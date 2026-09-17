@@ -302,6 +302,24 @@ def _register_local_ingress_route_alias(
         )
         return True
 
+    # OMN-18550: a SELF-collision -- both routes read from the same contract
+    # file -- has no second contract to disambiguate against and no package
+    # scope left to add, because the alias is already
+    # `<package>.<node>.<operation>`. Printing the same path on both sides of
+    # "and" describes a cross-contract collision that did not happen, and it
+    # cost the 2026-09-17 `.201` dev-lane incident its whole first diagnosis:
+    # the crash loop was read as a startup readiness deadline that does not
+    # exist in this codebase. Name the contract once and name the operation
+    # that is declared twice, so the reader is pointed at the contract entry
+    # they actually have to edit.
+    if existing.contract_path == route.contract_path:
+        raise ValueError(
+            f"Duplicate local ingress route alias '{alias}' declared twice by "
+            f"the same contract {route.contract_path}: two handler_routing "
+            f"entries resolve to this alias with different interfaces. Give "
+            f"each entry its own 'operation' name."
+        )
+
     raise ValueError(
         f"Duplicate local ingress route alias '{alias}' for "
         f"{existing.contract_path} and {route.contract_path}"
