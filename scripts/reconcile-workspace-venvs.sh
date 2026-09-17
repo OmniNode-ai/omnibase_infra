@@ -491,6 +491,31 @@ dispatch_base_python_candidates() {
 # records `/opt/homebrew/opt/python@3.13/bin`, two spellings of one directory.
 real_dir() { (cd "$1" 2>/dev/null && pwd -P) || true; }
 
+# The directory an executable REALLY lives in, following the file's own symlinks
+# first. This is not the same as resolving its parent directory, and the
+# difference is the whole comparison: `/opt/homebrew/bin` is a real directory
+# full of symlinks, so resolving IT yields `/opt/homebrew/bin`, while the
+# interpreter inside it points at `/opt/homebrew/Cellar/python@3.13/<v>/bin` --
+# which is what a venv built on it records, through the third spelling
+# `/opt/homebrew/opt/python@3.13/bin`.
+#
+# Resolving the parent refused a venv that had just been rebuilt correctly, on
+# the live host, with every package installed and the interpreter exactly right.
+# The readback caught it, which is what a readback is for; the comparison it fed
+# was the thing that was wrong. The symlink walk is the same idiom
+# `scripts/onex` uses to resolve itself.
+real_file_dir() {
+  local f="$1" link
+  while [[ -L "$f" ]]; do
+    link="$(readlink "$f")"
+    case "$link" in
+      /*) f="$link" ;;
+      *) f="${f%/*}/$link" ;;
+    esac
+  done
+  real_dir "${f%/*}"
+}
+
 # The `home` line of a venv's own pyvenv.cfg: the interpreter it was built on,
 # as recorded by the builder rather than as assumed by us.
 venv_base_home() {
@@ -515,7 +540,7 @@ dispatch_interpreter_ok() {
   [[ -n "$want" ]] || return 0
   home="$(venv_base_home "$DISPATCH_VENV")"
   [[ -n "$home" ]] || return 1
-  want_dir="$(real_dir "${want%/*}")"
+  want_dir="$(real_file_dir "$want")"
   have_dir="$(real_dir "$home")"
   [[ -n "$want_dir" && "$have_dir" == "$want_dir" ]]
 }

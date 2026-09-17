@@ -157,7 +157,17 @@ def _make_uv_shim(bin_dir: Path, *, sync_exit: int = 0, check_exit: int = 0) -> 
         "  done\n"
         '  if [[ -n "$_base" ]]; then\n'
         '    mkdir -p "${UV_PROJECT_ENVIRONMENT}/bin"\n'
-        '    printf "home = %s\\n" "${_base%/*}" > "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"\n'
+        # Record the RESOLVED directory, as real uv does: it writes the
+        # interpreter's own location (the Cellar/opt spelling), not the
+        # directory of the path it was handed. A shim that recorded the flag's
+        # dirname would model a uv that does not exist and would make a
+        # correctly-rebuilt venv read as drift.
+        '    _d="$_base"\n'
+        '    while [[ -L "$_d" ]]; do\n'
+        '      _l="$(readlink "$_d")"\n'
+        '      case "$_l" in /*) _d="$_l" ;; *) _d="${_d%/*}/$_l" ;; esac\n'
+        "    done\n"
+        '    printf "home = %s\\n" "$(cd "${_d%/*}" && pwd -P)" > "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"\n'
         "  fi\n"
         "fi\n"
         # UV_PROJECT_ENVIRONMENT is how uv is told WHICH venv a project sync
@@ -1078,3 +1088,72 @@ def test_no_environment_value_turns_the_interpreter_requirement_off() -> None:
         assert off_ish not in body, (
             f"an opt-out spelling appeared in the predicate: {off_ish!r}"
         )
+
+
+def test_an_interpreter_reached_through_symlinks_compares_equal(
+    ws: _Workspace,
+) -> None:
+    """The three spellings of one brew interpreter must read as the same one.
+
+    A real host offers `/opt/homebrew/bin/python3.13` (a symlink), records
+    `/opt/homebrew/opt/python@3.13/bin` in the venv it builds, and resolves both
+    to `/opt/homebrew/Cellar/python@3.13/<version>/bin`. Comparing the
+    interpreter's PARENT DIRECTORY instead of the interpreter itself refused a
+    venv that had just been rebuilt correctly on the live host — `/opt/homebrew/
+    bin` is a real directory of symlinks, so resolving it resolves to itself.
+
+    This models that shape exactly: a `bin` directory that really exists,
+    holding a symlink into a versioned directory, and a venv recording the
+    versioned spelling.
+    """
+    cellar_bin = ws.root / "cellar" / "python@3.13" / "3.13.3" / "bin"
+    cellar_bin.mkdir(parents=True)
+    real_python = cellar_bin / "python3.13"
+    real_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    real_python.chmod(0o755)
+
+    # A real directory holding a symlink to it — the `/opt/homebrew/bin` shape.
+    link_bin = ws.root / "linkbin"
+    link_bin.mkdir()
+    (link_bin / "python3.13").symlink_to(real_python)
+
+    # The venv records the versioned directory, as a real build does.
+    ws.set_dispatch_interpreter(cellar_bin)
+
+    env = ws.env()
+    env["ONEX_DISPATCH_BASE_PYTHON"] = str(link_bin / "python3.13")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "--check"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert "wrong interpreter" not in result.stdout, (
+        "two spellings of one interpreter compared unequal, so a correctly "
+        f"built venv reads as drift: {result.stdout!r}"
+    )
+
+
+def test_a_genuinely_different_interpreter_still_compares_unequal(
+    ws: _Workspace,
+) -> None:
+    """Positive control for the symlink resolution above.
+
+    Without it the previous test would pass against a comparison that had been
+    loosened until it accepted anything — which would silently retire the whole
+    rule-11 check rather than fix it.
+    """
+    other = ws.root / "some-other-python" / "bin"
+    other.mkdir(parents=True)
+    ws.set_dispatch_interpreter(other)
+
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "--check"],
+        capture_output=True,
+        text=True,
+        env=ws.env(),
+        check=False,
+    )
+    assert result.returncode == _EXIT_DRIFT
+    assert "wrong interpreter" in result.stdout
