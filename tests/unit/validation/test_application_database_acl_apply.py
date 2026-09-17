@@ -697,3 +697,45 @@ def test_a_conforming_archive_name_is_still_read(tmp_path: Path) -> None:
     )
 
     assert consent.approved_by == "operator"
+
+
+def test_a_symlinked_archive_entry_is_not_read(tmp_path: Path) -> None:
+    """The glob restricts the NAME; this restricts the inode.
+
+    A symlink matching the roll pattern would otherwise be followed by
+    ``read_text`` and could answer a citation with any file on the host,
+    authorising a live GRANT or REVOKE. The name is attacker-choosable; the
+    target must not be.
+    """
+    ledger = _ledger(tmp_path, "header", "2026-09-01T00:00:00Z | ROW | lane=x")
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    elsewhere = tmp_path / "planted.md"
+    elsewhere.write_text(_CONSENT_ROW + "\n", encoding="utf-8")
+    (archive_dir / f"{ledger.stem}_2026-09-15-split.md").symlink_to(elsewhere)
+
+    with pytest.raises(AclApplyRefusalError, match="opens with the timestamp"):
+        resolve_consent_citation(
+            f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+        )
+
+
+def test_a_symlinked_archive_directory_is_not_read(tmp_path: Path) -> None:
+    """The second half: the directory itself can be the link.
+
+    Checking only the entry still reads a real file in a real directory that the
+    archive path merely points at, and every entry there resolves consistently
+    so an entry-only check passes.
+    """
+    ledger = _ledger(tmp_path, "header", "2026-09-01T00:00:00Z | ROW | lane=x")
+    real_dir = tmp_path / "planted_archive"
+    real_dir.mkdir()
+    (real_dir / f"{ledger.stem}_2026-09-15-split.md").write_text(
+        _CONSENT_ROW + "\n", encoding="utf-8"
+    )
+    (tmp_path / "archive").symlink_to(real_dir, target_is_directory=True)
+
+    with pytest.raises(AclApplyRefusalError, match="opens with the timestamp"):
+        resolve_consent_citation(
+            f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+        )
