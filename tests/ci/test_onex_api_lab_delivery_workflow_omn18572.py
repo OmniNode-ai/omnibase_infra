@@ -125,9 +125,21 @@ def test_the_publisher_stays_off_the_shared_trusted_seam() -> None:
 
 
 def test_the_verify_job_runs_where_the_lane_is() -> None:
-    """The lane's docker daemon and published ports are on the LAN."""
+    """The lane's docker daemon and published ports are on the LAN.
+
+    OMN-18602 moved this job from `omnibase-deploy` to the verify class. The
+    claim this test makes is unchanged and is in its own name -- the job runs
+    WHERE THE LANE IS -- and `host-201` is the label that now carries it. What
+    changed is that the pin no longer also puts a read-only probe in the queue
+    behind release-train DEPLOY jobs, which is the only thing the deploy label
+    is for once the verify runners carry the same host-gateway alias.
+
+    The third label is load-bearing, not decoration: `omnibase-verify` names a
+    CLASS with members on two other lab hosts, and a run placed there would
+    report this lane's onex-api unreachable rather than fail to schedule.
+    """
     job = _load()["jobs"]["verify-onex-api-delivered"]
-    assert job["runs-on"] == ["self-hosted", "omnibase-deploy"]
+    assert job["runs-on"] == ["self-hosted", "omnibase-verify", "host-201"]
 
 
 def test_the_verify_job_runs_only_for_a_published_dev_command() -> None:
