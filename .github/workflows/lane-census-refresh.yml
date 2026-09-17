@@ -124,12 +124,32 @@ jobs:
           export LANE_CENSUS_PYTHON
           echo "census interpreter: ${LANE_CENSUS_PYTHON}"
 
+          # Name the host whose daemon we are inventorying, not the container we
+          # happen to run in. The collector defaults to `hostname`, which inside
+          # the runner is the container id — run 35273920602 emitted
+          # `host=7f296d05a363`. That id changes every time the runner is
+          # recreated, and `host` feeds `alert_key`, so the committed census
+          # would have claimed a nonsense host AND looked like a topology change
+          # on every single run, opening a PR each time. Asking the daemon who
+          # it is cannot drift from the daemon being read.
+          LANE_CENSUS_HOST="$(docker info --format '{{.Name}}')"
+          if [[ -z "${LANE_CENSUS_HOST}" ]]; then
+            echo "::error title=LANE-CENSUS-HOST-UNRESOLVED::docker info returned no daemon name; refusing to attribute the census to this container."
+            exit 1
+          fi
+          export LANE_CENSUS_HOST
+          echo "census host: ${LANE_CENSUS_HOST}"
+
           # Exit 0 = no drift, 30 = drift. Both are successful COLLECTIONS and
           # both write the snapshot. 3 = missing deps, 4 = inventory
           # unobservable, 2 = bad args: none of those produce a census and all
           # must fail the job rather than open a PR on nothing.
-          bash scripts/lane-census-check.sh --snapshot "$CANDIDATE"
-          rc=$?
+          # `||` keeps -e from aborting here: GitHub starts this step with
+          # `bash -e`, and `set -uo pipefail` above does NOT clear that. Reading
+          # `$?` on the next line never ran, so exit 30 — DRIFT, a normal census
+          # outcome — failed the job (run 35273920602).
+          rc=0
+          bash scripts/lane-census-check.sh --snapshot "$CANDIDATE" || rc=$?
           if [[ $rc -ne 0 && $rc -ne 30 ]]; then
             echo "::error title=LANE-CENSUS-UNCOLLECTABLE::lane-census-check.sh exited ${rc}; no census collected, no PR opened."
             exit 1
