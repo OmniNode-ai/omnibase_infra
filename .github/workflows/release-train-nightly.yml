@@ -232,6 +232,7 @@ jobs:
           VERSION: ${{ matrix.decision.candidate_version }}
           NEEDS_BUMP: ${{ matrix.decision.needs_bump }}
           CANDIDATE_SHA: ${{ matrix.decision.candidate_sha }}
+          BASE_BRANCH: ${{ matrix.decision.base_branch }}
           TICKET: OMN-18595
         run: |
           set -euo pipefail
@@ -317,4 +318,4 @@ jobs:
             --title "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
             --body "${body}" \
             --head "${branch}" \
-            --base dev
+            --base "${BASE_BRANCH}"

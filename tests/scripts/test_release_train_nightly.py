@@ -600,6 +600,50 @@ class TestWorkflowShape:
             "scheduled run decides the whole fleet"
         )
 
+    def test_the_workflow_opens_the_release_pr_against_the_decided_base(
+        self,
+    ) -> None:
+        """The base branch is a policy fact the decision carries, not a literal.
+
+        config/release_train_policy.yaml declares `default_branch` per repo
+        precisely because the train fans out across repositories, and a branch
+        name baked into the automation is correct only for as long as every
+        repository agrees. That is the defect OMN-18588 corrected elsewhere in
+        this repo on 2026-09-17, in automation that cloned every repo at a
+        hardcoded `dev`. Landing a fresh copy of it here would be a regression
+        of a lesson this repo learned the same day.
+        """
+        body = self.WORKFLOW.read_text(encoding="utf-8")
+        assert "--base dev" not in body, (
+            "the release train hardcodes the base branch; it must open the "
+            "release PR against the branch the decision carries, which is the "
+            "repo's own declared default_branch"
+        )
+        assert "matrix.decision.base_branch" in body, (
+            "the cut job must take its base branch from the decision row, so a "
+            "repo declaring a different default_branch is honoured rather than "
+            "silently retargeted"
+        )
+
+    def test_every_decision_row_carries_its_base_branch(self) -> None:
+        """The workflow can only read a field the decision actually emits.
+
+        Asserted on a repo whose declared default_branch is NOT `dev`, so the
+        field is proven to carry the declaration rather than a constant that
+        happens to agree with it today.
+        """
+        lab = rt.lab_pass_receipt
+        decision = rt.decide(
+            policy=_policy(default_branch="trunk"),
+            facts=_facts(),
+            **_lab_seam(
+                artifacts=[{"id": 1, "created_at": "2026-09-17T14:07:37Z"}],
+                receipt=_receipt(_INFRA_SHA, lab.EnumLabPassResult.PASS),
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.CUT
+        assert decision.to_dict()["base_branch"] == "trunk"
+
 
 # --------------------------------------------------------------------------- #
 # The train must not re-enter on its own bookkeeping.                           #

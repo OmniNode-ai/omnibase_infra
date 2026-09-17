@@ -226,6 +226,11 @@ class ModelTrainDecision:
     verdict: EnumTrainVerdict
     reason: EnumTrainReason
     detail: str
+    # The branch a release PR for this repo opens against. Carried on the
+    # decision, not baked into the workflow, because the train fans out across
+    # repositories and a branch name in the automation is correct only for as
+    # long as every repository agrees (OMN-18588, same repo, same day).
+    base_branch: str
     candidate_sha: str
     candidate_version: str
     latest_tag: str
@@ -239,6 +244,7 @@ class ModelTrainDecision:
             "verdict": self.verdict.value,
             "reason": self.reason.value,
             "detail": self.detail,
+            "base_branch": self.base_branch,
             "candidate_sha": self.candidate_sha,
             "candidate_version": self.candidate_version,
             "latest_tag": self.latest_tag,
@@ -583,6 +589,7 @@ def decide(
             verdict=verdict,
             reason=reason,
             detail=detail,
+            base_branch=policy.default_branch,
             candidate_sha=facts.dev_head_sha,
             candidate_version=candidate_version,
             latest_tag=facts.latest_tag,
@@ -819,6 +826,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     verdict=EnumTrainVerdict.REFUSE,
                     reason=EnumTrainReason.FACTS_UNREADABLE,
                     detail=str(exc),
+                    base_branch=policy.default_branch,
                     candidate_sha="",
                     candidate_version="",
                     latest_tag="",
