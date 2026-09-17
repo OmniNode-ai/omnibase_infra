@@ -178,16 +178,46 @@ jobs:
       - name: Set branch and PR variables
         if: steps.token_check.outputs.has_token == 'true'
         id: vars
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${{ inputs.version }}"
+          # >>> OMN-18596 bump branch >>>
+          # The branch carries a ticket because that is the ONLY arm of the
+          # autobind condition a dependency bump can satisfy.
+          #
+          # Every repo's call-occ-autobind.yml gates its job on
+          #   contains(pull_request.title, 'OMN-') || contains(head.ref, 'OMN-')
+          # and this cascade generated neither. So autobind never ran on a bump
+          # PR at all -- it did not decline one on the merits, the job simply
+          # reported `skipping` -- and a person hand-wrote the companion
+          # instead (onex_change_control#10026, human-authored 2026-09-17T15:04:42Z
+          # for omnimemory#511's bump).
+          #
+          # The title arm is not available: the pr-title gate exempts the
+          # `chore(deps` prefix precisely so dependency bumps need no ticket,
+          # so putting one in the title would fight a deliberate exemption.
+          #
+          # Ported from omnimarket#2395, which fixed exactly this for that
+          # repo's own post-release bump and generates
+          # automation/omn-18010-post-release-dev-bump-<version>. GitHub's
+          # expression `contains()` is case-insensitive, so the lowercase
+          # ticket satisfies the uppercase literal in the condition.
           VERSION="${VERSION#v}"
-          PACKAGE="${{ inputs.package }}"
           # Use hyphenated package name for the branch (PyPI convention)
           PKG_HYPHEN="${PACKAGE//_/-}"
-          BRANCH="automation/bump-${PKG_HYPHEN}-${VERSION}"
+          BRANCH="automation/omn-18596-bump-${PKG_HYPHEN}-${VERSION}"
+          # The shape this cascade generated until OMN-18596. Any bump PR
+          # opened before that change merged still carries it, and the
+          # already-open check below must see those too: a rename whose dedupe
+          # knows only the new shape opens a SECOND bump PR beside an in-flight
+          # one. That is the defect omnimarket#2366 fixed, not a hypothetical.
+          LEGACY_BRANCH="automation/bump-${PKG_HYPHEN}-${VERSION}"
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "legacy_branch=$LEGACY_BRANCH" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "pkg_hyphen=$PKG_HYPHEN" >> $GITHUB_OUTPUT
+          # <<< OMN-18596 bump branch <<<
           # >>> OMN-18596 base-branch resolver >>>
           # The base is the ref this job's checkout actually landed on, read
           # BEFORE the bump branch is cut from it. "Checkout downstream repo"
@@ -324,16 +354,29 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          # Check if a PR already exists for this branch
+          # Check whether a PR is already open for this bump, under EITHER
+          # branch shape. Querying only the current shape is how a rename
+          # opens a duplicate beside an in-flight PR (omnimarket#2366).
           EXISTING=$(gh pr list \
             --repo "OmniNode-ai/${{ matrix.repo }}" \
             --head "${{ steps.vars.outputs.branch }}" \
             --state open \
             --json number \
             --jq 'length')
+          LEGACY_EXISTING=$(gh pr list \
+            --repo "OmniNode-ai/${{ matrix.repo }}" \
+            --head "${{ steps.vars.outputs.legacy_branch }}" \
+            --state open \
+            --json number \
+            --jq 'length')
 
           if [ "$EXISTING" -gt 0 ]; then
             echo "PR already exists for branch ${{ steps.vars.outputs.branch }} -- skipping"
+            exit 0
+          fi
+
+          if [ "$LEGACY_EXISTING" -gt 0 ]; then
+            echo "PR already exists for the pre-OMN-18596 branch ${{ steps.vars.outputs.legacy_branch }} -- skipping rather than opening a duplicate"
             exit 0
           fi
 
