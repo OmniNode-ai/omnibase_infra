@@ -267,11 +267,13 @@ class TestCheckArgumentParsing:
 
     @pytest.mark.parametrize("bad", ["ready_main:ok", "ready_main", ""])
     def test_a_check_without_evidence_is_refused(self, bad: str) -> None:
-        with pytest.raises(ValueError, match="not 'name:ok\\|fail:evidence'"):
+        with pytest.raises(
+            ValueError, match="not 'name:ok\\|fail\\|indeterminate:evidence'"
+        ):
             parse_check_argument(bad)
 
     def test_an_unknown_verdict_word_is_refused(self) -> None:
-        with pytest.raises(ValueError, match="must be 'ok' or 'fail'"):
+        with pytest.raises(ValueError, match="verdict must be one of"):
             parse_check_argument("ready_main:probably:whatever")
 
 

@@ -118,13 +118,41 @@ someone is supposed to remember to do by hand.
 
 Fail-closed
 -----------
-Every indeterminate state is a FAIL: the container missing or not running, an
+Every unreadable state is a non-pass: the container missing or not running, an
 empty or sentinel revision label, a revision GitHub cannot resolve, a compare
 whose status is ``diverged`` or ``behind``, a docker or API error. A staleness
 guard that reports fresh when it could not look manufactures the exact false
 assurance the ticket is about.
 
-Exit codes: ``0`` the lane tracks ``dev``, ``1`` stale (or unprovable).
+The convergence budget starts at the agent's acceptance (OMN-18573)
+-------------------------------------------------------------------
+``--wait-timeout`` is the budget the LANE gets, and it is measured from the
+moment the deploy agent ACCEPTS the rebuild command -- read from the agent's own
+``/job/<correlation_id>`` record -- not from the moment this guard starts. The
+redeploy-start effect is serial, so the gap between a merge and the agent taking
+its command is a queue the lane is not responsible for. Measured twice on
+OMN-17214 (2026-09-16, and 2026-09-17 for merge ``50c57653d3cf``, receipt
+artifact 10496150688): the lane converged three minutes after a step-anchored
+window closed, the receipt read FAIL on ``deployed_revision`` alone with its
+other seven checks green, and rule 24(b) then refused a good sha for staging.
+
+``--wall-clock-seconds`` bounds how long THIS run may watch, because the job
+still has to settle the lane and write the receipt. It is a bound, never the
+budget, and it is never widened to absorb a queue.
+
+That gives convergence mode a THIRD verdict, and the distinction is the point:
+
+* ``ok`` -- the lane contains the merge sha;
+* ``fail`` -- the lane was granted its whole budget from acceptance and does not
+  contain it. A statement about the lane;
+* ``indeterminate`` -- the acceptance could not be established (no correlation
+  id, an unreachable agent, a command the effect never handed over), or this run
+  ran out of its own clock first. A statement about the RUN. It is still not a
+  pass: the exit status is non-zero and the receipt stays non-PASS, so rule
+  24(b) still refuses the sha. What changes is what the refusal says.
+
+Exit codes: ``0`` the lane tracks ``dev`` / converged, ``1`` stale or not
+converged, ``3`` convergence indeterminate.
 """
 
 from __future__ import annotations
@@ -136,8 +164,12 @@ import re
 import subprocess  # fixed argv, no shell, trusted docker/gh binaries
 import sys
 import time
+import urllib.error
+import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
 
@@ -534,12 +566,405 @@ def evaluate_convergence(
     return verdict
 
 
+class EnumConvergenceOutcome(StrEnum):
+    """What the convergence guard concluded. Three values, not two.
+
+    ``FAIL`` is a statement ABOUT THE LANE: it was granted its declared budget,
+    measured from the moment the deploy agent accepted the rebuild command, and
+    it did not come to run code containing the merge sha.
+
+    ``INDETERMINATE`` is the honest answer when that budget could not be
+    established, or when this job ran out of its own clock before the budget
+    expired. Nothing has been shown about the lane. It still exits non-zero and
+    still leaves the receipt non-PASS, so rule 24(b) stays closed; it changes
+    what the receipt says, not what it permits.
+    """
+
+    OK = "ok"
+    FAIL = "fail"
+    INDETERMINATE = "indeterminate"
+
+
+#: The exit code the convergence mode returns for an unestablished budget.
+#: Distinct from 1 so a caller reading only the exit status can still tell the
+#: two apart, and non-zero so nothing treats it as a pass.
+EXIT_INDETERMINATE: Final[int] = 3
+
+_CORRELATION_ID_RE: Final = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+class AcceptanceUnresolvedError(RuntimeError):
+    """The deploy agent's acceptance of this run's command could not be read.
+
+    Its own class so a caller cannot catch it alongside a transport error and
+    fall through to a default start time. There is no default: a budget with a
+    guessed start is the defect OMN-18573 removes, one layer down.
+    """
+
+
+@dataclass(frozen=True)
+class ModelAgentAcceptance:
+    """When the deploy agent took the rebuild command, and where that was read.
+
+    ``accepted_at`` is the agent's OWN record (``JobState.accepted_at``, served
+    by its ``/job/{correlation_id}`` endpoint), not a CI-side observation of
+    one. The agent writes it when it accepts the command, which is the instant
+    the lane's clock legitimately starts.
+    """
+
+    correlation_id: str
+    accepted_at: datetime
+    source: str
+
+    def __post_init__(self) -> None:
+        if self.accepted_at.tzinfo is None:
+            msg = "accepted_at must be timezone-aware"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class ModelAcceptanceProbe:
+    """One look at the agent: the acceptance, or why there is not one yet."""
+
+    acceptance: ModelAgentAcceptance | None
+    reason: str
+
+    def __post_init__(self) -> None:
+        if (self.acceptance is None) == (not self.reason):
+            msg = (
+                "an acceptance probe carries EXACTLY one of an acceptance and a "
+                "reason. Both, or neither, makes 'not accepted yet' and 'could "
+                "not ask' the same value, which is the collapse this ticket "
+                "exists to undo."
+            )
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class ModelConvergenceBudget:
+    """How long the LANE is granted to converge, from when, and what the job can afford.
+
+    ``declared_seconds`` is the lane's budget. It is measured from
+    ``acceptance.accepted_at``, never from the step's start: the redeploy-start
+    effect is serial, so the wait between the merge and the agent taking the
+    command is a queue the lane is not responsible for, and spending the lane's
+    budget on it produced a FAIL receipt for a lane that converged three
+    minutes later (OMN-17214, twice).
+
+    ``wall_clock_seconds`` is what THIS job can afford before it must stop and
+    write the receipt -- an unwritten receipt is the one outcome worse than a
+    failing one. It bounds the wait; it never redefines the budget. When the
+    job clock expires first the verdict is INDETERMINATE, naming both numbers,
+    exactly as ``ModelSettleBudget`` does for the settle phase.
+    """
+
+    declared_seconds: int
+    wall_clock_seconds: int
+    acceptance: ModelAgentAcceptance | None
+    unresolved_reason: str
+
+    def __post_init__(self) -> None:
+        if (self.acceptance is None) == (not self.unresolved_reason):
+            msg = (
+                "a convergence budget carries EXACTLY one of an acceptance and "
+                "an unresolved reason. A budget with neither cannot say why it "
+                "is unestablished, and one with both is two answers."
+            )
+            raise ValueError(msg)
+        if self.declared_seconds <= 0:
+            msg = f"declared_seconds must be positive, got {self.declared_seconds}"
+            raise ValueError(msg)
+
+    @property
+    def established(self) -> bool:
+        return self.acceptance is not None
+
+    def elapsed_since_acceptance(self, now: datetime) -> timedelta | None:
+        """Time the lane has had. Never negative.
+
+        The runner and the lab host are different machines, so a small forward
+        skew would otherwise read as a budget that has not started. Clamping at
+        zero costs the lane nothing and refuses to produce a negative age.
+        """
+        if self.acceptance is None:
+            return None
+        return max(timedelta(0), now - self.acceptance.accepted_at)
+
+    def deadline(self) -> datetime | None:
+        if self.acceptance is None:
+            return None
+        return self.acceptance.accepted_at + timedelta(seconds=self.declared_seconds)
+
+    def exhausted(self, now: datetime) -> bool:
+        elapsed = self.elapsed_since_acceptance(now)
+        return elapsed is not None and elapsed.total_seconds() >= self.declared_seconds
+
+    def acceptance_phrase(self, now: datetime) -> str:
+        """The clause every verdict's evidence carries when acceptance is known."""
+        if self.acceptance is None:
+            return ""
+        elapsed = self.elapsed_since_acceptance(now)
+        assert elapsed is not None
+        return (
+            f"{_format_age(elapsed)} since the deploy agent accepted "
+            f"{self.acceptance.correlation_id} at "
+            f"{self.acceptance.accepted_at.isoformat()} (budget "
+            f"{self.declared_seconds}s from that moment)"
+        )
+
+    def shortfall_reason(self, now: datetime) -> str:
+        """Why a job that ran out of ITS clock is not a statement about the lane."""
+        elapsed = self.elapsed_since_acceptance(now)
+        observed = _format_age(elapsed) if elapsed is not None else "0s"
+        return (
+            f"this job could NOT afford the lane's declared budget: it watched "
+            f"for {observed} of the {self.declared_seconds}s granted from "
+            f"acceptance, bounded by its own {self.wall_clock_seconds}s wall "
+            "clock, so the lane still had budget left when the job had to stop "
+            "and write the receipt"
+        )
+
+
+def convergence_check_outcome(outcome: EnumConvergenceOutcome) -> Any:
+    """Map a convergence verdict onto the lab-pass check outcome it becomes.
+
+    Lives here rather than in the workflow's shell, because a mapping written
+    in a ``run:`` block is a mapping nothing tests.
+    """
+    from scripts.ci.lab_pass_receipt import EnumLabPassCheckOutcome
+
+    return {
+        EnumConvergenceOutcome.OK: EnumLabPassCheckOutcome.PASS,
+        EnumConvergenceOutcome.FAIL: EnumLabPassCheckOutcome.FAIL,
+        EnumConvergenceOutcome.INDETERMINATE: EnumLabPassCheckOutcome.INDETERMINATE,
+    }[outcome]
+
+
+def read_agent_acceptance(
+    agent_url: str,
+    correlation_id: str,
+    *,
+    request_timeout_seconds: float = 10.0,
+    opener: Callable[[str, float], tuple[int, str]] | None = None,
+) -> ModelAgentAcceptance:
+    """Read the deploy agent's own acceptance record for one correlation id.
+
+    The agent serves ``GET /job/{correlation_id}`` with ``accepted_at`` from
+    its durable ``JobStore`` (``deploy_agent/health.py``, ``job_state.py``).
+    This job already reaches that surface for the lab-overlay record
+    (``scripts/ci/fetch_lab_overlay_record.py``), so no new credential, host or
+    network path is introduced.
+
+    WHY THE AGENT AND NOT THE BROKER. The guard's own topic-level question --
+    "did a command for this merge reach the agent" -- would need a broker
+    credential this job does not hold. OMN-18144 measured publish-to-accept on
+    the agent's control topic at 268ms, 962ms and 11.7s, so the agent's record
+    and the topic answer the same question to within the poll interval, and the
+    agent's record is the one reachable from here.
+
+    Every failure RAISES :class:`AcceptanceUnresolvedError`. None returns a default.
+    """
+    if not _CORRELATION_ID_RE.match(correlation_id.strip()):
+        msg = (
+            f"correlation id {correlation_id!r} is not a uuid. Refusing to "
+            "interpolate it into a request path."
+        )
+        raise AcceptanceUnresolvedError(msg)
+
+    url = f"{agent_url.rstrip('/')}/job/{correlation_id.strip()}"
+    fetch = opener or _http_get_json
+    try:
+        status, body = fetch(url, request_timeout_seconds)
+    except Exception as exc:
+        msg = f"{url} could not be read: {type(exc).__name__}: {exc}"
+        raise AcceptanceUnresolvedError(msg) from exc
+
+    if status == 404:
+        msg = (
+            f"the deploy agent reports no job for correlation {correlation_id} "
+            f"({url} -> HTTP 404). The command has not been handed to the agent "
+            "yet, so the lane's budget has not started."
+        )
+        raise AcceptanceUnresolvedError(msg)
+    if status != 200:
+        msg = f"{url} answered HTTP {status}: {body[:200]}"
+        raise AcceptanceUnresolvedError(msg)
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        msg = f"{url} returned an unreadable body ({exc}): {body[:200]}"
+        raise AcceptanceUnresolvedError(msg) from exc
+    if not isinstance(payload, dict) or "accepted_at" not in payload:
+        msg = f"{url} returned no accepted_at field: {body[:200]}"
+        raise AcceptanceUnresolvedError(msg)
+    try:
+        accepted_at = _parse_ts(str(payload["accepted_at"]))
+    except ValueError as exc:
+        msg = f"{url} returned an unparseable accepted_at {payload['accepted_at']!r}"
+        raise AcceptanceUnresolvedError(msg) from exc
+    return ModelAgentAcceptance(
+        correlation_id=correlation_id.strip(), accepted_at=accepted_at, source=url
+    )
+
+
+def _http_get_json(url: str, timeout_seconds: float) -> tuple[int, str]:
+    """GET one JSON surface. HTTP errors come back as a status, not an exception."""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_seconds) as response:  # noqa: S310
+            return int(response.status), response.read().decode(
+                "utf-8", errors="replace"
+            )
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), exc.read().decode("utf-8", errors="replace")
+
+
+@dataclass(frozen=True)
+class ModelConvergenceResult:
+    """Everything the emitting step needs, structured rather than re-derived."""
+
+    outcome: EnumConvergenceOutcome
+    reason: str
+    lane: LaneRevision
+    ancestry: Ancestry | None
+    budget: ModelConvergenceBudget
+    waited: timedelta
+    finished_at: datetime
+
+
+def run_convergence_wait(
+    *,
+    expected_revision: str,
+    read_lane: Callable[[], LaneRevision],
+    resolve_ancestry: Callable[[str], Ancestry | None],
+    resolve_acceptance: Callable[[], ModelAcceptanceProbe],
+    declared_budget: timedelta,
+    wall_clock: timedelta,
+    poll_interval: timedelta,
+    clock: Callable[[], datetime],
+    sleep: Callable[[float], None],
+) -> ModelConvergenceResult:
+    """Wait for the lane to contain the merge sha, on the LANE's clock.
+
+    The loop runs until one of three things is true, and the three are the
+    three verdicts:
+
+    * the lane contains the merge sha -- ``OK``;
+    * acceptance is known and its budget is spent -- ``FAIL``, a statement
+      about the lane;
+    * this job's own wall clock expires first, or acceptance was never
+      established -- ``INDETERMINATE``, a statement about the run.
+
+    The wall clock is a BOUND, never the budget. It exists because the job must
+    survive to write the receipt; it is not widened to absorb a queue, and when
+    it is what stopped the wait, the verdict says so rather than blaming the
+    lane.
+
+    Every moving part is injected so the three shapes are testable without a
+    lane, an agent, or a wall clock that really passes.
+    """
+    started = clock()
+    wall_deadline = started + wall_clock
+    probe = resolve_acceptance()
+    budget = ModelConvergenceBudget(
+        declared_seconds=int(declared_budget.total_seconds()),
+        wall_clock_seconds=int(wall_clock.total_seconds()),
+        acceptance=probe.acceptance,
+        unresolved_reason=probe.reason,
+    )
+
+    lane = read_lane()
+    ancestry = resolve_ancestry(lane.revision)
+
+    def _converged(observed: LaneRevision, relation: Ancestry | None) -> bool:
+        if revisions_match(observed.revision, expected_revision):
+            return True
+        if relation is None or not relation.observed_on_branch:
+            return False
+        return relation.relation in _CONTAINING_RELATIONS
+
+    while not _converged(lane, ancestry):
+        now = clock()
+        if budget.established and budget.exhausted(now):
+            break
+        if now >= wall_deadline:
+            break
+        remaining = (wall_deadline - now).total_seconds()
+        if budget.established:
+            deadline = budget.deadline()
+            assert deadline is not None
+            remaining = min(remaining, (deadline - now).total_seconds())
+        if remaining <= 0:
+            break
+        sleep(min(poll_interval.total_seconds(), remaining))
+        if not budget.established:
+            # Keep asking. The command is usually accepted DURING this wait,
+            # and the moment it is, the lane's budget starts from the agent's
+            # own timestamp rather than from when CI noticed.
+            probe = resolve_acceptance()
+            budget = ModelConvergenceBudget(
+                declared_seconds=budget.declared_seconds,
+                wall_clock_seconds=budget.wall_clock_seconds,
+                acceptance=probe.acceptance,
+                unresolved_reason=probe.reason,
+            )
+        lane = read_lane()
+        ancestry = resolve_ancestry(lane.revision)
+
+    now = clock()
+    waited = now - started
+    if _converged(lane, ancestry):
+        return ModelConvergenceResult(
+            outcome=EnumConvergenceOutcome.OK,
+            reason="",
+            lane=lane,
+            ancestry=ancestry,
+            budget=budget,
+            waited=waited,
+            finished_at=now,
+        )
+    if not budget.established:
+        return ModelConvergenceResult(
+            outcome=EnumConvergenceOutcome.INDETERMINATE,
+            reason=budget.unresolved_reason,
+            lane=lane,
+            ancestry=ancestry,
+            budget=budget,
+            waited=waited,
+            finished_at=now,
+        )
+    if budget.exhausted(now):
+        return ModelConvergenceResult(
+            outcome=EnumConvergenceOutcome.FAIL,
+            reason="",
+            lane=lane,
+            ancestry=ancestry,
+            budget=budget,
+            waited=waited,
+            finished_at=now,
+        )
+    return ModelConvergenceResult(
+        outcome=EnumConvergenceOutcome.INDETERMINATE,
+        reason=budget.shortfall_reason(now),
+        lane=lane,
+        ancestry=ancestry,
+        budget=budget,
+        waited=waited,
+        finished_at=now,
+    )
+
+
 def convergence_evidence(
     lane: LaneRevision,
     expected_revision: str,
     ancestry: Ancestry | None,
     waited: timedelta,
     converged: bool,
+    budget: ModelConvergenceBudget | None = None,
+    now: datetime | None = None,
+    indeterminate_reason: str = "",
 ) -> str:
     """Render the one-line evidence the lab-pass receipt's check carries.
 
@@ -547,10 +972,32 @@ def convergence_evidence(
     ancestry relation, so a reader of the receipt can tell "the lane ran a newer
     dev head that contains this change" apart from "the lane never applied it".
     The static string it replaces named neither and was identical on every run.
+
+    OMN-18573 adds the budget's own terms. When acceptance is known the line
+    carries the agent's timestamp and the elapsed time since it, on EVERY
+    verdict -- a passing receipt that does not say when the lane's clock
+    started cannot be used to check that the clock started in the right place.
+    When the verdict is INDETERMINATE the line says so in those words and
+    carries the reason, because "the lane did not converge" and "we could not
+    establish whether it had a chance to" are different findings.
     """
     observed = lane.revision[:12]
     expected = expected_revision[:12]
     waited_text = _format_age(waited)
+    reference = now or datetime.now(UTC)
+    acceptance_clause = ""
+    if budget is not None:
+        phrase = budget.acceptance_phrase(reference)
+        acceptance_clause = f"; {phrase}" if phrase else ""
+
+    if indeterminate_reason:
+        line = (
+            f"INDETERMINATE: lane at {observed}; whether it contains merge sha "
+            f"{expected} was not established after {waited_text}{acceptance_clause}. "
+            f"Reason: {indeterminate_reason}. This asserts nothing about the "
+            "lane; the receipt is still non-PASS."
+        )
+        return " ".join(line.translate(_EVIDENCE_UNSAFE).split())
 
     if converged and revisions_match(lane.revision, expected_revision):
         line = (
@@ -582,7 +1029,7 @@ def convergence_evidence(
             f"(relation: {ancestry.relation} on {ancestry.branch}); not converged "
             f"after {waited_text}"
         )
-    return " ".join(line.translate(_EVIDENCE_UNSAFE).split())
+    return " ".join((line + acceptance_clause).translate(_EVIDENCE_UNSAFE).split())
 
 
 def _run(argv: list[str]) -> str:
@@ -797,6 +1244,45 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--poll-interval", type=_parse_duration, default=DEFAULT_POLL_INTERVAL
     )
+    # OMN-18573. The three inputs that move the convergence budget off this
+    # step's own clock and onto the lane's. None of them widens the budget:
+    # --wait-timeout is still the lane's grant, and --wall-clock-seconds only
+    # says how long THIS job may watch before it must write the receipt.
+    parser.add_argument(
+        "--agent-url",
+        default="",
+        help=(
+            "the deploy agent's HTTP surface, whose /job/<correlation_id> "
+            "endpoint serves the acceptance timestamp the convergence budget is "
+            "measured from. Empty means the budget cannot be established, which "
+            "is INDETERMINATE and never a lane failure."
+        ),
+    )
+    parser.add_argument(
+        "--correlation-id",
+        default="",
+        help=(
+            "the redeploy correlation id this run published, as written by "
+            "scripts/trigger_rebuild_on_merge.py. Empty is INDETERMINATE."
+        ),
+    )
+    parser.add_argument(
+        "--agent-timeout-seconds",
+        type=float,
+        default=10.0,
+        help="per-request timeout for the deploy-agent acceptance read",
+    )
+    parser.add_argument(
+        "--wall-clock-seconds",
+        type=int,
+        default=int(DEFAULT_CONVERGENCE_WAIT.total_seconds()),
+        help=(
+            "how long THIS job may watch before it must stop and let the "
+            "receipt be written. A BOUND on the wait, never the lane's budget: "
+            "when it is what stopped the wait, the verdict is INDETERMINATE "
+            "naming both numbers, not a FAIL blaming the lane."
+        ),
+    )
     parser.add_argument(
         "--deployed-revision",
         default="",
@@ -942,56 +1428,82 @@ def _write_output(name: str, value: str) -> None:
 
 
 def _run_convergence_mode(args: argparse.Namespace) -> int:
+    """Wait for the lane on the LANE's clock, and report one of three verdicts.
+
+    OMN-18573. The wait used to be a fixed window opened when this step
+    started, so the time the redeploy-start effect spent queueing was spent out
+    of the budget the lane was meant to get. The budget now starts when the
+    deploy agent ACCEPTS the command, read from the agent's own job record, and
+    this step's remaining clock is only a BOUND on how long it can watch. When
+    the bound is what stopped the wait, or when the acceptance could never be
+    established, the verdict is INDETERMINATE and says which -- it is not a
+    claim that the lane misbehaved.
+    """
     expected = normalize_revision(args.expect_revision)
-    deadline = time.monotonic() + args.wait_timeout.total_seconds()
-    started = time.monotonic()
     resolver = _AncestryResolver(repo=args.repo, branch=args.branch, expected=expected)
 
-    def _verdict_now(
-        lane: LaneRevision, waited: timedelta
-    ) -> tuple[Verdict, Ancestry | None]:
-        ancestry = resolver.resolve(lane.revision)
-        return (
-            evaluate_convergence(
-                lane=lane,
-                expected_revision=expected,
-                waited=waited,
-                wait_timeout=args.wait_timeout,
-                ancestry=ancestry,
-            ),
-            ancestry,
-        )
+    def _resolve_acceptance() -> ModelAcceptanceProbe:
+        if not args.correlation_id.strip():
+            return ModelAcceptanceProbe(
+                acceptance=None,
+                reason=(
+                    "the publishing job recorded no correlation id for this run, "
+                    "so the deploy agent's acceptance cannot be located and the "
+                    "lane's convergence budget has no start"
+                ),
+            )
+        if not args.agent_url.strip():
+            return ModelAcceptanceProbe(
+                acceptance=None,
+                reason="no deploy-agent URL was supplied to this guard",
+            )
+        try:
+            acceptance = read_agent_acceptance(
+                agent_url=args.agent_url,
+                correlation_id=args.correlation_id,
+                request_timeout_seconds=args.agent_timeout_seconds,
+            )
+        except AcceptanceUnresolvedError as exc:
+            return ModelAcceptanceProbe(acceptance=None, reason=str(exc))
+        return ModelAcceptanceProbe(acceptance=acceptance, reason="")
 
-    lane = _read_lane(args)
-    verdict, ancestry = _verdict_now(lane, timedelta(0))
-
-    # The loop exits as soon as the lane CONTAINS the merge sha, not only when it
-    # equals it: holding the single omnibase-deploy runner slot for the full
-    # window after the lane has already run the change serialises the next
-    # merge's guard behind this one for no added proof.
-    while not verdict.ok:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        time.sleep(min(args.poll_interval.total_seconds(), remaining))
-        lane = _read_lane(args)
-        verdict, ancestry = _verdict_now(
-            lane, timedelta(seconds=time.monotonic() - started)
-        )
-
-    waited = timedelta(seconds=time.monotonic() - started)
+    result = run_convergence_wait(
+        expected_revision=expected,
+        read_lane=lambda: _read_lane(args),
+        resolve_ancestry=resolver.resolve,
+        resolve_acceptance=_resolve_acceptance,
+        declared_budget=args.wait_timeout,
+        wall_clock=timedelta(seconds=args.wall_clock_seconds),
+        poll_interval=args.poll_interval,
+        clock=lambda: datetime.now(UTC),
+        sleep=time.sleep,
+    )
+    lane = result.lane
+    ancestry = result.ancestry
 
     evidence = convergence_evidence(
         lane=lane,
         expected_revision=expected,
         ancestry=ancestry,
-        waited=waited,
-        converged=verdict.ok,
+        waited=result.waited,
+        converged=result.outcome is EnumConvergenceOutcome.OK,
+        budget=result.budget,
+        now=result.finished_at,
+        indeterminate_reason=(
+            result.reason
+            if result.outcome is EnumConvergenceOutcome.INDETERMINATE
+            else ""
+        ),
     )
     # OMN-18388 AC2: the receipt's deployed_revision check carries this, so the
     # artifact names the revision the lane was actually observed at and how it
     # relates to the sha the receipt is keyed by.
     _write_output("evidence", evidence)
+    # OMN-18573: the emit step maps this onto the check's outcome. It is an
+    # OUTPUT rather than the step's exit status because the status has two
+    # values and this has three; the workflow still falls back to the status
+    # when the step died before writing anything.
+    _write_output("verdict", convergence_check_outcome(result.outcome).value)
 
     # OMN-18436: publish the identity of the container this guard actually read,
     # so the probe step that runs next can prove its HTTP reads came from the
@@ -1014,21 +1526,48 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         else:
             _write_output("generation", generation.to_json())
 
+    budget = result.budget
     _summary(
         [
-            "## Dev-lane convergence (OMN-17888 AC4, OMN-18388)",
+            "## Dev-lane convergence (OMN-17888 AC4, OMN-18388, OMN-18573)",
             "",
+            f"- verdict: `{result.outcome.value}`",
             f"- expected revision: `{expected}`",
             f"- lane revision: `{lane.revision}`",
             f"- relation: `{ancestry.relation if ancestry else 'unresolved'}`, "
             f"on `{args.branch}`: "
             f"`{ancestry.observed_on_branch if ancestry else 'unknown'}`",
-            f"- waited: {_format_age(waited)} (bound {_format_age(args.wait_timeout)})",
+            f"- agent acceptance: "
+            f"`{budget.acceptance.accepted_at.isoformat() if budget.acceptance else 'UNESTABLISHED'}`",
+            f"- lane budget: {budget.declared_seconds}s from acceptance; this "
+            f"job could watch for {budget.wall_clock_seconds}s",
+            f"- watched: {_format_age(result.waited)}",
+            *([f"- reason: {result.reason}"] if result.reason else []),
             "",
             "Convergence is CONTAINMENT: a lane running a descendant of the merge "
             "sha on this branch has exercised the change. A lane running an "
             "ancestor has not, and is still a failure.",
+            "",
+            "The budget is measured from the moment the deploy agent ACCEPTED "
+            "the rebuild command, never from this step. A verdict of "
+            "`indeterminate` means the lane was never shown to have had its "
+            "budget -- it is not a finding about the lane, and it is still not "
+            "a pass.",
         ]
+    )
+
+    if result.outcome is EnumConvergenceOutcome.OK:
+        print(f"[ok] {evidence}")
+        return 0
+    if result.outcome is EnumConvergenceOutcome.INDETERMINATE:
+        print(f"::warning::{evidence}")
+        return EXIT_INDETERMINATE
+    verdict = evaluate_convergence(
+        lane=lane,
+        expected_revision=expected,
+        waited=result.waited,
+        wait_timeout=args.wait_timeout,
+        ancestry=ancestry,
     )
     return _report(verdict)
 

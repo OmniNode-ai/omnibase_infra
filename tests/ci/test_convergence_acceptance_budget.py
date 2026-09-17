@@ -1,0 +1,756 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""OMN-18573 -- the convergence budget is measured from deploy-agent acceptance.
+
+WHAT THESE PIN
+--------------
+``verify-lane-converged`` waits for the ``.201`` compose dev lane to report a
+revision containing the merge sha, and the ``deployed_revision`` check of the
+rule 24(a) lab-pass receipt carries that verdict. Before this change the wait
+was a fixed wall clock started when the STEP started, so every second the
+redeploy-start effect spent queueing came out of the budget the LANE was meant
+to get. A lane that converged three minutes after the clock expired receipted
+``FAIL``, and rule 24(b) then refused a good sha for staging delivery.
+
+Measured, twice: OMN-17214 on 2026-09-16 (lane ``dev-lane-flap-1200``), and
+again on 2026-09-17 for merge ``50c57653d3cf484bfd9b8a06e77d41cbf4329dd9``,
+receipt artifact ``10496150688``, ``deployed_revision`` the only failing check
+of eight, lane converged three minutes later.
+
+THE THREE SHAPES, and why the third is not a FAIL
+-------------------------------------------------
+* a long queue followed by a convergence inside the budget measured FROM
+  ACCEPTANCE is a PASS, even though the same convergence is past a wall clock
+  started at the step;
+* a lane that has had its whole budget since acceptance and still does not
+  contain the merge sha is a FAIL, unchanged;
+* an acceptance timestamp that cannot be established at all is INDETERMINATE.
+  It is not a FAIL because nothing has been shown about the lane -- the lane
+  was never granted a budget to miss. It still makes the receipt non-PASS, so
+  the delivery gate stays closed; what changes is what the receipt SAYS.
+
+The budget is never widened to absorb a queue. The ceiling is untouched
+(OMN-18573 AC6) and a job that runs out of its own clock before the lane's
+budget expires reports that, rather than blaming the lane.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import urllib.error
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.ci.check_dev_lane_staleness import (
+    AcceptanceUnresolvedError,
+    Ancestry,
+    EnumConvergenceOutcome,
+    LaneRevision,
+    ModelAcceptanceProbe,
+    ModelAgentAcceptance,
+    ModelConvergenceBudget,
+    convergence_check_outcome,
+    convergence_evidence,
+    read_agent_acceptance,
+    run_convergence_wait,
+)
+from scripts.ci.lab_pass_receipt import (
+    EnumLabLane,
+    EnumLabPassCheckOutcome,
+    EnumLabPassResult,
+    ModelLabPassCheck,
+    ModelLabPassReceipt,
+    evaluate_gate,
+    parse_check_argument,
+)
+
+pytestmark = pytest.mark.unit
+
+MERGE_SHA = "50c57653d3cf484bfd9b8a06e77d41cbf4329dd9"
+STALE_SHA = "843fe808cc7891a1b2c3d4e5f60718293a4b5c6d"
+CORRELATION_ID = "0a3d0f1e-1111-4c2a-9f3b-2a6c8d4e5f60"
+T0 = datetime(2026, 9, 17, 11, 0, 0, tzinfo=UTC)
+DECLARED = timedelta(minutes=25)
+
+# The wall clock the verify job can actually afford: its 45-minute ceiling less
+# the declared settle budget and the reserved tail. Not a number this change
+# may move -- see AC6.
+WALL_CLOCK = timedelta(seconds=45 * 60 - 900 - 120)
+
+
+def _lane(revision: str) -> LaneRevision:
+    return LaneRevision(
+        revision=revision,
+        compose_project="omnibase-infra",
+        build_source="workspace",
+        state="running",
+    )
+
+
+def _contained_ancestry() -> Ancestry:
+    return Ancestry(
+        relation="identical", commits_ahead=0, observed_on_branch=True, branch="dev"
+    )
+
+
+def _stale_ancestry() -> Ancestry:
+    return Ancestry(
+        relation="ancestor", commits_ahead=0, observed_on_branch=True, branch="dev"
+    )
+
+
+class _Clock:
+    """A monotonic wall clock the wait loop reads instead of ``time``."""
+
+    def __init__(self, start: datetime) -> None:
+        self.now = start
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now = self.now + timedelta(seconds=seconds)
+
+
+def _wait(
+    *,
+    clock: _Clock,
+    converges_at: datetime | None,
+    acceptance_at: datetime | None,
+    acceptance_reason: str = "",
+    acceptance_visible_from: datetime | None = None,
+    wall_clock: timedelta = WALL_CLOCK,
+):
+    """Drive the real loop over an injected clock, lane and agent."""
+
+    def read_lane() -> LaneRevision:
+        if converges_at is not None and clock.now >= converges_at:
+            return _lane(MERGE_SHA)
+        return _lane(STALE_SHA)
+
+    def resolve_ancestry(observed: str) -> Ancestry | None:
+        return _contained_ancestry() if observed == MERGE_SHA else _stale_ancestry()
+
+    def resolve_acceptance() -> ModelAcceptanceProbe:
+        if acceptance_at is None:
+            return ModelAcceptanceProbe(acceptance=None, reason=acceptance_reason)
+        visible = acceptance_visible_from or acceptance_at
+        if clock.now < visible:
+            return ModelAcceptanceProbe(
+                acceptance=None,
+                reason=(
+                    f"the deploy agent reports no job for correlation "
+                    f"{CORRELATION_ID} yet"
+                ),
+            )
+        return ModelAcceptanceProbe(
+            acceptance=ModelAgentAcceptance(
+                correlation_id=CORRELATION_ID,
+                accepted_at=acceptance_at,
+                source=f"http://host.docker.internal:8098/job/{CORRELATION_ID}",
+            ),
+            reason="",
+        )
+
+    return run_convergence_wait(
+        expected_revision=MERGE_SHA,
+        read_lane=read_lane,
+        resolve_ancestry=resolve_ancestry,
+        resolve_acceptance=resolve_acceptance,
+        declared_budget=DECLARED,
+        wall_clock=wall_clock,
+        poll_interval=timedelta(seconds=60),
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC1 -- a long queue followed by a fast convergence is a PASS
+# ---------------------------------------------------------------------------
+def test_long_queue_then_convergence_inside_the_acceptance_budget_passes() -> None:
+    """The defect, inverted.
+
+    Acceptance lands 1400s into the step, and the lane converges 150s later.
+    A wall clock started at the step expires at 1500s and calls that
+    NOT_CONVERGED; a budget measured from acceptance still has 1350s left.
+    The job can afford the wait (1550s < 1680s), so nothing is widened.
+    """
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=T0 + timedelta(seconds=1400),
+        converges_at=T0 + timedelta(seconds=1550),
+    )
+
+    assert result.outcome is EnumConvergenceOutcome.OK
+    assert result.reason == ""
+    # The convergence is genuinely past the old fixed bound; without that the
+    # test would pass on the pre-change tree too.
+    assert result.waited > DECLARED
+    assert result.budget.acceptance is not None
+    assert result.budget.acceptance.accepted_at == T0 + timedelta(seconds=1400)
+
+
+def test_passing_evidence_names_the_acceptance_timestamp_and_elapsed() -> None:
+    """AC7's shape, asserted on the evidence the receipt will carry."""
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=T0 + timedelta(seconds=1400),
+        converges_at=T0 + timedelta(seconds=1550),
+    )
+
+    evidence = convergence_evidence(
+        lane=result.lane,
+        expected_revision=MERGE_SHA,
+        ancestry=result.ancestry,
+        waited=result.waited,
+        converged=True,
+        budget=result.budget,
+        now=clock.now,
+    )
+
+    assert "2026-09-17T11:23:20" in evidence, evidence
+    assert "since the deploy agent accepted" in evidence, evidence
+    assert "\n" not in evidence
+
+
+# ---------------------------------------------------------------------------
+# AC2 -- a lane that had its whole budget and did not converge is still a FAIL
+# ---------------------------------------------------------------------------
+def test_budget_exhausted_since_acceptance_without_convergence_is_a_fail() -> None:
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=T0 + timedelta(seconds=10),
+        converges_at=None,
+    )
+
+    assert result.outcome is EnumConvergenceOutcome.FAIL
+    # It stopped on the LANE's budget, not on the job's clock.
+    assert result.waited < WALL_CLOCK
+    assert result.waited >= DECLARED
+
+
+def test_failing_evidence_names_the_acceptance_timestamp_and_elapsed() -> None:
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=T0 + timedelta(seconds=10),
+        converges_at=None,
+    )
+
+    evidence = convergence_evidence(
+        lane=result.lane,
+        expected_revision=MERGE_SHA,
+        ancestry=result.ancestry,
+        waited=result.waited,
+        converged=False,
+        budget=result.budget,
+        now=clock.now,
+    )
+
+    assert "2026-09-17T11:00:10" in evidence, evidence
+    assert "since the deploy agent accepted" in evidence, evidence
+    assert STALE_SHA[:12] in evidence
+    assert MERGE_SHA[:12] in evidence
+
+
+def test_an_acceptance_older_than_the_budget_fails_on_the_first_look() -> None:
+    """The command was accepted while the RUN was still queued.
+
+    The lane has already had more than its whole budget, so there is nothing
+    left to wait for and the verdict is available immediately.
+    """
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=T0 - timedelta(seconds=2000),
+        converges_at=None,
+    )
+
+    assert result.outcome is EnumConvergenceOutcome.FAIL
+    assert result.waited < timedelta(seconds=120)
+
+
+# ---------------------------------------------------------------------------
+# AC3 -- an unestablished budget is INDETERMINATE, never a FAIL
+# ---------------------------------------------------------------------------
+def test_no_correlation_id_is_indeterminate_not_a_lane_failure() -> None:
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=None,
+        acceptance_reason=(
+            "the publishing job recorded no correlation id for this run, so the "
+            "deploy agent's acceptance cannot be located"
+        ),
+        converges_at=None,
+    )
+
+    assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+    assert "no correlation id" in result.reason
+
+
+def test_unreachable_agent_is_indeterminate_and_names_the_transport() -> None:
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=None,
+        acceptance_reason="URLError: [Errno 111] Connection refused",
+        converges_at=None,
+    )
+
+    assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+    assert "Connection refused" in result.reason
+
+
+def test_agent_never_accepts_within_the_window_is_indeterminate() -> None:
+    """A 404 for the whole window means the effect never handed it over.
+
+    That is a statement about the hop BEFORE the agent, not about the lane, so
+    it is not a lane failure.
+    """
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=T0 + timedelta(days=1),
+        acceptance_visible_from=T0 + timedelta(days=1),
+        converges_at=None,
+    )
+
+    assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+    assert "no job for correlation" in result.reason
+    assert result.budget.acceptance is None
+
+
+def test_job_clock_exhausted_before_the_lane_budget_is_indeterminate() -> None:
+    """Acceptance is known but the job cannot afford the rest of the budget.
+
+    The honest answer is that this run did not observe the lane long enough,
+    not that the lane failed. Both numbers are named, the way the settle
+    budget's own shortfall check names both.
+    """
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=T0 + timedelta(seconds=1000),
+        converges_at=None,
+        wall_clock=timedelta(seconds=1200),
+    )
+
+    assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+    assert "could NOT afford" in result.reason
+    assert "1500" in result.reason
+
+
+def test_indeterminate_evidence_names_the_sha_and_the_reason() -> None:
+    clock = _Clock(T0)
+    result = _wait(
+        clock=clock,
+        acceptance_at=None,
+        acceptance_reason="URLError: [Errno 111] Connection refused",
+        converges_at=None,
+    )
+
+    evidence = convergence_evidence(
+        lane=result.lane,
+        expected_revision=MERGE_SHA,
+        ancestry=result.ancestry,
+        waited=result.waited,
+        converged=False,
+        budget=result.budget,
+        now=clock.now,
+        indeterminate_reason=result.reason,
+    )
+
+    assert MERGE_SHA[:12] in evidence
+    assert "INDETERMINATE" in evidence
+    assert "Connection refused" in evidence
+    assert "\n" not in evidence
+
+
+def test_convergence_check_outcome_maps_the_three_verdicts() -> None:
+    assert (
+        convergence_check_outcome(EnumConvergenceOutcome.OK)
+        is EnumLabPassCheckOutcome.PASS
+    )
+    assert (
+        convergence_check_outcome(EnumConvergenceOutcome.FAIL)
+        is EnumLabPassCheckOutcome.FAIL
+    )
+    assert (
+        convergence_check_outcome(EnumConvergenceOutcome.INDETERMINATE)
+        is EnumLabPassCheckOutcome.INDETERMINATE
+    )
+
+
+# ---------------------------------------------------------------------------
+# read_agent_acceptance -- the reader, and its refusals
+# ---------------------------------------------------------------------------
+def test_read_agent_acceptance_parses_the_agents_own_record() -> None:
+    body = json.dumps(
+        {
+            "correlation_id": CORRELATION_ID,
+            "status": "in_progress",
+            "accepted_at": "2026-09-17T11:23:20+00:00",
+            "completed_at": None,
+        }
+    )
+    acceptance = read_agent_acceptance(
+        agent_url="http://host.docker.internal:8098",
+        correlation_id=CORRELATION_ID,
+        opener=lambda url, timeout: (200, body),
+    )
+    assert acceptance.accepted_at == datetime(2026, 9, 17, 11, 23, 20, tzinfo=UTC)
+    assert acceptance.correlation_id == CORRELATION_ID
+    assert CORRELATION_ID in acceptance.source
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "fragment"),
+    [
+        (404, '{"error": "not found"}', "no job for correlation"),
+        (500, '{"error": "boom"}', "HTTP 500"),
+        (200, "not json at all", "unreadable"),
+        (200, '{"correlation_id": "x"}', "accepted_at"),
+        (200, '{"accepted_at": "not-a-timestamp"}', "accepted_at"),
+    ],
+)
+def test_read_agent_acceptance_refuses_rather_than_guessing(
+    status: int, body: str, fragment: str
+) -> None:
+    with pytest.raises(AcceptanceUnresolvedError) as excinfo:
+        read_agent_acceptance(
+            agent_url="http://host.docker.internal:8098",
+            correlation_id=CORRELATION_ID,
+            opener=lambda url, timeout: (status, body),
+        )
+    assert fragment in str(excinfo.value)
+
+
+def test_read_agent_acceptance_reports_a_transport_failure_as_unresolved() -> None:
+    def _boom(url: str, timeout: float) -> tuple[int, str]:
+        raise urllib.error.URLError("[Errno 111] Connection refused")
+
+    with pytest.raises(AcceptanceUnresolvedError) as excinfo:
+        read_agent_acceptance(
+            agent_url="http://host.docker.internal:8098",
+            correlation_id=CORRELATION_ID,
+            opener=_boom,
+        )
+    assert "Connection refused" in str(excinfo.value)
+
+
+def test_read_agent_acceptance_refuses_a_correlation_id_that_is_not_a_uuid() -> None:
+    with pytest.raises(AcceptanceUnresolvedError) as excinfo:
+        read_agent_acceptance(
+            agent_url="http://host.docker.internal:8098",
+            correlation_id="../../etc/passwd",
+            opener=lambda url, timeout: (200, "{}"),
+        )
+    assert "correlation id" in str(excinfo.value)
+
+
+def test_a_budget_cannot_claim_both_an_acceptance_and_a_reason() -> None:
+    with pytest.raises(ValueError, match="reason"):
+        ModelConvergenceBudget(
+            declared_seconds=1500,
+            wall_clock_seconds=1680,
+            acceptance=ModelAgentAcceptance(
+                correlation_id=CORRELATION_ID, accepted_at=T0, source="x"
+            ),
+            unresolved_reason="but also unresolved",
+        )
+
+
+def test_a_budget_with_no_acceptance_must_carry_a_reason() -> None:
+    with pytest.raises(ValueError, match="reason"):
+        ModelConvergenceBudget(
+            declared_seconds=1500,
+            wall_clock_seconds=1680,
+            acceptance=None,
+            unresolved_reason="",
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC4 -- an INDETERMINATE check keeps the receipt non-PASS
+# ---------------------------------------------------------------------------
+def _receipt(checks: tuple[ModelLabPassCheck, ...], result: EnumLabPassResult):
+    return ModelLabPassReceipt(
+        sha=MERGE_SHA,
+        lane=EnumLabLane.COMPOSE_DEV,
+        started_at=T0,
+        finished_at=T0 + timedelta(minutes=30),
+        result=result,
+        checks=checks,
+        agent_command_id=CORRELATION_ID,
+    )
+
+
+def test_a_receipt_carrying_an_indeterminate_check_is_not_a_pass() -> None:
+    checks = (
+        ModelLabPassCheck(name="ready_main", ok=True, evidence="HTTP 200"),
+        ModelLabPassCheck.indeterminate_check(
+            name="deployed_revision",
+            evidence="INDETERMINATE: the deploy agent's acceptance could not be read",
+        ),
+    )
+    receipt = _receipt(checks, EnumLabPassResult.FAIL)
+    assert receipt.result is EnumLabPassResult.FAIL
+    assert not all(c.ok for c in receipt.checks)
+
+
+def test_a_pass_receipt_over_an_indeterminate_check_is_refused() -> None:
+    checks = (
+        ModelLabPassCheck(name="ready_main", ok=True, evidence="HTTP 200"),
+        ModelLabPassCheck.indeterminate_check(
+            name="deployed_revision", evidence="INDETERMINATE: agent unreachable"
+        ),
+    )
+    with pytest.raises(ValueError, match="deployed_revision"):
+        _receipt(checks, EnumLabPassResult.PASS)
+
+
+def test_an_indeterminate_check_cannot_also_be_ok() -> None:
+    with pytest.raises(ValueError, match="indeterminate"):
+        ModelLabPassCheck(
+            name="deployed_revision", ok=True, evidence="e", indeterminate=True
+        )
+
+
+def test_an_indeterminate_check_round_trips_through_the_wire() -> None:
+    check = ModelLabPassCheck.indeterminate_check(
+        name="deployed_revision", evidence="INDETERMINATE: agent unreachable"
+    )
+    payload = check.to_dict()
+    assert payload["ok"] is False
+    assert payload["outcome"] == EnumLabPassCheckOutcome.INDETERMINATE.value
+    assert ModelLabPassCheck.from_dict(payload) == check
+
+
+def test_an_ordinary_check_is_byte_identical_to_the_pre_change_wire_form() -> None:
+    """The extra field is written only when it says something ``ok`` cannot.
+
+    A reader that predates this change then refuses exactly the receipts it
+    could not have interpreted, and parses unchanged every receipt it could.
+    """
+    for ok in (True, False):
+        payload = ModelLabPassCheck(name="ready_main", ok=ok, evidence="e").to_dict()
+        assert set(payload) == {"name", "ok", "evidence"}
+
+
+def test_the_check_argument_parser_accepts_the_indeterminate_verdict() -> None:
+    check = parse_check_argument("deployed_revision:indeterminate:agent unreachable")
+    assert check.outcome is EnumLabPassCheckOutcome.INDETERMINATE
+    assert check.ok is False
+    assert check.evidence == "agent unreachable"
+
+
+# ---------------------------------------------------------------------------
+# AC5 -- the delivery gate's refusal reads differently for INDETERMINATE
+# ---------------------------------------------------------------------------
+class _Out:
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def write(self, text: str) -> None:
+        self.lines.append(text)
+
+    @property
+    def text(self) -> str:
+        return "".join(self.lines)
+
+
+def _gate_text(monkeypatch: pytest.MonkeyPatch, receipt: ModelLabPassReceipt) -> str:
+    import scripts.ci.lab_pass_receipt as mod
+
+    monkeypatch.setattr(
+        mod, "list_artifacts", lambda repo, name: [{"id": 1, "created_at": "2026"}]
+    )
+    monkeypatch.setattr(mod, "download_receipt", lambda repo, artifact_id: receipt)
+    out = _Out()
+    rc = evaluate_gate(
+        repo="OmniNode-ai/omnibase_infra",
+        sha=MERGE_SHA,
+        lanes=[receipt.lane],
+        out=out,
+    )
+    assert rc == 1
+    return out.text
+
+
+def test_the_gate_refusal_names_the_sha_and_the_indeterminate_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reason = "INDETERMINATE: the deploy agent's acceptance could not be read"
+    receipt = _receipt(
+        (
+            ModelLabPassCheck(name="ready_main", ok=True, evidence="HTTP 200"),
+            ModelLabPassCheck.indeterminate_check(
+                name="deployed_revision", evidence=reason
+            ),
+        ),
+        EnumLabPassResult.FAIL,
+    )
+    text = _gate_text(monkeypatch, receipt)
+
+    assert MERGE_SHA in text
+    assert "deployed_revision" in text
+    assert reason in text
+    assert "INDETERMINATE" in text
+
+
+def test_the_indeterminate_refusal_is_not_the_same_text_as_a_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failing = _receipt(
+        (
+            ModelLabPassCheck(name="ready_main", ok=True, evidence="HTTP 200"),
+            ModelLabPassCheck(
+                name="deployed_revision",
+                ok=False,
+                evidence="lane at abc; not converged",
+            ),
+        ),
+        EnumLabPassResult.FAIL,
+    )
+    indeterminate = _receipt(
+        (
+            ModelLabPassCheck(name="ready_main", ok=True, evidence="HTTP 200"),
+            ModelLabPassCheck.indeterminate_check(
+                name="deployed_revision", evidence="INDETERMINATE: agent unreachable"
+            ),
+        ),
+        EnumLabPassResult.FAIL,
+    )
+
+    fail_text = _gate_text(monkeypatch, failing)
+    indeterminate_text = _gate_text(monkeypatch, indeterminate)
+
+    assert fail_text != indeterminate_text
+    # The generic refusal enumerates every refusable state, so the token alone
+    # is not the discriminator -- the INDETERMINATE-specific line is.
+    marker = "asserts nothing about the lab lane"
+    assert marker not in fail_text
+    assert marker in indeterminate_text
+
+
+# ---------------------------------------------------------------------------
+# The wiring, pinned. A fix that lives only in a Python function and is never
+# reached by the job is the shape rule 5 calls detection rather than
+# enforcement, so the workflow's own flags are asserted here.
+# ---------------------------------------------------------------------------
+WORKFLOW = REPO_ROOT / ".github/workflows/runtime-rebuild-trigger.yml"
+
+
+def _converge_step() -> dict:
+    import yaml
+
+    model = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = model["jobs"]["verify-lane-converged"]["steps"]
+    step = next(s for s in steps if s.get("id") == "converge")
+    assert isinstance(step, dict)
+    return step
+
+
+def test_the_convergence_step_is_handed_the_agent_surface_and_the_correlation_id() -> (
+    None
+):
+    body = _converge_step()["run"]
+    assert "--agent-url" in body
+    assert "--correlation-id" in body
+    assert "--wall-clock-seconds" in body
+    # The lane's budget is unchanged (AC6): the flags above bound the WAIT, and
+    # a fix that quietly widened the grant would show up right here.
+    assert "--wait-timeout 25m" in body
+
+
+def test_the_convergence_wall_clock_is_derived_not_typed() -> None:
+    body = _converge_step()["run"]
+    assert "lane_settle_budget.py" in body
+    assert "--converge-wall-clock" in body
+
+
+def test_the_trigger_job_publishes_the_correlation_id() -> None:
+    import yaml
+
+    model = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    outputs = model["jobs"]["trigger-rebuild"]["outputs"]
+    assert "correlation_id" in outputs
+
+
+def test_the_emit_step_reads_the_three_valued_verdict() -> None:
+    import yaml
+
+    model = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = model["jobs"]["verify-lane-converged"]["steps"]
+    emit = next(s for s in steps if "emit" in str(s.get("name", "")).lower())
+    assert "steps.converge.outputs.verdict" in emit["env"]["CONVERGE_VERDICT"]
+    assert "indeterminate" in emit["run"]
+
+
+def test_the_job_ceiling_is_unchanged_by_this_ticket() -> None:
+    """AC6, as a value rather than a promise."""
+    import yaml
+
+    model = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    assert model["jobs"]["verify-lane-converged"]["timeout-minutes"] == 45
+
+
+def test_the_declared_settle_budget_is_unchanged_by_this_ticket() -> None:
+    import yaml
+
+    declaration = yaml.safe_load(
+        (REPO_ROOT / "config/lab_pass_settle_budget.yaml").read_text(encoding="utf-8")
+    )
+    assert declaration["lanes"]["compose-dev"]["settle_budget_seconds"] == 900
+
+
+def test_the_converge_wall_clock_leaves_room_for_the_settle_and_the_tail() -> None:
+    """The bound is derived, and the derivation is the thing under test."""
+    from scripts.ci.lane_settle_budget import converge_wall_clock_seconds
+
+    seconds = converge_wall_clock_seconds(
+        lane="compose-dev",
+        job_ceiling_seconds=45 * 60,
+        elapsed_seconds=0,
+        reserved_tail_seconds=120,
+    )
+    assert seconds == 45 * 60 - 900 - 120
+    # A job that has already spent its ceiling gets zero, never a negative
+    # bound that would read as "wait forever".
+    assert (
+        converge_wall_clock_seconds(
+            lane="compose-dev",
+            job_ceiling_seconds=45 * 60,
+            elapsed_seconds=10_000,
+            reserved_tail_seconds=120,
+        )
+        == 0
+    )
+
+
+def test_an_unresolvable_declaration_refuses_a_converge_bound(tmp_path: Path) -> None:
+    from scripts.ci.lane_settle_budget import (
+        SettleBudgetError,
+        converge_wall_clock_seconds,
+    )
+
+    with pytest.raises(SettleBudgetError):
+        converge_wall_clock_seconds(
+            lane="compose-dev",
+            job_ceiling_seconds=2700,
+            elapsed_seconds=0,
+            reserved_tail_seconds=120,
+            path=tmp_path / "absent.yaml",
+        )

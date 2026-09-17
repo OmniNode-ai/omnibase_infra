@@ -62,6 +62,7 @@ from scripts.ci.lab_pass_receipt import ModelSettleBudget
 
 __all__ = [
     "DEFAULT_DECLARATION_PATH",
+    "converge_wall_clock_seconds",
     "ModelLaneSettleDeclaration",
     "SettleBudgetError",
     "affordable_seconds",
@@ -333,6 +334,41 @@ def derive_settle_budget(
     )
 
 
+def converge_wall_clock_seconds(
+    lane: str,
+    job_ceiling_seconds: int,
+    elapsed_seconds: int,
+    reserved_tail_seconds: int,
+    path: Path | None = None,
+) -> int:
+    """How long the CONVERGENCE step may watch before the receipt must be written.
+
+    OMN-18573. The convergence guard's ``--wait-timeout`` is the LANE's budget,
+    measured from the moment the deploy agent accepts the rebuild command. This
+    is a different number: what remains of the job's ceiling once the lane's
+    declared SETTLE budget and the reserved tail are held back, because both
+    still have to happen after convergence returns.
+
+    Keeping the two apart is the whole point. Before this, the wait was the
+    lane's budget AND the job's bound at once, so a queue upstream of the agent
+    was spent out of the lane's clock. Now, when this bound is what stops the
+    wait, the guard reports INDETERMINATE naming both numbers, and when the
+    lane's own budget is what stops it, the guard reports FAIL.
+
+    Derived from the declaration, never chosen: the settle budget is read from
+    the same fail-closed reader the probe uses, so a missing declaration raises
+    here exactly as it does there.
+    """
+    declaration = load_declaration(lane, path)
+    return max(
+        0,
+        job_ceiling_seconds
+        - elapsed_seconds
+        - declaration.settle_budget_seconds
+        - reserved_tail_seconds,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -364,11 +400,36 @@ def build_parser() -> argparse.ArgumentParser:
             "outcome worse than a failing one."
         ),
     )
+    parser.add_argument(
+        "--converge-wall-clock",
+        action="store_true",
+        help=(
+            "print only the seconds the CONVERGENCE step may watch for "
+            "(OMN-18573): the ceiling less the elapsed time, the lane's "
+            "declared settle budget and the reserved tail. This is a bound on "
+            "the wait, never the lane's convergence budget, which is measured "
+            "from the deploy agent's acceptance of the rebuild command."
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.converge_wall_clock:
+        try:
+            print(
+                converge_wall_clock_seconds(
+                    lane=args.lane,
+                    job_ceiling_seconds=args.job_ceiling_seconds,
+                    elapsed_seconds=args.elapsed_seconds,
+                    reserved_tail_seconds=args.reserved_tail_seconds,
+                )
+            )
+        except SettleBudgetError as exc:
+            print(f"::error::converge wall clock unresolved: {exc}", file=sys.stderr)
+            return 1
+        return 0
     try:
         budget = derive_settle_budget(
             lane=args.lane,
