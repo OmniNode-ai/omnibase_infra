@@ -68,6 +68,7 @@ reason OMN-18075 exists.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -287,7 +288,7 @@ class _FakeLinear:
 
 
 def _merged_pr(number: int) -> dict[str, Any]:
-    recent = "2026-09-10T02:00:00Z"
+    recent = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return {
         "number": number,
         "html_url": f"https://github.com/{_OCC_REPO}/pull/{number}",
