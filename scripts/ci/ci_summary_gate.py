@@ -405,9 +405,6 @@ SOFT_ALLOWLIST: frozenset[str] = frozenset(
 # job-level `if:` — it always executes and reports, even when pyproject.toml is
 # unchanged) and folded into the same fixture rows above.
 EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
-    # OMN-18629: the governed-helper primitive gate. Unconditional, no
-    # path filter, so it reports on every PR shape.
-    "Governed helper primitive gate",
     "deploy-gate / deploy-gate",  # 16/16 present, 15/16 green (#2555 red AT MERGE)
     "verify / verify",  # Receipt Gate
     "call-reject-skip-token / scan / reject-skip-gate-token",  # CLAUDE.md rule 10 mechanism
@@ -576,6 +573,21 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # windows by construction. Pinned by
     # tests/ci/test_omn18096_ci_bus_overlay_gate_wiring.py.
     "ci-bus-overlay-binding",  # ci-bus-overlay-binding.yml
+    # OMN-18629: the governed-helper primitive gate. Refuses a bare primitive
+    # committed where this repo already ships the governed helper superseding
+    # it -- the class behind OMN-18608, OMN-18613 and OMN-18606. Registered
+    # here rather than in branch protection for the OMN-16878 reason the
+    # kb-doc-gate note above gives: `dev` requires exactly ONE context, so this
+    # tuple IS the external enforcement surface on this repo. Admitted under
+    # POST_FIXTURE_WINDOW_CONTEXTS, which carries the admission argument.
+    #
+    # PLACED AT THE TAIL DELIBERATELY. The actor-conditional tests pin
+    # EXPECTED_EXTERNAL_CONTEXTS[0] as the synthesised absence and the next
+    # entry as the failing control, and both must be present in a 2026-07-30
+    # fixture. A context with no fixture history cannot serve as either, so a
+    # post-fixture-window admission belongs after every historical name rather
+    # than in alphabetical position.
+    "Governed helper primitive gate",  # governed-helper-primitive-gate.yml
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -609,6 +621,31 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         # merged PR in either fixture window could have produced this check-run.
         # Comes out at the next fixture re-capture.
         "ci-bus-overlay-binding",
+        # OMN-18629: the producer workflow lands in this same PR on 2026-09-17,
+        # so no merged PR in either fixture window could have produced this
+        # check-run. Comes out at the next fixture re-capture.
+        #
+        # ADMISSION IS BY CONSTRUCTION, on the argument recorded for
+        # `exposure-reader-coverage` above. What stands in for the measured
+        # N-of-16 record:
+        #   * The producer declares `pull_request`, `merge_group` and push to
+        #     dev/main, carries no `needs:`, no job-level `if:`, no path filter
+        #     and no failure-tolerating step key -- so it cannot be
+        #     skipped-as-passed and cannot wedge a queue SHA.
+        #   * It is proven able to FAIL on real input, which is the OMN-16876
+        #     vacuous-pass check: a new bare mkdir lock injected into
+        #     scripts/disk-gc.sh, a new unbounded consumer commit injected into
+        #     services/post_merge/consumer.py, and a new bare interpreter
+        #     injected into scripts/disk-watermark-check.sh each exit 1 naming
+        #     the file, the line, the pair and the governed helper. It also
+        #     exits 1 when a baselined call site is FIXED without its baseline
+        #     entry being deleted.
+        #   * It is proven able to PASS: the unmutated tree exits 0, and it did
+        #     so on this PR's own head after the OMN-18606 rebase.
+        #   * It ALREADY failed this PR for a real reason before admission --
+        #     the stale lane-census baseline entries after #3717 landed -- so
+        #     its ability to refuse is not a claim, it is in this PR's history.
+        "Governed helper primitive gate",
     }
 )
 

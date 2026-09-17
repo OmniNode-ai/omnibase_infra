@@ -23,6 +23,7 @@ name: Governed helper primitive gate (OMN-18629)
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [dev, main]
 
