@@ -113,6 +113,7 @@ import os
 import re
 import signal
 import sys
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -120,6 +121,8 @@ from pathlib import Path
 
 import click
 
+from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
+from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.backends.auto_configure import (
     BUS_INMEMORY,
     BUS_KAFKA,
@@ -138,13 +141,20 @@ from omnibase_infra.cli.delegate_lane_credentials import (
 )
 from omnibase_infra.cli.delegate_locus import (
     DelegateLocusRefusedError,
+    contract_terminal_topic,
     resolve_delegate_locus,
 )
 from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
     resolve_delegate_terminal,
 )
+from omnibase_infra.cli.model_delegate_locus_decision import (
+    ModelDelegateLocusDecision,
+)
 from omnibase_infra.cli.model_delegate_terminal import ModelDelegateTerminal
+from omnibase_infra.cli.model_delegate_timeout_refusal import (
+    ModelDelegateTimeoutRefusal,
+)
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     OmnimarketDriftError,
@@ -173,6 +183,7 @@ from omnibase_infra.event_bus.lane_client_transport_binding import (
 from omnibase_infra.event_bus.model_lane_client_transport import (
     ModelLaneClientTransport,
 )
+from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 
 logger = logging.getLogger(__name__)
@@ -1078,6 +1089,61 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
         signal.signal(signal.SIGALRM, previous_handler)
 
 
+def _timeout_receipt(
+    *,
+    correlation_id: uuid.UUID,
+    run_id: uuid.UUID,
+    declared_timeout: int,
+    elapsed_seconds: float,
+    bus: str,
+    locus_decision: ModelDelegateLocusDecision,
+    contract_path: Path,
+) -> ModelSkillResult[ModelDelegateTimeoutRefusal]:
+    """Build the one typed result a timed-out delegation puts on stdout (OMN-17516).
+
+    ``onex delegate`` documents exactly ONE ``ModelSkillResult`` on stdout. The
+    hard-timeout backstop was the single path that did not honour it: exit 1, a
+    prose line on stderr, and nothing at all on stdout. A caller parsing the
+    documented contract could not distinguish that from a run still in flight,
+    which is precisely the 2026-08-26 report this closes.
+
+    The receipt is ``FAILED`` with ``exit_code=1``. It is a report of a
+    delegation that did not terminalize, never a substitute for one: no
+    synthesized answer, no widened bound, nothing rescued.
+
+    Every value is one this invocation already resolved -- its own minted ids,
+    the transport and locus it actually ran on (OMN-17295/OMN-17304), and the
+    topics read from the contract it dispatched. Nothing is re-derived here, so
+    the refusal cannot describe a run other than the one that produced it.
+    """
+    refusal = ModelDelegateTimeoutRefusal(
+        correlation_id=correlation_id,
+        declared_timeout_seconds=declared_timeout,
+        grace_seconds=_HARD_TIMEOUT_GRACE_SECONDS,
+        elapsed_seconds=elapsed_seconds,
+        bus=bus,
+        locus=locus_decision.locus.value,
+        terminal_topic=contract_terminal_topic(contract_path),
+        command_topic=locus_decision.command_topic,
+        broker=locus_decision.broker,
+    )
+    return ModelSkillResult[ModelDelegateTimeoutRefusal](
+        skill_name="delegate",
+        node_name=DELEGATE_NODE_NAME,
+        status=EnumSkillResultStatus.FAILED,
+        correlation_id=correlation_id,
+        run_id=run_id,
+        exit_code=1,
+        duration_ms=int(elapsed_seconds * 1000),
+        result=refusal,
+        result_model=(
+            "omnibase_infra.cli.model_delegate_timeout_refusal."
+            "ModelDelegateTimeoutRefusal"
+        ),
+        runtime_identity=collect_runtime_identity(config_source=str(contract_path)),
+    )
+
+
 @click.command("delegate")
 @click.argument("prompt")
 @click.option(
@@ -1624,6 +1690,11 @@ def run_delegate(
             raise click.ClickException(str(exc)) from exc
 
         try:
+            # OMN-17516: the refusal reports the wall time actually served,
+            # which routinely exceeds declared + grace because a SIGALRM
+            # raised inside a blocking call only propagates at the next
+            # bytecode boundary. Measured, never assumed from the bound.
+            dispatch_started = time.monotonic()
             with _hard_timeout(timeout + _HARD_TIMEOUT_GRACE_SECONDS):
                 return run_receipt_mode(
                     node_name=DELEGATE_NODE_NAME,
@@ -1655,5 +1726,23 @@ def run_delegate(
                     ),
                 )
         except DelegateTimeoutExceededError as exc:
+            # OMN-17516. The human-facing line stays (OMN-14397 added it and a
+            # test pins it), and the caller that parses stdout now gets the one
+            # typed result this command has always documented. Before this, the
+            # backstop returned 1 with EMPTY stdout, which is byte-identical to
+            # a run still in progress -- the whole of the 2026-08-26 "no result
+            # at all" report. Nothing here invents a terminal: the receipt says
+            # FAILED, and says what was awaited and for how long.
             click.echo(str(exc), err=True)
+            click.echo(
+                _timeout_receipt(
+                    correlation_id=correlation_id,
+                    run_id=run_id,
+                    declared_timeout=timeout,
+                    elapsed_seconds=time.monotonic() - dispatch_started,
+                    bus=bus,
+                    locus_decision=locus_decision,
+                    contract_path=contract_path,
+                ).model_dump_json()
+            )
             return 1
