@@ -295,7 +295,17 @@ class TestEmptyConfidentialSecretFailsTheJob:
         stderr = capsys.readouterr().err
         record = json.loads(stderr.strip().splitlines()[-1])
         assert record["op"] == "error"
-        assert record["check"] == "confidential_client_secret_present"
+        assert record["check"] == "client_preflight", (
+            "OMN-18170 moved this refusal AHEAD of the client loop. The same "
+            "empty secret now fails the read-only survey before any write, so "
+            "the realm is left untouched instead of being mutated and then "
+            "reported on. The post-loop presence guard is unchanged and still "
+            "fires for a client the loop itself empties."
+        )
+        assert {f["code"] for f in record["findings"]} == {"live_secret_empty"}, (
+            "the refusal must still say WHICH failure class this is -- an "
+            "empty secret, not a mismatch"
+        )
         assert record["clients"] == ["onex-service"], (
             "the failure must name the offending client; a redacted failure "
             "leaves an operator exactly where this check was added to help"

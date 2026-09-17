@@ -186,7 +186,14 @@ class TestConsumerSecretFingerprintGuard:
         last_line = captured.err.strip().splitlines()[-1]
         record = json.loads(last_line)
         assert record["op"] == "error"
-        assert record["check"] == "client_secret_fingerprint_mismatch"
+        assert record["check"] == "client_preflight", (
+            "OMN-18170 moved the fingerprint comparison into the read-only "
+            "survey that runs ahead of the client loop; the post-loop guard "
+            "is unchanged and still covers the post-reconcile state"
+        )
+        assert {f["code"] for f in record["findings"]} == {
+            "consumer_secret_fingerprint_mismatch"
+        }
         assert record["clients"] == ["onex-api"]
 
         rendered = json.dumps(record)
@@ -250,9 +257,12 @@ class TestConsumerSecretFingerprintGuard:
         captured = capsys.readouterr()
         last_line = captured.err.strip().splitlines()[-1]
         record = json.loads(last_line)
-        assert record["check"] == "confidential_client_secret_present", (
-            "an empty value must fail the presence guard, not the fingerprint "
-            "mismatch guard -- conflating the two hides which failure occurred"
+        assert {f["code"] for f in record["findings"]} == {"live_secret_empty"}, (
+            "an empty value must be its own refusal, not the fingerprint "
+            "mismatch -- conflating the two hides which failure occurred. "
+            "OMN-18170 moved both ahead of the client loop, so the "
+            "distinguishing signal is now the finding CODE rather than which "
+            "of two post-loop guards happened to fire first"
         )
 
     def test_no_consumer_env_declared_skips_the_check(
