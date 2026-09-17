@@ -178,7 +178,14 @@ def _resolve_by_stamp(
         # A rolled row is still a real consent row, and this is the whole point
         # of the timestamp form: the row moved into the archive and its
         # timestamp went with it.
-        for archive in sorted(archive_dir.glob("*.md")):
+        # SCOPED TO THE ROLL'S OWN FILENAME SHAPE, not `*.md`. A bare glob
+        # would read every markdown file in the directory, so anything that
+        # could land a file there -- a stray doc, a partial write, a crafted
+        # name -- could carry a row with the target timestamp and the required
+        # fields and authorise a live GRANT/REVOKE nobody consented to. The
+        # names accepted are the ones `ledger_lock.py` itself writes beside this
+        # ledger: `<ledger stem>_<date>-split.md`.
+        for archive in sorted(archive_dir.glob(f"{path.stem}_*-split.md")):
             searched.append(str(archive))
             located.extend(
                 _rows_opening_with(

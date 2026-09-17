@@ -654,3 +654,46 @@ def test_a_scope_that_does_not_name_the_ticket_is_refused_by_timestamp_too(
         resolve_consent_citation(
             f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-99999", ledger_root=tmp_path
         )
+
+
+def test_an_archive_file_outside_the_roll_naming_shape_is_not_read(
+    tmp_path: Path,
+) -> None:
+    """The archive search is scoped to the names a roll actually writes.
+
+    A bare ``*.md`` glob would read every markdown file in the archive
+    directory, so anything that could land a file there -- a stray doc, a
+    partial write, a crafted name -- could carry a row with the target timestamp
+    and the required fields and authorise a live GRANT/REVOKE nobody consented
+    to. This plants exactly such a file under a name no roll produces.
+    """
+    ledger = _ledger(tmp_path, "header", "2026-09-01T00:00:00Z | ROW | lane=x")
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    (archive_dir / "notes.md").write_text(_CONSENT_ROW + "\n", encoding="utf-8")
+
+    with pytest.raises(AclApplyRefusalError, match="opens with the timestamp"):
+        resolve_consent_citation(
+            f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+        )
+
+
+def test_a_conforming_archive_name_is_still_read(tmp_path: Path) -> None:
+    """Positive control for the scoping above.
+
+    Without it, narrowing the glob to something that matches nothing would
+    satisfy the test above while silently retiring archive resolution, which is
+    the one behaviour the timestamp form exists to provide.
+    """
+    ledger = _ledger(tmp_path, "header", "2026-09-01T00:00:00Z | ROW | lane=x")
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    (archive_dir / f"{ledger.stem}_2026-09-15-split.md").write_text(
+        _CONSENT_ROW + "\n", encoding="utf-8"
+    )
+
+    consent = resolve_consent_citation(
+        f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+    )
+
+    assert consent.approved_by == "operator"
