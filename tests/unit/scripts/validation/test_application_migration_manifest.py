@@ -655,7 +655,22 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 2026-09-16T00:40:04Z. 0005 backfills the column by inverting the declared
     # byok_provider_backends.v1.yaml binding, and leaves an uncatalogued
     # backend NULL -- there the absence really is honest, and still refused.
-    assert len(result.declarations) == 185
+    #
+    # 185 -> 186 for OMN-18565's
+    # nodes/node_projection_delegation/0042_delegation_events_drop_house_tenant_default.sql,
+    # which removes the house-tenant column DEFAULT from delegation_events.
+    # tenant_id. That DEFAULT turned a write saying NOTHING about its tenant
+    # into a write ASSERTING one, authored by the schema rather than by any
+    # writer. delegation_events rows for one correlation are written by two
+    # independent subscriptions, so a tenant-less quality-gate verdict that won
+    # the race CREATED the row under the house tenant, and the real terminal's
+    # ON CONFLICT DO UPDATE was then refused by the tenant_isolation policy's
+    # USING half under FORCE ROW LEVEL SECURITY -- roughly three of sixteen
+    # staging proof runs passed over 24 hours on 2026-09-17. It drops a DEFAULT
+    # and rewrites no row; NOT NULL is deliberately kept, and the migration
+    # RAISES rather than proceeding on a lane where that column is nullable, so
+    # it can never trade a wrong tenant for a NULL one.
+    assert len(result.declarations) == 186
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
