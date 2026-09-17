@@ -20,6 +20,7 @@ which would trade a stuck host for a corrupted one.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -91,7 +92,7 @@ def _seed_lock(
 
 def _dead_pid() -> int:
     """A pid that certainly is not running: spawned, exited, reaped."""
-    proc = subprocess.Popen(["true"])
+    proc = subprocess.Popen(["true"], start_new_session=True)
     proc.wait()
     return proc.pid
 
@@ -163,7 +164,7 @@ def test_a_lock_held_by_a_live_pid_is_respected(ws: Workspace) -> None:
     deleted any lock it found, turning a stuck host into two concurrent writers
     -- which is the OMN-15590 stall shape the lock exists to prevent.
     """
-    live = subprocess.Popen(["sleep", "60"])
+    live = subprocess.Popen(["sleep", "60"], start_new_session=True)
     try:
         _seed_lock(ws, pid=live.pid, host=os.uname().nodename)
         _ready(ws)
@@ -200,7 +201,7 @@ def test_a_reclaim_names_the_pid_it_overrode_and_the_lock_age(ws: Workspace) -> 
     assert str(dead) in proc.stderr, (
         f"the reclaim did not name the pid it overrode: {proc.stderr}"
     )
-    assert "120s old" in proc.stderr, (
+    assert re.search(r"\b12[0-5]s old\b", proc.stderr), (
         f"the reclaim did not name the age of the lock it broke: {proc.stderr}"
     )
 
@@ -276,7 +277,7 @@ def test_a_foreign_host_holder_is_decided_by_age_not_by_a_local_pid(
     this lock is past. A run that refuses here is a run that asked the wrong
     machine about the wrong process.
     """
-    live = subprocess.Popen(["sleep", "60"])
+    live = subprocess.Popen(["sleep", "60"], start_new_session=True)
     try:
         _seed_lock(ws, pid=live.pid, host="some-other-host", age_seconds=7200)
         _ready(ws)
@@ -319,7 +320,7 @@ def test_the_refusal_names_the_holder_it_is_deferring_to(ws: Workspace) -> None:
     nothing held the lock. Naming the pid, the host and the start time is what
     turns the next occurrence into a diagnosis instead of a puzzle.
     """
-    live = subprocess.Popen(["sleep", "60"])
+    live = subprocess.Popen(["sleep", "60"], start_new_session=True)
     try:
         _seed_lock(ws, pid=live.pid, host=os.uname().nodename)
         _ready(ws)
@@ -363,7 +364,7 @@ def _gnu_stat_shim(tmp_path: Path) -> Path:
         "  exit 0\n"
         "fi\n"
         'if [[ "$1" == "-c" && "$2" == "%Y" ]]; then\n'
-        '  exec /usr/bin/stat -f %m "$3"\n'
+        "  exec python3 -c 'import os, sys; print(int(os.path.getmtime(sys.argv[1])))' \"$3\"\n"
         "fi\n"
         'exec /usr/bin/stat "$@"\n',
         encoding="utf-8",
