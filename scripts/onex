@@ -43,11 +43,13 @@
 # ============================================================================
 # THE CONTRACT
 # ============================================================================
-# This wrapper execs the CLI venv's own entrypoint BY ABSOLUTE PATH and never
-# consults PATH for `onex`. There is no uv in the invocation path at all, so
+# This wrapper execs the dispatch venv's own entrypoint BY ABSOLUTE PATH and
+# never consults PATH for `onex`. There is no uv in the invocation path at all, so
 # there is no implicit sync, no environment selection, and no fallback:
 #
-#   * the interpreter is `$OMNI_HOME/omnibase_infra/.venv/bin/onex`, always;
+#   * the interpreter is the DISPATCH venv's own `bin/onex` -- by default
+#     `$OMNI_HOME/.onex-dispatch-venv/bin/onex`, always (OMN-17819; it was
+#     the canonical clone's `.venv/bin/onex` before the gate/dispatch split);
 #   * if that entrypoint is missing, the workspace reconciler runs ONCE and the
 #     wrapper re-checks -- the same self-heal-then-proceed policy the drift
 #     guard uses, and the same single owner of repair policy;
@@ -70,6 +72,12 @@
 #               skip the self-heal and refuse immediately on a missing
 #               entrypoint. For tests and for diagnosing the wrapper itself;
 #               it never affects a working install.
+#   ONEX_DISPATCH_VENV
+#               absolute path to the dispatch venv, overriding
+#               $OMNI_HOME/.onex-dispatch-venv. `reconcile-workspace-venvs.sh`
+#               reads the same variable with the same default, so the wrapper
+#               and the reconciler cannot disagree about which venv is the
+#               composed one.
 #
 # ============================================================================
 # THE INVOCATION-TIME FLOOR (OMN-17309)
@@ -140,7 +148,23 @@ INFRA_DIR="$(dirname "$SCRIPT_DIR")"
 # right for the checkout this script is part of.
 OMNI_HOME="${OMNI_HOME:-$(dirname "$INFRA_DIR")}"
 
-ENTRYPOINT="$OMNI_HOME/omnibase_infra/.venv/bin/onex"
+# The DISPATCH venv, never the canonical clone's own `.venv` (OMN-17819).
+#
+# Until OMN-17819 this was `$OMNI_HOME/omnibase_infra/.venv` -- the clone's
+# PROJECT venv, which is also the environment `uv run pytest` executes in there
+# and the one the OMN-15620 purity gate judges. Composing omnimarket into it to
+# satisfy the OMN-14060 dispatch guard is what made every focused `uv run
+# pytest` in the canonical clone refuse before collection, and the refusal's own
+# recommended repair (`uv sync`, exact) removed omnimarket and bricked this CLI.
+# Neither side was wrong; the collapse of two environments into one was
+# (OMN-16846). The reconciler now composes the provider layer into
+# `$OMNI_HOME/.onex-dispatch-venv` and keeps the clone's `.venv` lock-pure, and
+# this wrapper execs the composed one.
+#
+# The default is spelled identically in both files and read from the same
+# variable, so a relocation cannot move one without the other.
+DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"
+ENTRYPOINT="$DISPATCH_VENV/bin/onex"
 RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
 HOST_RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-host.sh"
 FLOOR_FILE="$OMNI_HOME/.onex-workspace-floor.json"
@@ -206,18 +230,22 @@ _is_evidence_invocation() {
 _floor_verdict() {
   [[ -f "$FLOOR_FILE" ]] || { printf 'UNKNOWN:no floor marker at %s' "$FLOOR_FILE"; return 0; }
 
+  # The DISPATCH venv (OMN-17819): the floor's `omnimarket_commit` names the
+  # build a dispatch would actually use, and after the split that build lives
+  # here. Reading the clone's `.venv` would ask about a package that is now
+  # required to be ABSENT from it, and every invocation would read UNKNOWN.
   local site_packages="" candidate
-  for candidate in "$OMNI_HOME/omnibase_infra/.venv"/lib/python*/site-packages; do
+  for candidate in "$DISPATCH_VENV"/lib/python*/site-packages; do
     [[ -d "$candidate" ]] && { site_packages="$candidate"; break; }
   done
-  [[ -n "$site_packages" ]] || { printf 'UNKNOWN:no site-packages under the CLI venv'; return 0; }
+  [[ -n "$site_packages" ]] || { printf 'UNKNOWN:no site-packages under the dispatch venv at %s' "$DISPATCH_VENV"; return 0; }
 
   local -a dist_names=()
   for candidate in "$site_packages"/*.dist-info; do
     [[ -d "$candidate" ]] || continue
     dist_names+=("${candidate##*/}")
   done
-  [[ "${#dist_names[@]}" -gt 0 ]] || { printf 'UNKNOWN:CLI venv has no installed distributions'; return 0; }
+  [[ "${#dist_names[@]}" -gt 0 ]] || { printf 'UNKNOWN:dispatch venv has no installed distributions'; return 0; }
 
   # The installed omnimarket commit, read with the `read` builtin. Whitespace is
   # stripped first so the check does not depend on whether the installer wrote

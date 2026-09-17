@@ -186,7 +186,18 @@ VENV_DELEGATE="${ONEX_RECONCILE_VENV_DELEGATE:-$SCRIPT_DIR/reconcile-workspace-v
 RECEIPT="${ONEX_RECONCILE_RECEIPT:-$OMNI_HOME/.onex-workspace-reconcile.json}"
 FLOOR="$OMNI_HOME/.onex-workspace-floor.json"
 
-CLI_VENV="$OMNI_HOME/omnibase_infra/.venv"
+# The DISPATCH venv is the composed one -- lock layer plus the omnimarket
+# provider layer -- and is what `scripts/onex` execs (OMN-17819). It is read
+# here because it is the interpreter a dispatch actually runs in, so it is the
+# only one whose omnimarket commit answers the question this readback asks.
+# The default is spelled identically in `scripts/onex` and
+# `scripts/reconcile-workspace-venvs.sh`, and all three read the same override.
+DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"
+# The GATE venv is the canonical clone's own project environment: lock-governed
+# ONLY, and the one the OMN-15620 purity gate judges when a lane runs
+# `uv run pytest` there. It is read below as a PURITY readback, never as a place
+# the provider layer may live.
+GATE_VENV="$OMNI_HOME/omnibase_infra/.venv"
 CLI_LOCK="$OMNI_HOME/omnibase_infra/uv.lock"
 MARKET_CLONE="$OMNI_HOME/omnimarket"
 
@@ -419,8 +430,8 @@ observe_commit() { # site-packages dist_prefix
 }
 
 SP=""
-if ! SP="$(site_packages "$CLI_VENV")"; then
-  record "venv:cli" "INDETERMINATE" "no site-packages under $CLI_VENV"
+if ! SP="$(site_packages "$DISPATCH_VENV")"; then
+  record "venv:dispatch" "INDETERMINATE" "no site-packages under $DISPATCH_VENV"
 fi
 
 # Governed distributions: exactly the lock-governed siblings, named from the
@@ -462,7 +473,7 @@ if [[ "$MODE" == "repair" ]]; then
     trace "bash $VENV_DELEGATE --omni-home $OMNI_HOME --branch $BRANCH"
     bash "$VENV_DELEGATE" --omni-home "$OMNI_HOME" --branch "$BRANCH" >&2 || \
       say "venv delegate exited non-zero; the readback below is what decides."
-    SP="$(site_packages "$CLI_VENV" || true)"
+    SP="$(site_packages "$DISPATCH_VENV" || true)"
   fi
 fi
 
@@ -489,6 +500,42 @@ if [[ -n "$SP" ]]; then
       "$(observe_commit "$SP" "omnimarket")" "$(clone_head "$MARKET_CLONE")"
   fi
 fi
+
+# --------------------------------------------------------------------------- #
+# Gate-venv purity surface (OMN-17819)
+# --------------------------------------------------------------------------- #
+# The repair delegate composes the provider layer into $DISPATCH_VENV and syncs
+# the gate venv EXACT, which is what keeps `uv run pytest` in the canonical clone
+# runnable. Read that back rather than trusting the delegate's exit code -- this
+# script owns PROOF and the delegate owns REPAIR, and an undeclared `onex.nodes`
+# provider in the gate venv is invisible to every exit status involved. The
+# failure it prevents does not surface here at all: it surfaces later, at some
+# other lane's `pytest_configure`, as a refusal with no pointer back to this run.
+#
+# `*.dist-info` directory names, not an interpreter start: the same
+# packaging-spec-encoded observation the wrapper's floor check uses, so this
+# still answers when the gate venv's own python is broken. Checked in BOTH
+# modes -- in check mode it is the one leg that would otherwise let a
+# "clones/venv: in sync" verdict be printed over a gate venv nobody can run
+# tests in.
+gate_venv_purity_check() {
+  local sp d name
+  sp="$(site_packages "$GATE_VENV" 2>/dev/null || true)"
+  if [[ -z "$sp" ]]; then
+    # Not a failure: a host with no gate venv has nothing to keep pure, and
+    # manufacturing one here would fire on every fresh clone.
+    return 0
+  fi
+  for d in "$sp"/omnimarket-*.dist-info; do
+    [[ -d "$d" ]] || continue
+    name="${d##*/}"
+    record "venv:gate-purity" "IMPURE" \
+      "$name is installed in $GATE_VENV, which is lock-governed only — every \`uv run pytest\` in $OMNI_HOME/omnibase_infra is refused by the OMN-15620 purity gate while it is there; the provider layer belongs in $DISPATCH_VENV (OMN-17819)"
+    return 0
+  done
+  record "venv:gate-purity" "ALREADY_AT_TARGET" "no undeclared omnimarket provider in $GATE_VENV"
+}
+gate_venv_purity_check
 
 # --------------------------------------------------------------------------- #
 # onex CLI PATH-shadow surface (OMN-18403)
