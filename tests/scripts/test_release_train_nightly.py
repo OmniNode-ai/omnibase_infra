@@ -220,17 +220,47 @@ class TestLiveState:
             "omnibase_compat is excluded by operator ruling and must not appear"
         )
 
-    def test_only_omnibase_infra_is_armed_to_cut_today(self) -> None:
-        """The roll-out past the first repo is a policy edit, reviewed on its own.
+    def test_exactly_the_three_reviewed_repos_are_armed_to_cut(self) -> None:
+        """Arming a repo is one field, and this test is what keeps it a
+        deliberate, visible act rather than a side effect of another change.
 
-        Arming a repo is one field. This test is what makes arming a deliberate,
-        visible act rather than a side effect of some other change.
+        The set grew from one under the operator's roll-out ruling of
+        2026-09-17. Each addition was verified live BEFORE arming, and the
+        evidence is written into that repo's own policy entry rather than left
+        in a session that is now gone: main is an ancestor of dev, so the
+        release fast-forward can succeed, and every required context on dev
+        reported success for the candidate's gating commit.
+
+        omnimemory is deliberately NOT here despite being the same shape as the
+        other two. Its dev HEAD's gating commit carries a SKIPPED required
+        context, which GitHub treats as satisfying protection, so a cut would
+        fast-forward main across a commit whose gate never ran.
         """
         policies = rt.load_policy(_POLICY)
         armed = sorted(
             name for name, p in policies.items() if p.mode is rt.EnumTrainMode.CUT
         )
-        assert armed == ["omnibase_infra"]
+        assert armed == ["omnibase_core", "omnibase_infra", "omnibase_spi"]
+
+    def test_every_armed_repo_states_the_premise_it_cuts_on(self) -> None:
+        """A cut taken on a premise nobody wrote down is a cut nobody can audit.
+
+        Asserted on the policy entry, because the entry is what outlives the
+        session that armed it.
+        """
+        policies = rt.load_policy(_POLICY)
+        for name, policy in sorted(policies.items()):
+            if policy.mode is not rt.EnumTrainMode.CUT:
+                continue
+            if policy.lab_evidence is rt.EnumLabEvidence.NONE:
+                assert "green dev CI" in policy.mode_note, (
+                    f"{name} is armed to cut with no lab surface and its policy "
+                    "entry does not name the premise it cuts on"
+                )
+                assert "ancestor of dev" in policy.mode_note, (
+                    f"{name} is armed to cut without its ancestry stated; a cut "
+                    "whose fast-forward cannot succeed fails at the last step"
+                )
 
     def test_every_repo_declaring_no_lab_surface_carries_its_reason(self) -> None:
         policies = rt.load_policy(_POLICY)
