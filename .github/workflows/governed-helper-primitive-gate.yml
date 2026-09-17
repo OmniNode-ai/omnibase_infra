@@ -1,0 +1,47 @@
+name: Governed helper primitive gate (OMN-18629)
+
+# Refuses a bare primitive committed where this repository already ships the
+# governed helper that supersedes it. Four of the twelve verified defects of the
+# 2026-09-17 evening window were that class, and three of the four are here:
+# OMN-18608 (a mkdir lock with no holder record), OMN-18613 (an unbounded Kafka
+# consumer commit) and OMN-18606 (a repo-local script run through a bare
+# interpreter). Each was found by a person reading a failure.
+#
+# CLAUDE.md Operating Rule 5: enforcement, not detection. This job runs the same
+# scripts/ci/governed_helper_gate.py that the `governed-helper-primitive`
+# pre-commit hook runs, so a local verdict and a CI verdict cannot diverge.
+#
+# NO `paths:` FILTER, on the precedent of no-raw-prod-bypass.yml. The scanner
+# walks the whole tracked corpus, so a path filter would leave a hole wherever a
+# new call site lands in a file the filter does not name. Running unconditionally
+# is also the precondition for asserting this context in the CI Summary tuple: a
+# context a path filter can skip wedges merges when it is required.
+#
+# There is no force input, no skip input, and no `if:` on the enforcing step.
+# A test reads this file for the failure-tolerating step key, so reintroducing
+# one is a red test rather than a review catch.
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  governed-helper-primitive-gate:
+    name: Governed helper primitive gate
+    runs-on: ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # git ls-files, which the scanner uses, needs the full tracked index.
+          fetch-depth: 0
+
+      - name: Scan the tracked corpus for bare primitives with a governed helper
+        # Standard library only, deliberately: this same module runs in
+        # pre-commit where the resolved interpreter may be a bare system python,
+        # so it must not need an install step to be able to refuse.
+        run: python3 scripts/ci/governed_helper_gate.py

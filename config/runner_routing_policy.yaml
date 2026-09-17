@@ -953,38 +953,55 @@ route:
       omnibase_infra:
         - Application Database Domain Enforcement (OMN-15361)
         - Arch Invariants (OMN-3343)
+        - call-reject-skip-token / scan / reject-skip-gate-token
+        - Canonical Inference Gate
         - CI Evidence Policy (OMN-18247)
         - CI Summary
         - CI Tests Gate
-        - Canonical Inference Gate
+        - ci-bus-overlay-binding
         - CodeQL
         - Contract Compliance
         - Contract Compliance Check
         - Contract Sync Gate (Wave C) [OMN-8915]
+        - contract-validation
         - Customer Path Boundary (OMN-18012)
         - Demo Loop Gate
         - Dep Provenance Gate
         - Dep Provenance Lineage Gate (OMN-15604)
         - Deploy Agent Tests (OMN-15378) / deploy-agent-tests
+        - deploy-gate / deploy-gate
+        - dispatcher-route-coverage
         - Duplication Sweep
         - Effect-Assertion Gate (RT-5)
         - Event Chain Gate
         - Exposed Identifier Gate (OMN-17320)
+        - exposure-reader-coverage
         - Fingerprint Check
+        - Governed helper primitive gate
+        - imperative-contract-guard / Imperative Contract Guard
         - Infra Node Handler Ownership
         - Integration Silent-Skip Guard (OMN-14172)
         - Integration Test Removal Gate
         - Kafka Schema Handshake (OMN-3411)
+        - kb-doc-gate / kb-doc-gate
         - Lint
         - Lockfile CVE Scan (OMN-16228)
         - Lockfile Registry Allowlist (OMN-16516)
+        - main-target-guard
+        - merge-hold-gate / evaluate
         - Migration Freeze Check
         - Migration Integration Test
+        - no-noncanonical-lifecycle-classes
         - Node Migration Declaration Check
+        - non-dev-base-guard
         - OCC Companion Merged Gate (OMN-15214)
-        - ONEX Validators
+        - occ-preflight / eligibility
         - Omni Standards Gate
+        - ONEX Validators
         - Pin Reachability (OMN-15538)
+        - pr-title / check-title
+        - receipt-honesty
+        - required-check-skip-guard / check-skip-vectors
         - Runner Route (OMN-18031) / route
         - Stale TODO Gate
         - Subscribe Wiring Health
@@ -994,21 +1011,5 @@ route:
         - Trivyignore Expiry Check (OMN-16229)
         - Type Safety Validation
         - URL Authority Gate
-        - Writer-Migration Coupling Check
-        - call-reject-skip-token / scan / reject-skip-gate-token
-        - ci-bus-overlay-binding
-        - contract-validation
-        - deploy-gate / deploy-gate
-        - dispatcher-route-coverage
-        - exposure-reader-coverage
-        - imperative-contract-guard / Imperative Contract Guard
-        - kb-doc-gate / kb-doc-gate
-        - main-target-guard
-        - merge-hold-gate / evaluate
-        - no-noncanonical-lifecycle-classes
-        - non-dev-base-guard
-        - occ-preflight / eligibility
-        - pr-title / check-title
-        - receipt-honesty
-        - required-check-skip-guard / check-skip-vectors
         - verify / verify
+        - Writer-Migration Coupling Check

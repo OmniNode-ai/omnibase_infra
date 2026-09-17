@@ -1,0 +1,200 @@
+{
+  "$comment": [
+    "OMN-18629. THE BASELINE. Occurrences that existed when the governed-helper",
+    "gate landed. Read by scripts/ci/governed_helper_gate.py.",
+    "",
+    "THIS IS A RATCHET, NOT AN ALLOWLIST, and two properties enforce that.",
+    "",
+    "(1) Every entry cites the ticket that will REMOVE it. An entry whose",
+    "'ticket' is missing or empty is a load-time refusal, so growing this file",
+    "without filing the work is unavailable. The three sweeps are OMN-18630",
+    "(locks), OMN-18631 (consumer commits) and OMN-18632 (interpreter",
+    "invocations). The three scripts/lane-census-check.sh entries this file carried",
+    "when it was first generated are GONE: omnibase_infra#3717 landed the OMN-18606 fix while this gate was being built, and the STALE check caught the drift in CI within the hour. That is the rule working, not an inconvenience.",
+    "",
+    "(2) An entry the scanner NO LONGER MATCHES fails the gate as STALE. A fixed",
+    "call site may not leave cover behind for the next one at the same path, so",
+    "deleting the entry is part of fixing the occurrence. This file may shrink",
+    "and may never widen.",
+    "",
+    "Keyed on (pair, path, digest-of-the-matched-line) with an occurrence count,",
+    "not on line numbers: an unrelated edit above a baselined call site must not",
+    "un-baseline it, or the gate fires on work that touched nothing it governs.",
+    "The COUNT is what stops a second identical call site in an already-listed",
+    "file from riding in on the first one's entry.",
+    "",
+    "'note' is the matched line, for a reader. It is not read by the checker and",
+    "carries no authority: the digest is the key."
+  ],
+  "contract_version": "1.0.0",
+  "entries": [
+    {
+      "pair": "interpreter-without-project-venv",
+      "path": "scripts/deploy-runtime.sh",
+      "line_sha256_12": "f26d151d57ee",
+      "occurrences": 1,
+      "ticket": "OMN-18632",
+      "note": "python3 scripts/runtime_build/lane_lock.py describe --compose-project omnibase-infra"
+    },
+    {
+      "pair": "interpreter-without-project-venv",
+      "path": "scripts/disk-gc.sh",
+      "line_sha256_12": "0b3a6cd6e9d0",
+      "occurrences": 1,
+      "ticket": "OMN-18632",
+      "note": "' | KEEP_LIST=\"$KEEP_LIST\" python3 \"${SCRIPT_DIR}/disk_gc_plan.py\""
+    },
+    {
+      "pair": "interpreter-without-project-venv",
+      "path": "scripts/disk-gc.sh",
+      "line_sha256_12": "887e00ed918f",
+      "occurrences": 1,
+      "ticket": "OMN-18632",
+      "note": "if WATERMARK_TRIPLE=\"$(python3 \"${SCRIPT_DIR}/disk_watermark_thresholds.py\" \"$WATERMARK_THRESHOLDS_FILE\" 2>&1)\"; then"
+    },
+    {
+      "pair": "interpreter-without-project-venv",
+      "path": "scripts/disk-watermark-check.sh",
+      "line_sha256_12": "0e2715240f18",
+      "occurrences": 1,
+      "ticket": "OMN-18632",
+      "note": "if ! THRESHOLDS_RAW=\"$(python3 \"${SCRIPT_DIR}/disk_watermark_thresholds.py\" \"$THRESHOLDS_FILE\" 2>&1)\"; then"
+    },
+    {
+      "pair": "interpreter-without-project-venv",
+      "path": "scripts/disk-watermark-check.sh",
+      "line_sha256_12": "bbca95e2459b",
+      "occurrences": 1,
+      "ticket": "OMN-18632",
+      "note": "python3 \"${SCRIPT_DIR}/disk_watermark_event.py\""
+    },
+    {
+      "pair": "interpreter-without-project-venv",
+      "path": "scripts/run-forward-migrations.sh",
+      "line_sha256_12": "2ec619a92647",
+      "occurrences": 1,
+      "ticket": "OMN-18632",
+      "note": "echo \"[forward-migration]     python scripts/migrations/verify_migration_checksum_adoption.py --emit-adoptions ... (OMN-17139)\" >&2"
+    },
+    {
+      "pair": "interpreter-without-project-venv",
+      "path": "scripts/run-forward-migrations.sh",
+      "line_sha256_12": "a4da388e91ac",
+      "occurrences": 1,
+      "ticket": "OMN-18632",
+      "note": "echo \"[forward-migration]     python scripts/migrations/check_migration_applied_on_lane.py --version ${ledger_version} ...\" >&2"
+    },
+    {
+      "pair": "interpreter-without-project-venv",
+      "path": "scripts/runtime_build/reconcile_deploy_clones.sh",
+      "line_sha256_12": "be9e4e681d3e",
+      "occurrences": 1,
+      "ticket": "OMN-18632",
+      "note": "exec python3 \"${SCRIPT_DIR}/deploy_source_ref.py\" reconcile \\"
+    },
+    {
+      "pair": "interpreter-without-project-venv",
+      "path": "scripts/validate-pr-deploy-required.sh",
+      "line_sha256_12": "4e3173bf3028",
+      "occurrences": 1,
+      "ticket": "OMN-18632",
+      "note": "python scripts/validation/validate_pr_deploy_required.py \\"
+    },
+    {
+      "pair": "kafka-consumer-commit-unbounded",
+      "path": "scripts/edge_delegation_worker/delegation_channel.py",
+      "line_sha256_12": "d8ecd33191aa",
+      "occurrences": 1,
+      "ticket": "OMN-18631",
+      "note": "await self._consumer.commit()"
+    },
+    {
+      "pair": "kafka-consumer-commit-unbounded",
+      "path": "src/omnibase_infra/nodes/node_dlq_replay_effect/engine_dlq_replay.py",
+      "line_sha256_12": "d8ecd33191aa",
+      "occurrences": 1,
+      "ticket": "OMN-18631",
+      "note": "await self._consumer.commit()"
+    },
+    {
+      "pair": "kafka-consumer-commit-unbounded",
+      "path": "src/omnibase_infra/services/observability/consumer_health/consumer.py",
+      "line_sha256_12": "d8ecd33191aa",
+      "occurrences": 1,
+      "ticket": "OMN-18631",
+      "note": "await self._consumer.commit()"
+    },
+    {
+      "pair": "kafka-consumer-commit-unbounded",
+      "path": "src/omnibase_infra/services/post_merge/consumer.py",
+      "line_sha256_12": "d8ecd33191aa",
+      "occurrences": 2,
+      "ticket": "OMN-18631",
+      "note": "await self._consumer.commit()"
+    },
+    {
+      "pair": "kafka-consumer-commit-unbounded",
+      "path": "src/omnibase_infra/services/session/consumer.py",
+      "line_sha256_12": "d8ecd33191aa",
+      "occurrences": 3,
+      "ticket": "OMN-18631",
+      "note": "await self._consumer.commit()"
+    },
+    {
+      "pair": "kafka-consumer-commit-unbounded",
+      "path": "tests/integration/customer_path/test_omn18418_lane_probe_against_a_real_broker.py",
+      "line_sha256_12": "c60530d32176",
+      "occurrences": 1,
+      "ticket": "OMN-18631",
+      "note": "await consumer.commit()"
+    },
+    {
+      "pair": "lock-without-holder-record",
+      "path": "docker/runners/runner-monitor.sh",
+      "line_sha256_12": "e6174b90f524",
+      "occurrences": 1,
+      "ticket": "OMN-18630",
+      "note": "if ! mkdir \"${AUTO_BOUNCE_LOCKFILE}.d\" 2>/dev/null; then"
+    },
+    {
+      "pair": "lock-without-holder-record",
+      "path": "scripts/ci/ensure_ci_env.sh",
+      "line_sha256_12": "508871d4e725",
+      "occurrences": 1,
+      "ticket": "OMN-18630",
+      "note": "mkdir -p \"${lock_dir}\""
+    },
+    {
+      "pair": "lock-without-holder-record",
+      "path": "scripts/ci/ensure_ci_env.sh",
+      "line_sha256_12": "a17cb45b46e7",
+      "occurrences": 1,
+      "ticket": "OMN-18630",
+      "note": "until mkdir \"${lock_path}\" 2>/dev/null; do"
+    },
+    {
+      "pair": "lock-without-holder-record",
+      "path": "scripts/deploy-runtime.sh",
+      "line_sha256_12": "4d7fe16da4c1",
+      "occurrences": 3,
+      "ticket": "OMN-18630",
+      "note": "if mkdir \"${LOCK_DIR}\" 2>/dev/null; then"
+    },
+    {
+      "pair": "lock-without-holder-record",
+      "path": "scripts/hooks/prepush_dispatch.sh",
+      "line_sha256_12": "50de9f58afa8",
+      "occurrences": 2,
+      "ticket": "OMN-18630",
+      "note": "if mkdir \"$lockdir\" 2> /dev/null; then"
+    },
+    {
+      "pair": "lock-without-holder-record",
+      "path": "scripts/hooks/prepush_dispatch.sh",
+      "line_sha256_12": "ad7fd4cef8ba",
+      "occurrences": 2,
+      "ticket": "OMN-18630",
+      "note": "if mkdir \"$LOCKDIR\" 2> /dev/null; then return 0; fi"
+    }
+  ]
+}

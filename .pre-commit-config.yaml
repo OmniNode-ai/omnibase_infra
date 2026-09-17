@@ -763,6 +763,19 @@ repos:
       # defect. always_run: the scanner walks the whole tracked tree, and a bad
       # recipe can be introduced by a file that is not itself staged. SYNC with
       # the CI gate .github/workflows/no-bare-compose-teardown.yml.
+      # OMN-18629: refuse a bare primitive where a governed helper exists.
+      # Same module the CI job runs, so a local verdict and a CI verdict cannot
+      # diverge. The module imports only the standard library, which is why the
+      # CI job can invoke it with no install step; here it goes through the
+      # repo's sanctioned `uv run` form, which the OMN-17219 interpreter gate
+      # requires and which this gate's own interpreter pair recommends.
+      - id: governed-helper-primitive
+        name: Governed helper primitive gate (OMN-18629)
+        entry: uv run --frozen python scripts/ci/governed_helper_gate.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       - id: no-bare-compose-teardown
         name: No bare compose teardown (OMN-13886)
         entry: uv run --frozen python tests/test_compose_profile_teardown_policy.py
