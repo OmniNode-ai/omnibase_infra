@@ -56,6 +56,18 @@ on:
         description: 'Released version to pin to, tagged or bare (e.g. v0.38.30)'
         required: true
         type: string
+      ticket:
+        description: >-
+          OMN ticket the cascaded release closed (OMN-16286 convention), e.g.
+          OMN-15449. Validated against ^OMN-[0-9]+$ by the reusable workflow.
+        required: true
+        type: string
+      evidence_source:
+        description: >-
+          Evidence-Source that already proved that release, e.g. OCC#6695 or a
+          merged OCC commit SHA.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -73,6 +85,8 @@ jobs:
     with:
       package: ${{ inputs.package }}
       version: ${{ inputs.version }}
+      ticket: ${{ inputs.ticket }}
+      evidence_source: ${{ inputs.evidence_source }}
     secrets:
       # Read here and passed through, because only a workflow WITHOUT a
       # workflow_call declaration can resolve these. There is deliberately no

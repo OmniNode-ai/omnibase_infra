@@ -53,6 +53,8 @@ jobs:
       ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     outputs:
       version: ${{ steps.tag.outputs.tag }}
+      ticket: ${{ steps.release_evidence.outputs.ticket }}
+      evidence_source: ${{ steps.release_evidence.outputs.evidence_source }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -126,6 +128,54 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: '3.12'
+
+      # OMN-16286 / OMN-18596: the dependency cascade opens PRs in downstream
+      # repositories, and those PRs must carry the SAME Evidence-Ticket and
+      # Evidence-Source pair that already proved this release. Resolving it here
+      # rather than in the cascade means a release that cannot produce an honest
+      # pair fails BEFORE anything is published, not after.
+      #
+      # Ported from omnibase_core's copy so the two repos cannot disagree about
+      # what an honest cascade PR looks like.
+      - name: Resolve release ticket + evidence (OMN-16286)
+        id: release_evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+
+          # /commits/{sha}/pulls returns EVERY PR associated with this commit,
+          # including OPEN ones, with no documented ordering. Taking a bare
+          # .[0] risks propagating evidence from an open, unreviewed PR instead
+          # of the merged release PR that actually proved this code, so filter
+          # to merged explicitly and fail loud when none qualifies.
+          pr_number="$(gh api "repos/${{ github.repository }}/commits/${head_sha}/pulls" \
+            --jq '[.[] | select(.state == "closed" and .merged_at != null)][0].number // empty' 2>/dev/null || true)"
+          if [ -z "$pr_number" ]; then
+            echo "::error::OMN-16286: could not resolve a MERGED PR for release commit ${head_sha}. The dependency cascade requires a real Evidence-Ticket/Evidence-Source pair sourced from the release's own merged PR; a tag with no associated merged PR cannot cascade honestly."
+            exit 1
+          fi
+
+          pr_state="$(gh pr view "$pr_number" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || true)"
+          if [ "$pr_state" != "MERGED" ]; then
+            echo "::error::OMN-16286: PR #${pr_number} (commit ${head_sha}) resolved to state='${pr_state:-<unknown>}', not MERGED. Refusing to propagate evidence from a non-merged PR."
+            exit 1
+          fi
+
+          pr_body="$(gh pr view "$pr_number" --repo "${{ github.repository }}" --json body --jq '.body' 2>/dev/null || true)"
+
+          ticket="$(printf '%s' "$pr_body" | grep -oiE '^Evidence-Ticket:[[:space:]]*OMN-[0-9]+' | head -1 | grep -oiE 'OMN-[0-9]+' | tr '[:lower:]' '[:upper:]' || true)"
+          evidence_source="$(printf '%s' "$pr_body" | grep -iE '^Evidence-Source:[[:space:]]+\S' | head -1 | sed -E 's/^Evidence-Source:[[:space:]]*//; s/[[:space:]]+$//' || true)"
+
+          if [ -z "$ticket" ] || [ -z "$evidence_source" ]; then
+            echo "::error::OMN-16286: release PR #${pr_number} (commit ${head_sha}) is missing a resolvable Evidence-Ticket/Evidence-Source pair (ticket='${ticket:-<none>}', evidence_source='${evidence_source:-<none>}'). Fix the release PR's evidence trailer before the dependency cascade can open honest downstream PRs."
+            exit 1
+          fi
+
+          echo "ticket=${ticket}" >> "$GITHUB_OUTPUT"
+          echo "evidence_source=${evidence_source}" >> "$GITHUB_OUTPUT"
+          echo "::notice::OMN-16286: resolved cascade evidence from PR #${pr_number} -- ticket=${ticket} evidence_source=${evidence_source}"
 
       - name: Build wheel + sdist
         run: uv build
@@ -652,6 +702,8 @@ jobs:
     with:
       package: omnibase_infra
       version: ${{ needs.release.outputs.version }}
+      ticket: ${{ needs.release.outputs.ticket }}
+      evidence_source: ${{ needs.release.outputs.evidence_source }}
     secrets:
       # OMN-16373: CROSS_REPO_PAT retired — pass the onexbot-occ-writer App
       # credentials through so dependency-cascade.yml can mint its own
