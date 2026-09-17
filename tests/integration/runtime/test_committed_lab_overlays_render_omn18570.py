@@ -122,17 +122,34 @@ def test_an_overlay_restating_the_retired_parameter_count_is_refused(
     """NEGATIVE CONTROL: the corrected value is enforced, not merely written.
 
     This is the falsifier for the whole change. The fixture is the real dev
-    overlay with one field reverted to the 35B-A3B value the contract carried
-    until 2026-09-17, so a pass here would mean the retired figure is still
-    acceptable and the correction is decoration.
+    overlay with one field set to something the authorized table does not
+    declare, so a pass here would mean the bound figure is not actually
+    enforced and the correction is decoration.
+
+    OMN-18626: this control USED to poison the field with the literal "27B",
+    the value the contract carried until 2026-09-17. That stopped working the
+    moment the endpoint was rebuilt onto a Qwen3.8-27B and "27B" became the
+    CORRECT figure: the mutation became a no-op, the render succeeded, and the
+    control reported ``DID NOT RAISE`` -- a negative control that had quietly
+    stopped controlling for anything. Caught by CI, which is the third time on
+    this one endpoint that a literal standing in for a live value has gone
+    stale underneath a test.
+
+    So the poison is now DERIVED: take the authorized figure and make it
+    something else. That cannot collide with a future re-pin, whatever the
+    endpoint is serving by then.
     """
     overlay = yaml.safe_load(
         (_OVERLAY_DIR / "dev.bifrost.yaml").read_text(encoding="utf-8")
     )
     reverted = 0
     for backend in overlay["backends"]:
-        if backend["backend_id"] in _LOCAL_201_BACKENDS:
-            backend["parameter_count"] = "35B-A3B"
+        backend_id = backend["backend_id"]
+        if backend_id in _LOCAL_201_BACKENDS:
+            authorized = _AUTHORIZED_BINDINGS[backend_id].parameter_count
+            poison = f"{authorized}-not-the-authorized-figure"
+            assert poison != authorized
+            backend["parameter_count"] = poison
             reverted += 1
     assert reverted == len(_LOCAL_201_BACKENDS), (
         "the dev overlay no longer declares both .201 rungs, so this control "
