@@ -386,6 +386,18 @@ def test_the_compose_runner_converges_a_legacy_lane_without_dropping_anything() 
         f"{COMPOSE_RUNNER.name} must move a legacy tracker aside by rename so the "
         "corpus can create the canonical table and the old rows can be copied back"
     )
+    # Postgres does not rename a table's indexes with the table. Measured on
+    # postgres:16-alpine: leave them and the corpus's own
+    # ``CREATE INDEX IF NOT EXISTS idx_schema_migrations_applied_at`` matches the
+    # name the STASH still holds, skips, and is then dropped with the stash --
+    # so the converged lane silently ends up with no applied_at index and the
+    # canonical primary key lands as ``schema_migrations_pkey1``. Nothing fails
+    # at the time, which is what makes it worth a gate rather than a comment.
+    assert re.search(r"ALTER\s+INDEX[^\n]*RENAME\s+TO", text, re.IGNORECASE), (
+        f"{COMPOSE_RUNNER.name} renames the legacy tracker aside but leaves its index "
+        "names held by the stash, so the corpus's own index creation skips and the "
+        "converged lane loses that index when the stash is dropped"
+    )
     forbidden = re.search(
         rf"DROP\s+DATABASE|DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\s*\.\s*)?{TRACKER_TABLE}\b",
         text,

@@ -202,7 +202,22 @@ TRACKING="${MIGRATION_DIR}/00000000_migrations_tracking.sql"
 # canonical shape has no such column; that is what makes it unambiguous.
 # Re-entrant: a run that died between the rename and the copy leaves the stash
 # in place and the next pass finishes the job rather than losing the rows.
+#
+# The index rename is not tidiness, it is the difference between a converged
+# lane and a silently degraded one. Postgres does NOT rename a table's indexes
+# or constraints when the table is renamed, so the stash keeps holding
+# `schema_migrations_pkey` and `idx_schema_migrations_applied_at`. Measured on
+# postgres:16-alpine: without this loop the corpus's own
+# `CREATE INDEX IF NOT EXISTS idx_schema_migrations_applied_at` matches the name
+# the STASH still holds and skips with a NOTICE, and the canonical table's
+# primary key lands as `schema_migrations_pkey1`. Dropping the stash below then
+# takes the applied_at index with it and the converged lane ends up with no such
+# index at all -- permanently, and with nothing failing to say so. The names are
+# read off pg_index rather than written down, so this frees whatever the lane
+# actually holds instead of the two this runner happens to know about.
 psql_db -c "DO \$\$
+DECLARE
+  legacy_index record;
 BEGIN
   IF to_regclass('public.schema_migrations') IS NOT NULL
      AND EXISTS (SELECT 1 FROM information_schema.columns
@@ -212,6 +227,16 @@ BEGIN
   THEN
     RAISE NOTICE 'OMN-18544: retiring the migration_name-keyed ledger, rows preserved';
     ALTER TABLE public.schema_migrations RENAME TO schema_migrations_legacy_omn18544;
+    FOR legacy_index IN
+      SELECT c.relname
+        FROM pg_index i
+        JOIN pg_class c ON c.oid = i.indexrelid
+       WHERE i.indrelid = 'public.schema_migrations_legacy_omn18544'::regclass
+    LOOP
+      EXECUTE format('ALTER INDEX public.%I RENAME TO %I',
+                     legacy_index.relname,
+                     'legacy_omn18544_' || legacy_index.relname);
+    END LOOP;
   END IF;
 END
 \$\$;"
