@@ -44,6 +44,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -62,7 +66,16 @@ _SHA_LEN = 40
 # --------------------------------------------------------------------------- #
 def _git(*args: str, cwd: Path) -> str:
     result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+        # Git exports GIT_DIR / GIT_WORK_TREE into every hook environment and
+        # those OVERRIDE both `cwd=` and `git -C`. Under a pre-push hook an
+        # unscrubbed fixture would init and commit into the REAL invoking
+        # worktree instead of tmp_path (OMN-14891/OMN-18434).
+        env=scrub_git_location_env(),
     )
     return result.stdout.strip()
 
@@ -87,13 +100,16 @@ def _advance(repo: Path, text: str) -> str:
     return _git("rev-parse", "HEAD", cwd=repo)
 
 
-def _make_fake_venv(project: Path, installed_commit: str | None) -> Path:
+def _make_fake_venv(venv: Path, installed_commit: str | None) -> Path:
     """A directory shaped like a venv whose python echoes a canned commit id.
 
     ``installed_commit`` of ``None`` models "omnimarket is not installed from
     git in this interpreter" -- the absent/PyPI case.
+
+    Takes the venv path directly rather than a project directory: after the
+    OMN-17819 gate/dispatch split the two governed venvs no longer share a
+    parent, and one of them is deliberately not inside any project.
     """
-    venv = project / ".venv"
     (venv / "bin").mkdir(parents=True, exist_ok=True)
     python = venv / "bin" / "python"
     emitted = installed_commit or ""
@@ -127,8 +143,12 @@ def _make_uv_shim(bin_dir: Path, *, sync_exit: int = 0, check_exit: int = 0) -> 
     uv = bin_dir / "uv"
     uv.write_text(
         "#!/usr/bin/env bash\n"
-        'printf "%s\\n" "$*" >> "$UV_SHIM_LOG"\n'
-        'printf "uv %s\\n" "$*" >> "$ORDER_LOG"\n'
+        # UV_PROJECT_ENVIRONMENT is how uv is told WHICH venv a project sync
+        # targets, and after OMN-17819 that is the only thing distinguishing the
+        # dispatch-venv sync from the gate-venv sync -- both carry the same
+        # `--project <infra>`. Logging argv alone cannot tell them apart.
+        'printf "env=%s %s\\n" "${UV_PROJECT_ENVIRONMENT:--}" "$*" >> "$UV_SHIM_LOG"\n'
+        'printf "uv env=%s %s\\n" "${UV_PROJECT_ENVIRONMENT:--}" "$*" >> "$ORDER_LOG"\n'
         'for a in "$@"; do\n'
         '  if [[ "$a" == "--check" ]]; then exit ' + str(check_exit) + "; fi\n"
         "done\n"
@@ -148,6 +168,9 @@ def _make_install_shim(path: Path, *, exit_code: int = 0) -> Path:
     path.write_text(
         "#!/usr/bin/env bash\n"
         'printf "%s\\n" "${OMNIMARKET_REF:-<unset>}" >> "$INSTALL_SHIM_LOG"\n'
+        # argv carries `--execute <python>`: which interpreter the provider
+        # layer was composed into is the whole OMN-17819 question.
+        'printf "%s\\n" "$*" >> "$INSTALL_ARGV_LOG"\n'
         'printf "install %s\\n" "${OMNIMARKET_REF:-<unset>}" >> "$ORDER_LOG"\n'
         "exit " + str(exit_code) + "\n",
         encoding="utf-8",
@@ -170,12 +193,19 @@ class _Workspace:
         (self.omniclaude / "uv.lock").write_text("claude-lock-v1\n", encoding="utf-8")
 
         self.market_head = _git("rev-parse", "HEAD", cwd=self.omnimarket)
-        self.infra_venv = _make_fake_venv(self.infra, self.market_head)
-        _make_fake_venv(self.omniclaude, None)
+        # The GATE venv: the clone's own project environment, lock-governed
+        # only. It carries no omnimarket, which after OMN-17819 is the point.
+        self.gate_venv = _make_fake_venv(self.infra / ".venv", None)
+        # The DISPATCH venv: outside the clone, composed, and the one the
+        # installed-omnimarket probe reads.
+        self.dispatch_venv = root / ".onex-dispatch-venv"
+        _make_fake_venv(self.dispatch_venv, self.market_head)
+        _make_fake_venv(self.omniclaude / ".venv", None)
 
         self.bin_dir = root / "shimbin"
         self.uv_log = root / "uv.log"
         self.install_log = root / "install.log"
+        self.install_argv_log = root / "install-argv.log"
         # One interleaved log across BOTH shims. Two separate logs can prove
         # that each collaborator ran; only a shared one can prove the ORDER,
         # and the order is the OMN-16262 fix.
@@ -185,7 +215,12 @@ class _Workspace:
         _make_uv_shim(self.bin_dir)
 
     def set_installed_commit(self, commit: str | None) -> None:
-        _make_fake_venv(self.infra, commit)
+        """Move the DISPATCH venv's installed omnimarket commit.
+
+        The gate venv is never given one: an omnimarket in there is the
+        OMN-15620 impurity this split exists to remove.
+        """
+        _make_fake_venv(self.dispatch_venv, commit)
 
     def env(self) -> dict[str, str]:
         return {
@@ -194,6 +229,7 @@ class _Workspace:
             "PATH": f"{self.bin_dir}:{os.environ['PATH']}",
             "UV_SHIM_LOG": str(self.uv_log),
             "INSTALL_SHIM_LOG": str(self.install_log),
+            "INSTALL_ARGV_LOG": str(self.install_argv_log),
             "ORDER_LOG": str(self.order_log),
             "ONEX_RECONCILE_INSTALL_SCRIPT": str(self.install_script),
             # Keep the hook-venv surface deterministic: the plugin-data venv is
@@ -230,6 +266,34 @@ class _Workspace:
             kind, _, rest = line.partition(" ")
             out.append((kind, rest))
         return out
+
+    def dispatch_syncs(self) -> list[str]:
+        """Mutating uv syncs that targeted the DISPATCH venv."""
+        return [
+            c
+            for c in self.uv_calls()
+            if "sync" in c and "--check" not in c and f"env={self.dispatch_venv} " in c
+        ]
+
+    def gate_syncs(self) -> list[str]:
+        """Mutating uv syncs that targeted the GATE venv (uv's project default)."""
+        return [
+            c
+            for c in self.uv_calls()
+            if "sync" in c
+            and "--check" not in c
+            and c.startswith("env=- ")
+            and str(self.infra) in c
+        ]
+
+    def install_argv(self) -> list[str]:
+        if not self.install_argv_log.exists():
+            return []
+        return [
+            line
+            for line in self.install_argv_log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
 
     def install_refs(self) -> list[str]:
         if not self.install_log.exists():
@@ -309,24 +373,28 @@ def test_check_is_clean_immediately_after_a_reconcile(ws: _Workspace) -> None:
 def test_reconcile_applies_the_lock_without_removing_the_provider_layer(
     ws: _Workspace,
 ) -> None:
-    """The CLI venv's lock pass MUST be ``--inexact``.
+    """The DISPATCH venv's lock pass MUST be ``--inexact``.
 
     Without it, uv removes every package the lock does not mention -- which is
     omnimarket and its eleven companions -- and the next dispatch dies on the
     OMN-14060 guard. This is the single assertion that keeps the two layers from
     destroying each other.
+
+    Scoped to the dispatch venv since OMN-17819: the gate venv's pass carries
+    the same ``--project <infra>`` and must NOT be ``--inexact``, so a filter
+    that matched on the project path alone would now assert the opposite of the
+    truth for one of the two.
     """
     ws.set_installed_commit("0" * _SHA_LEN)
     result = ws.run()
     assert result.returncode == _EXIT_OK, result.stdout + result.stderr
 
-    cli_syncs = [
-        c
-        for c in ws.uv_calls()
-        if "sync" in c and "--check" not in c and "omnibase_infra" in c
-    ]
-    assert cli_syncs, "reconcile never applied the CLI venv's lock"
-    for call in cli_syncs:
+    dispatch_syncs = ws.dispatch_syncs()
+    assert dispatch_syncs, (
+        f"reconcile never applied the dispatch venv's lock; uv calls were: "
+        f"{ws.uv_calls()!r}"
+    )
+    for call in dispatch_syncs:
         assert "--frozen" in call, (
             "lock sync must be --frozen: re-resolving would silently move the "
             f"pins the lock exists to hold. Call: {call!r}"
@@ -356,9 +424,9 @@ def test_provider_coinstall_runs_before_the_lock_pass(ws: _Workspace) -> None:
     lock_after = [
         i
         for i, (kind, call) in enumerate(order)
-        if kind == "uv" and "--check" not in call and "omnibase_infra" in call
+        if kind == "uv" and "--check" not in call and f"env={ws.dispatch_venv} " in call
     ]
-    assert lock_after, "no CLI lock pass ran at all"
+    assert lock_after, "no dispatch-venv lock pass ran at all"
     assert max(lock_after) > provider_at, (
         "the provider co-install ran last, so a pin it downgraded stays "
         f"downgraded. Order was: {order!r}"
@@ -502,9 +570,139 @@ def test_clone_movement_moves_the_provider_layer_and_then_reapplies_the_lock(
     order = ws.ordered_calls()
     provider_at = max(i for i, (kind, _) in enumerate(order) if kind == "install")
     assert any(
-        kind == "uv" and "--check" not in call and "omnibase_infra" in call
+        kind == "uv" and "--check" not in call and f"env={ws.dispatch_venv} " in call
         for kind, call in order[provider_at:]
     ), (
         "the provider layer moved and no lock pass followed, so an OMN-16262 "
         f"downgrade would survive the tick. Order was: {order!r}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# OMN-17819: the gate venv and the dispatch venv are two directories
+# --------------------------------------------------------------------------- #
+# Until OMN-17819 the provider layer was composed into
+# ``$OMNI_HOME/omnibase_infra/.venv`` -- which is also the canonical clone's
+# PROJECT venv, the one ``uv run pytest`` executes in and the one the OMN-15620
+# purity gate judges. One directory was being asked to satisfy two contradictory
+# contracts: OMN-14060 refuses a dispatch when omnimarket is ABSENT, OMN-15620
+# refuses a test session when it is PRESENT. The measured effect on this Mac was
+# that every focused ``uv run pytest`` in the canonical clone was refused before
+# collection, on a 600-second self-healing tick that reverted the refusal's own
+# recommended repair.
+#
+# These assertions pin the split. Note what they do NOT assert: that the
+# reconciler REMOVES omnimarket from wherever it finds it. Removal alone is the
+# CLI-bricking path (it is exactly what the refusal message used to recommend);
+# the fix is that the provider layer is ROUTED to a venv where it belongs.
+def test_provider_layer_is_composed_into_the_dispatch_venv_not_the_gate_venv(
+    ws: _Workspace,
+) -> None:
+    ws.set_installed_commit("0" * _SHA_LEN)
+    assert ws.run().returncode == _EXIT_OK
+
+    argv = ws.install_argv()
+    assert argv, "the provider co-install never ran"
+    for call in argv:
+        assert str(ws.dispatch_venv) in call, (
+            "the provider co-install did not target the dispatch venv "
+            f"({ws.dispatch_venv}); argv was {call!r}"
+        )
+        assert str(ws.gate_venv) not in call, (
+            "the provider co-install targeted the GATE venv. That is the "
+            "OMN-17819 defect: an undeclared `onex.nodes` provider there makes "
+            "the OMN-15620 purity gate refuse every `uv run pytest` in the "
+            f"canonical clone. argv was {call!r}"
+        )
+
+
+def test_gate_venv_lock_pass_is_exact_never_inexact(ws: _Workspace) -> None:
+    """``--inexact`` on the gate venv is what re-admits the pollution.
+
+    ``--inexact`` exists so a COMPOSED layer can coexist with a lock. The gate
+    venv has no composed layer by construction, so the flag there means only
+    "leave undeclared distributions installed" -- which is the refusal
+    condition, restored.
+    """
+    _make_uv_shim(ws.bin_dir, check_exit=1)  # nothing satisfies its lock
+    assert ws.run().returncode == _EXIT_OK
+
+    gate_syncs = ws.gate_syncs()
+    assert gate_syncs, (
+        f"the gate venv's lock was never applied; uv calls were: {ws.uv_calls()!r}"
+    )
+    for call in gate_syncs:
+        assert "--inexact" not in call, (
+            "the gate venv was synced --inexact, which leaves an undeclared "
+            "`onex.nodes` provider installed and keeps the OMN-15620 gate "
+            f"refusing. Call: {call!r}"
+        )
+        assert "--frozen" in call, f"gate sync must be --frozen. Call: {call!r}"
+
+
+def test_dispatch_venv_is_reconciled_before_the_gate_venv_is_purified(
+    ws: _Workspace,
+) -> None:
+    """Order across the two surfaces, not just within one.
+
+    The gate pass is the step that takes omnimarket away from the clone's
+    ``.venv``. Running it before a working dispatch venv exists would leave this
+    host with no interpreter that can run ``onex`` at all.
+    """
+    _make_uv_shim(ws.bin_dir, check_exit=1)
+    ws.set_installed_commit("0" * _SHA_LEN)
+    assert ws.run().returncode == _EXIT_OK
+
+    calls = ws.uv_calls()
+    last_dispatch = max(i for i, c in enumerate(calls) if c in ws.dispatch_syncs())
+    first_gate = min(i for i, c in enumerate(calls) if c in ws.gate_syncs())
+    assert last_dispatch < first_gate, (
+        "the gate venv was purified before the dispatch venv was finished, so "
+        "there is a window with no runnable `onex` on the host. Calls were: "
+        f"{calls!r}"
+    )
+
+
+def test_a_dispatch_failure_refuses_without_touching_the_gate_venv(
+    ws: _Workspace,
+) -> None:
+    """A half-applied split is worse than the defect it replaces.
+
+    If the dispatch venv cannot be built, purifying the gate venv anyway would
+    remove the only omnimarket on the host and leave nothing able to dispatch.
+    """
+    _make_install_shim(ws.install_script, exit_code=1)
+    ws.set_installed_commit("0" * _SHA_LEN)
+    result = ws.run()
+
+    assert result.returncode == _EXIT_FAILED
+    assert ws.gate_syncs() == [], (
+        "the gate venv was synced after the dispatch layer failed; uv calls "
+        f"were: {ws.uv_calls()!r}"
+    )
+
+
+def test_installed_commit_is_read_from_the_dispatch_venv(ws: _Workspace) -> None:
+    """The drift comparison must ask the interpreter a dispatch actually uses.
+
+    Reading the gate venv would ask about a package that is now required to be
+    absent from it, and every tick would read "not installed" and re-install
+    forever.
+    """
+    stale = "0" * _SHA_LEN
+    _make_fake_venv(ws.dispatch_venv, stale)
+    _make_fake_venv(ws.infra / ".venv", ws.market_head)  # gate venv "agrees"
+
+    result = ws.run("--check")
+    assert result.returncode == _EXIT_DRIFT, (
+        "the reconciler read the gate venv's commit and called the workspace "
+        f"in sync: {result.stdout!r}"
+    )
+    assert stale[:12] in result.stdout
+
+
+def test_dispatch_venv_is_not_inside_the_canonical_clone(ws: _Workspace) -> None:
+    """A venv inside the clone is a venv some probe will find while asking
+    about the clone. Placement is the property, not an implementation detail."""
+    assert ws.dispatch_venv.parent == ws.root
+    assert str(ws.infra) not in str(ws.dispatch_venv)

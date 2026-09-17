@@ -57,6 +57,72 @@
 # reconciler to inherit the bug.
 #
 # ============================================================================
+# ...AND WHY THAT COMPOSED VENV IS NOT THE CLONE'S OWN .venv (OMN-17819)
+# ============================================================================
+# Everything above is true about the CLI, and every word of it was applied to
+# the WRONG DIRECTORY until OMN-17819. The composed layer used to be installed
+# into `$OMNI_HOME/omnibase_infra/.venv` -- which is not only the CLI's venv,
+# it is also the canonical clone's PROJECT venv, the one `uv run pytest` in
+# that clone executes in. So the same directory was being asked to satisfy two
+# contracts that contradict each other:
+#
+#   the CLI     needs omnimarket present   (OMN-14060 refuses without it)
+#   the gate    needs omnimarket ABSENT    (OMN-15620 refuses with it, because
+#                                           an undeclared `onex.nodes` provider
+#                                           collides with declared providers of
+#                                           the same node identity and
+#                                           manufactures DUPLICATE_REGISTRATION
+#                                           false REDs across the whole suite)
+#
+# Measured on this Mac 2026-09-03 and again 2026-09-17: `cd
+# $OMNI_HOME/omnibase_infra && uv run pytest <anything>` was refused BEFORE
+# collection with "Canonical venv is IMPURE: ... omnimarket==0.4.111", and the
+# repair the refusal itself recommends (`uv sync`, exact) is the CLI-bricking
+# path described above. Worse, the repair did not even hold: this reconciler
+# re-composed the provider layer on its next tick (600 s), so `uv sync` bought
+# minutes. Three separate lanes were pushed into throwaway worktrees to run
+# three tests each.
+#
+# This is the OMN-16846 collision, which CI already settled on 2026-08-28 in
+# exactly these words: "Neither side is wrong on its own -- the purity gate is
+# correct and the co-install is required -- so the defect is the collapse of
+# two environments into one." CI's fix is `$DISPATCH_VENV` in
+# `.github/workflows/evidence-autoclose-sweep.yml`; the measured effect on one
+# ticket was `verified=1 failed=3 behavior_proving=0` collapsed versus
+# `verified=5 failed=0 behavior_proving=3` separated. This script is the same
+# fix for the local workspace, so that the split is a property of the platform
+# rather than of one workflow file.
+#
+#   GATE venv      $OMNI_HOME/omnibase_infra/.venv       lock-governed ONLY.
+#                                                        Synced EXACT. Anything
+#                                                        the lock does not name
+#                                                        is pollution and is
+#                                                        removed.
+#   DISPATCH venv  $OMNI_HOME/.onex-dispatch-venv        both layers. Synced
+#                                                        --inexact, then the
+#                                                        provider co-install.
+#                                                        `scripts/onex` execs
+#                                                        THIS one, and the
+#                                                        OMN-17309 floor reads
+#                                                        its omnimarket commit.
+#
+# ORDER MATTERS ACROSS THE TWO SURFACES, not just within one. The dispatch venv
+# is reconciled FIRST and the gate venv second. The gate pass is the step that
+# removes omnimarket from `.venv`, and doing that before a working dispatch venv
+# exists would leave a window -- possibly a permanent one, if the dispatch build
+# then fails -- in which no interpreter on this host can run `onex`. A dispatch
+# failure therefore refuses without touching the gate venv at all.
+#
+# The dispatch venv is NOT under `$OMNI_HOME/omnibase_infra/`: a venv inside the
+# clone is a venv some future `uv` invocation or purity probe will find while
+# answering a question about the clone. It sits beside
+# `.onex-workspace-floor.json` and `.onex-workspace-reconcile.json`, which are
+# the other pieces of workspace-scoped state this reconciler owns. It is also
+# deliberately not `$CLAUDE_PLUGIN_DATA/.venv`: that venv belongs to
+# `repair-plugin-venv.sh` (CLAUDE.md rule 11's table), and taking it over here
+# would give one directory two owners -- the same mistake one level up.
+#
+# ============================================================================
 # WHY THE PROVIDER LAYER PINS TO THE LOCAL CLONE HEAD, NOT origin/dev
 # ============================================================================
 # install-node-skill-package.sh defaults to resolving omnimarket's ref from a
@@ -170,6 +236,14 @@
 #   ONEX_RECONCILE_UV_BIN            absolute path to `uv`, tried FIRST. Not a
 #                                    bypass: it changes which uv runs, never
 #                                    whether the sync has to succeed.
+#   ONEX_DISPATCH_VENV               absolute path to the dispatch venv,
+#                                    overriding $OMNI_HOME/.onex-dispatch-venv.
+#                                    `scripts/onex` reads the same variable with
+#                                    the same default, so the two cannot point
+#                                    at different directories by accident. Not a
+#                                    bypass: it relocates the composed venv, it
+#                                    never makes the gate venv a legal home for
+#                                    the provider layer again.
 #   CLAUDE_PLUGIN_DATA               optional; when its .venv exists it is a
 #                                    hook-venv surface too
 #
@@ -258,8 +332,18 @@ INFRA_DIR="$OMNI_HOME/omnibase_infra"
 MARKET_CLONE="$OMNI_HOME/omnimarket"
 CLAUDE_DIR="$OMNI_HOME/omniclaude"
 
+# The GATE venv: the canonical clone's own project environment, the one
+# `uv run pytest` executes in and the one the OMN-15620 purity gate judges.
+# Lock-governed only. The two names are kept because every caller and test
+# already uses them; what changed in OMN-17819 is what they are ALLOWED to
+# contain, not where they point.
 INFRA_VENV="$INFRA_DIR/.venv"
 INFRA_PYTHON="$INFRA_VENV/bin/python"
+
+# The DISPATCH venv: the composed environment `scripts/onex` execs and the
+# OMN-17309 floor is read from. Outside the clone on purpose (see the header).
+DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"
+DISPATCH_PYTHON="$DISPATCH_VENV/bin/python"
 
 INSTALL_SCRIPT="${ONEX_RECONCILE_INSTALL_SCRIPT:-$INFRA_DIR/scripts/install-node-skill-package.sh}"
 
@@ -548,12 +632,33 @@ say_clone_stale_remedy() {
 lock_layer_ok() {
   local project="$1"
   shift
-  (cd "$project" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
+  lock_layer_ok_in "$project" "" "$@"
 }
 
+# The same question, asked of a venv that is NOT the project's default one.
+# `UV_PROJECT_ENVIRONMENT` is how uv is told which environment a project sync
+# targets; it is the same primitive `.github/workflows/evidence-autoclose-
+# sweep.yml` uses to compose CI's dispatch venv, so the local split and the CI
+# split are the same mechanism rather than two lookalikes (OMN-16846/OMN-17819).
+lock_layer_ok_in() {
+  local project="$1" venv="$2"
+  shift 2
+  if [[ -n "$venv" ]]; then
+    (cd "$project" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$venv" \
+      "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
+  else
+    (cd "$project" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
+  fi
+}
+
+# Read from the DISPATCH venv (OMN-17819): that is where the provider layer
+# lives and where `scripts/onex` runs from, so it is the only interpreter whose
+# omnimarket commit answers "which build would a dispatch actually use".
+# Reading the gate venv here would report the commit of a package that is
+# supposed to be absent from it.
 installed_market_commit() {
-  [[ -x "$INFRA_PYTHON" ]] || return 0
-  env -u PYTHONPATH "$INFRA_PYTHON" - <<'PYEOF' 2>/dev/null || true
+  [[ -x "$DISPATCH_PYTHON" ]] || return 0
+  env -u PYTHONPATH "$DISPATCH_PYTHON" - <<'PYEOF' 2>/dev/null || true
 import json
 import sys
 from importlib.metadata import PackageNotFoundError, distribution
@@ -623,19 +728,37 @@ run_check() {
     exit "$EXIT_INDETERMINATE"
   fi
 
-  if [[ ! -x "$INFRA_PYTHON" ]]; then
-    say "DRIFT: cli venv absent ($INFRA_VENV)"
+  # ---- the DISPATCH venv: both layers (OMN-17819) ------------------------- #
+  if [[ ! -x "$DISPATCH_PYTHON" ]]; then
+    say "DRIFT: dispatch venv absent ($DISPATCH_VENV)"
     drift=1
   else
-    if ! lock_layer_ok "$INFRA_DIR" --inexact; then
-      say "DRIFT: cli venv does not satisfy $INFRA_DIR/uv.lock"
+    if ! lock_layer_ok_in "$INFRA_DIR" "$DISPATCH_VENV" --inexact; then
+      say "DRIFT: dispatch venv does not satisfy $INFRA_DIR/uv.lock"
       drift=1
     fi
     installed="$(installed_market_commit)"
     if [[ "$installed" != "$head" ]]; then
-      say "DRIFT: cli venv omnimarket ${installed:0:12} != clone HEAD ${head:0:12}"
+      say "DRIFT: dispatch venv omnimarket ${installed:0:12} != clone HEAD ${head:0:12}"
       drift=1
     fi
+  fi
+
+  # ---- the GATE venv: lock-governed ONLY ---------------------------------- #
+  # EXACT, deliberately: no `--inexact` here. `--inexact` is what lets a
+  # composed layer coexist with a lock, and the whole point of the OMN-17819
+  # split is that this venv has no composed layer. An undeclared `onex.nodes`
+  # provider in here is what the OMN-15620 gate refuses on, so a check that
+  # tolerated it would report IN_SYNC for the exact state that blocks every
+  # `uv run pytest` in the canonical clone.
+  if [[ ! -x "$INFRA_PYTHON" ]]; then
+    say "DRIFT: gate venv absent ($INFRA_VENV)"
+    drift=1
+  elif ! lock_layer_ok "$INFRA_DIR"; then
+    say "DRIFT: gate venv does not match $INFRA_DIR/uv.lock exactly"
+    say "  (either a locked pin is missing, or an undeclared distribution is"
+    say "  installed -- the second is what the OMN-15620 purity gate refuses on)"
+    drift=1
   fi
 
   local project
@@ -692,37 +815,81 @@ run_repair() {
     exit "$EXIT_INDETERMINATE"
   fi
 
-  # ---- surface 1: the onex CLI venv (two layers) -------------------------- #
+  # RUN_AS was planned from the gate venv's owner. A dispatch venv owned by
+  # somebody else would be written as the wrong user by that same prefix --
+  # the hazard plan_privileges exists to prevent -- so it is refused rather
+  # than written, exactly as a foreign-owned hook venv is below. A dispatch
+  # venv that does not exist yet has no owner to disagree with and is created
+  # by the surface owner like everything else here.
+  local dispatch_owner
+  if [[ -d "$DISPATCH_VENV" ]]; then
+    dispatch_owner="$(rp_surface_owner "$DISPATCH_VENV" || true)"
+    if [[ -n "$dispatch_owner" && "$dispatch_owner" != "$SURFACE_OWNER" ]]; then
+      say "INDETERMINATE: dispatch venv $DISPATCH_VENV is owned by $dispatch_owner,"
+      say "  but the package operations are running as $SURFACE_OWNER (owner of"
+      say "  $INFRA_DIR). Reconcile it as $dispatch_owner, or make the two"
+      say "  surfaces share an owner."
+      exit "$EXIT_INDETERMINATE"
+    fi
+  fi
+
+  # ---- surface 1: the DISPATCH venv (two layers) -------------------------- #
+  #
+  # FIRST, before the gate venv, and the ordering is load-bearing: the gate pass
+  # below is what REMOVES omnimarket from the clone's `.venv`, and doing that
+  # before a working dispatch venv exists would leave this host with no
+  # interpreter that can run `onex` at all. Every failure path here exits
+  # without reaching the gate venv (OMN-17819).
   #
   # Each layer is decided independently, so a tick that runs every 10 minutes
   # does the least work that closes the actual gap. The common case by far --
   # the clone advanced, the lock did not -- is additive `--no-deps` provider
   # work plus a lock pass that finds nothing to do.
-  if [[ ! -x "$INFRA_PYTHON" ]]; then
+  if [[ ! -x "$DISPATCH_PYTHON" ]]; then
     need_lock=1
     need_provider=1
   else
-    lock_layer_ok "$INFRA_DIR" --inexact || need_lock=1
+    lock_layer_ok_in "$INFRA_DIR" "$DISPATCH_VENV" --inexact || need_lock=1
     installed="$(installed_market_commit)"
     [[ "$installed" == "$head" ]] || need_provider=1
   fi
 
+  # A dispatch venv that does not exist yet has no provider layer to install
+  # into. Build the lock layer first in that one case, so `uv` creates the
+  # environment and the co-install has an interpreter to target. This is the
+  # ONLY situation in which the lock pass precedes the provider pass; the
+  # OMN-16262 ordering (provider first, lock second) still holds afterwards,
+  # because the co-install below forces a second lock pass.
+  if [[ ! -x "$DISPATCH_PYTHON" ]]; then
+    say "dispatch venv: creating $DISPATCH_VENV from $INFRA_DIR/uv.lock"
+    trace "UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV uv sync --frozen --inexact --project $INFRA_DIR"
+    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$DISPATCH_VENV" \
+        "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR"); then
+      fail "dispatch venv could not be created; the gate venv was NOT touched." \
+        "Without it there is no interpreter for \`onex\` to exec, so this" \
+        "refuses rather than purifying the gate venv and leaving the host with" \
+        "no CLI at all. Run by hand and read the error:" \
+        "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV \\" \
+        "    uv sync --frozen --inexact"
+    fi
+  fi
+
   if [[ "$need_lock" -eq 0 && "$need_provider" -eq 0 ]]; then
-    say "cli venv: already in sync (omnimarket ${head:0:12})"
+    say "dispatch venv: already in sync (omnimarket ${head:0:12})"
   else
     # PROVIDER FIRST. The co-install can move lock-governed pins (OMN-16262:
     # its hardcoded COMPAT_PIN downgrades omnibase-compat 0.5.6 -> 0.5.5 and
     # breaks the `occ` CLI extension badly enough that `onex` will not start),
     # so the lock pass has to come after it to undo that.
     if [[ "$need_provider" -eq 1 ]]; then
-      say "cli venv: reconciling provider layer to omnimarket ${head:0:12}"
+      say "dispatch venv: reconciling provider layer to omnimarket ${head:0:12}"
       if [[ ! -x "$INSTALL_SCRIPT" ]]; then
         fail "provider co-install script is missing or not executable." \
           "Expected at: $INSTALL_SCRIPT"
       fi
       # OMNIMARKET_REF is set explicitly so the install script's own ls-remote
       # default (OMN-16366 reversed drift) can never apply here.
-      trace "OMNIMARKET_REF=$head $INSTALL_SCRIPT --execute $INFRA_PYTHON"
+      trace "OMNIMARKET_REF=$head $INSTALL_SCRIPT --execute $DISPATCH_PYTHON"
       # PATH carries the resolved uv down to the child (OMN-17383). The
       # co-install calls bare `uv`, and it inherits the cron PATH -- which is
       # exactly the PATH that cannot reach a user-local install, so on `.201`
@@ -752,12 +919,13 @@ run_repair() {
       # so this changes where the child stands without changing what it installs.
       if ! (cd "$OMNI_HOME" && as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
           PATH="$(dirname "$UV_BIN"):$PATH" \
-          bash "$INSTALL_SCRIPT" --execute "$INFRA_PYTHON"); then
+          bash "$INSTALL_SCRIPT" --execute "$DISPATCH_PYTHON"); then
         fail "provider co-install did not complete; omnimarket is not installed." \
           "Every \`onex skill\`/\`onex node\`/\`onex delegate\` dispatch will refuse" \
-          "until this succeeds. Run by hand and read the error:" \
+          "until this succeeds. The gate venv was NOT touched. Run by hand and" \
+          "read the error:" \
           "  OMNIMARKET_REF=$head OMNI_HOME=$OMNI_HOME \\" \
-          "    bash $INSTALL_SCRIPT --execute $INFRA_PYTHON" \
+          "    bash $INSTALL_SCRIPT --execute $DISPATCH_PYTHON" \
           "  (this is scripts/install-node-skill-package.sh)"
       fi
       # The co-install just ran, so the lock pass is mandatory regardless of
@@ -766,22 +934,59 @@ run_repair() {
     fi
 
     if [[ "$need_lock" -eq 1 ]]; then
-      say "cli venv: applying $INFRA_DIR/uv.lock"
+      say "dispatch venv: applying $INFRA_DIR/uv.lock"
       # --frozen: apply the lock, never re-resolve it -- a re-resolution here
       #   would silently move the very pins the lock exists to hold.
       # --inexact: do not remove the composed provider layer, which the lock
-      #   correctly does not mention and must not be asked to.
-      trace "uv sync --frozen --inexact --project $INFRA_DIR"
-      if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR"); then
-        fail "cli venv lock sync did not complete." \
+      #   correctly does not mention and must not be asked to. This flag belongs
+      #   to THIS venv only; the gate venv below is synced exact (OMN-17819).
+      trace "UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV uv sync --frozen --inexact --project $INFRA_DIR"
+      if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$DISPATCH_VENV" \
+          "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR"); then
+        fail "dispatch venv lock sync did not complete; the gate venv was NOT touched." \
           "Run by hand and read the error:" \
-          "  cd $INFRA_DIR && env -u PYTHONPATH uv sync --frozen --inexact"
+          "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV \\" \
+          "    uv sync --frozen --inexact"
       fi
     fi
-    say "cli venv: reconciled"
+    say "dispatch venv: reconciled"
   fi
 
-  # ---- surface 2: the hook venv(s), lock-governed only -------------------- #
+  # ---- surface 2: the GATE venv, lock-governed ONLY (OMN-17819) ------------ #
+  # EXACT. This is the step that removes an undeclared `onex.nodes` provider
+  # from the canonical clone's own environment, which is what unblocks every
+  # `uv run pytest` there. It runs only after the dispatch venv above is proven
+  # good, because it is also the step that takes omnimarket away from whatever
+  # used to be running out of this directory.
+  #
+  # The previous revision of this script synced this venv `--inexact` and
+  # composed the provider layer INTO it. That is the OMN-17819 defect: the same
+  # directory cannot satisfy OMN-14060 (omnimarket must be present) and
+  # OMN-15620 (it must be absent) at once. Do not restore `--inexact` here --
+  # it would silently re-admit exactly the pollution this pass exists to remove,
+  # and the refusal it causes appears at `pytest_configure`, far from here.
+  local gate_needs_sync=0
+  if [[ ! -x "$INFRA_PYTHON" ]]; then
+    gate_needs_sync=1
+  elif ! lock_layer_ok "$INFRA_DIR"; then
+    gate_needs_sync=1
+  fi
+
+  if [[ "$gate_needs_sync" -eq 1 ]]; then
+    say "gate venv: applying $INFRA_DIR/uv.lock exactly"
+    trace "uv sync --frozen --project $INFRA_DIR"
+    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --project "$INFRA_DIR"); then
+      fail "gate venv lock sync did not complete." \
+        "Until it does, \`uv run pytest\` in $INFRA_DIR may be refused by the" \
+        "OMN-15620 purity gate. Run by hand and read the error:" \
+        "  cd $INFRA_DIR && env -u PYTHONPATH uv sync --frozen"
+    fi
+    say "gate venv: reconciled"
+  else
+    say "gate venv: already lock-pure"
+  fi
+
+  # ---- surface 3: the hook venv(s), lock-governed only -------------------- #
   # Exact (not --inexact) on purpose: a hook venv has no composed layer above
   # its lock, so anything the lock does not mention is cross-repo pollution.
   # This host had omnibase_infra's dev group (pre-commit, import-linter,

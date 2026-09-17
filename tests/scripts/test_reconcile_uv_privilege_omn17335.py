@@ -402,9 +402,14 @@ def test_the_gate_rejects_a_uv_sync_that_skips_the_owner_helper(tmp_path: Path) 
     source = (_REPO_ROOT / "scripts" / "reconcile-workspace-venvs.sh").read_text(
         encoding="utf-8"
     )
+    # The lock-pass write. Since OMN-17819 the `--inexact` form belongs to the
+    # DISPATCH venv and carries UV_PROJECT_ENVIRONMENT between `env` and the uv
+    # binary, so the stable anchor is the gate/hook-venv form -- an exact sync
+    # against a project. It is still a real write in the shipped script, which
+    # is the property this mutation proof needs.
     mutated = source.replace(
-        'as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --inexact',
-        'env -u PYTHONPATH "$UV_BIN" sync --frozen --inexact',
+        'as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --project',
+        'env -u PYTHONPATH "$UV_BIN" sync --frozen --project',
     )
     assert mutated != source, "the mutation target moved; update this test"
     (scratch / "scripts" / "reconcile-workspace-venvs.sh").write_text(
