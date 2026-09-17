@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -170,11 +171,20 @@ def test_the_health_probe_reaches_the_host_gateway_not_localhost() -> None:
     `localhost:8085` answers 000 while the `host.docker.internal` form answers
     200. Every compose-dev receipt emitted before that was understood carried
     three identical connection-refused failures and none was ever a PASS.
+
+    The URL is PARSED and its parts asserted, rather than scanned for a
+    substring. A substring check for the loopback name is incomplete
+    sanitization: it passes for a host that merely begins with that name and
+    fails for a perfectly good path containing the word, so it decides on the
+    wrong thing in both directions. The host is a field; assert the field.
     """
     job = _load()["jobs"]["verify-onex-api-delivered"]
     env = _step(job, "Probe onex-api on the lane")["env"]
-    assert env["ONEX_API_URL"].startswith("http://host.docker.internal:8090")
-    assert "localhost" not in env["ONEX_API_URL"]
+    url = urlparse(env["ONEX_API_URL"])
+    assert url.scheme == "http"
+    assert url.hostname == "host.docker.internal"
+    assert url.port == 8090
+    assert url.path == "/health"
 
 
 def test_the_receipt_records_both_the_revision_and_the_health_claims() -> None:
