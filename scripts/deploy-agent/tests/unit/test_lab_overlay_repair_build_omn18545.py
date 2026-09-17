@@ -35,6 +35,11 @@ from deploy_agent.lab_overlay import (
     CLOUD_MIGRATE_IMAGE_NAME,
     LAB_LANE_VALUE,
     LabOverlayRefusalError,
+    load_latest_record,
+    load_record,
+    load_repair_record,
+    record_path,
+    repair_record_path,
 )
 
 from .test_lab_overlay_omn18200 import (
@@ -246,3 +251,73 @@ def test_an_unresolvable_overlay_source_still_writes_a_record(
     names = [check["name"] for check in _checks(record)]
     assert names == ["overlay_source_resolved", "lab_overlay_applied"]
     assert not any(check["ok"] for check in _checks(record))
+
+
+# --------------------------------------------------------------------------- #
+# the repair record lives under its own key                                   #
+# --------------------------------------------------------------------------- #
+def test_a_repair_never_overwrites_a_passing_apply_record(
+    tmp_path: Path, overlay_source: Path
+) -> None:
+    """The highest-consequence property in this file.
+
+    ``_current_git_sha`` is whatever the pull resolved, not the triggering
+    command's sha, so two rebuild commands resolving the same dev head are
+    routine -- a sibling-repo trigger, a retry, coalesced merges. If the repair
+    wrote to the apply's key, job two failing would replace job one's passing
+    record with one asserting the lane was never advanced to that sha. That is
+    not a stale record, it is a false one, and it would supersede a PASS receipt
+    with a FAIL on the next emit.
+    """
+    applier = _applier(tmp_path, overlay_source, FakeRunner())
+    applier.apply(sha=SHA, stamp=STAMP, correlation_id="cid-apply")
+    state = tmp_path / "state"
+    applied = load_record(state, SHA)
+    assert applied is not None
+    assert all(check["ok"] for check in applied["checks"])
+
+    applier.build_repair_migrate_image(
+        sha=SHA, stamp=STAMP, correlation_id="cid-repair"
+    )
+
+    after = load_record(state, SHA)
+    assert after == applied, (
+        "the repair overwrote the apply's record for the same sha; the lane WAS "
+        "advanced to it and the record now says otherwise"
+    )
+    repair = load_repair_record(state, SHA)
+    assert repair is not None
+    assert repair["agent_command_id"] == "cid-repair"
+    assert record_path(state, SHA) != repair_record_path(state, SHA)
+
+
+def test_a_repair_record_never_becomes_the_latest_applied_record(
+    tmp_path: Path, overlay_source: Path
+) -> None:
+    """``load_latest_record`` answers "what did the agent most recently APPLY",
+    and the OMN-18399 descendant-tolerance fallback reads that answer and labels
+    it applied.
+
+    A repair record surfacing there would make the fallback assert an apply that
+    never happened -- turning a later merge's receipt red on a lane the earlier
+    coalesced apply had in fact advanced.
+
+    The positive control is the apply below: the same function DOES return a
+    record once a real apply has written one, so the ``None`` above is an
+    exclusion and not a broken reader.
+    """
+    applier = _applier(tmp_path, overlay_source, FakeRunner())
+    state = tmp_path / "state"
+
+    applier.build_repair_migrate_image(
+        sha=SHA, stamp=STAMP, correlation_id="cid-repair"
+    )
+    assert load_latest_record(state) is None, (
+        "a repair record answered 'the latest applied record'; the lane was "
+        "never applied"
+    )
+
+    applier.apply(sha=SHA, stamp=STAMP, correlation_id="cid-apply")
+    latest = load_latest_record(state)
+    assert latest is not None
+    assert latest["agent_command_id"] == "cid-apply"

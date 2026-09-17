@@ -1249,6 +1249,22 @@ class GatewayLaneConfigError(RuntimeError):
     """
 
 
+class DevLaneMigrationPreflightError(RuntimeError):
+    """The dev lane's own migration one-shots did not prove they did their job.
+
+    OMN-18545. A TYPE rather than a message, because the agent has to act on it:
+    this is the one deploy failure a freshly built cloud-migrate image can
+    actually fix, so it is the one that triggers the repair build. Every other
+    failure leaves the lab overlay alone -- rebuilding an image unrelated to a
+    gateway refusal or an out-of-memory build would spend minutes under the
+    single-flight lock for nothing.
+
+    Matching on the message text would work today and rot the first time somebody
+    rewords it, and the reword would silently turn the repair build off rather
+    than fail anything.
+    """
+
+
 class PreflightScriptUnavailableError(RuntimeError):
     """Raised when the required-compose-env preflight could not be executed.
 
@@ -2294,10 +2310,13 @@ class DeployExecutor:
         this exception skipped the OMN-18200 lab-overlay caller entirely and the
         persistent k3s ``onex-lab`` lane sat 16 hours behind ``dev`` with
         nothing reporting it -- rule 24(a)'s k3s half, silently not running.
-        That ordering is fixed (OMN-18545): the caller is in the job's
-        ``finally`` and now runs on the failing path too. This guard still
-        matters on its own terms -- an unpinned build is refused either way --
-        but a raise here no longer takes the lab overlay down with it.
+        That is still true of THIS failure and OMN-18545 did not change it: a
+        gateway refusal skips the lab-overlay apply, and the lane stays where it
+        was. What OMN-18545 added is a repair build on the DEV-LANE MIGRATION
+        PREFLIGHT failure alone, which is a different error and is now its own
+        type (``DevLaneMigrationPreflightError``). So this guard is still the
+        only thing standing between an unpinned build and a silently stale lane
+        here, and it stays.
 
         The guard STAYS. This passes the pin the accepted command already
         carries; it does not weaken, skip or opt out of the assertion. An empty
@@ -3275,7 +3294,7 @@ class DeployExecutor:
                 cmd = [*base_cmd, service]
                 result = _run(cmd, timeout=timeout, env=_compose_env())
                 if result.returncode != 0:
-                    raise RuntimeError(
+                    raise DevLaneMigrationPreflightError(
                         f"Dev-lane migration preflight failed for {service}: "
                         f"{result.stderr.strip() or result.stdout.strip()}"
                     )
@@ -3283,7 +3302,7 @@ class DeployExecutor:
                     [service], timeout_s=timeout, lane=lane
                 )
                 if not ok:
-                    raise RuntimeError(
+                    raise DevLaneMigrationPreflightError(
                         "Dev-lane migration preflight did not complete "
                         f"{service}: {pending}. A one-shot that has not exited "
                         "0 has not proven it did its job."

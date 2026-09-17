@@ -32,6 +32,7 @@ from deploy_agent.executor import (
     REPO_DIR,
     SCOPE_BUNDLES,
     DeployExecutor,
+    DevLaneMigrationPreflightError,
     assert_prod_request_has_stability_digest,
     resolve_prod_target_service,
 )
@@ -353,10 +354,11 @@ class DeployAgent:
         services_restarted: list[str] = []
         # OMN-18545: the resolved sha is a PROPERTY OF THIS JOB, cleared here
         # like the two above. It lives on the agent, which outlives the job, and
-        # the lab overlay now runs on the failing path too (see the `finally`
-        # below) -- so a job that dies before git_pull would otherwise build
-        # images and stamp a record for the PREVIOUS job's commit, which this
-        # job never deployed. An unresolved sha must read as unresolved.
+        # the lab overlay is now reachable from the failing path too (see the
+        # repair build in the `except` below) -- so a job that dies before
+        # git_pull would otherwise build images and stamp a record for the
+        # PREVIOUS job's commit, which this job never deployed. An unresolved sha
+        # must read as unresolved.
         self._current_git_sha = ""
 
         def on_phase_update(phase: Phase, status: PhaseStatus) -> None:
@@ -506,11 +508,21 @@ class DeployAgent:
             # ONEX_CLOUD_MIGRATE_IMAGE is operator-held and nothing in this
             # repository writes it. That half is deliberately out of scope.
             #
+            # TARGETED, not unconditional. Only a dev-lane migration preflight
+            # failure triggers it, because that is the one deploy failure a fresh
+            # cloud-migrate image can actually fix. A gateway refusal, an
+            # out-of-memory build or an unset compose variable would otherwise
+            # each spend up to sixteen minutes rebuilding an unrelated image
+            # under this agent's single-flight lock -- which rejects every
+            # concurrent rebuild command outright -- on the path that is by
+            # construction the busy one while the lane is broken.
+            #
             # The isolation from the job's verdict is structural: the verdict is
             # already written on the line above, and this method swallows. Both
             # properties are pinned by tests, not by this comment --
             # tests/unit/test_lab_overlay_build_order_omn18545.py.
-            self._build_lab_repair_image(cmd)
+            if isinstance(e, DevLaneMigrationPreflightError):
+                self._build_lab_repair_image(cmd)
 
         # Publish result (don't use on_phase_update — job is already completed,
         # and update_phase would revert status to in_progress)

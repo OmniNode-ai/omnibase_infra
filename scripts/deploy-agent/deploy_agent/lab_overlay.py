@@ -440,6 +440,42 @@ def record_path(state_dir: Path, sha: str) -> Path:
     return Path(state_dir) / "lab-overlay" / f"{sha}.json"
 
 
+def repair_record_path(state_dir: Path, sha: str) -> Path:
+    """Where one sha's REPAIR record lives, and why it is not beside the other.
+
+    OMN-18545. A repair record is not a lab-overlay record: the lane was never
+    advanced, only an image was built. Writing it to ``record_path`` would put it
+    at the same key an apply uses, and ``_write`` replaces unconditionally -- so
+    a second job resolving the same dev HEAD and failing would OVERWRITE an
+    earlier job's passing apply record with one asserting the lane was not
+    advanced to that sha. That is not a stale record, it is a false one, and it
+    would supersede a PASS receipt with a FAIL on the next emit.
+
+    A SUBDIRECTORY, deliberately. ``load_latest_record`` globs ``*.json``
+    non-recursively directly under ``lab-overlay/``, so nothing under here can
+    become "the latest applied record" -- which matters because the OMN-18399
+    descendant-tolerance fallback reads that answer and labels it *applied*. A
+    repair record answering that question would make the fallback assert an apply
+    that never happened.
+    """
+    return Path(state_dir) / "lab-overlay" / "repair" / f"{sha}.json"
+
+
+def load_repair_record(state_dir: Path, sha: str) -> dict[str, Any] | None:
+    """Read one repair record back, or ``None`` when none exists.
+
+    Same malformed-raises contract as ``load_record``, for the same reason.
+    """
+    path = repair_record_path(state_dir, sha)
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        msg = f"{path}: a record must be a JSON object"
+        raise ValueError(msg)
+    return payload
+
+
 def load_record(state_dir: Path, sha: str) -> dict[str, Any] | None:
     """Read one record back, or ``None`` when none exists.
 
@@ -1192,12 +1228,15 @@ class LabOverlayApplier:
         lock -- which on a broken migrate image would be taken on EVERY merge,
         since every merge fails. This is one ``alpine``-plus-two-``COPY`` build.
 
-        THE RECORD IS DELIBERATELY A FAILING ONE. It carries the same
-        ``{name, ok, evidence}`` shape ``apply`` writes, at the same sha-keyed
-        path, so the CI emitter has something to read instead of nothing -- but
-        ``lab_overlay_applied`` is recorded ``ok=False`` unconditionally, because
-        the lane was NOT advanced to this sha. A repair build must never be
-        readable as a lab pass.
+        THE RECORD LIVES UNDER ITS OWN KEY, and is deliberately a failing one.
+        It carries the same ``{name, ok, evidence}`` shape ``apply`` writes, so a
+        reader diagnosing a stuck lane has the build's outcome and evidence
+        durably -- but it goes to ``repair_record_path``, not ``record_path``,
+        because a repair is not an apply and writing it to the apply's key would
+        overwrite a passing record for the same sha with a false one. That
+        docstring carries the full argument. ``lab_overlay_applied`` is recorded
+        ``ok=False`` unconditionally on top of that, so a repair record can never
+        be read as a lab pass even by something that finds it directly.
         """
         started_at = _utc_now_iso()
         checks: list[ModelLabOverlayCheck] = []
@@ -1226,7 +1265,7 @@ class LabOverlayApplier:
                 )
             )
             checks.append(self._repair_lane_not_applied_check())
-            return self._write(
+            return self._write_repair(
                 sha=sha,
                 started_at=started_at,
                 correlation_id=correlation_id,
@@ -1271,7 +1310,7 @@ class LabOverlayApplier:
             )
 
         checks.append(self._repair_lane_not_applied_check())
-        return self._write(
+        return self._write_repair(
             sha=sha,
             started_at=started_at,
             correlation_id=correlation_id,
@@ -1607,6 +1646,43 @@ class LabOverlayApplier:
         a half-written record and report it as malformed -- which the reader is
         required to treat as a finding rather than as an absence.
         """
+        return self._write_at(
+            record_path(self.state_dir, sha),
+            sha=sha,
+            started_at=started_at,
+            correlation_id=correlation_id,
+            checks=checks,
+        )
+
+    def _write_repair(
+        self,
+        *,
+        sha: str,
+        started_at: str,
+        correlation_id: str | None,
+        checks: Sequence[ModelLabOverlayCheck],
+    ) -> Path:
+        """Write a repair record, under its own key (OMN-18545).
+
+        See ``repair_record_path`` for why it must not share the apply's key.
+        """
+        return self._write_at(
+            repair_record_path(self.state_dir, sha),
+            sha=sha,
+            started_at=started_at,
+            correlation_id=correlation_id,
+            checks=checks,
+        )
+
+    def _write_at(
+        self,
+        path: Path,
+        *,
+        sha: str,
+        started_at: str,
+        correlation_id: str | None,
+        checks: Sequence[ModelLabOverlayCheck],
+    ) -> Path:
         record = ModelLabOverlayRecord(
             sha=sha,
             lane=LAB_LANE_VALUE,
@@ -1615,7 +1691,6 @@ class LabOverlayApplier:
             agent_command_id=correlation_id,
             checks=tuple(checks),
         )
-        path = record_path(self.state_dir, sha)
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
         try:

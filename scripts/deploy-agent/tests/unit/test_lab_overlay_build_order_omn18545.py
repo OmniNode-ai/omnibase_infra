@@ -65,6 +65,7 @@ import pytest
 from deploy_agent import agent as agent_mod
 from deploy_agent.agent import DeployAgent
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
+from deploy_agent.executor import DevLaneMigrationPreflightError
 from deploy_agent.job_state import JobStore
 
 pytestmark = pytest.mark.unit
@@ -79,6 +80,15 @@ PREFLIGHT_ERROR = (
     "did its job."
 )
 OVERLAY_ERROR = "lab overlay: containerd import refused"
+
+#: An unrelated dev-lane failure. Its own measured shape, from the OMN-18134
+#: incident: the gateway step refused an unpinned build and took the job down.
+#: A fresh cloud-migrate image could not have helped, so the repair build must
+#: not run for it.
+GATEWAY_ERROR = RuntimeError(
+    "GATEWAY_DEPLOY_FAILED: bash scripts/deploy-gateway.sh --execute exited 5. "
+    "stderr: ERROR: DEPLOY_REF unset -- refusing to stage the AMBIENT host tree."
+)
 
 _DIGEST = "sha256:" + "c" * 64
 _OTHER_DIGEST = "sha256:" + "d" * 64
@@ -96,7 +106,7 @@ class _FakeExecutor:
     def __init__(
         self,
         *,
-        rebuild_error: str | None = None,
+        rebuild_error: Exception | None = None,
         preflight_error: str | None = None,
         git_sha: str = SHA,
         stability_ready_digest: str | None = _DIGEST,
@@ -135,11 +145,12 @@ class _FakeExecutor:
 
     def rebuild_scope(self, *args: object, **kwargs: object) -> list[str]:
         self.calls.append("rebuild_scope")
-        if self._rebuild_error:
+        if self._rebuild_error is not None:
             # The dev-lane migration preflight raises from inside here:
             # rebuild_scope -> _compose_up(RUNTIME) ->
-            # _ensure_runtime_migrations_ready.
-            raise RuntimeError(self._rebuild_error)
+            # _ensure_runtime_migrations_ready. The TYPE is what the agent acts
+            # on, so the double raises the real one.
+            raise self._rebuild_error
         return ["omninode-runtime"]
 
     def verify(self, **kwargs: object) -> list[object]:
@@ -260,7 +271,9 @@ async def test_a_failing_migration_preflight_still_reaches_the_overlay_build(
     image the preflight needs can never come into existence.
     """
     cmd = _dev_cmd()
-    fake_executor = _FakeExecutor(rebuild_error=PREFLIGHT_ERROR)
+    fake_executor = _FakeExecutor(
+        rebuild_error=DevLaneMigrationPreflightError(PREFLIGHT_ERROR)
+    )
     agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
     await agent._run_deploy(cmd)
@@ -294,7 +307,9 @@ async def test_the_overlay_build_runs_for_the_sha_this_job_resolved(
     naming a commit this job never deployed.
     """
     cmd = _dev_cmd()
-    fake_executor = _FakeExecutor(rebuild_error=PREFLIGHT_ERROR, git_sha=OTHER_SHA)
+    fake_executor = _FakeExecutor(
+        rebuild_error=DevLaneMigrationPreflightError(PREFLIGHT_ERROR), git_sha=OTHER_SHA
+    )
     agent, _ = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
     await agent._run_deploy(cmd)
@@ -349,7 +364,9 @@ async def test_neither_failure_masks_the_other(
     stay distinguishable.
     """
     cmd = _dev_cmd()
-    fake_executor = _FakeExecutor(rebuild_error=PREFLIGHT_ERROR)
+    fake_executor = _FakeExecutor(
+        rebuild_error=DevLaneMigrationPreflightError(PREFLIGHT_ERROR)
+    )
     agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
     _FakeApplier.raise_with = OVERLAY_ERROR
 
@@ -379,7 +396,9 @@ async def test_the_verdict_is_recorded_before_the_overlay_is_attempted(
     the property AC2 refuses to leave to a comment.
     """
     cmd = _dev_cmd()
-    fake_executor = _FakeExecutor(rebuild_error=PREFLIGHT_ERROR)
+    fake_executor = _FakeExecutor(
+        rebuild_error=DevLaneMigrationPreflightError(PREFLIGHT_ERROR)
+    )
     agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
     _FakeApplier.status_source = store
     _FakeApplier.status_cid = cmd.correlation_id
@@ -489,7 +508,9 @@ async def test_the_overlay_stays_off_when_the_operator_disabled_it(
     re-ordering must not turn it into a switch that only works on success."""
     monkeypatch.setattr(agent_mod, "LAB_OVERLAY_ENABLED", False)
     cmd = _dev_cmd()
-    fake_executor = _FakeExecutor(rebuild_error=PREFLIGHT_ERROR)
+    fake_executor = _FakeExecutor(
+        rebuild_error=DevLaneMigrationPreflightError(PREFLIGHT_ERROR)
+    )
     agent, _ = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
     await agent._run_deploy(cmd)
@@ -529,3 +550,70 @@ async def test_a_successful_dev_deploy_still_applies_the_overlay_exactly_once(
         ("apply", SHA)
     ]
     assert _FakeApplier.observed_status == ["success"]
+
+
+@pytest.mark.asyncio
+async def test_an_unrelated_dev_failure_does_not_trigger_a_repair_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The repair build is targeted, and this is the control that proves it.
+
+    Without this the agent would rebuild the cloud-migrate image on EVERY dev
+    failure -- a gateway refusal, an out-of-memory build, an unset compose
+    variable -- spending up to sixteen minutes under the single-flight lock,
+    which rejects every concurrent rebuild command outright, on an image that
+    has nothing to do with the failure. And that path is by construction the
+    busy one: while the lane is broken, every merge fails.
+    """
+    cmd = _dev_cmd()
+    fake_executor = _FakeExecutor(rebuild_error=GATEWAY_ERROR)
+    agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
+
+    await agent._run_deploy(cmd)
+
+    job = store.load(cmd.correlation_id)
+    assert job is not None
+    assert job.status == "failed"
+    assert any("GATEWAY_DEPLOY_FAILED" in error for error in job.errors)
+    assert _FakeApplier.calls == [], (
+        "a failure a new migrate image cannot fix still triggered the repair build"
+    )
+    assert _FakeApplier.instances == []
+
+
+@pytest.mark.asyncio
+async def test_the_terminal_event_is_still_published_when_the_repair_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The repair build runs inside the deploy job's ``except``, and the publish
+    block sits after it.
+
+    An exception escaping the repair build would skip that block entirely: the
+    job would be durably ``failed`` on disk with nothing on the bus and
+    ``result_publish_pending`` never set, so the retry loop would not replay it
+    either. Both docstrings name this as a reason for swallowing; this asserts
+    it instead.
+    """
+    published: list[object] = []
+    cmd = _dev_cmd()
+    fake_executor = _FakeExecutor(
+        rebuild_error=DevLaneMigrationPreflightError(PREFLIGHT_ERROR)
+    )
+    agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
+    monkeypatch.setattr(
+        agent_mod,
+        "publish_result",
+        lambda payload, config: bool(published.append(payload)) or True,
+    )
+    _FakeApplier.raise_with = OVERLAY_ERROR
+
+    await agent._run_deploy(cmd)
+
+    assert len(_FakeApplier.calls) == 1
+    assert len(published) == 1, (
+        "the terminal event was never published; a raise in the repair build "
+        "skipped the publish block of a job already recorded as failed"
+    )
+    job = store.load(cmd.correlation_id)
+    assert job is not None
+    assert job.status == "failed"
