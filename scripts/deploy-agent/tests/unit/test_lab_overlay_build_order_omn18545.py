@@ -9,8 +9,12 @@ job's dev-lane migration preflight requires the ``cloud-migration-files`` and
 ``cloud-migration`` one-shots to exit 0 **using that image**
 (``executor._ensure_runtime_migrations_ready``, reached from ``_compose_up`` for
 the RUNTIME phase, i.e. from inside ``rebuild_scope``). The only in-repo path that
-BUILDS a replacement migrate image is the lab-overlay applier
+builds a replacement CLOUD-migrate image -- ``docker/Dockerfile.migrate`` against
+the archived ``omninode_infra`` overlay tree -- is the lab-overlay applier
 (``lab_overlay.MIGRATE_DOCKERFILE`` / ``CLOUD_MIGRATE_IMAGE_NAME``).
+``build-and-push-migrate-image.yml`` builds the same Dockerfile against THIS
+repo's tree and pushes the INFRA migrate image to ECR; it is a different image
+and does not satisfy the pin the dev lane resolves.
 
 Before this change the applier was invoked from exactly one place: the LAST
 statement of the deploy job's ``try``, after ``executor.verify``. So while the
@@ -18,8 +22,19 @@ pinned migrate image was broken the preflight raised, control jumped to the
 ``except``, and the build never ran -- the agent could not build the image that
 would let the preflight pass. Observed live three times on 2026-09-16; the third
 (job ``6d8316f0``) reached terminal ``failed`` at 20:44:18Z with
-``verification: skipped`` and no ``onex-lab/omninode-cloud-migrate`` tag for the
-merged sha ever appearing on the host.
+``verification: skipped``, and the newest ``onex-lab/omninode-cloud-migrate``
+tag on the host stayed the 17:33Z pre-merge one throughout.
+
+THE FAILING PATH TAKES A NARROWER CALL THAN THE SUCCESS PATH, and these tests
+assert that difference rather than treating the two as interchangeable. Success
+still runs the full ``apply``. Failure runs ``build_repair_migrate_image``: one
+image build, no runtime promotion, no lane apply -- because the apply promotes
+``omnibase-infra-omninode-runtime:latest`` on the premise that this agent just
+built it from the merged sha, which a failed job can falsify, and the record's
+own readback checks compare against tags the same run minted and so cannot catch
+it. A full apply on the failing path would therefore roll the persistent k3s lane
+to a tag NAMING the merged sha while it ran the previous commit's binary, and
+report PASS.
 
 WHAT THE TESTS ASSERT, AND WHY EACH IS SHAPED THIS WAY
 ------------------------------------------------------
@@ -137,18 +152,18 @@ class _FakeExecutor:
 
 
 class _FakeApplier:
-    """Stands in for ``LabOverlayApplier``; records every apply it is asked for.
+    """Stands in for ``LabOverlayApplier``; records every call it is asked for.
 
-    ``apply`` is what builds the migrate image (``docker/Dockerfile.migrate``),
-    so "the build is reachable" is asserted as "apply ran", never as "the agent's
-    private method was entered".
+    Both entry points land in ``calls`` tagged with which one ran, so a test can
+    assert not only THAT the overlay path was reached but WHICH of the two it
+    took -- the distinction the repair build exists to make.
     """
 
     instances: list[_FakeApplier] = []
-    applies: list[dict[str, Any]] = []
-    #: Set by a test to make the apply blow up the way a real one can.
+    calls: list[dict[str, Any]] = []
+    #: Set by a test to make the call blow up the way a real one can.
     raise_with: str | None = None
-    #: Read at apply time so a test can prove the verdict was recorded FIRST.
+    #: Read at call time so a test can prove the verdict was recorded FIRST.
     observed_status: list[str | None] = []
     status_source: JobStore | None = None
     status_cid: Any = None
@@ -157,8 +172,10 @@ class _FakeApplier:
         self.kwargs = kwargs
         _FakeApplier.instances.append(self)
 
-    def apply(self, *, sha: str, stamp: str, correlation_id: str) -> Path:
-        _FakeApplier.applies.append({"sha": sha, "correlation_id": correlation_id})
+    def _record(self, entry: str, sha: str, correlation_id: str) -> Path:
+        _FakeApplier.calls.append(
+            {"entry": entry, "sha": sha, "correlation_id": correlation_id}
+        )
         store = _FakeApplier.status_source
         if store is not None and _FakeApplier.status_cid is not None:
             job = store.load(_FakeApplier.status_cid)
@@ -167,10 +184,18 @@ class _FakeApplier:
             raise RuntimeError(_FakeApplier.raise_with)
         return Path(f"/state/lab-overlay/{sha}.json")
 
+    def apply(self, *, sha: str, stamp: str, correlation_id: str) -> Path:
+        return self._record("apply", sha, correlation_id)
+
+    def build_repair_migrate_image(
+        self, *, sha: str, stamp: str, correlation_id: str
+    ) -> Path:
+        return self._record("repair", sha, correlation_id)
+
     @classmethod
     def reset(cls) -> None:
         cls.instances = []
-        cls.applies = []
+        cls.calls = []
         cls.raise_with = None
         cls.observed_status = []
         cls.status_source = None
@@ -246,11 +271,15 @@ async def test_a_failing_migration_preflight_still_reaches_the_overlay_build(
         "the preflight failure must still be the job's verdict; a reachable "
         "overlay build is not a reason to call a broken lane converged"
     )
-    assert [entry["sha"] for entry in _FakeApplier.applies] == [SHA], (
+    assert [(entry["entry"], entry["sha"]) for entry in _FakeApplier.calls] == [
+        ("repair", SHA)
+    ], (
         "the lab-overlay applier did not run on a job whose dev-lane migration "
-        "preflight failed, so the only in-repo builder of "
-        "docker/Dockerfile.migrate never executes while the pinned migrate "
-        "image is broken -- the loop cannot open on its own (OMN-18545)"
+        "preflight failed, so the only in-repo builder of a replacement "
+        "cloud-migrate image never executes while the pinned one is broken -- "
+        "the loop cannot open on its own (OMN-18545). The entry must be the "
+        "REPAIR build, never the full apply: a failed job has not proven the "
+        "runtime image the apply would promote was built from this sha."
     )
 
 
@@ -270,8 +299,8 @@ async def test_the_overlay_build_runs_for_the_sha_this_job_resolved(
 
     await agent._run_deploy(cmd)
 
-    assert [entry["sha"] for entry in _FakeApplier.applies] == [OTHER_SHA]
-    assert [entry["correlation_id"] for entry in _FakeApplier.applies] == [
+    assert [entry["sha"] for entry in _FakeApplier.calls] == [OTHER_SHA]
+    assert [entry["correlation_id"] for entry in _FakeApplier.calls] == [
         str(cmd.correlation_id)
     ]
 
@@ -302,7 +331,10 @@ async def test_an_overlay_failure_does_not_break_a_lane_running_the_merged_sha(
     assert not [error for error in job.errors if OVERLAY_ERROR in error], (
         "the overlay's failure leaked into the compose job's errors"
     )
-    assert len(_FakeApplier.applies) == 1
+    assert [entry["entry"] for entry in _FakeApplier.calls] == ["apply"], (
+        "the success path must still take the FULL apply; the repair build is "
+        "the failing path's narrower substitute, not a replacement for it"
+    )
 
 
 @pytest.mark.asyncio
@@ -331,8 +363,8 @@ async def test_neither_failure_masks_the_other(
         "message; the overlay masked the real failure"
     )
     assert not [error for error in job.errors if OVERLAY_ERROR in error]
-    assert len(_FakeApplier.applies) == 1, (
-        "the overlay attempt was not made, so its failure is invisible"
+    assert [entry["entry"] for entry in _FakeApplier.calls] == ["repair"], (
+        "the repair attempt was not made, so its failure is invisible"
     )
 
 
@@ -384,7 +416,7 @@ async def test_a_failing_prod_job_never_touches_the_overlay(
     assert job is not None
     assert job.status == "failed"
     assert fake_executor.calls == ["resolve_stability_ready_digest"]
-    assert _FakeApplier.applies == [], (
+    assert _FakeApplier.calls == [], (
         "a non-dev lane reached the lab-overlay applier; the overlay is a dev "
         "lane surface only"
     )
@@ -410,7 +442,7 @@ async def test_a_successful_prod_job_never_touches_the_overlay(
     assert job is not None
     assert job.status == "success"
     assert "deploy_and_verify" in fake_executor.calls
-    assert _FakeApplier.applies == []
+    assert _FakeApplier.calls == []
 
 
 @pytest.mark.asyncio
@@ -430,7 +462,7 @@ async def test_a_dev_job_that_fails_before_the_sha_is_resolved_applies_nothing(
     agent, store = _make_agent(tmp_path, monkeypatch, first, fake_executor)
 
     await agent._run_deploy(first)
-    assert [entry["sha"] for entry in _FakeApplier.applies] == [SHA]
+    assert [entry["sha"] for entry in _FakeApplier.calls] == [SHA]
 
     second = _dev_cmd()
     store.accept(second.correlation_id, second.model_dump(mode="json"))
@@ -443,9 +475,9 @@ async def test_a_dev_job_that_fails_before_the_sha_is_resolved_applies_nothing(
     job = store.load(second.correlation_id)
     assert job is not None
     assert job.status == "failed"
-    assert [entry["sha"] for entry in _FakeApplier.applies] == [SHA], (
-        "the second job applied an overlay for a sha it never resolved; the "
-        "only candidate was the FIRST job's, which this job did not deploy"
+    assert [entry["sha"] for entry in _FakeApplier.calls] == [SHA], (
+        "the second job built for a sha it never resolved; the only candidate "
+        "was the FIRST job's, which this job did not deploy"
     )
 
 
@@ -462,7 +494,7 @@ async def test_the_overlay_stays_off_when_the_operator_disabled_it(
 
     await agent._run_deploy(cmd)
 
-    assert _FakeApplier.applies == []
+    assert _FakeApplier.calls == []
     assert _FakeApplier.instances == []
 
 
@@ -493,5 +525,7 @@ async def test_a_successful_dev_deploy_still_applies_the_overlay_exactly_once(
         "rebuild_scope",
         "verify",
     ]
-    assert [entry["sha"] for entry in _FakeApplier.applies] == [SHA]
+    assert [(entry["entry"], entry["sha"]) for entry in _FakeApplier.calls] == [
+        ("apply", SHA)
+    ]
     assert _FakeApplier.observed_status == ["success"]
