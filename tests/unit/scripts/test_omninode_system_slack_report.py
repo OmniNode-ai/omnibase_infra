@@ -256,11 +256,15 @@ python3 - "$SPEC" "$@" <<'PY'
 import json,sys
 spec=json.load(open(sys.argv[1]))["docker"]
 a=sys.argv[2:]
+argline=" ".join(a)
 def ps_all():
     return [(c["name"], c["status"]) for c in spec["containers"]]
 def running():
     return [c for c in spec["containers"] if c["status"].startswith("Up")]
-if a[0]=="ps" and "-a" in a:
+if a[0]=="ps" and "status=created" in argline:
+    for c in spec["containers"]:
+        if c["status"].lower().startswith("created"): print(c["name"])
+elif a[0]=="ps" and "-a" in a:
     for n,s in ps_all(): print(f"{{n}}\\t{{s}}")
 elif a[0]=="ps" and ".Ports" in " ".join(a):
     for c in running(): print(c["name"] + "\\t" + c.get("ports",""))
@@ -274,7 +278,14 @@ elif a[0]=="inspect":
     c=next((c for c in spec["containers"] if c["name"]==name), None)
     if c is None: sys.exit(1)
     fmt=a[a.index("-f")+1]
-    print(c["started_at"] if "StartedAt" in fmt else c.get("start_period_ns",0))
+    if ".Created" in fmt:
+        L=c.get("labels") or {{}}
+        print("|".join([c.get("created_at",""),
+                        L.get("com.docker.compose.project",""),
+                        L.get("onex.cleanup-owner",""),
+                        L.get("onex.purpose","")]))
+    elif "StartedAt" in fmt: print(c["started_at"])
+    else: print(c.get("start_period_ns",0))
 elif a[0]=="volume":
     for v in spec.get("dangling", []): print(v)
 PY
@@ -971,6 +982,484 @@ def test_nonzero_exit_alarms(tmp_path: Path, lane_ports: dict[str, str]) -> None
     report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
     assert "exited_nonzero=omninode-runtime-effects" in report
     assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
+
+
+# --------------------------------------------------------------------------
+# OMN-18571 -- `created` containers are classified by age and ownership.
+#
+# The defect: `created` was a single grep count with no age floor and no
+# ownership distinction, and ANY nonzero value set docker_status=CRITICAL. Two
+# measured false-REDs followed on .201 on 2026-09-17 (census report
+# lab-hygiene-census-1054-20260917T1057Z.md section 1):
+#
+#   (a) compose legitimately holds containers in `created` for seconds while a
+#       `depends_on: service_healthy` dependency boots, so the check reddened on
+#       every dev-lane redeploy -- the delivery chain working reported as an
+#       outage;
+#   (b) 48 unowned CI/testcontainers leftovers aged 1-3 days held the host at
+#       CRITICAL permanently with zero unhealthy/restarting/dead, which is the
+#       "crying wolf" direction this file's own header calls fatal to a monitor.
+#
+# What did NOT change, and is pinned by test_unhealthy/restarting/dead below
+# plus the three pre-existing exit/start-period tests above: `unhealthy`,
+# `restarting`, `dead`, a container past its own declared start_period, a
+# non-zero exit, and a failed docker query all still drive CRITICAL.
+# --------------------------------------------------------------------------
+
+
+def _iso_ago(seconds: int) -> str:
+    """A Docker-shaped `.Created` timestamp `seconds` in the past.
+
+    Nanosecond precision on purpose: that is what `docker inspect` emits, and
+    the script's own `epoch_from_iso` has to trim it. A test that fed whole
+    seconds would not exercise the trim.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    stamp = datetime.now(UTC) - timedelta(seconds=seconds)
+    return stamp.strftime("%Y-%m-%dT%H:%M:%S") + ".123456789Z"
+
+
+def _created(
+    name: str,
+    *,
+    age_s: int | None = None,
+    created_at: str | None = None,
+    labels: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """One container sitting in Docker `created` status."""
+    return {
+        "name": name,
+        "status": "Created",
+        "started_at": "0001-01-01T00:00:00Z",
+        "created_at": _iso_ago(age_s) if created_at is None else created_at,
+        "labels": labels or {},
+    }
+
+
+def test_fresh_compose_held_container_does_not_trip_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC1 -- the in-flight redeploy case, measured live on 2026-09-17T06:52:39.
+
+    Three containers of the `omnibase-infra` project sat in `created` seconds
+    before the census probe because compose was holding them on
+    `omninode-runtime:service_healthy`. That is a deploy in progress, not a
+    fault, and it must not page.
+    """
+    docker_state = {
+        "containers": [
+            _created(
+                name,
+                age_s=5,
+                labels={"com.docker.compose.project": "omnibase-infra"},
+            )
+            for name in (
+                "omninode-runtime-effects",
+                "omnibase-infra-runtime-worker-1",
+                "omninode-contract-resolver",
+            )
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "Issues: *0 critical*" in report, report
+    # The raw count is still reported -- it is the classification that changed.
+    assert "created=3" in report, report
+    assert "created_fresh=3" in report, report
+    assert "unowned_debris=0" in report, report
+
+
+def test_aged_compose_held_container_is_a_warning_naming_its_project(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC2 -- a compose project still holding a container two hours later is a
+    real stall worth saying out loud, but it is a WARNING: the project is named
+    and there is an owner to name it to, so it is not the unattributable debris
+    case and it does not page."""
+    docker_state = {
+        "containers": [
+            _created(
+                "omnibase-infra-stability-test-runtime-worker-1",
+                age_s=7200,
+                labels={"com.docker.compose.project": "omnibase-infra-stability-test"},
+            )
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "created_pending=omnibase-infra-stability-test:1" in report, report
+    assert "Issues: *0 critical*" in report, report
+    assert re.search(r"- WARNING `container_issues`:", report), report
+
+
+def test_aged_unowned_container_is_warning_unowned_debris(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC3 -- the chronic baseline: a crashed testcontainers session leaves both
+    the workload container and its own Ryuk reaper in `created` forever, with no
+    compose project label and therefore no lane that owns them."""
+    docker_state = {
+        "containers": [
+            _created("testcontainers-ryuk-8f21", age_s=172800),
+            _created("repo-scripts-db-pg-34990041118-1", age_s=140000),
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "unowned_debris=2" in report, report
+    assert "Issues: *0 critical*" in report, report
+    assert re.search(r"- WARNING `container_issues`:", report), report
+
+
+def test_retention_labelled_container_is_listed_and_never_counted(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC4 -- the live keycloak case, held deliberately for OMN-18366's own
+    closer. Counting a container somebody labelled `keep this` as a problem
+    argues for deleting it, which is the opposite of what the label says. It is
+    named in the report so the retention stays visible, and counted nowhere."""
+    docker_state = {
+        "containers": [
+            _created(
+                "c9-keycloak-retained",
+                age_s=172800,
+                labels={
+                    "onex.cleanup-owner": "close_18354",
+                    "onex.purpose": "c9-keycloak-image-retention",
+                    "onex.ticket": "OMN-18366",
+                },
+            )
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "created_retained=c9-keycloak-retained" in report, report
+    assert "unowned_debris=0" in report, report
+    assert "created_pending=none" in report, report
+    assert "Issues: *0 critical*" in report, report
+
+
+def test_cleanup_owner_alone_is_enough_to_retain(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC4, second shape -- either label retains on its own. A container whose
+    `onex.purpose` does not end `-retention` but which names a cleanup owner is
+    still somebody's, so it is not unattributed debris."""
+    docker_state = {
+        "containers": [
+            _created(
+                "held-by-a-named-owner",
+                age_s=172800,
+                labels={"onex.cleanup-owner": "close_18354"},
+            ),
+            _created(
+                "held-by-purpose-only",
+                age_s=172800,
+                labels={"onex.purpose": "omn18366-image-retention"},
+            ),
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "unowned_debris=0" in report, report
+    assert "held-by-a-named-owner" in report, report
+    assert "held-by-purpose-only" in report, report
+    assert "Issues: *0 critical*" in report, report
+
+
+def test_a_purpose_that_merely_mentions_retention_does_not_retain(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC4, negative control -- the match is on the END of the purpose value,
+    not a substring anywhere in it (CLAUDE.md rule 15). A purpose of
+    `retention-policy-probe` describes a test OF retention, not a container
+    somebody asked to keep, and it must still count as debris. Without this the
+    exclusion is a hole any label containing the word can walk through."""
+    docker_state = {
+        "containers": [
+            _created(
+                "retention-policy-probe-1",
+                age_s=172800,
+                labels={"onex.purpose": "retention-policy-probe"},
+            )
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "unowned_debris=1" in report, report
+    assert "created_retained=none" in report, report
+
+
+def test_unageable_created_container_counts_as_debris_rather_than_excused(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC6 -- the fail-closed direction, and the one an implementation is most
+    likely to get backwards.
+
+    A container whose creation timestamp cannot be parsed cannot be proven
+    YOUNGER than the floor. The floor is an excuse for not counting something,
+    so an unprovable age must not earn it: the container is counted. An
+    implementation that treats "cannot age" as "too young to count" turns every
+    unparseable timestamp into silence, which is the exact shape of false green
+    this file's header refuses.
+    """
+    docker_state = {
+        "containers": [_created("age-unknown-debris", created_at="not-a-timestamp")],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "unowned_debris=1" in report, report
+    assert "created_fresh=0" in report, report
+
+
+def test_the_created_age_floor_is_configurable(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC1 -- the floor is a declared, env-overridable config entry, not a
+    literal welded into the decision path. Positive control on the same state:
+    the SAME container reads as debris at the default floor and as fresh at a
+    floor raised above its age, so the test cannot pass against an
+    implementation that ignores the setting."""
+    docker_state = {
+        "containers": [_created("aged-out", age_s=3600)],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    default_floor = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "unowned_debris=1" in default_floor, default_floor
+
+    raised = _run(
+        FIXED_SCRIPT,
+        tmp_path,
+        bin_dir,
+        extra_env={"OMNINODE_ALERT_CREATED_FLOOR_SECONDS": "7200"},
+    )
+    assert "unowned_debris=0" in raised, raised
+    assert "created_fresh=1" in raised, raised
+    assert "created_floor_seconds=7200" in raised, raised
+
+
+def test_created_floor_is_declared_in_the_config_block(tmp_path: Path) -> None:
+    """AC1, second falsifier -- the floor is resolved once, in the config block,
+    with the same `${OMNINODE_ALERT_*:-<default>}` shape as every other tunable
+    in this file. A magic number inside the classification pipeline would pass
+    the behavioural tests above and still be the defect OMN-16789's header
+    warns about: a literal in the decision path that nobody can find."""
+    body = FIXED_SCRIPT.read_text()
+    assert re.search(
+        r"^CREATED_FLOOR_SECONDS=\$\{OMNINODE_ALERT_CREATED_FLOOR_SECONDS:-600\}",
+        body,
+        flags=re.MULTILINE,
+    ), "the created age floor must be declared in the config block with a default"
+    # Anchored on the DEFINITION line, not the first mention of the name: the
+    # config entry's own comment cites the function, and splitting on the bare
+    # name would scan that comment instead of the classifier body.
+    classifier = body.split("\nclassify_created_containers() {\n", 1)
+    assert len(classifier) == 2, "classify_created_containers() must be defined"
+    decision_path = classifier[1].split("\n}\n", 1)[0]
+    assert "600" not in decision_path, (
+        "the floor's default must not be repeated as a literal inside the "
+        f"classifier: {decision_path}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "status"),
+    [
+        ("omninode-runtime", "Up 3 minutes (unhealthy)"),
+        ("omninode-runtime-effects", "Restarting (1) 5 seconds ago"),
+        ("omnibase-infra-postgres", "Dead"),
+    ],
+)
+def test_real_container_faults_still_drive_critical(
+    tmp_path: Path, lane_ports: dict[str, str], name: str, status: str
+) -> None:
+    """AC5 -- the conditions that were always worth paging on are untouched.
+
+    This change narrows exactly one input (`created`). If it widened into the
+    OMN-15509 fix it sits beside, these three plus the three pre-existing
+    exit/start-period tests above are what fails.
+    """
+    docker_state = {
+        "containers": [
+            {
+                "name": name,
+                "status": status,
+                "started_at": "2026-07-30T16:05:00Z",
+            }
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
+
+
+def test_an_unhealthy_container_pages_even_beside_fresh_created_ones(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC5 -- the mixed state. A redeploy in flight (fresh compose-held
+    containers) alongside a genuinely unhealthy container still pages: the
+    floor silences the `created` input, never the row."""
+    docker_state = {
+        "containers": [
+            _created(
+                "omninode-runtime-effects",
+                age_s=5,
+                labels={"com.docker.compose.project": "omnibase-infra"},
+            ),
+            {
+                "name": "omninode-runtime",
+                "status": "Up 3 minutes (unhealthy)",
+                "started_at": "2026-07-30T16:05:00Z",
+            },
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "created_fresh=1" in report, report
+    assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
+
+
+def test_container_issues_keeps_every_pre_existing_output_key(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC7 -- extend, never rename. The Slack renderer reads this row and so
+    could anything downstream, so the six keys that were there before this
+    change are still there, with the same meanings. `created=` in particular
+    stays the RAW total of created-status containers -- the classification is
+    reported in the new fields beside it, not by quietly redefining an existing
+    one, which would read as a fix to anyone diffing the output."""
+    docker_state = {
+        "containers": [
+            _created("fresh-one", age_s=5),
+            _created("aged-one", age_s=172800),
+        ],
+        "dangling": [],
+    }
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_all_green_http(lane_ports), docker_state=docker_state
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    for key in (
+        "unhealthy=",
+        "restarting=",
+        "dead=",
+        "created=",
+        "starting_past_start_period=",
+        "exited_nonzero=",
+    ):
+        assert key in report, f"{key} disappeared from container_issues: {report}"
+    assert "created=2" in report, report
+    for key in (
+        "created_floor_seconds=",
+        "created_fresh=",
+        "created_pending=",
+        "unowned_debris=",
+        "created_retained=",
+    ):
+        assert key in report, f"{key} missing from container_issues: {report}"
+
+
+def test_a_failed_created_query_is_still_critical(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """AC6 -- fail-closed on the query itself, unchanged from before. A docker
+    call that did not run is not evidence that nothing is wrong, and the
+    classifier must not convert that into a quiet WARNING."""
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    # Replace the docker stub with one that fails every call.
+    _write(
+        bin_dir / "docker",
+        "#!/usr/bin/env bash\necho 'docker: cannot connect' >&2\nexit 1\n",
+        executable=True,
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "docker_query=FAILED" in report, report
+    assert re.search(r"Issues: \*[1-9]\d* critical\*", report), report
+
+
+def test_the_measured_census_state_no_longer_pages(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    """The 2026-09-17T10:57Z census state, replayed in proportion.
+
+    51 created containers: 3 compose-held and seconds old, 47 unowned and 1-3
+    days old, 1 retention-labelled. Zero unhealthy, zero restarting, zero dead.
+    That state held the host at CRITICAL continuously. It is now one WARNING
+    row that names the debris count, which is a thing somebody can act on
+    rather than a colour nobody believes.
+    """
+    containers: list[dict[str, Any]] = [
+        _created(name, age_s=5, labels={"com.docker.compose.project": "omnibase-infra"})
+        for name in (
+            "omninode-runtime-effects",
+            "omnibase-infra-runtime-worker-1",
+            "omninode-contract-resolver",
+        )
+    ]
+    containers += [
+        _created(f"onex-egress-probe-{index}", age_s=172800) for index in range(32)
+    ]
+    containers += [
+        _created(f"testcontainers-ryuk-{index}", age_s=140000) for index in range(9)
+    ]
+    containers += [_created(f"stray-{index}", age_s=90000) for index in range(6)]
+    containers.append(
+        _created(
+            "c9-keycloak-retained",
+            age_s=172800,
+            labels={
+                "onex.cleanup-owner": "close_18354",
+                "onex.purpose": "c9-keycloak-image-retention",
+            },
+        )
+    )
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": containers, "dangling": []},
+    )
+    report = _run(FIXED_SCRIPT, tmp_path, bin_dir)
+    assert "created=51" in report, report
+    assert "created_fresh=3" in report, report
+    assert "unowned_debris=47" in report, report
+    assert "created_retained=c9-keycloak-retained" in report, report
+    assert "Issues: *0 critical*" in report, report
+    assert re.search(r"- WARNING `container_issues`:", report), report
 
 
 # --------------------------------------------------------------------------
