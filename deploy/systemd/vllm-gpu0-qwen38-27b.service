@@ -1,0 +1,240 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# vllm-gpu0.service — local model-serving unit for the .201 RTX 5090.
+#
+# Install on the model-serving host:
+#   sudo cp deploy/systemd/vllm-gpu0-qwen38-27b.service \
+#           /etc/systemd/system/vllm-gpu0.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vllm-gpu0.service
+#
+# The venv this unit runs from is NOT created by any repo path. Provision it
+# with deploy/systemd/provision-vllm-0.27-venv.sh BEFORE installing this unit,
+# and re-run that script after any pip operation in /opt/vllm-0.27/venv — both
+# of the toolchain repairs it makes are silently undone by an unconstrained
+# `pip install -U` or a reinstall of nvidia-cuda-runtime. See that script's
+# header for what is repo-declared and what is still hand-built.
+#
+# ROLLBACK is deploy/systemd/vllm-gpu0-qwen-coder.service (Qwen3.6-35B-A3B on
+# the 0.21.0 venv at /opt/vllm/venv), which is the unit this one replaced.
+#
+# The auto-tool-choice and qwen3_coder parser flags are required for SEA ADK
+# tool-calling runs. Without them, local OpenAI-compatible ADK calls can fail
+# with HTTP 400 even though plain chat completions pass. The parser choice is
+# not inherited blindly from the previous model: Qwen3.8-27B's own
+# chat_template.jinja defaults to XML tool calls and emits
+# "<tool_call>\n<function=NAME>", which is the form qwen3_coder parses.
+#
+# ---------------------------------------------------------------------------
+# MODEL: Qwen3.8-27B NVFP4 (OMN-18570, 2026-09-17)
+# ---------------------------------------------------------------------------
+# Operator ruling 2026-09-17, in-session, firm, recorded at
+# omni_home docs/tracking/ROLLING_WORK_LEDGER.md:4182 — serve Qwen3.8-27B on the
+# 5090 as the local model the cheapest-first delegation chain reaches. This
+# REPLACES Qwen3.6-35B-A3B; only one GPU remains on this host (the RTX 4090 was
+# pulled for RMA under OMN-16407 on 2026-08-23) so the two cannot co-reside.
+# The previous unit is retained beside this one as
+# vllm-gpu0.service.bak-omn18570-qwen36-35b-20260917T133600Z.
+#
+# WEIGHT SET. Four Qwen3.8-27B sets are staged under /data/inference/hf-cache.
+# Only ONE of them is complete and loadable by vLLM, and picking by name alone
+# would have chosen a broken one:
+#
+#   Qwen3.8-27B-NVFP4-RTX5090   18 GB   CHOSEN. Three shards
+#                                       (9.97 + 8.05 + 0.74 GB) + index +
+#                                       hf_quant_config.json + crc32.txt.
+#   Qwen3.8-27B-NVFP4          7.6 GB   PARTIAL DOWNLOAD. Holds only
+#                                       model_mtp.safetensors (849 MB) and a
+#                                       .parts/ directory against a 164 KB
+#                                       shard index. No main shards.
+#   Qwen3.8-27B-DSpark-NVFP4   1.4 GB   A single model.safetensors. Cannot be a
+#                                       27B of any quantization.
+#   Qwen3.8-27B-MTP-IQ4_XS-GGUF 15 GB   llama.cpp GGUF, not a vLLM checkpoint.
+#
+# SERVING STACK: vLLM 0.27.1 in a SEPARATE venv at /opt/vllm-0.27/venv. Not a
+# return to SGLang, and NOT an upgrade of /opt/vllm/venv — that environment is
+# left on 0.21.0 because the co-resident vllm-embeddings.service (:8002) runs
+# from it and is out of scope here. This unit is the only consumer of the new
+# venv, so the rollback is this file plus `systemctl restart`.
+#
+# WHY THE VERSION HAD TO MOVE, measured rather than assumed. The first attempt
+# on 2026-09-17 kept 0.21.0 and changed only --model. It failed at weight load:
+#
+#   ValueError: There is no module or parameter named 'lm_head.input_scale' in
+#   Qwen3_5ForCausalLM. The available parameters belonging to lm_head
+#   (ParallelLMHead) are: {'lm_head.weight'}
+#
+# The checkpoint quantizes its output head along with everything else — read out
+# of the shard header, lm_head.weight is U8 [248320, 2560] (NVFP4-packed against
+# hidden_size 5120) with lm_head.weight_scale F8_E4M3 [248320, 320],
+# weight_scale_2 and input_scale beside it. vLLM 0.21.0 builds that head
+# unquantized: qwen3_5.py constructs ParallelLMHead with no quant_config, and
+# modelopt.py never mentions lm_head, so the scale tensors have no destination
+# and the packed weight would not fit a bf16 head even if they were dropped. No
+# engine flag, memory fraction or context length changes that.
+#
+# 0.27.1 closes exactly that gap, verified in the installed venv on this host
+# before the unit was switched: qwen3_5.py passes `quant_config=self.quant_config`
+# into ParallelLMHead, and modelopt.py's get_quant_method returns the NVFP4
+# linear method for a ParallelLMHead that is not in exclude_modules. The same
+# venv reports torch 2.13.0+cu130, transformers 5.17.0, device capability
+# (12, 0), Qwen3_5ForConditionalGeneration in the model registry and
+# modelopt_fp4 in QUANTIZATION_METHODS. 0.27.1 rather than the newest available
+# (0.29.0) because it is the version the OMN-17948 activation plan already pins
+# for this exact artifact.
+#
+# ---------------------------------------------------------------------------
+# --gpu-memory-utilization 0.86 — CO-RESIDENCY BUDGET (OMN-14379), UNCHANGED
+# ---------------------------------------------------------------------------
+# This unit is NOT alone on cuda:0. Since the RTX 4090 was pulled for RMA
+# (OMN-16407, 2026-08-23) `vllm-embeddings.service` (:8002,
+# Qwen3-Embedding-0.6B) also runs on the surviving RTX 5090. Its unit carries
+# CUDA_VISIBLE_DEVICES=0 too. Both fractions are therefore taken out of ONE
+# 31.36 GiB device and MUST be sized against each other.
+#
+# The value was 0.92 while embeddings ran at 0.08. Those sum to exactly 1.00,
+# leaving zero room for either process's CUDA context — which is allocated
+# OUTSIDE the fraction. The unit could therefore never start, deterministically:
+#
+#   ValueError: Free memory on device cuda:0 (27.8/31.36 GiB) on startup is
+#   less than desired GPU memory utilization (0.92, 28.85 GiB).
+#
+# Measured on .201, 2026-09-03 (nvidia-smi + torch.cuda.mem_get_info):
+#
+#   T  total device                                        = 31.3564 GiB
+#                                                 (33,668,726,784 B; nvidia-smi 32,607 MiB)
+#   E  vllm-embeddings RESIDENT (nvidia-smi                 =  3.0391 GiB  (3,112 MiB)
+#      --query-compute-apps, pid 966377)
+#      its budget 0.08 * T                                  =  2.5085 GiB
+#      delta 0.5306 GiB = its CUDA context, outside the fraction
+#   F  free as seen by a STARTING vLLM process on cuda:0    = 27.8034 GiB
+#      (torch.cuda.mem_get_info, i.e. after this process's own ~0.51 GiB context)
+#
+# vLLM v1 gates startup on:  F >= gpu_memory_utilization * T
+#   hard ceiling  f_max = 27.8034 / 31.3564         = 0.8867
+#   chosen        0.86 * T = 26.966 GiB
+#                 startup margin = 27.8034 - 26.9665     =  0.837 GiB
+#
+# 0.86 rather than the 0.8867 ceiling: the margin has to absorb the embedding
+# server's own growth under load and allocator fragmentation across restarts,
+# or the fix regresses into an intermittent crash-loop instead of a permanent
+# one. 0.87 would leave only 0.52 GiB.
+#
+# This fraction is NOT changed by the model swap. The 27B checkpoint is SMALLER
+# on disk than the 35B it replaces (18.77 GB of shards against 22.74 GB), so the
+# swap moves headroom INTO the KV budget rather than out of it.
+#
+# KV floor for Qwen3.8-27B — the budget must still hold one full
+# --max-model-len run. From the checkpoint's own config.json:
+#   num_hidden_layers 64, full_attention_interval 4 -> 16 full-attention layers
+#   (the other 48 are linear/gated-delta layers whose state is per-SEQUENCE and
+#   constant in sequence length, not per-token), num_key_value_heads 2 after
+#   vLLM's tensor-parallel-1 layout of 4 KV heads across attn_output_gate, so
+#   read the config figure directly: num_key_value_heads 4, head_dim 256, bf16:
+#     per token = 16 * 2(K+V) * 4 * 256 * 2 B = 65,536 B = 64 KiB
+#     131,072 tokens                          = 8.00 GiB
+#   Linear-attention state is charged per sequence, not per token:
+#     48 layers * 48 value heads * 128 * 128 * 4 B (mamba_ssm_dtype float32)
+#       = 144 MiB per sequence; at --max-num-seqs 4 = 0.56 GiB
+#   weights on disk = 18.765 GB = 17.48 GiB (NVFP4, W4A4)
+#
+# MEASURED after the swap is what governs, not the estimate above. vLLM 0.27.1
+# reported these on the 2026-09-17 bind, at 0.86 and --max-model-len 131072:
+#
+#   loading weights                  69.50 s
+#   model loading                    17.07 GiB / 70.55 s
+#   torch.compile                     4.78 s
+#   graph capture                     2 s / 0.49 GiB
+#   free memory on startup           27.86 / 31.36 GiB
+#   available KV cache                6.93 GiB
+#   GPU KV cache size               216,946 tokens
+#   maximum concurrency @ 131,072     1.66x
+#   init engine                     131.07 s
+#   whole boot                        6m18s (mostly KV profiling)
+#
+# --max-model-len 131072 therefore HELD at 0.86, so the OMN-14379 co-residency
+# budget with vllm-embeddings survives the swap unchanged.
+#
+# 1.66x IS THE CAPACITY CEILING, and it is the figure to plan against. The KV
+# pool holds 216,946 tokens against a 131,072-token context, so the server can
+# hold at most one full-context request plus a fraction of a second. Past that
+# it does not degrade gracefully, it SERIALIZES: a second full-context caller
+# waits for the first to finish. --max-num-seqs 4 is an upper bound on short
+# requests, not a promise of four concurrent long ones.
+#
+# If vLLM ever refuses --max-model-len 131072 because the KV pool is short,
+# step the value down to what it reports rather than raising the memory
+# fraction, which would break the co-residency arithmetic above for BOTH units.
+#
+# ---------------------------------------------------------------------------
+# --kernel-config: WHY THE THREE WARMUP SWITCHES ARE OFF
+# ---------------------------------------------------------------------------
+# vLLM 0.27.1 defaults enable_flashinfer_autotune, enable_jit_warmup and
+# enable_cutedsl_warmup all on. On this card that means FlashInfer JIT-compiles
+# the whole sm120 NVFP4 CUTLASS GEMM tile sweep at startup before the server
+# ever binds its port. Measured on 2026-09-17: 65 parallel nvcc/cicc jobs,
+# host load average 111, still unfinished after 50 minutes, and the object cache
+# is written only at the END, so an interrupted run leaves nothing reusable
+# (/home/jonah/.cache/flashinfer/... held 0 .o and 0 .so files afterwards).
+# That is close to an hour of local-serving downtime for a tuning sweep, paid
+# again on any interruption.
+#
+# Turning the three off costs kernel autotuning, not correctness: the default
+# tile configuration is still used. If a later measurement shows the autotuned
+# kernels are materially faster, run the sweep DELIBERATELY in an announced
+# window and let it finish so the cache persists, rather than paying for it on
+# every cold start.
+#
+# If you change EITHER fraction, redo this arithmetic for BOTH units.
+# vllm-embeddings.service is not yet repo-owned — tracked separately (OMN-17788).
+# ---------------------------------------------------------------------------
+
+[Unit]
+Description=vLLM API - Qwen3.8-27B NVFP4 (RTX 5090, 128K)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=MAX_JOBS=4
+Type=simple
+User=jonah
+Group=jonah
+Environment=CUDA_DEVICE_ORDER=PCI_BUS_ID
+Environment=CUDA_VISIBLE_DEVICES=0
+# CUDA_HOME/PATH point at the CUDA 13.4 toolkit pip installed INSIDE this venv,
+# not at the system one. FlashInfer JIT-compiles its kernels at startup and
+# refuses to run when it cannot detect the device architecture; the system
+# toolkit at /usr/local/cuda is release 12.8, and SM 12.x needs >= 12.9, so
+# detection returned an EMPTY arch set and the engine died with the misleading
+# "FlashInfer requires GPUs with sm75 or higher" on a card that is sm120.
+# Setting TORCH_CUDA_ARCH_LIST does NOT fix it -- measured, the arch set stays
+# empty, because the refusal is about the compiler, not the request. With these
+# two lines flashinfer reports TARGET_CUDA_ARCHS {(12, '0f')} and check_cuda_arch
+# passes. systemd gives a unit a minimal PATH, so PATH is set explicitly here
+# rather than inherited.
+Environment=CUDA_HOME=/opt/vllm-0.27/venv/lib/python3.12/site-packages/nvidia/cu13
+Environment=PATH=/opt/vllm-0.27/venv/lib/python3.12/site-packages/nvidia/cu13/bin:/opt/vllm-0.27/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-/etc/vllm/env
+WorkingDirectory=/opt/vllm-0.27
+ExecStart=/opt/vllm-0.27/venv/bin/python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --model /data/inference/hf-cache/Qwen3.8-27B-NVFP4-RTX5090 \
+    --served-model-name Qwen3.8-27B \
+    --tensor-parallel-size 1 \
+    --max-model-len 131072 \
+    --max-num-seqs 4 \
+    --gpu-memory-utilization 0.86 \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --kernel-config '{"enable_flashinfer_autotune":false,"enable_jit_warmup":false,"enable_cutedsl_warmup":false}' \
+    --trust-remote-code
+Restart=on-failure
+RestartSec=10
+LimitMEMLOCK=infinity
+LimitNOFILE=65535
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
