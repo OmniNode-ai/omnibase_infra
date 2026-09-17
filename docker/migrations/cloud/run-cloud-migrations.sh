@@ -246,6 +246,9 @@ BEGIN
                     AND attnum > 0
                     AND NOT attisdropped)
   THEN
+    IF to_regclass('public.schema_migrations_legacy_omn18544') IS NOT NULL THEN
+      RAISE EXCEPTION 'OMN-18544: a retired ledger stash already exists while public.schema_migrations is still in the retired shape; resolve by hand rather than letting the rename collide';
+    END IF;
     RAISE NOTICE 'OMN-18544: retiring the migration_name-keyed ledger, rows preserved';
     ALTER TABLE public.schema_migrations RENAME TO schema_migrations_legacy_omn18544;
     FOR legacy_index IN
@@ -261,6 +264,19 @@ BEGIN
   END IF;
 END
 \$\$;"
+
+# Applying the tracking file outside the loop bypasses the MANIFEST's per-entry
+# apply conditions for that one entry. That is only safe while the entry carries
+# none, which is true today -- so it is checked rather than assumed. If
+# omninode_infra ever gives it a condition, this runner would silently ignore it
+# and the header's "decides nothing about what runs when" would stop being true.
+TRACKING_CONDITIONS="$(manifest_entries "$MANIFEST" | awk -F'\t' -v n="00000000_migrations_tracking.sql" '$1 == n { print $2 }')"
+if [ -n "$TRACKING_CONDITIONS" ]; then
+  echo "FATAL: the MANIFEST now gives 00000000_migrations_tracking.sql the apply" >&2
+  echo "       conditions '${TRACKING_CONDITIONS}'. This runner applies it outside" >&2
+  echo "       the loop to bootstrap the tracker and would ignore them (OMN-18544)." >&2
+  exit 1
+fi
 
 echo "-- tracker bootstrap (corpus-owned): 00000000_migrations_tracking.sql"
 psql_db -f "$TRACKING"
@@ -282,17 +298,24 @@ psql_db -f "$TRACKING"
 # a distinguishable answer instead of a psql abort mid-`if` that would print the
 # WRONG diagnosis below. PGOPTIONS above pins search_path, so "absent" here means
 # the corpus's own CREATE did not run, not that it landed in another schema.
-if [ "$(psql_db -tAc "SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.schema_migrations')")" != "1" ]; then
+# Captured OUTSIDE the `if`. A bare assignment takes the substitution's status,
+# so a psql that failed for any other reason -- a dropped connection, an auth
+# refusal -- aborts here under set -e. Inside an `if` condition set -e is
+# suspended and the empty result would compare unequal below, printing this
+# refusal's diagnosis for a cause it does not describe.
+TRACKER_PRESENT="$(psql_db -tAc "SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.schema_migrations')")"
+if [ "$TRACKER_PRESENT" != "1" ]; then
   echo "FATAL: the corpus bootstrap left no public.schema_migrations at all." >&2
   echo "       00000000_migrations_tracking.sql applied without creating its own" >&2
   echo "       tracking table, which this runner has no shape of its own to fall" >&2
   echo "       back on by design (OMN-18544)." >&2
   exit 1
 fi
-if [ "$(psql_db -tAc "SELECT count(*) FROM pg_attribute WHERE attrelid = to_regclass('public.schema_migrations') AND attname = 'migration_name' AND attnum > 0 AND NOT attisdropped")" != "0" ]; then
+RETIRED_COLUMN="$(psql_db -tAc "SELECT count(*) FROM pg_attribute WHERE attrelid = to_regclass('public.schema_migrations') AND attname = 'migration_name' AND attnum > 0 AND NOT attisdropped")"
+if [ "$RETIRED_COLUMN" != "0" ]; then
   echo "FATAL: public.schema_migrations still carries the retired migration_name" >&2
   echo "       column after the corpus bootstrap, so the convergence above did not" >&2
-  echo "       run and the corpus's own CREATE TABLE no-opped against the old table." >&2
+  echo "       run and the corpus's own idempotent create no-opped against it." >&2
   echo "       That is the OMN-18544 defect, unconverged. Refusing rather than" >&2
   echo "       resuming against a ledger the corpus cannot write to." >&2
   exit 1
@@ -337,7 +360,11 @@ BEGIN
     RAISE EXCEPTION 'OMN-18544: the retired ledger is stashed but public.schema_migrations does not exist';
   END IF;
 
-  SELECT a.attname INTO key_column
+  -- STRICT: a composite or absent primary key raises here instead of silently
+  -- taking whichever row came first. The shell guard below already refuses that
+  -- case, but it runs in a different psql session, so this block carries no
+  -- guarantee of its own without the keyword.
+  SELECT a.attname INTO STRICT key_column
     FROM pg_index i
     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
    WHERE i.indrelid = live AND i.indisprimary;
@@ -347,6 +374,7 @@ BEGIN
     FROM pg_attribute s
    WHERE s.attrelid = stash AND s.attnum > 0 AND NOT s.attisdropped
      AND s.attname <> 'migration_name'
+     AND s.attname <> key_column
      AND EXISTS (SELECT 1 FROM pg_attribute l
                   WHERE l.attrelid = live AND l.attnum > 0 AND NOT l.attisdropped
                     AND l.attname = s.attname);

@@ -195,6 +195,18 @@ _BODYLESS_CREATE_RE = re.compile(
 #: which only distinguishes the two forms when the gap between the words is
 #: exactly one space -- and the runner's own bookkeeping INSERTs are wrapped
 #: across lines.
+def _strip_shell_comments(script: str) -> str:
+    """Drop whole-line ``#`` comments from a shell script.
+
+    Whole-line only. A trailing ``#`` can be a parameter expansion
+    (``${verdict#SKIP }``) rather than a comment, and cutting at one would delete
+    live code and turn a presence check into a false negative.
+    """
+    return "\n".join(
+        "" if line.lstrip().startswith("#") else line for line in script.splitlines()
+    )
+
+
 def _collapsed(sql: str) -> str:
     """Comments removed and every whitespace run flattened to one space."""
     return re.sub(r"\s+", " ", _strip_comments(sql))
@@ -550,11 +562,28 @@ def test_the_compose_runner_makes_no_claim_about_a_shape_it_does_not_declare() -
 #: this module exists to refuse.
 WALK_ROOTS: tuple[str, ...] = ("docker", "scripts", "src", "tests")
 
-#: Suffixes the walk reads. ``.captured`` is here because a captured fixture is
-#: still a file that declares a shape.
+#: Suffixes the walk reads, compared case-INSENSITIVELY. ``.captured`` is here
+#: because a captured fixture is still a file that declares a shape; ``.psql``
+#: because psql scripts are ordinarily spelled that way. An extensionless file
+#: whose first line is a shebang is read too: ``Path.suffix`` is empty for those
+#: and a declarer in one would otherwise be in no registry, trip no walk, and
+#: match no pre-commit pattern -- the exact invisibility this check exists for.
 WALK_SUFFIXES: frozenset[str] = frozenset(
-    {".sql", ".sh", ".py", ".yaml", ".yml", ".captured"}
+    {".sql", ".psql", ".sh", ".py", ".yaml", ".yml", ".captured"}
 )
+
+
+def _walk_reads(path: Path, suffixes: frozenset[str]) -> bool:
+    """Whether the completeness walk reads ``path``."""
+    if path.suffix.lower() in suffixes:
+        return True
+    if path.suffix:
+        return False
+    try:
+        with path.open("rb") as handle:
+            return handle.read(2) == b"#!"
+    except OSError:
+        return False
 
 
 def _walk_declarers(
@@ -577,7 +606,7 @@ def _walk_declarers(
             "rglob would return nothing and this check would report a clean tree"
         )
         for path in sorted(base.rglob("*")):
-            if not path.is_file() or path.suffix not in suffixes:
+            if not path.is_file() or not _walk_reads(path, suffixes):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -674,22 +703,54 @@ def test_a_corpus_owned_runner_declares_no_shape_by_any_other_spelling() -> None
         if bodyless
         else ""
     )
-    # The `-f` set is the named-file applier and must be exactly these two. The
-    # runner's OTHER applier is the manifest loop's stdin pipe, which feeds it 46
-    # corpus files this gate deliberately never reads -- they are omninode_infra's
-    # and out of scope. Naming that here rather than leaving the `-f` assertion to
-    # imply a completeness it does not have.
-    applied = set(re.findall(r'psql_db -f "\$\{?(\w+)', text))
-    assert applied == {"BASELINE", "TRACKING"}, (
-        f"{COMPOSE_RUNNER.name} applies a named SQL file this gate never reads "
-        f"({sorted(applied.symmetric_difference({'BASELINE', 'TRACKING'}))}), so a "
-        "tracker declared inside it would be compared against nothing"
+    # Every rule above matches a declaration that NAMES the table. This one does
+    # not need to: the runner legitimately contains no CREATE TABLE at all, so
+    # any is refused. That closes the spellings a name-matching rule cannot see --
+    # `EXECUTE format('CREATE TABLE ... public.%I ...', 'schema_migrations')`,
+    # which is this file's OWN idiom for the convergence, and a table name held
+    # in a shell variable. Both reintroduce the defect in a form that looks
+    # exactly like the surrounding code.
+    body = _strip_shell_comments(text)
+    stray_create = re.search(r"CREATE\s+(?:\w+\s+)*TABLE\b", body, re.IGNORECASE)
+    assert stray_create is None, (
+        f"{COMPOSE_RUNNER.name} contains a CREATE TABLE ({stray_create.group(0)!r}). "
+        "This runner creates no table of its own by design; the corpus's tracking "
+        "migration is its only bootstrap"
+        if stray_create
+        else ""
     )
-    stdin_appliers = re.findall(r"\|\s*psql_db -f -", text)
-    assert len(stdin_appliers) == 1, (
-        f"{COMPOSE_RUNNER.name} has {len(stdin_appliers)} stdin appliers; exactly one "
-        "is expected (the manifest loop), and a second would be a corpus-applying "
-        "path nobody declared"
+    # The INSERT target list must be the derived key and nothing spelled out. A
+    # per-line check for the derived token is satisfied by a line that ALSO names
+    # a literal column, which is how `("${KEY_COLUMN}", applied_at)` survived a
+    # review round.
+    for target in re.findall(
+        rf"INSERT\s+INTO\s+public\.{TRACKER_TABLE}\s*\(([^)]*)\)", _collapsed(body)
+    ):
+        assert re.fullmatch(r'(?:%I%s|%I|\\?"\$\{KEY_COLUMN\}\\?")', target.strip()), (
+            f"{COMPOSE_RUNNER.name} spells a literal column in an INSERT target list on "
+            f"the canonical tracker: ({target.strip()}). Only the derived key belongs there"
+        )
+    # Matched by SHAPE, not by quoting. The previous form keyed on the literal
+    # `psql_db -f "$VAR`, so `psql_db -f /migrations/fixup.sql`, `--file`, a bare
+    # `| psql_db`, and a hand-rolled `psql -h ... -f ...` each applied a file the
+    # gate never reads while the assertion reported full coverage.
+    appliers = [
+        line.strip()
+        for line in _strip_shell_comments(text).splitlines()
+        if re.search(r"\bpsql", line)
+        and re.search(r"(?:\s-f\b|\s--file\b|\|\s*psql)", line)
+    ]
+    allowed = {
+        'psql_db -f "$BASELINE"',
+        'psql_db -f "$TRACKING"',
+        '{ manifest_guc_prelude "$conditions"; cat "${MIGRATION_DIR}/${name}"; } | psql_db -f -',
+    }
+    assert set(appliers) == allowed, (
+        f"{COMPOSE_RUNNER.name}'s set of SQL-applying invocations changed. Each one "
+        "either applies a file this gate reads, or moves a declaration into a file "
+        "it never will:\n"
+        f"  unexpected: {sorted(set(appliers) - allowed)}\n"
+        f"  missing:    {sorted(allowed - set(appliers))}"
     )
 
 
