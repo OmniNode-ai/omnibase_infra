@@ -65,6 +65,10 @@ ASSERTION_SCRIPT = "assert_evidence_artifact.py"
 EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "lab-load",
     "lab-pass-receipt-compose-dev",
+    # OMN-18572: the same lane, keyed by the OMNINODE_INFRA commit that changed
+    # its onex-api image. A third claim about a third repository's commits; the
+    # three artifact names cannot collide because each carries its own sha.
+    "lab-pass-receipt-compose-dev-onex-api",
     # OMN-18268: the same lane, keyed by a SIBLING repository's merged sha.
     "lab-pass-receipt-compose-dev-sibling",
     "lab-pass-receipt-onex-lab",

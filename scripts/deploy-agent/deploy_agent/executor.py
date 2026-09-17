@@ -18,6 +18,7 @@ import tomllib
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -90,6 +91,25 @@ COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
 COMPOSE_GEN_OUTPUT_FILE = f"{REPO_DIR}/docker/docker-compose.generated.yml"
 COMPOSE_PROJECT = "omnibase-infra"
 RUNTIME_POLICY_ENV_FILE = Path(REPO_DIR) / "docker" / "runtime-policy.env"
+# OMN-18572. The operator-env keys THIS FLEET rewrites between agent restarts,
+# and therefore the only ones ``_compose_env`` re-reads from disk per job rather
+# than trusting the process snapshot systemd resolved at unit start. See
+# ``_repointed_pin_env`` for why the set is narrow and why widening it is a
+# deliberate act. ``ONEX_CLOUD_MIGRATE_IMAGE`` has the same shape and is one
+# entry away, but its delivery is OMN-18475's in-flight work and is not taken
+# here -- two lanes writing the same seam is how a fix lands twice and neither
+# half is attributable.
+OPERATOR_REPOINTED_PIN_KEYS: tuple[str, ...] = ("ONEX_API_IMAGE",)
+#: The governed repoint the agent shells out to, resolved against the deploy
+#: clone rather than written out a second time.
+REPOINT_ONEX_API_SCRIPT = (
+    Path(REPO_DIR) / "scripts" / "runtime_build" / "repoint_dev_lane_onex_api.py"
+)
+#: The one service a pin advance is allowed to recreate. Named rather than
+#: derived: a scope that could widen is a scope that will.
+ONEX_API_SERVICE = "onex-api"
+REPOINT_TIMEOUT_SECONDS = 120
+ONEX_API_RECREATE_TIMEOUT_SECONDS = 300
 
 PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
@@ -576,6 +596,61 @@ def _load_runtime_policy_env(path: Path | None = None) -> dict[str, str]:
     return _load_dotenv_file(env_path)
 
 
+def _operator_env_file() -> Path | None:
+    """The operator env store this agent was launched against, or ``None``.
+
+    ``DEPLOY_AGENT_ENV_FILE`` is declared on the unit and is one of the
+    protected names the launcher refuses to let the store itself override, so
+    it names the same file for the life of the process. There is no default
+    (rule 8): a guessed path would silently read some other machine's file.
+    """
+    declared = os.environ.get("DEPLOY_AGENT_ENV_FILE", "").strip()
+    return Path(declared) if declared else None
+
+
+def _repointed_pin_env() -> dict[str, str]:
+    """Re-read the pins that are REPOINTED on the host between agent restarts.
+
+    OMN-18572. ``deploy-agent-dev.service`` resolves the operator env store once,
+    when systemd starts the process, so ``_compose_env``'s ``dict(os.environ)``
+    re-copies a snapshot frozen at that moment. Every other value in that file is
+    operator-held and changes on the operator's own cadence, which the restart
+    boundary is a perfectly good clock for. ``ONEX_API_IMAGE`` is different: it is
+    rewritten BY THIS FLEET, by ``scripts/runtime_build/repoint_dev_lane_onex_api.py``,
+    between jobs -- and a pin the writer advanced while the reader holds a stale
+    copy is the 11:26Z recreate of 2026-09-17, where the agent faithfully brought
+    up ``onex-api`` on the pin that had been replaced eight minutes earlier.
+
+    Deliberately NARROW. Overlaying the whole file would fix the same symptom and
+    change every other value the deploy runs with, including credentials the
+    launcher decoded differently from the way this parser would -- a far larger
+    blast radius than the defect. ``OPERATOR_REPOINTED_PIN_KEYS`` is the list of
+    keys this fleet itself writes, and adding one is a deliberate act.
+
+    Fails OPEN, by design and only here: an absent or unreadable store yields an
+    empty mapping and the process value stands. The agent's ability to deploy at
+    all must not depend on a file that exists on one host.
+    """
+    path = _operator_env_file()
+    if path is None:
+        return {}
+    try:
+        stored = _load_dotenv_file(path)
+    except OSError as exc:
+        logger.warning(
+            "operator env store %s could not be read for the repointed pins "
+            "(%s); the process environment's values stand",
+            path,
+            exc,
+        )
+        return {}
+    return {
+        key: value
+        for key, value in stored.items()
+        if key in OPERATOR_REPOINTED_PIN_KEYS and value
+    }
+
+
 def _load_dotenv_file(env_path: Path) -> dict[str, str]:
     """Parse one committed dotenv file with shell-compatible quoting."""
     if not env_path.exists():
@@ -678,8 +753,14 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     for key, value in _load_runtime_policy_env().items():
         env.setdefault(key, value)
+    # OMN-18572: `update`, not `setdefault`. The process environment ALREADY
+    # carries a value for these keys -- a stale one, resolved at unit start --
+    # so a setdefault would read as wired and change nothing.
+    env.update(_repointed_pin_env())
     # OMN-18073: refuse before compose interpolation writes a provably-mangled
-    # value into every container this deploy creates.
+    # value into every container this deploy creates. Deliberately AFTER the
+    # re-read above, so a mangled value arriving from the store is refused on
+    # the same terms as one arriving from the process.
     _assert_no_undecoded_ansi_c_quoting(env)
     postgres_host = env.get("POSTGRES_HOST", "127.0.0.1")
     postgres_port = env.get("POSTGRES_PORT", "5436")
@@ -1778,6 +1859,150 @@ class DeployExecutor:
 
         on_phase_update(Phase.GIT, PhaseStatus.SUCCESS)
         return sha
+
+    def deliver_onex_api_pin(
+        self,
+        *,
+        sha: str,
+        omninode_clone: Path,
+        lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+    ) -> dict[str, Any]:
+        """Advance ``ONEX_API_IMAGE`` to this merge's image and recreate that one service.
+
+        OMN-18572 -- the DELIVER half of a fact the lab-overlay applier already
+        produces. ``lab_overlay._derive_pins`` builds
+        ``onex-lab/omnicloud-core:<omninode_infra sha8>-<stamp>`` on every apply,
+        so after a successful dev deploy a correct image EXISTS on this host. The
+        compose lane runs whatever ``ONEX_API_IMAGE`` names, and until this method
+        nothing on the agent path wrote that key -- which is the whole of "a fix
+        merged at 09:00:53Z was still not on the lane at 11:15Z".
+
+        THE PIN IS RESTRICTED TO THIS JOB'S LINEAGE. ``--sha`` is passed, so the
+        repoint considers only images built from the commit this deploy just
+        applied. Without it the newest resident image wins whatever its lineage,
+        and a delivery that pins somebody else's commit is not a delivery of this
+        merge -- it is the floating ref this path exists to remove.
+
+        THE RECREATE IS ONE SERVICE. ``--no-deps`` so compose cannot walk into
+        core infra, and exactly one service name, so a pin advance can never
+        become a lane-wide bounce. ``_compose_env`` is what carries the new value
+        into the invocation, which is why the per-job re-read is a precondition
+        of this method rather than an independent nicety.
+
+        RETURNS RATHER THAN RAISES. Every outcome is a mapping carrying a
+        ``result``, because the caller records it and a raise here would convert
+        a delivery finding into a failed deploy of a lane that converged. The
+        pair ``tag_advanced``/``recreated`` is reported separately and on purpose:
+        ``recreated`` without ``tag_advanced`` is a faithful restart onto a stale
+        tag, and ``tag_advanced`` without ``recreated`` is a pin in a file that
+        never reached a container. They are different failures and a single
+        boolean hides both.
+        """
+        if lane != EnumRuntimeLane.DEV:
+            return {
+                "result": "SKIPPED",
+                "reason": (
+                    f"lane {lane.value} is not the dev lane; the onex-api pin is "
+                    "a dev-lane delivery and no governed lane is repointed here"
+                ),
+                "tag_advanced": False,
+                "recreated": False,
+            }
+
+        env_file = _operator_env_file()
+        if env_file is None:
+            return {
+                "result": "SKIPPED",
+                "reason": (
+                    "DEPLOY_AGENT_ENV_FILE is not declared, so there is no "
+                    "operator env store to advance the pin in"
+                ),
+                "tag_advanced": False,
+                "recreated": False,
+            }
+
+        argv = [
+            "python3",
+            str(REPOINT_ONEX_API_SCRIPT),
+            "--env-file",
+            str(env_file),
+            "--omninode-clone",
+            str(omninode_clone),
+            "--sha",
+            sha,
+            "--execute",
+        ]
+        repoint = _run(argv, timeout=REPOINT_TIMEOUT_SECONDS)
+        # The script prints a JSON refusal on its own stdout on every bounded
+        # refusal, so an unparseable body means the interpreter itself failed.
+        # Synthesising a refusal here keeps the caller from ever recording a
+        # bare null, which reads as "not attempted" rather than "refused".
+        try:
+            record: dict[str, Any] = json.loads(repoint.stdout)
+        except (ValueError, TypeError):
+            return {
+                "result": "REFUSED",
+                "reason": (
+                    f"repoint_dev_lane_onex_api.py exited {repoint.returncode} "
+                    f"with unparseable output: "
+                    f"{(repoint.stderr or repoint.stdout)[:400]}"
+                ),
+                "tag_advanced": False,
+                "recreated": False,
+            }
+
+        record.setdefault("recreated", False)
+        if not record.get("tag_advanced"):
+            # UNCHANGED and REFUSED both land here, and neither is a reason to
+            # bounce a healthy container. Recreating on an unadvanced tag is the
+            # silent staleness OMN-18113 named, performed deliberately.
+            logger.info(
+                "onex-api pin not advanced (%s); no recreate: %s",
+                record.get("result"),
+                record.get("reason", "the resident pin already names this image"),
+            )
+            return record
+
+        config = lane_config_for(lane)
+        recreate = [
+            "docker",
+            "compose",
+            *_compose_file_args(lane),
+            "-p",
+            config.compose_project,
+            "--profile",
+            "runtime",
+            "up",
+            "-d",
+            "--no-deps",
+            "--force-recreate",
+            ONEX_API_SERVICE,
+        ]
+        result = _run(
+            recreate,
+            timeout=ONEX_API_RECREATE_TIMEOUT_SECONDS,
+            env=_compose_env(),
+        )
+        record["recreated"] = result.returncode == 0
+        if result.returncode != 0:
+            record["result"] = "PIN_WRITTEN_NOT_RECREATED"
+            record["reason"] = (
+                f"the pin advanced to {record.get('pin_after')} and the "
+                f"{ONEX_API_SERVICE} recreate exited {result.returncode}: "
+                f"{(result.stderr or result.stdout).strip()[:400]}"
+            )
+            logger.error(
+                "onex-api pin advanced but the service was not recreated: %s",
+                record["reason"],
+            )
+        else:
+            logger.info(
+                "onex-api delivered: %s -> %s, %s recreated",
+                record.get("pin_before"),
+                record.get("pin_after"),
+                ONEX_API_SERVICE,
+            )
+        return record
 
     def _ref_lineage_facts(self, git_ref: str, *, timeout: int) -> ModelRefLineageFacts:
         """Ask git where ``git_ref`` sits relative to this lane's tracking branch.
