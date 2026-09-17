@@ -1,0 +1,442 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-api-lab-delivery-reusable.yml
+#
+# The onex-api half of rule 24(a). Called by `omninode_infra` when a push to
+# `dev` touches the lane's onex-api build inputs, so that merge delivers to the
+# `.201` compose dev lane instead of waiting for somebody to notice.
+#
+# THE DEFECT, MEASURED 2026-09-17
+# -------------------------------
+# `omninode_infra#1523` fixed the missing SASL fields that made tenant bootstrap
+# on the lab impossible, and merged at 09:00:53Z. At 11:15Z the lane was still
+# running `onex-lab/omnicloud-core:f37261c2-...`, the PARENT of that squash --
+# `git merge-base --is-ancestor 4528c42c f37261c2` exits 1, the reverse exits 0.
+# Tenant creation on the lab was impossible for the whole window and two lanes
+# lost a morning to it. `omninode_infra` had no rebuild trigger of any kind:
+# `grep -rln "redeploy-start\|rebuild-requested\|trigger_rebuild" .github/workflows/`
+# returned nothing, and the repository had never published a lab-pass receipt.
+#
+# WHY THIS IS NOT THE SIBLING REUSABLE
+# ------------------------------------
+# `runtime-rebuild-trigger-reusable.yml` serves repositories whose sources the
+# runtime image VENDORS, and its convergence guard reads the vendored revision
+# out of `/app/build-provenance.json`. `omninode_infra` is not vendored:
+# `docker/onex-api` is a self-contained `python:3.12-slim` app with no ombase
+# wheel, built as its OWN image by the deploy agent's lab-overlay applier and
+# run as a separate compose service pinned by `ONEX_API_IMAGE`. Pointed at an
+# omninode_infra push, that guard would read a manifest the repository does not
+# appear in. A different fact needs a different reader, which is
+# `scripts/ci/check_lane_onex_api_revision.py`.
+#
+# WHY THE DELIVERY IS THE AGENT'S AND NOT THIS WORKFLOW'S
+# -------------------------------------------------------
+# Advancing the lane means writing `ONEX_API_IMAGE` in the operator env store on
+# the lab host. That file is mounted into `omninode-deploy-runner` READ-ONLY
+# (`docker/docker-compose.runners.yml`), and making it writable would hand the CI
+# fleet write access to the host's operator credentials for the benefit of one
+# pin. The deploy agent already owns that identity by design -- the same argument
+# OMN-18200 recorded for putting the k3s lab-overlay apply in the agent rather
+# than in a workflow. So this workflow ASKS (a redeploy-start command), the agent
+# BUILDS and DELIVERS (OMN-18572's `executor.deliver_onex_api_pin`), and this
+# workflow then PROVES and RECORDS.
+#
+# WHERE THE RECEIPT LANDS, STATED RATHER THAN IMPLIED
+# ---------------------------------------------------
+# A called reusable workflow runs inside the CALLER's repository, so the receipt
+# this emits lives on the `omninode_infra` run and is keyed by the
+# `omninode_infra` sha. That is the right key -- it is the sha the lane was
+# proven to carry -- and it is deliberately invisible to omnibase_infra's own
+# delivery gate, which asks about omnibase_infra commits. Different claims about
+# different commits; no artifact name collides.
+#
+# Tickets: OMN-18572 (this), OMN-17530 rule 24(a), OMN-18113 (the repoint path),
+#          OMN-18200 (the compose-dev receipt), OMN-18268 (the sibling half).
+
+name: onex-api lab delivery (omninode_infra)
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: "The omninode_infra commit that was pushed to dev"
+        required: true
+        type: string
+      base_branch:
+        description: >-
+          The branch that was pushed. Required and checked rather than assumed:
+          the publisher maps a branch to a runtime lane, and a caller that
+          wandered onto `main` would silently become a stability-test rebuild.
+        required: true
+        type: string
+      changed_files:
+        description: "Comma-separated changed file paths of the push"
+        required: true
+        type: string
+      requested_by:
+        description: "Attribution recorded on the published command"
+        required: true
+        type: string
+      infra_ref:
+        description: >-
+          Ref the convergence job checks THIS repository out at, to supply the
+          scripts it invokes. Leave unset in normal use: the default is
+          github.job_workflow_sha, which is exactly the SHA the caller pinned
+          this workflow to, so the YAML spelling a script's arguments and the
+          script itself are one commit behind one pin and cannot drift apart.
+          OMN-18387 is why that matters: a caller pinned to an older YAML kept
+          invoking a newer probe-lane without an argument it had made required,
+          and every receipt it produced was a FAIL.
+        required: false
+        default: ""
+        type: string
+    secrets:
+      KAFKA_SASL_USERNAME:
+        required: true
+      KAFKA_SASL_PASSWORD:
+        required: true
+
+jobs:
+  trigger-delivery:
+    name: Ask the deploy agent to rebuild and deliver onex-api
+    # The dev control-bus broker is a tailnet host:port, so this publisher is
+    # LAN-BOUND and must not ride the shared trusted-CI seam (OMN-17888). The
+    # dedicated variable is deliberately left UNSET so the self-hosted literal
+    # operates, and the script refuses a LAN publish from hosted compute by NAME
+    # rather than timing out against an unresolvable bootstrap host.
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    # Matches the two sibling triggers' ceiling and for the same measured reason
+    # (OMN-18200 AC3): the shared CI env is bimodal and a cold build after a
+    # lockfile bump cost 4m01s on a run whose 5-minute ceiling cancelled it.
+    timeout-minutes: 15
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      runtime_lane: ${{ steps.publish.outputs.runtime_lane }}
+      source_sha: ${{ steps.publish.outputs.sibling_sha }}
+
+    steps:
+      - name: Refuse a branch this delivery does not serve
+        env:
+          BASE_BRANCH: ${{ inputs.base_branch }}
+        run: |
+          set -euo pipefail
+          if [ "${BASE_BRANCH}" != "dev" ]; then
+            echo "::error::base_branch='${BASE_BRANCH}'. The onex-api lab" \
+              "delivery serves the .201 compose DEV lane and nothing else. A" \
+              "push to any other branch maps to a governed lane, which this" \
+              "path must never rebuild. Refusing rather than publishing a" \
+              "command for a lane nobody asked for."
+            exit 1
+          fi
+
+      # Into the workspace ROOT, so `./.github/actions/setup-python-uv` resolves
+      # against omnibase_infra and the primary ref is read from a real clone.
+      #
+      # reusable-checkout-ref-ok: trigger-delivery OMN-18572 this clone's HEAD IS
+      # the published PRIMARY_REF, so it must be dev, not this workflow's commit.
+      #
+      # Deliberately NOT pinned to `github.job_workflow_sha`, unlike the
+      # convergence job below. This checkout also supplies the omnibase_infra
+      # revision the lane is told to rebuild at, and that wants dev HEAD by
+      # definition: pinning it to this workflow's own (older) commit would
+      # rebuild the lane at a stale infra revision, a worse defect than the one
+      # being fixed.
+      - name: Checkout omnibase_infra (the build-context repository)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_infra
+          ref: dev
+          persist-credentials: false
+
+      - name: Resolve the omnibase_infra ref the lane rebuilds at
+        id: primary
+        run: echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch authoritative CI bus lane overlay
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .ci-bus-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+            src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py
+          sparse-checkout-cone-mode: false
+
+      - name: Fetch canonical deploy-path classifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omniclaude
+          ref: main
+          path: .deploy-gate-source
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/deploy-gate/validate_pr_deploy_required.py
+          sparse-checkout-cone-mode: false
+
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-onex-api-lab-delivery
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+
+      - name: Publish the redeploy-start for this omninode_infra commit
+        id: publish
+        env:
+          # The dev control-bus lane declares SASL_PLAINTEXT / SCRAM-SHA-256 in
+          # omnimarket's config/ci_bus_lanes.yaml, sparse-checked-out above. The
+          # publisher READS that declaration and refuses to downgrade it, so a
+          # SASL lane with no credentials is a hard failure, never a silent
+          # plaintext publish (OMN-18012).
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          PUSH_CHANGED_FILES: ${{ inputs.changed_files }}
+          PUSH_BASE_BRANCH: ${{ inputs.base_branch }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          REQUESTED_BY: ${{ inputs.requested_by }}
+          PRIMARY_REF: ${{ steps.primary.outputs.ref }}
+          CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          uv run python scripts/trigger_rebuild_on_merge.py \
+            --changed-files "$PUSH_CHANGED_FILES" \
+            --labels "" \
+            --base-branch "$PUSH_BASE_BRANCH" \
+            --source-repo "omninode_infra" \
+            --source-sha "$SOURCE_SHA" \
+            --primary-ref "$PRIMARY_REF" \
+            --bus-lane "dev" \
+            --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml" \
+            --consumer-model ".ci-bus-overlay/src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py" \
+            --runtime-path-validator ".deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py" \
+            --runner-environment "$CI_RUNNER_ENVIRONMENT" \
+            --requested-by "$REQUESTED_BY"
+
+  # Publication is not application. The job above proves a command reached the
+  # broker; it cannot prove the lane runs the image. This asserts the fact the
+  # `onex-api` container itself carries.
+  verify-onex-api-delivered:
+    name: Verify the dev lane runs onex-api at this commit
+    needs: trigger-delivery
+    if: >-
+      needs.trigger-delivery.outputs.published == 'true' &&
+      needs.trigger-delivery.outputs.runtime_lane == 'dev'
+    # The lane's docker daemon and published ports are on the LAN; hosted compute
+    # can see neither. The checkout below is pinned to a commit of
+    # omnibase_infra, so no caller-authored code executes on the fleet.
+    runs-on: [self-hosted, omnibase-deploy]
+    # DERIVED, not chosen: converge --wait-timeout 25m + the declared compose-dev
+    # settle budget (900s, config/lab_pass_settle_budget.yaml) +
+    # RESERVED_TAIL_SECONDS 120s = 2520s = 42m, plus margin. A job killed by its
+    # ceiling uploads NO receipt, which is the one outcome worse than a failing
+    # one.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout omnibase_infra (the guard's own repository)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_infra
+          ref: ${{ inputs.infra_ref || github.job_workflow_sha }}
+          persist-credentials: false
+
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-onex-api-lab-delivery
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+
+      - name: Record the lab-pass window start and claim a private receipt directory
+        run: |
+          set -euo pipefail
+          echo "LAB_PASS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+          # OMN-18420. Every emitting job in this repository and in the two
+          # sibling reusables runs on the SAME `omnibase-deploy` host, and a
+          # `mkdir -p` on an existing directory is a no-op -- so a receipt.json
+          # left behind by an earlier job survived into the next one and was
+          # published under THAT job's sha-keyed name. The run id, the attempt
+          # and the job name together name exactly one execution, and the
+          # `rm -rf` is what makes the claim true rather than merely likely.
+          LAB_PASS_WORK="${RUNNER_TEMP}/lab-pass-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_JOB}"
+          rm -rf "${LAB_PASS_WORK}"
+          mkdir -p "${LAB_PASS_WORK}/receipt"
+          echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
+          echo "LAB_PASS_CHECKS=${LAB_PASS_WORK}/checks.json" >> "$GITHUB_ENV"
+
+      - name: Wait for the lane's onex-api to report this revision
+        id: converge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ needs.trigger-delivery.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/check_lane_onex_api_revision.py \
+            --expect-revision "$SOURCE_SHA" \
+            --wait-timeout 25m \
+            --poll-interval 60s
+
+      # The onex-api service's own readiness, which the shared lane probe does
+      # not cover: `probe-lane` reads the runtime, effects and projection
+      # surfaces, and rule 24(d) says plainly that the compose lane's
+      # tenant-scoped paths are not exercised by it. This check is narrow and
+      # says exactly what it read.
+      - name: Probe onex-api on the lane
+        id: onex-api-health
+        if: always()
+        env:
+          # `host.docker.internal`, NOT `localhost`: this job runs in the
+          # `omninode-deploy-runner` container against the host's docker daemon,
+          # not in the host's network namespace. That runner is the one carrying
+          # the host-gateway alias (`docker/docker-compose.runners.yml`
+          # `extra_hosts`), which is why the same form works for :8085 and :8086
+          # in the neighbouring workflows.
+          ONEX_API_URL: http://host.docker.internal:8090/health
+        run: |
+          set -euo pipefail
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${ONEX_API_URL}" || echo 000)"
+          echo "code=${CODE}" >> "$GITHUB_OUTPUT"
+          echo "onex-api ${ONEX_API_URL} -> HTTP ${CODE}"
+
+      - name: Probe the dev lane
+        id: probe
+        if: always()
+        env:
+          # Must equal this job's own `timeout-minutes`, which is DERIVED from
+          # the declared parts and asserted by
+          # tests/ci/test_lab_pass_settle_budget.py.
+          JOB_TIMEOUT_MINUTES: 45
+          RESERVED_TAIL_SECONDS: 120
+          # The container whose generation is re-read here and compared against
+          # the one the convergence guard verified. An empty CONVERGE_GENERATION
+          # means the guard published none, which FAILS the binding check rather
+          # than skipping it.
+          #
+          # STATED RATHER THAN LEFT TO BE INFERRED: this binds the ONEX-API
+          # container -- it proves onex-api was not recreated between the
+          # revision verdict and this probe, which is the fact this delivery is
+          # about. It does NOT bind the three HTTP reads below, which are of the
+          # runtime, effects and projection surfaces and belong to other
+          # containers. Those reads say the lane as a whole is up; the onex-api
+          # claim is carried by the revision check and the health check above.
+          DEV_LANE_CONTAINER: onex-api
+          CONVERGE_GENERATION: ${{ steps.converge.outputs.generation }}
+          DEV_LANE_MAIN_URL: http://host.docker.internal:8085
+          DEV_LANE_EFFECTS_URL: http://host.docker.internal:8086
+          DEV_LANE_PROJECTION_URL: http://host.docker.internal:3002
+        run: |
+          set -euo pipefail
+          mkdir -p "${LAB_PASS_DIR}"
+          STARTED_EPOCH=$(date -u -d "${LAB_PASS_STARTED_AT}" +%s 2>/dev/null \
+            || python3 -c "import datetime,os;print(int(datetime.datetime.strptime(os.environ['LAB_PASS_STARTED_AT'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.UTC).timestamp()))")
+          ELAPSED=$(( $(date -u +%s) - STARTED_EPOCH ))
+
+          # The derivation is a tested Python step, not shell arithmetic: it
+          # exits non-zero and prints nothing on stdout when the declaration
+          # cannot be resolved, so a partial capture cannot become a guessed
+          # budget (OMN-18436).
+          SETTLE_BUDGET_JSON=$(uv run python scripts/ci/lane_settle_budget.py \
+            --lane compose-dev \
+            --job-ceiling-seconds "$(( JOB_TIMEOUT_MINUTES * 60 ))" \
+            --elapsed-seconds "$ELAPSED" \
+            --reserved-tail-seconds "$RESERVED_TAIL_SECONDS")
+          echo "settle budget: ${SETTLE_BUDGET_JSON}"
+
+          uv run python scripts/ci/lab_pass_receipt.py probe-lane \
+            --lane compose-dev \
+            --main-url "$DEV_LANE_MAIN_URL" \
+            --effects-url "$DEV_LANE_EFFECTS_URL" \
+            --projection-url "$DEV_LANE_PROJECTION_URL" \
+            --settle-budget-json "$SETTLE_BUDGET_JSON" \
+            --generation-container "$DEV_LANE_CONTAINER" \
+            --expect-generation "$CONVERGE_GENERATION" \
+            > "${LAB_PASS_CHECKS}"
+          cat "${LAB_PASS_CHECKS}"
+
+      # `always()` on emit and upload: a FAILED lab pass is the record that tells
+      # "it failed" apart from "nobody ran it", and telling those apart is the
+      # receipt's whole job. The emit step exits non-zero on a FAIL receipt, so
+      # the failure stays visible on this run.
+      - name: Emit the compose-dev lab-pass receipt for this commit
+        if: always()
+        env:
+          SOURCE_SHA: ${{ needs.trigger-delivery.outputs.source_sha }}
+          CONVERGE_OUTCOME: ${{ steps.converge.outcome }}
+          CONVERGE_EVIDENCE: ${{ steps.converge.outputs.evidence }}
+          HEALTH_CODE: ${{ steps.onex-api-health.outputs.code }}
+        run: |
+          set -euo pipefail
+          if [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            SAFE_SHA="$SOURCE_SHA"
+          else
+            SAFE_SHA="<invalid-source-sha>"
+          fi
+          case "$CONVERGE_OUTCOME" in
+            success) REVISION_VERDICT=ok ;;
+            failure) REVISION_VERDICT=fail ;;
+            *)
+              REVISION_VERDICT=fail
+              CONVERGE_EVIDENCE="convergence step ended ${CONVERGE_OUTCOME}; no completed onex-api revision verdict was available"
+              ;;
+          esac
+          # A check with empty evidence is refused by ModelLabPassCheck, and a
+          # receipt that fails to WRITE is worse than one that reads FAIL.
+          EVIDENCE="${CONVERGE_EVIDENCE:-check_lane_onex_api_revision.py --expect-revision ${SAFE_SHA} against the onex-api container of the omnibase-infra compose project (the guard wrote no evidence)}"
+
+          if [ "${HEALTH_CODE:-000}" = "200" ]; then
+            HEALTH_VERDICT=ok
+          else
+            HEALTH_VERDICT=fail
+          fi
+
+          uv run python scripts/ci/lab_pass_receipt.py emit \
+            --sha "$SOURCE_SHA" \
+            --lane compose-dev \
+            --started-at "${LAB_PASS_STARTED_AT}" \
+            --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --check "onex_api_revision:${REVISION_VERDICT}:${EVIDENCE}" \
+            --check "onex_api_health:${HEALTH_VERDICT}:curl http://host.docker.internal:8090/health from the omnibase-deploy runner -> HTTP ${HEALTH_CODE:-000}" \
+            --checks-json "${LAB_PASS_CHECKS}" \
+            --out "${LAB_PASS_DIR}/receipt.json"
+
+      # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
+      # since the directory matches whether or not the receipt carries bytes.
+      - name: Assert the compose-dev lab-pass receipt is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact lab-pass-receipt-compose-dev-onex-api \
+            --require "${LAB_PASS_DIR}/receipt.json"
+
+      # OMN-18420: presence is not identity. A receipt left on this shared host
+      # by an earlier job satisfies the assertion above exactly as well as a
+      # fresh one, and the upload below keys the artifact by THIS job's sha.
+      - name: Assert the compose-dev receipt on disk is this job's own
+        if: always()
+        env:
+          SOURCE_SHA: ${{ needs.trigger-delivery.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/lab_pass_receipt.py verify \
+            --path "${LAB_PASS_DIR}/receipt.json" \
+            --sha "$SOURCE_SHA" \
+            --lane compose-dev
+
+      - name: Upload the compose-dev lab-pass receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # The NAME is the key scripts/ci/lab_pass_receipt.py's gate queries
+          # by; it must match artifact_name() exactly.
+          name: lab-pass-receipt-compose-dev-${{ needs.trigger-delivery.outputs.source_sha }}
+          path: ${{ env.LAB_PASS_DIR }}
+          retention-days: 90
+          if-no-files-found: error

@@ -974,3 +974,20 @@ cases:
     test: tests/ci/test_incident_replay_omn16958.py::test_the_real_guard_rejects_the_config_that_refused_the_commit
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is the absence of any check on hook interpreters: on 2026-09-15 an OMN-18172 commit on macOS was refused by workflow-input-default-type-parity and workflow-uv-available with "Executable `python` not found", because both were language: system hooks whose entry was a bare python and macOS ships none outside an activated venv, while every gate in this repo stayed green. The same config carried seven entries invoking a bare python3, which resolve whatever interpreter the committer's PATH exposes rather than the project environment. NOT A RECONSTRUCTION -- the artifact is the byte-for-byte .pre-commit-config.yaml blob at 9114ea9cc, the origin/dev head the OMN-16958 fix branched from, taken with git show and re-fetchable at the recorded locator. The guard is omnimarket's OMN-17219 validate_precommit_interpreter.py ported unchanged; the replay points its CONFIG_PATH at the captured bytes and requires exit 1 naming exactly those nine entries. The two language: python hooks with a bare python entry in the same blob (check-required-env-vars, check-dev-lane-required-env-vars) are outside the guard's language: system/script scope, because pre-commit supplies their interpreter; they were converted in the same PR regardless. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every config would satisfy the reject trivially and block every commit, so the same guard is required to accept the live config after the fix.
+  - id: omn18572-onex-api-lane-ran-the-parent-commit-unlabelled
+    guard: scripts/ci/check_lane_onex_api_revision.py
+    incident: OMN-18572
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn18572.py::test_the_same_guard_accepts_the_delivered_container
+    artifact:
+      fixture: tests/fixtures/omn18572/onex-api-labels-f37261c2.json.captured
+      sha256: 38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed
+    capture:
+      method: image-labels
+      source: image-labels:omni-201-ts:onex-lab/omnicloud-core@sha256:11c82d0363a6f2c164389f2e3bf9b04346cac680f3218d2da3f9b2962255a5e1
+      captured_at: '2026-09-17T12:40:00Z'
+      captured_by: lane onexapi-lab-delivery-trigger-build-1150
+    test: tests/ci/test_incident_replay_omn18572.py::test_the_real_guard_rejects_the_image_the_lane_was_actually_running
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is the absence of any reader at all for the lane's onex-api provenance: omninode_infra#1523 merged 2026-09-17T09:00:53Z and at 11:15Z the .201 compose dev lane was still running onex-lab/omnicloud-core:f37261c2-20260917T050425Z, the PARENT of that squash (git merge-base --is-ancestor 4528c42c f37261c2 exits 1, the reverse exits 0), with tenant creation on the lab impossible throughout. NOT A RECONSTRUCTION -- the artifact is the byte-for-byte docker inspect output for that exact image tag on the lab host's own daemon, re-fetchable at the recorded locator, and it is the single JSON token null. That shape is the point -- docker renders an image built with no labels as null, never as an empty object, and an index template against it is a template error with a non-zero exit, the same trap that made the OMN-18113 repoint refuse a lane it should have advanced. A hand-written fixture would have said empty object and the guard would have been proven against a shape production never produces. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every label map would satisfy this reject trivially and red every future delivery, so the same guard is required to accept the second captured artifact, the live onex-api CONTAINER label map after the 11:41:55Z delivery, carrying the revision label for 99fdbd375f3b6c17d564b588f505754160b1d1f2.

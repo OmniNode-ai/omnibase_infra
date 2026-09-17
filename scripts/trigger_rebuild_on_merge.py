@@ -770,6 +770,27 @@ LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
     # a full dev-lane rebuild.
     "scripts/deploy-agent/deploy_agent/**",
     "scripts/deploy-agent/deploy/**",
+    # OMN-18572. The dev lane's `onex-api` service, in the OMNINODE_INFRA tree.
+    #
+    # This one matches a path that does not exist in this repository, and that
+    # is deliberate rather than a mistake: the publisher is shared, and for a
+    # caller whose --source-repo is omninode_infra these are the paths that
+    # decide what the lane runs. The lane resolves `image: ${ONEX_API_IMAGE}`,
+    # and the lab-overlay applier builds that image from exactly this directory
+    # in the archived overlay tree (`lab_overlay.API_DOCKERFILE`/`API_CONTEXT`).
+    #
+    # The canonical classifier is right to miss it. Its `RUNTIME_PATH_PATTERNS`
+    # carry `docker/Dockerfile*` and `docker/**/*.Dockerfile`, and neither
+    # matches `docker/onex-api/Dockerfile` -- three segments against a
+    # two-segment pattern, and no `.Dockerfile` suffix -- while nothing at all
+    # matches `docker/onex-api/main.py`. That list answers "does this PR need
+    # deploy EVIDENCE" for the CLOUD plane, whose onex-api image is built and
+    # pinned by a separate workflow entirely.
+    #
+    # Measured cost of its absence: omninode_infra#1523 merged 2026-09-17
+    # 09:00:53Z and the lane was still running that squash's PARENT at 11:15Z,
+    # with tenant creation on the lab impossible throughout.
+    "docker/onex-api/**",
 )
 
 
