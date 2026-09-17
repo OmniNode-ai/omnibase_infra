@@ -77,12 +77,33 @@ class AuthorizedLabBinding(NamedTuple):
 # ``parameter_count`` for DS-V4-Flash carries forward the 284B MoE figure the
 # omnimarket contract has declared since OMN-12492; the served metadata does not
 # expose a parameter count, so this field is a declaration, not a probe result.
+#
+# OMN-18570: THE SAME DRIFT, ON A THIRD FIELD. The two .201 rows read
+# ``parameter_count="27B"`` until 2026-09-17 while advertising
+# ``served_model_id="Qwen3.6-35B-A3B"``. That 27B is a true reading of the
+# 2026-08-23 deployment — the RTX 5090 did serve a Qwen3.8 27B under SGLang for
+# about eleven days — and OMN-16999 corrected the served id when the box moved to
+# vLLM on the 35B without correcting the count beside it. The paired probe
+# fixture could not catch it, because ``/v1/models`` reports no parameter count
+# and the field had no external referent.
+#
+# It has one now, and it was in the row the whole time: a served id of the vendor
+# MoE form ``<total>B-A<active>B`` states the count itself.
+# ``tests/unit/runtime/test_bifrost_parameter_count_matches_served_id.py`` reads
+# it back out of the id, so a fourth flip fails a test. Where the served id
+# carries no figure (DS-V4-Flash) the rule declines and the paragraph above
+# still governs.
+#
+# No call was ever refused over this field — the cost was a contract that
+# misdescribed the hardware to everyone reading it, including the operator, who
+# on 2026-09-17 asked why delegation was "using the 35b model instead of qwen 3.8
+# 27b on the 5090" about a box that had served the 35B for two weeks.
 _AUTHORIZED_BINDINGS: Mapping[str, AuthorizedLabBinding] = {
     "local-coder": AuthorizedLabBinding(
         host="192.168.86.201",  # onex-allow-internal-ip OMN-16999 reason="authorized .201 lab binding table"
         port=8000,
         served_model_id="Qwen3.6-35B-A3B",
-        parameter_count="27B",
+        parameter_count="35B-A3B",
         context_window=131_072,
         serving=True,
     ),
@@ -90,7 +111,7 @@ _AUTHORIZED_BINDINGS: Mapping[str, AuthorizedLabBinding] = {
         host="192.168.86.201",  # onex-allow-internal-ip OMN-16999 reason="authorized .201 lab binding table"
         port=8000,
         served_model_id="Qwen3.6-35B-A3B",
-        parameter_count="27B",
+        parameter_count="35B-A3B",
         context_window=131_072,
         serving=True,
     ),
@@ -100,6 +121,36 @@ _AUTHORIZED_BINDINGS: Mapping[str, AuthorizedLabBinding] = {
     # reasoner slot, which was physically removed and IS deleted upstream). To
     # restore the rung: start the ds4 server, re-probe GET .200:8101/v1/models,
     # update the fixture with that readback, and flip ``serving`` back to True.
+    #
+    # OMN-18570, re-probed 2026-09-17: THE SERVER IS BACK UP, AND ``serving``
+    # STILL MUST NOT BE FLIPPED. Do not read the paragraph above as a checklist
+    # whose first step is now satisfied. Measured from the .201 host and again
+    # from inside the ``omninode-runtime`` container, so this is the reachability
+    # that matters rather than a workstation-local one:
+    #
+    #   GET  .200:8101/v1/models           -> http=200 in 0.006s; ids
+    #                                         ["deepseek-v4-flash", "deepseek-v4-pro"]
+    #   GET  .200:8101/health              -> http=404 (no health route at all)
+    #   POST .200:8101/v1/chat/completions -> http=200 after 42.8s for max_tokens=16
+    #   POSITIVE CONTROL, same session, same curl shape, against .201:8000:
+    #        POST /v1/chat/completions      -> http=200 after 5.3s for max_tokens=16
+    #
+    # So the rung lists models and does generate — at roughly 0.4 tokens/second.
+    # The 4,318-output-token render this lane audited (run
+    # b958c6e0-3a6c-42ed-a3c2-b285a20f4aca) took 19.5s on .201:8000 and would
+    # take hours here. Offering it to routing would not restore a local rung; it
+    # would hand the local tier a rung that wins on declared cost and then
+    # exhausts its 300s timeout on every real call.
+    #
+    # This is the gap the ``serving`` axis cannot express: ``reachable`` in the
+    # probe fixture means "/v1/models answered", and this endpoint proves
+    # answering and being usable are different facts. Separating them — a
+    # generation probe with a throughput floor, not a listing probe — is a
+    # follow-up, deliberately not done here, because it changes what
+    # ``test_non_serving_bindings_have_a_failed_probe_on_record`` demands of
+    # every row. Until it exists, ``serving=False`` is the correct and
+    # evidence-backed value, and the 2026-09-05 record below stays as written:
+    # it is a dated record of that probe, not a claim about today.
     "local-ds-v4-flash": AuthorizedLabBinding(
         host="192.168.86.200",  # onex-allow-internal-ip OMN-16999 reason="authorized .200 lab binding table"
         port=8101,

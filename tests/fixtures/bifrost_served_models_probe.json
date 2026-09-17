@@ -21,7 +21,7 @@
   "probes": [
     {
       "endpoint": "http://192.168.86.201:8000/v1/models",
-      "probed_at": "2026-09-05T23:12:00Z",
+      "probed_at": "2026-09-17T11:08:00Z",
       "command": "curl -sS -m 10 -w '\\nhttp=%{http_code} t=%{time_total}\\n' http://192.168.86.201:8000/v1/models",
       "http_status": 200,
       "reachable": true,
@@ -29,7 +29,8 @@
       "owned_by": "vllm",
       "root": "/data/inference/hf-cache/Qwen3.6-35B-A3B-GPTQ-Int4",
       "max_model_len": 131072,
-      "control": "This probe IS the positive control for the method: http=200 in 0.017s with a parseable body, on the same host, same curl invocation and same session as the http=000 row below."
+      "control": "This probe IS the positive control for the method: http=200 in 0.014s with a parseable body, on the same host, same curl invocation and same session as the http=000 row below.",
+      "revalidation_note": "OMN-18570 re-probed this endpoint on 2026-09-17 and the readback is unchanged from the 2026-09-05 record it replaces — same single served id, same root, same max_model_len. Recorded anyway, because the question that prompted the re-probe was whether the RTX 5090 had moved to a Qwen3.8 27B, and 'we looked, and nothing moved' is a result worth having a date on. What the probe also established, and what the binding table's parameter_count now reflects: the serving process is systemd unit vllm-gpu0.service, up since 2026-09-03T12:05:11 local, and nvidia-smi -L reports exactly one GPU on the host because the RTX 4090 was pulled for RMA under OMN-16407. No 27B is served anywhere on the lab; the four Qwen3.8-27B weight sets under /data/inference/hf-cache are staged on disk and loaded by nothing."
     },
     {
       "endpoint": "http://192.168.86.200:8101/v1/models",
