@@ -18,7 +18,8 @@
 # Usage (on 192.168.86.201, user scope, no sudo):
 #   bash deploy/lane-census/install-lane-census.sh             # install drop-in + reload
 #   bash deploy/lane-census/install-lane-census.sh --uninstall
-#   bash deploy/lane-census/install-lane-census.sh --status
+#   bash deploy/lane-census/install-lane-census.sh --status   # print effective unit
+#   bash deploy/lane-census/install-lane-census.sh --verify   # exit 1 if not installed
 
 set -euo pipefail
 
@@ -35,6 +36,28 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   systemctl --user daemon-reload 2>/dev/null || true
   echo "Done. lane-census drop-in removed (base onex-disk-gc unit untouched)."
   exit 0
+fi
+
+if [[ "${1:-}" == "--verify" ]]; then
+  # OMN-18606 AC5. `--status` PRINTS the effective unit; a reader has to notice
+  # the census ExecStart is absent. That is how D1 survived: the drop-in was
+  # never installed on .201, `systemctl --user status onex-disk-gc.service`
+  # reported a clean SUCCESS every hour with no census pass in the unit at all,
+  # and nothing anywhere distinguished that from a healthy install. --verify
+  # makes the same fact an exit code, so a probe or a tick can assert it.
+  rc=0
+  if [[ ! -f "$DROPIN_DST" ]]; then
+    echo "NOT INSTALLED: $DROPIN_DST is absent — the hourly census pass is not registered" >&2
+    rc=1
+  elif ! systemctl --user cat onex-disk-gc.service --no-pager 2>/dev/null | grep -q -- "--snapshot"; then
+    echo "STALE INSTALL: the effective onex-disk-gc.service carries no --snapshot census ExecStart" >&2
+    echo "  re-run: bash deploy/lane-census/install-lane-census.sh" >&2
+    rc=1
+  fi
+  if [[ $rc -eq 0 ]]; then
+    echo "OK: lane-census pass is registered on onex-disk-gc.service and writes a snapshot"
+  fi
+  exit $rc
 fi
 
 if [[ "${1:-}" == "--status" ]]; then
