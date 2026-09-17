@@ -24,6 +24,18 @@
 #   ./scripts/lane-census-check.sh --lane prod      # one lane
 #   ./scripts/lane-census-check.sh --dry-run        # print event/plan, do NOT publish
 #   ./scripts/lane-census-check.sh --json           # emit the plan JSON to stdout
+#   ./scripts/lane-census-check.sh --snapshot PATH  # write the census SNAPSHOT to PATH ('-' = stdout)
+#
+# THE SNAPSHOT IS NOT THE PLAN (OMN-18606). `--json` emits the PLAN document
+# (keys: findings, has_drift, lanes_checked, schema_version). The staleness gate
+# reads `emitted_at`, which the plan does not carry — so `--json` can never
+# produce a file that gate accepts. The snapshot the gate reads is the typed
+# EVENT document, and `--snapshot` is the only supported way to write it:
+#
+#   ./scripts/lane-census-check.sh --snapshot deploy/lane-census/census-snapshot.json
+#
+# `--snapshot` writes the file whether or not there is drift, and leaves the
+# drift verdict and exit code below untouched.
 #
 # Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps,
 #             4 inventory unobservable (BOTH Engine API and bounded CLI failed —
@@ -39,6 +51,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LANE=""
 DRY_RUN=false
 EMIT_JSON=false
+# OMN-18606: destination for the gate-valid census snapshot document. Empty means
+# "do not write one" (the pre-OMN-18606 behaviour). "-" means stdout.
+SNAPSHOT_OUT=""
 LOG_FILE="${HOME}/.local/log/onex/lane-census.log"
 DRIFT_TOPIC="onex.evt.infra.lane-census-drift.v1"
 # Inventory unobservable — NOT drift. See the exit-code table above (OMN-15466).
@@ -49,16 +64,64 @@ while [[ $# -gt 0 ]]; do
     --lane) LANE="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --json) EMIT_JSON=true; shift ;;
+    --snapshot)
+      [[ $# -ge 2 ]] || { echo "ERROR: --snapshot requires a path ('-' for stdout)" >&2; exit 2; }
+      SNAPSHOT_OUT="$2"; shift 2 ;;
     --help|-h) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
+# A snapshot to STDOUT must be the only document on stdout. --json prints the
+# PLAN document and --dry-run prints the EVENT document; either alongside
+# "--snapshot -" produces two concatenated JSON documents, which is exactly the
+# `Extra data: line 2 column 1` shape that made the old recipes unusable.
+if [[ "$SNAPSHOT_OUT" == "-" ]]; then
+  if [[ "$EMIT_JSON" == true || "$DRY_RUN" == true ]]; then
+    echo "ERROR: --snapshot - cannot be combined with --json or --dry-run (two JSON documents on stdout)" >&2
+    exit 2
+  fi
+fi
+
 mkdir -p "$(dirname "$LOG_FILE")"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [lane-census] $*" | tee -a "$LOG_FILE" >&2; }
 
+# OMN-18606: resolve the interpreter EXPLICITLY rather than inheriting whatever
+# `python3` happens to mean in the caller's PATH.
+#
+# WHY. This script's only third-party dependency is PyYAML, imported by
+# lane_census_plan.py to read the lane manifest. On .201 the hourly
+# onex-disk-gc drop-in runs with PATH=/usr/local/bin:/usr/bin:/bin and the
+# system interpreter there carries PyYAML, so `python3` was correct for years
+# and stays the default here. In GitHub Actions it is NOT: `uv sync` installs
+# PyYAML into a project .venv, and the shared setup action puts neither
+# .venv/bin on PATH nor VIRTUAL_ENV in the environment, so a bare `python3`
+# resolves to the runner's system interpreter and dies with
+# `ModuleNotFoundError: No module named 'yaml'` deep inside a sibling script.
+# Both live dispatches of lane-census-refresh.yml failed exactly that way
+# (runs 35265905466 and 35266125665, 2026-09-17).
+#
+# The caller names the interpreter; this script never guesses one. The default
+# preserves the host path byte-for-byte.
+LANE_CENSUS_PYTHON="${LANE_CENSUS_PYTHON:-python3}"
+command -v "$LANE_CENSUS_PYTHON" >/dev/null 2>&1 || {
+  echo "ERROR: interpreter '$LANE_CENSUS_PYTHON' not found (set LANE_CENSUS_PYTHON)" >&2
+  exit 3
+}
+
+# Fail LOUD and EARLY on a usable interpreter that cannot import what the
+# census needs. Without this the failure surfaces as a traceback from
+# lane_census_plan.py with the offending interpreter never named, which is what
+# made the CI failure above take a live dispatch to diagnose.
+if ! "$LANE_CENSUS_PYTHON" -c 'import yaml' >/dev/null 2>&1; then
+  echo "ERROR: interpreter '$LANE_CENSUS_PYTHON' cannot import PyYAML, which" >&2
+  echo "       lane_census_plan.py needs to read the lane manifest." >&2
+  echo "       In CI, set LANE_CENSUS_PYTHON to the project venv interpreter," >&2
+  echo "       e.g. LANE_CENSUS_PYTHON=\"\$(uv run python -c 'import sys; print(sys.executable)')\"" >&2
+  exit 3
+fi
+
 command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found" >&2; exit 3; }
-command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found" >&2; exit 3; }
 
 HOST="${LANE_CENSUS_HOST:-$(hostname)}"
 log "Starting (lane=${LANE:-ALL}, host=$HOST, $( [[ "$DRY_RUN" == true ]] && echo DRY-RUN || echo LIVE ))"
@@ -86,7 +149,7 @@ RUNTIME_TAG="${RUNTIME_TAG:-}"
 set +e
 ENVELOPE_JSON="$(
   LANE="$LANE" RUNTIME_TAG="$RUNTIME_TAG" \
-    python3 "${SCRIPT_DIR}/lane_census_inventory.py" 2>"$SCRATCH/inventory.err"
+    "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_inventory.py" 2>"$SCRATCH/inventory.err"
 )"
 INVENTORY_RC=$?
 set -e
@@ -101,25 +164,44 @@ fi
 # Surface any fallback/degradation notices without changing the exit policy.
 while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/inventory.err"
 
-PLAN_JSON="$(echo "$ENVELOPE_JSON" | python3 "${SCRIPT_DIR}/lane_census_plan.py")"
+PLAN_JSON="$(echo "$ENVELOPE_JSON" | "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_plan.py")"
 
 if [[ "$EMIT_JSON" == true ]]; then
   echo "$PLAN_JSON"
 fi
 
-HAS_DRIFT="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["has_drift"])')"
+HAS_DRIFT="$(echo "$PLAN_JSON" | "$LANE_CENSUS_PYTHON" -c 'import json,sys;print(json.load(sys.stdin)["has_drift"])')"
+
+# OMN-18606: the census SNAPSHOT document is the typed event — the only carrier
+# of `emitted_at`, which the staleness gate reads. Build it BEFORE the no-drift
+# early exit below so a fleet that matches its manifest can still emit a census.
+# Until this change the event was built only on drift, so a healthy fleet could
+# produce no snapshot by any path and the gate became unsatisfiable seven days
+# later with no available remedy. Writing the snapshot does NOT change this
+# script's exit-code contract: the drift verdict below is unchanged.
+if [[ -n "$SNAPSHOT_OUT" || "$HAS_DRIFT" == "True" ]]; then
+  EVENT_JSON="$(echo "$PLAN_JSON" | LANE_CENSUS_HOST="$HOST" "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_event.py")"
+fi
+
+if [[ -n "$SNAPSHOT_OUT" ]]; then
+  if [[ "$SNAPSHOT_OUT" == "-" ]]; then
+    printf '%s\n' "$EVENT_JSON"
+  else
+    mkdir -p "$(dirname "$SNAPSHOT_OUT")"
+    printf '%s\n' "$EVENT_JSON" >"$SNAPSHOT_OUT"
+    log "census snapshot written: $SNAPSHOT_OUT"
+  fi
+fi
 
 if [[ "$HAS_DRIFT" != "True" ]]; then
   log "No lane drift. Desired == actual."
   exit 0
 fi
 
-# Build the typed drift event from the plan.
-EVENT_JSON="$(echo "$PLAN_JSON" | LANE_CENSUS_HOST="$HOST" python3 "${SCRIPT_DIR}/lane_census_event.py")"
 log "DRIFT detected:"
 # Render each finding to stderr. The event JSON is passed via env (EVENT_JSON) so
 # the single-quoted heredoc body needs no shell escaping of inner Python quotes.
-EVENT_JSON="$EVENT_JSON" python3 <<'PYEOF' >&2 || true
+EVENT_JSON="$EVENT_JSON" "$LANE_CENSUS_PYTHON" <<'PYEOF' >&2 || true
 import json, os
 event = json.loads(os.environ["EVENT_JSON"])
 for finding in event["findings"]:

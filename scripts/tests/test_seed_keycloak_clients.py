@@ -863,8 +863,17 @@ class TestMain:
                 with patch.object(_ensure_mod(), "_request", side_effect=fake_request):
                     _ensure_mod().main()
 
+        # JSON-lines, not one object: OMN-18170 added an `op=preflight` record
+        # per roster entry ahead of the client loop. The reconcile record for
+        # the client is still the last line.
         out = capsys.readouterr().out
-        record = json.loads(out.strip())
+        records = [
+            json.loads(line) for line in out.strip().splitlines() if line.strip()
+        ]
+        assert any(
+            r["op"] == "preflight" and r["clientId"] == "omniweb" for r in records
+        ), "every roster entry is surveyed before any client is written"
+        record = records[-1]
         assert record["clientId"] == "omniweb"
         assert record["op"] == "unchanged"
 

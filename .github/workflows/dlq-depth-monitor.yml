@@ -144,7 +144,16 @@ jobs:
     # read from a routing variable: the constraint is that this job must sit in
     # the .201 host's network namespace, which no org-wide routing decision can
     # satisfy and a routing flip must not be able to silently revoke.
-    runs-on: [self-hosted, omnibase-deploy]
+    #
+    # OMN-18602: the label moved from `omnibase-deploy` to the verify class.
+    # The constraint above is UNCHANGED and is why the pin is three labels, not
+    # two -- `host-201` is what keeps this job in the .201 network namespace,
+    # and `omnibase-verify` alone would admit the arm64 verify runners on the
+    # other lab hosts, which are in a different namespace entirely. The job is
+    # read-only (it is named so) and never needed the deploy runner's private
+    # clone tree; it was on that label only because the label happened to be
+    # the one host-scoped self-hosted pin that existed when it was written.
+    runs-on: [self-hosted, omnibase-verify, host-201]
     timeout-minutes: 15
     permissions:
       contents: read

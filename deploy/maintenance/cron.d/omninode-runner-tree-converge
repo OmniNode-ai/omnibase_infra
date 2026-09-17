@@ -1,0 +1,44 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# OMN-18567: converge the deploy runner's PRIVATE OMNI_HOME clone tree
+# (/data/omninode/runner_omni_home) -- the build source the dev-lane refresh,
+# the stability-lane refresh and the release-train tag cut all read.
+#
+# Nothing converged it before this unit. On 2026-09-17 five of its six clones
+# were on detached HEADs and every one was behind origin/dev, omnibase_infra by
+# 294 commits and onex_change_control by 1120. The two mechanisms already on
+# this host miss it by design: the :37 maintenance sync converges host FILES and
+# no git clone, and the :19 workspace reconcile is scoped to the shared
+# operator-owned tree, not this private one.
+#
+# --converge, not --check. A detector on a timer with no repair attached is the
+# OMN-17898 condition: drift found hourly, alarmed hourly, repaired only when a
+# human typed the other verb.
+#
+# Runs as root because /etc/cron.d is root-owned and root is what cron gives us
+# here. The script NEVER converges as root: it plans privileges through
+# scripts/reconcile_privilege_lib.sh and drops to the tree's owning uid for
+# every command that touches it. A root reset --hard would leave a tree the
+# runner cannot write -- a broken clone in place of a stale one, which is worse.
+#
+# Minute :49 is chosen, not arbitrary. Three other root cron jobs already touch
+# this host on a schedule:
+#   */15  omninode-system-slack-report --mode alert   (:00 :15 :30 :45)
+#   :19   omninode-workspace-reconcile
+#   :37   omninode-host-maintenance-sync --converge --slack
+# :49 sits clear of all three, so four root jobs never contend on the same
+# clones, the same git object stores or the same Slack rate limit.
+# tests/scripts/test_runner_tree_converge_omn18567.py asserts the separation so
+# a later edit cannot quietly collide.
+#
+# Hourly, not every 15 minutes, and that is a busy-gate decision rather than a
+# cost one. The tick REFUSES while a job is running on the tree, so a tighter
+# cadence buys nothing but a longer run of refusals in the log; and the drift it
+# repairs accrues over days, so one hour of exposure is not the risk. The
+# exposure that IS real -- the runner accepting a queued job mid-run -- shrinks
+# with fewer, rarer ticks, not with more.
+#
+# Output appends to one cumulative log rather than a file per run: at hourly
+# cadence a per-run file is 8,760 files a year that nothing prunes.
+49 * * * * root /data/maintenance/bin/omninode-runner-tree-converge.sh --converge >> /data/maintenance/logs/runner-tree-converge.log 2>&1

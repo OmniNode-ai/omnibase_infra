@@ -151,6 +151,16 @@ PROBE_HOST=${OMNINODE_ALERT_PROBE_HOST:-127.0.0.1} # fallback-ok: this reporter 
 # Grace applied to a `health: starting` container whose image declares no
 # start_period. Fail-closed: a finite grace, not "never alarm".
 STARTING_GRACE_SECONDS=${OMNINODE_ALERT_STARTING_GRACE_SECONDS:-180}
+# How long a container may sit in Docker `created` status before it is counted
+# at all (OMN-18571). See classify_created_containers() for what this bounds.
+#
+# 600s is chosen against the measured legitimate hold: compose creates a
+# container and holds it until its `depends_on: service_healthy` dependency
+# passes, which on the .201 dev lane resolves well inside one tick of the */15
+# cron. It is a config entry rather than a literal in the classifier for the
+# same reason PROBE_TIMEOUT_SECONDS is: a lane that measures a longer honest
+# hold raises this, it does not edit the decision path.
+CREATED_FLOOR_SECONDS=${OMNINODE_ALERT_CREATED_FLOOR_SECONDS:-600}
 # How much of a response body is quoted into the Slack message / log line. This
 # bounds DISPLAY ONLY. It must never be applied before a body is parsed or
 # pattern-matched (OMN-15525) — see check_runtime_lane.
@@ -618,6 +628,133 @@ starting_past_start_period() {
   printf '%s' "${out[*]:-}"
 }
 
+# Containers sitting in Docker `created` status, classified by AGE and by
+# OWNERSHIP (OMN-18571).
+#
+# THE DEFECT THIS REPLACES
+#   `created` was one grep — `docker ps -a ... | grep -Eci 'Created'` — and ANY
+#   nonzero value set docker_status=CRITICAL. No age floor, no ownership
+#   distinction, no retention exclusion. Measured on .201 2026-09-17T10:57Z
+#   (census lab-hygiene-census-1054-20260917T1057Z.md §1), that produced two
+#   false REDs at once, in opposite directions:
+#
+#   (a) TOO EARLY. Compose creates a container and holds it in `created` until
+#       its `depends_on: ... service_healthy` dependency passes. Three
+#       containers of the `omnibase-infra` project were in that state seconds
+#       before the probe, mid-redeploy, with omninode-runtime still
+#       `health: starting`. The delivery chain recreates the dev lane dozens of
+#       times a day, so the check reddened on every one of them. A monitor that
+#       alarms on its own platform working is a monitor that gets muted.
+#
+#   (b) TOO LONG. 48 containers carried no compose project label at all —
+#       ad hoc `docker run` probes, and crashed Python testcontainers sessions
+#       that stranded both the workload container AND their own Ryuk reaper, so
+#       nothing was ever going to reap them. They spanned three days and were
+#       still accumulating. The host therefore sat CRITICAL permanently with
+#       zero unhealthy, zero restarting and zero dead — this file's header
+#       calls that the "crying wolf" direction and it is the one that hides a
+#       real fault, because a row that is always red carries no information.
+#
+# THE THREE CLASSES, AND WHY EACH LANDS WHERE IT DOES
+#   fresh     — younger than CREATED_FLOOR_SECONDS, whatever its ownership.
+#               Not counted. This is (a): a deploy in progress.
+#   pending   — older than the floor AND carrying a com.docker.compose.project
+#               label. Reported per project, WARNING. A compose project still
+#               holding a container ten minutes on is worth saying, but there
+#               is a declared lane that owns it, so it is attributable work,
+#               not debris — and the lane map already alarms separately if that
+#               lane's runtime is actually down.
+#   unowned   — older than the floor, no compose project, not retained. This is
+#               (b), and it is the count worth acting on: `unowned_debris=<n>`,
+#               WARNING.
+#
+#   Retention-labelled containers (`onex.cleanup-owner`, or an `onex.purpose`
+#   ENDING `-retention`) are listed by name and counted in NO class. Somebody
+#   labelled them "keep this" for a named ticket; counting them as a problem
+#   argues for their deletion, which is the opposite of what the label says.
+#   The purpose match is anchored to the end of the value rather than a
+#   substring (CLAUDE.md rule 15): `retention-policy-probe` describes a test OF
+#   retention, not a container anyone asked to keep.
+#
+# WHAT STILL PAGES, UNCHANGED
+#   unhealthy, restarting, dead, a container past its own declared start_period
+#   (OMN-15509), a non-zero exit (OMN-15509), and a docker query that did not
+#   run. This change narrows exactly one input and nothing else.
+#
+# FAIL-CLOSED, IN THE DIRECTION THAT MATTERS
+#   The floor is an excuse for NOT counting something, so nothing gets it
+#   without proof. A container whose creation timestamp cannot be parsed cannot
+#   be proven younger than the floor, so it is counted, not excused — treating
+#   "cannot age" as "too young" would convert every unparseable timestamp into
+#   silence. A failed docker query stays __DOCKER_QUERY_FAILED__ and CRITICAL.
+#
+# Emits one space-separated `key=value` fragment for the container_issues row.
+classify_created_containers() {
+  local names name inspected created_at project owner purpose
+  local now_epoch created_epoch age_s fresh=0 unowned=0
+  local pending_names="" retained_names=""
+  now_epoch=$(date -u +%s)
+  names=$(docker ps -a --filter status=created --format '{{.Names}}' 2>/dev/null \
+    || echo "__DOCKER_QUERY_FAILED__")
+  if [[ "$names" == "__DOCKER_QUERY_FAILED__" ]]; then
+    printf '%s' "__DOCKER_QUERY_FAILED__"
+    return 0
+  fi
+
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    # One inspect per container, four fields. The `if .Config.Labels` guards
+    # are required: `index` on a nil label map renders `<no value>`, which
+    # would read as a project name.
+    inspected=$(docker inspect -f \
+      '{{.Created}}|{{if .Config.Labels}}{{index .Config.Labels "com.docker.compose.project"}}{{end}}|{{if .Config.Labels}}{{index .Config.Labels "onex.cleanup-owner"}}{{end}}|{{if .Config.Labels}}{{index .Config.Labels "onex.purpose"}}{{end}}' \
+      "$name" 2>/dev/null || true)
+    IFS='|' read -r created_at project owner purpose <<<"$inspected"
+
+    if [[ -n "$owner" || "$purpose" == *-retention ]]; then
+      retained_names="${retained_names}${name},"
+      continue
+    fi
+
+    created_epoch=$(epoch_from_iso "$created_at")
+    if (( created_epoch > 0 )); then
+      age_s=$(( now_epoch - created_epoch ))
+      if (( age_s < CREATED_FLOOR_SECONDS )); then
+        fresh=$(( fresh + 1 ))
+        continue
+      fi
+    fi
+    # Past the floor, or unageable (fail-closed: unprovable age does not earn
+    # the floor's excuse).
+    if [[ -n "$project" ]]; then
+      pending_names="${pending_names}${project}"$'\n'
+    else
+      unowned=$(( unowned + 1 ))
+    fi
+  done <<<"$names"
+
+  local pending="none"
+  if [[ -n "$pending_names" ]]; then
+    # project:count pairs, one per project, deterministic order. sort/uniq
+    # rather than an associative array: this file has to run under the bash on
+    # every host that executes it, and bash 3.2 has no `declare -A`.
+    pending=$(printf '%s' "$pending_names" | sort | uniq -c \
+      | awk '{printf "%s%s:%s", (NR>1 ? "," : ""), $2, $1}')
+  fi
+  local retained="${retained_names%,}"
+  printf 'created_floor_seconds=%s created_fresh=%s created_pending=%s unowned_debris=%s created_retained=%s' \
+    "$CREATED_FLOOR_SECONDS" "$fresh" "$pending" "$unowned" "${retained:-none}"
+}
+
+# Read one field back out of classify_created_containers()'s fragment. The
+# fragment is rendered into the Slack row verbatim, so the status decision
+# reads the SAME string the operator reads — there is no second, private copy
+# of the numbers that could disagree with the published one.
+created_class_field() {
+  local key="$1" fragment="$2"
+  sed -E "s/.*${key}=([^ ]*).*/\1/" <<<"$fragment"
+}
+
 # Containers that exited non-zero. Exit(0) one-shots (migration/init) are
 # expected to finish and must not alarm.
 exited_nonzero() {
@@ -687,10 +824,91 @@ check_ci_required_contexts() {
   printf '%s\n' "$out"
 }
 
+# OMN-18567: surface the deploy runner's private clone-tree convergence.
+#
+# WHY IT LIVES HERE. `omninode-runner-tree-converge.sh` runs hourly at :49 and
+# writes one verdict line. A verdict nothing reads is a log line, and CLAUDE.md
+# rule 5 is that detection not wired to something is advisory. Folding the read
+# into this reporter rather than building a second alerter is the
+# net-negative-surface rule: it inherits this script's Slack poster, its
+# per-key state-change de-duplication, its resolved-notification and its */15
+# cron. No new cron unit, no second Slack integration -- the same argument
+# `check_ci_required_contexts` above is here on.
+#
+# WHAT IT ESCALATES, AND WHAT IT DELIBERATELY DOES NOT. The tick REFUSES while
+# a deploy job is using the tree, and exits 0 when it does, because a refusal is
+# the guard working. So a single REFUSED is not an issue and must not page. What
+# IS an issue is the tree going unconverged for a long time -- whether because
+# the runner is permanently busy, because the unit stopped being scheduled, or
+# because nobody ever installed it. All three look identical from the outside,
+# and all three are caught by ageing `last_success` rather than by reading the
+# most recent verdict. That is the whole reason the tick carries that field.
+#
+# A missing file is a WARNING, not silence: "the tick has never run" is exactly
+# the OMN-15525 condition this maintenance family exists to make visible.
+check_runner_tree_converge() {
+  local status_file="${OMNINODE_RUNNER_TREE_STATE_FILE:-$STATE_DIR/runner-tree-converge.status}"
+  local stale_hours="${OMNINODE_RUNNER_TREE_STALE_HOURS:-6}"
+
+  if [[ "${OMNINODE_RUNNER_TREE_CHECK_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$status_file" ]]; then
+    printf 'runner-tree|WARNING|converge|no verdict at %s; the hourly converge has never run, or its unit is not installed\n' "$status_file"
+    return 0
+  fi
+
+  local line verdict last_success detail
+  line=$(tail -n1 "$status_file" 2>/dev/null)
+  verdict=$(sed -n 's/^runner-tree-converge|\([A-Z_]*\)|.*/\1/p' <<<"$line")
+  last_success=$(sed -n 's/.*|last_success=\([^|]*\)|.*/\1/p' <<<"$line")
+  detail=$(sed -n 's/.*|detail=\(.*\)$/\1/p' <<<"$line")
+  if [[ -z "$verdict" ]]; then
+    printf 'runner-tree|WARNING|converge|verdict at %s is unparseable; convergence state unknown\n' "$status_file"
+    return 0
+  fi
+
+  # A converge that could not repair is the one outcome worth a human: the tree
+  # is the build source for three deploy paths and it is now knowingly wrong.
+  if [[ "$verdict" == "FAILED" || "$verdict" == "PRECONDITION" ]]; then
+    printf 'runner-tree|CRITICAL|converge|%s — %s\n' "$verdict" "${detail:-no detail}"
+    return 0
+  fi
+
+  if [[ -z "$last_success" || "$last_success" == "never" ]]; then
+    printf 'runner-tree|WARNING|converge|last verdict %s and the tree has never been converged by the tick\n' "$verdict"
+    return 0
+  fi
+
+  local success_epoch now_epoch age_hours
+  # GNU first, BSD second. The host is Linux and only the GNU form runs there,
+  # but this script is exercised on macOS by its own tests -- and a parse that
+  # only ever succeeds on the host would mean every test took the "could not
+  # read the timestamp" branch while believing it had tested the staleness
+  # rule. A seam that silently becomes the implementation is the failure mode
+  # this file's header is about.
+  success_epoch=$(date -u -d "$last_success" +%s 2>/dev/null) \
+    || success_epoch=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$last_success" +%s 2>/dev/null) \
+    || success_epoch=""
+  if [[ -z "$success_epoch" ]]; then
+    printf 'runner-tree|WARNING|converge|last_success=%s could not be read as a timestamp; staleness unknown\n' "$last_success"
+    return 0
+  fi
+  now_epoch=$(date -u +%s)
+  age_hours=$(( (now_epoch - success_epoch) / 3600 ))
+  if (( age_hours >= stale_hours )); then
+    printf 'runner-tree|WARNING|converge|last clean convergence was %sh ago (%s); latest verdict %s\n' \
+      "$age_hours" "$last_success" "$verdict"
+    return 0
+  fi
+
+  printf 'runner-tree|OK|converge|%s, last clean convergence %sh ago\n' "$verdict" "$age_hours"
+}
+
 collect() {
   local now host root data root_status data_status running unhealthy restarting dead created
   local dangling named_dangling anonymous_dangling docker_status docker_detail
-  local starting_stuck exited_bad lane spec key port
+  local starting_stuck exited_bad created_classes lane spec key port
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   host=$(hostname)
   root=$(df_line /)
@@ -711,18 +929,33 @@ collect() {
 
   starting_stuck=$(starting_past_start_period)
   exited_bad=$(exited_nonzero)
+  created_classes=$(classify_created_containers)
 
   docker_status=OK
+  # `created=` stays the RAW total of created-status containers. The
+  # classification is reported in the fields beside it (OMN-18571) rather than
+  # by redefining a key anything downstream may already read — extend, never
+  # rename.
   docker_detail="unhealthy=$unhealthy restarting=$restarting dead=$dead created=$created"
-  if [[ "$starting_stuck" == "__DOCKER_QUERY_FAILED__" || "$exited_bad" == "__DOCKER_QUERY_FAILED__" ]]; then
+  if [[ "$starting_stuck" == "__DOCKER_QUERY_FAILED__" || "$exited_bad" == "__DOCKER_QUERY_FAILED__" \
+        || "$created_classes" == "__DOCKER_QUERY_FAILED__" ]]; then
     # Fail-closed: a docker query that did not run is not evidence of health.
     docker_status=CRITICAL
     docker_detail="$docker_detail docker_query=FAILED"
   else
-    docker_detail="$docker_detail starting_past_start_period=${starting_stuck:-none} exited_nonzero=${exited_bad:-none}"
-    if [[ "$unhealthy" != 0 || "$restarting" != 0 || "$dead" != 0 || "$created" != 0 \
+    docker_detail="$docker_detail starting_past_start_period=${starting_stuck:-none} exited_nonzero=${exited_bad:-none} $created_classes"
+    # CRITICAL is the container states that are faults on their own terms. The
+    # `created` count is deliberately NOT among them any more (OMN-18571): the
+    # measured nonzero values were a redeploy in flight and three days of
+    # unreaped test debris, neither of which is an outage.
+    if [[ "$unhealthy" != 0 || "$restarting" != 0 || "$dead" != 0 \
           || -n "$starting_stuck" || -n "$exited_bad" ]]; then
       docker_status=CRITICAL
+    elif [[ "$(created_class_field unowned_debris "$created_classes")" != 0 \
+            || "$(created_class_field created_pending "$created_classes")" != none ]]; then
+      # Attributable-but-stalled, or unattributable debris. Worth naming on a
+      # row somebody reads; not worth a page.
+      docker_status=WARNING
     fi
   fi
 
@@ -770,6 +1003,7 @@ collect() {
     # port from the service catalog rather than restoring this literal.
     check_http web-3003 "http://${PROBE_HOST}:3003/" ''
     check_ci_required_contexts
+    check_runner_tree_converge
   }
 }
 
@@ -930,7 +1164,7 @@ recovered_keys=$(awk -F'\t' '$1=="RECOVERED" { print $2 }' <<<"$decisions")
 
 format_digest() {
   local title="$1"
-  local lines endpoint_lines ci_lines issue_lines
+  local lines endpoint_lines ci_lines tree_lines issue_lines
   lines=$(awk -F'|' '$1=="disk" {printf "- `%s`: %s, %s, %s (%s)\n", $3, $4, $5, $6, $2} $1=="docker" {printf "- Docker `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   # STARTING is rendered here with the rest (OMN-18435). A booting lane that
   # vanished from this section would be the BLIND direction of monitor failure,
@@ -941,9 +1175,15 @@ format_digest() {
   # detection-shelf blindness where a silent section reads as healthy.
   ci_lines=$(awk -F'|' '$1=="ci" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   [[ -n "$ci_lines" ]] || ci_lines="- No required-context probe rows this tick"
+  # OMN-18567. Same reasoning as the CI heartbeat above: the runner-tree row
+  # renders even when clean so "converged an hour ago" and "nothing looked at
+  # the tree" are distinguishable in the digest, rather than both rendering as
+  # an absent section that reads as healthy.
+  tree_lines=$(awk -F'|' '$1=="runner-tree" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$tree_lines" ]] || tree_lines="- No runner clone-tree verdict this tick"
   # `next` keeps the three row shapes mutually exclusive so a `ci` row cannot
   # also be rendered by the generic column-2 branch below it.
-  issue_lines=$(awk -F'|' '$1=="ci" && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
+  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
   if [[ -z "$issue_lines" ]]; then
     issue_lines="- No active warning/critical checks"
   fi
@@ -958,6 +1198,8 @@ $lines
 $endpoint_lines
 *CI required contexts*
 $ci_lines
+*Runner clone tree*
+$tree_lines
 *Active issues*
 $issue_lines
 MSG

@@ -30,8 +30,10 @@ fails loudly instead of reporting success.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,28 @@ SOURCE = "rolling_work_ledger"
 EXIT_SECTION_CAP = 74
 EXIT_ROW_SHAPE = 76
 EXIT_UNRESOLVED = 3
+
+
+# --- OMN-18554: fixture rows are stamped from the LIVE clock ----------------
+#
+# ledger_lock.py in this repo now carries the OMN-17427 wall-clock guard, ported
+# from the omni_home copy where it had been living uncommitted. That guard reads
+# a row's OWN leading timestamp and refuses one stamped more than 5 minutes ahead
+# of the wall clock or more than 24 hours behind it. Every fixture row below was
+# written before this repo's script had that guard, so each carried a frozen date
+# literal that is now weeks in the past and is correctly refused.
+#
+# `_live_stamp` rewrites only the LEADING timestamp, at call time, and leaves the
+# rest of each row byte-identical. The literal stays in the source as the shape
+# documentation it always was; what changes is that the row is honest about when
+# it was written, which is the only thing the guard asks.
+_LEADING_TS = re.compile(r"(?<![\d])20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+
+def _live_stamp(row: str, *, shift_seconds: int = 0) -> str:
+    """Rewrite the row's FIRST timestamp to now (+shift), leaving all else."""
+    moment = datetime.now(UTC).replace(microsecond=0) + timedelta(seconds=shift_seconds)
+    return _LEADING_TS.sub(moment.strftime("%Y-%m-%dT%H:%M:%SZ"), row, count=1)
 
 
 def _run(script: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -351,11 +375,21 @@ def test_append_that_does_not_start_a_row_is_refused(tmp_path: Path) -> None:
 
 def test_append_in_a_live_row_shape_is_accepted(tmp_path: Path) -> None:
     """The guard must accept every shape the fleet already writes."""
+    # OMN-18554: stamped live, because this repo's ledger_lock.py now carries the
+    # OMN-17427 clock guard. The two rows that are also rule-4 CLAIM shapes carry a
+    # cost sentence for the same reason the claim-token fixtures do -- this test is
+    # about the ROW-SHAPE guard, and a row refused earlier in the chain never
+    # reaches it.
+    priced = "est ~2 lane-hours; displaces nothing; (OMN-17403)"
     for index, payload in enumerate(
         (
-            "2026-09-16T09:00:00Z | CLAIM | lane=x |",
-            "| 2026-09-16T09:00:00Z | CLAIM | lane=x |",
-            "- 2026-09-16T09:00:00Z CLAIM lane=x",
+            _live_stamp(
+                f"2026-09-16T09:00:00Z | CLAIM | lane=x | OMN-17403 {priced} |"
+            ),
+            _live_stamp(
+                f"| 2026-09-16T09:00:00Z | CLAIM | lane=x | OMN-17403 {priced} |"
+            ),
+            _live_stamp(f"- 2026-09-16T09:00:00Z CLAIM OMN-17403 lane=x {priced}"),
             "### 2026-09-16 — a headed row",
         )
     ):
@@ -383,8 +417,13 @@ def test_append_in_a_live_row_shape_is_accepted(tmp_path: Path) -> None:
 def test_the_guard_only_judges_the_first_line(tmp_path: Path) -> None:
     """A multi-line row is one row. Only its first line opens it."""
     ledger = _ledger(tmp_path, 3)
-    payload = (
-        "2026-09-16T09:00:00Z | TERMINAL | lane=x |\n  wrapped continuation\nmore prose"
+    # `friction=none` is here because this repo's ledger_lock.py now carries the
+    # OMN-18274 friction guard, which requires every TERMINAL row to state its
+    # friction one way or the other. Same reasoning as the rule-4 fixtures above:
+    # a row refused earlier in the chain never reaches the row-shape guard.
+    payload = _live_stamp(
+        "2026-09-16T09:00:00Z | TERMINAL | lane=x | friction=none |"
+        "\n  wrapped continuation\nmore prose"
     )
     result = _run(
         _LOCK,

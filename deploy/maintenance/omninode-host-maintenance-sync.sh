@@ -148,6 +148,16 @@ MANIFEST=(
   # performs. Only the two host-resident files need this guard.
   "deploy/maintenance/omninode-workspace-reconcile.sh|/data/maintenance/bin/omninode-workspace-reconcile.sh|0755"
   "deploy/maintenance/cron.d/omninode-workspace-reconcile|/etc/cron.d/omninode-workspace-reconcile|0644"
+  # OMN-18567. The deploy runner's private clone tree converger and its cron
+  # unit. Listing them here IS the installation: the hourly --converge writes
+  # every entry that differs from origin/dev and reads it back, so the tick
+  # reaches the host by merging to `dev` rather than by anyone editing a
+  # crontab. Both files are host-resident and neither resolves a collaborator
+  # relative to itself, which is why both are listed -- unlike the workspace
+  # reconciler proper, which is executed from the clone so its collaborators
+  # resolve and is therefore deliberately absent.
+  "deploy/maintenance/omninode-runner-tree-converge.sh|/data/maintenance/bin/omninode-runner-tree-converge.sh|0755"
+  "deploy/maintenance/cron.d/omninode-runner-tree-converge|/etc/cron.d/omninode-runner-tree-converge|0644"
 )
 
 # Optional manifest override: a file of `relpath|hostpath|mode` lines, blank and

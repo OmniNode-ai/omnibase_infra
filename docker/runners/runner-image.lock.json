@@ -6,7 +6,7 @@
   "kubectl_version": "1.32.1",
   "python_version": "3.12",
   "runner_version": "2.336.0",
-  "shared_env_digest": "57a5d6df81c2b4614c72ec8f",
+  "shared_env_digest": "3422b74c335d2788113e77d5",
   "shared_env_install_args": "--frozen --all-extras --all-groups --no-install-project",
   "trivy_version": "0.74.0",
   "uv_version": "0.6.14"

@@ -57,6 +57,72 @@
 # reconciler to inherit the bug.
 #
 # ============================================================================
+# ...AND WHY THAT COMPOSED VENV IS NOT THE CLONE'S OWN .venv (OMN-17819)
+# ============================================================================
+# Everything above is true about the CLI, and every word of it was applied to
+# the WRONG DIRECTORY until OMN-17819. The composed layer used to be installed
+# into `$OMNI_HOME/omnibase_infra/.venv` -- which is not only the CLI's venv,
+# it is also the canonical clone's PROJECT venv, the one `uv run pytest` in
+# that clone executes in. So the same directory was being asked to satisfy two
+# contracts that contradict each other:
+#
+#   the CLI     needs omnimarket present   (OMN-14060 refuses without it)
+#   the gate    needs omnimarket ABSENT    (OMN-15620 refuses with it, because
+#                                           an undeclared `onex.nodes` provider
+#                                           collides with declared providers of
+#                                           the same node identity and
+#                                           manufactures DUPLICATE_REGISTRATION
+#                                           false REDs across the whole suite)
+#
+# Measured on this Mac 2026-09-03 and again 2026-09-17: `cd
+# $OMNI_HOME/omnibase_infra && uv run pytest <anything>` was refused BEFORE
+# collection with "Canonical venv is IMPURE: ... omnimarket==0.4.111", and the
+# repair the refusal itself recommends (`uv sync`, exact) is the CLI-bricking
+# path described above. Worse, the repair did not even hold: this reconciler
+# re-composed the provider layer on its next tick (600 s), so `uv sync` bought
+# minutes. Three separate lanes were pushed into throwaway worktrees to run
+# three tests each.
+#
+# This is the OMN-16846 collision, which CI already settled on 2026-08-28 in
+# exactly these words: "Neither side is wrong on its own -- the purity gate is
+# correct and the co-install is required -- so the defect is the collapse of
+# two environments into one." CI's fix is `$DISPATCH_VENV` in
+# `.github/workflows/evidence-autoclose-sweep.yml`; the measured effect on one
+# ticket was `verified=1 failed=3 behavior_proving=0` collapsed versus
+# `verified=5 failed=0 behavior_proving=3` separated. This script is the same
+# fix for the local workspace, so that the split is a property of the platform
+# rather than of one workflow file.
+#
+#   GATE venv      $OMNI_HOME/omnibase_infra/.venv       lock-governed ONLY.
+#                                                        Synced EXACT. Anything
+#                                                        the lock does not name
+#                                                        is pollution and is
+#                                                        removed.
+#   DISPATCH venv  $OMNI_HOME/.onex-dispatch-venv        both layers. Synced
+#                                                        --inexact, then the
+#                                                        provider co-install.
+#                                                        `scripts/onex` execs
+#                                                        THIS one, and the
+#                                                        OMN-17309 floor reads
+#                                                        its omnimarket commit.
+#
+# ORDER MATTERS ACROSS THE TWO SURFACES, not just within one. The dispatch venv
+# is reconciled FIRST and the gate venv second. The gate pass is the step that
+# removes omnimarket from `.venv`, and doing that before a working dispatch venv
+# exists would leave a window -- possibly a permanent one, if the dispatch build
+# then fails -- in which no interpreter on this host can run `onex`. A dispatch
+# failure therefore refuses without touching the gate venv at all.
+#
+# The dispatch venv is NOT under `$OMNI_HOME/omnibase_infra/`: a venv inside the
+# clone is a venv some future `uv` invocation or purity probe will find while
+# answering a question about the clone. It sits beside
+# `.onex-workspace-floor.json` and `.onex-workspace-reconcile.json`, which are
+# the other pieces of workspace-scoped state this reconciler owns. It is also
+# deliberately not `$CLAUDE_PLUGIN_DATA/.venv`: that venv belongs to
+# `repair-plugin-venv.sh` (CLAUDE.md rule 11's table), and taking it over here
+# would give one directory two owners -- the same mistake one level up.
+#
+# ============================================================================
 # WHY THE PROVIDER LAYER PINS TO THE LOCAL CLONE HEAD, NOT origin/dev
 # ============================================================================
 # install-node-skill-package.sh defaults to resolving omnimarket's ref from a
@@ -170,6 +236,14 @@
 #   ONEX_RECONCILE_UV_BIN            absolute path to `uv`, tried FIRST. Not a
 #                                    bypass: it changes which uv runs, never
 #                                    whether the sync has to succeed.
+#   ONEX_DISPATCH_VENV               absolute path to the dispatch venv,
+#                                    overriding $OMNI_HOME/.onex-dispatch-venv.
+#                                    `scripts/onex` reads the same variable with
+#                                    the same default, so the two cannot point
+#                                    at different directories by accident. Not a
+#                                    bypass: it relocates the composed venv, it
+#                                    never makes the gate venv a legal home for
+#                                    the provider layer again.
 #   CLAUDE_PLUGIN_DATA               optional; when its .venv exists it is a
 #                                    hook-venv surface too
 #
@@ -258,8 +332,310 @@ INFRA_DIR="$OMNI_HOME/omnibase_infra"
 MARKET_CLONE="$OMNI_HOME/omnimarket"
 CLAUDE_DIR="$OMNI_HOME/omniclaude"
 
+# The GATE venv: the canonical clone's own project environment, the one
+# `uv run pytest` executes in and the one the OMN-15620 purity gate judges.
+# Lock-governed only. The two names are kept because every caller and test
+# already uses them; what changed in OMN-17819 is what they are ALLOWED to
+# contain, not where they point.
 INFRA_VENV="$INFRA_DIR/.venv"
 INFRA_PYTHON="$INFRA_VENV/bin/python"
+
+# The DISPATCH venv: the composed environment `scripts/onex` execs and the
+# OMN-17309 floor is read from. Outside the clone on purpose (see the header).
+#
+# Derived from $OMNI_HOME, which is already resolved fail-fast above -- there is
+# no default root and no absolute path literal here, so this resolves correctly
+# on a machine whose checkout lives somewhere else (CLAUDE.md rules 6 and 8).
+DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"
+DISPATCH_PYTHON="$DISPATCH_VENV/bin/python"
+
+# --------------------------------------------------------------------------- #
+# The dispatch venv may never BE a clone's own venv
+# --------------------------------------------------------------------------- #
+# The default above cannot be a clone's `.venv`, but `ONEX_DISPATCH_VENV` can,
+# and pointing it at one would reconstruct the exact OMN-17819 defect by hand:
+# the provider layer composed into a project environment, the OMN-15620 purity
+# gate refusing every `uv run pytest` there, and the refusal's own recommended
+# repair breaking the CLI. The override exists to RELOCATE the composed venv,
+# never to re-collapse the two.
+#
+# `-e`, not `-d`, on the `.git` test: in a worktree `.git` is a FILE, and a
+# `-d` test would wave through exactly the per-ticket worktrees lanes spend all
+# day inside.
+refuse_dispatch_venv_inside_a_clone() {
+  local parent
+  parent="${DISPATCH_VENV%/*}"
+
+  # The gate venv is refused UNCONDITIONALLY, before any `.git` test. Whether
+  # that directory happens to be a git checkout right now is irrelevant: it is
+  # the environment `uv run pytest` executes in and the OMN-15620 purity gate
+  # judges, and that is true of a tarball, a CI workspace and a fresh clone
+  # alike. Gating this on `.git` made the refusal miss the single case the whole
+  # ticket is about whenever the directory was not a repository.
+  if [[ "$DISPATCH_VENV" == "$INFRA_VENV" ]]; then
+    say "INDETERMINATE: refusing to compose the provider layer into $DISPATCH_VENV."
+    say "  That is the canonical clone's GATE venv -- the one \`uv run pytest\`"
+    say "  runs in and the OMN-15620 purity gate judges. Composing an undeclared"
+    say "  \`onex.nodes\` provider into it is the OMN-17819 defect itself."
+    say "  The dispatch venv must live OUTSIDE every clone. Unset"
+    say "  ONEX_DISPATCH_VENV to use the default ($OMNI_HOME/.onex-dispatch-venv),"
+    say "  or point it at a path that is not a clone's .venv."
+    exit "$EXIT_INDETERMINATE"
+  fi
+
+  [[ "${DISPATCH_VENV##*/}" == ".venv" ]] || return 0
+  [[ -e "$parent/.git" ]] || return 0
+
+  say "INDETERMINATE: refusing to compose the provider layer into $DISPATCH_VENV."
+  say "  That is the project venv of the git clone at $parent. A composed"
+  say "  layer there is undeclared in that project's lock, so its own purity"
+  say "  checks and test runs would be refused -- the OMN-17819 defect, moved."
+  say "  The dispatch venv must live OUTSIDE every clone. Unset"
+  say "  ONEX_DISPATCH_VENV to use the default ($OMNI_HOME/.onex-dispatch-venv),"
+  say "  or point it at a path that is not a clone's .venv."
+  exit "$EXIT_INDETERMINATE"
+}
+refuse_dispatch_venv_inside_a_clone
+
+# --------------------------------------------------------------------------- #
+# The dispatch venv's base interpreter (CLAUDE.md rule 11)
+# --------------------------------------------------------------------------- #
+# macOS Sonoma+ grants Local Network access per binary path and signature, not
+# per Python version. An adhoc-signed uv-managed interpreter never surfaces the
+# privacy dialog and its LAN connections fail silently with EHOSTUNREACH; the
+# brew interpreter carries the grant. The dispatch venv is what `scripts/onex`
+# execs, and `onex` talks to the LAN services on the lab host, so on macOS it
+# must be built on the brew binary at its literal resolved path -- never
+# `$(brew --prefix)`, which a launchd or cron PATH cannot resolve.
+#
+# The requirement is macOS-only, deliberately. Rule 11 scopes itself to the
+# `local_macos_claude_hooks` profile and says in terms that it does not apply to
+# CI runners, containers, or the lab host. This same reconciler runs from the
+# lab host's cron, where there is no brew prefix and no privacy gate to satisfy;
+# requiring one there would refuse every tick for a constraint that does not
+# exist on that platform.
+#
+# Historical note, so this is not mis-read as a regression: the venv the
+# OMN-17819 split replaced was ALREADY uv-managed -- `omnibase_infra/.venv` read
+# `home = <uv data dir>/cpython-3.12-macos-aarch64-none/bin`. The CLI never had
+# the grant on this host. The split is what made the interpreter fixable in one
+# place rather than entangled with the clone's own project environment.
+DISPATCH_BASE_PYTHON_CANDIDATES=(
+  "/opt/homebrew/bin/python3.13"  # Apple Silicon
+  "/usr/local/bin/python3.13"     # Intel
+)
+
+# Echoes the interpreter `uv` must build the dispatch venv on, or nothing when
+# this platform has no such requirement. A macOS host with no brew interpreter
+# echoes nothing too, and the caller refuses -- naming every path it looked at,
+# because "not on PATH" was read as "not installed" once already (OMN-17335).
+# Whether this host has the LAN-grant constraint at all.
+#
+# Both overrides can only ADD the requirement, never remove it -- there is no
+# value of either that turns it off, and `dispatch_base_python` refuses rather
+# than falling back when it cannot satisfy one. That is deliberate: a variable
+# that switched a safety requirement off would be the bypass rule 17 forbids.
+# What they buy is a behaviour that is exercised by the merge gate: CI runs on
+# Linux, so without a seam the entire rule-11 enforcement would be untestable
+# there and would ship unproven (rule 5 -- opt-in verification never gets
+# adopted).
+dispatch_requires_base_python() {
+  [[ "${ONEX_DISPATCH_REQUIRE_BASE_PYTHON:-0}" == "1" ]] && return 0
+  [[ -n "${ONEX_DISPATCH_BASE_PYTHON:-}" ]] && return 0
+  [[ "$(uname -s)" == "Darwin" ]]
+}
+
+dispatch_base_python() {
+  dispatch_requires_base_python || return 0
+  if [[ -n "${ONEX_DISPATCH_BASE_PYTHON:-}" ]]; then
+    # Validated, not trusted. Echoing a path that is not there hands uv an
+    # argument it cannot use and turns a clear "that interpreter does not
+    # exist" into whatever uv says three steps later -- and on a shim-backed
+    # test host, into no error at all.
+    if [[ ! -x "$ONEX_DISPATCH_BASE_PYTHON" ]]; then
+      say "INDETERMINATE: ONEX_DISPATCH_BASE_PYTHON names $ONEX_DISPATCH_BASE_PYTHON,"
+      say "  which is not an executable file. The dispatch venv is what"
+      say "  \`scripts/onex\` execs; building it on an interpreter that is not"
+      say "  there would leave this host with no CLI."
+      exit "$EXIT_INDETERMINATE"
+    fi
+    printf '%s' "$ONEX_DISPATCH_BASE_PYTHON"
+    return 0
+  fi
+  local candidate
+  for candidate in $(dispatch_base_python_candidates); do
+    [[ -x "$candidate" ]] && { printf '%s' "$candidate"; return 0; }
+  done
+}
+
+# The candidates, as a whitespace-separated list. `ONEX_DISPATCH_BASE_PYTHON_
+# CANDIDATES` (colon-separated) replaces the built-ins.
+#
+# This narrows WHICH interpreter qualifies; it never changes WHETHER one is
+# required, so it is not an opt-out. It exists because the refusal path -- no
+# acceptable interpreter anywhere -- is otherwise untestable on any host that
+# has brew installed, which is every developer Mac. Two earlier fixtures in this
+# suite already read host state that way and had to be repaired; this is the
+# same lesson applied to the code instead of to the test.
+dispatch_base_python_candidates() {
+  if [[ -n "${ONEX_DISPATCH_BASE_PYTHON_CANDIDATES:-}" ]]; then
+    printf '%s' "${ONEX_DISPATCH_BASE_PYTHON_CANDIDATES//:/ }"
+    return 0
+  fi
+  printf '%s' "${DISPATCH_BASE_PYTHON_CANDIDATES[*]}"
+}
+
+# Resolve a directory through every symlink, with shell builtins only: macOS
+# ships no GNU `realpath`, and the comparison below cannot be a string match --
+# `/opt/homebrew/bin/python3.13` is a symlink into the Cellar while the venv
+# records `/opt/homebrew/opt/python@3.13/bin`, two spellings of one directory.
+real_dir() { (cd "$1" 2>/dev/null && pwd -P) || true; }
+
+# The directory an executable REALLY lives in, following the file's own symlinks
+# first. This is not the same as resolving its parent directory, and the
+# difference is the whole comparison: `/opt/homebrew/bin` is a real directory
+# full of symlinks, so resolving IT yields `/opt/homebrew/bin`, while the
+# interpreter inside it points at `/opt/homebrew/Cellar/python@3.13/<v>/bin` --
+# which is what a venv built on it records, through the third spelling
+# `/opt/homebrew/opt/python@3.13/bin`.
+#
+# Resolving the parent refused a venv that had just been rebuilt correctly, on
+# the live host, with every package installed and the interpreter exactly right.
+# The readback caught it, which is what a readback is for; the comparison it fed
+# was the thing that was wrong. The symlink walk is the same idiom
+# `scripts/onex` uses to resolve itself.
+real_file_dir() {
+  local f="$1" link
+  while [[ -L "$f" ]]; do
+    link="$(readlink "$f")"
+    case "$link" in
+      /*) f="$link" ;;
+      *) f="${f%/*}/$link" ;;
+    esac
+  done
+  real_dir "${f%/*}"
+}
+
+# The `home` line of a venv's own pyvenv.cfg: the interpreter it was built on,
+# as recorded by the builder rather than as assumed by us.
+venv_base_home() {
+  local cfg="$1/pyvenv.cfg" line
+  [[ -f "$cfg" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      home*=*)
+        line="${line#*=}"
+        printf '%s' "${line# }"
+        return 0
+        ;;
+    esac
+  done < "$cfg"
+}
+
+# The installation an interpreter belongs to: its path with the trailing
+# `bin/<exe>` removed, resolved. `/opt/homebrew/bin/python3.13` -> `/opt/homebrew`.
+python_install_root() {
+  local p="${1%/*}"
+  [[ "${p##*/}" == "bin" ]] && p="${p%/*}"
+  real_dir "$p"
+}
+
+# Whether the existing dispatch venv is already on the required interpreter.
+# True when no interpreter is required (non-macOS) so the caller reads the same
+# on every platform.
+#
+# CONTAINMENT, NOT DIRECTORY EQUALITY -- and that is the third attempt at this
+# predicate, so the two measured failures are recorded here rather than left for
+# someone to rediscover:
+#
+#   1. Comparing the two PARENT DIRECTORIES. `/opt/homebrew/bin` is a real
+#      directory full of symlinks, so it resolves to itself, while a venv built
+#      on the interpreter inside it records `/opt/homebrew/opt/python@3.13/bin`.
+#      Never equal.
+#   2. Fully resolving the interpreter FILE. Measured on this host, brew's
+#      `python3.13` resolves through the Cellar and into the framework bundle:
+#         /opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/bin
+#      while the venv records
+#         /opt/homebrew/Cellar/python@3.13/3.13.3/bin
+#      Both are correct paths to one installation, and neither directory equals
+#      the other.
+#
+# Directory equality was simply the wrong question. What rule 11 asks is whether
+# the venv's base interpreter comes from the BREW INSTALLATION -- which holds the
+# macOS Local Network grant -- rather than from uv's managed store. Both brew
+# spellings resolve under `/opt/homebrew`; a uv-managed interpreter resolves
+# under the uv data directory. Containment answers exactly that and is immune to
+# how many symlinks either side happens to traverse.
+# The second argument is the venv to judge, defaulting to the live dispatch
+# venv. An atomic rebuild has to ask this about the STAGED venv, before that
+# one becomes live -- see swap_dispatch_venv below.
+dispatch_interpreter_ok() {
+  local want="$1" venv="${2:-$DISPATCH_VENV}" home want_root have_dir
+  [[ -n "$want" ]] || return 0
+  home="$(venv_base_home "$venv")"
+  [[ -n "$home" ]] || return 1
+  want_root="$(python_install_root "$want")"
+  have_dir="$(real_dir "$home")"
+  [[ -n "$want_root" && -n "$have_dir" ]] || return 1
+  # Equal, or underneath. The trailing slash stops `/opt/homebrew-other` from
+  # matching `/opt/homebrew`.
+  [[ "$have_dir" == "$want_root" || "$have_dir" == "$want_root"/* ]]
+}
+
+# --------------------------------------------------------------------------- #
+# Atomic rebuild: stage a sibling, prove it, then rename it in (OMN-17819)
+# --------------------------------------------------------------------------- #
+# A rebuild used to happen IN PLACE, on the one path every lane's `onex` execs.
+# `uv sync` removes what the lock does not mention before it installs, so for
+# the length of a rebuild -- and for the whole of a FAILED one -- the dispatch
+# venv on disk is a half-built environment with no omnimarket in it, and every
+# `onex skill` / `node` / `delegate` in every concurrent lane refuses. That is
+# not hypothetical: on 2026-09-17 a wrong interpreter predicate rebuilt and then
+# refused its own readback on a ~600s tick, and the provider layer was missing
+# from the shared venv for over an hour while lanes failed against it.
+#
+# So a rebuild is built at a SIBLING path and renamed into place only once it
+# has been read back and proven good. The live venv keeps serving until the
+# rename, and a rebuild that fails leaves it untouched rather than gutted.
+#
+# RELOCATABLE IS NOT OPTIONAL HERE, and it is why this is not merely a `mv`. A
+# venv's console scripts carry an ABSOLUTE shebang naming the venv they were
+# installed into -- 101 of them in this one, `onex` among them -- so a sibling
+# build renamed into place would yield a venv whose every entry point names a
+# directory that no longer exists. That is worse than the in-place rebuild it
+# replaces. `uv venv --relocatable` writes a `/bin/sh` wrapper that resolves the
+# interpreter from the script's own location instead, and `uv sync` preserves
+# that property for packages installed afterwards. Both halves were measured on
+# a real uv before this was written rather than assumed, and the second one is
+# read back off disk below because `uv sync` recreating the environment would
+# silently drop it.
+venv_is_relocatable() {
+  local cfg="$1/pyvenv.cfg"
+  [[ -f "$cfg" ]] || return 1
+  grep -qE '^[[:space:]]*relocatable[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$cfg"
+}
+
+# Rename a proven staged venv over the live one: two renames on one filesystem,
+# keeping the old generation until the new one is in place, so a failed second
+# rename is rolled back rather than leaving the host with no venv at all.
+swap_dispatch_venv() {
+  local staging="$1" live="$2" previous="$2.previous"
+  rm -rf "$previous"
+  if [[ -e "$live" ]] && ! mv "$live" "$previous"; then
+    fail "could not move the live dispatch venv aside; it is UNTOUCHED and" \
+      "still serving, and the gate venv was NOT touched." \
+      "The proven replacement is at:" \
+      "  $staging"
+  fi
+  if ! mv "$staging" "$live"; then
+    [[ -e "$previous" ]] && mv "$previous" "$live"
+    fail "could not move the rebuilt dispatch venv into place; the previous" \
+      "one has been restored and the gate venv was NOT touched." \
+      "The replacement is at:" \
+      "  $staging"
+  fi
+  rm -rf "$previous"
+}
 
 INSTALL_SCRIPT="${ONEX_RECONCILE_INSTALL_SCRIPT:-$INFRA_DIR/scripts/install-node-skill-package.sh}"
 
@@ -548,12 +924,40 @@ say_clone_stale_remedy() {
 lock_layer_ok() {
   local project="$1"
   shift
-  (cd "$project" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
+  lock_layer_ok_in "$project" "" "$@"
 }
 
+# The same question, asked of a venv that is NOT the project's default one.
+# `UV_PROJECT_ENVIRONMENT` is how uv is told which environment a project sync
+# targets; it is the same primitive `.github/workflows/evidence-autoclose-
+# sweep.yml` uses to compose CI's dispatch venv, so the local split and the CI
+# split are the same mechanism rather than two lookalikes (OMN-16846/OMN-17819).
+lock_layer_ok_in() {
+  local project="$1" venv="$2"
+  shift 2
+  if [[ -n "$venv" ]]; then
+    (cd "$project" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$venv" \
+      "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
+  else
+    # `-u UV_PROJECT_ENVIRONMENT` is not decoration. uv reads that variable from
+    # the ambient environment, so a caller that has one set -- a CI job, a shell
+    # inside an activated venv, a `uv run` parent -- silently redirects a sync
+    # that means "the project's own venv" to somewhere else entirely. Measured
+    # on this repo's CI, where the runner exports it: the gate pass targeted
+    # /home/runner/work/omnibase_infra/omnibase_infra/.venv and the canonical
+    # clone's venv was never purified at all, while the run still exited 0.
+    (cd "$project" && as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
+  fi
+}
+
+# Read from the DISPATCH venv (OMN-17819): that is where the provider layer
+# lives and where `scripts/onex` runs from, so it is the only interpreter whose
+# omnimarket commit answers "which build would a dispatch actually use".
+# Reading the gate venv here would report the commit of a package that is
+# supposed to be absent from it.
 installed_market_commit() {
-  [[ -x "$INFRA_PYTHON" ]] || return 0
-  env -u PYTHONPATH "$INFRA_PYTHON" - <<'PYEOF' 2>/dev/null || true
+  [[ -x "$DISPATCH_PYTHON" ]] || return 0
+  env -u PYTHONPATH "$DISPATCH_PYTHON" - <<'PYEOF' 2>/dev/null || true
 import json
 import sys
 from importlib.metadata import PackageNotFoundError, distribution
@@ -623,19 +1027,55 @@ run_check() {
     exit "$EXIT_INDETERMINATE"
   fi
 
-  if [[ ! -x "$INFRA_PYTHON" ]]; then
-    say "DRIFT: cli venv absent ($INFRA_VENV)"
+  # ---- the DISPATCH venv: both layers (OMN-17819) ------------------------- #
+  if [[ ! -x "$DISPATCH_PYTHON" ]]; then
+    say "DRIFT: dispatch venv absent ($DISPATCH_VENV)"
     drift=1
   else
-    if ! lock_layer_ok "$INFRA_DIR" --inexact; then
-      say "DRIFT: cli venv does not satisfy $INFRA_DIR/uv.lock"
+    # Reported in check mode as well as repaired, because `--check` is what the
+    # SessionStart line and every read-only probe run: a verdict that stayed
+    # silent about the interpreter would print "in sync" over a CLI whose LAN
+    # calls to the lab host fail silently (CLAUDE.md rule 11).
+    local base_python
+    base_python="$(dispatch_base_python)"
+    if dispatch_requires_base_python && [[ -z "$base_python" ]]; then
+      say "DRIFT: no brew Python to build the dispatch venv on; looked at:"
+      say "  $(dispatch_base_python_candidates)"
+      drift=1
+    elif ! dispatch_interpreter_ok "$base_python"; then
+      say "DRIFT: dispatch venv is on the wrong interpreter -- built on"
+      say "  $(venv_base_home "$DISPATCH_VENV"), required ${base_python%/*}"
+      say "  (CLAUDE.md rule 11: the macOS Local Network grant is per binary path,"
+      say "  so a uv-managed interpreter's LAN calls fail silently)"
+      drift=1
+    fi
+
+    if ! lock_layer_ok_in "$INFRA_DIR" "$DISPATCH_VENV" --inexact; then
+      say "DRIFT: dispatch venv does not satisfy $INFRA_DIR/uv.lock"
       drift=1
     fi
     installed="$(installed_market_commit)"
     if [[ "$installed" != "$head" ]]; then
-      say "DRIFT: cli venv omnimarket ${installed:0:12} != clone HEAD ${head:0:12}"
+      say "DRIFT: dispatch venv omnimarket ${installed:0:12} != clone HEAD ${head:0:12}"
       drift=1
     fi
+  fi
+
+  # ---- the GATE venv: lock-governed ONLY ---------------------------------- #
+  # EXACT, deliberately: no `--inexact` here. `--inexact` is what lets a
+  # composed layer coexist with a lock, and the whole point of the OMN-17819
+  # split is that this venv has no composed layer. An undeclared `onex.nodes`
+  # provider in here is what the OMN-15620 gate refuses on, so a check that
+  # tolerated it would report IN_SYNC for the exact state that blocks every
+  # `uv run pytest` in the canonical clone.
+  if [[ ! -x "$INFRA_PYTHON" ]]; then
+    say "DRIFT: gate venv absent ($INFRA_VENV)"
+    drift=1
+  elif ! lock_layer_ok "$INFRA_DIR"; then
+    say "DRIFT: gate venv does not match $INFRA_DIR/uv.lock exactly"
+    say "  (either a locked pin is missing, or an undeclared distribution is"
+    say "  installed -- the second is what the OMN-15620 purity gate refuses on)"
+    drift=1
   fi
 
   local project
@@ -692,37 +1132,172 @@ run_repair() {
     exit "$EXIT_INDETERMINATE"
   fi
 
-  # ---- surface 1: the onex CLI venv (two layers) -------------------------- #
+  # RUN_AS was planned from the gate venv's owner. A dispatch venv owned by
+  # somebody else would be written as the wrong user by that same prefix --
+  # the hazard plan_privileges exists to prevent -- so it is refused rather
+  # than written, exactly as a foreign-owned hook venv is below. A dispatch
+  # venv that does not exist yet has no owner to disagree with and is created
+  # by the surface owner like everything else here.
+  local dispatch_owner
+  if [[ -d "$DISPATCH_VENV" ]]; then
+    dispatch_owner="$(rp_surface_owner "$DISPATCH_VENV" || true)"
+    if [[ -n "$dispatch_owner" && "$dispatch_owner" != "$SURFACE_OWNER" ]]; then
+      say "INDETERMINATE: dispatch venv $DISPATCH_VENV is owned by $dispatch_owner,"
+      say "  but the package operations are running as $SURFACE_OWNER (owner of"
+      say "  $INFRA_DIR). Reconcile it as $dispatch_owner, or make the two"
+      say "  surfaces share an owner."
+      exit "$EXIT_INDETERMINATE"
+    fi
+  fi
+
+  # ---- surface 1: the DISPATCH venv (two layers) -------------------------- #
+  #
+  # FIRST, before the gate venv, and the ordering is load-bearing: the gate pass
+  # below is what REMOVES omnimarket from the clone's `.venv`, and doing that
+  # before a working dispatch venv exists would leave this host with no
+  # interpreter that can run `onex` at all. Every failure path here exits
+  # without reaching the gate venv (OMN-17819).
   #
   # Each layer is decided independently, so a tick that runs every 10 minutes
   # does the least work that closes the actual gap. The common case by far --
   # the clone advanced, the lock did not -- is additive `--no-deps` provider
   # work plus a lock pass that finds nothing to do.
-  if [[ ! -x "$INFRA_PYTHON" ]]; then
+  if [[ ! -x "$DISPATCH_PYTHON" ]]; then
     need_lock=1
     need_provider=1
   else
-    lock_layer_ok "$INFRA_DIR" --inexact || need_lock=1
+    lock_layer_ok_in "$INFRA_DIR" "$DISPATCH_VENV" --inexact || need_lock=1
     installed="$(installed_market_commit)"
     [[ "$installed" == "$head" ]] || need_provider=1
   fi
 
+  # The base interpreter, resolved once (CLAUDE.md rule 11). Empty off macOS,
+  # where the LAN-grant constraint does not exist.
+  local base_python
+  base_python="$(dispatch_base_python)"
+  if dispatch_requires_base_python && [[ -z "$base_python" ]]; then
+    fail "no brew Python found to build the dispatch venv on; the gate venv was NOT touched." \
+      "The dispatch venv is what \`scripts/onex\` execs, and on macOS the Local" \
+      "Network grant is per binary path -- a uv-managed interpreter's LAN" \
+      "connections to the lab host fail silently with EHOSTUNREACH." \
+      "Looked at, in order:" \
+      "  $(dispatch_base_python_candidates)" \
+      "Install it (brew install python@3.13), or name one explicitly with" \
+      "ONEX_DISPATCH_BASE_PYTHON=<absolute path>."
+  fi
+
+  local -a dispatch_python_arg=()
+  [[ -n "$base_python" ]] && dispatch_python_arg=(--python "$base_python")
+
+  # An existing dispatch venv on the WRONG interpreter is drift, not a state to
+  # leave alone. Without this the rule-11 requirement would hold only for hosts
+  # that happened to build the venv after it landed, and every host that already
+  # had one would keep a silently LAN-blind CLI forever. `uv sync --python`
+  # recreates the environment when the interpreter differs, so the rebuild is
+  # uv's single code path rather than an `rm -rf` in a reconciler.
+  # A BOOLEAN, separate from the message. An earlier draft used the recorded
+  # `home` string as the flag, which is empty in exactly the drift case that
+  # matters most -- a venv with no readable pyvenv.cfg -- so it printed
+  # "Rebuilding." and then skipped both the rebuild and its readback. A hand-run
+  # reproduction caught that; no test would have, because every fixture wrote a
+  # pyvenv.cfg.
+  local rebuild=0 rebuild_home=""
+  if [[ -x "$DISPATCH_PYTHON" ]] && ! dispatch_interpreter_ok "$base_python"; then
+    rebuild=1
+    rebuild_home="$(venv_base_home "$DISPATCH_VENV")"
+    say "dispatch venv: interpreter drift -- built on ${rebuild_home:-<unreadable pyvenv.cfg>},"
+    say "  required ${base_python%/*} (CLAUDE.md rule 11). Rebuilding."
+    need_lock=1
+    need_provider=1
+  fi
+
+  # WHERE THIS PASS WRITES. A rebuild is staged at a sibling and renamed in at
+  # the end; everything else writes straight to the live venv, because an
+  # ADDITIVE provider or lock pass never leaves it unusable and staging one
+  # would buy nothing. A venv that does not exist YET is also built in place --
+  # there is no live environment to protect, and no lane can be using it.
+  local target_venv="$DISPATCH_VENV" target_python="$DISPATCH_PYTHON" staging=""
+  if [[ "$rebuild" -eq 1 ]]; then
+    staging="$DISPATCH_VENV.rebuilding"
+    target_venv="$staging"
+    target_python="$staging/bin/python"
+    # A leftover from an earlier failed rebuild is scrap, not state.
+    rm -rf "$staging"
+    say "dispatch venv: staging the rebuild at $staging"
+    # Created HERE rather than left to the `uv sync` below, because only
+    # `uv venv` takes --relocatable and `uv sync` has no equivalent -- measured:
+    # UV_VENV_RELOCATABLE is not honoured by `uv sync`, which writes absolute
+    # shebangs. Without this step the rename would break every console script.
+    trace "uv venv --relocatable ${dispatch_python_arg[*]} $staging"
+    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH \
+        "$UV_BIN" venv --relocatable "${dispatch_python_arg[@]}" "$staging"); then
+      fail "could not stage the dispatch venv rebuild; the live venv is" \
+        "UNTOUCHED and still serving, and the gate venv was NOT touched." \
+        "Run by hand and read the error:" \
+        "  cd $INFRA_DIR && env -u PYTHONPATH \\" \
+        "    uv venv --relocatable ${dispatch_python_arg[*]} $staging"
+    fi
+  fi
+
+  # What a refusal from here on can HONESTLY claim survived. A staged rebuild
+  # writes nowhere near the live venv, so every failure below leaves it serving
+  # -- and saying only "the gate venv was NOT touched" would leave the reader
+  # believing the CLI is gone and reaching for a repair that is not needed.
+  # A first-ever build has no live venv to make that claim about.
+  local intact_note="the gate venv was NOT touched."
+  if [[ -n "$staging" ]]; then
+    intact_note="the live venv is UNTOUCHED and still serving, and the gate venv was NOT touched."
+  fi
+
+  # A dispatch venv that does not exist yet has no provider layer to install
+  # into. Build the lock layer first in that one case, so `uv` creates the
+  # environment and the co-install has an interpreter to target. This is the
+  # ONLY situation in which the lock pass precedes the provider pass; the
+  # OMN-16262 ordering (provider first, lock second) still holds afterwards,
+  # because the co-install below forces a second lock pass.
+  if [[ ! -x "$DISPATCH_PYTHON" || "$rebuild" -eq 1 ]]; then
+    say "dispatch venv: creating $target_venv from $INFRA_DIR/uv.lock${base_python:+ on $base_python}"
+    trace "UV_PROJECT_ENVIRONMENT=$target_venv uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
+    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$target_venv" \
+        "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR" "${dispatch_python_arg[@]}"); then
+      fail "dispatch venv could not be created; $intact_note" \
+        "Without it there is no interpreter for \`onex\` to exec, so this" \
+        "refuses rather than purifying the gate venv and leaving the host with" \
+        "no CLI at all. Run by hand and read the error:" \
+        "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$target_venv \\" \
+        "    uv sync --frozen --inexact ${dispatch_python_arg[*]}"
+    fi
+
+    # Prove the interpreter MOVED, by reading the venv back. `uv sync --python`
+    # exiting 0 is not evidence that it rebuilt on the interpreter asked for --
+    # that is the OMN-17307 defect class, a repair reporting its own exit status
+    # as proof. A silent failure here would leave a LAN-blind CLI reading as
+    # reconciled.
+    if ! dispatch_interpreter_ok "$base_python" "$target_venv"; then
+      fail "dispatch venv is still not on the required interpreter; $intact_note" \
+        "  required : ${base_python%/*}" \
+        "  recorded : $(venv_base_home "$target_venv")" \
+        "Remove $target_venv and re-run, or name the interpreter explicitly" \
+        "with ONEX_DISPATCH_BASE_PYTHON=<absolute path>."
+    fi
+  fi
+
   if [[ "$need_lock" -eq 0 && "$need_provider" -eq 0 ]]; then
-    say "cli venv: already in sync (omnimarket ${head:0:12})"
+    say "dispatch venv: already in sync (omnimarket ${head:0:12})"
   else
     # PROVIDER FIRST. The co-install can move lock-governed pins (OMN-16262:
     # its hardcoded COMPAT_PIN downgrades omnibase-compat 0.5.6 -> 0.5.5 and
     # breaks the `occ` CLI extension badly enough that `onex` will not start),
     # so the lock pass has to come after it to undo that.
     if [[ "$need_provider" -eq 1 ]]; then
-      say "cli venv: reconciling provider layer to omnimarket ${head:0:12}"
+      say "dispatch venv: reconciling provider layer to omnimarket ${head:0:12}"
       if [[ ! -x "$INSTALL_SCRIPT" ]]; then
         fail "provider co-install script is missing or not executable." \
           "Expected at: $INSTALL_SCRIPT"
       fi
       # OMNIMARKET_REF is set explicitly so the install script's own ls-remote
       # default (OMN-16366 reversed drift) can never apply here.
-      trace "OMNIMARKET_REF=$head $INSTALL_SCRIPT --execute $INFRA_PYTHON"
+      trace "OMNIMARKET_REF=$head $INSTALL_SCRIPT --execute $target_python"
       # PATH carries the resolved uv down to the child (OMN-17383). The
       # co-install calls bare `uv`, and it inherits the cron PATH -- which is
       # exactly the PATH that cannot reach a user-local install, so on `.201`
@@ -752,12 +1327,13 @@ run_repair() {
       # so this changes where the child stands without changing what it installs.
       if ! (cd "$OMNI_HOME" && as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
           PATH="$(dirname "$UV_BIN"):$PATH" \
-          bash "$INSTALL_SCRIPT" --execute "$INFRA_PYTHON"); then
+          bash "$INSTALL_SCRIPT" --execute "$target_python"); then
         fail "provider co-install did not complete; omnimarket is not installed." \
           "Every \`onex skill\`/\`onex node\`/\`onex delegate\` dispatch will refuse" \
-          "until this succeeds. Run by hand and read the error:" \
+          "until this succeeds. $intact_note Run by hand and" \
+          "read the error:" \
           "  OMNIMARKET_REF=$head OMNI_HOME=$OMNI_HOME \\" \
-          "    bash $INSTALL_SCRIPT --execute $INFRA_PYTHON" \
+          "    bash $INSTALL_SCRIPT --execute $target_python" \
           "  (this is scripts/install-node-skill-package.sh)"
       fi
       # The co-install just ran, so the lock pass is mandatory regardless of
@@ -766,22 +1342,87 @@ run_repair() {
     fi
 
     if [[ "$need_lock" -eq 1 ]]; then
-      say "cli venv: applying $INFRA_DIR/uv.lock"
+      say "dispatch venv: applying $INFRA_DIR/uv.lock"
       # --frozen: apply the lock, never re-resolve it -- a re-resolution here
       #   would silently move the very pins the lock exists to hold.
       # --inexact: do not remove the composed provider layer, which the lock
-      #   correctly does not mention and must not be asked to.
-      trace "uv sync --frozen --inexact --project $INFRA_DIR"
-      if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR"); then
-        fail "cli venv lock sync did not complete." \
+      #   correctly does not mention and must not be asked to. This flag belongs
+      #   to THIS venv only; the gate venv below is synced exact (OMN-17819).
+      trace "UV_PROJECT_ENVIRONMENT=$target_venv uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
+      if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$target_venv" \
+          "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR" "${dispatch_python_arg[@]}"); then
+        fail "dispatch venv lock sync did not complete; $intact_note" \
           "Run by hand and read the error:" \
-          "  cd $INFRA_DIR && env -u PYTHONPATH uv sync --frozen --inexact"
+          "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$target_venv \\" \
+          "    uv sync --frozen --inexact"
       fi
     fi
-    say "cli venv: reconciled"
+    say "dispatch venv: reconciled"
   fi
 
-  # ---- surface 2: the hook venv(s), lock-governed only -------------------- #
+  # PROVE THE STAGED VENV BEFORE IT BECOMES THE LIVE ONE. `uv` exiting 0 is not
+  # evidence (OMN-17307, a repair reporting its own exit status as proof), and
+  # the interpreter readback above ran BEFORE the provider and lock passes --
+  # either of which can recreate the environment and drop what makes the rename
+  # safe. Both properties are therefore read back off disk here, at the last
+  # moment before the swap. Every refusal on this path leaves the live venv
+  # serving, which is the whole point of staging.
+  if [[ -n "$staging" ]]; then
+    if ! dispatch_interpreter_ok "$base_python" "$staging"; then
+      fail "the staged dispatch venv is not on the required interpreter; the" \
+        "live venv is UNTOUCHED and still serving, and the gate venv was NOT" \
+        "touched." \
+        "  required : ${base_python%/*}" \
+        "  recorded : $(venv_base_home "$staging")" \
+        "The staged build is at $staging; remove it and re-run."
+    fi
+    if ! venv_is_relocatable "$staging"; then
+      fail "the staged dispatch venv is not relocatable, so renaming it into" \
+        "place would leave every console script -- \`onex\` among them --" \
+        "naming $staging, which is about to stop existing. The live venv is" \
+        "UNTOUCHED and still serving, and the gate venv was NOT touched." \
+        "Expected 'relocatable = true' in $staging/pyvenv.cfg."
+    fi
+    say "dispatch venv: swapping the proven rebuild into $DISPATCH_VENV"
+    swap_dispatch_venv "$staging" "$DISPATCH_VENV"
+  fi
+
+  # ---- surface 2: the GATE venv, lock-governed ONLY (OMN-17819) ------------ #
+  # EXACT. This is the step that removes an undeclared `onex.nodes` provider
+  # from the canonical clone's own environment, which is what unblocks every
+  # `uv run pytest` there. It runs only after the dispatch venv above is proven
+  # good, because it is also the step that takes omnimarket away from whatever
+  # used to be running out of this directory.
+  #
+  # The previous revision of this script synced this venv `--inexact` and
+  # composed the provider layer INTO it. That is the OMN-17819 defect: the same
+  # directory cannot satisfy OMN-14060 (omnimarket must be present) and
+  # OMN-15620 (it must be absent) at once. Do not restore `--inexact` here --
+  # it would silently re-admit exactly the pollution this pass exists to remove,
+  # and the refusal it causes appears at `pytest_configure`, far from here.
+  local gate_needs_sync=0
+  if [[ ! -x "$INFRA_PYTHON" ]]; then
+    gate_needs_sync=1
+  elif ! lock_layer_ok "$INFRA_DIR"; then
+    gate_needs_sync=1
+  fi
+
+  if [[ "$gate_needs_sync" -eq 1 ]]; then
+    say "gate venv: applying $INFRA_DIR/uv.lock exactly"
+    trace "uv sync --frozen --project $INFRA_DIR"
+    if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT \
+        "$UV_BIN" sync --frozen --project "$INFRA_DIR"); then
+      fail "gate venv lock sync did not complete." \
+        "Until it does, \`uv run pytest\` in $INFRA_DIR may be refused by the" \
+        "OMN-15620 purity gate. Run by hand and read the error:" \
+        "  cd $INFRA_DIR && env -u PYTHONPATH uv sync --frozen"
+    fi
+    say "gate venv: reconciled"
+  else
+    say "gate venv: already lock-pure"
+  fi
+
+  # ---- surface 3: the hook venv(s), lock-governed only -------------------- #
   # Exact (not --inexact) on purpose: a hook venv has no composed layer above
   # its lock, so anything the lock does not mention is cross-repo pollution.
   # This host had omnibase_infra's dev group (pre-commit, import-linter,
@@ -812,7 +1453,8 @@ run_repair() {
     fi
     say "hook venv: reconciling $project/.venv to $project/uv.lock"
     trace "uv sync --frozen --project $project"
-    if ! (cd "$project" && as_owner env -u PYTHONPATH "$UV_BIN" sync --frozen --project "$project"); then
+    if ! (cd "$project" && as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT \
+        "$UV_BIN" sync --frozen --project "$project"); then
       fail "hook venv lock sync did not complete for $project." \
         "Run by hand and read the error:" \
         "  cd $project && env -u PYTHONPATH uv sync --frozen"

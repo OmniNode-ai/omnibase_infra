@@ -32,7 +32,9 @@ from deploy_agent.executor import (
     REPO_DIR,
     SCOPE_BUNDLES,
     DeployExecutor,
+    DevLaneMigrationPreflightError,
     assert_prod_request_has_stability_digest,
+    lane_config_for,
     resolve_prod_target_service,
 )
 from deploy_agent.health import create_health_app
@@ -41,6 +43,11 @@ from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lab_overlay import (
     DEFAULT_APPLY_BUDGET_SECONDS,
     LabOverlayApplier,
+)
+from deploy_agent.lane_lock_client import (
+    DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+    LaneLockContendedError,
+    lane_lock,
 )
 from deploy_agent.lane_policy import load_allowed_lanes_from_env
 from deploy_agent.loaded_code import record_loaded_code_sha
@@ -351,115 +358,228 @@ class DeployAgent:
         # method has always discarded the return, which is why every terminal
         # event reported services_restarted=[] for a scope-default deploy.
         services_restarted: list[str] = []
+        # OMN-18545: the resolved sha is a PROPERTY OF THIS JOB, cleared here
+        # like the two above. It lives on the agent, which outlives the job, and
+        # the lab overlay is now reachable from the failing path too (see the
+        # repair build in the `except` below) -- so a job that dies before
+        # git_pull would otherwise build images and stamp a record for the
+        # PREVIOUS job's commit, which this job never deployed. An unresolved sha
+        # must read as unresolved.
+        self._current_git_sha = ""
 
         def on_phase_update(phase: Phase, status: PhaseStatus) -> None:
             self.job_store.update_phase(cid, phase, status)
 
         try:
-            # OMN-15181: boundary-level guard — a prod request may only
-            # deploy a digest already proven in stability-test. Must run
-            # before ANY deploy effect (preflight included), not just before
-            # health checks. Previously implemented
-            # (assert_prod_request_has_stability_digest) but never called
-            # from the live consume/execute path — dead code, unit-tested in
-            # isolation only.
+            # OMN-18572. THE LANE'S OWN LOCK, HELD FOR THE WHOLE JOB.
             #
-            # Round 4 (Finding 11): the guard is resolved PER-SERVICE, not
-            # per-lane — a runtime-effects request must be compared against
-            # the effects stability container, not the runtime one
-            # (resolve_prod_target_service / resolve_stability_ready_digest).
-            # Previously every prod request was compared against the RUNTIME
-            # stability digest unconditionally, wrongly rejecting a
-            # runtime-effects command carrying its own stability-proven
-            # digest.
-            if cmd.runtime_lane == EnumRuntimeLane.PROD:
-                target_service = resolve_prod_target_service(cmd)
-                stability_digest = self.executor.resolve_stability_ready_digest(
-                    target_service
-                )
-                assert_prod_request_has_stability_digest(
-                    cmd, stability_ready_digest=stability_digest
-                )
+            # OMN-18124 put this lock around `git_pull` alone, because the
+            # deploy-source clone was the shared thing it was reasoning about.
+            # Every phase after it -- the build, the compose up, the verify,
+            # the lab-overlay apply -- then ran with the lane UNLOCKED, so a
+            # concurrent `scripts/deploy-runtime.sh` took the same lock
+            # uncontended and recreated the project underneath a job that was
+            # mid-flight. Measured 2026-09-17: a hand deploy entered at 11:20Z
+            # against job 746a118a, accepted 11:07:45Z and still in its runtime
+            # phase; the lane answered 000 on all three published ports for
+            # about six minutes with containers stranded in `Created`.
+            #
+            # `single_flight_lock` above does NOT cover this. It serializes this
+            # agent against itself and says nothing about any other writer on
+            # the host, which is why nothing refused.
+            #
+            # Re-entrant by construction: `git_pull` takes the same project and
+            # the client's ONEX_LANE_LOCK_HELD token makes that a no-op, the
+            # same rule `lane_lock.sh` applies to nested shell callers.
+            #
+            # The lock wraps the phases and NOT the terminal publish below. A
+            # publish is a bus write, not a lane mutation, and holding a lane
+            # lock across a retrying publish would serialize the next merge
+            # behind a broker problem that has nothing to do with the lane.
+            with lane_lock(
+                lane_config_for(cmd.runtime_lane).compose_project,
+                lane=cmd.runtime_lane.value,
+                ref=cmd.git_ref,
+                timeout=DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+            ):
+                # OMN-15181: boundary-level guard — a prod request may only
+                # deploy a digest already proven in stability-test. Must run
+                # before ANY deploy effect (preflight included), not just before
+                # health checks. Previously implemented
+                # (assert_prod_request_has_stability_digest) but never called
+                # from the live consume/execute path — dead code, unit-tested in
+                # isolation only.
+                #
+                # Round 4 (Finding 11): the guard is resolved PER-SERVICE, not
+                # per-lane — a runtime-effects request must be compared against
+                # the effects stability container, not the runtime one
+                # (resolve_prod_target_service / resolve_stability_ready_digest).
+                # Previously every prod request was compared against the RUNTIME
+                # stability digest unconditionally, wrongly rejecting a
+                # runtime-effects command carrying its own stability-proven
+                # digest.
+                if cmd.runtime_lane == EnumRuntimeLane.PROD:
+                    target_service = resolve_prod_target_service(cmd)
+                    stability_digest = self.executor.resolve_stability_ready_digest(
+                        target_service
+                    )
+                    assert_prod_request_has_stability_digest(
+                        cmd, stability_ready_digest=stability_digest
+                    )
 
-            # Preflight
-            self.executor.preflight(on_phase_update=on_phase_update)
+                # Preflight
+                self.executor.preflight(on_phase_update=on_phase_update)
 
-            # Git pull -- OMN-18124: under the lane's host lock, the same
-            # per-compose-project lock refresh_dev_lane.sh takes. The
-            # deploy-source clone is shared with that script, and this agent
-            # took nothing until now.
-            self._current_git_sha = self.executor.git_pull(
-                cmd.git_ref,
-                lane=cmd.runtime_lane,
-                on_phase_update=on_phase_update,
-            )
-
-            # Regenerate compose from catalog (non-fatal — logs warning on failure)
-            self.executor.compose_gen(
-                SCOPE_BUNDLES.get(cmd.scope, ["core", "runtime"]),
-                on_phase_update=on_phase_update,
-                lane=cmd.runtime_lane,
-            )
-
-            # Seed Infisical before containers start (non-fatal)
-            self.executor.seed_infisical(on_phase_update=on_phase_update)
-
-            # Runtime/full deploys must not start with stale endpoint env values.
-            if cmd.scope in (Scope.RUNTIME, Scope.FULL):
-                self.executor.validate_llm_endpoint_env_contract()
-
-            # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
-            # cache. prod pulls the pinned digest instead of rebuilding from a ref.
-            services_restarted = self.executor.rebuild_scope(
-                cmd.scope,
-                cmd.services,
-                on_phase_update=on_phase_update,
-                git_sha=self._current_git_sha,
-                # OMN-16442/OMN-17291: the command's own pin, carried through to
-                # stage_workspace.sh as DEPLOY_REF for workspace-mode builds.
-                git_ref=cmd.git_ref,
-                build_source=cmd.build_source,
-                lane=cmd.runtime_lane,
-                image_digest=cmd.image_digest,
-            )
-
-            # prod must serve exactly the pinned digest: verify the running
-            # container image digest equals the requested digest BEFORE any
-            # health check, failing closed on mismatch.
-            if cmd.runtime_lane == EnumRuntimeLane.PROD and cmd.image_digest:
-                health_checks = self.executor.deploy_and_verify(
+                # Git pull -- OMN-18124: under the lane's host lock, the same
+                # per-compose-project lock refresh_dev_lane.sh takes. The
+                # deploy-source clone is shared with that script, and this agent
+                # took nothing until now.
+                self._current_git_sha = self.executor.git_pull(
+                    cmd.git_ref,
                     lane=cmd.runtime_lane,
-                    expected_digest=cmd.image_digest,
                     on_phase_update=on_phase_update,
-                    service=resolve_prod_target_service(cmd),
-                )
-            else:
-                health_checks = self.executor.verify(
-                    on_phase_update=on_phase_update, lane=cmd.runtime_lane
                 )
 
-            # Complete
-            self.job_store.complete(cid, status="success")
-            logger.info("Job %s completed successfully", cid)
+                # Regenerate compose from catalog (non-fatal — logs warning on failure)
+                self.executor.compose_gen(
+                    SCOPE_BUNDLES.get(cmd.scope, ["core", "runtime"]),
+                    on_phase_update=on_phase_update,
+                    lane=cmd.runtime_lane,
+                )
 
-            # OMN-18200 AC5 -- the k3s onex-lab overlay's half of rule 24(a).
-            #
-            # AFTER the compose lane is verified and the job is marked complete,
-            # and deliberately NOT part of its verdict. The compose lane
-            # converged on its own merits by this point; a lab-overlay failure
-            # must not report a lane that IS running the merged sha as broken.
-            # The lab verdict travels in its own sha-keyed receipt, on its own
-            # lane value, emitted by the workflow job that reads the record this
-            # writes.
-            #
-            # Only the dev lane. A merge to `main` targets stability-test, which
-            # is a governed lane this agent's fence already refuses, and the lab
-            # overlay is not a stability surface.
-            self._apply_lab_overlay(cmd)
+                # Seed Infisical before containers start (non-fatal)
+                self.executor.seed_infisical(on_phase_update=on_phase_update)
 
+                # Runtime/full deploys must not start with stale endpoint env values.
+                if cmd.scope in (Scope.RUNTIME, Scope.FULL):
+                    self.executor.validate_llm_endpoint_env_contract()
+
+                # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
+                # cache. prod pulls the pinned digest instead of rebuilding from a ref.
+                services_restarted = self.executor.rebuild_scope(
+                    cmd.scope,
+                    cmd.services,
+                    on_phase_update=on_phase_update,
+                    git_sha=self._current_git_sha,
+                    # OMN-16442/OMN-17291: the command's own pin, carried through to
+                    # stage_workspace.sh as DEPLOY_REF for workspace-mode builds.
+                    git_ref=cmd.git_ref,
+                    build_source=cmd.build_source,
+                    lane=cmd.runtime_lane,
+                    image_digest=cmd.image_digest,
+                )
+
+                # prod must serve exactly the pinned digest: verify the running
+                # container image digest equals the requested digest BEFORE any
+                # health check, failing closed on mismatch.
+                if cmd.runtime_lane == EnumRuntimeLane.PROD and cmd.image_digest:
+                    health_checks = self.executor.deploy_and_verify(
+                        lane=cmd.runtime_lane,
+                        expected_digest=cmd.image_digest,
+                        on_phase_update=on_phase_update,
+                        service=resolve_prod_target_service(cmd),
+                    )
+                else:
+                    health_checks = self.executor.verify(
+                        on_phase_update=on_phase_update, lane=cmd.runtime_lane
+                    )
+
+                # Complete
+                self.job_store.complete(cid, status="success")
+                logger.info("Job %s completed successfully", cid)
+
+                # OMN-18200 AC5 -- the k3s onex-lab overlay's half of rule 24(a).
+                #
+                # AFTER the compose lane is verified and the job is marked complete,
+                # and deliberately NOT part of its verdict. The compose lane
+                # converged on its own merits by this point; a lab-overlay failure
+                # must not report a lane that IS running the merged sha as broken.
+                # The lab verdict travels in its own sha-keyed receipt, on its own
+                # lane value, emitted by the workflow job that reads the record this
+                # writes.
+                #
+                # Only the dev lane. A merge to `main` targets stability-test, which
+                # is a governed lane this agent's fence already refuses, and the lab
+                # overlay is not a stability surface.
+                self._apply_lab_overlay(cmd)
+
+                # OMN-18572. The applier above BUILT a fresh onex-api image;
+                # this is what DELIVERS it. Inside the lock, because it
+                # recreates a container on this lane, and inside the `try`
+                # rather than after it, because a delivery attempted on a job
+                # that has already failed would pin an image the lane was never
+                # proven able to run -- the same argument OMN-18545 made for the
+                # repair build taking a narrower path than the apply.
+                self._deliver_onex_api_pin(cmd)
+
+        except LaneLockContendedError as e:
+            # Named separately from a build failure because the two lead to
+            # different actions: this one is retried later by whoever holds the
+            # lane, and NOTHING on this lane was touched -- the contended
+            # acquire happens before the first phase runs.
+            logger.error(  # noqa: TRY400
+                "Job %s did not start: %s friction_type=lane_lock_contended",
+                cid,
+                e,
+            )
+            self.job_store.complete(cid, status="failed", errors=[str(e)])
         except Exception as e:
             logger.exception("Job %s failed: %s", cid, e)
             self.job_store.complete(cid, status="failed", errors=[str(e)])
+            # OMN-18545 -- THE REPAIR BUILD, AND WHY THE FAILING PATH NEEDED ONE
+            # AT ALL.
+            #
+            # Until now the ONLY call to the lab overlay was the one above, the
+            # last statement of the `try`. That closed a loop the agent could
+            # not open. The compose dev lane runs whatever
+            # ONEX_CLOUD_MIGRATE_IMAGE names; the dev-lane migration preflight
+            # (executor._ensure_runtime_migrations_ready, reached from
+            # _compose_up for the RUNTIME phase, i.e. from inside rebuild_scope)
+            # requires the cloud-migration one-shots to exit 0 USING THAT IMAGE;
+            # and lab_overlay is the only thing in this repository that builds a
+            # replacement CLOUD-migrate image from the archived omninode_infra
+            # overlay tree. (build-and-push-migrate-image.yml builds the same
+            # Dockerfile against THIS repo's tree and pushes the INFRA migrate
+            # image to ECR -- a different image, which does not satisfy this
+            # pin.) So while the
+            # pinned image was broken the preflight raised, control jumped HERE,
+            # and the build never ran -- the agent could not produce the image
+            # that would let the preflight pass. Measured three times on
+            # 2026-09-16; job 6d8316f0 reached terminal `failed` at 20:44:18Z
+            # with `verification: skipped`, and the newest
+            # onex-lab/omninode-cloud-migrate tag on the host stayed the 17:33Z
+            # pre-merge one throughout, which is the mechanical proof the
+            # applier never ran.
+            #
+            # This is a REPAIR BUILD, not the apply above. It builds one image
+            # and touches nothing else -- no runtime promotion, no lane apply.
+            # Running the full apply here would promote
+            # omnibase-infra-omninode-runtime:latest on a premise a failed job
+            # can falsify, rolling the persistent k3s lane to a tag NAMING the
+            # merged sha while it ran the previous commit's binary, and report
+            # PASS. build_repair_migrate_image's docstring carries the full
+            # reasoning and the cost argument.
+            #
+            # The honest limit, stated rather than implied: this makes a
+            # replacement image EXIST on the host. It does not DELIVER it --
+            # ONEX_CLOUD_MIGRATE_IMAGE is operator-held and nothing in this
+            # repository writes it. That half is deliberately out of scope.
+            #
+            # TARGETED, not unconditional. Only a dev-lane migration preflight
+            # failure triggers it, because that is the one deploy failure a fresh
+            # cloud-migrate image can actually fix. A gateway refusal, an
+            # out-of-memory build or an unset compose variable would otherwise
+            # each spend up to sixteen minutes rebuilding an unrelated image
+            # under this agent's single-flight lock -- which rejects every
+            # concurrent rebuild command outright -- on the path that is by
+            # construction the busy one while the lane is broken.
+            #
+            # The isolation from the job's verdict is structural: the verdict is
+            # already written on the line above, and this method swallows. Both
+            # properties are pinned by tests, not by this comment --
+            # tests/unit/test_lab_overlay_build_order_omn18545.py.
+            if isinstance(e, DevLaneMigrationPreflightError):
+                self._build_lab_repair_image(cmd)
 
         # Publish result (don't use on_phase_update — job is already completed,
         # and update_phase would revert status to in_progress)
@@ -493,6 +613,10 @@ class DeployAgent:
     def _apply_lab_overlay(self, cmd: ModelRebuildRequested) -> None:
         """Re-apply the k3s onex-lab overlay for this merge (OMN-18200 AC5).
 
+        Called on the SUCCESS path only. The failing path takes the narrower
+        ``_build_lab_repair_image`` instead (OMN-18545), because the apply
+        promotes the runtime pin on a premise a failed job can falsify.
+
         Swallows every exception by design. The record the applier writes is the
         channel this result travels on; a raise here would convert a lab finding
         into a failed compose deploy, which is the opposite of what the two
@@ -500,32 +624,19 @@ class DeployAgent:
         applier is itself logged and then dropped, because the applier's own
         contract is that it writes a record on both outcomes -- so an escape is a
         defect in the applier, reported as one, not a reason to lose the deploy.
+
+        Swallowing also protects the TERMINAL PUBLISH. This runs inside the
+        deploy job's ``try``/``except`` and the publish block sits after it, so
+        an exception escaping here would skip the publish entirely: the job would
+        be durably ``failed`` on disk with nothing on the bus and
+        ``result_publish_pending`` never set, so the retry loop would not replay
+        it either.
         """
-        if cmd.runtime_lane != EnumRuntimeLane.DEV:
-            return
-        if not LAB_OVERLAY_ENABLED:
-            logger.info(
-                "lab overlay re-apply DISABLED by DEPLOY_AGENT_LAB_OVERLAY=off; "
-                "no onex-lab-k3s record will exist for %s",
-                self._current_git_sha,
-            )
-            return
-        sha = self._current_git_sha
-        if not sha or len(sha) != 40:
-            logger.warning(
-                "lab overlay re-apply skipped: the resolved deploy sha is %r, and a "
-                "record must be keyed by an exact 40-character sha",
-                sha,
-            )
+        sha = self._resolve_lab_overlay_sha(cmd, action="re-apply")
+        if sha is None:
             return
         try:
-            applier = LabOverlayApplier(
-                state_dir=STATE_DIR,
-                repo_dir=Path(REPO_DIR),
-                overlay_source_dir=LAB_OVERLAY_SOURCE_DIR,
-                env=os.environ,
-                budget_seconds=LAB_OVERLAY_BUDGET_SECONDS,
-            )
+            applier = self._lab_overlay_applier()
             path = applier.apply(
                 sha=sha,
                 stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
@@ -538,6 +649,124 @@ class DeployAgent:
                 "onex-lab-k3s receipt for this sha will report a missing record",
                 sha,
             )
+
+    def _deliver_onex_api_pin(self, cmd: ModelRebuildRequested) -> None:
+        """Advance ``ONEX_API_IMAGE`` to the image the apply just built (OMN-18572).
+
+        The applier makes a correct onex-api image EXIST on this host. This is
+        the step that makes the lane RUN it. Without it the two facts diverge
+        silently and stay diverged until somebody delivers by hand -- which is
+        what a fix merged at 09:00:53Z on 2026-09-17 waited until 11:20Z for,
+        with tenant creation on the lab impossible throughout.
+
+        Reuses ``_resolve_lab_overlay_sha`` rather than re-deriving the fence.
+        The two paths must agree about which jobs touch the lab at all -- dev
+        lane, overlay enabled, an exact 40-character sha resolved by THIS job --
+        and a second copy of that rule is a second thing to drift.
+
+        Swallows for the same reasons its two neighbours do. The delivery
+        verdict travels in the lab-pass receipt the workflow emits, keyed by
+        this sha; converting it into a failed compose deploy would report a lane
+        that converged as broken, and an escape here would skip the terminal
+        publish that sits after this method's caller.
+        """
+        sha = self._resolve_lab_overlay_sha(cmd, action="onex-api delivery")
+        if sha is None:
+            return
+        try:
+            record = self.executor.deliver_onex_api_pin(
+                sha=sha,
+                omninode_clone=LAB_OVERLAY_SOURCE_DIR,
+                lane=cmd.runtime_lane,
+            )
+            logger.info(
+                "onex-api delivery for %s: result=%s tag_advanced=%s recreated=%s",
+                sha,
+                record.get("result"),
+                record.get("tag_advanced"),
+                record.get("recreated"),
+            )
+        except Exception:
+            logger.exception(
+                "onex-api delivery raised instead of returning a verdict for "
+                "%s; the lane may still be running the previous pin",
+                sha,
+            )
+
+    def _build_lab_repair_image(self, cmd: ModelRebuildRequested) -> None:
+        """Build the cloud-migrate repair image after a FAILED deploy (OMN-18545).
+
+        The narrow half of the overlay path: one image build, no runtime
+        promotion, no lane apply. See ``LabOverlayApplier.build_repair_migrate_image``
+        for why the failing path must not take the full apply, and the call site
+        for the loop this opens.
+
+        Swallows for the same two reasons ``_apply_lab_overlay`` does, and the
+        second one binds harder here: this runs inside the deploy job's
+        ``except`` block, so an escape would skip the terminal publish of a job
+        that has ALREADY been recorded as failed.
+        """
+        sha = self._resolve_lab_overlay_sha(cmd, action="repair build")
+        if sha is None:
+            return
+        try:
+            applier = self._lab_overlay_applier()
+            path = applier.build_repair_migrate_image(
+                sha=sha,
+                stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
+                correlation_id=str(cmd.correlation_id),
+            )
+            logger.info("lab overlay repair build recorded at %s", path)
+        except Exception:
+            logger.exception(
+                "lab overlay repair build raised instead of recording for %s; no "
+                "replacement cloud-migrate image was produced for this sha",
+                sha,
+            )
+
+    def _resolve_lab_overlay_sha(
+        self, cmd: ModelRebuildRequested, *, action: str
+    ) -> str | None:
+        """The fence both lab-overlay paths pass through, or ``None`` to skip.
+
+        Dev lane only. A merge to ``main`` targets stability-test, which is a
+        governed lane this agent's fence already refuses, and the lab overlay is
+        not a stability surface.
+
+        The sha is per-job -- cleared at the top of ``_run_deploy`` -- and that
+        clearing is load-bearing now that the failing path reaches here at all: a
+        job that died before ``git_pull`` would otherwise build images for the
+        PREVIOUS job's commit and stamp a record naming it.
+        """
+        if cmd.runtime_lane != EnumRuntimeLane.DEV:
+            return None
+        if not LAB_OVERLAY_ENABLED:
+            logger.info(
+                "lab overlay %s DISABLED by DEPLOY_AGENT_LAB_OVERLAY=off; "
+                "no onex-lab-k3s record will exist for %s",
+                action,
+                self._current_git_sha,
+            )
+            return None
+        sha = self._current_git_sha
+        if not sha or len(sha) != 40:
+            logger.warning(
+                "lab overlay %s skipped: the resolved deploy sha is %r, and a "
+                "record must be keyed by an exact 40-character sha",
+                action,
+                sha,
+            )
+            return None
+        return sha
+
+    def _lab_overlay_applier(self) -> LabOverlayApplier:
+        return LabOverlayApplier(
+            state_dir=STATE_DIR,
+            repo_dir=Path(REPO_DIR),
+            overlay_source_dir=LAB_OVERLAY_SOURCE_DIR,
+            env=os.environ,
+            budget_seconds=LAB_OVERLAY_BUDGET_SECONDS,
+        )
 
     def _publish_rejected(self, cmd: ModelRebuildRequested, *, reason: str) -> None:
         from kafka import KafkaProducer

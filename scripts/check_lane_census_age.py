@@ -4,8 +4,9 @@
 """check_lane_census_age.py — CI gate: reject a census snapshot older than MAX_AGE_DAYS (OMN-13034).
 
 THE CLASS FIX (retro B-6): the CLAUDE.md lane table must be a generated block
-derived from a machine-readable census snapshot. The snapshot is produced by
-lane-census-check.sh on .201 (the census timer). This gate asserts that:
+derived from a machine-readable census snapshot. The snapshot is written by
+`lane-census-check.sh --snapshot <path>` on .201 — the hourly census pass writes
+it to the host, and it is committed here. This gate asserts that:
 
   1. A census snapshot file exists at deploy/lane-census/census-snapshot.json.
   2. Its `emitted_at` timestamp is within MAX_AGE_DAYS (default 7) of now.
@@ -54,10 +55,12 @@ def check_census_age(
         print(
             f"::error title=LANE-CENSUS-STALE::Census snapshot missing: "
             f"{snapshot_path.relative_to(_REPO) if snapshot_path.is_relative_to(_REPO) else snapshot_path}. "
-            f"Run 'bash scripts/lane-census-check.sh --json > "
+            f"Run 'bash scripts/lane-census-check.sh --snapshot "
             f"deploy/lane-census/census-snapshot.json' on .201 and commit the "
-            f"result. A missing snapshot means the lane table is undocumented — "
-            f"the failure class OMN-13034 was written to prevent.",
+            f"result. Use --snapshot, NOT --json: --json emits the plan "
+            f"document, which carries no 'emitted_at' and is rejected here "
+            f"(OMN-18606). A missing snapshot means the lane table is "
+            f"undocumented — the failure class OMN-13034 was written to prevent.",
             file=sys.stderr,
         )
         return 1
@@ -114,9 +117,11 @@ def check_census_age(
         print(
             f"::error title=LANE-CENSUS-STALE::Census snapshot is {age_days} days "
             f"old (emitted_at={emitted_raw!r}). Maximum allowed age is "
-            f"{max_age_days} days. Re-run the lane census on .201 and commit an "
-            f"updated deploy/lane-census/census-snapshot.json. Stale census = "
-            f"undocumented runtime topology (retro B-6 / OMN-13034).",
+            f"{max_age_days} days. Run 'bash scripts/lane-census-check.sh "
+            f"--snapshot deploy/lane-census/census-snapshot.json' on .201 and "
+            f"commit the result (--snapshot, not --json — see OMN-18606). "
+            f"Stale census = undocumented runtime topology "
+            f"(retro B-6 / OMN-13034).",
             file=sys.stderr,
         )
         return 1

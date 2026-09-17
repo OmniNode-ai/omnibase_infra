@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import math
 import sys
 from pathlib import Path
 
@@ -263,6 +264,43 @@ FULL_SUITE_BRANCHES = {"main"}
 # Full suite uses 15 splits (infra CI split count)
 _FULL_SUITE_SPLIT_COUNT = 15
 
+# The ceiling a NARROWED selection may reach, one below the full-suite count.
+#
+# This gap is load-bearing and is not a rounding choice. scripts/hooks/
+# prepush_remote_verify.py's binding 3 decides whether a green CI run was the
+# full suite by reading the shard DENOMINATOR out of the job names
+# ("Tests (Split i/N)"), because that denominator is produced by CI from the
+# pushed tree rather than supplied by the caller -- a forge-resistant witness of
+# `is_full_suite`. That inference is sound only while no narrowed run can mint
+# the full-suite denominator. Sizing shards by population (OMN-18542) would
+# otherwise let a selection covering the whole tree reach 15 and become
+# indistinguishable from a real full-suite run by job name alone.
+#
+# The cost of reserving 15 is bounded and measured: the widest narrowed
+# selection observed (omnibase_infra#3652's ten paths, 2,178 of 2,231
+# collectable modules) lands 156 modules on a shard at 14 shards against the
+# full-suite path's 149 -- 4.7% denser, inside the budget's headroom by a wide
+# margin. Raising this to `_FULL_SUITE_SPLIT_COUNT` therefore buys ~5% and
+# silently collapses a pre-push safety binding; it is pinned in both repos'
+# tests so it cannot be done by accident.
+_MAX_NARROWED_SPLIT_COUNT = _FULL_SUITE_SPLIT_COUNT - 1
+
+# Directories a filesystem walk must never descend into when counting the
+# collectable population. Neither can contain a module pytest would collect from
+# source, and both can carry stale copies that would inflate the count.
+_UNCOUNTED_DIR_NAMES = frozenset({"__pycache__", ".pytest_cache", ".git"})
+
+
+# The roots pytest itself collects, i.e. `[tool.pytest.ini_options] testpaths`.
+# Held equal to pyproject.toml in BOTH directions by
+# scripts/validation/validate_test_root_collection.py, which is why this is
+# derived from COLLOCATED_TEST_ROOTS rather than re-listed here: a new collocated
+# root joins the population automatically, and one that is added to only one of
+# the two places fails that validator rather than silently shrinking the
+# denominator below.
+def _full_suite_roots() -> tuple[str, ...]:
+    return (TESTS_PREFIX, *sorted(set(COLLOCATED_TEST_ROOTS.values())))
+
 
 def resolve_test_paths(
     changed_files: list[str],
@@ -482,7 +520,7 @@ def compute_selection(
         # safer to run something than nothing. `.github/workflows/**` is NOT in
         # this population — it maps positively to CI_CONTRACT_TEST_ROOT.
         selected = ["tests/unit/"]
-    split_count = _split_count_for(selected)
+    split_count = split_count_for_selection(selected)
 
     return ModelTestSelection(
         selected_paths=selected,
@@ -503,24 +541,94 @@ def _full_suite(reason: EnumFullSuiteReason) -> ModelTestSelection:
     )
 
 
-def _split_count_for(selected_paths: list[str]) -> int:
-    """Conservative heuristic mapping selected path count to split count.
+def _collectable_modules_under(selected_path: str, repo_root: Path) -> frozenset[Path]:
+    """Every module pytest would collect under one selected path.
 
-    Thresholds keep small PRs on a single shard (cheap) while preventing
-    pathologically slow runs when many paths survive selection.
-    Infra has a smaller test suite than core, so the ceiling is 5 splits
-    (vs core's 5 — same cap, smaller absolute counts per split).
+    Returns resolved paths so overlapping selections (`tests/unit/` alongside
+    `tests/unit/docker/`) can be unioned rather than summed.
     """
-    n = len(selected_paths)
-    if n <= 2:
+    target = repo_root / selected_path
+    if not selected_path.endswith("/"):
+        return (
+            frozenset({target})
+            if target.is_file() and is_collectable_test_file_name(target.name)
+            else frozenset()
+        )
+    if not target.is_dir():
+        return frozenset()
+    found: set[Path] = set()
+    for dirpath, dirnames, filenames in target.walk():
+        dirnames[:] = [d for d in dirnames if d not in _UNCOUNTED_DIR_NAMES]
+        found.update(
+            dirpath / name for name in filenames if is_collectable_test_file_name(name)
+        )
+    return frozenset(found)
+
+
+def collectable_test_file_count(
+    selected_paths: list[str], repo_root: Path = REPO_ROOT
+) -> int:
+    """How many modules pytest would collect for this selection, de-duplicated.
+
+    Counted off the working tree at selection time, so it cannot go stale as the
+    suite grows. A selected path that is not on disk contributes nothing: the
+    selector already refuses to emit one (`_selection_target_exists`), and an
+    absent path is zero work either way.
+    """
+    modules: set[Path] = set()
+    for path in selected_paths:
+        modules.update(_collectable_modules_under(path, repo_root))
+    return len(modules)
+
+
+def full_suite_test_file_count(repo_root: Path = REPO_ROOT) -> int:
+    """The population the full-suite path hands pytest, over every testpaths root."""
+    return collectable_test_file_count(list(_full_suite_roots()), repo_root)
+
+
+def split_count_for_selection(
+    selected_paths: list[str], repo_root: Path = REPO_ROOT
+) -> int:
+    """Size the shard matrix to the test population, never to the path count.
+
+    OMN-18542. This used to be a ladder over `len(selected_paths)`:
+
+        n <= 2 -> 1   n <= 5 -> 2   n <= 10 -> 3   n <= 16 -> 4   else 5
+
+    Nothing in that ladder related a path to the amount of work behind it, and
+    one string can be the entire unit tree. Two live populations on 2026-09-16,
+    both cancelled within one second of `timeout-minutes: 15` and therefore
+    neither a hang: `#3652`'s ten-path selection covered effectively the whole
+    tree and was given three shards, one of which reached 59% in 15 minutes; and
+    the conservative `["tests/unit/"]` fallback -- which the comment above still
+    described as "~3-5 min" -- ran 28,455 cases on ONE shard at 11.9, 14.5, 14.7
+    and 15.0 minutes across four runs the same day.
+
+    The rule is PARITY, not a magic number: no narrowed selection may be denser
+    per shard than the full-suite run of the whole tree, which is
+    `_FULL_SUITE_SPLIT_COUNT` shards over every `testpaths` root. Both sides are
+    counted from the working tree, so the ratio calibrates itself as the suite
+    grows instead of ageing into the same defect.
+
+    The result is capped at `_MAX_NARROWED_SPLIT_COUNT`, one below the
+    full-suite count, so a narrowed run can never mint the full-suite shard
+    denominator. See that constant for why that gap has to stay.
+
+    Fails CLOSED. If the full-suite population reads back as zero -- a wrong
+    root, a checkout that has not materialised -- the selection cannot be sized,
+    and returning 1 would put an unknown amount of work on one shard. That is
+    exactly the failure this function exists to remove, so it returns the
+    full-suite count instead.
+    """
+    full_suite_files = full_suite_test_file_count(repo_root)
+    if full_suite_files <= 0:
+        return _MAX_NARROWED_SPLIT_COUNT
+    target_per_split = math.ceil(full_suite_files / _FULL_SUITE_SPLIT_COUNT)
+
+    selected_files = collectable_test_file_count(selected_paths, repo_root)
+    if selected_files <= 0:
         return 1
-    if n <= 5:
-        return 2
-    if n <= 10:
-        return 3
-    if n <= 16:
-        return 4
-    return 5
+    return min(_MAX_NARROWED_SPLIT_COUNT, math.ceil(selected_files / target_per_split))
 
 
 def main(argv: list[str] | None = None) -> int:

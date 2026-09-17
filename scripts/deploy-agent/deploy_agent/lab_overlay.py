@@ -32,8 +32,19 @@ registry credential is involved.
 
 *The completion signal.* OMN-18200 AC3's asynchronous gap is real: the agent's
 build begins minutes after the command is published, so nothing that runs
-synchronously with the publish can know the lane converged. This module runs
+synchronously with the publish can know the lane converged. ``apply`` runs
 **after** this agent's own verify step, so the signal is not a wall clock.
+
+TWO ENTRY POINTS, NOT ONE (OMN-18545). ``apply`` is the success path and is
+unchanged. ``build_repair_migrate_image`` is the FAILING path, and it exists
+because this module is also the only thing in the repository that builds a
+replacement CLOUD-migrate image from the overlay tree -- the image the compose
+lane's dev-lane migration preflight runs, and therefore the image a failed
+preflight needs rebuilt. It builds that one image and applies nothing, because
+the apply's runtime-pin promotion rests on a premise a failed job can falsify;
+its own docstring carries the argument. Neither entry point can change the
+compose lane's verdict: both are called after the job already has a terminal
+status, and the agent swallows what escapes them.
 
 WHAT IS SPLIT OUT, AND WHY
 --------------------------
@@ -222,6 +233,14 @@ MIGRATE_DOCKERFILE = "docker/Dockerfile.migrate"
 MIGRATE_CONTEXT = "."
 API_DOCKERFILE = "docker/onex-api/Dockerfile"
 API_CONTEXT = "docker/onex-api"
+
+#: OMN-18113. OCI provenance stamped on the api image, naming the omninode_infra
+#: commit its source came from. The tag already carries an abbreviation of the
+#: same sha; the label is what survives a retag, and it is what
+#: ``scripts/runtime_build/repoint_dev_lane_onex_api.py`` cross-checks the tag
+#: against before it writes the compose lane's pin.
+API_REVISION_LABEL = "org.opencontainers.image.revision"
+API_SOURCE_LABEL = "ai.omninode.image.source-repo"
 
 #: OMN-18354. The build argument ``docker/onex-api/Dockerfile`` stage 0 requires
 #: and gives no default to. Named here rather than spelled at the call site so
@@ -427,6 +446,42 @@ def record_path(state_dir: Path, sha: str) -> Path:
     record for a different commit.
     """
     return Path(state_dir) / "lab-overlay" / f"{sha}.json"
+
+
+def repair_record_path(state_dir: Path, sha: str) -> Path:
+    """Where one sha's REPAIR record lives, and why it is not beside the other.
+
+    OMN-18545. A repair record is not a lab-overlay record: the lane was never
+    advanced, only an image was built. Writing it to ``record_path`` would put it
+    at the same key an apply uses, and ``_write`` replaces unconditionally -- so
+    a second job resolving the same dev HEAD and failing would OVERWRITE an
+    earlier job's passing apply record with one asserting the lane was not
+    advanced to that sha. That is not a stale record, it is a false one, and it
+    would supersede a PASS receipt with a FAIL on the next emit.
+
+    A SUBDIRECTORY, deliberately. ``load_latest_record`` globs ``*.json``
+    non-recursively directly under ``lab-overlay/``, so nothing under here can
+    become "the latest applied record" -- which matters because the OMN-18399
+    descendant-tolerance fallback reads that answer and labels it *applied*. A
+    repair record answering that question would make the fallback assert an apply
+    that never happened.
+    """
+    return Path(state_dir) / "lab-overlay" / "repair" / f"{sha}.json"
+
+
+def load_repair_record(state_dir: Path, sha: str) -> dict[str, Any] | None:
+    """Read one repair record back, or ``None`` when none exists.
+
+    Same malformed-raises contract as ``load_record``, for the same reason.
+    """
+    path = repair_record_path(state_dir, sha)
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        msg = f"{path}: a record must be a JSON object"
+        raise ValueError(msg)
+    return payload
 
 
 def load_record(state_dir: Path, sha: str) -> dict[str, Any] | None:
@@ -830,25 +885,45 @@ class LabOverlayApplier:
         context: str,
         target: str,
         timeout: int,
+        import_into_containerd: bool,
         build_args: Mapping[str, str] | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> None:
-        """Build one image from source and import it into the k3s content store.
+        """Build one image from source, and optionally import it into k3s.
 
-        Every image this caller pins goes through here, and every one is rebuilt
+        Every image this caller PINS goes through here, and every one is rebuilt
         on every run. That is not thrift-blindness; it is the only shape in which
         a pin is guaranteed pullable. See ``_derive_pins``.
+
+        ``import_into_containerd`` has no default because the two callers want
+        opposite things and neither is the obvious one. A pin for the k3s lane
+        must be in the k3s content store or the rollout dies at
+        ``ImagePullBackOff``; the OMN-18545 repair build wants the image on the
+        HOST DOCKER DAEMON, which is what the compose dev lane reads, and has no
+        business writing into the lane's content store on a deploy that failed.
 
         ``build_args`` is passed through verbatim, and only where a Dockerfile
         declares the argument -- a build argument nothing declares is a warning
         on every run, which teaches a reader to ignore warnings.
+
+        ``labels`` are OCI provenance, and they exist because the TAG is not
+        always the thing a reader has (OMN-18113). The compose dev lane pins an
+        image by reference in an operator env file; asked "which commit is this",
+        the only honest answer used to be "parse the tag", and an image that had
+        been retagged by hand answered nothing at all -- measured 2026-09-17, the
+        lane's onex-api carried no labels whatsoever. A label survives a retag,
+        so ``docker image inspect`` can answer the question directly.
         """
         argv = ["docker", "build", "-f", dockerfile, "-t", target]
+        for name, value in (labels or {}).items():
+            argv += ["--label", f"{name}={value}"]
         for name, value in (build_args or {}).items():
             argv += ["--build-arg", f"{name}={value}"]
         # The context is last because docker requires it there.
         argv.append(context)
         self._run(argv, timeout=timeout, cwd=tree)
-        self._import_into_containerd(target)
+        if import_into_containerd:
+            self._import_into_containerd(target)
 
     # -- prune -------------------------------------------------------------
     def declared_deployments(self, render_path: Path) -> frozenset[str]:
@@ -1138,6 +1213,149 @@ class LabOverlayApplier:
             checks=checks,
         )
 
+    def build_repair_migrate_image(
+        self, *, sha: str, stamp: str, correlation_id: str | None
+    ) -> Path:
+        """Build the cloud-migrate image ALONE, for a deploy job that failed.
+
+        OMN-18545. The compose dev lane runs whatever ``ONEX_CLOUD_MIGRATE_IMAGE``
+        names; the dev-lane migration preflight requires the cloud-migration
+        one-shots to exit 0 USING THAT IMAGE; and this module is the only thing
+        in the repository that builds a replacement from the overlay tree. While
+        the pinned image was broken the preflight raised, the deploy job failed,
+        and ``apply`` never ran -- so the agent could not produce the image that
+        would let the preflight pass. This is the narrow path out of that loop.
+
+        WHY THIS IS NOT JUST ``apply`` ON THE FAILING PATH. ``apply`` PROMOTES
+        the runtime pin (``_derive_pins``: ``promote_and_import`` of
+        ``omnibase-infra-omninode-runtime:latest``) on the premise that "this
+        agent just built it for the compose lane from the merged sha". On a
+        FAILED job that premise can be false -- a job that dies before or during
+        the image build leaves that tag at the PREVIOUS deploy's image -- and
+        the readback checks cannot catch it, because ``deployed_image`` compares
+        the lane against the tag this run just minted and
+        ``runtime_omnimarket_version`` compares it against the compose lane,
+        which on a failed deploy is also still the old image. Running the full
+        apply on failure would therefore roll the persistent k3s lane to a tag
+        NAMING the merged sha while it ran the previous commit's binary, and
+        report PASS. That is the false green this whole surface exists to
+        remove, so the failing path does not apply the lane at all: it builds
+        one image and touches nothing else.
+
+        It is also the cheap half. ``apply`` is four imports plus a lane apply,
+        bounded at roughly two hours, and it runs under the agent's single-flight
+        lock -- which on a broken migrate image would be taken on EVERY merge,
+        since every merge fails. This is one ``alpine``-plus-two-``COPY`` build.
+
+        THE RECORD LIVES UNDER ITS OWN KEY, and is deliberately a failing one.
+        It carries the same ``{name, ok, evidence}`` shape ``apply`` writes, so a
+        reader diagnosing a stuck lane has the build's outcome and evidence
+        durably -- but it goes to ``repair_record_path``, not ``record_path``,
+        because a repair is not an apply and writing it to the apply's key would
+        overwrite a passing record for the same sha with a false one. That
+        docstring carries the full argument. ``lab_overlay_applied`` is recorded
+        ``ok=False`` unconditionally on top of that, so a repair record can never
+        be read as a lab pass even by something that finds it directly.
+        """
+        started_at = _utc_now_iso()
+        checks: list[ModelLabOverlayCheck] = []
+        work = self.state_dir / "lab-overlay" / "work"
+        overlay_tree = work / "omninode_infra"
+
+        try:
+            manifest_sha = self.archive_overlay(overlay_tree)
+            checks.append(
+                ModelLabOverlayCheck(
+                    name="overlay_source_resolved",
+                    ok=True,
+                    evidence=(
+                        f"git archive omninode_infra@{manifest_sha} from "
+                        f"{self.overlay_source_dir} (origin/dev; the overlay's own "
+                        "lineage, not the merged omnibase_infra sha)"
+                    ),
+                )
+            )
+        except (LabOverlayRefusalError, OSError, subprocess.SubprocessError) as exc:
+            checks.append(
+                ModelLabOverlayCheck(
+                    name="overlay_source_resolved",
+                    ok=False,
+                    evidence=f"{type(exc).__name__}: {_truncate(str(exc))}",
+                )
+            )
+            checks.append(self._repair_lane_not_applied_check())
+            return self._write_repair(
+                sha=sha,
+                started_at=started_at,
+                correlation_id=correlation_id,
+                checks=checks,
+            )
+
+        # The same tag shape a successful apply would have minted, so the
+        # operator pins one name whichever path produced the image.
+        target = f"{CLOUD_MIGRATE_IMAGE_NAME}:{manifest_sha[:8]}-{stamp}"
+        try:
+            self.build_and_import(
+                tree=overlay_tree,
+                dockerfile=MIGRATE_DOCKERFILE,
+                context=MIGRATE_CONTEXT,
+                target=target,
+                timeout=MIGRATE_BUILD_TIMEOUT_SECONDS,
+                # The host DOCKER daemon is what the compose dev lane reads, and
+                # that is the whole point of this build. The k3s content store is
+                # for pins, and this run pins nothing.
+                import_into_containerd=False,
+            )
+            checks.append(
+                ModelLabOverlayCheck(
+                    name="cloud_migrate_repair_image_built",
+                    ok=True,
+                    evidence=(
+                        f"docker build -f {MIGRATE_DOCKERFILE} -t {target} "
+                        f"{MIGRATE_CONTEXT} from omninode_infra@{manifest_sha}; "
+                        "resident on the host Docker daemon. It is NOT delivered "
+                        "to the lane: ONEX_CLOUD_MIGRATE_IMAGE is operator-held "
+                        "and nothing in this repository writes it."
+                    ),
+                )
+            )
+        except (LabOverlayRefusalError, OSError, subprocess.SubprocessError) as exc:
+            checks.append(
+                ModelLabOverlayCheck(
+                    name="cloud_migrate_repair_image_built",
+                    ok=False,
+                    evidence=f"{type(exc).__name__}: {_truncate(str(exc))}",
+                )
+            )
+
+        checks.append(self._repair_lane_not_applied_check())
+        return self._write_repair(
+            sha=sha,
+            started_at=started_at,
+            correlation_id=correlation_id,
+            checks=checks,
+        )
+
+    @staticmethod
+    def _repair_lane_not_applied_check() -> ModelLabOverlayCheck:
+        """The check that keeps a repair record from reading as a lab pass.
+
+        Always failing, by construction. The receipt derives PASS iff every check
+        passed, so a repair record must carry one that did not: the k3s lane was
+        never advanced to this sha, and a record saying otherwise would be a
+        worse lie than no record at all.
+        """
+        return ModelLabOverlayCheck(
+            name="lab_overlay_applied",
+            ok=False,
+            evidence=(
+                "not attempted: the compose deploy job for this sha FAILED, so "
+                "the k3s onex-lab lane was deliberately not advanced to it "
+                "(OMN-18545). This run built the cloud-migrate repair image "
+                "only. The lane is still running whatever it ran before."
+            ),
+        )
+
     def _derive_pins(
         self,
         *,
@@ -1196,6 +1414,7 @@ class LabOverlayApplier:
             context=MIGRATE_CONTEXT,
             target=infra_migrate_image,
             timeout=MIGRATE_BUILD_TIMEOUT_SECONDS,
+            import_into_containerd=True,
         )
         # The overlay's tree, so these two carry the overlay's lineage.
         self.build_and_import(
@@ -1204,6 +1423,7 @@ class LabOverlayApplier:
             context=MIGRATE_CONTEXT,
             target=cloud_migrate_image,
             timeout=MIGRATE_BUILD_TIMEOUT_SECONDS,
+            import_into_containerd=True,
         )
         # OMN-18354. THE API BUILD NAMES THE RUNTIME IMAGE IT DERIVES FROM.
         #
@@ -1230,7 +1450,18 @@ class LabOverlayApplier:
             context=API_CONTEXT,
             target=api_image,
             timeout=API_BUILD_TIMEOUT_SECONDS,
+            import_into_containerd=True,
             build_args={API_RUNTIME_IMAGE_BUILD_ARG: runtime_image},
+            # OMN-18113. The compose dev lane pins this image by reference in an
+            # operator env file, and the repoint script that writes that pin
+            # cross-checks the label against the tag -- two provenance claims
+            # that must agree or neither is trusted. Only the api image carries
+            # these: it is the one that leaves this module's own naming
+            # convention and becomes a string in a file somebody else reads.
+            labels={
+                API_REVISION_LABEL: manifest_sha,
+                API_SOURCE_LABEL: "omninode_infra",
+            },
         )
 
         resident = self.resident_images()
@@ -1444,6 +1675,43 @@ class LabOverlayApplier:
         a half-written record and report it as malformed -- which the reader is
         required to treat as a finding rather than as an absence.
         """
+        return self._write_at(
+            record_path(self.state_dir, sha),
+            sha=sha,
+            started_at=started_at,
+            correlation_id=correlation_id,
+            checks=checks,
+        )
+
+    def _write_repair(
+        self,
+        *,
+        sha: str,
+        started_at: str,
+        correlation_id: str | None,
+        checks: Sequence[ModelLabOverlayCheck],
+    ) -> Path:
+        """Write a repair record, under its own key (OMN-18545).
+
+        See ``repair_record_path`` for why it must not share the apply's key.
+        """
+        return self._write_at(
+            repair_record_path(self.state_dir, sha),
+            sha=sha,
+            started_at=started_at,
+            correlation_id=correlation_id,
+            checks=checks,
+        )
+
+    def _write_at(
+        self,
+        path: Path,
+        *,
+        sha: str,
+        started_at: str,
+        correlation_id: str | None,
+        checks: Sequence[ModelLabOverlayCheck],
+    ) -> Path:
         record = ModelLabOverlayRecord(
             sha=sha,
             lane=LAB_LANE_VALUE,
@@ -1452,7 +1720,6 @@ class LabOverlayApplier:
             agent_command_id=correlation_id,
             checks=tuple(checks),
         )
-        path = record_path(self.state_dir, sha)
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
         try:

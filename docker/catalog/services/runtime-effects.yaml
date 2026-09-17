@@ -19,8 +19,8 @@ required_env:
   - GITHUB_TOKEN
   - DEPLOY_AGENT_HMAC_SECRET
 hardcoded_env:
-  OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
-  OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omniintelligence'
+  OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
+  OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence'
   KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   KAFKA_BROKER_ALLOWLIST: 'redpanda:'
   BUS_ID: local

@@ -71,7 +71,11 @@ class _Workspace:
         self.infra = root / "omnibase_infra"
         self.scripts = self.infra / "scripts"
         self.scripts.mkdir(parents=True)
-        self.venv_bin = self.infra / ".venv" / "bin"
+        # The DISPATCH venv, outside the clone (OMN-17819). The wrapper execs
+        # this one; the clone's own ``.venv`` is the gate venv and the wrapper
+        # must not reach into it at all.
+        self.dispatch_venv = root / ".onex-dispatch-venv"
+        self.venv_bin = self.dispatch_venv / "bin"
         self.venv_bin.mkdir(parents=True)
 
         self.wrapper = self.scripts / "onex"
@@ -105,7 +109,7 @@ class _Workspace:
         ``test_onex_wrapper_floor_omn17309.py``, including the case this
         deliberately excludes: an absent floor.
         """
-        site_packages = self.infra / ".venv" / "lib" / "python3.12" / "site-packages"
+        site_packages = self.dispatch_venv / "lib" / "python3.12" / "site-packages"
         dist_info = site_packages / "omnibase_infra-0.38.16.dist-info"
         dist_info.mkdir(parents=True, exist_ok=True)
         (dist_info / "METADATA").write_text(
@@ -419,3 +423,82 @@ def test_wrapper_is_executable_in_the_repo() -> None:
     """It is invoked as ``$OMNI_HOME/omnibase_infra/scripts/onex`` from a shell
     alias; a non-executable file makes that alias fail on a fresh clone."""
     assert os.access(_WRAPPER_SOURCE, os.X_OK)
+
+
+# --------------------------------------------------------------------------- #
+# OMN-17819: the wrapper execs the DISPATCH venv, never the canonical clone's
+# --------------------------------------------------------------------------- #
+def test_never_execs_the_gate_venv_entrypoint(workspace: _Workspace) -> None:
+    """An ``onex`` sitting in the canonical clone's own ``.venv`` is not a
+    fallback, it is a leftover from before the split.
+
+    Until OMN-17819 the wrapper's entrypoint WAS
+    ``$OMNI_HOME/omnibase_infra/.venv/bin/onex`` -- the clone's project venv,
+    which is also the environment ``uv run pytest`` runs in there and the one
+    the OMN-15620 purity gate judges. Keeping omnimarket in it to satisfy the
+    OMN-14060 dispatch guard is what made every focused pytest in the canonical
+    clone refuse before collection. Now that the gate venv is lock-pure, an
+    ``onex`` found there is a stale binary against an interpreter with no
+    provider layer: exec'ing it would produce an OMN-14060 refusal, or worse a
+    receipt, from a build nobody chose. Refuse instead.
+    """
+    gate_bin = workspace.infra / ".venv" / "bin"
+    gate_bin.mkdir(parents=True, exist_ok=True)
+    gate_entrypoint = gate_bin / "onex"
+    gate_entrypoint.write_text(
+        '#!/usr/bin/env bash\nprintf "GATE_VENV %s\\n" "$*" >> "$WITNESS"\nexit 0\n',
+        encoding="utf-8",
+    )
+    gate_entrypoint.chmod(0o755)
+
+    result = workspace.run(
+        "node", "node_example", extra_env={"ONEX_WRAPPER_NO_RECONCILE": "1"}
+    )
+
+    assert result.returncode == _EXIT_REFUSED, (
+        f"expected a refusal, got {result.returncode}: {result.stderr!r}"
+    )
+    assert not any(ln.startswith("GATE_VENV") for ln in workspace.witness_lines()), (
+        "the wrapper exec'd the canonical clone's own .venv entrypoint"
+    )
+    assert str(workspace.dispatch_venv) in result.stderr, (
+        "the refusal must name the dispatch venv it expected, so the reader "
+        f"knows which venv to reconcile. stderr was: {result.stderr!r}"
+    )
+
+
+def test_dispatch_venv_location_is_overridable_and_shared_with_the_reconciler(
+    workspace: _Workspace,
+) -> None:
+    """``ONEX_DISPATCH_VENV`` is read here with the same default the reconciler
+    uses, so the two cannot end up pointing at different directories."""
+    elsewhere = workspace.root / "somewhere-else"
+    (elsewhere / "bin").mkdir(parents=True)
+    entrypoint = elsewhere / "bin" / "onex"
+    entrypoint.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "ELSEWHERE %s\\n" "$*" >> "$WITNESS"\n'
+        f"exit {_SENTINEL_OK}\n",
+        encoding="utf-8",
+    )
+    entrypoint.chmod(0o755)
+
+    result = workspace.run("--help", extra_env={"ONEX_DISPATCH_VENV": str(elsewhere)})
+
+    assert result.returncode == _SENTINEL_OK, result.stderr
+    assert any(ln.startswith("ELSEWHERE") for ln in workspace.witness_lines())
+
+
+def test_the_reconciler_default_and_the_wrapper_default_are_the_same_string() -> None:
+    """Two files spelling the same default is how they drift apart. Assert the
+    spelling, in both, rather than trusting a comment that says they match."""
+    wrapper = _WRAPPER_SOURCE.read_text(encoding="utf-8")
+    reconciler = (_WRAPPER_SOURCE.parent / "reconcile-workspace-venvs.sh").read_text(
+        encoding="utf-8"
+    )
+    default = 'DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"'
+    assert default in wrapper, f"{_WRAPPER_SOURCE} does not resolve the dispatch venv"
+    assert default in reconciler, (
+        "reconcile-workspace-venvs.sh resolves the dispatch venv differently "
+        "from the wrapper that execs it"
+    )

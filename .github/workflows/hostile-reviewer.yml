@@ -73,9 +73,11 @@ jobs:
   occ-preflight:
     # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
     # omnibase_infra has no local occ-preflight.yml (unlike omnibase_core, which
-    # hosts the reusable) -- reference it remotely, matching the pinned SHA
-    # already used by this repo's own call-occ-preflight.yml / auto-merge.yml.
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@53055e39c1a5f3e2329f0a80d583530fd16111ce
+    # hosts the reusable) -- reference it remotely, matching the pinned SHA used
+    # by this repo's only other caller of it, ci.yml. Those two are the complete
+    # set of callers in this repository, and they must move together or the same
+    # merge path ends up gated by two different revisions of the reusable.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@979c290a16f70fcd7e0b62600ac511140baab4a6
     permissions:
       contents: read
       pull-requests: read
@@ -356,6 +358,11 @@ jobs:
           # Coding Plan; independent hardware AND quota domain). Running >=2
           # models keeps cli_review's exit-0 "at least 2 succeeded" path
           # reachable even when the whole local fleet is down.
+          #
+          # OMN-18479: those models are also the quorum. cli_review now
+          # resolves cross-model agreement and only a finding at least two
+          # distinct models raised is treated as blocking; below-quorum
+          # findings are reported in the review body without a thread.
           uv run python -m omniintelligence.review_pairing.cli_review \
             --pr "$PR_NUMBER" \
             --repo "$REPO" \
@@ -404,9 +411,25 @@ jobs:
                   sev = str(finding.get("severity", "info"))
                   severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
-          verdict = "passed" if len(models_succeeded) >= 2 else "degraded"
+          # OMN-18479: the reviewer resolves cross-model agreement itself and
+          # ships the verdict in `quorum`. Read it -- never re-derive one
+          # here. `degraded_quorum` means fewer models succeeded than
+          # agreement requires, so there is NO verdict: it must not report
+          # `passed`. A result with no quorum block is a reviewer predating
+          # OMN-18479; fall back to the model count that rule replaced.
+          quorum = data.get("quorum") or {}
+          quorum_verdict = str(quorum.get("verdict", ""))
+          if not quorum_verdict:
+              verdict = "passed" if len(models_succeeded) >= 2 else "degraded"
+          elif quorum_verdict in ("degraded_quorum", "no_models"):
+              verdict = "degraded"
+          else:
+              verdict = "passed"
 
           print(f"verdict={verdict}")
+          print(f"quorum_verdict={quorum_verdict or 'absent'}")
+          print(f"quorum_blocking={int(quorum.get('blocking_count', 0))}")
+          print(f"quorum_below={int(quorum.get('warning_count', 0))}")
           print(f"error_count={severity_counts.get('error', 0)}")
           print(f"warning_count={severity_counts.get('warning', 0)}")
           print(f"total_findings={total_findings}")

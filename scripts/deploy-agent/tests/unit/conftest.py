@@ -159,6 +159,16 @@ def _derive_image_build_budget_from_this_checkout(
     adding a runtime service or a Dockerfile step moves what these tests
     observe. The derivation's own behaviour is asserted directly in
     ``test_build_budget_omn18072.py``.
+
+    OMN-18615: it re-implements the production function's argument list, so it
+    must carry EVERY argument that function passes -- including the host
+    conditions. A repoint that quietly omits one silently reverts the
+    derivation for every executor test while still calling itself a repoint,
+    which is the failure mode this docstring is asserting it does not have.
+    ``probe_host_conditions`` is reached through ``executor_mod`` rather than
+    imported here so a test that pins a host still reaches this closure.
+    ``test_executor_build_ceiling_host_omn18615.py`` fails if the host term
+    goes missing from this fixture again.
     """
     from deploy_agent import build_budget
     from deploy_agent import executor as executor_mod
@@ -180,6 +190,7 @@ def _derive_image_build_budget_from_this_checkout(
             per_step_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
             per_image_seconds=executor_mod.RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
             floor_seconds=executor_mod.RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
+            host=executor_mod.probe_host_conditions(),
         )
 
     monkeypatch.setattr(executor_mod, "runtime_image_build_budget", _budget)

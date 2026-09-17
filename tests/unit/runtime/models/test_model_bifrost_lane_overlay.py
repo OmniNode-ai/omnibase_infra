@@ -27,7 +27,7 @@ _SHAPES: dict[str, dict[str, object]] = {
     "local-coder": {
         "endpoint_url": _QWEN_ENDPOINT,
         "served_model_id": "Qwen3.6-35B-A3B",
-        "parameter_count": "27B",
+        "parameter_count": "35B-A3B",
         "context_window": 131_072,
         "max_tokens": 65_536,
         "timeout_ms": 300_000,
@@ -36,7 +36,7 @@ _SHAPES: dict[str, dict[str, object]] = {
     "local-heavy-reasoning": {
         "endpoint_url": _QWEN_ENDPOINT,
         "served_model_id": "Qwen3.6-35B-A3B",
-        "parameter_count": "27B",
+        "parameter_count": "35B-A3B",
         "context_window": 131_072,
         "max_tokens": 65_536,
         "timeout_ms": 300_000,
@@ -150,7 +150,7 @@ def test_incomplete_or_unauthorized_endpoint_is_rejected(
     ("backend_id", "field", "value"),
     [
         ("local-coder", "served_model_id", "Qwen3.6-35B-A3B-27b"),
-        ("local-coder", "parameter_count", "27b"),
+        ("local-coder", "parameter_count", "35b-a3b"),
         ("local-coder", "context_window", 32_768),
         ("local-coder", "max_tokens", 131_073),
         ("local-coder", "endpoint_url_env", "BIFROST_LOCAL_CODER_ENDPOINT_URL"),

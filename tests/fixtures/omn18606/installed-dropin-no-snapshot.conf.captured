@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# 20-lane-census.conf — systemd drop-in extending the SHARED onex-disk-gc.service
+# with the lane-census reconcile pass (OMN-13011).
+#
+# COORDINATION (OMN-13008 / PR #1952): the disk-GC PR owns onex-disk-gc.service +
+# onex-disk-gc.timer. Rather than install a SECOND timer (per the ticket: "share
+# the timer unit rather than adding a second"), this drop-in appends a 4th
+# ExecStart to that ONE unit. systemd runs drop-ins after the base unit's own
+# ExecStart lines, so the lane-census reconcile runs after the GC passes on the
+# same hourly tick.
+#
+# Why a drop-in instead of editing the base .service: the base unit lives in a
+# separate in-flight PR. A drop-in lets both PRs land independently with zero
+# merge collision on the unit file. When OMN-13008 merges, install-lane-census.sh
+# copies this drop-in into ~/.config/systemd/user/onex-disk-gc.service.d/ and
+# reloads — no second timer, no duplicate schedule.
+#
+# Install (on .201, user scope, after OMN-13008's install-disk-gc.sh has run):
+#   bash deploy/lane-census/install-lane-census.sh
+#
+# Check:
+#   systemctl --user cat onex-disk-gc.service    # shows base + this drop-in
+#   journalctl --user -u onex-disk-gc.service -f
+
+[Service]
+# Reconcile every declared lane against actual. Non-zero exit on drift is the
+# expected maintenance signal (the watermark pass uses the same '-' fail-soft
+# convention so one drift does not fail the whole maintenance unit). The drift
+# event is published to the bus inside the script when KAFKA_BOOTSTRAP_SERVERS
+# is present.
+ExecStart=-/bin/bash %h/Code/omni_home/omnibase_infra/scripts/lane-census-check.sh

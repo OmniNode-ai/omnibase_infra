@@ -68,6 +68,7 @@ reason OMN-18075 exists.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -287,7 +288,13 @@ class _FakeLinear:
 
 
 def _merged_pr(number: int) -> dict[str, Any]:
-    recent = "2026-09-10T02:00:00Z"
+    # OMN-18555. DERIVED, never pinned. The handler enumerates companions in
+    # two windows it computes from the wall clock and filters on exactly these
+    # two keys, so a literal here is a fixture with an expiry date rather than
+    # a fixture. This one was pinned to `2026-09-10T02:00:00Z`, left the 168h
+    # backfill window at 2026-09-17T02:00:00Z, and took nine of the eleven
+    # tests below -- and `dev` for every open pull request -- down with it.
+    recent = (datetime.now(tz=UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
         "number": number,
         "html_url": f"https://github.com/{_OCC_REPO}/pull/{number}",
@@ -300,14 +307,16 @@ def _merged_pr(number: int) -> dict[str, Any]:
 def _handler(
     skill_result: dict[str, Any], linear: _FakeLinear
 ) -> HandlerEvidenceAutocloseSweep:
-    async def fake_gh(args: list[str], timeout: float):
+    async def fake_gh(args: list[str], timeout: float) -> tuple[object | None, str]:
         path = args[2]
         if "/files" in path:
             return [{"filename": f"contracts/{_TICKET}.yaml"}], ""
         page = int(path.rsplit("page=", 1)[1])
         return ([_merged_pr(8859)], "") if page == 1 else ([], "")
 
-    async def fake_dod_verify(ticket_id: str, cwd: str, timeout: float):
+    async def fake_dod_verify(
+        ticket_id: str, cwd: str, timeout: float
+    ) -> tuple[dict[str, object] | None, int, str]:
         return skill_result, 0, ""
 
     return HandlerEvidenceAutocloseSweep(

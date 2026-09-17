@@ -84,7 +84,16 @@
       "bearerOnly": false,
       "serviceAccountsEnabled": true,
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
-      "consumerSecretEnv": "ONEX_API_CONSUMER_CLIENT_SECRET"
+      "consumerSecretEnv": "ONEX_API_CONSUMER_CLIENT_SECRET",
+      "environmentOverrides": {
+        "prod": {
+          "bearerOnly": true,
+          "serviceAccountsEnabled": false,
+          "consumerSecretEnv": null,
+          "ticket": "OMN-18582",
+          "reason": "Production onex-api is a pure resource server: it validates by JWKS and nothing authenticates AS it. Measured read-only 2026-09-17 against the production realm -- the onex-prod onex-api Deployment carries KEYCLOAK_ISSUER_URL, KEYCLOAK_AUDIENCE and the two tenant claim names and no client secret of any kind, and onex-prod/onex-runtime-credentials carries eleven keys of which none is KEYCLOAK_CLIENT_SECRET. Declaring it confidential there would have Keycloak mint a credential nothing uses, which is the anti-pattern OMN-16504 already paid for. The base shape above stays correct for dev-system, where deployment-omninode-runtime-effects.yaml mounts KEYCLOAK_CLIENT_SECRET with optional:false and introspects with it. Operator ruling 2026-09-17T17:33:52Z, resolve by timestamp."
+        }
+      }
     },
     {
       "clientId": "omnidash-spa",

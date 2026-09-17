@@ -2708,6 +2708,53 @@ def _extract_projection_envelope_timestamp(envelope: object) -> datetime | None:
     return value
 
 
+def _extract_projection_envelope_tenant(envelope: object) -> str | None:
+    """Return the tenant the PRODUCER stamped on the dispatched envelope.
+
+    OMN-18565, closing the half of OMN-18326 that was left open. That ticket
+    found that this seam injected the envelope ID and the event TIME but never
+    attached the envelope itself, so a projection handler reading the raw wire
+    record under ``_envelope`` -- the STANDALONE runner seam's key -- got nothing
+    on a kernel pod. It fixed the time and did not fix the TENANT, which sits
+    one field over on the same envelope and has the same property: for a payload
+    model that carries no tenant field of its own it is the ONLY attribution a
+    projection writer can see.
+
+    The cost of the gap was not a refusal this time, which is why it survived
+    longer. ``omnimarket.projection.envelope.envelope_tenant_identity`` returned
+    ``None`` for every event on the deployed ``omnimarket-projection-delegation-
+    writer``, whatever the producer stamped, and the writer then attributed the
+    quality-gate verdict to the HOUSE tenant. ``delegation_events`` rows for one
+    correlation are written by two independent subscriptions, so when the
+    verdict won the race it CREATED the row under an identity the delegation's
+    own terminal disagreed with, and the terminal's ``ON CONFLICT DO UPDATE``
+    was refused by the ``tenant_isolation`` policy's ``USING`` half under FORCE
+    ROW LEVEL SECURITY. Roughly three of sixteen staging business-proof runs
+    passed in the 24 hours measured on 2026-09-17; the greens were the runs
+    where the terminal happened to be scheduled first.
+
+    A writer under FORCE ROW LEVEL SECURITY cannot recover this by reading:
+    with ``app.tenant_id`` unset the policy predicate is NULL and an RLS-covered
+    ``SELECT`` returns zero rows, indistinguishable from an empty table.
+    Attribution is producer-recorded or it does not exist.
+
+    Returns ``None`` -- never a default, never an invented identity -- when the
+    envelope records none, or records something that is not a non-blank string.
+    The caller then injects NO key, so a reader that finds nothing refuses
+    rather than being handed a tenant this process chose. That is the same
+    fail-closed contract as the sibling event-time extractor above, and for the
+    same reason: this seam TRANSPORTS a producer fact and must never author one.
+    """
+    value = (
+        envelope.get("tenant_id")
+        if isinstance(envelope, dict)
+        else getattr(envelope, "tenant_id", None)
+    )
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _is_raw_event_projection_contract(contract: ModelDiscoveredContract) -> bool:
     if contract.event_bus is None:
         return False
@@ -4564,6 +4611,17 @@ def _make_projection_dispatch_callback(
                 # un-timed event, whereas a defaulted one would silently write
                 # the runtime's own wall clock into an event-time column.
                 input_data["_envelope_timestamp"] = envelope_timestamp
+            envelope_tenant = _extract_projection_envelope_tenant(typed_envelope)
+            if envelope_tenant is not None:
+                # OMN-18565. The producer-recorded tenant, from the same typed
+                # envelope the id and the time above come from, and injected on
+                # the same terms: only when the producer actually recorded one.
+                # An absent key leaves a reader unattributed, which is the
+                # correct terminal state for an event nobody scoped -- whereas a
+                # defaulted one silently attributes a row to a tenant that never
+                # submitted it, and under FORCE ROW LEVEL SECURITY that row then
+                # makes the real writer's conflict-update unwritable.
+                input_data["_tenant_id"] = envelope_tenant
 
             def _invoke_projection_handler() -> object:
                 # OMN-16874: the runtime does NOT pre-connect a handler-owned DB
@@ -4842,6 +4900,7 @@ async def _emit_projection_terminal_event(
     Best-effort: publish failures are logged but never propagate.
     """
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.runtime.observability import record_flow_output
 
     try:
         source_payload = _extract_dispatch_payload(source_envelope)
@@ -4859,6 +4918,17 @@ async def _emit_projection_terminal_event(
         if hasattr(event_bus, "publish"):
             # Why: Control flow narrows this union at runtime before the attribute access.
             await event_bus.publish(terminal_event, None, raw)  # type: ignore[union-attr]
+            # OMN-17214 Defect B: this is a handler's own DECLARED output leaving
+            # the runtime, and it does NOT go through the result applier — so
+            # before this line the only publisher that attributed anything was
+            # the applier, and every projection/reducer whose output leaves here
+            # reported `messages_out = 0` and derived STALLED while producing.
+            # Measured on the .201 dev lane 2026-09-17: the Phase 1 writer
+            # `local.omnimarket.projection_consumer_flow` read in=76 out=0
+            # STALLED across 19 consecutive windows while its own terminal topic
+            # advanced HWM 178532 -> 178535. Recorded AFTER the await so a failed
+            # publish is not counted as an output.
+            record_flow_output(terminal_event)
         else:
             logger.warning(
                 "Projection terminal event not emitted: event_bus has no publish method "
@@ -5278,6 +5348,7 @@ def _make_stateful_dispatch_callback(
         from omnibase_core.models.events.model_event_envelope import (
             ModelEventEnvelope as _Envelope,
         )
+        from omnibase_infra.runtime.observability import record_flow_output
 
         if event_bus is None or not hasattr(event_bus, "publish_envelope"):
             return 0
@@ -5342,6 +5413,14 @@ def _make_stateful_dispatch_callback(
             await event_bus.publish_envelope(  # type: ignore[attr-defined]
                 envelope=out_envelope, topic=topic, key=key
             )
+            # OMN-17214 Defect B: the in-row outbox is the OTHER seam that
+            # publishes a handler's declared output without going through the
+            # result applier, so a stateful reducer publishing from its own row
+            # was counted as producing nothing. Recorded per envelope AFTER its
+            # await, so a batch that fails partway attributes exactly the
+            # envelopes that actually reached the broker — the same count
+            # `published` reports to the CAS-finalize below.
+            record_flow_output(topic)
             published += 1
         return published
 

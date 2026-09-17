@@ -157,6 +157,22 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn18595-release-train-cut-on-its-own-bookkeeping
+    guard: scripts/ci/release_train.py
+    incident: OMN-13912
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn18595/pull-3693-post-release-bump.json.captured
+      sha256: 69201b8dba8502e27ba420d84c8293bae490db8cdbdaa85377e68d074053d431
+    capture:
+      method: gh-api
+      source: gh-api:repos/OmniNode-ai/omnibase_infra/pulls/3693
+      captured_at: '2026-09-17T15:00:00Z'
+      captured_by: lane replay (OMN-18595)
+    test: tests/ci/test_incident_replay_omn18595.py::test_the_real_guard_rejects_the_post_release_bump_as_releasable_work
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green being replaced is a RELEASE THAT CONTAINS NOTHING: the OMN-13912 post-release bump edits pyproject.toml, pyproject.toml is a release-relevant path because it carries the dependency floor that ships with the wheel, and a decision surface that counts commits over release-relevant paths therefore sees exactly one the morning after every release -- the machinery's own bookkeeping. Cut on that count, the train publishes a version with no product change, its own post-release bump lands, and the count is one again; once per release, forever. This is not a hypothesis. It is the state origin/dev was in when the guard was written: `git rev-list --count v0.38.30..origin/dev -- src pyproject.toml` returned 1 and `git log --no-merges --format=%s` over the same range returned exactly one line, `chore(OMN-13912): post-release dev version bump to 0.38.31 (#3693)`, while the shipped classifier returned 0 unreleased commits for the same range. The sibling decision surface in omnimarket had to grow its own marker for the identical reason, which decide_release_on_merge.py's docstring records in its own words: without one the post-release commit re-triggers the workflow and releases an empty version, once per merge, forever. THE ARTIFACT IS THE PULL REQUEST, NOT A COMMIT OBJECT, and the reason is that the guard decides on a commit SUBJECT: every repo in this registry is squash-only with no merge queue, so a merged pull request's title IS the subject of the commit it produces plus the suffix git appends, and pulls/3693's merge_commit_sha 695305b303dfd1e1d1b68a2885ea34641cd251ea is the head of origin/dev, which the test reads out of the captured bytes rather than from this paragraph. A commit-object capture would have carried author emails into a PUBLIC repository for no gain; the pulls API carries logins only, and the only address string in either fixture is the standard github.com clone URL. THE DISCRIMINATOR IS MANDATORY AND NOT A FORMALITY - a classifier that called every subject bookkeeping would replay this incident perfectly and make the train cut nothing ever, which is equally broken and far harder to notice because a train that never cuts looks like a quiet week. test_the_same_guard_accepts_real_runtime_work drives the SAME function over a second captured pull request, pulls/3683 (feat(OMN-18567), merge commit 2a4e49511d421c368adb5097131c5d1b985272c3, sha256 0ca7e74942e7ae25160fe2555e9805ee9ec3695c725e2dd7ba1140760937c3ec), and requires the opposite verdict; a third test requires the two fixtures not to be byte-identical and both to be merged into dev, so neither assertion can be vacuous. A fourth pins the narrow half - the patterns anchor at the conventional-commit prefix, so a subject that merely MENTIONS a release is still work, which is the failure mode where a guard written to stop one empty release stops every release. NO MODIFICATIONS: both fixtures are the exact bytes the REST API returned, unedited.
   - id: omn15355-blocked-acl-matrix-had-no-live-apply-gate
     guard: scripts/apply_application_database_acl.py
     incident: OMN-15355
@@ -974,3 +990,52 @@ cases:
     test: tests/ci/test_incident_replay_omn16958.py::test_the_real_guard_rejects_the_config_that_refused_the_commit
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is the absence of any check on hook interpreters: on 2026-09-15 an OMN-18172 commit on macOS was refused by workflow-input-default-type-parity and workflow-uv-available with "Executable `python` not found", because both were language: system hooks whose entry was a bare python and macOS ships none outside an activated venv, while every gate in this repo stayed green. The same config carried seven entries invoking a bare python3, which resolve whatever interpreter the committer's PATH exposes rather than the project environment. NOT A RECONSTRUCTION -- the artifact is the byte-for-byte .pre-commit-config.yaml blob at 9114ea9cc, the origin/dev head the OMN-16958 fix branched from, taken with git show and re-fetchable at the recorded locator. The guard is omnimarket's OMN-17219 validate_precommit_interpreter.py ported unchanged; the replay points its CONFIG_PATH at the captured bytes and requires exit 1 naming exactly those nine entries. The two language: python hooks with a bare python entry in the same blob (check-required-env-vars, check-dev-lane-required-env-vars) are outside the guard's language: system/script scope, because pre-commit supplies their interpreter; they were converted in the same PR regardless. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every config would satisfy the reject trivially and block every commit, so the same guard is required to accept the live config after the fix.
+  - id: omn18572-onex-api-lane-ran-the-parent-commit-unlabelled
+    guard: scripts/ci/check_lane_onex_api_revision.py
+    incident: OMN-18572
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn18572.py::test_the_same_guard_accepts_the_delivered_container
+    artifact:
+      fixture: tests/fixtures/omn18572/onex-api-labels-f37261c2.json.captured
+      sha256: 38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed
+    capture:
+      method: image-labels
+      source: image-labels:omni-201-ts:onex-lab/omnicloud-core@sha256:11c82d0363a6f2c164389f2e3bf9b04346cac680f3218d2da3f9b2962255a5e1
+      captured_at: '2026-09-17T12:40:00Z'
+      captured_by: lane onexapi-lab-delivery-trigger-build-1150
+    test: tests/ci/test_incident_replay_omn18572.py::test_the_real_guard_rejects_the_image_the_lane_was_actually_running
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is the absence of any reader at all for the lane's onex-api provenance: omninode_infra#1523 merged 2026-09-17T09:00:53Z and at 11:15Z the .201 compose dev lane was still running onex-lab/omnicloud-core:f37261c2-20260917T050425Z, the PARENT of that squash (git merge-base --is-ancestor 4528c42c f37261c2 exits 1, the reverse exits 0), with tenant creation on the lab impossible throughout. NOT A RECONSTRUCTION -- the artifact is the byte-for-byte docker inspect output for that exact image tag on the lab host's own daemon, re-fetchable at the recorded locator, and it is the single JSON token null. That shape is the point -- docker renders an image built with no labels as null, never as an empty object, and an index template against it is a template error with a non-zero exit, the same trap that made the OMN-18113 repoint refuse a lane it should have advanced. A hand-written fixture would have said empty object and the guard would have been proven against a shape production never produces. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every label map would satisfy this reject trivially and red every future delivery, so the same guard is required to accept the second captured artifact, the live onex-api CONTAINER label map after the 11:41:55Z delivery, carrying the revision label for 99fdbd375f3b6c17d564b588f505754160b1d1f2.
+  - id: omn18606-census-went-stale-while-the-hourly-job-reported-success
+    guard: scripts/lane_census_refresh_decision.py
+    incident: OMN-18606
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn18606/stale-census-snapshot-2e4eec05.json.captured
+      sha256: 5bc1438712529c9597abe67ac0e95e5b4bab151c515178b519f48ba109e4db10
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@2e4eec05cae24801f14036dba2fcfd14391dda11:deploy/lane-census/census-snapshot.json
+      captured_at: "2026-09-17T18:00:00Z"
+      captured_by: lane lane-census-timer-stall-1637
+    test: tests/ci/test_incident_replay_omn18606.py::test_the_real_decision_refuses_to_leave_the_stale_census_alone
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case. The false_green is the absence of any reader at all: nothing evaluated the committed census, so this exact artifact sat at emitted_at 2026-09-10T10:06:57Z until the 7-day staleness gate went red at 2026-09-17T10:07Z on every omnibase_infra PR touching the census paths. Six hand-opened heal PRs preceded it (#2395, #2691, #2846, #2998, #3394, #3489) and a seventh (#3703, an unrelated lane) landed a snapshot by hand while this ticket was being written. The test drives the real decision with these bytes at that exact instant and requires REFRESH; a companion test drives the same bytes one day in and requires a no-op, because a decision that always refreshes would open four PRs a day and get the leg deleted.
+  - id: omn18606-installed-dropin-ran-hourly-and-wrote-nothing
+    guard: scripts/lane-census-check.sh
+    incident: OMN-18606
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn18606/installed-dropin-no-snapshot.conf.captured
+      sha256: ac2f987782cb5f2cbc24447119286e1b75425747c95fb798e632f97714378dce
+    capture:
+      method: host-file
+      source: host-file:omni-201-ts:/home/jonah/.config/systemd/user/onex-disk-gc.service.d/20-lane-census.conf
+      captured_at: "2026-09-17T18:05:00Z"
+      captured_by: lane lane-census-timer-stall-1637
+    why: >-
+      The collector became wired enforcement when lane-census-refresh.yml began invoking it, so default-deny demands a real case. These are the bytes that were installed on the lab host: a single ExecStart naming the collector with no output destination and no redirect, and systemd runs execve rather than a shell so a redirect could never have worked there. That is the false_green — onex-disk-gc.service reported SUCCESS every hour precisely because the census pass wrote nothing and so had nothing to fail. The argv that would have fixed it was itself refused: the pre-fix collector answered `Unknown argument: --snapshot` with exit 2. The test asserts the captured configuration carries no destination, and drives the real collector with the shipped drop-in's own argv to prove that argv now parses.
+    test: tests/ci/test_incident_replay_omn18606.py::test_the_dropin_actually_installed_on_the_host_could_not_write_a_census

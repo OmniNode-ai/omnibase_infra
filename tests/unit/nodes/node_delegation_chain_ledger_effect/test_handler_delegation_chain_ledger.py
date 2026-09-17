@@ -42,7 +42,17 @@ _CHAIN = tuple(
     )
     for index, topic in enumerate(_CHAIN_TOPICS)
 )
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _get_repo_root() -> Path:
+    """Resolve the repository root without depending on test-file depth."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    raise RuntimeError("Could not locate repository root from pyproject.toml")
+
+
+_REPO_ROOT = _get_repo_root()
 _CONTRACT_PATH = (
     _REPO_ROOT
     / "src/omnibase_infra/nodes/node_delegation_chain_ledger_effect/contract.yaml"

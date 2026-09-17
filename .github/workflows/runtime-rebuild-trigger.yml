@@ -126,6 +126,12 @@ jobs:
       published: ${{ steps.publish.outputs.published }}
       source_sha: ${{ steps.publish.outputs.source_sha }}
       runtime_lane: ${{ steps.publish.outputs.runtime_lane }}
+      # OMN-18573. The convergence guard below resolves the deploy agent's
+      # ACCEPTANCE of this exact command and measures the lane's budget from
+      # that moment, so a queue upstream of the agent is no longer spent out of
+      # the lane's clock. Empty when nothing was published; the guard reports
+      # INDETERMINATE on an empty id rather than inventing a start time.
+      correlation_id: ${{ steps.publish.outputs.correlation_id }}
 
     steps:
       - name: Checkout code
@@ -233,7 +239,43 @@ jobs:
     # Unconditional self-hosted rather than the fork fallback the publisher
     # uses, because the checkout below is pinned to the trusted base ref, so no
     # fork-authored code executes on the fleet.
-    runs-on: [self-hosted, omnibase-deploy]
+    #
+    # OMN-18602: moved off `omnibase-deploy`. OMN-18408 split five probes onto
+    # the verify class and deliberately left this one behind, "pending a
+    # follow-up decision on the remainder". This is that decision, and the
+    # measurement it was missing: over the 38 non-skipped executions between
+    # 2026-09-15T22:49Z and 2026-09-17T15:39Z this job QUEUED a median 29.1
+    # min, p90 75.8, max 101.3, with 18 of 38 over half an hour. Job
+    # `created_at` is stamped when `needs` completes -- run 35223485518 has
+    # `trigger-rebuild` finishing at 12:51:27Z, this job created at 12:51:28Z
+    # and started at 13:42:01Z -- so that is runner queue, not dependency wait.
+    #
+    # The queue is spent BEFORE the derived budget below starts, so it never
+    # corrupted a verdict. What it delayed was delivery: rule 24(b) fails
+    # closed without a PASS receipt for the exact sha, so a 101-minute queue is
+    # a 101-minute staging stall.
+    #
+    # THIS JOB WRITES NOTHING. It polls `check_dev_lane_staleness.py`, which
+    # reads a `docker inspect` of the lane container and the deploy agent's
+    # HTTP surface, then probes readiness. It needs the host's docker socket
+    # and its `host.docker.internal` gateway, both of which the verify runners
+    # carry; it never needed the private OMNI_HOME clone tree that is the
+    # deploy runner's reason to exist.
+    #
+    # A SECOND `omnibase-deploy` RUNNER WAS REFUSED, not overlooked. That would
+    # let two lane-mutating release-train jobs run at once, and a `concurrency`
+    # group cannot prevent it: a concurrency group is scoped to ONE repository,
+    # and the sibling reusable's copy of this job is called from omnimarket.
+    # The single physical deploy runner is the only serialisation guard that
+    # holds across repositories, so it keeps the two DEPLOY jobs and nothing
+    # else.
+    #
+    # `host-201` is not decoration. `omnibase-verify` names a CLASS, and
+    # omninode-mini-runner-1 and omninode-air-runner-1 carry it on other lab
+    # hosts. A run placed there would not fail to schedule; it would report
+    # this lane unreachable, which reads as a lane outage. Pinned by
+    # tests/ci/test_verify_runner_runs_on_omn18408.py.
+    runs-on: [self-hosted, omnibase-verify, host-201]
     # 25-minute convergence wait + margin.
     #
     # WHAT THAT 25 MINUTES COVERS, stated honestly rather than derived from a
@@ -330,17 +372,64 @@ jobs:
       # branch the lane converges onto a DESCENDANT and byte equality reported
       # that as never-applied. The stale direction (an ancestor) is unchanged
       # and still fails, and so does a revision dev does not contain.
+      # OMN-18573: the 25 minutes below is the LANE's budget and is measured
+      # from the moment the deploy agent ACCEPTS the rebuild command, not from
+      # when this step starts. The redeploy-start effect is serial, so the wait
+      # between the merge and the agent taking the command is a queue the lane
+      # is not responsible for; spending the lane's budget on it produced a
+      # FAIL receipt for a lane that converged three minutes later, twice
+      # (OMN-17214, 2026-09-16 and 2026-09-17, receipt artifact 10496150688).
+      #
+      # `--wall-clock-seconds` is a BOUND on how long THIS step may watch, not
+      # the budget: the ceiling less the elapsed time, the lane's declared
+      # settle budget and the reserved tail, derived by the same fail-closed
+      # reader the probe uses. When the bound is what stops the wait, or when
+      # the acceptance cannot be established at all, the guard reports
+      # INDETERMINATE and says which -- never a FAIL asserting the lane
+      # misbehaved. The receipt is still non-PASS either way, so rule 24(b)
+      # stays closed. Nothing here widens the ceiling.
       - name: Wait for the dev lane to report a revision containing the merge SHA
         id: converge
+        # The guard exits 3 for INDETERMINATE, which is non-zero and must not
+        # abort the job before the receipt is written. The emit step below
+        # reads this step's `verdict` OUTPUT, which carries all three values;
+        # `continue-on-error` keeps the run alive to produce the artifact and
+        # the verdict is what decides the check.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          CORRELATION_ID: ${{ needs.trigger-rebuild.outputs.correlation_id }}
+          # The deploy agent's own HTTP surface on this host, the same one
+          # `fetch_lab_overlay_record.py` already reads from this runner class.
+          # Its /job/<correlation_id> endpoint serves the acceptance timestamp.
+          DEPLOY_AGENT_URL: http://host.docker.internal:8098
+          JOB_TIMEOUT_MINUTES: 45
+          RESERVED_TAIL_SECONDS: 120
         run: |
           set -euo pipefail
+          STARTED_EPOCH=$(date -u -d "${LAB_PASS_STARTED_AT}" +%s 2>/dev/null \
+            || python3 -c "import datetime,os;print(int(datetime.datetime.strptime(os.environ['LAB_PASS_STARTED_AT'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.UTC).timestamp()))")
+          ELAPSED=$(( $(date -u +%s) - STARTED_EPOCH ))
+
+          # Derived by a tested Python step, never shell arithmetic, and
+          # fail-closed: an unresolvable declaration exits non-zero and prints
+          # nothing, so a partial capture cannot become a guessed bound.
+          CONVERGE_WALL_CLOCK=$(uv run python scripts/ci/lane_settle_budget.py \
+            --lane compose-dev \
+            --converge-wall-clock \
+            --job-ceiling-seconds "$(( JOB_TIMEOUT_MINUTES * 60 ))" \
+            --elapsed-seconds "$ELAPSED" \
+            --reserved-tail-seconds "$RESERVED_TAIL_SECONDS")
+          echo "converge wall clock: ${CONVERGE_WALL_CLOCK}s"
+
           uv run python scripts/ci/check_dev_lane_staleness.py \
             --expect-revision "$MERGE_SHA" \
             --wait-timeout 25m \
-            --poll-interval 60s
+            --poll-interval 60s \
+            --agent-url "$DEPLOY_AGENT_URL" \
+            --correlation-id "$CORRELATION_ID" \
+            --wall-clock-seconds "$CONVERGE_WALL_CLOCK"
 
       # OMN-17530 rule 24(a) -- the .201 compose dev lane's half of the
       # automatic lab pass.
@@ -482,7 +571,23 @@ jobs:
         if: always()
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          # OMN-18573. The receipt's typed agent_command_id, which every
+          # compose-dev receipt carried as null because no emitter passed it.
+          # The id was knowable the whole time; the readback that found this had
+          # it legible in the deployed_revision evidence string while the field
+          # a machine reads sat empty. Empty here means no command was
+          # published, which the emitter records as null rather than as "".
+          CORRELATION_ID: ${{ needs.trigger-rebuild.outputs.correlation_id }}
           CONVERGE_OUTCOME: ${{ steps.converge.outcome }}
+          # OMN-18573. The guard's own three-valued verdict -- pass, fail or
+          # indeterminate. It is an OUTPUT rather than the step's status
+          # because the status has two values and this has three, and the
+          # difference is the whole ticket: "the lane did not converge" and "we
+          # could not establish whether it had a chance to" are different
+          # findings and a fail-closed gate must say which it refused on. The
+          # status remains the fallback for a step that died before writing
+          # anything.
+          CONVERGE_VERDICT: ${{ steps.converge.outputs.verdict }}
           # OMN-18388 AC2. The guard writes one line naming the revision the lane
           # was actually observed at and how it relates to the merge sha
           # ("lane at 0d0250a6c31f, which contains merge sha 18b539f0f76f, 6
@@ -508,18 +613,26 @@ jobs:
           else
             SAFE_MERGE_SHA="<invalid-merge-sha>"
           fi
-          case "$CONVERGE_OUTCOME" in
-            success)
-              DEPLOYED_REVISION_VERDICT=ok
-              ;;
-            failure)
-              DEPLOYED_REVISION_VERDICT=fail
+          case "$CONVERGE_VERDICT" in
+            pass|fail|indeterminate)
+              DEPLOYED_REVISION_VERDICT="$CONVERGE_VERDICT"
               ;;
             *)
-              DEPLOYED_REVISION_VERDICT=fail
-              CONVERGE_EVIDENCE="convergence step ended ${CONVERGE_OUTCOME}; no completed deployed-revision verdict was available"
+              # The guard wrote no verdict, so it died before reaching its own
+              # decision -- a crash, or the job being cancelled mid-poll. That
+              # is not a statement about the lane either, so it is
+              # INDETERMINATE rather than a FAIL, and the evidence says the
+              # guard never got to a verdict. The receipt is still non-PASS.
+              DEPLOYED_REVISION_VERDICT=indeterminate
+              CONVERGE_EVIDENCE="INDETERMINATE: the convergence guard ended ${CONVERGE_OUTCOME} without writing a verdict, so no deployed-revision fact was established for ${SAFE_MERGE_SHA}"
               ;;
           esac
+          # The receipt vocabulary spells a passing check 'ok'; the guard's own
+          # vocabulary spells it 'pass'. One translation, here, rather than two
+          # enums that can drift.
+          if [[ "$DEPLOYED_REVISION_VERDICT" == "pass" ]]; then
+            DEPLOYED_REVISION_VERDICT=ok
+          fi
           EVIDENCE="${CONVERGE_EVIDENCE:-check_dev_lane_staleness.py --expect-revision ${SAFE_MERGE_SHA} against the omnibase-infra compose project (the guard wrote no evidence)}"
           uv run python scripts/ci/lab_pass_receipt.py emit \
             --sha "$MERGE_SHA" \
@@ -528,6 +641,7 @@ jobs:
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --check "deployed_revision:${DEPLOYED_REVISION_VERDICT}:${EVIDENCE}" \
             --checks-json "${LAB_PASS_CHECKS}" \
+            --agent-command-id "${CORRELATION_ID}" \
             --out "${LAB_PASS_DIR}/receipt.json"
 
       # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
@@ -745,6 +859,12 @@ jobs:
         if: always()
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          # OMN-18573. This lane's apply IS performed by the deploy agent as
+          # part of ONE rebuild correlation (OMN-18200), which is what the
+          # receipt model's own docstring says distinguishes it from the
+          # `onex-lab` boot gate — and the boot gate is the emitter that
+          # correctly carries none. So this receipt owes the id too.
+          CORRELATION_ID: ${{ needs.trigger-rebuild.outputs.correlation_id }}
         run: |
           set -euo pipefail
           uv run python scripts/ci/lab_pass_receipt.py emit \
@@ -753,6 +873,7 @@ jobs:
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --checks-json "${LAB_PASS_CHECKS}" \
+            --agent-command-id "${CORRELATION_ID}" \
             --out "${LAB_PASS_DIR}/receipt.json"
 
       # OMN-18247: same zero-byte gap as the compose-dev receipt above.

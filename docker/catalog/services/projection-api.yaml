@@ -7,7 +7,7 @@ required_env:
   - POSTGRES_PASSWORD
   - OMNIDASH_ANALYTICS_DB_URL
 hardcoded_env:
-  OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra'
+  OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
   OTEL_SERVICE_NAME: omnimarket-projection-api
   RUNTIME_PROFILE: projection-api
 operational_defaults: {}

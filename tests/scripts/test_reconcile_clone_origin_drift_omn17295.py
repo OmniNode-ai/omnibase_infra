@@ -56,6 +56,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -72,7 +76,16 @@ _SHORT = 12
 # --------------------------------------------------------------------------- #
 def _git(*args: str, cwd: Path) -> str:
     result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+        # Git exports GIT_DIR / GIT_WORK_TREE into every hook environment and
+        # those OVERRIDE both `cwd=` and `git -C`. Under a pre-push hook an
+        # unscrubbed fixture would mutate the REAL invoking worktree instead
+        # of tmp_path (OMN-14891/OMN-18434).
+        env=scrub_git_location_env(),
     )
     return result.stdout.strip()
 
@@ -110,8 +123,9 @@ def _make_install_shim(path: Path) -> None:
     path.chmod(0o755)
 
 
-def _make_fake_venv(project: Path, installed_commit: str | None) -> None:
-    venv = project / ".venv"
+def _make_fake_venv(venv: Path, installed_commit: str | None) -> None:
+    """Takes the venv path directly: after the OMN-17819 gate/dispatch split
+    the two governed venvs no longer share a parent project."""
     (venv / "bin").mkdir(parents=True, exist_ok=True)
     python = venv / "bin" / "python"
     python.write_text(
@@ -158,11 +172,28 @@ class _Workspace:
         self.omniclaude = root / "omniclaude"
         self.omniclaude.mkdir()
         (self.omniclaude / "uv.lock").write_text("claude-lock-v1\n", encoding="utf-8")
-        _make_fake_venv(self.omniclaude, None)
+        _make_fake_venv(self.omniclaude / ".venv", None)
 
-        # The venv is at the clone HEAD: the venv -> clone leg is IN_SYNC, so a
-        # DRIFT verdict in these tests can only come from the new leg.
-        _make_fake_venv(self.infra, self.base)
+        # Both governed venvs are provisioned so the venv legs read IN_SYNC and
+        # a DRIFT verdict in these tests can only come from the clone->origin
+        # leg. The DISPATCH venv carries the installed omnimarket commit; the
+        # GATE venv carries none, which after OMN-17819 is what lock-pure means.
+        self.dispatch_venv = root / ".onex-dispatch-venv"
+        _make_fake_venv(self.dispatch_venv, self.base)
+        # A fake rule-11 interpreter, and a dispatch venv recorded as built on
+        # it. Both are baseline, not assertion: this suite is about the
+        # clone -> origin/<branch> leg, and without them every case here would
+        # probe the real /opt/homebrew and report interpreter drift instead —
+        # making the outcome depend on what is installed on the host running
+        # the tests, which is the coupling this fixture exists to avoid.
+        self.brew_python = root / "fakebrew" / "bin" / "python3.13"
+        self.brew_python.parent.mkdir(parents=True, exist_ok=True)
+        self.brew_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        self.brew_python.chmod(0o755)
+        (self.dispatch_venv / "pyvenv.cfg").write_text(
+            f"home = {self.brew_python.parent}\n", encoding="utf-8"
+        )
+        _make_fake_venv(self.infra / ".venv", None)
 
         self.bin_dir = root / "shimbin"
         self.uv_log = root / "uv.log"
@@ -199,7 +230,10 @@ class _Workspace:
         return tip
 
     def set_installed_commit(self, commit: str | None) -> None:
-        _make_fake_venv(self.infra, commit)
+        _make_fake_venv(self.dispatch_venv, commit)
+        (self.dispatch_venv / "pyvenv.cfg").write_text(
+            f"home = {self.brew_python.parent}\n", encoding="utf-8"
+        )
 
     def head(self) -> str:
         return _git("rev-parse", "HEAD", cwd=self.omnimarket)
@@ -214,6 +248,9 @@ class _Workspace:
             "INSTALL_SHIM_LOG": str(self.install_log),
             "ONEX_RECONCILE_INSTALL_SCRIPT": str(self.install_script),
             "CLAUDE_PLUGIN_DATA": str(self.root / "no-such-plugin-data"),
+            # Named explicitly so this suite never probes the host's real brew
+            # prefix (CLAUDE.md rule 11).
+            "ONEX_DISPATCH_BASE_PYTHON": str(self.brew_python),
         }
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:

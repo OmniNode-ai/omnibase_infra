@@ -45,6 +45,7 @@ from pathlib import Path
 import pytest
 
 from omnibase_infra.cli.cli_delegate import _write_unattributed_run_files
+from omnibase_infra.cli.model_delegate_terminal import ModelDelegateTerminal
 
 pytestmark = pytest.mark.unit
 
@@ -59,7 +60,11 @@ def _run(result: dict[str, object], state_root: Path) -> dict[str, object]:
             "correlation_id": str(correlation_id),
             "status": "failed",
         },
-        result=result,
+        # OMN-18569 typed the writer's terminal. The recorded shapes below are
+        # unchanged; they are validated into the model the runtime's own
+        # terminal validates into, which is a stricter input than the loose
+        # dict this used to hand over, not a weaker one.
+        result=ModelDelegateTerminal.model_validate(result),
         state_root=state_root,
         prompt="draft two paragraphs of rationale prose",
         task_type="document",

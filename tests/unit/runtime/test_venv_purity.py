@@ -212,3 +212,49 @@ class TestAssertVenvPurity:
         assert "9.9.9" in message
         assert "node_rogue_thing" in message
         assert "uv sync" in message
+
+
+# --------------------------------------------------------------------------- #
+# OMN-17819: the refusal must not recommend the CLI-bricking repair
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_refusal_names_the_reconciler_not_a_bare_uv_sync(tmp_path: Path) -> None:
+    """The message a reader acts on has to be the repair that holds.
+
+    The previous text said "Repair with `uv sync` from the repo root (exact
+    mode removes anything uv.lock does not declare)". On the local workspace
+    that advice was wrong twice over: the OMN-17190 reconciler re-composed the
+    provider layer within one tick, and while the removal lasted every `onex
+    skill`/`node`/`delegate` dispatch refused on the OMN-14060 guard, because
+    the same directory was serving as the dispatch venv. The durable repair is
+    the reconciler, which routes the provider layer to the dispatch venv and
+    then syncs this venv exactly.
+    """
+    site_packages = tmp_path / "site-packages"
+    site_packages.mkdir()
+    _install_fake_distribution(
+        site_packages,
+        name="omnimarket",
+        version="0.4.111",
+        node_entry_point_names=["node_ab_compare_orchestrator"],
+    )
+    lock_path = _write_uv_lock(tmp_path, ["omnibase-infra"])
+
+    with pytest.raises(VenvPurityError) as excinfo:
+        assert_venv_purity(lock_path=lock_path, search_paths=[str(site_packages)])
+
+    message = str(excinfo.value)
+    assert "reconcile-host.sh" in message, (
+        "the refusal does not name the reconciler, which is the only repair "
+        f"that survives the next tick. Message: {message!r}"
+    )
+    assert ".onex-dispatch-venv" in message, (
+        "the refusal does not say where the provider layer belongs, so a "
+        f"reader has no way to act on it. Message: {message!r}"
+    )
+    assert "OMN-17819" in message
+    # The bare `uv sync` may still be MENTIONED -- as the thing not to reach
+    # for first -- but never as the instruction.
+    assert "Repair with `uv sync`" not in message, (
+        "the message still instructs the reader to run the CLI-bricking repair"
+    )

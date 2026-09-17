@@ -29,6 +29,20 @@ repair). This module is the fix for THAT: a fitness assertion that turns the
 next recurrence into one named refusal at gate/test-session start instead of
 N unexplained test failures.
 
+Not every recurrence is a hand-install, and this docstring said otherwise for
+a year (OMN-17819). On the local workspace the re-pollution was GOVERNED: the
+OMN-17190 reconciler composed the omnimarket provider layer into this exact
+venv on a 600-second tick, because until OMN-17819 the clone's ``.venv`` was
+also serving as the CLI's dispatch venv. The refusal was correct every time;
+the attribution in the repair advice was not, and a ``uv sync`` issued on that
+advice was reverted within minutes and broke the CLI while it lasted. The two
+environments are now separated -- gate venv here, dispatch venv at
+``$OMNI_HOME/.onex-dispatch-venv`` -- mirroring the ``$DISPATCH_VENV`` split
+CI settled in OMN-16846. Before concluding that a lane polluted this venv by
+hand, read ``$OMNI_HOME/.onex-workspace-reconcile.json``: if the offending
+distribution's ``dist-info`` mtime tracks that receipt's ``generated_at``, the
+installer was the reconciler.
+
 ## What it checks
 
 Enumerates installed distributions that expose an ``onex.nodes`` entry point
@@ -242,10 +256,18 @@ def assert_venv_purity(
         f"{offenders}. These collide with declared providers of the same node "
         "identity and manufacture DUPLICATE_REGISTRATION false REDs across "
         "the whole test suite (OMN-15620) rather than a real defect in the "
-        "tree. Repair with `uv sync` from the repo root (exact mode removes "
-        "anything uv.lock does not declare). If a distribution is needed for "
-        "on-demand skill dispatch rather than the gate venv, install it "
-        "immediately before that dispatch via "
-        "scripts/install-node-skill-package.sh, not by hand into the "
-        "canonical clone (see OMN-14060)."
+        "tree. Repair by running the workspace reconciler: "
+        "`bash scripts/reconcile-host.sh --omni-home $OMNI_HOME`. It composes "
+        "the provider layer into the DISPATCH venv "
+        "($OMNI_HOME/.onex-dispatch-venv, which is what `scripts/onex` execs) "
+        "and syncs this gate venv exactly, so the repair holds. Do NOT reach "
+        "for a bare `uv sync` first: on a host whose reconciler predates "
+        "OMN-17819 that is both undone within one tick (600s) and, while it "
+        "lasts, CLI-breaking, because the same directory was serving as the "
+        "dispatch venv and removing omnimarket from it makes every `onex "
+        "skill`/`node`/`delegate` dispatch refuse on the OMN-14060 guard. If a "
+        "distribution is needed for on-demand skill dispatch rather than the "
+        "gate venv, it belongs in the dispatch venv via "
+        "scripts/install-node-skill-package.sh, never by hand into the "
+        "canonical clone (see OMN-14060, OMN-16846, OMN-17819)."
     )

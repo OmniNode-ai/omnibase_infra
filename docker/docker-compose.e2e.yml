@@ -297,10 +297,17 @@ services:
       redpanda-topic-manager:
         condition: service_completed_successfully
     environment:
-      # PostgreSQL - primary DSN (used by omnibase_infra application code)
-      OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://postgres:test-password@postgres:5432/omnibase_infra}
-      # OmniIntelligence plugin database
-      OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://postgres:test-password@postgres:5432/omniintelligence}
+      # PostgreSQL - primary DSN (used by omnibase_infra application code).
+      # OMN-4084/OMN-18478: the container always uses the compose-internal
+      # postgres:5432 and interpolates POSTGRES_PASSWORD, matching :258 in
+      # this file and docker-compose.infra.yml:143. There is deliberately no
+      # outer ${OMNIBASE_INFRA_DB_URL:-...} wrapper: that nests an expansion
+      # inside a :- default, which tests/ci/test_compose_no_nested_expansion.py
+      # refuses and compose does not reliably expand, and it would also let a
+      # host-side ~/.omnibase/.env DSN (localhost:5436) reach the container.
+      OMNIBASE_INFRA_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omnibase_infra
+      # OmniIntelligence plugin database - same shape, same reasons.
+      OMNIINTELLIGENCE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omniintelligence
       # Legacy individual vars - retained for agent-actions-consumer and session storage
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432

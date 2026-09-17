@@ -28,6 +28,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -53,7 +57,15 @@ GOVERNED = (
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        # Git exports GIT_DIR / GIT_WORK_TREE into every hook environment and
+        # those OVERRIDE both `cwd=` and `git -C`. Under a pre-push hook an
+        # unscrubbed fixture would mutate the REAL invoking worktree instead
+        # of tmp_path (OMN-14891/OMN-18434).
+        env=scrub_git_location_env(),
     ).stdout.strip()
 
 
@@ -80,12 +92,26 @@ def _make_clone(root: Path, name: str) -> tuple[Path, Path]:
     origin = root / "_origins" / f"{name}.git"
     origin.mkdir(parents=True)
     subprocess.run(
-        ["git", "init", "--quiet", "--bare", "-b", "dev", str(origin)], check=True
+        ["git", "init", "--quiet", "--bare", "-b", "dev", str(origin)],
+        check=True,
+        # Git exports GIT_DIR / GIT_WORK_TREE into every hook environment and
+        # those OVERRIDE both `cwd=` and `git -C`. Under a pre-push hook an
+        # unscrubbed fixture would mutate the REAL invoking worktree instead
+        # of tmp_path (OMN-14891/OMN-18434).
+        env=scrub_git_location_env(),
     )
 
     seed = root / "_seed" / name
     seed.mkdir(parents=True)
-    subprocess.run(["git", "init", "--quiet", "-b", "dev", str(seed)], check=True)
+    subprocess.run(
+        ["git", "init", "--quiet", "-b", "dev", str(seed)],
+        check=True,
+        # Git exports GIT_DIR / GIT_WORK_TREE into every hook environment and
+        # those OVERRIDE both `cwd=` and `git -C`. Under a pre-push hook an
+        # unscrubbed fixture would mutate the REAL invoking worktree instead
+        # of tmp_path (OMN-14891/OMN-18434).
+        env=scrub_git_location_env(),
+    )
     _git(seed, "config", "user.email", "t@example.invalid")
     _git(seed, "config", "user.name", "t")
     (seed / "README.md").write_text("seed\n", encoding="utf-8")
@@ -96,7 +122,13 @@ def _make_clone(root: Path, name: str) -> tuple[Path, Path]:
 
     clone = root / name
     subprocess.run(
-        ["git", "clone", "--quiet", "-b", "dev", str(origin), str(clone)], check=True
+        ["git", "clone", "--quiet", "-b", "dev", str(origin), str(clone)],
+        check=True,
+        # Git exports GIT_DIR / GIT_WORK_TREE into every hook environment and
+        # those OVERRIDE both `cwd=` and `git -C`. Under a pre-push hook an
+        # unscrubbed fixture would mutate the REAL invoking worktree instead
+        # of tmp_path (OMN-14891/OMN-18434).
+        env=scrub_git_location_env(),
     )
     _git(clone, "config", "user.email", "t@example.invalid")
     _git(clone, "config", "user.name", "t")
@@ -168,7 +200,15 @@ def build_workspace(tmp_path: Path) -> Workspace:
     (scripts / "runtime_build").mkdir()
     shutil.copy2(_MANIFEST, scripts / "runtime_build" / "sibling_clone_manifest.sh")
 
-    site_packages = infra / ".venv" / "lib" / "python3.12" / "site-packages"
+    # The DISPATCH venv (OMN-17819), outside the clone. This is the surface
+    # reconcile-host.sh reads governed distribution versions and the omnimarket
+    # commit from, because it is the interpreter `scripts/onex` execs. The
+    # clone's own `.venv` is the gate venv and is deliberately NOT created here:
+    # this fixture asserts nothing about it, and creating one would silently
+    # enrol every test in the gate-purity surface as well.
+    site_packages = (
+        root / ".onex-dispatch-venv" / "lib" / "python3.12" / "site-packages"
+    )
     site_packages.mkdir(parents=True)
 
     return Workspace(

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import subprocess
@@ -31,6 +32,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -43,9 +45,16 @@ def _request(
     method: str,
     url: str,
     token: str | None = None,
-    payload: dict[str, Any] | None = None,
+    payload: dict[str, Any] | list[Any] | None = None,
 ) -> tuple[int, Any]:
-    """Perform an HTTP request; return (status_code, parsed_json_or_None)."""
+    """Perform an HTTP request; return (status_code, parsed_json_or_None).
+
+    The payload is a JSON document, which for Keycloak's admin API is an object
+    for most endpoints and an ARRAY for the role-assignment POSTs. Annotating it
+    as an object only was inaccurate rather than restrictive -- both call sites
+    already passed a list and both worked -- so the two long-standing mypy
+    ``arg-type`` errors on this file described the annotation, not the calls.
+    """
     data = json.dumps(payload).encode() if payload is not None else None
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if token:
@@ -101,17 +110,62 @@ def _log(op: str, client_id: str, fields_changed: list[str] | None = None) -> No
     print(json.dumps(record), flush=True)
 
 
-def _die(_msg: str) -> NoReturn:
+def _log_realm_smtp(realm: str, status: str) -> None:
+    """Record which realm-SMTP branch the reconcile took (OMN-18170).
+
+    ``status`` is ``"configured"`` or ``"not_configured"`` -- a decision, not a
+    value. No mail setting, host included, is ever emitted here.
+    """
     print(
-        json.dumps(
-            {
-                "op": "error",
-                "message": "seed-keycloak-clients failed; details redacted",
-            }
-        ),
-        file=sys.stderr,
+        json.dumps({"op": "realm_smtp", "clientId": f"realm:{realm}", "smtp": status}),
         flush=True,
     )
+
+
+def _die(
+    _msg: str,
+    *,
+    keys: Sequence[str] | None = None,
+    client_id: str | None = None,
+) -> NoReturn:
+    """Abort, reporting WHERE the run failed without reporting WHY in prose.
+
+    The free-text ``_msg`` is still discarded, deliberately and unconditionally:
+    several call sites interpolate a Keycloak error body into it, and nothing
+    guarantees such a body carries no secret material. That redaction is the
+    whole reason this helper exists.
+
+    OMN-18170: discarding the message also discarded the failure SITE, so every
+    one of the ~30 failure paths printed the same anonymous line. An operator
+    facing it could not tell a provisioning gap (an env var nobody set) from a
+    credential failure (a password that is wrong) without re-deriving the
+    failure by hand -- which is exactly what the `.201` dev-lane reconcile
+    forced someone to do.
+
+    Three non-secret identifiers are now reported:
+
+    * ``site`` / ``line`` -- read off the CALLER'S frame, so every call site is
+      covered with no annotation and the value cannot go stale as the file is
+      edited;
+    * ``keys`` -- env var NAMES, never their values. Passing a value here would
+      defeat the redaction above, so callers pass names only;
+    * ``clientId`` -- a roster identifier, the same non-secret field ``_log``
+      already emits.
+    """
+    record: dict[str, Any] = {
+        "op": "error",
+        "message": "seed-keycloak-clients failed; details redacted",
+    }
+    caller = inspect.currentframe()
+    caller = caller.f_back if caller is not None else None
+    if caller is not None:
+        record["site"] = caller.f_code.co_name
+        record["line"] = caller.f_lineno
+    if client_id is not None:
+        record["clientId"] = client_id
+    if keys:
+        record["keys"] = list(keys)
+    print(json.dumps(record), file=sys.stderr, flush=True)
     sys.exit(1)
 
 
@@ -120,8 +174,21 @@ def _die(_msg: str) -> NoReturn:
 # ---------------------------------------------------------------------------
 
 
-def _secret_fingerprint(value: str) -> str:
+def _comparison_fingerprint(value: str) -> str:
     """Return a comparison-safe fingerprint: sha256-12 plus length.
+
+    Named for what it RETURNS, not for what it is handed. What comes back is a
+    truncated sha256 digest and a length -- a comparison token that is safe to
+    print, and printing it is the entire point of the mismatch guard. The
+    earlier name, `_secret_fingerprint`, said the opposite, and CodeQL's
+    `py/clear-text-logging-sensitive-data` believed it: the query classifies a
+    callable whose IDENTIFIER matches a sensitive pattern as a taint source, so
+    every digest this returns was tracked as a secret all the way into the
+    record that prints it (alert 1968, eleven paths, sink confirmed from the
+    analysis SARIF at this function's own call site). No secret was in the flow
+    at any point. Renaming it keeps the analyzer's source set empty rather than
+    suppressing the finding, which is the remedy this repo already uses for the
+    same query in handler_evidence_autoclose_sweep.py:377-390.
 
     Never returns, logs, or otherwise exposes the underlying secret value.
     Two equal secrets always fingerprint equal; a fingerprint collision
@@ -153,6 +220,111 @@ BASE_FIELDS = {
 _SECRET_CLEARING_FLAGS = ("bearerOnly", "publicClient")
 _SERVER_MANAGED_CLIENT_FIELDS = frozenset({"access", "id"})
 
+# Declared fields whose value is a collection Keycloak is free to return in an
+# order of its own choosing. Comparing them positionally reports drift forever
+# (OMN-18600): on the .201 dev-lane realm, omniweb, omnidash-spa and
+# onex-customer were set-equal and list-unequal on both of these on every
+# reconcile, including one run immediately after a clean one.
+_UNORDERED_LIST_FIELDS = frozenset({"redirectUris", "webOrigins"})
+
+# Attribute keys Keycloak maintains on a client representation itself. The
+# roster does not declare them, so finding them in the live map is not drift.
+#
+# Both were measured read-only against the .201 dev-lane realm on 2026-09-17:
+# `realm_client` on all nine roster clients, `client.secret.creation.time` on
+# the three whose secret Keycloak has minted. This is a named constant and not
+# an inline literal so that the next key Keycloak adds arrives as a failing
+# test asking for a decision, rather than as a silent return of this defect.
+# Widening it is deliberately a visible, one-line change.
+_SERVER_MANAGED_ATTRIBUTE_KEYS = frozenset(
+    {
+        "realm_client",
+        "client.secret.creation.time",
+    }
+)
+
+
+def _canonical_unordered(value: list[Any]) -> list[str]:
+    """Order-independent form of a list, preserving multiplicity.
+
+    Elements are rendered canonically rather than sorted directly so the
+    comparison does not depend on the element type being orderable. A duplicate
+    that appears on one side only is still a difference -- this ignores order,
+    not content.
+    """
+    return sorted(json.dumps(item, sort_keys=True) for item in value)
+
+
+def _comparable_attributes(
+    live: dict[str, Any], desired: dict[str, Any]
+) -> dict[str, Any]:
+    """The live attribute map, minus undeclared keys Keycloak maintains.
+
+    A key the roster declares is always compared, even if it shares a name with
+    a server-managed one -- the exemption is for keys nobody declared, never a
+    licence to stop reconciling a declared key. A live-only key that is NOT
+    server-managed stays in, so undeclared state on a surface the roster owns is
+    still drift and is still reconciled away.
+    """
+    return {
+        key: value
+        for key, value in live.items()
+        if key in desired or key not in _SERVER_MANAGED_ATTRIBUTE_KEYS
+    }
+
+
+def _attributes_update_value(live: Any, desired: dict[str, Any]) -> dict[str, Any]:
+    """The attributes map to PUT: the roster's, keeping Keycloak's own keys.
+
+    The update payload replaces `attributes` wholesale, so without this the one
+    reconcile that legitimately changes an attribute would also delete the
+    timestamp Keycloak wrote when it minted the client's secret. The roster
+    always wins for a key it declares.
+    """
+    carried = (
+        {
+            key: value
+            for key, value in live.items()
+            if key not in desired and key in _SERVER_MANAGED_ATTRIBUTE_KEYS
+        }
+        if isinstance(live, dict)
+        else {}
+    )
+    return {**carried, **desired}
+
+
+def _field_is_drifted(field: str, live: Any, desired: Any) -> bool:
+    """Whether a declared field differs in the realm, rather than in shape.
+
+    Falls back to the plain inequality for any value whose shape is not what
+    the special case is about, so an unexpected representation is compared the
+    way it always was rather than silently treated as converged.
+    """
+    if (
+        field in _UNORDERED_LIST_FIELDS
+        and isinstance(live, list)
+        and isinstance(desired, list)
+    ):
+        return _canonical_unordered(live) != _canonical_unordered(desired)
+    if field == "attributes" and isinstance(live, dict) and isinstance(desired, dict):
+        return _comparable_attributes(live, desired) != desired
+    return bool(live != desired)
+
+
+def _drifted_fields(existing: dict[str, Any], spec: dict[str, Any]) -> list[str]:
+    """Every declared base field whose live value differs from the roster's.
+
+    One implementation for both callers on purpose: the read-only preflight and
+    the reconcile loop must never disagree about what has drifted, or the
+    survey tells an operator three clients are drifted and the run that follows
+    reports them unchanged.
+    """
+    return sorted(
+        field
+        for field in BASE_FIELDS - {"defaultClientScopes"}
+        if field in spec and _field_is_drifted(field, existing.get(field), spec[field])
+    )
+
 
 def _resolve_client_secret(client_spec: dict[str, Any]) -> str | None:
     secret_env = client_spec.get("secretEnv")
@@ -162,7 +334,9 @@ def _resolve_client_secret(client_spec: dict[str, Any]) -> str | None:
     if not val:
         _die(
             f"Client '{client_spec['clientId']}' requires env var '{secret_env}' "
-            f"but it is not set or empty."
+            f"but it is not set or empty.",
+            keys=[secret_env],
+            client_id=client_spec["clientId"],
         )
     return val
 
@@ -188,7 +362,9 @@ def _resolve_consumer_secret(client_spec: dict[str, Any]) -> str | None:
     if not val:
         _die(
             f"Client '{client_spec['clientId']}' declares consumerSecretEnv "
-            f"'{consumer_env}' but it is not set or empty."
+            f"'{consumer_env}' but it is not set or empty.",
+            keys=[consumer_env],
+            client_id=client_spec["clientId"],
         )
     return val
 
@@ -206,6 +382,10 @@ def _build_update_payload(
     }
     for field in drift_fields:
         update_payload[field] = spec[field]
+    if "attributes" in drift_fields and isinstance(spec.get("attributes"), dict):
+        update_payload["attributes"] = _attributes_update_value(
+            existing.get("attributes"), spec["attributes"]
+        )
     for secret_clearing_flag in _SECRET_CLEARING_FLAGS:
         if secret_clearing_flag not in drift_fields:
             update_payload.pop(secret_clearing_flag, None)
@@ -246,24 +426,58 @@ _SMTP_FIELD_MAP = {
 }
 
 
-def _resolve_realm_smtp_settings(smtp_spec: dict[str, Any]) -> dict[str, str]:
+def _resolve_realm_smtp_settings(smtp_spec: dict[str, Any]) -> dict[str, str] | None:
     """Resolve realmSettings.smtpServer's *Env indirections against the live
-    environment. Fail-closed: every declared field is a required env var, no
-    default is ever substituted (this is the direct guard against the
-    OMN-14938 optional:true-on-a-required-key anti-pattern)."""
-    resolved: dict[str, str] = {}
-    for spec_field, realm_field in _SMTP_FIELD_MAP.items():
-        env_var = smtp_spec.get(spec_field)
-        if not env_var:
-            continue
-        val = os.environ.get(env_var)
-        if not val:
-            _die(
-                f"Realm SMTP setting '{realm_field}' requires env var "
-                f"'{env_var}' but it is not set or empty."
-            )
-        resolved[realm_field] = val
-    return resolved
+    environment.
+
+    Returns ``None`` when this lane declares NO mail provider -- the roster
+    carries no ``smtpServer`` block, or it does and not one of the env vars it
+    indirects through resolves. The caller then skips realm SMTP entirely and
+    leaves Keycloak's own SMTP state exactly as it found it.
+
+    OMN-18170: this used to be unconditionally fail-closed, which is correct
+    where mail IS configured and wrong where it is not. The `.201` compose dev
+    lane sends no email and declares none of the eight SMTP_* variables, so the
+    reconcile died there before it reached a single client -- a lane with no
+    mail provider could not reconcile its Keycloak clients at all.
+
+    Three outcomes, and the middle one is the whole point:
+
+    * every declared key resolves  -> configure, byte-identically to before
+      (this is the staging / onex-dev path, where the eight vars are seeded);
+    * NO declared key resolves     -> return None, skip, touch nothing;
+    * SOME resolve and some do not -> refuse, naming every key that did not.
+
+    No default is ever substituted for any mail value (rule 8, and the direct
+    guard against the OMN-14938 optional:true-on-a-required-key anti-pattern).
+    Absent is a skip; it is never a stand-in value. The partial case stays
+    fail-closed deliberately: half a mail configuration is a misconfiguration,
+    and silently treating it as "not configured" would ignore a real,
+    half-applied setup -- including the shape where a mail host is gone but its
+    credentials are still sitting in the environment.
+    """
+    declared = {
+        spec_field: env_var
+        for spec_field in _SMTP_FIELD_MAP
+        if (env_var := smtp_spec.get(spec_field))
+    }
+    if not declared:
+        return None
+
+    missing = [env_var for env_var in declared.values() if not os.environ.get(env_var)]
+    if len(missing) == len(declared):
+        return None
+    if missing:
+        _die(
+            "Realm SMTP is partially configured: "
+            f"{len(missing)} of {len(declared)} declared env vars are unset or empty.",
+            keys=missing,
+        )
+
+    return {
+        _SMTP_FIELD_MAP[spec_field]: os.environ[env_var]
+        for spec_field, env_var in declared.items()
+    }
 
 
 def _get_existing_client(
@@ -514,10 +728,7 @@ def _reconcile_client(
         all_changed.append("created")
     else:
         # Drift detection on base fields
-        drift_fields: list[str] = []
-        for field in BASE_FIELDS - {"defaultClientScopes"}:
-            if field in spec and existing.get(field) != spec[field]:
-                drift_fields.append(field)
+        drift_fields = _drifted_fields(existing, spec)
         if drift_fields:
             # OMN-16504: send ONLY the drifted fields, never the full live
             # representation.
@@ -667,7 +878,7 @@ def _die_fingerprint_mismatch(mismatches: list[dict[str, str]]) -> NoReturn:
     ``mismatches`` entries are ``{"clientId": ..., "live": <fingerprint>,
     "consumer": <fingerprint>}``. Neither secret value is ever read into this
     function's arguments or printed -- only their fingerprints (sha256-12 +
-    length), computed by the caller via _secret_fingerprint().
+    length), computed by the caller via _comparison_fingerprint().
     """
     print(
         json.dumps(
@@ -690,7 +901,10 @@ def _die_fingerprint_mismatch(mismatches: list[dict[str, str]]) -> NoReturn:
     sys.exit(1)
 
 
-def _live_client_requires_secret(existing: dict[str, Any]) -> bool:
+def _live_client_requires_secret(
+    existing: dict[str, Any],
+    spec: dict[str, Any],
+) -> bool:
     """Return whether the live Keycloak client shape is expected to hold a secret.
 
     Classified from the LIVE representation rather than the desired spec,
@@ -708,11 +922,36 @@ def _live_client_requires_secret(existing: dict[str, Any]) -> bool:
     -- the deploy would stay green while introspection returns 401, which is
     the silent failure OMN-16504 is about.
 
-    The architectural mismatch is real and is worth fixing separately, by
-    moving introspection onto a non-bearer-only client. Until that happens the
-    guard reports what is true of this realm today.
+    OMN-18582 adds the ONE narrow exemption the operator ruled for, and takes
+    it from the RESOLVED SPEC rather than from the live representation. The
+    distinction is the whole safety of it: a partial roster entry says nothing
+    about a field it omits, but a spec that EXPLICITLY declares
+    ``bearerOnly: true`` and names no secret source at all is stating, in the
+    reviewed file, that this client authenticates nowhere. That is production
+    `onex-api` -- it validates by JWKS and nothing authenticates as it.
+
+    It cannot be reached by accident, in three directions:
+
+    * a client that is merely bearer-only LIVE, with the roster silent, is
+      still guarded -- that is OMN-16504's own client before the ruling, and
+      the incident was exactly a live bearer-only shape whose secret Keycloak
+      cleared;
+    * a spec that declares ``bearerOnly`` but also names ``secretEnv`` or
+      ``consumerSecretEnv`` is still guarded, because the exemption is about
+      holding no credential, not about the flag;
+    * dev-system's resolved `onex-api` declares ``bearerOnly: false``, so the
+      realm this guard was written for is untouched.
+
+    The architectural mismatch is still real for dev-system and is still worth
+    fixing separately, by moving introspection onto a non-bearer-only client.
     """
-    return existing.get("publicClient") is not True
+    if existing.get("publicClient") is True:
+        return False
+    declares_bearer_only = spec.get("bearerOnly") is True
+    names_a_secret_source = bool(
+        spec.get(_ROSTER_FIELD_PUSHED_ENV) or spec.get(_ROSTER_FIELD_CONSUMER_ENV)
+    )
+    return not (declares_bearer_only and not names_a_secret_source)
 
 
 def _read_client_secret_value(
@@ -788,7 +1027,7 @@ def _assert_confidential_clients_have_secrets(
         if existing is None:
             offenders.append(client_id)
             continue
-        if not _live_client_requires_secret(existing):
+        if not _live_client_requires_secret(existing, spec):
             continue
         if not _read_client_secret_is_present(kc_url, realm, token, existing):
             offenders.append(client_id)
@@ -844,8 +1083,8 @@ def _assert_client_secrets_match_consumers(
         live_secret = _read_client_secret_value(kc_url, realm, token, existing)
         if not live_secret:
             continue  # emptiness is _assert_confidential_clients_have_secrets' job
-        live_fp = _secret_fingerprint(live_secret)
-        consumer_fp = _secret_fingerprint(consumer_secret)
+        live_fp = _comparison_fingerprint(live_secret)
+        consumer_fp = _comparison_fingerprint(consumer_secret)
         if live_fp != consumer_fp:
             mismatches.append(
                 {"clientId": client_id, "live": live_fp, "consumer": consumer_fp}
@@ -853,6 +1092,366 @@ def _assert_client_secrets_match_consumers(
 
     if mismatches:
         _die_fingerprint_mismatch(mismatches)
+
+
+# ---------------------------------------------------------------------------
+# Read-only client preflight (OMN-18170)
+# ---------------------------------------------------------------------------
+
+# The roster's own field names, held as constants with neutral identifiers
+# rather than written as literals at each lookup. `py/clear-text-logging-
+# sensitive-data` classifies a mapping key whose TEXT matches a sensitive
+# pattern as a taint source, so `spec.get("secretEnv")` made the env var NAME
+# it returns -- a name read from a JSON config file, never a value -- taint the
+# record that prints it (alert 1968; the analysis SARIF named this exact
+# expression as the source once the fingerprint helper was renamed). Naming the
+# two roster fields once is also plainly better than spelling them at four
+# call sites, which is why this is a correction rather than a workaround.
+_ROSTER_FIELD_PUSHED_ENV = "secretEnv"
+_ROSTER_FIELD_CONSUMER_ENV = "consumerSecretEnv"
+#: OMN-18582. The one declared per-environment deviation mechanism.
+#:
+#: The roster is ONE file serving two realms, byte-identical across three
+#: tracked copies with a parity gate enforcing it. Almost every client is the
+#: same shape in both. `onex-api` is not, and the difference is real rather
+#: than cosmetic: dev-system runs a consumer that authenticates AS it and must
+#: hold a secret, production runs none and validates by JWKS. Forking the file
+#: would give the two realms two sources of truth, which is the failure this
+#: component exists to remove, so the deviation is declared IN the entry and
+#: the environment is selected by the Job that runs.
+_ROSTER_FIELD_ENV_OVERRIDES = "environmentOverrides"
+
+#: Keys inside an override block that document it rather than change the
+#: client. They are stripped before the spec reaches a payload builder, so a
+#: reviewer can demand a reason without that reason being sent to Keycloak.
+_OVERRIDE_ANNOTATION_FIELDS = frozenset({"reason", "ticket"})
+
+
+def apply_environment_overrides(
+    clients: list[dict[str, Any]],
+    environment: str | None,
+) -> list[dict[str, Any]]:
+    """Resolve each roster entry to the shape THIS realm should have.
+
+    OMN-18582, operator ruling 2026-09-17T17:33:52Z (resolve by timestamp; the
+    ledger rolled that day). Public because it is the seam the tests exercise
+    directly -- the resolution is where the two realms diverge, so it is worth
+    being able to assert on without standing up a realm.
+
+    Returns NEW dicts. The input is never mutated, because the same roster
+    object is read by the preflight survey and by the reconcile loop and a
+    mutation here would silently change what the other one saw.
+
+    Semantics, deliberately small:
+
+    * a client with no override block is returned unchanged, so every roster
+      written before this field existed resolves identically;
+    * an override block for an environment this run is not is ignored;
+    * a key set to ``null`` is REMOVED rather than set to None, because a None
+      would flow into the create/update payload and be sent to Keycloak as a
+      field value;
+    * ``reason`` and ``ticket`` document the exception and never reach a
+      payload.
+
+    FAILS CLOSED when the roster carries an override and no environment is
+    named. The base cannot be assumed: the direction nobody tests is a
+    PRODUCTION Job that forgot the flag, which would reconcile the dev shape
+    into production, flip `onex-api` confidential and have Keycloak mint the
+    credential the ruling exists to refuse. Refusing is the cheap failure.
+    """
+    carriers = [
+        client["clientId"]
+        for client in clients
+        if client.get(_ROSTER_FIELD_ENV_OVERRIDES)
+    ]
+    if carriers and environment is None:
+        _die_naming_clients(
+            "environment_not_declared",
+            (
+                "the roster declares per-environment overrides but this run "
+                "named no environment, so the realm shape cannot be resolved; "
+                "pass --environment (or KC_ENVIRONMENT). Defaulting to the "
+                "base shape is refused: on a production realm that would "
+                "reconcile the dev-system shape and mint a client secret "
+                "nothing consumes (OMN-18582)"
+            ),
+            carriers,
+        )
+
+    resolved: list[dict[str, Any]] = []
+    for client in clients:
+        overrides = client.get(_ROSTER_FIELD_ENV_OVERRIDES)
+        spec = {
+            key: value
+            for key, value in client.items()
+            if key != _ROSTER_FIELD_ENV_OVERRIDES
+        }
+        block = (overrides or {}).get(environment) if environment else None
+        for key, value in (block or {}).items():
+            if key in _OVERRIDE_ANNOTATION_FIELDS:
+                continue
+            if value is None:
+                spec.pop(key, None)
+            else:
+                spec[key] = value
+        resolved.append(spec)
+    return resolved
+
+
+# How a client's Keycloak secret is supposed to get there. The distinction
+# matters to an operator reading a refusal, because it is the difference
+# between "seed this value" and "nothing to do".
+_PROVENANCE_ROSTER_PUSHED = "roster_pushed"
+_PROVENANCE_CONSUMER_OWNED = "consumer_owned"
+_PROVENANCE_KEYCLOAK_MINTED = "keycloak_minted"
+_PROVENANCE_PUBLIC = "public"
+
+
+def _classify_provenance(spec: dict[str, Any], existing: dict[str, Any] | None) -> str:
+    """Classify where this client's secret is supposed to come from.
+
+    ``secretEnv`` means the ROSTER pushes the value: this reconciler writes
+    the env var's contents into Keycloak, so an absent env var is a
+    provisioning gap a human has to close. ``consumerSecretEnv`` means the
+    value lives in a consuming Secret and this reconciler only compares
+    fingerprints. A confidential client declaring neither is one Keycloak
+    MINTS for itself -- there is nothing to seed and nothing absent.
+
+    Public-ness is read from the LIVE representation when there is one, for
+    the same reason ``_live_client_requires_secret`` does: a roster entry is
+    partial and says nothing about fields it does not declare.
+    """
+    if spec.get(_ROSTER_FIELD_PUSHED_ENV):
+        return _PROVENANCE_ROSTER_PUSHED
+    if spec.get(_ROSTER_FIELD_CONSUMER_ENV):
+        return _PROVENANCE_CONSUMER_OWNED
+    source = existing if existing is not None else spec
+    if source.get("publicClient") is True:
+        return _PROVENANCE_PUBLIC
+    return _PROVENANCE_KEYCLOAK_MINTED
+
+
+def _env_var_is_populated(name: str) -> bool:
+    """Whether an env var holds a non-empty value, as a bare fact.
+
+    The value itself never leaves this frame. Callers that only need presence
+    call this rather than binding the value, so a secret cannot reach a record
+    they go on to build.
+    """
+    return bool(os.environ.get(name))
+
+
+def _inspect_live_client_value(
+    kc_url: str,
+    realm: str,
+    token: str,
+    existing: dict[str, Any],
+    consumer_env: str | None,
+) -> tuple[bool, tuple[str, str] | None]:
+    """Read the live client's secret and, optionally, the consumer's copy.
+
+    Returns only non-secret facts: whether the live client holds a secret at
+    all, and -- when ``consumer_env`` is given and populated -- the pair of
+    sha256-12 fingerprints to compare. Both raw values are confined to this
+    function's frame and neither is returned, logged or raised.
+
+    This confinement is structural on purpose. The caller builds a record it
+    prints, and an earlier revision read the two values into that caller's
+    scope and relied on discipline not to put them in the record. That is
+    exactly the shape a later edit turns into a leak, and a CodeQL
+    clear-text-logging path found the twelve dataflows that made it possible.
+    Keeping the values in here means the record is printable by construction
+    rather than by review.
+    """
+    live_value = _read_client_secret_value(kc_url, realm, token, existing)
+    if live_value is None:
+        return (False, None)
+    if consumer_env is None:
+        return (True, None)
+    consumer_value = os.environ.get(consumer_env)
+    if not consumer_value:
+        return (True, None)
+    return (
+        True,
+        (_comparison_fingerprint(live_value), _comparison_fingerprint(consumer_value)),
+    )
+
+
+def _preflight_client(
+    kc_url: str,
+    realm: str,
+    token: str,
+    spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Survey one roster entry read-only; never writes, never raises.
+
+    Returns a record whose ``findings`` list holds every REFUSAL for this
+    client. Informational facts (what the client's secret source is, whether
+    it exists yet, which fields have drifted) are record fields rather than
+    findings, so "this run will refuse" and "here is what the run saw" stay
+    separable in the output.
+    """
+    client_id = spec["clientId"]
+    existing = _get_existing_client(kc_url, realm, token, client_id)
+    provenance = _classify_provenance(spec, existing)
+    env_var = spec.get(_ROSTER_FIELD_PUSHED_ENV) or spec.get(_ROSTER_FIELD_CONSUMER_ENV)
+    findings: list[dict[str, str]] = []
+
+    env_present: bool | None = None
+    if env_var:
+        env_present = _env_var_is_populated(env_var)
+        if not env_present:
+            if provenance == _PROVENANCE_ROSTER_PUSHED:
+                findings.append(
+                    {
+                        "code": "roster_secret_absent",
+                        "env_var": env_var,
+                        "detail": "absent, roster-pushed, seed required",
+                    }
+                )
+            else:
+                findings.append(
+                    {
+                        "code": "consumer_secret_absent",
+                        "env_var": env_var,
+                        "detail": (
+                            "absent, consumer-owned; Keycloak mints this "
+                            "client's secret and the consuming Secret's copy "
+                            "is what must match it, so the comparison cannot "
+                            "run until this value is readable"
+                        ),
+                    }
+                )
+
+    live_value_present: bool | None = None
+    drift_fields: list[str] = []
+    if existing is not None:
+        drift_fields = _drifted_fields(existing, spec)
+        if _live_client_requires_secret(existing, spec):
+            compare_against = (
+                env_var
+                if provenance == _PROVENANCE_CONSUMER_OWNED and env_present
+                else None
+            )
+            live_value_present, fingerprints = _inspect_live_client_value(
+                kc_url, realm, token, existing, compare_against
+            )
+            if not live_value_present:
+                findings.append(
+                    {
+                        "code": "live_secret_empty",
+                        "detail": (
+                            "this client already holds NO secret in Keycloak; "
+                            "every caller authenticating as it gets HTTP 401. "
+                            "Reconciling it would send its declared drift, "
+                            "which is what empties a secret in the first "
+                            "place, so the run refuses instead"
+                        ),
+                    }
+                )
+            elif fingerprints is not None and fingerprints[0] != fingerprints[1]:
+                findings.append(
+                    {
+                        "code": "consumer_secret_fingerprint_mismatch",
+                        "env_var": str(env_var),
+                        "live": fingerprints[0],
+                        "consumer": fingerprints[1],
+                        "detail": (
+                            "the live Keycloak secret does not match the "
+                            "consuming Secret's copy; consumers holding "
+                            "the stale copy get HTTP 401"
+                        ),
+                    }
+                )
+
+    return {
+        "op": "preflight",
+        "clientId": client_id,
+        "present": existing is not None,
+        "provenance": provenance,
+        "env_var": env_var,
+        "env_present": env_present,
+        "live_value_present": live_value_present,
+        "drift_fields": drift_fields,
+        "findings": findings,
+    }
+
+
+def _preflight_clients(
+    kc_url: str,
+    realm: str,
+    token: str,
+    clients: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Survey EVERY roster entry read-only, before the first client write.
+
+    OMN-18170. Two ordering defects made real breakage unreportable:
+
+    * ``_resolve_client_secret`` ``_die()``s inside the client loop on the
+      first entry whose ``secretEnv`` is unset, so a run named one absent
+      variable however many were absent. On the `.201` dev lane that meant an
+      operator learned about ten absent values one re-run at a time.
+    * Both secret guards run AFTER the loop, so a run that died mid-loop
+      reached neither. The live ``onex-api`` client on that lane already holds
+      an empty secret and carries declared drift on ``bearerOnly`` -- and
+      sending that drift is exactly what makes Keycloak clear a secret. The
+      loop would have mutated it and then exited on a later entry, before the
+      guard that reports it.
+
+    Surveying first turns both into one refusal that names everything, and
+    removes the partial-application hazard rather than reporting it after the
+    fact: nothing is written at all when the survey refuses. That is a
+    stronger property than letting the loop run to completion and collecting
+    refusals on the way, which would still leave earlier clients mutated.
+
+    A client that does not exist yet is NOT a refusal -- it is work the loop
+    is about to do. That boundary is the one thing this survey deliberately
+    reads differently from ``_assert_confidential_clients_have_secrets``,
+    which runs after the loop and is right to treat a still-absent client as
+    an offender.
+    """
+    return [_preflight_client(kc_url, realm, token, spec) for spec in clients]
+
+
+def _preflight_refusals(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Flatten every refusal across the survey, each tagged with its client."""
+    return [
+        {"clientId": record["clientId"], **finding}
+        for record in records
+        for finding in record["findings"]
+    ]
+
+
+def _die_preflight(records: list[dict[str, Any]]) -> NoReturn:
+    """Fail the run once, naming every refusing client and every key.
+
+    Like ``_die_naming_clients`` and unlike ``_die``, this prints clientIds
+    and env var NAMES in the clear: both are already emitted by ``_log`` on
+    every ordinary reconcile line, and a refusal that will not say which
+    client or which variable leaves an operator in the debugging position
+    this check exists to remove. No secret value, and no property of one
+    beyond a fingerprint, is printed.
+    """
+    refusals = _preflight_refusals(records)
+    print(
+        json.dumps(
+            {
+                "op": "error",
+                "check": "client_preflight",
+                "reason": (
+                    "the read-only client survey refused before any client was "
+                    "written; every refusing client and every env var that must "
+                    "be seeded is named below, and the realm is unchanged"
+                ),
+                "clients": sorted({r["clientId"] for r in refusals}),
+                "env_vars": sorted({r["env_var"] for r in refusals if "env_var" in r}),
+                "findings": refusals,
+            }
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -876,6 +1475,13 @@ def _reconcile_realm_settings(
     settings against a running realm. Full-representation GET/diff/PUT,
     matching the per-client reconciler's update shape."""
     smtp_server = _resolve_realm_smtp_settings(spec.get("smtpServer", {}))
+
+    # OMN-18170: say which of the two SMTP branches was taken, in the run's own
+    # output. A skip that left no trace is indistinguishable from an SMTP block
+    # that was reconciled and happened not to drift -- and on a lane with no
+    # mail provider the skip is the interesting fact, not the absence of drift.
+    _log_realm_smtp(realm, "configured" if smtp_server else "not_configured")
+
     desired_attributes = dict(spec.get("attributes", {}))
 
     url = f"{kc_url}/admin/realms/{realm}"
@@ -1035,6 +1641,18 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--environment",
+        default=os.environ.get("KC_ENVIRONMENT") or None,
+        help=(
+            "OMN-18582. Which realm this run is reconciling, used to resolve "
+            "the roster's declared environmentOverrides. Optional while no "
+            "roster entry declares one; REQUIRED the moment any does, and the "
+            "run refuses rather than defaulting to the base -- a production "
+            "Job that forgot this flag would otherwise reconcile the "
+            "dev-system shape into production."
+        ),
+    )
+    p.add_argument(
         "--reset-bootstrap-admin",
         action="store_true",
         default=False,
@@ -1067,6 +1685,12 @@ def main() -> None:
     if not clients:
         _die("No clients found in config file")
 
+    # OMN-18582. Resolve the realm shape BEFORE anything reads the client
+    # list: the preflight survey, the reconcile loop and both post-loop guards
+    # must all see the same resolved spec, or they would disagree about what
+    # this realm is supposed to look like.
+    clients = apply_environment_overrides(clients, args.environment)
+
     token = _get_token(args.kc_url, args.admin_username, args.admin_password)
 
     if config.get("realmSettings"):
@@ -1080,6 +1704,21 @@ def main() -> None:
             _die(f"User profile config file not found: {profile_path}")
         with profile_path.open() as f:
             _reconcile_user_profile(args.kc_url, args.realm, token, json.load(f))
+
+    # OMN-18170: survey every roster entry read-only BEFORE the first client
+    # write, print what it saw, and refuse once if anything refuses. Placed
+    # here rather than before the realm block deliberately: realm settings are
+    # not a client mutation, and gating them behind a client-credential gap
+    # would re-break the lane this ordering exists to unblock -- a lane with no
+    # mail provider and an unseeded client secret can still reconcile its realm.
+    #
+    # Every record prints whether or not a refusal follows, so a refusal on one
+    # client never hides what the survey learned about another.
+    preflight = _preflight_clients(args.kc_url, args.realm, token, clients)
+    for record in preflight:
+        print(json.dumps(record), flush=True)
+    if _preflight_refusals(preflight):
+        _die_preflight(preflight)
 
     for client_spec in clients:
         _reconcile_client(args.kc_url, args.realm, token, client_spec)

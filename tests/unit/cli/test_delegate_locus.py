@@ -368,3 +368,114 @@ class TestRunDelegateThreadsTheDecision:
                 emit_socket=tmp_path / "emit.sock",
             )
         assert calls == [], "a refused lane probe still dispatched a run"
+
+
+class TestTheDocumentedLaneProbeIsRunnable:
+    """AC1: the one documented command has to be a command that runs.
+
+    ``--help`` is where a lane probe gets copied from, and this ticket's AC1
+    asks for "a documented, single command that causes the DEPLOYED
+    orchestrator to make the accept/climb decision". The examples were
+    complete when they were written. OMN-16871 then made a kafka delegation
+    that names no broker a REFUSAL — correctly, because the address had been
+    coming from an ambient variable pointing at a governed proof lane — and
+    the examples did not move with it.
+
+    Measured on the .201 dev lane 2026-09-17: the documented example run
+    verbatim exits 1 with "this delegation resolves to the shared kafka bus
+    but names no broker", having published nothing. The same command with
+    ``--lane dev`` added completes on the lane in 47.7 s. So the gap is one
+    flag in the documentation, and a criterion that reads "there is a
+    documented, single command" is not satisfied by a documented command that
+    refuses before it publishes.
+
+    This is asserted rather than reviewed because the two surfaces are edited
+    by different changes: a refusal tightened in ``delegate_lane`` silently
+    invalidates an example string in ``cli_delegate`` with nothing in between
+    to notice.
+    """
+
+    @staticmethod
+    def _documented_shared_bus_examples() -> tuple[str, ...]:
+        """Every ``onex delegate`` example in the command's own help that uses the shared bus."""
+        from click.testing import CliRunner
+
+        from omnibase_infra.cli.cli_delegate import delegate_command
+
+        result = CliRunner().invoke(delegate_command, ["--help"])
+        assert result.exit_code == 0, result.output
+        return tuple(
+            line.strip()
+            for line in result.output.splitlines()
+            if line.strip().startswith("onex delegate")
+            and f"--bus {_BUS_KAFKA}" in line
+        )
+
+    @staticmethod
+    def _option_value(argv: list[str], option: str) -> str | None:
+        if option not in argv:
+            return None
+        index = argv.index(option)
+        assert index + 1 < len(argv), f"{option} names no value in {argv!r}"
+        return argv[index + 1]
+
+    @staticmethod
+    def _declared_workspace(tmp_path: Path) -> Path:
+        """A workspace root whose lane declaration binds the lanes the docs may name."""
+        from omnibase_infra.cli.delegate_lane import LANE_DECLARATION_RELATIVE_PATH
+
+        declaration = tmp_path / LANE_DECLARATION_RELATIVE_PATH
+        declaration.parent.mkdir(parents=True, exist_ok=True)
+        declaration.write_text(
+            yaml.safe_dump(
+                {
+                    "lanes": {
+                        "dev": {
+                            "broker": "declared-dev.example:19092",
+                            "security_protocol": "SASL_PLAINTEXT",
+                            "sasl_mechanism": "SCRAM-SHA-256",
+                        },
+                        "stability-test": {
+                            "broker": "declared-stability.example:39092",
+                            "security_protocol": "PLAINTEXT",
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        return tmp_path
+
+    def test_the_help_still_documents_a_shared_bus_example(self) -> None:
+        """Deleting the example would pass the check below vacuously."""
+        assert self._documented_shared_bus_examples(), (
+            "the command's help documents no --bus kafka example at all, so "
+            "AC1's 'documented, single command' has no subject"
+        )
+
+    def test_every_documented_shared_bus_example_addresses_a_broker(
+        self, tmp_path: Path
+    ) -> None:
+        """Each documented shared-bus example survives the address resolution it will hit."""
+        import shlex
+
+        from omnibase_infra.cli.delegate_lane import (
+            DelegateLaneSelectionError,
+            resolve_lane_target,
+        )
+
+        workspace = self._declared_workspace(tmp_path)
+        for example in self._documented_shared_bus_examples():
+            argv = shlex.split(example)
+            try:
+                resolve_lane_target(
+                    bus=_BUS_KAFKA,
+                    lane=self._option_value(argv, "--lane"),
+                    kafka_bootstrap=self._option_value(argv, "--kafka-bootstrap"),
+                    omni_home=workspace,
+                )
+            except DelegateLaneSelectionError as exc:
+                pytest.fail(
+                    "a documented example refuses before it publishes: "
+                    f"{example!r} -> {exc}"
+                )

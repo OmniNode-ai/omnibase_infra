@@ -92,14 +92,16 @@ def _record_flow_output(resolved_topic: str) -> None:
     Imported lazily so this module keeps no import-time dependency on the
     observability package, and so the counters cannot become a startup-ordering
     hazard on a path whose only job is publishing.
-    """
-    from omnibase_infra.runtime.observability import (
-        record_active_out,
-        record_produced_topic,
-    )
 
-    record_active_out()
-    record_produced_topic(resolved_topic)
+    OMN-17214: delegates to the shared ``record_flow_output`` seam rather than
+    calling the two halves here. This module was the ONLY publisher that
+    recorded anything, and the two seams inside ``handler_wiring`` recorded
+    neither half — one entry point is what makes "did this publisher attribute
+    its output?" a question a gate can ask.
+    """
+    from omnibase_infra.runtime.observability import record_flow_output
+
+    record_flow_output(resolved_topic)
 
 
 # Delegation intent topics are resolved from the contract-sourced topic registry

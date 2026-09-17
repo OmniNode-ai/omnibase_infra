@@ -49,7 +49,8 @@ HOST_LABEL = "host-201"
 DEPLOY_LABEL = ["self-hosted", "omnibase-deploy"]
 
 # (workflow file, job key, job `name:`) -- the five named in the OMN-18408
-# acceptance criteria and in the authorising operator-consent row.
+# acceptance criteria and in the authorising operator-consent row, plus the
+# five OMN-18602 moved when it took the follow-up decision OMN-18408 deferred.
 MOVED_JOBS = (
     ("dev-lane-liveness.yml", "dev-lane-liveness", "dev-lane-liveness"),
     ("dev-lane-staleness.yml", "dev-lane-staleness", "dev-lane-staleness"),
@@ -60,17 +61,75 @@ MOVED_JOBS = (
         "verify-lab-overlay-converged",
         "Verify the k3s onex-lab overlay applied the merged sha",
     ),
+    # --- OMN-18602 -------------------------------------------------------
+    # The remainder OMN-18408 left on the deploy label. Every one of them is a
+    # read-only probe: none writes to the lane, and none needs the private
+    # OMNI_HOME clone tree that is the deploy runner's reason to exist. They
+    # were measured, not merely reasoned about -- `verify-lane-converged`
+    # queued a median 29.1 min, p90 75.8, max 101.3 over its 38 non-skipped
+    # runs between 2026-09-15T22:49Z and 2026-09-17T15:39Z, holding the single
+    # deploy runner a median 25.0 min per run while it polled.
+    (
+        "runtime-rebuild-trigger.yml",
+        "verify-lane-converged",
+        "Verify dev lane applied the redeploy",
+    ),
+    (
+        "runtime-rebuild-trigger-reusable.yml",
+        "verify-sibling-converged",
+        "Verify the dev lane vendors the merged sibling revision",
+    ),
+    (
+        "onex-api-lab-delivery-reusable.yml",
+        "verify-onex-api-delivered",
+        "Verify the dev lane runs onex-api at this commit",
+    ),
+    ("baselines-scheduler.yml", "baselines-compute", "Baselines Batch Compute"),
+    ("dlq-depth-monitor.yml", "dlq-depth-monitor", "DLQ Depth Monitor (read-only)"),
 )
 
-# Deliberately NOT moved. The first is the release-train DEPLOY job that must
-# stay serialised; the rest are verify jobs the operator left on the deploy
-# label pending a separate decision. A change that moves one of these is a
-# scope change and must fail here rather than pass quietly.
+# Jobs that were BORN on the verify label rather than moved onto it. Kept in a
+# separate tuple on purpose: MOVED_JOBS above is the record of two specific
+# decisions (OMN-18408 and its OMN-18602 follow-up), and folding a new job into
+# it would quietly rewrite what those decisions covered.
+#
+# The bar for landing here is the same one OMN-18602 settled the label's meaning
+# on: the job READS the .201 lane and never mutates it. `refresh` collects a
+# docker inventory through the socket the runner already mounts and opens a pull
+# request; the only thing it writes is a branch in this repository.
+#
+# It needs the HOST label for the same reason all ten above do, and more sharply:
+# a census collected against the wrong daemon is not an outage, it is a WRONG
+# ANSWER committed to the repository as the documented lane topology. The
+# `omnibase-ci` pool cannot be used for it at all -- 60 of its runners carry no
+# host label (read live from the org runner census on 2026-09-17), so placement
+# there is unpinned by construction.
+NEW_VERIFY_JOBS = (
+    (
+        "lane-census-refresh.yml",
+        "refresh",
+        "Collect the lab census and open a bump PR when it has moved",
+    ),
+)
+
+# Every job legally on the label, however it got there.
+VERIFY_JOBS = MOVED_JOBS + NEW_VERIFY_JOBS
+
+# Deliberately NOT moved, and after OMN-18602 this set is exactly the jobs that
+# MUTATE the lane. That is the whole of what `omnibase-deploy` now means.
+#
+# This is the positive control that matters most in the file. `omnibase-deploy`
+# is a single physical runner, and that is not an accident of provisioning --
+# it is the serialisation guard for release-train tag-cut and lane refresh
+# (CLAUDE.md rule 2a/12, memory feedback_serialize_same_lane_redeploys). It is
+# also the only guard available: a GitHub `concurrency` group is scoped to ONE
+# repository, and `verify-sibling-converged` is called from omnimarket, so no
+# group could ever serialise these two against it. Draining the label of these
+# jobs, or adding a second runner to it, removes the guard rather than
+# relieving a queue.
 STAYED_JOBS = (
     ("release-train-lab.yml", "deploy"),
     ("release-train-lab.yml", "cut-tag"),
-    ("runtime-rebuild-trigger.yml", "verify-lane-converged"),
-    ("runtime-rebuild-trigger-reusable.yml", "verify-sibling-converged"),
 )
 
 
@@ -92,7 +151,7 @@ def _runs_on(workflow: str, job_key: str) -> Any:
     return job["runs-on"]
 
 
-@pytest.mark.parametrize(("workflow", "job_key", "job_name"), MOVED_JOBS)
+@pytest.mark.parametrize(("workflow", "job_key", "job_name"), VERIFY_JOBS)
 def test_moved_job_runs_on_the_verify_label(
     workflow: str, job_key: str, job_name: str
 ) -> None:
@@ -131,7 +190,7 @@ def test_no_other_job_in_the_repo_uses_the_verify_label() -> None:
             if isinstance(job, dict) and job.get("runs-on") == VERIFY_LABEL:
                 found.add((path.name, job_key))
 
-    assert found == {(wf, key) for wf, key, _ in MOVED_JOBS}
+    assert found == {(wf, key) for wf, key, _ in VERIFY_JOBS}
 
 
 def test_every_moved_job_is_host_scoped_not_merely_class_scoped() -> None:
@@ -145,7 +204,7 @@ def test_every_moved_job_is_host_scoped_not_merely_class_scoped() -> None:
     cannot observe the .201 lane at all, which surfaces as a lane outage rather
     than as a routing mistake. That is the reading this test exists to prevent.
     """
-    for workflow, job_key, _ in MOVED_JOBS:
+    for workflow, job_key, _ in VERIFY_JOBS:
         runs_on = _runs_on(workflow, job_key)
         assert HOST_LABEL in runs_on, (
             f"{workflow}:{job_key} is scoped to the verify CLASS but not to a "

@@ -34,7 +34,11 @@ from typing import Any
 
 import pytest
 
-from scripts.ci.detect_test_paths import _FULL_SUITE_SPLIT_COUNT, _split_count_for
+from scripts.ci.detect_test_paths import (
+    _FULL_SUITE_SPLIT_COUNT,
+    _MAX_NARROWED_SPLIT_COUNT,
+    split_count_for_selection,
+)
 from scripts.hooks.prepush_remote_verify import (
     FULL_SUITE_SPLIT_COUNT,
     RemoteVerifyError,
@@ -114,7 +118,7 @@ def test_full_matrix_all_green_is_full_suite_shaped() -> None:
 
 def test_narrowed_run_is_rejected_even_when_every_shard_is_green() -> None:
     """A selector-narrowed run is green but is NOT full-suite evidence."""
-    narrowed = _split_count_for(["tests/unit/a", "tests/unit/b", "tests/unit/c"])
+    narrowed = split_count_for_selection(["tests/unit/cli/"])
     ok, why = run_is_full_suite_shaped(_shard_jobs(narrowed, denominator=narrowed))
     assert not ok
     assert "NARROWED" in why
@@ -153,12 +157,30 @@ def test_run_with_no_shard_jobs_is_not_evidence() -> None:
 def test_narrowed_ceiling_cannot_reach_full_suite_count() -> None:
     """The structural gap the shard-denominator binding depends on.
 
-    ``_split_count_for`` is the ONLY producer of a narrowed ``split_count``. If
-    its ceiling ever reaches ``_FULL_SUITE_SPLIT_COUNT``, a narrowed run becomes
-    indistinguishable from a full one by job name alone and the pre-push gate
-    silently starts accepting less work than it demands.
+    ``split_count_for_selection`` is the ONLY producer of a narrowed
+    ``split_count``. If its ceiling ever reaches ``_FULL_SUITE_SPLIT_COUNT``, a
+    narrowed run becomes indistinguishable from a full one by job name alone and
+    the pre-push gate silently starts accepting less work than it demands.
+
+    OMN-18542: this probe used to read ``max(_split_count_for(["p"] * n) ...)``,
+    which sized shards from the NUMBER of path strings and so measured a real
+    ceiling. Sizing is now by test population, and paths named ``p`` are not on
+    disk -- that probe would count zero modules, return 1, and pass while
+    measuring nothing. It is probed with the real roots instead, and the
+    positive control below proves the probe actually reaches the cap.
     """
-    ceiling = max(_split_count_for(["p"] * n) for n in range(200))
+    ceiling = max(
+        split_count_for_selection(paths)
+        for paths in (
+            ["tests/"],
+            ["tests/unit/"],
+            ["tests/unit/", "tests/integration/", "tests/ci/", "tests/scripts/"],
+        )
+    )
+    assert ceiling == _MAX_NARROWED_SPLIT_COUNT, (
+        f"the narrowed-ceiling probe reached only {ceiling}; it is no longer "
+        "exercising the cap, so the assertion below would pass vacuously"
+    )
     assert ceiling < _FULL_SUITE_SPLIT_COUNT, (
         f"narrowed split ceiling {ceiling} has reached the full-suite count "
         f"{_FULL_SUITE_SPLIT_COUNT}; the shard-denominator binding in "

@@ -126,6 +126,15 @@ evidence_artifacts:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
       The .201 compose dev lane's lab pass for a SIBLING repository's merged sha (rule 24(a), OMN-18268). Keyed by the sibling sha, not the omnibase_infra one, because that is the revision the lane was proven to vendor; the two never collide on one artifact name.
+  - id: lab-pass-receipt-compose-dev-onex-api
+    workflow: .github/workflows/onex-api-lab-delivery-reusable.yml
+    job: verify-onex-api-delivered
+    producer_step: "Emit the compose-dev lab-pass receipt for this commit"
+    artifact_name: lab-pass-receipt-compose-dev-${{ needs.trigger-delivery.outputs.source_sha }}
+    required_paths:
+      - ${LAB_PASS_DIR}/receipt.json
+    rationale: >-
+      The .201 compose dev lane's lab pass for an OMNINODE_INFRA commit that changed the lane's onex-api image (rule 24(a), OMN-18572). Keyed by the omninode_infra sha, because that is the revision the lane's onex-api container was proven to carry; it collides with neither the omnibase_infra receipt nor a sibling's, which are claims about different repositories' commits. It lands on the omninode_infra run, since a called reusable workflow's artifacts belong to the caller.
   - id: lab-pass-receipt-onex-lab-k3s
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: verify-lab-overlay-converged

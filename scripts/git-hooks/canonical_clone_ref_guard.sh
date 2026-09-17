@@ -67,8 +67,54 @@
 #   DENY   rewinding or diverting an existing refs/heads/* ref (branch -f,
 #          reset --hard backwards, update-ref to an unrelated commit, a non-ff
 #          `fetch <src>:<dst>`)
-#   DENY   deleting any refs/heads/* ref
+#   DENY   deleting any refs/heads/* ref, UNLESS the sanctioned orphan-branch
+#          deletion door below names that exact ref and cites an operator
+#          consent row (OMN-18370)
 #   DENY   refs/stash -- stashing is a mutation the Claude guard already denies
+#
+# ## The sanctioned orphan-branch deletion door (OMN-18370)
+#
+# The blanket branch-deletion refusal above is correct and stays, but it left a
+# class with no sanctioned path at all. A worktree pruner removes a worktree
+# under the worktrees root and then has to delete the branch that worktree held;
+# the branch lives in the CLONE, so the delete lands here and is refused.
+# Measured 2026-09-16: a prune pass removed 171 rescue-only worktrees under the
+# operator consent row at `docs/tracking/ROLLING_WORK_LEDGER.md:3624` and every
+# one of the 171 `git branch -D` calls that followed exited 128 against this
+# hook. The worktrees went; the branches stayed. Each half was behaving
+# correctly and the result was 171 orphan branches. This was the THIRD
+# occurrence (OMN-18370, previously 23 of 26).
+#
+# The door is opened by TWO variables that must agree, and it is scoped to ONE
+# verb -- deleting a `refs/heads/*` ref. It cannot widen a HEAD move, a
+# non-fast-forward, or a stash, because it is consulted only on the deletion
+# branch of the policy below:
+#
+#   ONEX_BRANCH_DELETE_CONSENT   `<path>:<line>` citing an OPERATOR-CONSENT row.
+#                                A relative path resolves against $OMNI_HOME.
+#                                The cited line must actually BE a consent row.
+#   ONEX_BRANCH_DELETE_REFS      whitespace-separated list of the exact full
+#                                refs this invocation is authorised to delete.
+#                                A ref absent from the list is refused even
+#                                while the door is otherwise open.
+#
+# Both are required; either alone is refused. Every permitted deletion is
+# recorded as `SANCTIONED_DELETE` in the same durable log the refusals go to,
+# carrying the consent citation and the oid the ref held, so the branch tip
+# survives the deletion as evidence -- which is the objection the blanket
+# refusal was built on ("branch deletion in a mirror destroys the only local
+# record of what it pointed at").
+#
+# HONEST LIMIT, stated rather than left to be found. This enforces EVIDENCE and
+# BLAST RADIUS, not authorisation: nothing in a git hook can prove a human said
+# the words in the cited row, and an actor that can set the environment can set
+# both variables around a hand-typed delete. What it removes is the SILENT
+# deletion -- one that leaves no artifact naming a ref, an oid and a consent
+# row. The intended caller is `scripts/delete_orphan_branch.py`, which resolves
+# the citation, refuses a branch with an open pull request, refuses a branch
+# that is neither merged nor tip-recorded, and sets these variables itself. The
+# Claude PreToolUse guard is unchanged and still refuses a bare `git branch -D`
+# typed as a tool call, so the declared tool remains the only comfortable path.
 #
 # Sanctioned bypass: `ONEX_CANONICAL_CONVERGE=1`, exported by
 # `converge-canonical-clone.sh` for its own re-attach and reset. That script
@@ -250,6 +296,51 @@ EOF
   exit 1
 }
 
+# sanctioned_branch_delete_permits <ref>
+#
+# True when the OMN-18370 door is open for THIS ref. Fails closed on every
+# ambiguity: a missing variable, a citation that is not `<path>:<line>`, a line
+# number that is not a positive integer, an unreadable or too-short file, a
+# cited line that is not an OPERATOR-CONSENT row, or a ref absent from the
+# authorised list. Never writes, never exits -- the caller decides.
+sanctioned_branch_delete_permits() {
+  local ref="$1"
+  local citation="${ONEX_BRANCH_DELETE_CONSENT:-}"
+  local authorised="${ONEX_BRANCH_DELETE_REFS:-}"
+
+  [[ -n "$citation" && -n "$authorised" ]] || return 1
+
+  # The ref must be named EXACTLY. Substring matching would let a grant for
+  # `refs/heads/feat` carry `refs/heads/feature-that-matters` with it.
+  local candidate found=0
+  for candidate in $authorised; do
+    if [[ "$candidate" == "$ref" ]]; then
+      found=1
+      break
+    fi
+  done
+  [[ "$found" == "1" ]] || return 1
+
+  # `<path>:<line>`. Split on the LAST colon so a path containing one still
+  # resolves.
+  local path="${citation%:*}" line="${citation##*:}"
+  [[ -n "$path" && "$path" != "$citation" ]] || return 1
+  [[ "$line" =~ ^[1-9][0-9]*$ ]] || return 1
+
+  case "$path" in
+    /*) : ;;
+    *) path="$omni_home/$path" ;;
+  esac
+  [[ -f "$path" && -r "$path" ]] || return 1
+
+  local row
+  row="$(sed -n "${line}p" "$path" 2>/dev/null)" || return 1
+  [[ -n "$row" ]] || return 1
+  [[ "$row" == *"| OPERATOR-CONSENT |"* ]] || return 1
+
+  return 0
+}
+
 # worktree_is_initializing
 #
 # True when some registered worktree admin directory has no HEAD file yet.
@@ -406,8 +497,17 @@ while read -r old new ref; do
       ;;
     refs/heads/*)
       if [[ "$new" == "$_zero_oid" ]]; then
+        if sanctioned_branch_delete_permits "$ref"; then
+          # Record the oid the ref held BEFORE it goes. That record is what
+          # answers the blanket refusal's own objection: the local pointer is
+          # destroyed, the value it pointed at is not.
+          _deleted_oid="$(git rev-parse --verify --quiet "$ref" 2>/dev/null || true)"
+          record "SANCTIONED_DELETE" "$ref" \
+            "what=deleting a branch oid=${_deleted_oid:-unresolvable} consent=$ONEX_BRANCH_DELETE_CONSENT"
+          continue
+        fi
         deny "$ref" "deleting a branch" \
-          "Branch deletion in a mirror destroys the only local record of what it pointed at."
+          "Branch deletion in a mirror destroys the only local record of what it pointed at. A worktree pruner deleting an orphan branch uses the sanctioned door: $omni_home/omnibase_infra/scripts/delete_orphan_branch.py --consent <ledger>:<line> ..."
       fi
       current=""
       if ! current="$(git rev-parse --verify --quiet "$ref" 2>/dev/null)"; then

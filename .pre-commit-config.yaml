@@ -351,6 +351,36 @@ repos:
         files: ^(tests/integration/lane_presence\.py|tests/integration/.*test_.*\.py|tests/ci/test_lane_presence_guard_omn18345\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-18544: every declarer of a `schema_migrations` tracker must agree,
+      # per DATABASE. The compose cloud runner bootstrapped a `migration_name`-
+      # keyed table ahead of the omninode_cloud corpus, so the corpus's own
+      # idempotent CREATE no-opped and the shape it declares never landed. That
+      # is OMN-4627 with the sides swapped, and OMN-4627 was closed by
+      # reconciling two literals by hand -- which is exactly what did not
+      # survive. The gate refuses the second literal rather than correcting it.
+      - id: schema-migrations-tracker-shape
+        name: schema_migrations tracker shape agrees per database (OMN-18544)
+        entry: uv run --frozen pytest tests/unit/db/test_schema_migrations_tracker_shape_agreement_omn18544.py -q
+        language: system
+        # Scoped to the whole of every walked root, not the six known declarers:
+        # a NEW file declaring a tracker is precisely the case the completeness
+        # check exists to catch, and a six-path pattern would never fire on it.
+        files: ^(docker|scripts|src|tests)/.*\.(sql|sh|py|ya?ml|captured)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-18553: the cloud migrations_log alias declaration lists names that
+      # omninode_infra's corpus owns, with no mechanical link to it, so it goes
+      # stale silently and aborts the dev lane's forward-migration one-shot.
+      # In-repo completeness is not decidable (the corpus is in another repo and
+      # ships inside an image), so what this pins is that the refusal NAMES its
+      # offenders, plus the declaration's own invariants.
+      - id: cloud-migration-alias-staleness
+        name: Cloud migrations_log alias declaration stays loud, not silent (OMN-18553)
+        entry: uv run --frozen pytest tests/unit/db/test_cloud_migration_alias_staleness_omn18553.py -q
+        language: system
+        files: ^(docker/migrations/forward/_ledger/cloud-migration-aliases\.tsv|scripts/run-forward-migrations\.sh|tests/unit/db/test_cloud_migration_alias_staleness_omn18553\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: ci-evidence-policy
         name: CI evidence artifacts asserted non-empty at the uploader (OMN-18247)
         entry: uv run --frozen pytest tests/ci/test_ci_evidence_policy.py -q
@@ -522,6 +552,18 @@ repos:
         entry: uv run --frozen pytest tests/ci/test_omn17214_subscription_flow_counter_gate.py -q
         language: system
         files: ^(src/omnibase_infra/runtime/auto_wiring/handler_wiring\.py|src/omnibase_infra/runtime/observability/consumer_flow_counters\.py|tests/ci/test_omn17214_subscription_flow_counter_gate\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # The PUBLISH-side sibling of the gate above (OMN-17214 Defect B): every
+      # handler_wiring seam that publishes a handler's declared output on
+      # event_bus must attribute it through record_flow_output, or a node whose
+      # output leaves there reports messages_out=0 and derives STALLED while
+      # producing.
+      - id: publish-flow-attribution-gate
+        name: publish flow-attribution gate (OMN-17214)
+        entry: uv run --frozen pytest tests/ci/test_omn17214_publish_flow_attribution_gate.py -q
+        language: system
+        files: ^(src/omnibase_infra/runtime/auto_wiring/handler_wiring\.py|src/omnibase_infra/runtime/observability/consumer_flow_counters\.py|src/omnibase_infra/runtime/service_dispatch_result_applier\.py|tests/ci/test_omn17214_publish_flow_attribution_gate\.py)$
         pass_filenames: false
         stages: [pre-commit]
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor

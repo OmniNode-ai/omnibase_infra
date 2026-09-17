@@ -55,8 +55,27 @@ jobs:
             echo "source_repo=manual" >> $GITHUB_OUTPUT
           fi
 
-      - name: Checkout omnibase_infra
+      # OMN-18273: this job used to push with the default workflow token, which
+      # both mis-attributes the commit to github-actions[bot] and does NOT start
+      # push-driven CI, so the PR it opened sat with no checks. Mint the
+      # onexbot-occ-writer installation token instead. The mint is deliberately
+      # NOT given a `|| secrets.GITHUB_TOKEN` fallback: a fallback restores the
+      # old behaviour silently while the job still reports success.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omnibase_infra
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout omnibase_infra (app token so the bot push triggers CI)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -121,22 +140,19 @@ jobs:
       - name: Commit and push
         if: steps.diff.outputs.changed == 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "onexbot-occ-writer[bot]"
+          git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
           git add docker/Dockerfile.runtime
-          git commit -m "chore(deps): pin ${{ steps.inputs.outputs.package }} to ${{ steps.inputs.outputs.version }}
-
-          Automated Dockerfile.runtime pin update triggered by release of
-          ${{ steps.inputs.outputs.package }} ${{ steps.inputs.outputs.version }}
-          from ${{ steps.inputs.outputs.source_repo }}.
-
-          Triggered-by: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          git commit -m "chore(deps): pin ${{ steps.inputs.outputs.package }} to ${{ steps.inputs.outputs.version }}" \
+            -m "Automated Dockerfile.runtime pin update triggered by release of ${{ steps.inputs.outputs.package }} ${{ steps.inputs.outputs.version }} from ${{ steps.inputs.outputs.source_repo }}." \
+            --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
+            --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           git push origin "${{ steps.branch.outputs.name }}"
 
       - name: Open PR
         if: steps.diff.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           EXISTING=$(gh pr list \
             --head "${{ steps.branch.outputs.name }}" \

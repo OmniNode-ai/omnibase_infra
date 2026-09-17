@@ -293,12 +293,19 @@ class ContractAttachReadinessGate:
         :class:`ModelContractAttachGateStatus`, so a 503 body names every
         NOT_READY / FAILED / still-pending contract rather than only asserting
         that the runtime is not ready.
+
+        OMN-18550 adds ``summary``: the same account rendered as one line, so
+        the readiness failure LOG carries it too. The structured fields reach
+        the ``/ready`` body; only the message reaches a reader tailing the
+        container, and that reader is the one deciding whether a boot is slow
+        or wedged.
         """
         gate_status = self.status()
         detail: dict[str, object] = gate_status.model_dump(mode="json")
         # ``ready`` is supplied by the probe tuple and re-added by the caller;
         # dropping it here keeps the merged supplemental block single-valued.
         detail.pop("ready", None)
+        detail["summary"] = gate_status.summary_line()
         return gate_status.ready, detail
 
 

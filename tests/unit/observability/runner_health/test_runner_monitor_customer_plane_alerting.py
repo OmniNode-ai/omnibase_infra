@@ -61,6 +61,13 @@ CP2 = "omninode-customer-plane-runner-2"
 # OMN-18408: the read-only verify runner is the SECOND family outside the
 # RUNNER_NAME_PREFIX loop, and it is checked by the same alert-only block.
 VR = "omninode-verify-runner-1"
+# OMN-18602 grew the class to three. VR stays the member every assertion in
+# this module drives, because the alert-only block is per-NAME and one member
+# is enough to prove it fires. The other two are staged healthy throughout so
+# the baseline is a healthy CLASS -- without them the enumerated-names loop
+# reports two MISSING containers and every positive control goes red for a
+# reason that has nothing to do with what it tests.
+VR_PEERS = ("omninode-verify-runner-2", "omninode-verify-runner-3")
 
 pytestmark = pytest.mark.unit
 
@@ -156,6 +163,19 @@ def _runners_json(
                 ],
             }
         )
+        # The peers are always online: these tests vary ONE member's state.
+        for peer in VR_PEERS:
+            runners.append(
+                {
+                    "name": peer,
+                    "status": "online",
+                    "busy": False,
+                    "labels": [
+                        {"name": "self-hosted"},
+                        {"name": "omnibase-verify"},
+                    ],
+                }
+            )
     return json.dumps({"total_count": len(runners), "runners": runners})
 
 
@@ -186,6 +206,8 @@ def _make_mock_bin(
     vr_ps_lines = ""
     if vr_docker_status is not None:
         vr_ps_lines = f'printf "%s\\t%s\\n" "{VR}" "{vr_docker_status}"'
+        for _peer in VR_PEERS:
+            vr_ps_lines += f'\n            printf "%s\\t%s\\n" "{_peer}" "Up (healthy)"'
 
     cp_ps_lines = ""
     if cp1_docker_status is not None:
@@ -246,6 +268,8 @@ def _make_mock_bin(
                 echo "{CP1}"
                 echo "{CP2}"
                 echo "{VR}"
+                echo "omninode-verify-runner-2"
+                echo "omninode-verify-runner-3"
               fi
               exit 0
             fi

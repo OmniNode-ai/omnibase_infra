@@ -145,6 +145,27 @@ LOCATOR_GRAMMARS: dict[str, re.Pattern[str]] = {
     ),
     # host-file:omni-201-ts:/data/maintenance/bin/report.sh
     "host-file": re.compile(r"^host-file:[A-Za-z0-9_.-]+:/[A-Za-z0-9_./+-]+$"),
+    # image-labels:omni-201-ts:onex-lab/omnicloud-core@sha256:<64hex>
+    #
+    # Added by OMN-18572, which could not otherwise be replayed at all -- the
+    # same reason container-probe was added by OMN-15676 and gh-graphql by
+    # OMN-18179. That incident's guard reads a container's LABEL MAP, and no
+    # locator above points at one: the bytes are neither a file in the image
+    # (container-probe), nor a file on the host (host-file), nor anything a git
+    # or GitHub surface carries. They are what the host's docker daemon renders
+    # for `--format '{{json .Config.Labels}}'`, and the failing value was the
+    # single token `null` -- a shape that exists only there.
+    #
+    # The image MUST be ID-pinned, for exactly the reason container-probe
+    # requires a digest: these `onex-lab/...` names are LOCAL tags on one
+    # daemon and a repoint moves them, so a tag-locator would let the bytes
+    # behind a case silently change, which is what R1 exists to prevent. The
+    # host is part of the locator because, unlike a registry image, a local tag
+    # resolves on one machine. Re-fetch:
+    #   ssh <host> docker image inspect <id> --format '{{json .Config.Labels}}'
+    "image-labels": re.compile(
+        r"^image-labels:[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+@sha256:[0-9a-f]{64}$"
+    ),
     # live-http:omni-201-ts:8085/health
     "live-http": re.compile(r"^live-http:[A-Za-z0-9_.-]+:\d{2,5}/[A-Za-z0-9_./?=&-]*$"),
     # ci-artifact:30574058377/coverage-shard-3

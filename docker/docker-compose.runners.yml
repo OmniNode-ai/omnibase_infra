@@ -1461,6 +1461,193 @@ services:
         max-size: "10m"
         max-file: "3"
   # ---------------------------------------------------------------------------
+  # omninode-verify-runner-2/3 -- OMN-18602: the host-201 verify class is THREE
+  # runners, and the number is measured rather than chosen.
+  #
+  # WHAT OMN-18408 LEFT OPEN. That ticket moved five short probes here and, by
+  # explicit operator scope, left five more on `omnibase-deploy` "pending a
+  # follow-up decision on the remainder". The remainder turned out to contain
+  # the expensive ones.
+  #
+  # THE MEASUREMENT, over the 21.3 h from 2026-09-16T18:45Z (when
+  # omninode-verify-runner-1 came online) to 2026-09-17T16:01Z, taken from job
+  # `started_at`/`completed_at` via `gh api .../actions/runs/<id>/jobs`:
+  #
+  #   job                                         n    service-hours  erlangs
+  #   verify-lane-converged                      21          9.24       0.43
+  #   verify-lab-overlay-converged               18          6.93       0.33
+  #   the five probes OMN-18408 already moved    98          0.80       0.04
+  #   dlq-depth-monitor                          40          0.66       0.03
+  #   baselines-compute                           1          0.01       0.00
+  #   TOTAL OFFERED LOAD                                    17.64       0.83
+  #
+  # The two convergence guards are 92% of it. They are long because they POLL
+  # while holding the runner -- median service time 25.0 min, max 41.7 -- not
+  # because they compute anything.
+  #
+  # WHY THREE AND NOT ONE OR FIVE. At 0.83 erlangs with a 25-minute mean
+  # service time, Erlang-C over N servers gives:
+  #
+  #   N=1  83% utilisation  P(wait) 0.83  mean wait 122.1 min
+  #   N=2  42%              P(wait) 0.24  mean wait   5.2 min
+  #   N=3  28%              P(wait) 0.06  mean wait   0.7 min
+  #   N=4  21%              P(wait) 0.01  mean wait   0.1 min
+  #
+  # The N=1 row is not a prediction, it is a RETRODICTION, and that is what
+  # makes the rest of the table usable: `verify-lane-converged` on the single
+  # deploy runner actually queued a median 29.1 min, p90 75.8 and max 101.3
+  # over its 38 non-skipped runs between 2026-09-15T22:49Z and
+  # 2026-09-17T15:39Z. The model reproduces the observed order of magnitude, so
+  # N=3 is read off the same curve rather than picked. N=4 buys another 0.6 min
+  # and a fourth container; N=2 leaves a quarter of arrivals waiting.
+  #
+  # WHY THIS DOES NOT REOPEN OMN-18411. That ticket capped the omnibase-ci
+  # fleet at 60 because the REGISTERED runner count is the worst-case
+  # concurrent-job ceiling on a fixed-core box, and a burst drove one-minute
+  # load to 100.9. Two more runners raise that ceiling by two, and the jobs
+  # they will run are 60-second-interval poll loops that sleep through almost
+  # all of their 25 minutes. The cost is 2 x 2 GB reserved and 2 x 1.0 cpus,
+  # and the CPU is nearly all idle by construction.
+  #
+  # WHY NOT A SECOND `omnibase-deploy` RUNNER INSTEAD, which is the obvious
+  # reading of "the deploy label has one runner": because `omnibase-deploy`
+  # also carries release-train-lab.yml's `cut-tag` and `deploy`, which MUTATE
+  # the lane and must stay serialised (CLAUDE.md rule 2a/12). A second runner
+  # on that label lets two of them run at once, and a GitHub `concurrency`
+  # group cannot stop it -- a concurrency group is scoped to ONE repository,
+  # and `verify-sibling-converged` is called from omnimarket. The single
+  # physical deploy runner is the only serialisation guard that spans both
+  # callers, so it keeps the two DEPLOY jobs and the read-only work moves here.
+  #
+  # IDENTICAL TO omninode-verify-runner-1 IN EVERY FIELD BUT THREE: the
+  # container name, the `RUNNER_NAME`, and its own creds volume. The label set
+  # is byte-identical on purpose -- these are interchangeable members of one
+  # class, and a label that differed between them would make placement depend
+  # on which member GitHub happened to pick. Everything the block comment above
+  # says about what is deliberately ABSENT (no ${DEPLOY_RUNNER_OMNI_HOME} bind,
+  # no DEPLOY_RUNNER_TOKEN git-safe.directory wiring, no write surface into any
+  # compose lane) holds here unchanged, and
+  # tests/ci/test_verify_runner_credential_read_only_omn18408.py asserts it
+  # against every member of the class rather than against runner-1 alone.
+  #
+  # DEPLOYING THESE. Use the sanctioned scoped mode, one at a time, never a
+  # hand-typed compose command on the host and never the default fleet path:
+  #
+  #   bash scripts/deploy-runners.sh --add=omninode-verify-runner-2
+  #   bash scripts/deploy-runners.sh --add=omninode-verify-runner-3
+  #
+  # The default path force-recreates the whole project -- ~3 h serialised
+  # across the fleet (OMN-18188), with the monitor's auto-bounce cron racing
+  # anything offline past 300 s. `--rolling --only=` refuses by design: it
+  # enumerates general-pool runners and requires its target online and idle
+  # first, which a container that does not exist yet can never be.
+  omninode-verify-runner-2:
+    image: omninode-runner:latest
+    container_name: omninode-verify-runner-2
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -eu
+        runner_uid="$$(id -u runner)"
+        runner_gid="$$(id -g runner)"
+        mkdir -p /home/runner/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
+        install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
+          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
+        exec /usr/local/bin/entrypoint.sh
+    environment:
+      RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
+      RUNNER_NAME: omninode-verify-runner-2
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-deploy
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      LANE_PROBE_HOST: host.docker.internal
+      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
+      # comment above omninode-verify-runner-1.
+      - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - verify-runner-2-creds:/home/runner/.runner-creds
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    group_add:
+      - "984" # Match host Docker socket GID for DinD access
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  omninode-verify-runner-3:
+    image: omninode-runner:latest
+    container_name: omninode-verify-runner-3
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -eu
+        runner_uid="$$(id -u runner)"
+        runner_gid="$$(id -g runner)"
+        mkdir -p /home/runner/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
+        install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
+          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
+        exec /usr/local/bin/entrypoint.sh
+    environment:
+      RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
+      RUNNER_NAME: omninode-verify-runner-3
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-deploy
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      LANE_PROBE_HOST: host.docker.internal
+      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
+      # comment above omninode-verify-runner-1.
+      - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - verify-runner-3-creds:/home/runner/.runner-creds
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    group_add:
+      - "984" # Match host Docker socket GID for DinD access
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  # ---------------------------------------------------------------------------
   # omninode-customer-plane-runner-1/2 -- OMN-18392: the credential-free pair.
   #
   # These two exist for ONE property: a job that runs here holds no platform
@@ -1716,6 +1903,13 @@ volumes:
   # customer-plane pair below: registration cache is keyed to the label set.
   verify-runner-1-creds:
     name: omninode-verify-runner-1-creds
+  # OMN-18602 -- one creds volume per class member. Sharing one across the
+  # three would have them contend for a single registration cache that names
+  # ONE runner, so whichever recreated last would re-register over its peers.
+  verify-runner-2-creds:
+    name: omninode-verify-runner-2-creds
+  verify-runner-3-creds:
+    name: omninode-verify-runner-3-creds
   # OMN-18392 -- credential-free customer-plane pair (see the service
   # definitions above). Separate creds volumes so their registration cache
   # is keyed to their own label set and cannot inherit a fleet runner's.

@@ -44,6 +44,7 @@ from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+    _AUTHORIZED_BINDINGS,
     ACTIVE_BACKEND_KEYS,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
@@ -74,7 +75,12 @@ def test_dev_overlay_matches_cross_repo_v2_parity_fixture() -> None:
         binding = by_id[backend_key]
         assert binding.endpoint_url == "http://192.168.86.201:8000/v1/chat/completions"
         assert binding.advertised_model == "Qwen3.6-35B-A3B"
-        assert binding.parameter_count == "27B"
+        # OMN-18570: read from the authorized table rather than restating it.
+        # This assertion carried "27B" for two weeks after the endpoint moved
+        # off the Qwen3.8 27B, agreeing with an overlay that was also wrong.
+        assert (
+            binding.parameter_count == _AUTHORIZED_BINDINGS[backend_key].parameter_count
+        )
         assert binding.context_window == 131_072
 
     ds_v4 = by_id["local-ds-v4-flash"]

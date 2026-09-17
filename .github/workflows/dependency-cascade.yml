@@ -39,16 +39,6 @@ on:
       onexbot-occ-private-key:
         description: "onexbot-occ-writer GitHub App private key (org secret ONEXBOT_OCC_PRIVATE_KEY)"
         required: false
-  workflow_dispatch:
-    inputs:
-      package:
-        description: 'Released package name (e.g. omnibase_infra)'
-        required: true
-        type: string
-      version:
-        description: 'Released version tag (e.g. v0.11.0)'
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -113,16 +103,32 @@ jobs:
       - name: Check onexbot-occ-writer App credentials are configured
         id: token_check
         env:
+          # ONE source, deliberately. This workflow declares
+          # `on: workflow_call: secrets:`, and a workflow carrying that
+          # declaration has its secrets context restricted to the DECLARED
+          # names under every trigger -- an org-level name resolves EMPTY here
+          # even on a manual run. A fallback to one would therefore be dead
+          # code in a credential expression, which is worse than no fallback:
+          # the next reader believes the manual path is covered.
+          #
+          # Every caller passes these explicitly. release.yml does it for the
+          # automatic path and dependency-cascade-dispatch.yml does it for the
+          # manual one, the latter existing precisely because only a workflow
+          # WITHOUT a workflow_call declaration can read them (OMN-18596).
           APP_ID: ${{ secrets.onexbot-occ-app-id }}
           APP_PRIVATE_KEY: ${{ secrets.onexbot-occ-private-key }}
         run: |
           if [ -z "$APP_ID" ] || [ -z "$APP_PRIVATE_KEY" ]; then
-            echo "::warning::ONEXBOT_OCC_APP_ID / ONEXBOT_OCC_PRIVATE_KEY are not configured. Skipping dependency bump for ${{ matrix.repo }}." \
-              "Provision the onexbot-occ-writer App org secrets to enable automated dependency cascades."
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
+            # FAIL, never skip. A cascade that cannot authenticate has not
+            # skipped a bump; it has failed to perform one, and a green job is
+            # indistinguishable from a cascade that had nothing to do. Same
+            # reasoning the lab-pass receipt is built on: a result that appears
+            # only when things worked cannot tell "it failed" apart from
+            # "nobody ran it".
+            echo "::error::onexbot-occ-writer App identity did not resolve for ${{ matrix.repo }}. Every caller must pass onexbot-occ-app-id and onexbot-occ-private-key: release.yml for the automatic path, dependency-cascade-dispatch.yml for the manual one. Refusing to report success for a bump that was never attempted."
+            exit 1
           fi
+          echo "has_token=true" >> "$GITHUB_OUTPUT"
 
       # OMN-16373: mint a short-lived onexbot-occ-writer App installation
       # token, scoped to the one downstream repo this matrix leg touches.
@@ -178,16 +184,71 @@ jobs:
       - name: Set branch and PR variables
         if: steps.token_check.outputs.has_token == 'true'
         id: vars
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${{ inputs.version }}"
+          # >>> OMN-18596 bump branch >>>
+          # The branch carries a ticket because that is the ONLY arm of the
+          # autobind condition a dependency bump can satisfy.
+          #
+          # Every repo's call-occ-autobind.yml gates its job on
+          #   contains(pull_request.title, 'OMN-') || contains(head.ref, 'OMN-')
+          # and this cascade generated neither. So autobind never ran on a bump
+          # PR at all -- it did not decline one on the merits, the job simply
+          # reported `skipping` -- and a person hand-wrote the companion
+          # instead (onex_change_control#10026, human-authored 2026-09-17T15:04:42Z
+          # for omnimemory#511's bump).
+          #
+          # The title arm is not available: the pr-title gate exempts the
+          # `chore(deps` prefix precisely so dependency bumps need no ticket,
+          # so putting one in the title would fight a deliberate exemption.
+          #
+          # Ported from omnimarket#2395, which fixed exactly this for that
+          # repo's own post-release bump and generates
+          # automation/omn-18010-post-release-dev-bump-<version>. GitHub's
+          # expression `contains()` is case-insensitive, so the lowercase
+          # ticket satisfies the uppercase literal in the condition.
           VERSION="${VERSION#v}"
-          PACKAGE="${{ inputs.package }}"
           # Use hyphenated package name for the branch (PyPI convention)
           PKG_HYPHEN="${PACKAGE//_/-}"
-          BRANCH="automation/bump-${PKG_HYPHEN}-${VERSION}"
+          BRANCH="automation/omn-18596-bump-${PKG_HYPHEN}-${VERSION}"
+          # The shape this cascade generated until OMN-18596. Any bump PR
+          # opened before that change merged still carries it, and the
+          # already-open check below must see those too: a rename whose dedupe
+          # knows only the new shape opens a SECOND bump PR beside an in-flight
+          # one. That is the defect omnimarket#2366 fixed, not a hypothetical.
+          LEGACY_BRANCH="automation/bump-${PKG_HYPHEN}-${VERSION}"
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "legacy_branch=$LEGACY_BRANCH" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "pkg_hyphen=$PKG_HYPHEN" >> $GITHUB_OUTPUT
+          # <<< OMN-18596 bump branch <<<
+          # >>> OMN-18596 base-branch resolver >>>
+          # The base is the ref this job's checkout actually landed on, read
+          # BEFORE the bump branch is cut from it. "Checkout downstream repo"
+          # above passes no `ref:`, so that ref IS the downstream repository's
+          # own default branch, resolved at run time by the checkout itself.
+          # Reading it here binds base to head: the PR is opened against the
+          # exact ref its commit sits on top of, which a literal cannot do.
+          #
+          # This job previously passed the release branch as a literal base while
+          # cutting the branch from a default branch of `dev`. On 2026-09-17 that opened
+          # omniclaude#2215 against a release-synced main, presenting a 3-line
+          # lockfile bump as a 16,201-addition diff; it had to be retargeted by
+          # hand. `main` is the last release on these repos and is advanced only
+          # by an automated fast-forward, so it is never a pull-request target.
+          #
+          # An unresolvable ref REFUSES. A cascade that guesses its own base is
+          # how a wrong branch becomes a wrong diff, and a bump PR against a
+          # branch nobody chose is worse than no bump PR.
+          BASE_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+          if [ -z "${BASE_BRANCH}" ] || [ "${BASE_BRANCH}" = "HEAD" ]; then
+            echo "::error::refusing to open a dependency-bump PR for ${{ matrix.repo }}: the checkout is detached or its branch could not be read, so the base cannot be bound to the commit's own parent. Resolve the repository's default branch rather than assuming one."
+            exit 1
+          fi
+          echo "base=$BASE_BRANCH" >> $GITHUB_OUTPUT
+          # <<< OMN-18596 base-branch resolver <<<
 
       - name: Create branch and upgrade lockfile
         if: steps.token_check.outputs.has_token == 'true'
@@ -282,14 +343,16 @@ jobs:
       - name: Commit and push
         if: steps.token_check.outputs.has_token == 'true' && env.SKIP == 'false'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # OMN-18273: commit as the App this job already authenticates as, not
+          # as github-actions[bot] — the push is an App-token push, so the two
+          # disagreeing was itself misleading about who made the change.
+          git config user.name "onexbot-occ-writer[bot]"
+          git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
           git add uv.lock pyproject.toml
-          git commit -m "chore(deps): bump ${{ inputs.package }} to ${{ steps.vars.outputs.version }}
-
-          Automated dependency cascade — updates uv.lock and pyproject.toml pins.
-
-          Triggered-by: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          git commit -m "chore(deps): bump ${{ inputs.package }} to ${{ steps.vars.outputs.version }}" \
+            -m "Automated dependency cascade — updates uv.lock and pyproject.toml pins." \
+            --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
+            --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           git push origin "${{ steps.vars.outputs.branch }}"
 
       - name: Open pull request
@@ -297,16 +360,29 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          # Check if a PR already exists for this branch
+          # Check whether a PR is already open for this bump, under EITHER
+          # branch shape. Querying only the current shape is how a rename
+          # opens a duplicate beside an in-flight PR (omnimarket#2366).
           EXISTING=$(gh pr list \
             --repo "OmniNode-ai/${{ matrix.repo }}" \
             --head "${{ steps.vars.outputs.branch }}" \
             --state open \
             --json number \
             --jq 'length')
+          LEGACY_EXISTING=$(gh pr list \
+            --repo "OmniNode-ai/${{ matrix.repo }}" \
+            --head "${{ steps.vars.outputs.legacy_branch }}" \
+            --state open \
+            --json number \
+            --jq 'length')
 
           if [ "$EXISTING" -gt 0 ]; then
             echo "PR already exists for branch ${{ steps.vars.outputs.branch }} -- skipping"
+            exit 0
+          fi
+
+          if [ "$LEGACY_EXISTING" -gt 0 ]; then
+            echo "PR already exists for the pre-OMN-18596 branch ${{ steps.vars.outputs.legacy_branch }} -- skipping rather than opening a duplicate"
             exit 0
           fi
 
@@ -332,7 +408,7 @@ jobs:
           PREOF
           )" \
             --head "${{ steps.vars.outputs.branch }}" \
-            --base main
+            --base "${{ steps.vars.outputs.base }}"
 
       - name: Skip summary
         if: steps.token_check.outputs.has_token == 'true' && env.SKIP == 'true'

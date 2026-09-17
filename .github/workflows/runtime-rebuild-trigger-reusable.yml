@@ -262,7 +262,28 @@ jobs:
     # The lane's docker daemon is on the LAN; hosted compute cannot see it. The
     # checkout below is pinned to a commit of omnibase_infra, so no
     # caller-authored code executes on the fleet.
-    runs-on: [self-hosted, omnibase-deploy]
+    #
+    # OMN-18602: moved off `omnibase-deploy` with its sibling in
+    # runtime-rebuild-trigger.yml, for the queue measured there. This job reads
+    # the same surfaces and writes nothing.
+    #
+    # THIS JOB IS WHY A SECOND DEPLOY-LABEL RUNNER WOULD NOT HAVE WORKED. It is
+    # called from omnimarket, so it and the release-train DEPLOY jobs live in
+    # different repositories -- and a `concurrency` group is scoped to one
+    # repository, so no group can serialise them against each other. Adding a
+    # second runner carrying `omnibase-deploy` would therefore have removed the
+    # only guard that actually spans the two callers. Moving the read-only work
+    # to the verify class leaves the deploy label as one physical runner, which
+    # is the guard.
+    #
+    # The verify runners register into the `omnibase-deploy` runner GROUP,
+    # whose visibility already covers omnibase_infra and omnimarket, so
+    # this caller can reach them. Group membership grants repository
+    # visibility; the LABEL decides routing.
+    #
+    # `host-201` is required, never the bare class: the other verify-class
+    # runners are on other lab hosts and cannot see this lane.
+    runs-on: [self-hosted, omnibase-verify, host-201]
     # 25-minute convergence wait plus a tail for the probe, the emit and the
     # upload. A job killed by timeout uploads NO receipt, which is the one
     # outcome worse than a failing one.
