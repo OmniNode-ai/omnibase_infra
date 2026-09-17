@@ -164,8 +164,8 @@ psql_db -f "$BASELINE"
 # own 00000000_migrations_tracking.sql. Because this runner always won the
 # name, that file's `CREATE TABLE IF NOT EXISTS` was a silent no-op on every
 # run and the shape it declares never landed -- so 021_workflow_results.sql,
-# the one corpus file that self-registers, died on `column "version" of
-# relation "schema_migrations" does not exist`.
+# which self-registers on `version`, died on `column "version" of relation
+# "schema_migrations" does not exist`.
 #
 # That is OMN-4627 with the two sides swapped, and OMN-4627 was closed by
 # reconciling the two literals by hand. The hand reconciliation is exactly what
@@ -174,8 +174,16 @@ psql_db -f "$BASELINE"
 # corpus's shape -- a correct copy is how the defect came back. This runner now
 # declares nothing at all about the tracker: it applies the corpus's own
 # tracking migration as the bootstrap and reads its bookkeeping column off the
-# resulting primary key. Exactly one declaration of that table exists anywhere,
-# so there is no second literal for a future edit to drift away from.
+# resulting primary key, so THIS REPO carries no literal for a future edit to
+# drift away from.
+#
+# That is the honest scope and it is narrower than "one declaration anywhere".
+# omninode_infra's k8s Job runner (k8s/migrations/omninode-cloud-migrate.yaml)
+# declares the same shape for the k3s path, and the corpus's own
+# 20260429_plan_entitlements.sql declares a third, conditional shape for a
+# local-dev database carrying neither column. Neither is reachable from this
+# lane and neither is this runner's to reconcile; what this file guarantees is
+# that it adds no fourth, which is exactly what the gate below enforces.
 #
 # This is not a second specification of the apply order either. The file below
 # is the MANIFEST's own first entry; applying it here brings the table into
@@ -219,11 +227,16 @@ psql_db -c "DO \$\$
 DECLARE
   legacy_index record;
 BEGIN
+  -- pg_catalog, not information_schema: that view shows only the columns the
+  -- current role holds a privilege on, so a legacy table this role cannot read
+  -- would report NO migration_name column and skip the convergence in silence.
+  -- pg_attribute is not privilege-filtered and answers the question asked.
   IF to_regclass('public.schema_migrations') IS NOT NULL
-     AND EXISTS (SELECT 1 FROM information_schema.columns
-                  WHERE table_schema = 'public'
-                    AND table_name   = 'schema_migrations'
-                    AND column_name  = 'migration_name')
+     AND EXISTS (SELECT 1 FROM pg_attribute
+                  WHERE attrelid = 'public.schema_migrations'::regclass
+                    AND attname  = 'migration_name'
+                    AND attnum > 0
+                    AND NOT attisdropped)
   THEN
     RAISE NOTICE 'OMN-18544: retiring the migration_name-keyed ledger, rows preserved';
     ALTER TABLE public.schema_migrations RENAME TO schema_migrations_legacy_omn18544;
@@ -244,6 +257,27 @@ END
 echo "-- tracker bootstrap (corpus-owned): 00000000_migrations_tracking.sql"
 psql_db -f "$TRACKING"
 
+# Prove the convergence happened. Every step above is conditional and each one
+# is SILENT when its condition is false: a skipped rename leaves the retired
+# table in place, the corpus's CREATE TABLE IF NOT EXISTS then no-ops against it
+# exactly as it did before this fix, and the key read below resolves to
+# `migration_name` off the surviving primary key -- announcing the retired key on
+# a line that reads like success, and dying 46 files later on the original error.
+# Refusing here is the difference between a fix and a fix that cannot tell you it
+# did not work.
+#
+# This is the ONE assertion this runner is entitled to make about the shape. Not
+# what the tracker's columns are, which is the corpus's business and the whole
+# point of the change above -- only that the column THIS RUNNER retired is gone.
+if [ "$(psql_db -tAc "SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.schema_migrations'::regclass AND attname = 'migration_name' AND attnum > 0 AND NOT attisdropped")" != "0" ]; then
+  echo "FATAL: public.schema_migrations still carries the retired migration_name" >&2
+  echo "       column after the corpus bootstrap, so the convergence above did not" >&2
+  echo "       run and the corpus's own CREATE TABLE no-opped against the old table." >&2
+  echo "       That is the OMN-18544 defect, unconverged. Refusing rather than" >&2
+  echo "       resuming against a ledger the corpus cannot write to." >&2
+  exit 1
+fi
+
 # The bookkeeping column is whatever the corpus made the primary key -- read,
 # not written down. Fail closed on anything but exactly one column: a composite
 # or absent key means the corpus changed something this loop's ON CONFLICT
@@ -259,8 +293,18 @@ echo "   tracker key column, read from the corpus's own primary key: ${KEY_COLUM
 
 if [ "$(psql_db -tAc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = 'schema_migrations_legacy_omn18544'")" != "0" ]; then
   echo "-- converging the retired ledger into ${KEY_COLUMN}, preserving its rows"
-  psql_db -c "INSERT INTO public.schema_migrations (\"${KEY_COLUMN}\") SELECT migration_name FROM public.schema_migrations_legacy_omn18544 ON CONFLICT DO NOTHING"
-  psql_db -c "DROP TABLE public.schema_migrations_legacy_omn18544"
+  # One psql -c, so the copy and the drop share an implicit transaction and a
+  # crash between them cannot strand the rows. applied_at is carried across
+  # explicitly: without it every recorded time silently becomes the convergence
+  # timestamp, and an audit trail is what the corpus's tracking file says it is
+  # for. That is the LEGACY table's column being read, not a claim about the
+  # canonical shape -- if the corpus ever drops applied_at this INSERT fails
+  # loudly, which is the correct direction to fail in.
+  psql_db -c "INSERT INTO public.schema_migrations (\"${KEY_COLUMN}\", applied_at)
+              SELECT migration_name, applied_at
+                FROM public.schema_migrations_legacy_omn18544
+               ON CONFLICT DO NOTHING;
+              DROP TABLE public.schema_migrations_legacy_omn18544;"
 fi
 
 applied=0

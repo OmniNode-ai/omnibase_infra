@@ -95,6 +95,28 @@ TRACKER_DECLARERS: dict[str, tuple[str, ...]] = {
 #: This repo may not declare their shape at all -- see the module docstring.
 CORPUS_OWNED_ELSEWHERE: frozenset[str] = frozenset({"omninode_cloud"})
 
+#: Files that declare a tracker this registry deliberately does NOT govern, each
+#: with the reason. A path earns a place here by argument, never by being
+#: inconvenient, and the completeness check below fails on any declarer that is
+#: in neither this mapping nor TRACKER_DECLARERS -- so the registry cannot fall
+#: quietly behind the tree the way a hand-reconciled pair of literals did.
+UNGOVERNED_DECLARERS: dict[str, str] = {
+    "docker/migrations/forward/_ledger/bootstrap.sql": (
+        "platform_catalog.schema_migrations in omnidash_analytics -- a different "
+        "schema in a different database, with its own migration-stream ledger "
+        "shape and its own immutability gate"
+    ),
+    "docker/legacy-rds-fixture/legacy-seed.sql": (
+        "a fixture that deliberately reproduces RETIRED shapes, including the "
+        "pre-OMN-17537 nullable-checksum one, so migrations can be proven against "
+        "them; agreeing with the corpus would defeat its purpose"
+    ),
+    "docker/legacy-rds-fixture/prove.sh": (
+        "the harness asserting against that fixture, carrying the same retired "
+        "shapes as its expectations"
+    ),
+}
+
 #: The compose runner's bootstrap, once it stops declaring a shape of its own.
 CORPUS_TRACKING_FILE = "00000000_migrations_tracking.sql"
 
@@ -112,11 +134,27 @@ psql_db -c "CREATE TABLE IF NOT EXISTS public.schema_migrations (
             )"
 """
 
+#: ``UNLOGGED``/``TEMP`` and quoted identifiers are matched deliberately: a
+#: reintroduced declaration that spells the table ``"schema_migrations"`` or
+#: creates it UNLOGGED is the same defect, and a matcher that missed them would
+#: be a gate with a documented way around it.
 _CREATE_RE = re.compile(
-    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
-    r"(?:[A-Za-z_][\w$]*\s*\.\s*)?"
-    rf"{TRACKER_TABLE}\b\s*\(",
+    r"CREATE\s+(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP(?:ORARY)?\s+|UNLOGGED\s+)?TABLE\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"(?:\"?[A-Za-z_][\w$]*\"?\s*\.\s*)?"
+    rf"\"?{TRACKER_TABLE}\"?\b\s*\(",
     re.IGNORECASE,
+)
+
+#: Shaping DDL that is not a CREATE. The convergence step legitimately issues
+#: ``ALTER TABLE ... RENAME TO`` to retire the table it once created; anything
+#: that ADDs, ALTERs or DROPs a COLUMN, or adds a CONSTRAINT, is this repo
+#: declaring a shape by another spelling.
+_SHAPING_ALTER_RE = re.compile(
+    rf"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:\"?[A-Za-z_][\w$]*\"?\s*\.\s*)?"
+    rf"\"?{TRACKER_TABLE}\"?\b[^;]*?"
+    r"\b(?:ADD\s+COLUMN|DROP\s+COLUMN|ALTER\s+COLUMN|ADD\s+CONSTRAINT)\b",
+    re.IGNORECASE | re.DOTALL,
 )
 
 #: Leading words that begin a TABLE constraint rather than a column definition.
@@ -146,6 +184,20 @@ def _balanced_body(text: str, open_paren: int) -> str:
     )
 
 
+def _strip_comments(sql: str) -> str:
+    """Remove ``--`` line comments and ``/* */`` blocks.
+
+    Order matters: this runs BEFORE the body is comma-split and depth-counted.
+    Stripping afterwards -- the shape this module shipped with first -- drops a
+    real column whenever a comment contains a comma (``-- the key, unique``
+    swallows the next column entirely) and raises on a comment containing an
+    unbalanced parenthesis. Neither fires on any registered file today, which is
+    exactly why it needed finding rather than waiting for.
+    """
+    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
+    return re.sub(r"--[^\n]*", "", sql)
+
+
 def _split_top_level(body: str) -> list[str]:
     """Split a CREATE TABLE body on commas that are not inside parentheses."""
     items: list[str] = []
@@ -172,15 +224,12 @@ def declared_column_sets(text: str) -> list[tuple[str, ...]]:
     constraints are dropped; only column definitions contribute a name.
     """
     found: list[tuple[str, ...]] = []
+    text = _strip_comments(text)
     for match in _CREATE_RE.finditer(text):
         body = _balanced_body(text, match.end() - 1)
         columns: list[str] = []
         for item in _split_top_level(body):
             stripped = item.strip()
-            if not stripped:
-                continue
-            # Drop SQL comments so a commented column name is not read as one.
-            stripped = re.sub(r"--[^\n]*", "", stripped).strip()
             if not stripped:
                 continue
             first = stripped.split()[0].strip('"').lower()
@@ -324,10 +373,15 @@ def test_the_compose_runner_bootstraps_from_the_corpus_tracking_file() -> None:
         f"{COMPOSE_RUNNER.name} does not reference {CORPUS_TRACKING_FILE}; with no "
         "CREATE TABLE of its own it has nothing to bootstrap the tracker from"
     )
-    assert re.search(
-        r"FATAL[^\n]*TRACKING|TRACKING[^\n]*\bFATAL", text, re.IGNORECASE
-    ) or ("$TRACKING" in text or "${TRACKING" in text), (
-        f"{COMPOSE_RUNNER.name} must resolve the corpus tracking file through a fail-closed guard"
+    assert re.search(r'psql_db -f "\$TRACKING"', text), (
+        f"{COMPOSE_RUNNER.name} names the corpus tracking file but never applies it. "
+        "Naming it is not bootstrapping it: with no CREATE TABLE of its own the "
+        "tracker would simply not exist and the loop's first probe would die. The "
+        "previous form of this assertion was satisfied by a variable named TRACKING"
+    )
+    assert re.search(r'\[ -f "\$TRACKING" \] \|\|', text), (
+        f"{COMPOSE_RUNNER.name} must fail closed on an absent tracking file rather "
+        "than fall through to a loop that reads a table nothing created"
     )
 
 
@@ -347,16 +401,15 @@ def test_the_compose_runner_derives_its_bookkeeping_key_from_the_live_primary_ke
         f"{COMPOSE_RUNNER.name} does not introspect the tracker's primary key; its "
         "bookkeeping column must be derived, not written down"
     )
-    # Word-bounded on purpose: the convergence step probes for the retired
-    # ``schema_migrations_legacy_omn18544`` stash, which is not the tracker and
-    # is correctly addressed by its own literal name.
-    live_tracker = re.compile(rf"\b{TRACKER_TABLE}\b")
-    bookkeeping = [
-        line
-        for line in text.splitlines()
-        if live_tracker.search(line)
-        and ("SELECT count(*)" in line or "INSERT INTO" in line)
-    ]
+    # Scoped to statements that read or write the ledger's CONTENT. The stash
+    # probe addresses ``schema_migrations_legacy_omn18544`` by its own literal
+    # name, and the retired-column assertion queries ``pg_attribute`` rather
+    # than the tracker -- neither is bookkeeping and neither may be required to
+    # use the derived key.
+    ledger_content = re.compile(
+        rf"(?:FROM|INTO)\s+public\.{TRACKER_TABLE}\b", re.IGNORECASE
+    )
+    bookkeeping = [line for line in text.splitlines() if ledger_content.search(line)]
     assert bookkeeping, (
         f"{COMPOSE_RUNNER.name} has no {TRACKER_TABLE} probe or insert to check"
     )
@@ -422,4 +475,117 @@ def test_the_compose_runner_makes_no_claim_about_a_shape_it_does_not_declare() -
     assert "same shape the corpus creates" not in text, (
         f"{COMPOSE_RUNNER.name} still claims its bootstrap matches the corpus shape. "
         "The runner no longer declares a shape at all; say that instead."
+    )
+
+
+@pytest.mark.unit
+def test_the_registry_accounts_for_every_tracker_declaration_in_the_tree() -> None:
+    """No file may declare a tracker without this registry knowing about it.
+
+    The thesis of this change is that hand-reconciled literals do not survive. A
+    hand-maintained list of paths with no completeness check is the same class
+    one level up: a new declarer would sit in no registry, match no pre-commit
+    ``files:`` pattern, and be invisible to both layers. This walks the tree
+    instead of trusting the list.
+    """
+    governed = {rel for paths in TRACKER_DECLARERS.values() for rel in paths}
+    unaccounted: dict[str, list[tuple[str, ...]]] = {}
+    for root in ("docker", "scripts", "src"):
+        for path in sorted((REPO_ROOT / root).rglob("*")):
+            if not path.is_file() or path.suffix not in {
+                ".sql",
+                ".sh",
+                ".py",
+                ".yaml",
+                ".yml",
+            }:
+                continue
+            relative = path.relative_to(REPO_ROOT).as_posix()
+            if relative in governed or relative in UNGOVERNED_DECLARERS:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            if TRACKER_TABLE not in text:
+                continue
+            shapes = declared_column_sets(text)
+            if shapes:
+                unaccounted[relative] = shapes
+    assert not unaccounted, (
+        f"these files declare a {TRACKER_TABLE} tracker and are in neither "
+        "TRACKER_DECLARERS nor UNGOVERNED_DECLARERS, so nothing checks their "
+        "agreement and no pre-commit hook fires on them:\n"
+        + "\n".join(f"  {where}: {cols}" for where, cols in sorted(unaccounted.items()))
+    )
+
+
+@pytest.mark.unit
+def test_the_completeness_walk_finds_the_declarers_it_is_meant_to_skip() -> None:
+    """Positive control for the walk above: it really does find declarations.
+
+    A completeness check whose walk matched nothing -- a wrong root, a suffix
+    filter excluding every real file, a parser that stopped matching -- would
+    report a clean tree forever. This asserts the same parser finds a
+    declaration in every path the registry exempts.
+    """
+    found = {
+        relative
+        for relative in UNGOVERNED_DECLARERS
+        if declared_column_sets((REPO_ROOT / relative).read_text(encoding="utf-8"))
+    }
+    assert found == set(UNGOVERNED_DECLARERS), (
+        "UNGOVERNED_DECLARERS names paths the parser finds no declaration in, so "
+        "the exemptions are stale and the walk's zero result proves nothing: "
+        f"missing {sorted(set(UNGOVERNED_DECLARERS) - found)}"
+    )
+
+
+@pytest.mark.unit
+def test_a_corpus_owned_runner_declares_no_shape_by_any_other_spelling() -> None:
+    """``CREATE TABLE`` is not the only way to declare a shape.
+
+    The corpus-owned rule is the single gate over the subject database, so the
+    ways around it matter more than usual. ``ALTER TABLE ... ADD COLUMN`` shapes
+    the tracker just as surely, and applying some other vendored ``.sql`` would
+    move the declaration into a file this registry never reads. The convergence
+    step's own ``RENAME TO`` stays allowed on purpose: retiring a table this
+    runner once created is not declaring a shape for it.
+    """
+    text = COMPOSE_RUNNER.read_text(encoding="utf-8")
+    shaping = _SHAPING_ALTER_RE.search(_strip_comments(text))
+    assert shaping is None, (
+        f"{COMPOSE_RUNNER.name} shapes {TRACKER_TABLE} through ALTER rather than "
+        f"CREATE, which the corpus-owned rule alone would miss: "
+        f"{shaping.group(0)!r}"
+        if shaping
+        else ""
+    )
+    applied = set(re.findall(r'psql_db -f "\$\{?(\w+)', text))
+    assert applied <= {"BASELINE", "TRACKING"}, (
+        f"{COMPOSE_RUNNER.name} applies a SQL file this gate never reads "
+        f"({sorted(applied - {'BASELINE', 'TRACKING'})}), so a tracker declared "
+        "inside it would be compared against nothing"
+    )
+
+
+@pytest.mark.unit
+def test_the_compose_runner_refuses_a_lane_the_convergence_did_not_reach() -> None:
+    """Every convergence step is conditional, so the runner must prove one ran.
+
+    A skipped rename leaves the retired table in place, the corpus's
+    ``CREATE TABLE IF NOT EXISTS`` no-ops against it exactly as it did before the
+    fix, and the derived key resolves to the retired column -- announcing the old
+    key on a line that reads like success and dying 46 files later on the
+    original error. Without this the change cannot tell anyone it did not work.
+    """
+    text = COMPOSE_RUNNER.read_text(encoding="utf-8")
+    assert re.search(r"FATAL[^\n]*(?:retired|migration_name)", text, re.IGNORECASE), (
+        f"{COMPOSE_RUNNER.name} never refuses a lane where the retired column "
+        "survived the bootstrap, so a skipped convergence reports success"
+    )
+    assert "attisdropped" in text, (
+        f"{COMPOSE_RUNNER.name} must read the retired column from pg_catalog: "
+        "information_schema is privilege-filtered and answers 'absent' for a "
+        "table the role cannot read, which is the silent skip this guards"
     )
