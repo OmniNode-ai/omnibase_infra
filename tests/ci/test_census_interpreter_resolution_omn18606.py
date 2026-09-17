@@ -23,9 +23,18 @@ observe a bug about not running under the venv.
 
 HOW THESE TESTS AVOID REPEATING THAT MISTAKE. The two behavioural tests below
 drive the real script as a subprocess with a real `LANE_CENSUS_PYTHON` and read
-its real exit code. They are hermetic: `PATH` is `/usr/bin:/bin`, which carries
-`mkdir`/`date`/`tee` but not `docker` (which lives in `/usr/local/bin` or
-`/opt/homebrew/bin`), so no docker daemon is contacted on any path.
+its real exit code.
+
+They are hermetic by CONSTRUCTION, not by assumption. `PATH` is a temp directory
+holding symlinks to exactly the two external commands the script runs before its
+docker check -- `mkdir` and `dirname` -- and nothing else. An earlier revision
+used `/usr/bin:/bin` on the reasoning that docker lives in `/usr/local/bin` or
+`/opt/homebrew/bin`; that is a macOS fact stated as a universal one. On the CI
+runner `docker` IS in that PATH, so the positive control sailed past the docker
+check and ran a real census against the runner's own daemon (`lane=ALL,
+host=runnervmlun5p, LIVE`, exit 0). Building the PATH up from the commands the
+script actually needs cannot be wrong that way: whatever is not linked in is
+absent, on every host.
 
 The pair is a discriminator, not a single assertion. One stub fails the PyYAML
 import and one passes it; the same invocation must produce two DIFFERENT
@@ -37,6 +46,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -49,8 +59,29 @@ _REPO = Path(__file__).resolve().parents[2]
 _CENSUS_SH = _REPO / "scripts" / "lane-census-check.sh"
 _WORKFLOW = _REPO / ".github" / "workflows" / "lane-census-refresh.yml"
 
-# Carries mkdir/date/tee; carries no docker on any supported dev or CI host.
-_MINIMAL_PATH = "/usr/bin:/bin"
+# The only external commands the collector runs before its docker check. Read
+# from the script rather than guessed: `mkdir -p "$(dirname "$LOG_FILE")"`.
+_PRE_DOCKER_COMMANDS = ("mkdir", "dirname")
+
+
+def _sealed_path(tmp_path: Path) -> Path:
+    """A PATH containing the script's pre-docker needs and provably nothing else.
+
+    `docker` is absent because it was never linked in, which holds on every host
+    rather than on the one the author happened to be using.
+    """
+    sealed = tmp_path / "sealed-bin"
+    sealed.mkdir(exist_ok=True)
+    for name in _PRE_DOCKER_COMMANDS:
+        resolved = shutil.which(name)
+        assert resolved, f"{name} is required to drive the collector at all"
+        link = sealed / name
+        if not link.exists():
+            link.symlink_to(resolved)
+    assert shutil.which("docker", path=str(sealed)) is None, (
+        "the sealed PATH resolves docker; this test would contact a real daemon"
+    )
+    return sealed
 
 
 def _stub(path: Path, *, imports_ok: bool) -> Path:
@@ -68,7 +99,7 @@ def _run_census(python: Path, tmp_path: Path) -> subprocess.CompletedProcess[str
         check=False,
         cwd=_REPO,
         env={
-            "PATH": _MINIMAL_PATH,
+            "PATH": str(_sealed_path(tmp_path)),
             "HOME": str(tmp_path),
             "LANE_CENSUS_PYTHON": str(python),
         },
