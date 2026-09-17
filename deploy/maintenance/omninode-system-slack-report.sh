@@ -687,6 +687,87 @@ check_ci_required_contexts() {
   printf '%s\n' "$out"
 }
 
+# OMN-18567: surface the deploy runner's private clone-tree convergence.
+#
+# WHY IT LIVES HERE. `omninode-runner-tree-converge.sh` runs hourly at :49 and
+# writes one verdict line. A verdict nothing reads is a log line, and CLAUDE.md
+# rule 5 is that detection not wired to something is advisory. Folding the read
+# into this reporter rather than building a second alerter is the
+# net-negative-surface rule: it inherits this script's Slack poster, its
+# per-key state-change de-duplication, its resolved-notification and its */15
+# cron. No new cron unit, no second Slack integration -- the same argument
+# `check_ci_required_contexts` above is here on.
+#
+# WHAT IT ESCALATES, AND WHAT IT DELIBERATELY DOES NOT. The tick REFUSES while
+# a deploy job is using the tree, and exits 0 when it does, because a refusal is
+# the guard working. So a single REFUSED is not an issue and must not page. What
+# IS an issue is the tree going unconverged for a long time -- whether because
+# the runner is permanently busy, because the unit stopped being scheduled, or
+# because nobody ever installed it. All three look identical from the outside,
+# and all three are caught by ageing `last_success` rather than by reading the
+# most recent verdict. That is the whole reason the tick carries that field.
+#
+# A missing file is a WARNING, not silence: "the tick has never run" is exactly
+# the OMN-15525 condition this maintenance family exists to make visible.
+check_runner_tree_converge() {
+  local status_file="${OMNINODE_RUNNER_TREE_STATE_FILE:-$STATE_DIR/runner-tree-converge.status}"
+  local stale_hours="${OMNINODE_RUNNER_TREE_STALE_HOURS:-6}"
+
+  if [[ "${OMNINODE_RUNNER_TREE_CHECK_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$status_file" ]]; then
+    printf 'runner-tree|WARNING|converge|no verdict at %s; the hourly converge has never run, or its unit is not installed\n' "$status_file"
+    return 0
+  fi
+
+  local line verdict last_success detail
+  line=$(tail -n1 "$status_file" 2>/dev/null)
+  verdict=$(sed -n 's/^runner-tree-converge|\([A-Z_]*\)|.*/\1/p' <<<"$line")
+  last_success=$(sed -n 's/.*|last_success=\([^|]*\)|.*/\1/p' <<<"$line")
+  detail=$(sed -n 's/.*|detail=\(.*\)$/\1/p' <<<"$line")
+  if [[ -z "$verdict" ]]; then
+    printf 'runner-tree|WARNING|converge|verdict at %s is unparseable; convergence state unknown\n' "$status_file"
+    return 0
+  fi
+
+  # A converge that could not repair is the one outcome worth a human: the tree
+  # is the build source for three deploy paths and it is now knowingly wrong.
+  if [[ "$verdict" == "FAILED" || "$verdict" == "PRECONDITION" ]]; then
+    printf 'runner-tree|CRITICAL|converge|%s — %s\n' "$verdict" "${detail:-no detail}"
+    return 0
+  fi
+
+  if [[ -z "$last_success" || "$last_success" == "never" ]]; then
+    printf 'runner-tree|WARNING|converge|last verdict %s and the tree has never been converged by the tick\n' "$verdict"
+    return 0
+  fi
+
+  local success_epoch now_epoch age_hours
+  # GNU first, BSD second. The host is Linux and only the GNU form runs there,
+  # but this script is exercised on macOS by its own tests -- and a parse that
+  # only ever succeeds on the host would mean every test took the "could not
+  # read the timestamp" branch while believing it had tested the staleness
+  # rule. A seam that silently becomes the implementation is the failure mode
+  # this file's header is about.
+  success_epoch=$(date -u -d "$last_success" +%s 2>/dev/null) \
+    || success_epoch=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$last_success" +%s 2>/dev/null) \
+    || success_epoch=""
+  if [[ -z "$success_epoch" ]]; then
+    printf 'runner-tree|WARNING|converge|last_success=%s could not be read as a timestamp; staleness unknown\n' "$last_success"
+    return 0
+  fi
+  now_epoch=$(date -u +%s)
+  age_hours=$(( (now_epoch - success_epoch) / 3600 ))
+  if (( age_hours >= stale_hours )); then
+    printf 'runner-tree|WARNING|converge|last clean convergence was %sh ago (%s); latest verdict %s\n' \
+      "$age_hours" "$last_success" "$verdict"
+    return 0
+  fi
+
+  printf 'runner-tree|OK|converge|%s, last clean convergence %sh ago\n' "$verdict" "$age_hours"
+}
+
 collect() {
   local now host root data root_status data_status running unhealthy restarting dead created
   local dangling named_dangling anonymous_dangling docker_status docker_detail
@@ -770,6 +851,7 @@ collect() {
     # port from the service catalog rather than restoring this literal.
     check_http web-3003 "http://${PROBE_HOST}:3003/" ''
     check_ci_required_contexts
+    check_runner_tree_converge
   }
 }
 
@@ -930,7 +1012,7 @@ recovered_keys=$(awk -F'\t' '$1=="RECOVERED" { print $2 }' <<<"$decisions")
 
 format_digest() {
   local title="$1"
-  local lines endpoint_lines ci_lines issue_lines
+  local lines endpoint_lines ci_lines tree_lines issue_lines
   lines=$(awk -F'|' '$1=="disk" {printf "- `%s`: %s, %s, %s (%s)\n", $3, $4, $5, $6, $2} $1=="docker" {printf "- Docker `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   # STARTING is rendered here with the rest (OMN-18435). A booting lane that
   # vanished from this section would be the BLIND direction of monitor failure,
@@ -941,9 +1023,15 @@ format_digest() {
   # detection-shelf blindness where a silent section reads as healthy.
   ci_lines=$(awk -F'|' '$1=="ci" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   [[ -n "$ci_lines" ]] || ci_lines="- No required-context probe rows this tick"
+  # OMN-18567. Same reasoning as the CI heartbeat above: the runner-tree row
+  # renders even when clean so "converged an hour ago" and "nothing looked at
+  # the tree" are distinguishable in the digest, rather than both rendering as
+  # an absent section that reads as healthy.
+  tree_lines=$(awk -F'|' '$1=="runner-tree" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$tree_lines" ]] || tree_lines="- No runner clone-tree verdict this tick"
   # `next` keeps the three row shapes mutually exclusive so a `ci` row cannot
   # also be rendered by the generic column-2 branch below it.
-  issue_lines=$(awk -F'|' '$1=="ci" && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
+  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
   if [[ -z "$issue_lines" ]]; then
     issue_lines="- No active warning/critical checks"
   fi
@@ -958,6 +1046,8 @@ $lines
 $endpoint_lines
 *CI required contexts*
 $ci_lines
+*Runner clone tree*
+$tree_lines
 *Active issues*
 $issue_lines
 MSG
