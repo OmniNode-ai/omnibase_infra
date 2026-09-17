@@ -47,11 +47,13 @@ class _Workspace:
         self.infra = root / "omnibase_infra"
         self.scripts = self.infra / "scripts"
         self.scripts.mkdir(parents=True)
-        self.site_packages = (
-            self.infra / ".venv" / "lib" / "python3.12" / "site-packages"
-        )
+        # The floor's distributions and omnimarket commit are read from the
+        # DISPATCH venv (OMN-17819): that is the interpreter a dispatch runs in,
+        # so it is the only one whose installed build the floor is about.
+        self.dispatch_venv = root / ".onex-dispatch-venv"
+        self.site_packages = self.dispatch_venv / "lib" / "python3.12" / "site-packages"
         self.site_packages.mkdir(parents=True)
-        self.venv_bin = self.infra / ".venv" / "bin"
+        self.venv_bin = self.dispatch_venv / "bin"
         self.venv_bin.mkdir(parents=True)
 
         self.wrapper = self.scripts / "onex"
