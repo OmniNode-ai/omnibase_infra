@@ -23,6 +23,7 @@ staleness gate. Those are guards, not preferences, and they are pinned first.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -371,7 +372,7 @@ def test_the_pr_title_clears_the_ticket_gate_and_arms_auto_merge() -> None:
     """
     body = _WORKFLOW.read_text(encoding="utf-8")
     assert (
-        '--title "chore(deps, OMN-13034): refresh the lane census snapshot [bot]"'
+        '--title "chore(deps, OMN-18606): refresh the lane census snapshot [bot]"'
         in body
     )
     assert "gh pr merge" in body and "--squash --auto" in body
@@ -449,3 +450,56 @@ def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
         f"fleet, so the leg must stay quiet; got {steady}"
     )
     assert steady["reason"] == REASON_FRESH_AND_UNCHANGED
+
+
+def test_the_bot_pr_binds_to_the_ticket_that_owns_the_leg() -> None:
+    """The title decides which contract's DoD tree the bot PR must satisfy.
+
+    The autobind resolves a ticket from this title and mints an OCC companion
+    bound to it. While the title cited the lane-census ratchet's ticket, every
+    refresh PR inherited that contract's accumulated tree — 17 checks, two of
+    them BLOCK. Those two fetch the census at a PINNED sha and then assert the
+    frozen artifact is under seven days old against wall-clock now, so each was
+    true the day it was written and false forever about a week later.
+    `omnibase_infra#3726` died on exactly that and so would every successor.
+
+    Binding to the leg's own ticket is not cosmetic: it is the difference
+    between a PR that can land unattended and one that structurally cannot.
+    """
+    body = _WORKFLOW.read_text(encoding="utf-8")
+
+    titles = [line for line in body.splitlines() if "--title" in line]
+    assert len(titles) == 1, titles
+    assert "OMN-18606" in titles[0], (
+        f"the bot PR must cite the ticket that owns this leg: {titles[0].strip()}"
+    )
+
+    commits = [line for line in body.splitlines() if 'git commit -m "' in line]
+    assert len(commits) == 1, commits
+    assert "OMN-18606" in commits[0], (
+        "the commit subject and the PR title must name the same ticket, or the "
+        f"receipt gate and the autobind can resolve different ones: {commits[0].strip()}"
+    )
+
+
+def test_the_bot_pr_body_resolves_exactly_one_ticket() -> None:
+    """A second resolvable reference is a second thing for an extractor to pick.
+
+    The defect this file's sibling test records was the WRONG ticket being
+    resolved. Naming two in the body reintroduces the ambiguity by a different
+    route, so the ratchet is referred to in prose rather than by token.
+    """
+    body = _WORKFLOW.read_text(encoding="utf-8")
+    # The body is built by a printf block redirected into census_refresh_body.md.
+    # Anchor on the redirect and walk BACK to the `{` that opens it: the marker
+    # string's first occurrence in the file IS that redirect, so searching
+    # forward from it runs off the end of the block.
+    close = body.index('} > "${RUNNER_TEMP}/census_refresh_body.md"')
+    open_brace = body.rindex("\n          {\n", 0, close)
+    emitted = body[open_brace:close]
+    assert "printf" in emitted, "did not locate the PR-body block"
+
+    tickets = set(re.findall(r"OMN-\d+", emitted))
+    assert tickets == {"OMN-18606"}, (
+        f"the bot PR body must resolve exactly one ticket, its own; found {sorted(tickets)}"
+    )
