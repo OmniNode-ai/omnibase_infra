@@ -1050,3 +1050,121 @@ class TestThereIsNoWayToAssertTheCIFact:
             f"the train declares {forbidden}, which would let a caller assert or "
             "bypass the CI fact it is supposed to resolve itself"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Version source: two manifests, one answer (OMN-18595 roll-out).               #
+# --------------------------------------------------------------------------- #
+class TestTheVersionSourceIsDiscoveredNotAssumed:
+    """The fleet is not all Python.
+
+    omnidash and omniweb carry a package.json and no pyproject.toml, so a train
+    that could only read ``[project].version`` would refuse them every night
+    with version_unreadable -- fail-closed, but pure noise.
+
+    Fixtures are real git repositories rather than mocks, because the thing
+    under test is how the reader behaves against `git show` on a ref, and a
+    mock of `git show` would be a mock of the exact surface that broke.
+    """
+
+    @staticmethod
+    def _repo(tmp_path: Path, files: dict[str, str]) -> Path:
+        import os
+        import subprocess
+
+        from omnibase_core.validators.no_unguarded_git_subprocess import (
+            scrub_git_location_env,
+        )
+
+        root = tmp_path / "repo"
+        root.mkdir()
+
+        def git(*args: str) -> None:
+            # The scrub is INLINE, not hoisted into a variable: the OMN-14891
+            # guard reads the call site, and a hoisted binding reads to it as an
+            # ambient environment. Keeping it here means the guard can see it.
+            subprocess.run(
+                ["git", *args],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                env=scrub_git_location_env(os.environ),
+            )
+
+        git("init", "--initial-branch", "dev")
+        git("config", "user.email", "t@example.invalid")
+        git("config", "user.name", "t")
+        for name, body in files.items():
+            (root / name).write_text(body, encoding="utf-8")
+            git("add", name)
+        git("commit", "-m", "init")
+        # collect_repo_facts reads origin/<branch>, so give it one.
+        git("update-ref", "refs/remotes/origin/dev", "HEAD")
+        return root
+
+    def test_a_python_repo_still_reads_its_project_version(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._repo(
+            tmp_path, {"pyproject.toml": '[project]\nversion = "1.2.3"\n'}
+        )
+        assert rt.resolve_declared_version("r", root, "origin/dev") == "1.2.3"
+
+    def test_a_node_repo_reads_its_package_json_version(self, tmp_path: Path) -> None:
+        """The omnidash fixture: real shape, real version."""
+        root = self._repo(
+            tmp_path, {"package.json": '{"name":"omnidash","version":"1.1.3"}'}
+        )
+        assert rt.resolve_declared_version("omnidash", root, "origin/dev") == "1.1.3"
+
+    def test_the_omniweb_fixture_reads_too(self, tmp_path: Path) -> None:
+        root = self._repo(
+            tmp_path, {"package.json": '{"name":"omniweb","version":"0.1.0"}'}
+        )
+        assert rt.resolve_declared_version("omniweb", root, "origin/dev") == "0.1.0"
+
+    def test_neither_manifest_refuses(self, tmp_path: Path) -> None:
+        """A repo whose version cannot be read is a repo whose next release is
+        already broken; reporting that as "nothing to do" is the original
+        disease this train was built against."""
+        root = self._repo(tmp_path, {"README.md": "hi\n"})
+        with pytest.raises(rt.ReleaseTrainConfigError, match="neither pyproject"):
+            rt.resolve_declared_version("r", root, "origin/dev")
+
+    def test_both_manifests_refuse_rather_than_preferring_one(
+        self, tmp_path: Path
+    ) -> None:
+        """A silent preference cuts whichever number the other manifest is not
+        tracking. The two would drift and only one would ever be tagged."""
+        root = self._repo(
+            tmp_path,
+            {
+                "pyproject.toml": '[project]\nversion = "1.2.3"\n',
+                "package.json": '{"name":"x","version":"9.9.9"}',
+            },
+        )
+        with pytest.raises(rt.ReleaseTrainConfigError, match="BOTH"):
+            rt.resolve_declared_version("r", root, "origin/dev")
+
+    def test_a_versionless_package_json_refuses(self, tmp_path: Path) -> None:
+        root = self._repo(tmp_path, {"package.json": '{"name":"x"}'})
+        with pytest.raises(rt.ReleaseTrainConfigError, match="declares no version"):
+            rt.resolve_declared_version("r", root, "origin/dev")
+
+    def test_an_unparseable_package_json_refuses(self, tmp_path: Path) -> None:
+        root = self._repo(tmp_path, {"package.json": "{not json"})
+        with pytest.raises(rt.ReleaseTrainConfigError, match="does not parse"):
+            rt.resolve_declared_version("r", root, "origin/dev")
+
+    def test_an_unreadable_ref_raises_rather_than_reading_as_absent(
+        self, tmp_path: Path
+    ) -> None:
+        """The distinction the helper exists for.
+
+        git reports BOTH "path not in ref" and "ref is not a thing" as exit
+        128, so an implementation keyed on the exit code alone would report a
+        repo nobody could read as a repo with nothing to release.
+        """
+        root = self._repo(tmp_path, {"package.json": '{"name":"x","version":"1.0.0"}'})
+        with pytest.raises(rt.ReleaseTrainConfigError):
+            rt.resolve_declared_version("r", root, "origin/no-such-branch")

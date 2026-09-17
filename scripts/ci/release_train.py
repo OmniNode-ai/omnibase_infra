@@ -451,6 +451,114 @@ def _git(clone: Path, *args: str) -> str:
     return completed.stdout
 
 
+# --------------------------------------------------------------------------- #
+# Version source. Two manifests, one answer.                                    #
+# --------------------------------------------------------------------------- #
+#
+# The fleet is not all Python. omnidash and omniweb are Node repos carrying a
+# package.json and no pyproject.toml, so a train that could only read
+# ``[project].version`` could not decide them at all -- it would refuse them
+# every night with version_unreadable, which is fail-closed but is pure noise.
+#
+# The manifest is DISCOVERED rather than declared in the policy, because which
+# manifest a repo carries is a fact about that repo's tree, and a policy field
+# restating it is a second place to be wrong.
+
+
+def _read_pyproject_version(raw: str, repo: str, ref: str) -> str | None:
+    try:
+        parsed = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        msg = f"{repo}: pyproject.toml at {ref} does not parse: {exc}"
+        raise ReleaseTrainConfigError(msg) from exc
+    version = parsed.get("project", {}).get("version")
+    if not isinstance(version, str) or not version.strip():
+        msg = f"{repo}: pyproject.toml at {ref} declares no [project].version"
+        raise ReleaseTrainConfigError(msg)
+    return version.strip()
+
+
+def _read_package_json_version(raw: str, repo: str, ref: str) -> str | None:
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        msg = f"{repo}: package.json at {ref} does not parse: {exc}"
+        raise ReleaseTrainConfigError(msg) from exc
+    version = parsed.get("version") if isinstance(parsed, dict) else None
+    if not isinstance(version, str) or not version.strip():
+        msg = f"{repo}: package.json at {ref} declares no version"
+        raise ReleaseTrainConfigError(msg)
+    return version.strip()
+
+
+def resolve_declared_version(repo: str, clone: Path, ref: str) -> str:
+    """The version this repo declares at ``ref``, from whichever manifest it has.
+
+    Refuses when NEITHER manifest is present: a repo whose version cannot be
+    read is a repo whose next release is already broken, and reporting that as
+    "nothing to do" is the original disease this train was built against.
+
+    Refuses when BOTH are present, rather than preferring one. A repo declaring
+    two versions has no single answer, and a silent preference is how a release
+    cuts the wrong number -- the two would drift and only one would be tagged.
+    """
+    pyproject_raw = _git_optional(clone, f"{ref}:pyproject.toml")
+    package_raw = _git_optional(clone, f"{ref}:package.json")
+
+    if pyproject_raw is not None and package_raw is not None:
+        msg = (
+            f"{repo}: {ref} carries BOTH pyproject.toml and package.json, so the "
+            "declared version is ambiguous. Refusing rather than preferring one: "
+            "a silent preference cuts whichever number the other manifest is not "
+            "tracking"
+        )
+        raise ReleaseTrainConfigError(msg)
+
+    if pyproject_raw is not None:
+        resolved = _read_pyproject_version(pyproject_raw, repo, ref)
+    elif package_raw is not None:
+        resolved = _read_package_json_version(package_raw, repo, ref)
+    else:
+        msg = (
+            f"{repo}: {ref} carries neither pyproject.toml nor package.json, so "
+            "no declared version can be read"
+        )
+        raise ReleaseTrainConfigError(msg)
+
+    assert resolved is not None
+    return resolved
+
+
+def _git_optional(clone: Path, spec: str) -> str | None:
+    """``git show <spec>``, or None when the path does not exist at that ref.
+
+    Distinguishing "absent" from "unreadable" matters: an unreadable clone must
+    still raise, or a repo nobody could read would be reported as a repo with
+    nothing to release.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(clone), "show", spec],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return result.stdout
+    # git reports BOTH "this path is not in that ref" and "that ref is not a
+    # thing" as exit 128, so the exit code alone cannot tell absent from
+    # unreadable. Only the two path-missing messages mean absent; anything else
+    # -- a bad ref, a corrupt or shallow clone -- raises, because a repo nobody
+    # could read must never be reported as a repo with nothing to release.
+    stderr = result.stderr
+    if "does not exist in" in stderr or "exists on disk, but not in" in stderr:
+        return None
+    msg = (
+        f"git show {spec} failed in {clone}: "
+        f"{stderr.strip() or f'exit {result.returncode}'}"
+    )
+    raise ReleaseTrainConfigError(msg)
+
+
 def collect_repo_facts(policy: ModelRepoReleasePolicy, clone: Path) -> ModelRepoFacts:
     """Read the repo's own history. Every failure raises rather than returning 0.
 
@@ -463,18 +571,7 @@ def collect_repo_facts(policy: ModelRepoReleasePolicy, clone: Path) -> ModelRepo
     tags = [line.strip() for line in _git(clone, "tag", "--list", "v*").splitlines()]
     latest_tag = highest_published(tags)
 
-    pyproject_raw = _git(clone, "show", f"{head_ref}:pyproject.toml")
-    try:
-        parsed = tomllib.loads(pyproject_raw)
-    except tomllib.TOMLDecodeError as exc:
-        msg = f"{policy.repo}: pyproject.toml at {head_ref} does not parse: {exc}"
-        raise ReleaseTrainConfigError(msg) from exc
-    version = parsed.get("project", {}).get("version")
-    if not isinstance(version, str) or not version.strip():
-        msg = (
-            f"{policy.repo}: pyproject.toml at {head_ref} declares no [project].version"
-        )
-        raise ReleaseTrainConfigError(msg)
+    version = resolve_declared_version(policy.repo, clone, head_ref)
 
     span = f"{latest_tag}..{head_ref}" if latest_tag else head_ref
     log = _git(
