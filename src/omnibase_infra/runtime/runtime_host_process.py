@@ -5825,14 +5825,47 @@ class RuntimeHostProcess:
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="readiness_check",
             )
+            # OMN-18550: name what is outstanding IN THE MESSAGE, not only in
+            # ``extra``. The container log format renders the message and drops
+            # the structured fields, so on the 2026-09-17 `.201` dev-lane
+            # incident the only line a reader met, every ten seconds for hours,
+            # was the bare sentence below. It cannot distinguish a boot that is
+            # still wiring from one that will never finish, and the lane that
+            # diagnosed the incident built an entire false mechanism on it.
+            #
+            # The leading sentence is preserved verbatim so anything already
+            # grepping for it keeps matching. Each probe renders its own
+            # account under the generic ``summary`` key; a probe that supplies
+            # none is still named, because "which probe" is the first question
+            # and an unnamed blocker is the defect being fixed.
+            blocking: list[str] = []
+            if not self._is_running:
+                blocking.append("process not running")
+            if self._is_draining:
+                blocking.append("process draining")
+            if not event_bus_ready:
+                blocking.append("event_bus not ready")
+            for probe_name, probe_result in supplemental_readiness.items():
+                if not isinstance(probe_result, dict) or probe_result.get("ready"):
+                    continue
+                probe_summary = probe_result.get("summary") or probe_result.get("error")
+                blocking.append(
+                    f"{probe_name}: {probe_summary}"
+                    if isinstance(probe_summary, str) and probe_summary
+                    else probe_name
+                )
+
             logger.warning(
-                "Readiness check failed: runtime is not ready",
+                "Readiness check failed: runtime is not ready -- blocked on %s",
+                "; ".join(blocking) if blocking else "an unreported term",
                 extra={
                     "correlation_id": str(failure_context.correlation_id),
                     "is_running": self._is_running,
                     "is_draining": self._is_draining,
                     "event_bus_ready": event_bus_ready,
                     "supplemental_ready": supplemental_ready,
+                    "readiness_blocked_on": tuple(blocking),
+                    "supplemental_readiness": supplemental_readiness,
                 },
             )
             return {

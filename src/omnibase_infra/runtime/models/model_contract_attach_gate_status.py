@@ -60,5 +60,32 @@ class ModelContractAttachGateStatus(BaseModel):
         default_factory=tuple
     )
 
+    def summary_line(self) -> str:
+        """Render one line naming how many contracts attached and which are not.
+
+        OMN-18550: this account already existed in the fields above and reached
+        only the ``/ready`` HTTP body. The container log format renders a
+        record's message and not its structured ``extra``, so a reader watching
+        a boot saw ``Readiness check failed: runtime is not ready`` and nothing
+        else -- no way to tell a slow boot from a wedged one. The sentence is
+        built here, beside the fields it reads, so the generic readiness seam in
+        ``RuntimeHostProcess`` can place it without learning this model's shape.
+
+        Outstanding contracts are listed under their own disposition because
+        they mean different things: FAILED was tried and refused, NOT_READY was
+        tried and has not converged, pending was never attempted.
+        """
+        attached = len(self.attached_contracts)
+        required = len(self.required_contracts)
+        parts = [f"{attached}/{required} contracts attached"]
+        for label, names in (
+            ("failed", self.failed_contracts),
+            ("not_ready", self.not_ready_contracts),
+            ("pending", self.pending_contracts),
+        ):
+            if names:
+                parts.append(f"{label}=[{', '.join(names)}]")
+        return ", ".join(parts)
+
 
 __all__: list[str] = ["ModelContractAttachGateStatus"]

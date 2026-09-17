@@ -1475,3 +1475,67 @@ def test_discover_routes_orders_runtime_dispatch_success_terminal_first(
         "onex.evt.demo.plural-only-completed.v1",
         "onex.evt.demo.plural-only-failed.v1",
     )
+
+
+def test_discover_runtime_local_ingress_routes_names_a_self_colliding_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-18550: one contract declaring an operation twice must say so.
+
+    The ``.201`` dev lane crash-looped for hours on
+    ``Duplicate local ingress route alias '<alias>' for X and X`` -- the SAME
+    contract path printed on both sides of the word "and". That message reads
+    as a collision between two contracts, so the first lane to diagnose it went
+    looking for a second contract, found none, and attributed the loop to a
+    startup readiness deadline that does not exist.
+
+    A self-collision has no second contract to disambiguate against and no
+    package scope left to add: the alias is already
+    ``<package>.<node>.<operation>``. The failure must therefore name the
+    contract ONCE and name the operation that is declared twice.
+
+    Red against the parent commit: the message names the path twice and never
+    names the operation.
+    """
+    package_root = tmp_path / "fakepkg"
+    (package_root / "nodes" / "node_dupe").mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    contract_path = package_root / "nodes" / "node_dupe" / "contract.yaml"
+    # The shape measured live on 2026-09-17: two handler entries, one operation
+    # name, two different input models (omnimarket#2598 before #2603 fixed it).
+    contract_path.write_text(
+        """
+name: node_dupe
+event_bus:
+  subscribe_topics:
+    - onex.cmd.dupe.start.v1
+handler_routing:
+  handlers:
+    - operation: dupe.deploy.publish_monitor
+      input_model:
+        module: fakepkg.models.model_publish_command
+        name: ModelPublishCommand
+    - operation: dupe.deploy.publish_monitor
+      input_model:
+        module: fakepkg.events.runtime_deployment
+        name: ModelRebuildCompleted
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        discover_runtime_local_ingress_routes(("fakepkg",))
+
+    message = str(excinfo.value)
+    # The operation that is actually declared twice is named.
+    assert "dupe.deploy.publish_monitor" in message
+    # The contract is named exactly once: there is no second contract, and
+    # printing the same path on both sides of "and" is the defect.
+    assert message.count(str(contract_path)) == 1
+    # The reader is told this is one contract disagreeing with itself.
+    assert "same contract" in message
