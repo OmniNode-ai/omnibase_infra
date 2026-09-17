@@ -659,6 +659,59 @@ for repo in "${ALL_TRACKED_REPOS[@]}"; do
     log "  ${repo} now at $(git_clone "${clone}" rev-parse --short=12 HEAD) via ${sibling_ref}"
 done
 
+# --- OMN-18113: advance the onex-api pin BEFORE the bring-up -----------------
+# onex-api is TAG-REFERENCED, not lane-built: the compose file renders
+# `image: ${ONEX_API_IMAGE:?...}` and the value comes from the operator env file.
+# Membership in REFRESH_BUILD_SERVICES above gets the container RECREATED, which
+# is the half that was already working -- and recreating it on an unchanged tag
+# is exactly the silent staleness this ticket names. Measured 2026-09-10: a full
+# refresh advanced all eight other dev-lane-only services and the string
+# `onex-api` appeared nowhere in the run log.
+#
+# ORDER IS THE POINT. The pin is advanced here, before deploy-runtime.sh, and the
+# in-process value is re-exported with it -- this shell sourced the operator env
+# under `set -a` long before the rewrite, so a file-only write would leave the
+# compose invocation below interpolating the OLD tag from an already-exported
+# variable and the receipt would record an advance that did not reach the lane.
+#
+# A REFUSAL IS NOT A REFRESH FAILURE. The repoint refuses on every ambiguous
+# input -- no applier-built image resident, a collected tag, a lineage that is
+# not a commit, a missing or duplicated key. None of those is a reason to stop
+# refreshing the other services, and all of them are recorded in the receipt
+# below by name, which is what AC1 asks for: a detected, named condition instead
+# of silence.
+ONEX_API_SERVICE="onex-api"
+ONEX_API_PIN_BEFORE="${ONEX_API_IMAGE:-}"
+ONEX_API_CID_BEFORE="$(compose_ps_q "${ONEX_API_SERVICE}")"
+ONEX_API_PIN_AFTER="${ONEX_API_PIN_BEFORE}"
+ONEX_API_REPOINT_JSON='null'
+REPOINT_SCRIPT="${SCRIPT_DIR}/repoint_dev_lane_onex_api.py"
+REPOINT_OUT="${WORKDIR}/onex-api-repoint.json"
+log "=== Advance onex-api pin (OMN-18113) ==="
+log "  pin before: ${ONEX_API_PIN_BEFORE:-<unset>}"
+if python3 "${REPOINT_SCRIPT}" \
+        --env-file "${OMNIBASE_OPERATOR_ENV_FILE}" \
+        --omninode-clone "${OMNI_HOME}/omninode_infra" \
+        --execute > "${REPOINT_OUT}" 2>&1; then
+    ONEX_API_REPOINT_JSON="$(cat "${REPOINT_OUT}")"
+    ONEX_API_PIN_AFTER="$(jq -r '.pin_after' "${REPOINT_OUT}")"
+    export ONEX_API_IMAGE="${ONEX_API_PIN_AFTER}"
+    log "  result    : $(jq -r '.result' "${REPOINT_OUT}")"
+    log "  pin after : ${ONEX_API_PIN_AFTER}"
+else
+    # The script prints a JSON refusal on its own stdout; keep it verbatim when
+    # it is parseable and synthesise one when the interpreter itself failed, so
+    # the receipt never carries a bare `null` that reads as "not attempted".
+    if jq -e . "${REPOINT_OUT}" >/dev/null 2>&1; then
+        ONEX_API_REPOINT_JSON="$(cat "${REPOINT_OUT}")"
+    else
+        ONEX_API_REPOINT_JSON="$(jq -n --arg reason "$(head -c 800 "${REPOINT_OUT}")" \
+            '{result: "REFUSED", reason: $reason}')"
+    fi
+    err "  onex-api pin NOT advanced: $(printf '%s' "${ONEX_API_REPOINT_JSON}" | jq -r '.reason // .result')"
+    err "  the refresh continues; this is recorded in the receipt as a named condition."
+fi
+
 log "=== Build + bring-up (branch: ${BRANCH}) ==="
 DEPLOY_EXIT=0
 if [[ "${BRANCH}" == "cold-aware-full" ]]; then
@@ -687,6 +740,33 @@ fi
 if [[ "${DEPLOY_EXIT}" -ne 0 ]]; then
     log "deploy-runtime.sh exited ${DEPLOY_EXIT} -- proceeding to health-gate anyway"
 fi
+
+# OMN-18113 AC4: the two facts about onex-api that a refresh must be able to
+# state SEPARATELY. They come apart in both directions and the pair is what makes
+# either one readable: recreated-and-not-advanced is the defect this ticket was
+# filed on -- a faithful restart onto the same stale tag -- and
+# advanced-but-not-recreated is a pin written into a file that never reached a
+# running container. The container id is the evidence for the first: a recreate
+# mints a new one, a restart does not.
+ONEX_API_CID_AFTER="$(compose_ps_q "${ONEX_API_SERVICE}")"
+ONEX_API_JSON="$(jq -n \
+    --arg service "${ONEX_API_SERVICE}" \
+    --arg pin_before "${ONEX_API_PIN_BEFORE}" \
+    --arg pin_after "${ONEX_API_PIN_AFTER}" \
+    --arg cid_before "${ONEX_API_CID_BEFORE}" \
+    --arg cid_after "${ONEX_API_CID_AFTER}" \
+    --argjson repoint "${ONEX_API_REPOINT_JSON}" \
+    '{
+        service: $service,
+        pin_before: (if $pin_before == "" then null else $pin_before end),
+        pin_after: (if $pin_after == "" then null else $pin_after end),
+        tag_advanced: ($pin_before != $pin_after),
+        container_before: (if $cid_before == "" then null else $cid_before end),
+        container_after: (if $cid_after == "" then null else $cid_after end),
+        recreated: ($cid_after != "" and $cid_after != $cid_before),
+        repoint: $repoint
+    }')"
+log "onex-api: tag_advanced=$(printf '%s' "${ONEX_API_JSON}" | jq -r '.tag_advanced') recreated=$(printf '%s' "${ONEX_API_JSON}" | jq -r '.recreated')"
 
 declare -A NEW_REFS
 if [[ "${BRANCH}" == "warm" ]]; then
@@ -955,6 +1035,7 @@ jq -n \
     --argjson unhealthy_dimensions "${UNHEALTHY_DIMENSIONS_JSON}" \
     --argjson provenance_failures "${PROVENANCE_FAILURES_JSON}" \
     --argjson decision "${DECISION_RECORD_JSON}" \
+    --argjson onex_api "${ONEX_API_JSON}" \
     --arg result "${RESULT}" \
     '{
         ts_utc: $ts,
@@ -968,6 +1049,7 @@ jq -n \
         health_gate: $health_gate[0],
         lane_health: {healthy: $lane_is_healthy, failing_dimensions: $unhealthy_dimensions},
         build_provenance: {failing_dimensions: $provenance_failures},
+        onex_api: $onex_api,
         rollback: {
             triggered: $rollback_triggered,
             gate: $rollback_gate,

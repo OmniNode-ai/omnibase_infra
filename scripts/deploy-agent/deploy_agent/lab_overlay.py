@@ -234,6 +234,14 @@ MIGRATE_CONTEXT = "."
 API_DOCKERFILE = "docker/onex-api/Dockerfile"
 API_CONTEXT = "docker/onex-api"
 
+#: OMN-18113. OCI provenance stamped on the api image, naming the omninode_infra
+#: commit its source came from. The tag already carries an abbreviation of the
+#: same sha; the label is what survives a retag, and it is what
+#: ``scripts/runtime_build/repoint_dev_lane_onex_api.py`` cross-checks the tag
+#: against before it writes the compose lane's pin.
+API_REVISION_LABEL = "org.opencontainers.image.revision"
+API_SOURCE_LABEL = "ai.omninode.image.source-repo"
+
 #: OMN-18354. The build argument ``docker/onex-api/Dockerfile`` stage 0 requires
 #: and gives no default to. Named here rather than spelled at the call site so
 #: the string that must equal the Dockerfile's own ``ARG`` has one home.
@@ -879,6 +887,7 @@ class LabOverlayApplier:
         timeout: int,
         import_into_containerd: bool,
         build_args: Mapping[str, str] | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> None:
         """Build one image from source, and optionally import it into k3s.
 
@@ -896,8 +905,18 @@ class LabOverlayApplier:
         ``build_args`` is passed through verbatim, and only where a Dockerfile
         declares the argument -- a build argument nothing declares is a warning
         on every run, which teaches a reader to ignore warnings.
+
+        ``labels`` are OCI provenance, and they exist because the TAG is not
+        always the thing a reader has (OMN-18113). The compose dev lane pins an
+        image by reference in an operator env file; asked "which commit is this",
+        the only honest answer used to be "parse the tag", and an image that had
+        been retagged by hand answered nothing at all -- measured 2026-09-17, the
+        lane's onex-api carried no labels whatsoever. A label survives a retag,
+        so ``docker image inspect`` can answer the question directly.
         """
         argv = ["docker", "build", "-f", dockerfile, "-t", target]
+        for name, value in (labels or {}).items():
+            argv += ["--label", f"{name}={value}"]
         for name, value in (build_args or {}).items():
             argv += ["--build-arg", f"{name}={value}"]
         # The context is last because docker requires it there.
@@ -1433,6 +1452,16 @@ class LabOverlayApplier:
             timeout=API_BUILD_TIMEOUT_SECONDS,
             import_into_containerd=True,
             build_args={API_RUNTIME_IMAGE_BUILD_ARG: runtime_image},
+            # OMN-18113. The compose dev lane pins this image by reference in an
+            # operator env file, and the repoint script that writes that pin
+            # cross-checks the label against the tag -- two provenance claims
+            # that must agree or neither is trusted. Only the api image carries
+            # these: it is the one that leaves this module's own naming
+            # convention and becomes a string in a file somebody else reads.
+            labels={
+                API_REVISION_LABEL: manifest_sha,
+                API_SOURCE_LABEL: "omninode_infra",
+            },
         )
 
         resident = self.resident_images()
