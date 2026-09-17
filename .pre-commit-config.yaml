@@ -368,6 +368,19 @@ repos:
         files: ^(docker|scripts|src|tests)/.*\.(sql|sh|py|ya?ml|captured)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-18553: the cloud migrations_log alias declaration lists names that
+      # omninode_infra's corpus owns, with no mechanical link to it, so it goes
+      # stale silently and aborts the dev lane's forward-migration one-shot.
+      # In-repo completeness is not decidable (the corpus is in another repo and
+      # ships inside an image), so what this pins is that the refusal NAMES its
+      # offenders, plus the declaration's own invariants.
+      - id: cloud-migration-alias-staleness
+        name: Cloud migrations_log alias declaration stays loud, not silent (OMN-18553)
+        entry: uv run --frozen pytest tests/unit/db/test_cloud_migration_alias_staleness_omn18553.py -q
+        language: system
+        files: ^(docker/migrations/forward/_ledger/cloud-migration-aliases\.tsv|scripts/run-forward-migrations\.sh|tests/unit/db/test_cloud_migration_alias_staleness_omn18553\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: ci-evidence-policy
         name: CI evidence artifacts asserted non-empty at the uploader (OMN-18247)
         entry: uv run --frozen pytest tests/ci/test_ci_evidence_policy.py -q

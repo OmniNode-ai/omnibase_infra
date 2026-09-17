@@ -1180,6 +1180,11 @@ DO $cloud_history_export$
 DECLARE
   schema_columns TEXT;
   log_columns TEXT;
+  -- OMN-18553: the two alias refusals below used to name nothing, so finding
+  -- out WHICH rows they refused meant probing the live database by hand. These
+  -- carry the offending names into the message instead.
+  unresolved_aliases TEXT;
+  unimportable_aliases TEXT;
 BEGIN
   SELECT coalesce(string_agg(column_name, ',' ORDER BY column_name), '')
   INTO schema_columns
@@ -1268,26 +1273,29 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'unknown cloud migrations_log direction';
   END IF;
-  IF EXISTS (
-    SELECT 1
+  SELECT string_agg(DISTINCT log.migration_name, ', ' ORDER BY log.migration_name)
+    INTO unresolved_aliases
     FROM public.migrations_log log
     LEFT JOIN onex_cloud_migration_alias alias
       ON alias.migration_name = log.migration_name
-    WHERE alias.migration_name IS NULL
-  ) THEN
-    RAISE EXCEPTION 'unknown cloud migrations_log alias';
+   WHERE alias.migration_name IS NULL;
+  IF unresolved_aliases IS NOT NULL THEN
+    RAISE EXCEPTION
+      'unknown cloud migrations_log alias: %. Declare each in docker/migrations/forward/_ledger/cloud-migration-aliases.tsv as "<name>	ab<runner_version>.sql" (OMN-18553)',
+      unresolved_aliases;
   END IF;
-  IF EXISTS (
-    SELECT 1
+  SELECT string_agg(DISTINCT log.migration_name, ', ' ORDER BY log.migration_name)
+    INTO unimportable_aliases
     FROM public.migrations_log log
     JOIN onex_cloud_migration_alias alias
       ON alias.migration_name = log.migration_name
     LEFT JOIN public.schema_migrations applied
       ON applied.version = alias.runner_version
-    WHERE applied.version IS NULL
-  ) THEN
+   WHERE applied.version IS NULL;
+  IF unimportable_aliases IS NOT NULL THEN
     RAISE EXCEPTION
-      'cloud migrations_log is audit-only: log-only alias cannot be imported as applied';
+      'cloud migrations_log is audit-only: log-only alias cannot be imported as applied: % (OMN-18553)',
+      unimportable_aliases;
   END IF;
 
   INSERT INTO onex_cloud_migration_export
