@@ -1354,6 +1354,50 @@ def probe_compose_dev(
 _CHECK_VERDICTS: Final[frozenset[str]] = frozenset({"ok", "fail", "indeterminate"})
 
 
+#: A deploy-agent correlation id is a uuid. The publishing job writes an EMPTY
+#: value when it published no command at all, which a workflow expression
+#: delivers as an empty string rather than as an absent flag -- so the two
+#: cases the field must tell apart arrive through the same argv.
+_CORRELATION_ID_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def parse_agent_command_id(raw: str | None) -> str | None:
+    """Normalise ``--agent-command-id`` into the field's two legal states.
+
+    OMN-18573. The field existed and every compose-dev receipt carried ``null``
+    in it, because no emitter passed the flag. The correlation id was knowable
+    the whole time -- the publishing job had it -- and the readback that found
+    this had the id legible in the ``deployed_revision`` EVIDENCE STRING while
+    the typed field a machine reads sat empty. A fact present in prose and
+    absent from the contract is a fact no consumer can use.
+
+    Empty or whitespace-only means the emitter genuinely has none: the run
+    published no command (the ``onex-lab`` boot gate never does), and ``None``
+    is the honest record of that. It is NOT an error, because refusing here
+    would lose the whole receipt, and an unwritten receipt is the one outcome
+    worse than a failing one.
+
+    Anything else must be a uuid. A non-uuid is REFUSED rather than stored: a
+    field carrying a value no agent job can be looked up by is worse than the
+    null it replaced, since a reader would believe it.
+    """
+    if raw is None:
+        return None
+    candidate = raw.strip()
+    if not candidate:
+        return None
+    if not _CORRELATION_ID_RE.match(candidate):
+        msg = (
+            f"agent_command_id {raw!r} is not a uuid. A correlation id no agent "
+            "job can be resolved by is worse than an absent one, because a "
+            "reader would believe it."
+        )
+        raise ValueError(msg)
+    return candidate
+
+
 def parse_check_argument(raw: str) -> ModelLabPassCheck:
     """Parse ``name:ok|fail|indeterminate:evidence`` from the command line.
 
@@ -1791,8 +1835,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent-command-id",
         default=None,
         help=(
-            "the deploy agent's correlation id; omit only when the emitter "
-            "genuinely has none (the onex-lab apply never does)"
+            "the deploy agent's correlation id for the rebuild this receipt "
+            "attests to. An EMPTY value records that the emitter genuinely has "
+            "none (no command was published); a non-uuid is refused."
         ),
     )
     emit.add_argument("--out", required=True, type=Path)
@@ -1878,7 +1923,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 started_at=_parse_ts(args.started_at),
                 finished_at=_parse_ts(args.finished_at),
                 checks=checks,
-                agent_command_id=args.agent_command_id,
+                agent_command_id=parse_agent_command_id(args.agent_command_id),
             )
         except (ValueError, TypeError, KeyError, OSError) as exc:
             print(

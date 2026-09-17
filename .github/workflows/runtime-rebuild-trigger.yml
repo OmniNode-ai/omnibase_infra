@@ -535,6 +535,13 @@ jobs:
         if: always()
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          # OMN-18573. The receipt's typed agent_command_id, which every
+          # compose-dev receipt carried as null because no emitter passed it.
+          # The id was knowable the whole time; the readback that found this had
+          # it legible in the deployed_revision evidence string while the field
+          # a machine reads sat empty. Empty here means no command was
+          # published, which the emitter records as null rather than as "".
+          CORRELATION_ID: ${{ needs.trigger-rebuild.outputs.correlation_id }}
           CONVERGE_OUTCOME: ${{ steps.converge.outcome }}
           # OMN-18573. The guard's own three-valued verdict -- pass, fail or
           # indeterminate. It is an OUTPUT rather than the step's status
@@ -598,6 +605,7 @@ jobs:
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --check "deployed_revision:${DEPLOYED_REVISION_VERDICT}:${EVIDENCE}" \
             --checks-json "${LAB_PASS_CHECKS}" \
+            --agent-command-id "${CORRELATION_ID}" \
             --out "${LAB_PASS_DIR}/receipt.json"
 
       # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
@@ -815,6 +823,12 @@ jobs:
         if: always()
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          # OMN-18573. This lane's apply IS performed by the deploy agent as
+          # part of ONE rebuild correlation (OMN-18200), which is what the
+          # receipt model's own docstring says distinguishes it from the
+          # `onex-lab` boot gate — and the boot gate is the emitter that
+          # correctly carries none. So this receipt owes the id too.
+          CORRELATION_ID: ${{ needs.trigger-rebuild.outputs.correlation_id }}
         run: |
           set -euo pipefail
           uv run python scripts/ci/lab_pass_receipt.py emit \
@@ -823,6 +837,7 @@ jobs:
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --checks-json "${LAB_PASS_CHECKS}" \
+            --agent-command-id "${CORRELATION_ID}" \
             --out "${LAB_PASS_DIR}/receipt.json"
 
       # OMN-18247: same zero-byte gap as the compose-dev receipt above.
