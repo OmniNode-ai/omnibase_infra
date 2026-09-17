@@ -65,6 +65,15 @@ BRANCH_PUSHERS: dict[str, tuple[str, ...]] = {
     # identity, and stamps both trailers. It is NOT exempt the way the tag
     # pushers above are -- it pushes a commit, and a commit can carry a trailer.
     "release-train-nightly.yml": ("cut",),
+    # The lane-census refresh leg (OMN-18606). Its `refresh` job pushes the
+    # census bump branch, so it complies on exactly the terms below: the App
+    # token is minted with no GITHUB_TOKEN fallback, the commit is attributed to
+    # the App identity, and both trailers are stamped. It is NOT exempt the way
+    # the tag pushers are -- it pushes a commit, and a commit can carry a
+    # trailer. The push identity is load-bearing here rather than cosmetic: a
+    # bump PR whose CI never runs cannot clear the staleness gate it exists to
+    # clear, which is the whole point of the leg.
+    "lane-census-refresh.yml": ("refresh",),
 }
 
 # Workflow file -> why it is out of scope. Every exemption is a stated reason, not a
