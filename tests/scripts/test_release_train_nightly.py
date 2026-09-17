@@ -56,6 +56,28 @@ def _load() -> Any:
 rt = _load()
 
 
+@pytest.fixture(autouse=True)
+def _green_ci_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test that is not ABOUT the CI premise gets a green one.
+
+    Without this the default seams would reach the network, so a unit test
+    would silently depend on live branch protection. Tests that exercise the
+    premise pass their own seam explicitly and are unaffected, and the
+    "one input flipped" tests below prove the green default is not masking it.
+    """
+    monkeypatch.setattr(
+        rt, "default_required_contexts", lambda repo, branch: ["CI Summary"]
+    )
+    monkeypatch.setattr(rt, "default_gating_sha", lambda repo, sha: "g" * 40)
+    monkeypatch.setattr(
+        rt,
+        "default_check_runs",
+        lambda repo, sha: [
+            {"name": "CI Summary", "status": "completed", "conclusion": "success"}
+        ],
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Fixtures modelled on the live 2026-09-17 readings.                            #
 # --------------------------------------------------------------------------- #
@@ -750,4 +772,251 @@ class TestTheDeclaredRepoListingComesFromTheCLI:
             "the workflow must list the declared repos through the module's own "
             "subcommand, so the listing is exercised by the same tests as the "
             "rest of the module"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# The green-CI premise (OMN-18595, second pass).                                #
+# --------------------------------------------------------------------------- #
+def _ci_seam(
+    *,
+    required: list[str] | None = None,
+    runs: list[dict[str, Any]] | None = None,
+    required_error: Exception | None = None,
+    runs_error: Exception | None = None,
+    gate: str | None = None,
+    gate_error: Exception | None = None,
+) -> dict[str, Any]:
+    def _required(repo: str, branch: str) -> list[str]:
+        if required_error is not None:
+            raise required_error
+        return list(required if required is not None else ["CI Summary"])
+
+    def _runs(repo: str, sha: str) -> list[dict[str, Any]]:
+        if runs_error is not None:
+            raise runs_error
+        if runs is not None:
+            return runs
+        return [{"name": "CI Summary", "status": "completed", "conclusion": "success"}]
+
+    def _gate(repo: str, sha: str) -> str:
+        if gate_error is not None:
+            raise gate_error
+        return gate if gate is not None else "d8ab1e719e0a" + "0" * 28
+
+    return {
+        "required_contexts": _required,
+        "check_runs": _runs,
+        "gating_sha": _gate,
+    }
+
+
+class TestTheGreenCIPremiseGuardsEveryCutPath:
+    """The premise this file's first pass did not have at all.
+
+    Before it, a repo declaring `lab_evidence: none` -- five of the seven --
+    would CUT on unreleased commits alone: no lab receipt, and no CI check of
+    any kind. That is materially weaker than the design described, and weaker
+    than anyone would assume from the phrase "the cut path".
+    """
+
+    def test_a_no_lab_surface_repo_cuts_only_when_ci_is_green(self) -> None:
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.NONE, lab_evidence_note="n"),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.CUT
+        assert "required context" in decision.detail, (
+            "a cut taken on the CI premise must SAY what it proved, or the "
+            "decision record cannot be told apart from one taken on nothing"
+        )
+
+    def test_the_same_repo_does_not_cut_when_a_required_context_failed(self) -> None:
+        """One input flipped. Proves the cut above is not vacuous."""
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.NONE, lab_evidence_note="n"),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(
+                runs=[
+                    {
+                        "name": "CI Summary",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    }
+                ]
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.SKIP
+        assert decision.reason is rt.EnumTrainReason.CI_NOT_GREEN
+
+    def test_a_skipped_required_context_is_its_own_refusal(self) -> None:
+        """The trap. GitHub treats a skipped REQUIRED context as satisfying
+        protection, so the commit is mergeable while that gate never ran. A
+        train that folded this into "not green" would still be right to refuse,
+        but nobody reading the artifact would learn why."""
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.NONE, lab_evidence_note="n"),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(
+                runs=[
+                    {
+                        "name": "CI Summary",
+                        "status": "completed",
+                        "conclusion": "skipped",
+                    }
+                ]
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.SKIP
+        assert decision.reason is rt.EnumTrainReason.CI_REQUIRED_CONTEXT_SKIPPED
+
+    def test_a_required_context_absent_from_the_sha_refuses(self) -> None:
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.NONE, lab_evidence_note="n"),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(runs=[]),
+        )
+        assert decision.reason is rt.EnumTrainReason.CI_REQUIRED_CONTEXT_MISSING
+
+    def test_a_still_running_required_context_refuses(self) -> None:
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.NONE, lab_evidence_note="n"),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(
+                runs=[
+                    {"name": "CI Summary", "status": "in_progress", "conclusion": None}
+                ]
+            ),
+        )
+        assert decision.reason is rt.EnumTrainReason.CI_REQUIRED_CONTEXT_PENDING
+
+    def test_an_empty_required_set_is_not_green(self) -> None:
+        """An ungated branch is not a passing one, and reading it as green would
+        make this premise vacuous exactly where it matters most."""
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.NONE, lab_evidence_note="n"),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(required=[]),
+        )
+        assert decision.reason is rt.EnumTrainReason.CI_PROTECTION_UNREADABLE
+
+    def test_an_unreadable_protection_read_refuses(self) -> None:
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.NONE, lab_evidence_note="n"),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(required_error=RuntimeError("404")),
+        )
+        assert decision.reason is rt.EnumTrainReason.CI_PROTECTION_UNREADABLE
+
+    def test_an_unreadable_check_run_read_refuses(self) -> None:
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.NONE, lab_evidence_note="n"),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(runs_error=RuntimeError("boom")),
+        )
+        assert decision.reason is rt.EnumTrainReason.CI_PROTECTION_UNREADABLE
+
+    def test_the_premise_also_guards_the_lab_receipt_arm(self) -> None:
+        """A premise that guarded only the no-lab arm would leave the repo that
+        HAS a lab lane cutting without it."""
+        lab = rt.lab_pass_receipt
+        decision = rt.decide(
+            policy=_policy(),
+            facts=_facts(),
+            **_lab_seam(
+                artifacts=[{"id": 1, "created_at": "2026-09-17T14:07:37Z"}],
+                receipt=_receipt(_INFRA_SHA, lab.EnumLabPassResult.PASS),
+            ),
+            **_ci_seam(
+                runs=[
+                    {
+                        "name": "CI Summary",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    }
+                ]
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.SKIP
+        assert decision.reason is rt.EnumTrainReason.CI_NOT_GREEN
+
+    def test_the_premise_is_read_against_the_candidate_sha_and_branch(self) -> None:
+        """Not against "the repo" in the abstract.
+
+        A premise resolved against some other ref would pass while the commit
+        being cut had never been gated at all.
+        """
+        seen: list[tuple[str, str]] = []
+        gate_asked: list[tuple[str, str]] = []
+        GATE = "d8ab1e719e0a" + "0" * 28
+
+        def _gate(repo: str, sha: str) -> str:
+            gate_asked.append((repo, sha))
+            return GATE
+
+        def _runs(repo: str, sha: str) -> list[dict[str, Any]]:
+            seen.append((repo, sha))
+            return [
+                {"name": "CI Summary", "status": "completed", "conclusion": "success"}
+            ]
+
+        branches: list[tuple[str, str]] = []
+
+        def _required(repo: str, branch: str) -> list[str]:
+            branches.append((repo, branch))
+            return ["CI Summary"]
+
+        rt.decide(
+            policy=_policy(
+                default_branch="trunk",
+                lab_evidence=rt.EnumLabEvidence.NONE,
+                lab_evidence_note="n",
+            ),
+            facts=_facts(dev_head_sha=_INFRA_SHA),
+            **_lab_seam(),
+            required_contexts=_required,
+            check_runs=_runs,
+            gating_sha=_gate,
+        )
+        # The gating sha is resolved FROM the candidate, and the check runs are
+        # read against the GATING sha, not the candidate. Asking the post-merge
+        # commit for a PR-time gate is unsatisfiable by construction.
+        assert gate_asked == [("omnibase_infra", _INFRA_SHA)]
+        assert seen == [("omnibase_infra", GATE)]
+        assert branches == [("omnibase_infra", "trunk")]
+
+
+class TestThereIsNoWayToAssertTheCIFact:
+    def test_no_entrypoint_declares_an_option_that_asserts_ci(self) -> None:
+        """Same shape the health fact has on the k3s prod gate.
+
+        Asserted against the parser's own declared option strings, so adding a
+        bypass later is a red test rather than a review catch.
+        """
+        options: list[str] = []
+        for action in rt.build_parser()._actions:
+            options.extend(action.option_strings)
+        for sub in rt.build_parser()._subparsers._group_actions:
+            for parser in getattr(sub, "choices", {}).values():
+                for action in parser._actions:
+                    options.extend(action.option_strings)
+        forbidden = [
+            o
+            for o in options
+            if any(
+                t in o.lower() for t in ("ci-status", "ci-green", "skip-ci", "force")
+            )
+        ]
+        assert not forbidden, (
+            f"the train declares {forbidden}, which would let a caller assert or "
+            "bypass the CI fact it is supposed to resolve itself"
         )
