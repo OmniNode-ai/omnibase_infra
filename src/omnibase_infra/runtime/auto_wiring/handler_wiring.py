@@ -4842,6 +4842,7 @@ async def _emit_projection_terminal_event(
     Best-effort: publish failures are logged but never propagate.
     """
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.runtime.observability import record_flow_output
 
     try:
         source_payload = _extract_dispatch_payload(source_envelope)
@@ -4859,6 +4860,17 @@ async def _emit_projection_terminal_event(
         if hasattr(event_bus, "publish"):
             # Why: Control flow narrows this union at runtime before the attribute access.
             await event_bus.publish(terminal_event, None, raw)  # type: ignore[union-attr]
+            # OMN-17214 Defect B: this is a handler's own DECLARED output leaving
+            # the runtime, and it does NOT go through the result applier — so
+            # before this line the only publisher that attributed anything was
+            # the applier, and every projection/reducer whose output leaves here
+            # reported `messages_out = 0` and derived STALLED while producing.
+            # Measured on the .201 dev lane 2026-09-17: the Phase 1 writer
+            # `local.omnimarket.projection_consumer_flow` read in=76 out=0
+            # STALLED across 19 consecutive windows while its own terminal topic
+            # advanced HWM 178532 -> 178535. Recorded AFTER the await so a failed
+            # publish is not counted as an output.
+            record_flow_output(terminal_event)
         else:
             logger.warning(
                 "Projection terminal event not emitted: event_bus has no publish method "
@@ -5278,6 +5290,7 @@ def _make_stateful_dispatch_callback(
         from omnibase_core.models.events.model_event_envelope import (
             ModelEventEnvelope as _Envelope,
         )
+        from omnibase_infra.runtime.observability import record_flow_output
 
         if event_bus is None or not hasattr(event_bus, "publish_envelope"):
             return 0
@@ -5342,6 +5355,14 @@ def _make_stateful_dispatch_callback(
             await event_bus.publish_envelope(  # type: ignore[attr-defined]
                 envelope=out_envelope, topic=topic, key=key
             )
+            # OMN-17214 Defect B: the in-row outbox is the OTHER seam that
+            # publishes a handler's declared output without going through the
+            # result applier, so a stateful reducer publishing from its own row
+            # was counted as producing nothing. Recorded per envelope AFTER its
+            # await, so a batch that fails partway attributes exactly the
+            # envelopes that actually reached the broker — the same count
+            # `published` reports to the CAS-finalize below.
+            record_flow_output(topic)
             published += 1
         return published
 

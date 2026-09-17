@@ -16,6 +16,7 @@ from omnibase_infra.runtime.observability.consumer_flow_counters import (
     record_active_dlq,
     record_active_error,
     record_active_out,
+    record_flow_output,
     record_produced_topic,
     reset_consumer_flow_counters,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "record_active_dlq",
     "record_active_error",
     "record_active_out",
+    "record_flow_output",
     "record_produced_topic",
     "reset_consumer_flow_counters",
 ]

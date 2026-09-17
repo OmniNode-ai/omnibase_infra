@@ -365,6 +365,34 @@ def record_produced_topic(topic: str, count: int = 1) -> None:
     get_consumer_flow_counters().record_produced(topic, count)
 
 
+def record_flow_output(topic: str, count: int = 1) -> None:
+    """Record ``count`` successfully published output envelopes (OMN-17214).
+
+    The single entry point every publish seam that emits a handler's own
+    DECLARED output calls, so the two halves of an output cannot drift apart:
+    ``messages_out`` against the in-flight subscription, and the topic's own
+    upstream-production evidence.
+
+    Both halves are needed and neither substitutes for the other.  Without the
+    first, a node that publishes reads ``messages_out = 0`` and derives
+    ``STALLED`` while it is demonstrably producing — a false stall on a healthy
+    producer, which is how an alert channel gets muted.  Without the second,
+    every downstream consumer of that topic loses the evidence that separates
+    ``STARVED`` from ``IDLE``.
+
+    Deliberately NOT called for a DLQ route or a boundary FAILURE terminal.
+    Those outcomes are already counted as ``messages_dlq``/``handler_errors``,
+    and counting a failure terminal as a successful output would make a consumer
+    that is failing every message read ``FLOWING``.
+
+    ``record_active_out`` no-ops when no subscription is in flight, so a
+    boot-time republish or a sweep records the production without inventing a
+    consumer_group for it.
+    """
+    record_active_out(count)
+    record_produced_topic(topic, count)
+
+
 __all__ = [
     "RETAINED_FLOW_WINDOW_COUNT",
     "ConsumerFlowCounters",
@@ -374,6 +402,7 @@ __all__ = [
     "record_active_dlq",
     "record_active_error",
     "record_active_out",
+    "record_flow_output",
     "record_produced_topic",
     "reset_consumer_flow_counters",
 ]
