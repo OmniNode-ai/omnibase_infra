@@ -209,12 +209,151 @@ MARKET_CLONE="$OMNI_HOME/omnimarket"
 # identically on both hosts. Concurrency here is real -- several hook ticks can
 # fire at once -- and without a lock they all pile onto uv's own exclusive lock,
 # which is the OMN-15590 stall shape rather than a race.
+#
+# THE LOCK RECORDS ITS HOLDER (OMN-18608). A bare `mkdir` released only by a
+# trap is leaked permanently by a SIGKILL, and a directory with nothing in it
+# cannot tell a live holder from a corpse. Measured on this host on 2026-09-17:
+# a session died at about 15:25Z holding a lock it had taken at 15:23Z, and
+# every tick for the next 35 minutes printed "nothing to do" and exited 0 while
+# `ps` showed no reconcile process anywhere. The tick's own receipt line read
+# `tick=complete reconciler_exit=0 verdict="in sync"` on runs that did no work,
+# so nothing in the log said the host had stopped reconciling.
+#
+# This is the shape `omni_home/scripts/commit_lock.py` already uses for the
+# same reason: the holder is written INTO the lock, and a tick decides by
+# reading it rather than by its mere existence.
 LOCK_DIR="$OMNI_HOME/.onex-reconcile-host.lock"
+LOCK_HOLDER="$LOCK_DIR/holder"
+
+# How long a lock whose holder cannot be PROVEN live may sit before a tick
+# reclaims it. Deliberately far longer than any real pass: the tick fires every
+# 600s by default and a cold pass syncs several venvs, so an hour is "nothing
+# alive would still be here", not "this is taking a while".
+LOCK_STALE_SECONDS="${ONEX_RECONCILE_LOCK_STALE_SECONDS:-3600}"
+
+# `stat` is not portable: BSD spells the mtime `-f %m`, GNU spells it `-c %Y`.
+# Both are tried rather than branching on `uname`, because this script runs on
+# the macOS workstation and the Linux lab host and must behave identically.
+#
+# THE RESULT IS VALIDATED, NOT JUST THE EXIT STATUS, and that is the whole point
+# of this function rather than an inline `stat`. On GNU coreutils `-f` does not
+# mean "format" at all -- it means "report on the FILESYSTEM" -- so
+# `stat -f %m <path>` there succeeds, exits 0, and prints a filesystem dump
+# beginning `File: ...`. A plain `||` fallback therefore never fires on Linux,
+# and the dump flows into the `(( ))` below, where bash reads the bare word
+# `File` as a variable name and `set -u` kills the script with
+# `File: unbound variable`. That is not hypothetical: it is what CI reported on
+# the Linux runner for a version of this file that had been proven green on
+# macOS, where `-f %m` is correct and the bug is invisible.
+#
+# So a candidate is accepted only when it is entirely digits, which an epoch
+# second is and a filesystem dump is not.
+file_mtime() {
+  local out
+  # shellcheck disable=SC2086  # deliberate: each candidate is a flag PAIR
+  for fmt in "-f %m" "-c %Y"; do
+    out="$(stat $fmt "$1" 2>/dev/null || true)"
+    case "$out" in
+      "" | *[!0-9]*) continue ;;
+      *) printf '%s' "$out"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# Seconds since the lock was taken. The holder file when it exists, else the
+# directory itself -- which is the window between `mkdir` and the holder being
+# written, and is correctly read as "just taken".
+lock_age_seconds() {
+  local target="$LOCK_DIR" mtime now
+  [[ -f "$LOCK_HOLDER" ]] && target="$LOCK_HOLDER"
+  mtime="$(file_mtime "$target")"
+  # Belt and braces with file_mtime's own validation: nothing but digits may
+  # reach the arithmetic below, because under `set -u` a stray word there is a
+  # fatal unbound-variable error rather than a bad number.
+  case "$mtime" in
+    "" | *[!0-9]*) return 1 ;;
+  esac
+  now="$(date +%s)"
+  printf '%s' "$(( now - mtime ))"
+}
+
+lock_holder_field() {
+  local key="$1" line
+  [[ -f "$LOCK_HOLDER" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "$key"=*) printf '%s' "${line#*=}"; return 0 ;;
+    esac
+  done < "$LOCK_HOLDER"
+  return 1
+}
+
+# Why the existing lock may be reclaimed, or empty when it may not. Printing
+# the REASON rather than returning a boolean is deliberate: a reclaim that does
+# not say what it overrode would hide a genuine concurrency bug behind a
+# self-healing tick, which is the failure this whole file is about.
+lock_reclaim_reason() {
+  local age pid host
+  age="$(lock_age_seconds)" || age=""
+  # An unreadable age is not evidence of staleness. Fail closed: respect it.
+  [[ -n "$age" ]] || return 0
+  pid="$(lock_holder_field pid || true)"
+  host="$(lock_holder_field host || true)"
+
+  if [[ -z "$pid" || -z "$host" ]]; then
+    # No holder record yet, or a malformed one. Under the bound this is the
+    # `mkdir`-to-holder window of a peer that is very much alive.
+    (( age > LOCK_STALE_SECONDS )) && \
+      printf 'no readable holder record and the lock is %ss old (bound %ss)' \
+        "$age" "$LOCK_STALE_SECONDS"
+    return 0
+  fi
+
+  if [[ "$host" != "$(hostname)" ]]; then
+    # HOST-SCOPED ON PURPOSE. A pid from another host means nothing here, and
+    # `kill -0` on it would answer about an unrelated LOCAL process -- quite
+    # possibly a live one, which would make a dead foreign holder look alive
+    # forever. Age is the only honest signal for a foreign lock.
+    (( age > LOCK_STALE_SECONDS )) && \
+      printf 'holder pid %s is on host %s, not this one, and the lock is %ss old (bound %ss)' \
+        "$pid" "$host" "$age" "$LOCK_STALE_SECONDS"
+    return 0
+  fi
+
+  if kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+  printf 'holder pid %s on this host is not running, and the lock is %ss old' \
+    "$pid" "$age"
+}
+
+write_lock_holder() {
+  printf 'pid=%s\nhost=%s\nstarted_at=%s\n' \
+    "$$" "$(hostname)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK_HOLDER"
+}
+
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  say "another reconcile-host is running ($LOCK_DIR); nothing to do."
-  exit "$EXIT_OK"
+  reclaim="$(lock_reclaim_reason)"
+  if [[ -z "$reclaim" ]]; then
+    say "another reconcile-host is running ($LOCK_DIR); nothing to do."
+    say "  held by pid $(lock_holder_field pid || printf '<unrecorded>') on" \
+      "$(lock_holder_field host || printf '<unrecorded>') since" \
+      "$(lock_holder_field started_at || printf '<unrecorded>')"
+    exit "$EXIT_OK"
+  fi
+  say "RECLAIMING a stale reconcile-host lock: $reclaim"
+  rm -rf "$LOCK_DIR"
+  # A peer may have reclaimed it in the same instant. Losing that race is the
+  # ordinary outcome, not an error.
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    say "another reconcile-host took the lock during the reclaim; nothing to do."
+    exit "$EXIT_OK"
+  fi
 fi
-cleanup() { rmdir "$LOCK_DIR" 2>/dev/null || true; }
+write_lock_holder
+# `rm -rf`, not `rmdir`: the lock is no longer an empty directory.
+cleanup() { rm -rf "$LOCK_DIR" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 # --------------------------------------------------------------------------- #
