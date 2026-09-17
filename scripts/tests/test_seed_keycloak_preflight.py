@@ -185,9 +185,9 @@ class TestPreflightEvaluatesEveryRosterEntry:
                 )
 
         by_client = _records_by_client(records)
-        assert by_client["alpha"]["secret_env"] == "ALPHA_SECRET"
-        assert by_client["beta"]["secret_env"] == "BETA_SECRET"
-        keys = {f["key"] for r in records for f in r["findings"] if "key" in f}
+        assert by_client["alpha"]["env_var"] == "ALPHA_SECRET"
+        assert by_client["beta"]["env_var"] == "BETA_SECRET"
+        keys = {f["env_var"] for r in records for f in r["findings"] if "env_var" in f}
         assert keys == {"ALPHA_SECRET", "BETA_SECRET"}
 
     def test_refusal_exits_non_zero_once_naming_every_client_and_key(
@@ -216,7 +216,7 @@ class TestPreflightEvaluatesEveryRosterEntry:
         assert record["op"] == "error"
         assert record["check"] == "client_preflight"
         assert sorted(record["clients"]) == ["alpha", "beta"]
-        assert sorted(record["keys"]) == ["ALPHA_SECRET", "BETA_SECRET"]
+        assert sorted(record["env_vars"]) == ["ALPHA_SECRET", "BETA_SECRET"]
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ class TestPreflightDistinguishesSecretSources:
                 )
 
         record = _records_by_client(records)["signup"]
-        assert record["secret_source"] == "roster_pushed"
+        assert record["provenance"] == "roster_pushed"
         finding = next(
             f for f in record["findings"] if f["code"] == "roster_secret_absent"
         )
@@ -268,8 +268,8 @@ class TestPreflightDistinguishesSecretSources:
                 )
 
         record = _records_by_client(records)["minted"]
-        assert record["secret_source"] == "keycloak_minted"
-        assert record["secret_env"] is None
+        assert record["provenance"] == "keycloak_minted"
+        assert record["env_var"] is None
         assert record["findings"] == []
 
     def test_public_client_is_classified_and_needs_no_secret(self) -> None:
@@ -284,7 +284,7 @@ class TestPreflightDistinguishesSecretSources:
                 )
 
         record = _records_by_client(records)["spa"]
-        assert record["secret_source"] == "public"
+        assert record["provenance"] == "public"
         assert record["findings"] == []
 
     def test_consumer_owned_absent_env_is_its_own_refusal_code(self) -> None:
@@ -300,7 +300,7 @@ class TestPreflightDistinguishesSecretSources:
                 )
 
         record = _records_by_client(records)["api"]
-        assert record["secret_source"] == "consumer_owned"
+        assert record["provenance"] == "consumer_owned"
         assert "consumer_secret_absent" in _finding_codes(record)
         assert "roster_secret_absent" not in _finding_codes(record)
 
@@ -329,7 +329,7 @@ class TestPreflightRefusesEmptyLiveSecret:
 
         record = _records_by_client(records)["api"]
         assert record["present"] is True
-        assert record["live_secret_present"] is False
+        assert record["live_value_present"] is False
         assert "live_secret_empty" in _finding_codes(record)
 
     def test_an_absent_client_is_not_a_refusal_it_will_be_created(self) -> None:

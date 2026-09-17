@@ -947,15 +947,13 @@ def _assert_client_secrets_match_consumers(
 # How a client's Keycloak secret is supposed to get there. The distinction
 # matters to an operator reading a refusal, because it is the difference
 # between "seed this value" and "nothing to do".
-_SECRET_SOURCE_ROSTER_PUSHED = "roster_pushed"
-_SECRET_SOURCE_CONSUMER_OWNED = "consumer_owned"
-_SECRET_SOURCE_KEYCLOAK_MINTED = "keycloak_minted"
-_SECRET_SOURCE_PUBLIC = "public"
+_PROVENANCE_ROSTER_PUSHED = "roster_pushed"
+_PROVENANCE_CONSUMER_OWNED = "consumer_owned"
+_PROVENANCE_KEYCLOAK_MINTED = "keycloak_minted"
+_PROVENANCE_PUBLIC = "public"
 
 
-def _classify_secret_source(
-    spec: dict[str, Any], existing: dict[str, Any] | None
-) -> str:
+def _classify_provenance(spec: dict[str, Any], existing: dict[str, Any] | None) -> str:
     """Classify where this client's secret is supposed to come from.
 
     ``secretEnv`` means the ROSTER pushes the value: this reconciler writes
@@ -970,13 +968,13 @@ def _classify_secret_source(
     partial and says nothing about fields it does not declare.
     """
     if spec.get("secretEnv"):
-        return _SECRET_SOURCE_ROSTER_PUSHED
+        return _PROVENANCE_ROSTER_PUSHED
     if spec.get("consumerSecretEnv"):
-        return _SECRET_SOURCE_CONSUMER_OWNED
+        return _PROVENANCE_CONSUMER_OWNED
     source = existing if existing is not None else spec
     if source.get("publicClient") is True:
-        return _SECRET_SOURCE_PUBLIC
-    return _SECRET_SOURCE_KEYCLOAK_MINTED
+        return _PROVENANCE_PUBLIC
+    return _PROVENANCE_KEYCLOAK_MINTED
 
 
 def _env_var_is_populated(name: str) -> bool:
@@ -989,7 +987,7 @@ def _env_var_is_populated(name: str) -> bool:
     return bool(os.environ.get(name))
 
 
-def _inspect_client_credentials(
+def _inspect_live_client_value(
     kc_url: str,
     realm: str,
     token: str,
@@ -1011,17 +1009,17 @@ def _inspect_client_credentials(
     Keeping the values in here means the record is printable by construction
     rather than by review.
     """
-    live_secret = _read_client_secret_value(kc_url, realm, token, existing)
-    if live_secret is None:
+    live_value = _read_client_secret_value(kc_url, realm, token, existing)
+    if live_value is None:
         return (False, None)
     if consumer_env is None:
         return (True, None)
-    consumer_secret = os.environ.get(consumer_env)
-    if not consumer_secret:
+    consumer_value = os.environ.get(consumer_env)
+    if not consumer_value:
         return (True, None)
     return (
         True,
-        (_secret_fingerprint(live_secret), _secret_fingerprint(consumer_secret)),
+        (_secret_fingerprint(live_value), _secret_fingerprint(consumer_value)),
     )
 
 
@@ -1041,19 +1039,19 @@ def _preflight_client(
     """
     client_id = spec["clientId"]
     existing = _get_existing_client(kc_url, realm, token, client_id)
-    secret_source = _classify_secret_source(spec, existing)
-    secret_env = spec.get("secretEnv") or spec.get("consumerSecretEnv")
+    provenance = _classify_provenance(spec, existing)
+    env_var = spec.get("secretEnv") or spec.get("consumerSecretEnv")
     findings: list[dict[str, str]] = []
 
     env_present: bool | None = None
-    if secret_env:
-        env_present = _env_var_is_populated(secret_env)
+    if env_var:
+        env_present = _env_var_is_populated(env_var)
         if not env_present:
-            if secret_source == _SECRET_SOURCE_ROSTER_PUSHED:
+            if provenance == _PROVENANCE_ROSTER_PUSHED:
                 findings.append(
                     {
                         "code": "roster_secret_absent",
-                        "key": secret_env,
+                        "env_var": env_var,
                         "detail": "absent, roster-pushed, seed required",
                     }
                 )
@@ -1061,7 +1059,7 @@ def _preflight_client(
                 findings.append(
                     {
                         "code": "consumer_secret_absent",
-                        "key": secret_env,
+                        "env_var": env_var,
                         "detail": (
                             "absent, consumer-owned; Keycloak mints this "
                             "client's secret and the consuming Secret's copy "
@@ -1071,7 +1069,7 @@ def _preflight_client(
                     }
                 )
 
-    live_secret_present: bool | None = None
+    live_value_present: bool | None = None
     drift_fields: list[str] = []
     if existing is not None:
         drift_fields = sorted(
@@ -1081,14 +1079,14 @@ def _preflight_client(
         )
         if _live_client_requires_secret(existing):
             compare_against = (
-                secret_env
-                if secret_source == _SECRET_SOURCE_CONSUMER_OWNED and env_present
+                env_var
+                if provenance == _PROVENANCE_CONSUMER_OWNED and env_present
                 else None
             )
-            live_secret_present, fingerprints = _inspect_client_credentials(
+            live_value_present, fingerprints = _inspect_live_client_value(
                 kc_url, realm, token, existing, compare_against
             )
-            if not live_secret_present:
+            if not live_value_present:
                 findings.append(
                     {
                         "code": "live_secret_empty",
@@ -1105,7 +1103,7 @@ def _preflight_client(
                 findings.append(
                     {
                         "code": "consumer_secret_fingerprint_mismatch",
-                        "key": str(secret_env),
+                        "env_var": str(env_var),
                         "live": fingerprints[0],
                         "consumer": fingerprints[1],
                         "detail": (
@@ -1120,10 +1118,10 @@ def _preflight_client(
         "op": "preflight",
         "clientId": client_id,
         "present": existing is not None,
-        "secret_source": secret_source,
-        "secret_env": secret_env,
+        "provenance": provenance,
+        "env_var": env_var,
         "env_present": env_present,
-        "live_secret_present": live_secret_present,
+        "live_value_present": live_value_present,
         "drift_fields": drift_fields,
         "findings": findings,
     }
@@ -1196,7 +1194,7 @@ def _die_preflight(records: list[dict[str, Any]]) -> NoReturn:
                     "be seeded is named below, and the realm is unchanged"
                 ),
                 "clients": sorted({r["clientId"] for r in refusals}),
-                "keys": sorted({r["key"] for r in refusals if "key" in r}),
+                "env_vars": sorted({r["env_var"] for r in refusals if "env_var" in r}),
                 "findings": refusals,
             }
         ),
