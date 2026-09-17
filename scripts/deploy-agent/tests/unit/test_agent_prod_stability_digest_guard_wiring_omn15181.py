@@ -114,7 +114,7 @@ async def test_prod_deploy_with_mismatched_stability_digest_is_rejected_before_p
     fake_executor = _FakeExecutor(stability_ready_digest=_OTHER_DIGEST)
     agent = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert fake_executor.calls == ["resolve_stability_ready_digest"], (
         "guard must fire before preflight/git_pull/rebuild_scope — no deploy "
@@ -137,7 +137,7 @@ async def test_prod_deploy_with_no_stability_ready_digest_is_rejected(
     fake_executor = _FakeExecutor(stability_ready_digest=None)
     agent = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert fake_executor.calls == ["resolve_stability_ready_digest"]
     job = agent.job_store.load(cmd.correlation_id)
@@ -156,7 +156,7 @@ async def test_prod_deploy_with_matching_stability_digest_proceeds(
     fake_executor = _FakeExecutor(stability_ready_digest=_DIGEST)
     agent = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert fake_executor.calls[0] == "resolve_stability_ready_digest"
     assert "preflight" in fake_executor.calls
@@ -186,7 +186,7 @@ async def test_dev_lane_deploy_never_invokes_stability_guard(
     fake_executor = _FakeExecutor(stability_ready_digest=None)
     agent = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert "resolve_stability_ready_digest" not in fake_executor.calls
     job = agent.job_store.load(cmd.correlation_id)
