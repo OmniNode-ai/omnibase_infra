@@ -344,7 +344,7 @@ def _gnu_stat_shim(tmp_path: Path) -> Path:
     FILESYSTEM", so ``stat -f %m <path>`` SUCCEEDS and prints a dump beginning
     ``File:`` instead of failing the way a BSD-only reader assumes it will.
 
-    ``-c %Y`` answers truthfully, by asking the real ``stat``. A shim that
+    ``-c %Y`` answers truthfully, via python rather than the real ``stat``. A shim that
     returned a canned number would also distort every OTHER ``stat`` call this
     script makes, and would then be testing the shim rather than the script.
 
@@ -364,6 +364,11 @@ def _gnu_stat_shim(tmp_path: Path) -> Path:
         "  exit 0\n"
         "fi\n"
         'if [[ "$1" == "-c" && "$2" == "%Y" ]]; then\n'
+        # Via python, NOT via `stat -f %m`. That spelling is the mtime on BSD
+        # and the FILESYSTEM flag on GNU, so a shim using it would answer
+        # correctly on the workstation and garbage on the Linux runner -- which
+        # is the very confusion this test exists to pin, reintroduced inside the
+        # test's own scaffolding. CI caught exactly that.
         "  exec python3 -c 'import os, sys; print(int(os.path.getmtime(sys.argv[1])))' \"$3\"\n"
         "fi\n"
         'exec /usr/bin/stat "$@"\n',
