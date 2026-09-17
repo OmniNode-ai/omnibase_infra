@@ -990,3 +990,91 @@ def test_unset_omni_home_is_still_fail_fast_with_no_default(tmp_path: Path) -> N
     combined = result.stdout + result.stderr
     assert result.returncode == _EXIT_INDETERMINATE
     assert "OMNI_HOME" in combined
+
+
+def test_the_interpreter_requirement_is_exercised_off_macos(ws: _Workspace) -> None:
+    """The enforcement must be provable on the merge gate, not only on a Mac.
+
+    CI runs on Linux, where the LAN-grant constraint does not exist and the
+    reconciler correctly stands down. Without a seam that switches the
+    requirement ON, every assertion above would be macOS-only and the rule-11
+    enforcement would ship untested by the gate that guards it — rule 5's
+    "opt-in verification never gets adopted", applied to a safety requirement.
+
+    Both seams only ever ADD the requirement; see the no-bypass test below.
+    """
+    env = ws.env()
+    env.pop("ONEX_DISPATCH_BASE_PYTHON")
+    env["ONEX_DISPATCH_REQUIRE_BASE_PYTHON"] = "1"
+    env["ONEX_DISPATCH_BASE_PYTHON_CANDIDATES"] = str(ws.brew_python)
+    import shutil
+
+    shutil.rmtree(ws.dispatch_venv)
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    cfg = (ws.dispatch_venv / "pyvenv.cfg").read_text(encoding="utf-8")
+    assert f"home = {ws.brew_python.parent}" in cfg, (
+        f"the requirement did not apply once switched on off-macOS; pyvenv.cfg: {cfg!r}"
+    )
+
+
+def test_no_acceptable_interpreter_refuses_and_names_every_path_tried(
+    ws: _Workspace,
+) -> None:
+    """Hermetic on every host.
+
+    Asserting this against the built-in candidates would pass on CI and fail on
+    every developer Mac, which has brew installed — the same host-state coupling
+    two fixtures in this suite already had to be repaired for.
+    """
+    missing = [str(ws.root / "no-python-a"), str(ws.root / "no-python-b")]
+    env = ws.env()
+    env.pop("ONEX_DISPATCH_BASE_PYTHON")
+    env["ONEX_DISPATCH_REQUIRE_BASE_PYTHON"] = "1"
+    env["ONEX_DISPATCH_BASE_PYTHON_CANDIDATES"] = ":".join(missing)
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == _EXIT_FAILED, combined
+    for candidate in missing:
+        assert candidate in combined, (
+            f"the refusal did not name {candidate}; an unnamed candidate list is "
+            "how 'not on PATH' got read as 'not installed' (OMN-17335). "
+            f"Output: {combined!r}"
+        )
+    assert ws.gate_syncs() == [], "the gate venv was purified anyway"
+
+
+def test_no_environment_value_turns_the_interpreter_requirement_off() -> None:
+    """The two seams are one-way.
+
+    A variable that switched a safety requirement off is the bypass rule 17
+    forbids, and it would be reached for the first time by whoever is most
+    inconvenienced by the gate. Asserted against the source's own predicate
+    rather than by trying values, so a new escape hatch is a red test.
+    """
+    source = _SCRIPT.read_text(encoding="utf-8")
+    start = source.index("dispatch_requires_base_python() {")
+    body = source[start : source.index("\n}", start)]
+
+    # Every branch inside the predicate must be a `return 0` (requirement ON)
+    # or the platform test. Nothing may return non-zero on an env value.
+    assert "return 1" not in body, (
+        f"dispatch_requires_base_python can be switched OFF by an env value: {body!r}"
+    )
+    for off_ish in ('!= "1"', '== "0"', "ONEX_DISPATCH_SKIP", "ALLOW"):
+        assert off_ish not in body, (
+            f"an opt-out spelling appeared in the predicate: {off_ish!r}"
+        )

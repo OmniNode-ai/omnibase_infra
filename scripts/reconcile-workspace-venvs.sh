@@ -429,8 +429,24 @@ DISPATCH_BASE_PYTHON_CANDIDATES=(
 # this platform has no such requirement. A macOS host with no brew interpreter
 # echoes nothing too, and the caller refuses -- naming every path it looked at,
 # because "not on PATH" was read as "not installed" once already (OMN-17335).
+# Whether this host has the LAN-grant constraint at all.
+#
+# Both overrides can only ADD the requirement, never remove it -- there is no
+# value of either that turns it off, and `dispatch_base_python` refuses rather
+# than falling back when it cannot satisfy one. That is deliberate: a variable
+# that switched a safety requirement off would be the bypass rule 17 forbids.
+# What they buy is a behaviour that is exercised by the merge gate: CI runs on
+# Linux, so without a seam the entire rule-11 enforcement would be untestable
+# there and would ship unproven (rule 5 -- opt-in verification never gets
+# adopted).
+dispatch_requires_base_python() {
+  [[ "${ONEX_DISPATCH_REQUIRE_BASE_PYTHON:-0}" == "1" ]] && return 0
+  [[ -n "${ONEX_DISPATCH_BASE_PYTHON:-}" ]] && return 0
+  [[ "$(uname -s)" == "Darwin" ]]
+}
+
 dispatch_base_python() {
-  [[ "$(uname -s)" == "Darwin" ]] || return 0
+  dispatch_requires_base_python || return 0
   if [[ -n "${ONEX_DISPATCH_BASE_PYTHON:-}" ]]; then
     # Validated, not trusted. Echoing a path that is not there hands uv an
     # argument it cannot use and turns a clear "that interpreter does not
@@ -447,9 +463,26 @@ dispatch_base_python() {
     return 0
   fi
   local candidate
-  for candidate in "${DISPATCH_BASE_PYTHON_CANDIDATES[@]}"; do
+  for candidate in $(dispatch_base_python_candidates); do
     [[ -x "$candidate" ]] && { printf '%s' "$candidate"; return 0; }
   done
+}
+
+# The candidates, as a whitespace-separated list. `ONEX_DISPATCH_BASE_PYTHON_
+# CANDIDATES` (colon-separated) replaces the built-ins.
+#
+# This narrows WHICH interpreter qualifies; it never changes WHETHER one is
+# required, so it is not an opt-out. It exists because the refusal path -- no
+# acceptable interpreter anywhere -- is otherwise untestable on any host that
+# has brew installed, which is every developer Mac. Two earlier fixtures in this
+# suite already read host state that way and had to be repaired; this is the
+# same lesson applied to the code instead of to the test.
+dispatch_base_python_candidates() {
+  if [[ -n "${ONEX_DISPATCH_BASE_PYTHON_CANDIDATES:-}" ]]; then
+    printf '%s' "${ONEX_DISPATCH_BASE_PYTHON_CANDIDATES//:/ }"
+    return 0
+  fi
+  printf '%s' "${DISPATCH_BASE_PYTHON_CANDIDATES[*]}"
 }
 
 # Resolve a directory through every symlink, with shell builtins only: macOS
@@ -888,9 +921,9 @@ run_check() {
     # calls to the lab host fail silently (CLAUDE.md rule 11).
     local base_python
     base_python="$(dispatch_base_python)"
-    if [[ "$(uname -s)" == "Darwin" && -z "$base_python" ]]; then
+    if dispatch_requires_base_python && [[ -z "$base_python" ]]; then
       say "DRIFT: no brew Python to build the dispatch venv on; looked at:"
-      say "  ${DISPATCH_BASE_PYTHON_CANDIDATES[*]}"
+      say "  $(dispatch_base_python_candidates)"
       drift=1
     elif ! dispatch_interpreter_ok "$base_python"; then
       say "DRIFT: dispatch venv is on the wrong interpreter -- built on"
@@ -1025,13 +1058,13 @@ run_repair() {
   # where the LAN-grant constraint does not exist.
   local base_python
   base_python="$(dispatch_base_python)"
-  if [[ "$(uname -s)" == "Darwin" && -z "$base_python" ]]; then
+  if dispatch_requires_base_python && [[ -z "$base_python" ]]; then
     fail "no brew Python found to build the dispatch venv on; the gate venv was NOT touched." \
       "The dispatch venv is what \`scripts/onex\` execs, and on macOS the Local" \
       "Network grant is per binary path -- a uv-managed interpreter's LAN" \
       "connections to the lab host fail silently with EHOSTUNREACH." \
       "Looked at, in order:" \
-      "  ${DISPATCH_BASE_PYTHON_CANDIDATES[*]}" \
+      "  $(dispatch_base_python_candidates)" \
       "Install it (brew install python@3.13), or name one explicitly with" \
       "ONEX_DISPATCH_BASE_PYTHON=<absolute path>."
   fi
@@ -1045,10 +1078,17 @@ run_repair() {
   # had one would keep a silently LAN-blind CLI forever. `uv sync --python`
   # recreates the environment when the interpreter differs, so the rebuild is
   # uv's single code path rather than an `rm -rf` in a reconciler.
-  local rebuild_reason=""
+  # A BOOLEAN, separate from the message. An earlier draft used the recorded
+  # `home` string as the flag, which is empty in exactly the drift case that
+  # matters most -- a venv with no readable pyvenv.cfg -- so it printed
+  # "Rebuilding." and then skipped both the rebuild and its readback. A hand-run
+  # reproduction caught that; no test would have, because every fixture wrote a
+  # pyvenv.cfg.
+  local rebuild=0 rebuild_home=""
   if [[ -x "$DISPATCH_PYTHON" ]] && ! dispatch_interpreter_ok "$base_python"; then
-    rebuild_reason="$(venv_base_home "$DISPATCH_VENV")"
-    say "dispatch venv: interpreter drift -- built on ${rebuild_reason:-<unreadable pyvenv.cfg>},"
+    rebuild=1
+    rebuild_home="$(venv_base_home "$DISPATCH_VENV")"
+    say "dispatch venv: interpreter drift -- built on ${rebuild_home:-<unreadable pyvenv.cfg>},"
     say "  required ${base_python%/*} (CLAUDE.md rule 11). Rebuilding."
     need_lock=1
     need_provider=1
@@ -1060,7 +1100,7 @@ run_repair() {
   # ONLY situation in which the lock pass precedes the provider pass; the
   # OMN-16262 ordering (provider first, lock second) still holds afterwards,
   # because the co-install below forces a second lock pass.
-  if [[ ! -x "$DISPATCH_PYTHON" || -n "$rebuild_reason" ]]; then
+  if [[ ! -x "$DISPATCH_PYTHON" || "$rebuild" -eq 1 ]]; then
     say "dispatch venv: creating $DISPATCH_VENV from $INFRA_DIR/uv.lock${base_python:+ on $base_python}"
     trace "UV_PROJECT_ENVIRONMENT=$DISPATCH_VENV uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
     if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$DISPATCH_VENV" \
