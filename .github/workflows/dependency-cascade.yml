@@ -39,16 +39,6 @@ on:
       onexbot-occ-private-key:
         description: "onexbot-occ-writer GitHub App private key (org secret ONEXBOT_OCC_PRIVATE_KEY)"
         required: false
-  workflow_dispatch:
-    inputs:
-      package:
-        description: 'Released package name (e.g. omnibase_infra)'
-        required: true
-        type: string
-      version:
-        description: 'Released version tag (e.g. v0.11.0)'
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -113,22 +103,20 @@ jobs:
       - name: Check onexbot-occ-writer App credentials are configured
         id: token_check
         env:
-          # Read from BOTH sources, because the two triggers populate different
-          # ones and neither name alone serves both (OMN-18596).
+          # ONE source, deliberately. This workflow declares
+          # `on: workflow_call: secrets:`, and a workflow carrying that
+          # declaration has its secrets context restricted to the DECLARED
+          # names under every trigger -- an org-level name resolves EMPTY here
+          # even on a manual run. A fallback to one would therefore be dead
+          # code in a credential expression, which is worse than no fallback:
+          # the next reader believes the manual path is covered.
           #
-          # On workflow_call, release.yml passes these explicitly and only the
-          # declared inputs are populated. On workflow_dispatch those input
-          # names do not exist at all, so reading only them resolved empty,
-          # has_token went false, every later step's `if:` was false, and the
-          # job exited 0 having done nothing. Run 35260585795 dispatched this
-          # workflow against the released v0.38.30 while all three targets were
-          # behind it, and reported four green jobs and zero pull requests.
-          #
-          # The fallback stays INSIDE the App's own identity. Substituting the
-          # default workflow token would suppress the downstream workflows of
-          # anything it pushed, which is the confound OMN-18273 corrected.
-          APP_ID: ${{ secrets.onexbot-occ-app-id || secrets.ONEXBOT_OCC_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.onexbot-occ-private-key || secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          # Every caller passes these explicitly. release.yml does it for the
+          # automatic path and dependency-cascade-dispatch.yml does it for the
+          # manual one, the latter existing precisely because only a workflow
+          # WITHOUT a workflow_call declaration can read them (OMN-18596).
+          APP_ID: ${{ secrets.onexbot-occ-app-id }}
+          APP_PRIVATE_KEY: ${{ secrets.onexbot-occ-private-key }}
         run: |
           if [ -z "$APP_ID" ] || [ -z "$APP_PRIVATE_KEY" ]; then
             # FAIL, never skip. A cascade that cannot authenticate has not
@@ -137,7 +125,7 @@ jobs:
             # reasoning the lab-pass receipt is built on: a result that appears
             # only when things worked cannot tell "it failed" apart from
             # "nobody ran it".
-            echo "::error::onexbot-occ-writer App identity did not resolve for ${{ matrix.repo }}. On workflow_call the caller must pass onexbot-occ-app-id and onexbot-occ-private-key; on workflow_dispatch the org-level values must be readable. Refusing to report success for a bump that was never attempted."
+            echo "::error::onexbot-occ-writer App identity did not resolve for ${{ matrix.repo }}. Every caller must pass onexbot-occ-app-id and onexbot-occ-private-key: release.yml for the automatic path, dependency-cascade-dispatch.yml for the manual one. Refusing to report success for a bump that was never attempted."
             exit 1
           fi
           echo "has_token=true" >> "$GITHUB_OUTPUT"
