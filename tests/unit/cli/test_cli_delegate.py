@@ -65,6 +65,9 @@ from omnibase_infra.cli.cli_delegate import (
     resolve_default_bus,
     run_delegate,
 )
+from omnibase_infra.cli.delegate_terminal_resolver import (
+    DelegateTerminalUnresolvedError,
+)
 from omnibase_infra.cli.model_receipt_runtime_summary import (
     ModelReceiptRuntimeSummary,
 )
@@ -2407,3 +2410,292 @@ class TestFailedDelegationIsRendered:
         ModelSkillResult.model_validate(parsed)
         # AC4: rendering the receipt is not reporting success.
         assert result.exit_code != 0
+
+
+_OMN18569_FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures"
+    / "delegation"
+    / "omn18569"
+    / "dispatched_envelope_carrier_receipt.json"
+)
+
+
+def _recorded_dispatched_receipt() -> ModelSkillResult[ModelReceiptRuntimeSummary]:
+    """The verbatim receipt of a real DISPATCHED delegation to the ``.201`` dev lane.
+
+    Recorded 2026-09-17, correlation ``83aa8b6c-8189-49f0-953d-80c8f015ed0a``.
+    See the fixture's README for the run and its redactions. Nothing about its
+    shape is synthesised — this is the CLI's own stdout.
+    """
+    return ModelSkillResult[ModelReceiptRuntimeSummary].model_validate(
+        json.loads(_OMN18569_FIXTURE.read_text(encoding="utf-8"))
+    )
+
+
+class TestDispatchedDelegationWritesRunFiles:
+    """OMN-18569: a dispatched delegation wrote none of the three files, silently.
+
+    THE DEFECT. ``receipt_mode`` takes the ``ModelReceiptRuntimeSummary`` branch
+    whenever no handler result exists, and a DISPATCHED run hosts no handlers —
+    so every dispatched run lands there, success included. On that path the
+    terminal arrives inside its event envelope, so the delegation fields sit at
+    ``terminal_payload.payload`` and not at ``terminal_payload``. The unwrap
+    looked for an ``attempts`` list directly on ``terminal_payload``, found
+    none, returned ``None``, and the writer returned early.
+
+    Measured live on the lane the product is demonstrated from: exit 0, a
+    correct answer, quality 1.0 — and no ``result.txt``, ``receipt.json`` or
+    ``run.json``, with no line on stderr saying so. That is goal-board row B5
+    failing on the dispatched path while reporting success.
+    """
+
+    def test_recorded_receipt_carries_its_terminal_inside_an_envelope(self) -> None:
+        """Positive control on the fixture: it really is the envelope carrier.
+
+        Without this, a green suite below could mean the fixture happens to be
+        the bare shape the old code already handled.
+        """
+        receipt = _recorded_dispatched_receipt()
+        carrier = receipt.result.terminal_payload
+        assert isinstance(carrier, dict)
+        assert "envelope_id" in carrier, "the recorded carrier is an event envelope"
+        assert "attempts" not in carrier, (
+            "the delegation fields are NOT at the top level — that is the defect"
+        )
+        nested = carrier["payload"]
+        assert isinstance(nested, dict)
+        assert isinstance(nested["attempts"], list) and len(nested["attempts"]) == 1
+        # The second key the old unwrap tried is null on this path, so it could
+        # not have rescued the miss either.
+        assert receipt.result.handler_result is None
+        assert receipt.result.handler_locus == "dispatched"
+        # Exit 0 with a correct answer: nothing about the RUN was wrong.
+        assert receipt.exit_code == 0
+        assert receipt.status is EnumSkillResultStatus.SUCCESS
+        assert nested["response"] == "2, 3, 5, 7, 11"
+
+    def test_writes_three_files_for_a_dispatched_run(self, tmp_path: Path) -> None:
+        """AC1: the three customer artifacts exist. RED before the unwrap fix."""
+        receipt = _recorded_dispatched_receipt()
+
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt=(
+                "List the first five prime numbers in ascending order, "
+                "separated by commas, and nothing else."
+            ),
+            task_type="summarization",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+        )
+
+        run_dir = tmp_path / "runs" / str(receipt.run_id)
+        assert (run_dir / "result.txt").read_text(encoding="utf-8") == "2, 3, 5, 7, 11"
+        assert (run_dir / "receipt.json").exists()
+        assert (run_dir / "run.json").exists()
+
+    def test_receipt_names_the_lane_rung_that_answered(self, tmp_path: Path) -> None:
+        """AC1: the receipt attributes the run to the rung that actually answered."""
+        receipt = _recorded_dispatched_receipt()
+
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="List the first five prime numbers",
+            task_type="summarization",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+        )
+
+        run_dir = tmp_path / "runs" / str(receipt.run_id)
+        receipt_data = json.loads(
+            (run_dir / "receipt.json").read_text(encoding="utf-8")
+        )
+        assert receipt_data["model"] == "Qwen3.6-35B-A3B"
+        assert receipt_data["routing_tier"] == "local"
+        assert receipt_data["backend_id"] == "a3428e79-1694-5248-ab00-8e532196a515"
+        assert receipt_data["receipt_id"] == str(receipt.correlation_id)
+        assert receipt_data["correlation_id"] == (
+            "83aa8b6c-8189-49f0-953d-80c8f015ed0a"
+        )
+        run_data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        assert run_data["lane"] == "local"
+        assert run_data["task_type"] == "summarization"
+
+    def test_announces_the_paths_on_stderr(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A customer learns where the files are from the run, not from ``ls``."""
+        receipt = _recorded_dispatched_receipt()
+
+        _write_local_run_files(
+            receipt=receipt,
+            state_root=tmp_path,
+            prompt="List the first five prime numbers",
+            task_type="summarization",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+        )
+
+        announced = capsys.readouterr().err
+        assert "delegate artifacts: " in announced
+        for name in ("result.txt", "receipt.json", "run.json"):
+            assert str(tmp_path / "runs" / str(receipt.run_id) / name) in announced
+
+
+class TestUnresolvableTerminalFailsLoudly:
+    """OMN-18569: an unresolvable terminal must never be a silent skip.
+
+    The nesting miss was one level and cheap. What let it survive a release was
+    the early return: a writer that cannot find its terminal and exits 0 looks,
+    from outside, exactly like one that had nothing to write. Both this defect
+    and OMN-16999's before it were found by a human noticing an empty directory
+    long afterwards.
+    """
+
+    @staticmethod
+    def _summary_receipt_without_a_terminal(
+        *, workflow: str
+    ) -> ModelSkillResult[ModelReceiptRuntimeSummary]:
+        return ModelSkillResult[ModelReceiptRuntimeSummary](
+            skill_name=cli_delegate.DELEGATE_NODE_NAME,
+            node_name=cli_delegate.DELEGATE_NODE_NAME,
+            status=EnumSkillResultStatus.SUCCESS,
+            correlation_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            exit_code=0,
+            duration_ms=11,
+            result=ModelReceiptRuntimeSummary(
+                workflow_result="completed",
+                exit_code=0,
+                workflow=workflow,
+                terminal_payload=None,
+                handler_result=None,
+            ),
+            result_model=(
+                "omnibase_infra.cli.model_receipt_runtime_summary."
+                "ModelReceiptRuntimeSummary"
+            ),
+            runtime_identity=collect_runtime_identity(config_source="test"),
+        )
+
+    def test_absent_terminal_raises_naming_both_carrier_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """AC3: the refusal says WHICH field was missing, not that something failed."""
+        receipt = self._summary_receipt_without_a_terminal(
+            workflow=(
+                "/site-packages/omnimarket/nodes/"
+                "node_delegate_skill_orchestrator/contract.yaml"
+            )
+        )
+
+        with pytest.raises(DelegateTerminalUnresolvedError) as raised:
+            _write_local_run_files(
+                receipt=receipt,
+                state_root=tmp_path,
+                prompt="List the first five prime numbers",
+                task_type="summarization",
+                task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            )
+
+        message = str(raised.value)
+        assert "terminal_payload: absent" in message
+        assert "handler_result: absent" in message
+        assert not (tmp_path / "runs").exists()
+
+    def test_terminal_of_an_unrecognised_shape_names_the_absent_field(
+        self, tmp_path: Path
+    ) -> None:
+        """A present-but-wrong terminal is named too, not just an absent one."""
+        receipt = self._summary_receipt_without_a_terminal(
+            workflow=(
+                "/site-packages/omnimarket/nodes/"
+                "node_delegate_skill_orchestrator/contract.yaml"
+            )
+        )
+        receipt = receipt.model_copy(
+            update={
+                "result": receipt.result.model_copy(
+                    update={"terminal_payload": {"status": "completed"}}
+                )
+            }
+        )
+
+        with pytest.raises(DelegateTerminalUnresolvedError) as raised:
+            _write_local_run_files(
+                receipt=receipt,
+                state_root=tmp_path,
+                prompt="List the first five prime numbers",
+                task_type="summarization",
+                task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            )
+
+        message = str(raised.value)
+        assert "attempts" in message, "the field that identifies a terminal"
+        assert "envelope_id" in message, "and the one that identifies its envelope"
+
+    def test_some_other_nodes_run_is_still_skipped_silently(
+        self, tmp_path: Path
+    ) -> None:
+        """AC5: the new refusal did not widen into every receipt.
+
+        ``run_receipt_mode`` is shared with ``onex node``/``onex skill``. A
+        failed proof run of an unrelated node reaches this writer with no
+        terminal at all, and must still write nothing WITHOUT raising —
+        otherwise this fix converts an unrelated node's failure into a delegate
+        error.
+        """
+        _write_local_run_files(
+            receipt=self._summary_receipt_without_a_terminal(
+                workflow="/site-packages/omnimarket/nodes/node_gap_compute/contract.yaml"
+            ),
+            state_root=tmp_path,
+            prompt="proof",
+            task_type="summarization",
+            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+        )
+        assert not (tmp_path / "runs").exists()
+
+    def test_the_refusal_exits_non_zero_and_reaches_stderr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC3's other half, end to end through the real command.
+
+        The unit tests above prove the writer raises and names the field. This
+        proves what the CUSTOMER sees when it does: a non-zero exit and the
+        message on stderr, with the receipt still on stdout — ``receipt_mode``
+        catches a callback failure rather than letting it erase the answer
+        (OMN-18306), and the two guarantees have to hold together.
+        """
+        contract_path = tmp_path / "contract.yaml"
+        contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
+        monkeypatch.setattr(
+            cli_delegate, "_resolve_packaged_contract", lambda _name: contract_path
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+
+        def _unresolvable(**_kwargs: object) -> None:
+            raise DelegateTerminalUnresolvedError(
+                "delegate receipt carries no resolvable delegation terminal, so "
+                "the customer artifacts cannot be written -- terminal_payload: "
+                "absent; handler_result: absent"
+            )
+
+        monkeypatch.setattr(cli_delegate, "_write_local_run_files", _unresolvable)
+
+        result = CliRunner().invoke(
+            delegate_command,
+            [
+                "List the first five prime numbers",
+                "--state-root",
+                str(tmp_path / "state"),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code != 0, "no files written is not a successful run"
+        assert "terminal_payload: absent" in result.stderr
+        # The refusal is about the FILES; the answer still reaches the customer.
+        ModelSkillResult.model_validate(json.loads(result.stdout.strip()))
