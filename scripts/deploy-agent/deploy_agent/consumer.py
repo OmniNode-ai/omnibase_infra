@@ -110,6 +110,11 @@ RAW_PREVIEW_BYTES = 512
 # is past a record it never processed, without anyone reading the journal.
 QUARANTINE_COMMIT_METADATA = "onex-deploy-agent:quarantined-undecodable"
 
+#: Stamped on every offset `_process_message` commits, so `rpk group
+#: describe` shows that the commit was bounded to ONE record rather than to
+#: the consumer's fetch position (OMN-18613).
+PROCESSED_COMMIT_METADATA = "onex-deploy-agent:processed-one-record"
+
 # kafka-python requires an explicit leader epoch; -1 is its "unknown" sentinel.
 UNKNOWN_LEADER_EPOCH = -1
 
@@ -229,7 +234,7 @@ class DeployConsumer:
                 detail=payload.error,
                 raw_preview=payload.raw_preview,
             )
-            self.consumer.commit()
+            self._commit_through(msg)
             return None, "undecodable_payload"
 
         correlation_id_str = payload.get("correlation_id", "unknown")
@@ -240,7 +245,7 @@ class DeployConsumer:
                 "Rejecting command (correlation_id=%s): invalid_signature",
                 correlation_id_str,
             )
-            self.consumer.commit()
+            self._commit_through(msg)
             return None, "invalid_signature"
 
         # Step 3: Validate payload. The signature is transport metadata, not
@@ -261,7 +266,7 @@ class DeployConsumer:
                 detail=str(e),
                 raw_preview=None,
             )
-            self.consumer.commit()
+            self._commit_through(msg)
             return None, "invalid_payload"
 
         # Step 4: Lane fence (OMN-16939). The dev control bus carries both dev
@@ -275,19 +280,19 @@ class DeployConsumer:
             logger.warning(
                 "Rejecting command %s: lane_not_allowed (%s)", cmd.correlation_id, e
             )
-            self.consumer.commit()
+            self._commit_through(msg)
             return None, "lane_not_allowed"
 
         # Step 5: Check busy
         if self.job_store.has_active_job():
             logger.info("Rejecting command %s: agent busy", cmd.correlation_id)
-            self.consumer.commit()
+            self._commit_through(msg)
             return None, "busy"
 
         # Step 6: Check dedup
         if self.job_store.is_duplicate(cmd.correlation_id):
             logger.info("Rejecting command %s: duplicate", cmd.correlation_id)
-            self.consumer.commit()
+            self._commit_through(msg)
             return None, "duplicate"
 
         # Step 7: Self-update boundary (OMN-16442). This is the last point at
@@ -321,11 +326,42 @@ class DeployConsumer:
         )
 
         # Step 9: Commit offset
-        self.consumer.commit()
+        self._commit_through(msg)
 
         # Step 10: Return accepted command
         logger.info("Accepted command %s (scope=%s)", cmd.correlation_id, cmd.scope)
         return cmd, None
+
+    def _commit_through(self, msg: Any) -> None:
+        """Commit past THIS record and no further.
+
+        A bare ``self.consumer.commit()`` commits the consumer's POSITION for
+        every assigned partition. After a ``poll()`` that returned a batch the
+        position is past every record FETCHED, not past the one record
+        ``_process_message`` was handed -- ``poll_and_accept`` deliberately
+        processes the first record and returns, leaving the rest buffered. So a
+        bare commit silently marks records the agent has never looked at as
+        done, and they are gone the moment the client buffer is discarded, which
+        the ``post_terminal`` self-update re-exec does routinely.
+
+        Measured 2026-09-17 (OMN-18613): accepting offset 262 committed 264,
+        past a buffered 263 carrying the rebuild command for omnimarket#2622.
+        That command was never delivered again -- no job record, no acceptance
+        line, no rejection line and no quarantine record.
+
+        Advancing past a record the agent REFUSES stays deliberate: step 4's own
+        comment notes that re-reading a refused command forever "would stall
+        every command behind it". What is bounded here is the reach of that
+        advance, not its direction.
+        """
+        topic_partition = TopicPartition(msg.topic, msg.partition)
+        self.consumer.commit(
+            {
+                topic_partition: OffsetAndMetadata(
+                    msg.offset + 1, PROCESSED_COMMIT_METADATA, UNKNOWN_LEADER_EPOCH
+                )
+            }
+        )
 
     def _rewind_committed_offset_to(self, msg: Any) -> None:
         """Commit this message's own offset so it is re-read, not skipped.
