@@ -704,6 +704,30 @@ EXIT_ROW_SHAPE = 76
 ROLL_RECEIPT_SCHEMA = "ledger-roll/1"
 ROLL_RECEIPT_PREFIX = "ledger_lock: ROLL "
 ROLL_POINTER_MARKER = "<!-- ledger-roll:"
+# The line-shift banner (OMN-18620). A roll removes rows from the TOP of the
+# section, so every `<path>:<line>` citation written before it resolves to the
+# wrong row afterwards -- measured on 2026-09-17, where a roll moved the
+# operator's qwen hold ruling from :4311 to :3385 and a consent row from :4367
+# to :3441. Two gates resolve those citations by line number
+# (omniclaude credential_rotation_guard.py, omnibase_infra
+# apply_application_database_acl.py), so a roll can make a pending consent
+# unresolvable or, worse, point it at a different row.
+#
+# One banner is kept, not a chain: it is stripped and rewritten on each roll,
+# exactly like the pointer block above. It bridges the MOST RECENT roll, which
+# is the one a live citation is most likely to have been written before. The
+# durable fix for older citations is the timestamp citation form, because a row
+# timestamp travels with the row into the archive; the roll chain itself stays
+# recoverable from the archive headers.
+ROLL_SHIFT_BANNER_PREFIX = "ROLL:"
+# A SENTENCE ON THE EXISTING POINTER LINE, not a line of its own. A separate
+# line looked tidier and was wrong: `parse_section` counts the pointer block
+# toward the section's line budget, so one extra line changed the roll
+# arithmetic for every caller -- an existing cap test went from a roll that fit
+# in 10 lines to one refused at 11. The offset is roll metadata exactly like the
+# pointer it sits beside, and metadata must not consume the budget meant for
+# rows.
+ROLL_SHIFT_PLACEHOLDER = "@@ROLL_SHIFT@@"
 ROLL_POINTER_PROSE_PREFIX = "> Older rows live in"
 
 # A row starts where an append starts (OMN-17403).
@@ -933,7 +957,28 @@ def _pointer_block(
     return (
         f"{ROLL_POINTER_MARKER} {marker} -->\n"
         f"{ROLL_POINTER_PROSE_PREFIX} `{archive_ref}` -- {rolled} rows rolled at {rolled_at}. "
-        f"Rows older than {first_kept!r} are not in this file.\n\n"
+        f"Rows older than {first_kept!r} are not in this file. "
+        f"{ROLL_SHIFT_PLACEHOLDER}\n\n"
+    )
+
+
+def _first_line_of(text: str, needle: str) -> int:
+    """The 1-based line number where `needle` starts in `text`.
+
+    Used to measure the shift a roll introduces against the file's own bytes
+    rather than by counting what the roll intended to remove -- the same
+    readback posture OMN-17307 put on the reconcilers.
+    """
+    return text[: text.index(needle)].count("\n") + 1
+
+
+def _shift_sentence(first_kept_line_before: int, shift: int) -> str:
+    """The offset, as a sentence for the pointer line."""
+    return (
+        f"{ROLL_SHIFT_BANNER_PREFIX} lines above {first_kept_line_before} "
+        f"shifted by -{shift}, so a `<path>:<line>` citation written before this "
+        f"roll resolves at (line - {shift}); cite `<path>@<row timestamp>` "
+        "instead, which a roll cannot move."
     )
 
 
@@ -1003,12 +1048,22 @@ def plan_roll(
     preamble = _strip_pointer_block(parsed.preamble)
     if preamble and not preamble.endswith("\n"):
         preamble += "\n"
+    # The offset is measured off the FINAL text, with the sentence standing in
+    # as an inline placeholder. Inline is what makes this exact: substituting a
+    # placeholder inside an existing line cannot change any line number, so the
+    # figure recorded is true of the bytes finally written.
     live_text = (
         parsed.head
         + parsed.heading_line
         + preamble
         + _pointer_block(archive_path, len(rolled), rolled_at, first_kept, ledger)
         + "".join(entry.text for entry in kept)
+    )
+    anchor = kept[0].text
+    first_kept_line_before = _first_line_of(text, anchor)
+    shift = first_kept_line_before - _first_line_of(live_text, anchor)
+    live_text = live_text.replace(
+        ROLL_SHIFT_PLACEHOLDER, _shift_sentence(first_kept_line_before, shift), 1
     )
 
     archive_header = (
@@ -1047,13 +1102,87 @@ def plan_roll(
         "section_lines_after": after.line_count(),
         "section_bytes_before": bytes_before,
         "section_bytes_after": after.byte_count(),
+        "first_kept_line_before": first_kept_line_before,
+        "line_shift": shift,
     }
     return RollPlan(live_text, archive_text, archive_path, receipt, len(rolled))
 
 
-def apply_roll(ledger: Path, plan: RollPlan) -> None:
+def _scrubbed_git_env() -> dict[str, str]:
+    """`os.environ` without the git location variables (OMN-14891).
+
+    This tool runs from lane shells and from git hooks. Git exports GIT_DIR and
+    friends into every hook environment and they OVERRIDE `-C`, so an unscrubbed
+    `git add` here would stage into whatever worktree invoked the hook rather
+    than the one holding the ledger.
+    """
+    env = dict(os.environ)
+    for key in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ):
+        env.pop(key, None)
+    return env
+
+
+def stage_rolled_paths(ledger: Path, archive: Path) -> str:
+    """Stage the archive and the rewritten ledger. Returns "" or a reason.
+
+    THE ROLL MUST NOT LEAVE ROWS OUTSIDE GIT (OMN-18620). It writes the rolled
+    rows into a NEW archive file, and on 2026-09-17 that file was created
+    untracked: a lane then committed exactly the one path rule 19 tells it to
+    commit, the ledger, and produced `1 file changed, 8 insertions(+), 928
+    deletions(-)` -- a commit recording the removal of 928 rows with no record
+    of where they went. The rows existed only as an untracked file, one
+    clean-untracked away from being gone. Nothing in this tool's output said a
+    roll had happened.
+
+    Staging rather than committing, deliberately. Committing is `commit_lock.py`'s
+    job and it holds a DIFFERENT lock; taking a commit here would mean two tools
+    committing the same shared tree under two locks. Staging is enough to close
+    the hole: a staged file is inside git, so it cannot be lost to a clean, and
+    `commit_lock.py` refuses (exit 4) when the index carries paths the caller did
+    not list -- which turns the next commit into a prompt naming the archive
+    instead of a silent 928-row deletion.
+    """
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(ledger.parent), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=_scrubbed_git_env(),
+        )
+    except OSError as exc:
+        return f"git could not be run ({exc})"
+    if top.returncode != 0:
+        return f"{ledger.parent} is not inside a git work tree"
+    added = subprocess.run(
+        ["git", "-C", str(ledger.parent), "add", "--", str(archive), str(ledger)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_scrubbed_git_env(),
+    )
+    if added.returncode != 0:
+        return f"git add failed: {(added.stderr or added.stdout).strip()}"
+    return ""
+
+
+def apply_roll(ledger: Path, plan: RollPlan) -> str:
+    """Write the roll, stage both paths, and report what could not be staged.
+
+    The return value is a REASON, empty when both paths are staged. It is not
+    raised: the bytes are already on disk durably by then, so failing here would
+    leave the operator with a completed roll and a traceback instead of a
+    completed roll and an instruction.
+    """
     if plan.rolled == 0:
-        return
+        return ""
     plan.archive_path.parent.mkdir(parents=True, exist_ok=True)
     existing = ""
     if plan.archive_path.exists():
@@ -1063,6 +1192,7 @@ def apply_roll(ledger: Path, plan: RollPlan) -> None:
         existing += "\n"
     _write_text_durably(plan.archive_path, existing + plan.archive_text)
     _write_text_durably(ledger, plan.live_text)
+    return stage_rolled_paths(ledger, plan.archive_path)
 
 
 def _write_text_durably(path: Path, text: str) -> None:
@@ -1084,6 +1214,47 @@ def _write_text_durably(path: Path, text: str) -> None:
         os.fsync(directory)
     finally:
         os.close(directory)
+
+
+def announce_roll(plan: RollPlan, unstaged_reason: str) -> None:
+    """Say on stderr that a roll happened, and whether it is inside git.
+
+    A ROLL CANNOT BE SILENT (OMN-18620). Before this, a cap-crossing append
+    printed its ordinary output and a JSON receipt line; nothing said in words
+    that 926 lines had just left the file. The lane that hit it caught the loss
+    only by reading `git commit`'s stat afterwards and noticing that 928
+    deletions is an odd result for a four-row append.
+
+    A plan that rolled nothing says nothing. `plan_roll` returns such a plan
+    whenever the section is shorter than `--roll-keep-entries`, and its receipt
+    carries no offset fields to report.
+    """
+    if plan.rolled == 0:
+        return
+    print(
+        f"ledger_lock: ROLLED {plan.rolled} row(s) out of this section into "
+        f"{plan.archive_path} -- the live file lost "
+        f"{plan.receipt['line_shift']} lines, so every `<path>:<line>` citation "
+        f"above line {plan.receipt['first_kept_line_before']} has moved. The "
+        "pointer line at the top of the section records the offset.",
+        file=sys.stderr,
+    )
+    if unstaged_reason:
+        print(
+            "ledger_lock: WARNING -- the archive is NOT staged "
+            f"({unstaged_reason}). Commit it TOGETHER with the ledger, or the "
+            "rolled rows exist only as an untracked file and a commit of the "
+            "ledger alone records their deletion with no record of where they "
+            f"went:\n  {plan.archive_path}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "ledger_lock: the archive and the ledger are both STAGED. Commit "
+            "them together; commit_lock.py will refuse a commit that lists only "
+            "one of them.",
+            file=sys.stderr,
+        )
 
 
 def read_append_payload(args: argparse.Namespace) -> str | None:
@@ -3530,7 +3701,7 @@ def run_roll_section(args: argparse.Namespace) -> int:
         )
         print(f"{ROLL_RECEIPT_PREFIX}{json.dumps(plan.receipt, sort_keys=True)}")
         return EXIT_SECTION_CAP
-    apply_roll(args.ledger, plan)
+    announce_roll(plan, apply_roll(args.ledger, plan))
     print(f"{ROLL_RECEIPT_PREFIX}{json.dumps(plan.receipt, sort_keys=True)}")
     return 0
 
@@ -3620,7 +3791,7 @@ def enforce_section_caps(args: argparse.Namespace, payload: str) -> int | None:
             file=sys.stderr,
         )
         return EXIT_SECTION_CAP
-    apply_roll(args.ledger, plan)
+    announce_roll(plan, apply_roll(args.ledger, plan))
     print(f"{ROLL_RECEIPT_PREFIX}{json.dumps(plan.receipt, sort_keys=True)}")
     return None
 
