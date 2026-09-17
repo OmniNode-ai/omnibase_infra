@@ -268,6 +268,15 @@ def _derive_gateway_deploy_budget_from_this_checkout(
             build_floor_seconds=executor_mod.RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
             reload_margin_seconds=executor_mod.GATEWAY_RECREATE_MARGIN_SECONDS,
             reload_floor_seconds=executor_mod.GATEWAY_RECREATE_FLOOR_SECONDS,
+            # OMN-18615 second pass: like the image-build repoint above, this
+            # one re-implements the production call and so must carry EVERY
+            # argument it passes. Omitting the host term silently reverts the
+            # gateway ceiling to the machine-blind OMN-18072 derivation for
+            # every test, while still reporting green. That is the SECOND time
+            # this exact harness shape hid the defect -- the first was the
+            # image-build repoint -- which is why both are now pinned by
+            # live-path tests rather than by reading the fixture.
+            host=executor_mod.probe_host_conditions(),
         )
 
     monkeypatch.setattr(executor_mod, "gateway_deploy_budget", _budget)

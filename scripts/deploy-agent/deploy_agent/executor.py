@@ -1323,6 +1323,7 @@ def gateway_deploy_budget() -> ModelGatewayDeployBudget:
         build_floor_seconds=RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
         reload_margin_seconds=GATEWAY_RECREATE_MARGIN_SECONDS,
         reload_floor_seconds=GATEWAY_RECREATE_FLOOR_SECONDS,
+        host=probe_host_conditions(),
     )
 
 
