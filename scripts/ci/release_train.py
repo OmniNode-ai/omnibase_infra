@@ -763,6 +763,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--out", type=Path, default=None)
 
+    # The workflow needs the declared set before it can clone anything, and it
+    # needs it from THIS module so the listing and the decision cannot disagree.
+    # It is a subcommand rather than an inline importlib heredoc in the YAML
+    # because that heredoc was a second, subtly different loader for a module
+    # shipped right beside it: it omitted `sys.modules[name] = module`, so
+    # `@dataclass` resolved its defining module to None and the first dispatched
+    # run of the train (35247876101) died at import before deciding anything.
+    # A CLI surface is exercised by the same tests as the rest of the module.
+    declared = sub.add_parser(
+        "declared", help="print every declared repo name, one per line"
+    )
+    declared.add_argument("--policy", type=Path, default=DEFAULT_POLICY_PATH)
+
     changelog = sub.add_parser("changelog", help="render one release changelog block")
     changelog.add_argument("--policy", type=Path, default=DEFAULT_POLICY_PATH)
     changelog.add_argument("--repo", required=True)
@@ -789,6 +802,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ReleaseTrainConfigError as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 2
+
+    if args.command == "declared":
+        # Sorted, so the clone order is stable run to run and a diff of two
+        # runs' logs is about what changed rather than about dict ordering.
+        for name in sorted(policies):
+            print(name)
+        return 0
 
     if args.command == "changelog":
         try:

@@ -102,18 +102,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/train-clones"
-          declared=$(python3 - <<'PY'
-          import pathlib, sys
-          sys.path.insert(0, "scripts/ci")
-          import importlib.util
-          spec = importlib.util.spec_from_file_location(
-              "release_train", "scripts/ci/release_train.py"
-          )
-          mod = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(mod)
-          print("\n".join(sorted(mod.load_policy(mod.DEFAULT_POLICY_PATH))))
-          PY
-          )
+          # Through the module's own CLI, never a second loader for it. An
+          # inline importlib heredoc here omitted the sys.modules registration
+          # and died at import in run 35247876101, before the train decided
+          # anything; the tests never saw it because they load the module
+          # correctly themselves.
+          declared=$(python3 scripts/ci/release_train.py declared \
+            --policy config/release_train_policy.yaml)
           if [ -n "${SELECTED}" ]; then
             wanted=$(printf '%s' "${SELECTED}" | tr ',' '\n' | sed 's/[[:space:]]//g')
           else

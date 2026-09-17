@@ -677,3 +677,77 @@ class TestReleaseBookkeepingIsNotUnreleasedWork:
         assert not rt.is_release_bookkeeping_subject(
             "docs(OMN-18010): describe how the release train decides to cut (#1)"
         )
+
+
+# --------------------------------------------------------------------------- #
+# The workflow must not hand-roll a second loader for the module it ships with. #
+# --------------------------------------------------------------------------- #
+class TestTheDeclaredRepoListingComesFromTheCLI:
+    """Run 35247876101 is why this class exists.
+
+    The first dispatched run of the train died in its very first step. The
+    workflow listed the declared repos by loading ``release_train.py`` through
+    an inline ``importlib`` heredoc, and that copy omitted the
+    ``sys.modules[name] = module`` registration this test file's own loader has.
+    Without it ``@dataclass`` raises ``AttributeError: 'NoneType' object has no
+    attribute '__dict__'`` at import, because ``dataclasses`` resolves the
+    defining module out of ``sys.modules`` and finds nothing there.
+
+    The lesson is not "add the missing line". Two loaders for one module is the
+    defect; the tests passed the whole time precisely because the loader under
+    test was the correct one and the shipped one was never exercised. So the
+    module grows a subcommand, the workflow calls it like any other CLI, and
+    the second loader stops existing.
+    """
+
+    WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-train-nightly.yml"
+
+    def test_the_declared_subcommand_lists_every_declared_repo(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = rt.main(["declared", "--policy", str(_POLICY)])
+        assert code == 0
+        listed = buffer.getvalue().split()
+        assert listed == sorted(listed), "listed in a stable order, not dict order"
+        assert set(listed) == set(rt.load_policy(_POLICY)), (
+            "the subcommand and the policy loader must agree on the declared set; "
+            "a listing that drifts from the policy silently drops a repo from "
+            "every nightly decision"
+        )
+
+    def test_the_subcommand_runs_as_a_subprocess_the_way_the_workflow_calls_it(
+        self,
+    ) -> None:
+        """The reproduction of run 35247876101, at the boundary it failed on.
+
+        Invoked as a real child process, so the module is imported exactly as
+        the runner imports it. The in-process test above cannot catch the
+        original defect at all: by the time it runs, the module is already in
+        ``sys.modules`` because this file put it there.
+        """
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, str(_MODULE), "declared", "--policy", str(_POLICY)],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=_REPO_ROOT,
+        )
+        assert result.returncode == 0, result.stderr
+        assert set(result.stdout.split()) == set(rt.load_policy(_POLICY))
+
+    def test_the_workflow_does_not_hand_roll_a_module_loader(self) -> None:
+        body = self.WORKFLOW.read_text(encoding="utf-8")
+        assert "spec_from_file_location" not in body, (
+            "the workflow hand-rolls a loader for a module it ships beside; that "
+            "second copy is what died in run 35247876101. Call the CLI instead"
+        )
+        assert "release_train.py declared" in body, (
+            "the workflow must list the declared repos through the module's own "
+            "subcommand, so the listing is exercised by the same tests as the "
+            "rest of the module"
+        )
