@@ -50,6 +50,7 @@ that RELEASES; so the vocabulary earns its way in, and the veto wins ties.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -221,12 +222,18 @@ class _FakeLinear:
 def _handler(
     skill_result: dict[str, Any], linear: _FakeLinear
 ) -> HandlerEvidenceAutocloseSweep:
-    async def fake_gh(args: list[str], timeout: float):
+    async def fake_gh(args: list[str], timeout: float) -> tuple[object | None, str]:
         path = args[2]
         if "/files" in path:
             return [{"filename": f"contracts/{_TICKET}.yaml"}], ""
         page = int(path.rsplit("page=", 1)[1])
-        recent = "2026-09-10T16:00:00Z"
+        # OMN-18555. DERIVED, never pinned -- same reason as the identical fake
+        # in test_omn_18125_coverage_corpus.py. This literal was twelve hours
+        # from expiring out of the 168h backfill window when that one already
+        # had, which would have reddened `dev` a second time the same day.
+        recent = (datetime.now(tz=UTC) - timedelta(hours=1)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         return (
             (
                 [
@@ -244,7 +251,9 @@ def _handler(
             else ([], "")
         )
 
-    async def fake_dod_verify(ticket_id: str, cwd: str, timeout: float):
+    async def fake_dod_verify(
+        ticket_id: str, cwd: str, timeout: float
+    ) -> tuple[dict[str, object] | None, int, str]:
         return skill_result, 0, ""
 
     return HandlerEvidenceAutocloseSweep(
