@@ -318,3 +318,134 @@ def test_the_workflow_fails_rather_than_opening_a_pr_on_a_bad_collection() -> No
     body = _WORKFLOW.read_text(encoding="utf-8")
     assert "$rc -ne 0 && $rc -ne 30" in body
     assert "LANE-CENSUS-UNCOLLECTABLE" in body
+
+
+# --------------------------------------------------------------------------
+# The writer-App PR path. The leg's PR-opening half cannot be exercised
+# without the `host-201` runner, so these pin the properties a reviewer would
+# otherwise have to take on trust — and the end-to-end below drives the real
+# decision CLI from a FIXTURE census rather than the lab host.
+# --------------------------------------------------------------------------
+
+
+def test_the_pr_is_authored_by_the_writer_app_not_the_default_token() -> None:
+    """A default-GITHUB_TOKEN push does not trigger downstream CI.
+
+    The bump PR is worthless if the staleness gate never runs on it, so the leg
+    must mint and use an App installation token. `omninode_infra` kept a PAT for
+    years on the mistaken belief that App pushes were also suppressed; the
+    correction (OMN-18273) is that an App token DOES trigger CI provided the
+    checkout does not leave a `GITHUB_TOKEN` extraheader overriding it. Here
+    that is satisfied by checking out WITH the app token rather than clearing
+    credentials.
+    """
+    body = _WORKFLOW.read_text(encoding="utf-8")
+    assert "actions/create-github-app-token" in body
+    assert "secrets.ONEXBOT_OCC_APP_ID" in body
+    assert "secrets.ONEXBOT_OCC_PRIVATE_KEY" in body
+    assert "token: ${{ steps.app-token.outputs.token }}" in body, (
+        "the checkout must carry the app token, or the push authenticates as "
+        "GITHUB_TOKEN and the bump PR gets no CI"
+    )
+    assert "secrets.GITHUB_TOKEN" not in body, (
+        "no fallback to GITHUB_TOKEN: a silent substitution when the mint fails "
+        "is exactly the confound that made the PAT look necessary (OMN-18273)"
+    )
+
+
+def test_the_commit_is_attributed_to_the_app_it_authenticates_as() -> None:
+    """Commit identity must match the pushing identity (OMN-18273)."""
+    body = _WORKFLOW.read_text(encoding="utf-8")
+    assert 'git config user.name "onexbot-occ-writer[bot]"' in body
+    assert "onexbot-occ-writer[bot]@users.noreply.github.com" in body
+
+
+def test_the_pr_title_clears_the_ticket_gate_and_arms_auto_merge() -> None:
+    """A bot PR nobody merges is a queue of stale branches.
+
+    `chore(deps,` is the prefix the pr-title ticket gate exempts, matching the
+    sibling-lock-refresh and publish-downstream-pin-bump conventions; without it
+    every bump PR fails `pr-title / check-title` on a bot-authored title. And
+    the PR must arm auto-merge, or the leg replaces a hand-opened PR with a
+    hand-merged one and has removed half a step.
+    """
+    body = _WORKFLOW.read_text(encoding="utf-8")
+    assert (
+        '--title "chore(deps, OMN-13034): refresh the lane census snapshot [bot]"'
+        in body
+    )
+    assert "gh pr merge" in body and "--squash --auto" in body
+
+
+def test_the_leg_writes_only_the_census_file() -> None:
+    """Blast radius. A refresh PR that touched anything else would be unreviewable."""
+    body = _WORKFLOW.read_text(encoding="utf-8")
+    added = [
+        line.strip()
+        for line in body.splitlines()
+        if line.strip().startswith("git add ")
+    ]
+    assert added == ["git add deploy/lane-census/census-snapshot.json"], (
+        f"the leg stages something other than the census: {added}"
+    )
+
+
+def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
+    tmp_path: Path,
+) -> None:
+    """Drive the real decision CLI over the REAL committed census and a fixture.
+
+    This is the collect-decide-report chain the workflow runs, with the collect
+    step replaced by a fixture so it needs no docker socket, no runner and no
+    access to the lab host. Both directions are asserted from the same pair of
+    files, which is what makes it a test of the RULE and not of the clock:
+
+      * `--refresh-after-days 0` forces the aging branch  -> refresh, PR opens
+      * the default 3-day threshold on a census minutes old -> no-op, no PR
+
+    The second is the one that matters operationally. It is also exactly how the
+    leg is meant to be dispatched for a live proof once the host is reachable:
+    `workflow_dispatch` with `refresh_after_days: 0`.
+    """
+    committed_path = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
+    committed = json.loads(committed_path.read_text(encoding="utf-8"))
+
+    # A fixture candidate: same fleet (same alert_key), collected "now".
+    candidate = dict(committed)
+    candidate["emitted_at"] = datetime.now(UTC).isoformat()
+    candidate_path = tmp_path / "census-candidate.json"
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    def _decide(days: str) -> dict[str, Any]:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(_MODULE),
+                "--committed",
+                str(committed_path),
+                "--candidate",
+                str(candidate_path),
+                "--refresh-after-days",
+                days,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        decision: dict[str, Any] = json.loads(result.stdout)
+        return decision
+
+    forced = _decide("0")
+    assert forced["refresh"] is True, (
+        "a zero-day threshold must force the aging branch; this is the dispatch "
+        "shape used to prove the leg end to end"
+    )
+    assert forced["reason"] == REASON_AGING
+
+    steady = _decide("3")
+    assert steady["refresh"] is False, (
+        "the committed census is recent and the fixture describes the same "
+        f"fleet, so the leg must stay quiet; got {steady}"
+    )
+    assert steady["reason"] == REASON_FRESH_AND_UNCHANGED

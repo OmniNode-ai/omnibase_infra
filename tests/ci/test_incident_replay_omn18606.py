@@ -152,26 +152,37 @@ def test_the_repo_dropin_now_carries_an_output_destination() -> None:
     )
 
 
-def test_the_real_collector_accepts_the_fixed_dropins_argv() -> None:
+def test_the_real_collector_accepts_the_fixed_dropins_argv(tmp_path: Path) -> None:
     """Drive the REAL script with the fixed drop-in's flags and prove it parses.
 
     The pre-fix collector answered `Unknown argument: --snapshot` with exit 2 —
     so the one argv that could have made the hourly pass write a census was
-    rejected by the script itself. Exit 2 is the argument-parse refusal; 3
-    (docker absent in the test environment) and 4 (inventory unobservable) are
-    both fine here, because this asserts the argument contract and not the
-    collection.
+    rejected by the script itself. That refusal happens in the argument loop,
+    which runs before the script touches anything, so this discriminates without
+    any collection at all.
+
+    HERMETIC BY CONSTRUCTION. `PATH` is an empty directory, so the script cannot
+    reach `docker` (or anything else) and dies on its first external command.
+    That is deliberate: the trusted CI pool is self-hosted ON the lab host, so a
+    test that let this collector run would inventory the real lab daemon from a
+    unit test — slow, and an inventory of production-adjacent lanes is not a
+    unit test's business. Exit 2 is the parse refusal and is the only outcome
+    this test rejects; any other exit means the argv was accepted.
     """
     argv = _exec_start_argv(_REPO_DROPIN.read_text(encoding="utf-8"))
     flags = list(argv[argv.index("--snapshot") :])
-    flags[flags.index("--snapshot") + 1] = "/dev/null"
+    flags[flags.index("--snapshot") + 1] = str(tmp_path / "unreachable.json")
+
+    empty_path = tmp_path / "empty-bin"
+    empty_path.mkdir()
 
     result = subprocess.run(
-        ["bash", str(_CENSUS_SH), *flags],
+        ["/bin/bash", str(_CENSUS_SH), *flags],
         capture_output=True,
         text=True,
         check=False,
         cwd=_REPO,
+        env={"PATH": str(empty_path), "HOME": str(tmp_path)},
     )
 
     assert result.returncode != 2, (
