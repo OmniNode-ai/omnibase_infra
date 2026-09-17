@@ -104,6 +104,17 @@ set -uo pipefail
 readonly EXIT_OK=0
 readonly EXIT_FAILED=2
 readonly EXIT_INDETERMINATE=3
+# A DECLINE is not a verdict about the host (OMN-18608). This run reconciled
+# nothing because a live peer holds the lock, so it proved nothing -- and the
+# one thing it must not do is let a caller record "in sync" on its behalf. That
+# is exactly what happened for 35 minutes on 2026-09-17: the tick mapped exit 0
+# to `verdict="in sync"` and wrote it on runs that did no work at all.
+#
+# Distinct from EXIT_INDETERMINATE deliberately. Indeterminate means the
+# question could not be answered and something may be wrong; a decline means a
+# PEER IS ANSWERING IT RIGHT NOW, which is the normal outcome when several hook
+# ticks fire at once and must not raise an alarm.
+readonly EXIT_DECLINED=4
 
 MODE="repair"
 VERBOSE=0
@@ -340,7 +351,9 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     say "  held by pid $(lock_holder_field pid || printf '<unrecorded>') on" \
       "$(lock_holder_field host || printf '<unrecorded>') since" \
       "$(lock_holder_field started_at || printf '<unrecorded>')"
-    exit "$EXIT_OK"
+    say "  this run reconciled NOTHING; its exit status says so rather than"
+    say "  letting a caller record the host as in sync on its behalf."
+    exit "$EXIT_DECLINED"
   fi
   say "RECLAIMING a stale reconcile-host lock: $reclaim"
   rm -rf "$LOCK_DIR"
@@ -348,7 +361,7 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   # ordinary outcome, not an error.
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     say "another reconcile-host took the lock during the reclaim; nothing to do."
-    exit "$EXIT_OK"
+    exit "$EXIT_DECLINED"
   fi
 fi
 write_lock_holder
