@@ -77,6 +77,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from deploy_agent.build_budget import ModelBuildBudget, derive_image_build_budget
+from deploy_agent.host_conditions import ModelHostConditions
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +166,7 @@ def derive_gateway_deploy_budget(
     build_floor_seconds: int,
     reload_margin_seconds: int,
     reload_floor_seconds: int,
+    host: ModelHostConditions | None = None,
 ) -> ModelGatewayDeployBudget:
     """Derive the ``scripts/deploy-gateway.sh --execute`` ceiling.
 
@@ -175,6 +177,21 @@ def derive_gateway_deploy_budget(
     half needs -- the defect the flat floor-plus-constant it replaces could
     not express.
 
+    OMN-18615, SECOND PASS. ``host`` is threaded into the BUILD half and
+    deliberately not into the recreate half. The build is work this ceiling
+    actually bounds, and it slows down on a contended or cache-pruned machine
+    exactly like the runtime build does. The recreate half is the unit's OWN
+    ``ExecReload --wait-timeout``, which ``systemctl reload`` enforces itself --
+    inflating it here would describe a bound nothing honours.
+
+    Why this argument exists at all: the first pass wired the machine terms at
+    ``executor.runtime_image_build_budget`` and MISSED this caller, so the
+    gateway deploy kept deriving a ceiling as though the host were idle. On
+    2026-09-17 that killed job ``a0b496ed`` at 1180s on a host whose load1 had
+    peaked at 73.73. The kill message said so in its own words -- "no host
+    conditions were read (model terms only ... blind to the machine)" -- which
+    is the clause the first pass added for precisely this case.
+
     Raises ``GatewayBudgetError`` when either half's model cannot be read.
     """
     build = derive_image_build_budget(
@@ -183,6 +200,7 @@ def derive_gateway_deploy_budget(
         per_step_seconds=per_step_seconds,
         per_image_seconds=per_image_seconds,
         floor_seconds=build_floor_seconds,
+        host=host,
     )
     reload_wait_timeout = read_exec_reload_wait_timeout(service_unit_path)
     recreate_seconds = max(
