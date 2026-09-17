@@ -1090,38 +1090,34 @@ def test_no_environment_value_turns_the_interpreter_requirement_off() -> None:
         )
 
 
-def test_an_interpreter_reached_through_symlinks_compares_equal(
+def test_a_brew_style_interpreter_and_its_venv_compare_equal(
     ws: _Workspace,
 ) -> None:
-    """The three spellings of one brew interpreter must read as the same one.
+    """The three spellings of one brew installation must read as the same one.
 
-    A real host offers `/opt/homebrew/bin/python3.13` (a symlink), records
-    `/opt/homebrew/opt/python@3.13/bin` in the venv it builds, and resolves both
-    to `/opt/homebrew/Cellar/python@3.13/<version>/bin`. Comparing the
-    interpreter's PARENT DIRECTORY instead of the interpreter itself refused a
-    venv that had just been rebuilt correctly on the live host — `/opt/homebrew/
-    bin` is a real directory of symlinks, so resolving it resolves to itself.
-
-    This models that shape exactly: a `bin` directory that really exists,
-    holding a symlink into a versioned directory, and a venv recording the
-    versioned spelling.
+    A real host offers ``<prefix>/bin/python3.13`` (a symlink), records
+    ``<prefix>/opt/python@3.13/bin`` in the venv it builds, and resolves both
+    into ``<prefix>/Cellar/python@3.13/<version>/bin``. Two earlier attempts at
+    this predicate compared directories and both refused a venv that was
+    correct; see ``dispatch_interpreter_ok``'s own comment for the measurements.
     """
-    cellar_bin = ws.root / "cellar" / "python@3.13" / "3.13.3" / "bin"
+    prefix = ws.root / "brewprefix"
+    cellar_bin = prefix / "Cellar" / "python@3.13" / "3.13.3" / "bin"
     cellar_bin.mkdir(parents=True)
     real_python = cellar_bin / "python3.13"
     real_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     real_python.chmod(0o755)
 
-    # A real directory holding a symlink to it — the `/opt/homebrew/bin` shape.
-    link_bin = ws.root / "linkbin"
-    link_bin.mkdir()
-    (link_bin / "python3.13").symlink_to(real_python)
+    (prefix / "bin").mkdir()
+    (prefix / "bin" / "python3.13").symlink_to(real_python)
+    (prefix / "opt").mkdir()
+    (prefix / "opt" / "python@3.13").symlink_to(cellar_bin.parent)
 
-    # The venv records the versioned directory, as a real build does.
-    ws.set_dispatch_interpreter(cellar_bin)
+    # The venv records the `opt` spelling, as a real brew-built venv does.
+    ws.set_dispatch_interpreter(prefix / "opt" / "python@3.13" / "bin")
 
     env = ws.env()
-    env["ONEX_DISPATCH_BASE_PYTHON"] = str(link_bin / "python3.13")
+    env["ONEX_DISPATCH_BASE_PYTHON"] = str(prefix / "bin" / "python3.13")
     result = subprocess.run(
         ["bash", str(_SCRIPT), "--check"],
         capture_output=True,
@@ -1130,19 +1126,61 @@ def test_an_interpreter_reached_through_symlinks_compares_equal(
         check=False,
     )
     assert "wrong interpreter" not in result.stdout, (
-        "two spellings of one interpreter compared unequal, so a correctly "
+        "three spellings of one installation compared unequal, so a correctly "
         f"built venv reads as drift: {result.stdout!r}"
+    )
+
+
+def test_an_interpreter_resolving_into_a_framework_bundle_compares_equal(
+    ws: _Workspace,
+) -> None:
+    """The exact shape that broke the second attempt, pinned.
+
+    Measured on a real host: brew's ``python3.13`` resolves through the Cellar
+    and on into ``Frameworks/Python.framework/Versions/3.13/bin``, while the
+    venv records the Cellar's own ``bin``. Fully resolving the file therefore
+    compared two different real directories and refused a correct venv.
+    """
+    prefix = ws.root / "fw-prefix"
+    cellar = prefix / "Cellar" / "python@3.13" / "3.13.3"
+    framework_bin = (
+        cellar / "Frameworks" / "Python.framework" / "Versions" / "3.13" / "bin"
+    )
+    framework_bin.mkdir(parents=True)
+    real_python = framework_bin / "python3.13"
+    real_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    real_python.chmod(0o755)
+
+    (cellar / "bin").mkdir(parents=True)
+    (cellar / "bin" / "python3.13").symlink_to(real_python)
+    (prefix / "bin").mkdir()
+    (prefix / "bin" / "python3.13").symlink_to(cellar / "bin" / "python3.13")
+
+    ws.set_dispatch_interpreter(cellar / "bin")
+
+    env = ws.env()
+    env["ONEX_DISPATCH_BASE_PYTHON"] = str(prefix / "bin" / "python3.13")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "--check"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert "wrong interpreter" not in result.stdout, (
+        "the framework-bundle shape still reads as drift; this is the exact "
+        f"measurement the second attempt failed on: {result.stdout!r}"
     )
 
 
 def test_a_genuinely_different_interpreter_still_compares_unequal(
     ws: _Workspace,
 ) -> None:
-    """Positive control for the symlink resolution above.
+    """Positive control.
 
-    Without it the previous test would pass against a comparison that had been
-    loosened until it accepted anything — which would silently retire the whole
-    rule-11 check rather than fix it.
+    Without it the two tests above would pass against a predicate loosened
+    until it accepted anything — which would silently retire the rule-11 check
+    rather than fix it.
     """
     other = ws.root / "some-other-python" / "bin"
     other.mkdir(parents=True)
@@ -1156,4 +1194,27 @@ def test_a_genuinely_different_interpreter_still_compares_unequal(
         check=False,
     )
     assert result.returncode == _EXIT_DRIFT
+    assert "wrong interpreter" in result.stdout
+
+
+def test_a_sibling_prefix_is_not_accepted_as_containment(ws: _Workspace) -> None:
+    """Containment is on path SEGMENTS, not on string prefix.
+
+    Without the trailing separator, an installation at ``/opt/homebrew-other``
+    would satisfy a requirement rooted at ``/opt/homebrew``.
+    """
+    sibling = ws.root / "fakebrew-other" / "bin"
+    sibling.mkdir(parents=True)
+    ws.set_dispatch_interpreter(sibling)
+
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "--check"],
+        capture_output=True,
+        text=True,
+        env=ws.env(),
+        check=False,
+    )
+    assert result.returncode == _EXIT_DRIFT, (
+        f"a sibling prefix was accepted as containment; output: {result.stdout!r}"
+    )
     assert "wrong interpreter" in result.stdout
