@@ -88,6 +88,33 @@ MOVED_JOBS = (
     ("dlq-depth-monitor.yml", "dlq-depth-monitor", "DLQ Depth Monitor (read-only)"),
 )
 
+# Jobs that were BORN on the verify label rather than moved onto it. Kept in a
+# separate tuple on purpose: MOVED_JOBS above is the record of two specific
+# decisions (OMN-18408 and its OMN-18602 follow-up), and folding a new job into
+# it would quietly rewrite what those decisions covered.
+#
+# The bar for landing here is the same one OMN-18602 settled the label's meaning
+# on: the job READS the .201 lane and never mutates it. `refresh` collects a
+# docker inventory through the socket the runner already mounts and opens a pull
+# request; the only thing it writes is a branch in this repository.
+#
+# It needs the HOST label for the same reason all ten above do, and more sharply:
+# a census collected against the wrong daemon is not an outage, it is a WRONG
+# ANSWER committed to the repository as the documented lane topology. The
+# `omnibase-ci` pool cannot be used for it at all -- 60 of its runners carry no
+# host label (read live from the org runner census on 2026-09-17), so placement
+# there is unpinned by construction.
+NEW_VERIFY_JOBS = (
+    (
+        "lane-census-refresh.yml",
+        "refresh",
+        "Collect the lab census and open a bump PR when it has moved",
+    ),
+)
+
+# Every job legally on the label, however it got there.
+VERIFY_JOBS = MOVED_JOBS + NEW_VERIFY_JOBS
+
 # Deliberately NOT moved, and after OMN-18602 this set is exactly the jobs that
 # MUTATE the lane. That is the whole of what `omnibase-deploy` now means.
 #
@@ -124,7 +151,7 @@ def _runs_on(workflow: str, job_key: str) -> Any:
     return job["runs-on"]
 
 
-@pytest.mark.parametrize(("workflow", "job_key", "job_name"), MOVED_JOBS)
+@pytest.mark.parametrize(("workflow", "job_key", "job_name"), VERIFY_JOBS)
 def test_moved_job_runs_on_the_verify_label(
     workflow: str, job_key: str, job_name: str
 ) -> None:
@@ -163,7 +190,7 @@ def test_no_other_job_in_the_repo_uses_the_verify_label() -> None:
             if isinstance(job, dict) and job.get("runs-on") == VERIFY_LABEL:
                 found.add((path.name, job_key))
 
-    assert found == {(wf, key) for wf, key, _ in MOVED_JOBS}
+    assert found == {(wf, key) for wf, key, _ in VERIFY_JOBS}
 
 
 def test_every_moved_job_is_host_scoped_not_merely_class_scoped() -> None:
@@ -177,7 +204,7 @@ def test_every_moved_job_is_host_scoped_not_merely_class_scoped() -> None:
     cannot observe the .201 lane at all, which surfaces as a lane outage rather
     than as a routing mistake. That is the reading this test exists to prevent.
     """
-    for workflow, job_key, _ in MOVED_JOBS:
+    for workflow, job_key, _ in VERIFY_JOBS:
         runs_on = _runs_on(workflow, job_key)
         assert HOST_LABEL in runs_on, (
             f"{workflow}:{job_key} is scoped to the verify CLASS but not to a "
