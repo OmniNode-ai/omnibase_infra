@@ -1,0 +1,83 @@
+---
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# dependency-cascade-dispatch.yml (OMN-18596)
+#
+# WHY THIS FILE EXISTS AS A SEPARATE WORKFLOW
+#   dependency-cascade.yml is a reusable workflow: it declares
+#   `on: workflow_call: secrets:`. A workflow carrying that declaration has its
+#   `secrets` context restricted to the DECLARED names under every trigger, so
+#   an org-level secret name resolves EMPTY inside it even on a manual run.
+#
+#   That made its own `workflow_dispatch` trigger unusable, and unusable in the
+#   worst way: run 35260585795 dispatched it against the released v0.38.30
+#   while all three fan-out targets were behind it, and reported four green
+#   jobs having opened, updated and examined zero pull requests. Nothing about
+#   the result said so.
+#
+#   The constraint is a property of the `workflow_call` declaration, not of the
+#   entitlement and not of the expression. The repository IS entitled to the
+#   values (the org secret lists omnibase_infra among its selected
+#   repositories), and release-train-nightly.yml reads the same org-level names
+#   on the same trigger in this same repository and mints successfully -- it
+#   simply declares no `workflow_call`. That pair is the control.
+#
+#   So the manual trigger lives HERE, in a workflow that declares no
+#   `workflow_call` and therefore has a full `secrets` context, and calls the
+#   reusable one passing the values explicitly -- exactly the shape release.yml
+#   already uses for the automatic path. The reusable workflow keeps a single
+#   way of receiving them and needs no knowledge of who called it.
+#
+# WHAT THIS IS FOR
+#   Re-running a cascade that failed, or catching a downstream repo up without
+#   waiting for the next release of the foundation package. It opens pull
+#   requests and nothing else: it tags nothing, publishes nothing, merges
+#   nothing and deploys nothing, and every PR it opens lands under exactly the
+#   gates that apply to any other PR in that repository.
+
+name: Dependency Cascade (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: >-
+          Foundation package whose downstream pins to advance. One of
+          omnibase_core, omnibase_spi, omnibase_infra -- the reusable
+          workflow refuses any other name rather than fanning out to a guess.
+        required: true
+        type: choice
+        options:
+          - omnibase_core
+          - omnibase_spi
+          - omnibase_infra
+      version:
+        description: 'Released version to pin to, tagged or bare (e.g. v0.38.30)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # One manual cascade per package at a time. Two concurrent runs for the same
+  # package would race on the same bump branch in the same downstream repos.
+  group: dependency-cascade-dispatch-${{ inputs.package }}
+  cancel-in-progress: false
+
+jobs:
+  cascade:
+    name: Cascade
+    uses: ./.github/workflows/dependency-cascade.yml
+    with:
+      package: ${{ inputs.package }}
+      version: ${{ inputs.version }}
+    secrets:
+      # Read here and passed through, because only a workflow WITHOUT a
+      # workflow_call declaration can resolve these. There is deliberately no
+      # expression substituting the default workflow token: a push authored by
+      # it has its downstream workflows suppressed, which is the confound
+      # OMN-18273 corrected.
+      onexbot-occ-app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+      onexbot-occ-private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}

@@ -128,6 +128,33 @@ def _job_run_text(workflow: str, job_id: str) -> str:
     return "\n".join(chunks)
 
 
+def _declares_workflow_call_secrets(workflow: str) -> bool:
+    """True when this workflow is REUSABLE and declares its own secret inputs."""
+    data = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))
+    triggers = data.get("on", data.get(True, {})) or {}
+    call = triggers.get("workflow_call") or {}
+    return bool(call.get("secrets"))
+
+
+def _in_repo_callers(workflow: str) -> dict[str, dict[str, str]]:
+    """Every workflow in this repo that `uses:` ``workflow``, and what it passes.
+
+    Keyed by caller file name; the value is that caller's ``secrets:`` mapping.
+    A caller that passes nothing maps to an empty dict, which fails the
+    assertions above rather than being skipped.
+    """
+    callers: dict[str, dict[str, str]] = {}
+    for path in _workflow_files():
+        if path.name == workflow:
+            continue
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job in (data.get("jobs") or {}).values():
+            uses = str(job.get("uses", ""))
+            if uses.endswith((f"/{workflow}", workflow)):
+                callers[path.name] = job.get("secrets") or {}
+    return callers
+
+
 def test_every_git_push_workflow_is_classified() -> None:
     """A new automated pusher cannot appear without a classification.
 
@@ -166,9 +193,44 @@ def test_branch_pusher_mints_the_app_token_fail_closed(
         "push-driven CI, and it attributes the commit to github-actions[bot] rather "
         "than to a bot this org owns."
     )
-    assert "ONEXBOT_OCC_APP_ID" in text and "ONEXBOT_OCC_PRIVATE_KEY" in text, (
-        f"{workflow}:{job_id} must mint from the onexbot-occ-writer org secrets."
-    )
+    if _declares_workflow_call_secrets(workflow):
+        # A REUSABLE pusher cannot name the org-level values in its own job
+        # text, and must not: a workflow declaring `workflow_call: secrets:`
+        # has its secrets context restricted to the DECLARED names under every
+        # trigger, so an org-level name there resolves EMPTY. Writing one in
+        # anyway to satisfy a text match would be dead code in a credential
+        # expression -- run 35267246993 proved that shape mints nothing while
+        # reading like coverage (OMN-18596).
+        #
+        # The requirement is unchanged, it just moves one level out: the job
+        # mints from its declared inputs, and EVERY in-repo caller passes the
+        # org-level values into them. Both halves are asserted, so a caller
+        # that quietly passed something else is still caught.
+        assert "secrets.onexbot-occ-app-id" in text, (
+            f"{workflow}:{job_id} is a reusable pusher and must mint from its "
+            "declared onexbot-occ-app-id secret input."
+        )
+        callers = _in_repo_callers(workflow)
+        assert callers, (
+            f"{workflow} is a reusable pusher that no workflow in this repo "
+            "calls; an uncallable pusher cannot be shown to mint from the "
+            "onexbot-occ-writer App at all."
+        )
+        for caller, passed in callers.items():
+            assert "ONEXBOT_OCC_APP_ID" in passed.get("onexbot-occ-app-id", ""), (
+                f"{caller} calls {workflow} without passing "
+                "ONEXBOT_OCC_APP_ID; that leg mints nothing."
+            )
+            assert "ONEXBOT_OCC_PRIVATE_KEY" in passed.get(
+                "onexbot-occ-private-key", ""
+            ), (
+                f"{caller} calls {workflow} without passing "
+                "ONEXBOT_OCC_PRIVATE_KEY; that leg mints nothing."
+            )
+    else:
+        assert "ONEXBOT_OCC_APP_ID" in text and "ONEXBOT_OCC_PRIVATE_KEY" in text, (
+            f"{workflow}:{job_id} must mint from the onexbot-occ-writer org secrets."
+        )
 
     # Fail closed. A fallback silently restores the workflow token and with it the
     # exact credential confound that produced the wrong org-wide finding in August.
