@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Release-train policy (OMN-18595).
+#
+# WHAT THIS FILE IS
+#   The whole per-repo configuration of the scheduled release train
+#   (.github/workflows/release-train-nightly.yml -> scripts/ci/release_train.py).
+#   The train carries NO built-in default for any field here: a repo that is not
+#   declared refuses rather than being run against a guess, because a guess about
+#   which paths are release-relevant is a guess about what gets published.
+#
+# ARMING A REPO IS ONE FIELD, AND IT IS DELIBERATE
+#   `mode: cut` lets the train open a release PR for that repo. `mode: report_only`
+#   decides and reports and never cuts. Flipping one to `cut` is a reviewed edit
+#   with its own PR, and tests/scripts/test_release_train_nightly.py asserts the
+#   armed set, so arming cannot happen as a side effect of some other change.
+#
+# THE LAB-EVIDENCE FIELD IS A STATEMENT OF FACT, NOT A DIAL
+#   Operator ruling (ROLLING_WORK_LEDGER.md:4258) names a PASS lab-pass receipt
+#   as the cut premise. Measured 2026-09-17, only omnibase_infra and omnimarket
+#   carry a rebuild trigger and emit one at all; the other five repos are
+#   libraries with no lab lane of their own and cannot produce a receipt for any
+#   sha. `lab_evidence: none` records that, with its reason, and the reason is
+#   printed on every decision the train makes for that repo. It is not a way past
+#   the bar: every repo declaring it is also `report_only` today, so nothing is
+#   cut on a weaker premise pending an operator decision on what a library repo's
+#   equivalent premise should be.
+#
+# release_relevant_paths
+#   What can change the published artifact. `src` is the packaged tree and
+#   `pyproject.toml` carries the dependency floor that ships with it. Commits
+#   that are the release machinery's own bookkeeping -- the post-release dev
+#   version bump, the release PR itself -- are excluded by subject in
+#   scripts/ci/release_train.py, because the bump edits pyproject.toml and would
+#   otherwise make the train cut an empty release every night forever.
+repos:
+  omnibase_infra:
+    package: omnibase-infra
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: compose-dev
+    lab_evidence_note: >-
+      the compose dev lane on the lab host; runtime-rebuild-trigger.yml emits a lab-pass-receipt-compose-dev-<sha> artifact in this repo for every merge
+    mode: cut
+  omnimarket:
+    package: omnimarket
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: compose-dev
+    lab_evidence_note: >-
+      the compose dev lane; this repo carries its own runtime-rebuild-trigger.yml and its receipts are published here, in the repo the sha belongs to
+    mode: report_only
+    mode_note: >-
+      release-on-merge.yml already releases this repo on every source-touching merge to dev (OMN-18010), proven by the automated post-release bump PRs from 0.4.85 onward. A second cutter would race it. The train reports this repo instead, so a run that finds unreleased work here is the signal that release-on-merge has stopped firing.
+  omnibase_core:
+    package: omnibase-core
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml; this repo reaches the lab only vendored into an omnibase_infra candidate, so no receipt is keyed by one of its shas
+    mode: report_only
+    mode_note: >-
+      pending the operator decision on what premise replaces a lab-pass receipt for a library repo with no lab lane
+  omnibase_spi:
+    package: omnibase-spi
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml; not vendored into the runtime image either, so nothing keys a receipt to one of its shas
+    mode: report_only
+    mode_note: >-
+      pending the operator decision on what premise replaces a lab-pass receipt for a library repo with no lab lane
+  omnimemory:
+    package: omnimemory
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml
+    mode: report_only
+    mode_note: >-
+      pending the operator decision on what premise replaces a lab-pass receipt for a library repo with no lab lane
+  omniintelligence:
+    package: omniintelligence
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml
+    mode: report_only
+    mode_note: >-
+      67 unreleased source commits measured 2026-09-17 against a tag dated 2026-05-26. Arming a patch cut over three months of accumulated change is the hazard OMN-18010 put out of scope; this repo needs a deliberate minor release first, and the train reports it nightly until that is taken
+  omniclaude:
+    package: omniclaude
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml; the plugin's deploy surface is a plugin update, not a runtime lane
+    mode: report_only
+    mode_note: >-
+      65 unreleased source commits measured 2026-09-17 against a tag dated 2026-06-02, the same catch-up hazard as omniintelligence
