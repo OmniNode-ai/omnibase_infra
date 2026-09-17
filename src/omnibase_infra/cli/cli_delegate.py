@@ -1333,10 +1333,13 @@ def delegate_command(
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
         onex delegate "hand off from the external client" --source external-client
-        # Dispatch to the deployed orchestrator; refuses if nothing consumes the topic:
-        onex delegate "document the router" --bus kafka --locus deployed-lane
+        # Dispatch to the deployed orchestrator; refuses if nothing consumes the topic.
+        # --lane names the broker: since OMN-16871 a shared-bus run that names none
+        # is refused rather than reading an ambient address, so the lane selector is
+        # part of the command, not an optional extra.
+        onex delegate "document the router" --bus kafka --lane dev --locus deployed-lane
         # Run it here on purpose, and say so in the record:
-        onex delegate "document the router" --bus kafka --locus in-process
+        onex delegate "document the router" --bus kafka --lane dev --locus in-process
     """
     try:
         exit_code = run_delegate(
