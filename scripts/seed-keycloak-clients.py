@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import subprocess
@@ -31,6 +32,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -101,17 +103,62 @@ def _log(op: str, client_id: str, fields_changed: list[str] | None = None) -> No
     print(json.dumps(record), flush=True)
 
 
-def _die(_msg: str) -> NoReturn:
+def _log_realm_smtp(realm: str, status: str) -> None:
+    """Record which realm-SMTP branch the reconcile took (OMN-18170).
+
+    ``status`` is ``"configured"`` or ``"not_configured"`` -- a decision, not a
+    value. No mail setting, host included, is ever emitted here.
+    """
     print(
-        json.dumps(
-            {
-                "op": "error",
-                "message": "seed-keycloak-clients failed; details redacted",
-            }
-        ),
-        file=sys.stderr,
+        json.dumps({"op": "realm_smtp", "clientId": f"realm:{realm}", "smtp": status}),
         flush=True,
     )
+
+
+def _die(
+    _msg: str,
+    *,
+    keys: Sequence[str] | None = None,
+    client_id: str | None = None,
+) -> NoReturn:
+    """Abort, reporting WHERE the run failed without reporting WHY in prose.
+
+    The free-text ``_msg`` is still discarded, deliberately and unconditionally:
+    several call sites interpolate a Keycloak error body into it, and nothing
+    guarantees such a body carries no secret material. That redaction is the
+    whole reason this helper exists.
+
+    OMN-18170: discarding the message also discarded the failure SITE, so every
+    one of the ~30 failure paths printed the same anonymous line. An operator
+    facing it could not tell a provisioning gap (an env var nobody set) from a
+    credential failure (a password that is wrong) without re-deriving the
+    failure by hand -- which is exactly what the `.201` dev-lane reconcile
+    forced someone to do.
+
+    Three non-secret identifiers are now reported:
+
+    * ``site`` / ``line`` -- read off the CALLER'S frame, so every call site is
+      covered with no annotation and the value cannot go stale as the file is
+      edited;
+    * ``keys`` -- env var NAMES, never their values. Passing a value here would
+      defeat the redaction above, so callers pass names only;
+    * ``clientId`` -- a roster identifier, the same non-secret field ``_log``
+      already emits.
+    """
+    record: dict[str, Any] = {
+        "op": "error",
+        "message": "seed-keycloak-clients failed; details redacted",
+    }
+    caller = inspect.currentframe()
+    caller = caller.f_back if caller is not None else None
+    if caller is not None:
+        record["site"] = caller.f_code.co_name
+        record["line"] = caller.f_lineno
+    if client_id is not None:
+        record["clientId"] = client_id
+    if keys:
+        record["keys"] = list(keys)
+    print(json.dumps(record), file=sys.stderr, flush=True)
     sys.exit(1)
 
 
@@ -162,7 +209,9 @@ def _resolve_client_secret(client_spec: dict[str, Any]) -> str | None:
     if not val:
         _die(
             f"Client '{client_spec['clientId']}' requires env var '{secret_env}' "
-            f"but it is not set or empty."
+            f"but it is not set or empty.",
+            keys=[secret_env],
+            client_id=client_spec["clientId"],
         )
     return val
 
@@ -188,7 +237,9 @@ def _resolve_consumer_secret(client_spec: dict[str, Any]) -> str | None:
     if not val:
         _die(
             f"Client '{client_spec['clientId']}' declares consumerSecretEnv "
-            f"'{consumer_env}' but it is not set or empty."
+            f"'{consumer_env}' but it is not set or empty.",
+            keys=[consumer_env],
+            client_id=client_spec["clientId"],
         )
     return val
 
@@ -246,24 +297,58 @@ _SMTP_FIELD_MAP = {
 }
 
 
-def _resolve_realm_smtp_settings(smtp_spec: dict[str, Any]) -> dict[str, str]:
+def _resolve_realm_smtp_settings(smtp_spec: dict[str, Any]) -> dict[str, str] | None:
     """Resolve realmSettings.smtpServer's *Env indirections against the live
-    environment. Fail-closed: every declared field is a required env var, no
-    default is ever substituted (this is the direct guard against the
-    OMN-14938 optional:true-on-a-required-key anti-pattern)."""
-    resolved: dict[str, str] = {}
-    for spec_field, realm_field in _SMTP_FIELD_MAP.items():
-        env_var = smtp_spec.get(spec_field)
-        if not env_var:
-            continue
-        val = os.environ.get(env_var)
-        if not val:
-            _die(
-                f"Realm SMTP setting '{realm_field}' requires env var "
-                f"'{env_var}' but it is not set or empty."
-            )
-        resolved[realm_field] = val
-    return resolved
+    environment.
+
+    Returns ``None`` when this lane declares NO mail provider -- the roster
+    carries no ``smtpServer`` block, or it does and not one of the env vars it
+    indirects through resolves. The caller then skips realm SMTP entirely and
+    leaves Keycloak's own SMTP state exactly as it found it.
+
+    OMN-18170: this used to be unconditionally fail-closed, which is correct
+    where mail IS configured and wrong where it is not. The `.201` compose dev
+    lane sends no email and declares none of the eight SMTP_* variables, so the
+    reconcile died there before it reached a single client -- a lane with no
+    mail provider could not reconcile its Keycloak clients at all.
+
+    Three outcomes, and the middle one is the whole point:
+
+    * every declared key resolves  -> configure, byte-identically to before
+      (this is the staging / onex-dev path, where the eight vars are seeded);
+    * NO declared key resolves     -> return None, skip, touch nothing;
+    * SOME resolve and some do not -> refuse, naming every key that did not.
+
+    No default is ever substituted for any mail value (rule 8, and the direct
+    guard against the OMN-14938 optional:true-on-a-required-key anti-pattern).
+    Absent is a skip; it is never a stand-in value. The partial case stays
+    fail-closed deliberately: half a mail configuration is a misconfiguration,
+    and silently treating it as "not configured" would ignore a real,
+    half-applied setup -- including the shape where a mail host is gone but its
+    credentials are still sitting in the environment.
+    """
+    declared = {
+        spec_field: env_var
+        for spec_field in _SMTP_FIELD_MAP
+        if (env_var := smtp_spec.get(spec_field))
+    }
+    if not declared:
+        return None
+
+    missing = [env_var for env_var in declared.values() if not os.environ.get(env_var)]
+    if len(missing) == len(declared):
+        return None
+    if missing:
+        _die(
+            "Realm SMTP is partially configured: "
+            f"{len(missing)} of {len(declared)} declared env vars are unset or empty.",
+            keys=missing,
+        )
+
+    return {
+        _SMTP_FIELD_MAP[spec_field]: os.environ[env_var]
+        for spec_field, env_var in declared.items()
+    }
 
 
 def _get_existing_client(
@@ -876,6 +961,13 @@ def _reconcile_realm_settings(
     settings against a running realm. Full-representation GET/diff/PUT,
     matching the per-client reconciler's update shape."""
     smtp_server = _resolve_realm_smtp_settings(spec.get("smtpServer", {}))
+
+    # OMN-18170: say which of the two SMTP branches was taken, in the run's own
+    # output. A skip that left no trace is indistinguishable from an SMTP block
+    # that was reconciled and happened not to drift -- and on a lane with no
+    # mail provider the skip is the interesting fact, not the absence of drift.
+    _log_realm_smtp(realm, "configured" if smtp_server else "not_configured")
+
     desired_attributes = dict(spec.get("attributes", {}))
 
     url = f"{kc_url}/admin/realms/{realm}"
