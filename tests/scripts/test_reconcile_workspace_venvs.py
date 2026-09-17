@@ -143,6 +143,23 @@ def _make_uv_shim(bin_dir: Path, *, sync_exit: int = 0, check_exit: int = 0) -> 
     uv = bin_dir / "uv"
     uv.write_text(
         "#!/usr/bin/env bash\n"
+        # `uv sync` CREATES the environment when it is absent and RECREATES it
+        # when --python names a different interpreter. The shim models that much
+        # so a test can read the resulting pyvenv.cfg `home` line -- the same
+        # line the reconciler itself reads, rather than a parallel assertion
+        # about argv that would pass while the venv stayed wrong (OMN-17819).
+        'if [[ -n "${UV_PROJECT_ENVIRONMENT:-}" ]]; then\n'
+        '  _base=""\n'
+        '  _prev=""\n'
+        '  for a in "$@"; do\n'
+        '    [[ "$_prev" == "--python" ]] && _base="$a"\n'
+        '    _prev="$a"\n'
+        "  done\n"
+        '  if [[ -n "$_base" ]]; then\n'
+        '    mkdir -p "${UV_PROJECT_ENVIRONMENT}/bin"\n'
+        '    printf "home = %s\\n" "${_base%/*}" > "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"\n'
+        "  fi\n"
+        "fi\n"
         # UV_PROJECT_ENVIRONMENT is how uv is told WHICH venv a project sync
         # targets, and after OMN-17819 that is the only thing distinguishing the
         # dispatch-venv sync from the gate-venv sync -- both carry the same
@@ -200,6 +217,15 @@ class _Workspace:
         # installed-omnimarket probe reads.
         self.dispatch_venv = root / ".onex-dispatch-venv"
         _make_fake_venv(self.dispatch_venv, self.market_head)
+        # A fake "brew" interpreter, and a dispatch venv already built on it.
+        # Both are fixture baseline, not assertion: every pre-existing test in
+        # this file is about composition, and without them each one would read
+        # as rule-11 interpreter drift on macOS and measure the wrong thing.
+        self.brew_python = root / "fakebrew" / "bin" / "python3.13"
+        self.brew_python.parent.mkdir(parents=True, exist_ok=True)
+        self.brew_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        self.brew_python.chmod(0o755)
+        self.set_dispatch_interpreter(self.brew_python.parent)
         _make_fake_venv(self.omniclaude / ".venv", None)
 
         self.bin_dir = root / "shimbin"
@@ -214,6 +240,17 @@ class _Workspace:
         _make_install_shim(self.install_script)
         _make_uv_shim(self.bin_dir)
 
+    def set_dispatch_interpreter(self, home: Path) -> None:
+        """Write the dispatch venv's own ``pyvenv.cfg`` ``home`` line.
+
+        The reconciler reads this file to decide whether the venv was built on
+        the required interpreter, so a test moves the interpreter by writing it
+        rather than by asserting on argv.
+        """
+        (self.dispatch_venv / "pyvenv.cfg").write_text(
+            f"home = {home}\nimplementation = CPython\n", encoding="utf-8"
+        )
+
     def set_installed_commit(self, commit: str | None) -> None:
         """Move the DISPATCH venv's installed omnimarket commit.
 
@@ -221,6 +258,7 @@ class _Workspace:
         OMN-15620 impurity this split exists to remove.
         """
         _make_fake_venv(self.dispatch_venv, commit)
+        self.set_dispatch_interpreter(self.brew_python.parent)
 
     def env(self) -> dict[str, str]:
         return {
@@ -244,6 +282,10 @@ class _Workspace:
             # unpurified. Every sync that must target a project default has to
             # clear it, and a fixture with a clean environment cannot see that.
             "UV_PROJECT_ENVIRONMENT": str(self.root / "decoy-ambient-venv"),
+            # Rule 11's interpreter, named explicitly so the suite is hermetic:
+            # probing the real /opt/homebrew would make every outcome depend on
+            # what happens to be installed on the machine running the tests.
+            "ONEX_DISPATCH_BASE_PYTHON": str(self.brew_python),
         }
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -715,3 +757,236 @@ def test_dispatch_venv_is_not_inside_the_canonical_clone(ws: _Workspace) -> None
     about the clone. Placement is the property, not an implementation detail."""
     assert ws.dispatch_venv.parent == ws.root
     assert str(ws.infra) not in str(ws.dispatch_venv)
+
+
+# --------------------------------------------------------------------------- #
+# The dispatch venv is built on the brew interpreter (CLAUDE.md rule 11)
+# --------------------------------------------------------------------------- #
+# macOS grants Local Network access per binary path and signature, not per
+# Python version. A uv-managed interpreter never surfaces the privacy dialog and
+# its LAN connections fail silently with EHOSTUNREACH. The dispatch venv is what
+# `scripts/onex` execs and `onex` talks to the lab host's services, so it has to
+# be built on the brew binary at its literal resolved path.
+#
+# This is a pre-existing defect the OMN-17819 split made fixable, not one the
+# split introduced: the venv it replaced was already uv-managed.
+def test_dispatch_venv_is_built_on_the_required_interpreter(ws: _Workspace) -> None:
+    """Asserted by reading the venv's own ``pyvenv.cfg``, not by matching argv.
+
+    An argv assertion passes whenever the flag is present, including when uv
+    ignored it and left the environment on the interpreter it already had. The
+    file is what the reconciler itself reads.
+    """
+    import shutil
+
+    shutil.rmtree(ws.dispatch_venv)
+    assert ws.run().returncode == _EXIT_OK
+
+    cfg = (ws.dispatch_venv / "pyvenv.cfg").read_text(encoding="utf-8")
+    assert f"home = {ws.brew_python.parent}" in cfg, (
+        "the dispatch venv was not built on the required interpreter; its "
+        f"pyvenv.cfg reads: {cfg!r}"
+    )
+
+
+def test_an_existing_venv_on_the_wrong_interpreter_is_rebuilt(ws: _Workspace) -> None:
+    """Drift, not a state to leave alone.
+
+    Without this the requirement would hold only for hosts that built their
+    dispatch venv after it landed, and every host that already had one would
+    keep a silently LAN-blind CLI forever — which is the actual starting state
+    on the machine this was written for.
+    """
+    uv_managed = ws.root / "uv-managed" / "cpython-3.12-macos-aarch64-none" / "bin"
+    uv_managed.mkdir(parents=True)
+    ws.set_dispatch_interpreter(uv_managed)
+
+    result = ws.run()
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+
+    cfg = (ws.dispatch_venv / "pyvenv.cfg").read_text(encoding="utf-8")
+    assert f"home = {ws.brew_python.parent}" in cfg, (
+        f"the wrong interpreter survived the reconcile; pyvenv.cfg: {cfg!r}"
+    )
+    assert "interpreter drift" in result.stdout, (
+        "the rebuild happened silently; a lane reading the output cannot tell "
+        f"its CLI was relocated. Output: {result.stdout!r}"
+    )
+
+
+def test_check_mode_reports_interpreter_drift_instead_of_in_sync(
+    ws: _Workspace,
+) -> None:
+    """`--check` is what the SessionStart line runs.
+
+    A verdict that stayed silent about the interpreter would print "in sync"
+    over a CLI whose LAN calls to the lab host fail silently — a probe naming
+    something narrower than it measures, which is the OMN-17295 defect class.
+    """
+    uv_managed = ws.root / "uv-managed" / "bin"
+    uv_managed.mkdir(parents=True)
+    ws.set_dispatch_interpreter(uv_managed)
+
+    result = ws.run("--check")
+    assert result.returncode == _EXIT_DRIFT
+    assert "wrong interpreter" in result.stdout
+    assert ws.uv_calls() == [] or all("--check" in c for c in ws.uv_calls()), (
+        "check mode mutated something while reporting interpreter drift"
+    )
+
+
+def test_a_missing_brew_interpreter_refuses_and_names_every_path_tried(
+    ws: _Workspace,
+) -> None:
+    """An empty PATH probe was read as "uv is not installed" once already
+    (OMN-17335). A refusal that does not name what it looked at repeats it."""
+    env = ws.env()
+    env["ONEX_DISPATCH_BASE_PYTHON"] = str(ws.root / "no-such-python")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    combined = result.stdout + result.stderr
+    # The named interpreter does not exist, so uv cannot build on it. Either the
+    # reconciler refuses up front or uv fails — both must be a refusal, never a
+    # silent fallback to whatever interpreter was already there.
+    assert result.returncode in (_EXIT_FAILED, _EXIT_INDETERMINATE), combined
+    assert ws.gate_syncs() == [], (
+        "the gate venv was purified even though the dispatch venv could not be "
+        "built on the required interpreter"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The dispatch venv may never BE a clone's own venv
+# --------------------------------------------------------------------------- #
+def test_refuses_to_compose_into_the_canonical_clones_gate_venv(
+    ws: _Workspace,
+) -> None:
+    """The override relocates the composed venv; it never re-collapses the two.
+
+    Pointing `ONEX_DISPATCH_VENV` at the clone's `.venv` reconstructs the exact
+    OMN-17819 defect by hand.
+    """
+    env = ws.env()
+    env["ONEX_DISPATCH_VENV"] = str(ws.infra / ".venv")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == _EXIT_INDETERMINATE, combined
+    assert "GATE venv" in combined
+    assert ws.install_argv() == [], (
+        "the provider co-install ran against the gate venv anyway"
+    )
+
+
+def test_refuses_a_dispatch_venv_inside_any_other_clone(ws: _Workspace) -> None:
+    """Not just the one clone this ticket was about.
+
+    A composed layer is undeclared in whatever project owns that venv, so its
+    own purity checks and test runs would be refused — the same defect, moved.
+    """
+    other = _make_clone(ws.root, "omniother")
+    env = ws.env()
+    env["ONEX_DISPATCH_VENV"] = str(other / ".venv")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == _EXIT_INDETERMINATE, combined
+    assert str(other) in combined
+
+
+def test_refuses_a_dispatch_venv_inside_a_worktree(ws: _Workspace) -> None:
+    """In a worktree ``.git`` is a FILE.
+
+    A `-d` test would wave through exactly the per-ticket worktrees lanes spend
+    all day inside, which is where a hand-set override is most likely to point.
+    """
+    fake_worktree = ws.root / "omni_worktrees" / "OMN-1" / "omnibase_infra"
+    fake_worktree.mkdir(parents=True)
+    (fake_worktree / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
+
+    env = ws.env()
+    env["ONEX_DISPATCH_VENV"] = str(fake_worktree / ".venv")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == _EXIT_INDETERMINATE, result.stdout + result.stderr
+
+
+def test_a_path_that_merely_ends_in_venv_is_not_refused(ws: _Workspace) -> None:
+    """Positive control for the refusals above.
+
+    Without it every one of them could pass against a guard that refused
+    unconditionally, which would make the reconciler unusable rather than safe.
+    """
+    elsewhere = ws.root / "not-a-clone"
+    elsewhere.mkdir()
+    env = ws.env()
+    env["ONEX_DISPATCH_VENV"] = str(elsewhere / ".venv")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+
+
+# --------------------------------------------------------------------------- #
+# No machine-absolute path literal (CLAUDE.md rules 6 and 8)
+# --------------------------------------------------------------------------- #
+def test_the_reconciler_carries_no_machine_absolute_path_literal() -> None:
+    """Every path resolves from ``$OMNI_HOME``, which is itself fail-fast.
+
+    The brew interpreter candidates are the deliberate exception rule 11 names:
+    launchd and cron run with a restricted PATH that cannot resolve
+    ``$(brew --prefix)``, so those two must be literal. They are not
+    machine-specific — no ``/Users`` or ``/Volumes`` component.
+    """
+    source = _SCRIPT.read_text(encoding="utf-8")
+    offenders = [
+        line
+        for line in source.splitlines()
+        if ("/Users/" in line or "/Volumes/" in line)
+        and not line.lstrip().startswith("#")
+    ]
+    assert offenders == [], (
+        f"machine-absolute path literal in the reconciler: {offenders!r}"
+    )
+
+
+def test_unset_omni_home_is_still_fail_fast_with_no_default(tmp_path: Path) -> None:
+    """Pinned here rather than assumed: a silent default would reconcile some
+    other checkout's venv and report success for a venv nobody is running."""
+    env = {k: v for k, v in os.environ.items() if k != "OMNI_HOME"}
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode == _EXIT_INDETERMINATE
+    assert "OMNI_HOME" in combined

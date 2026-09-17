@@ -180,6 +180,19 @@ class _Workspace:
         # GATE venv carries none, which after OMN-17819 is what lock-pure means.
         self.dispatch_venv = root / ".onex-dispatch-venv"
         _make_fake_venv(self.dispatch_venv, self.base)
+        # A fake rule-11 interpreter, and a dispatch venv recorded as built on
+        # it. Both are baseline, not assertion: this suite is about the
+        # clone -> origin/<branch> leg, and without them every case here would
+        # probe the real /opt/homebrew and report interpreter drift instead —
+        # making the outcome depend on what is installed on the host running
+        # the tests, which is the coupling this fixture exists to avoid.
+        self.brew_python = root / "fakebrew" / "bin" / "python3.13"
+        self.brew_python.parent.mkdir(parents=True, exist_ok=True)
+        self.brew_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        self.brew_python.chmod(0o755)
+        (self.dispatch_venv / "pyvenv.cfg").write_text(
+            f"home = {self.brew_python.parent}\n", encoding="utf-8"
+        )
         _make_fake_venv(self.infra / ".venv", None)
 
         self.bin_dir = root / "shimbin"
@@ -218,6 +231,9 @@ class _Workspace:
 
     def set_installed_commit(self, commit: str | None) -> None:
         _make_fake_venv(self.dispatch_venv, commit)
+        (self.dispatch_venv / "pyvenv.cfg").write_text(
+            f"home = {self.brew_python.parent}\n", encoding="utf-8"
+        )
 
     def head(self) -> str:
         return _git("rev-parse", "HEAD", cwd=self.omnimarket)
@@ -232,6 +248,9 @@ class _Workspace:
             "INSTALL_SHIM_LOG": str(self.install_log),
             "ONEX_RECONCILE_INSTALL_SCRIPT": str(self.install_script),
             "CLAUDE_PLUGIN_DATA": str(self.root / "no-such-plugin-data"),
+            # Named explicitly so this suite never probes the host's real brew
+            # prefix (CLAUDE.md rule 11).
+            "ONEX_DISPATCH_BASE_PYTHON": str(self.brew_python),
         }
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:
