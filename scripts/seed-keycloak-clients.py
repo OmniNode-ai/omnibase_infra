@@ -45,9 +45,16 @@ def _request(
     method: str,
     url: str,
     token: str | None = None,
-    payload: dict[str, Any] | None = None,
+    payload: dict[str, Any] | list[Any] | None = None,
 ) -> tuple[int, Any]:
-    """Perform an HTTP request; return (status_code, parsed_json_or_None)."""
+    """Perform an HTTP request; return (status_code, parsed_json_or_None).
+
+    The payload is a JSON document, which for Keycloak's admin API is an object
+    for most endpoints and an ARRAY for the role-assignment POSTs. Annotating it
+    as an object only was inaccurate rather than restrictive -- both call sites
+    already passed a list and both worked -- so the two long-standing mypy
+    ``arg-type`` errors on this file described the annotation, not the calls.
+    """
     data = json.dumps(payload).encode() if payload is not None else None
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if token:
@@ -213,6 +220,111 @@ BASE_FIELDS = {
 _SECRET_CLEARING_FLAGS = ("bearerOnly", "publicClient")
 _SERVER_MANAGED_CLIENT_FIELDS = frozenset({"access", "id"})
 
+# Declared fields whose value is a collection Keycloak is free to return in an
+# order of its own choosing. Comparing them positionally reports drift forever
+# (OMN-18600): on the .201 dev-lane realm, omniweb, omnidash-spa and
+# onex-customer were set-equal and list-unequal on both of these on every
+# reconcile, including one run immediately after a clean one.
+_UNORDERED_LIST_FIELDS = frozenset({"redirectUris", "webOrigins"})
+
+# Attribute keys Keycloak maintains on a client representation itself. The
+# roster does not declare them, so finding them in the live map is not drift.
+#
+# Both were measured read-only against the .201 dev-lane realm on 2026-09-17:
+# `realm_client` on all nine roster clients, `client.secret.creation.time` on
+# the three whose secret Keycloak has minted. This is a named constant and not
+# an inline literal so that the next key Keycloak adds arrives as a failing
+# test asking for a decision, rather than as a silent return of this defect.
+# Widening it is deliberately a visible, one-line change.
+_SERVER_MANAGED_ATTRIBUTE_KEYS = frozenset(
+    {
+        "realm_client",
+        "client.secret.creation.time",
+    }
+)
+
+
+def _canonical_unordered(value: list[Any]) -> list[str]:
+    """Order-independent form of a list, preserving multiplicity.
+
+    Elements are rendered canonically rather than sorted directly so the
+    comparison does not depend on the element type being orderable. A duplicate
+    that appears on one side only is still a difference -- this ignores order,
+    not content.
+    """
+    return sorted(json.dumps(item, sort_keys=True) for item in value)
+
+
+def _comparable_attributes(
+    live: dict[str, Any], desired: dict[str, Any]
+) -> dict[str, Any]:
+    """The live attribute map, minus undeclared keys Keycloak maintains.
+
+    A key the roster declares is always compared, even if it shares a name with
+    a server-managed one -- the exemption is for keys nobody declared, never a
+    licence to stop reconciling a declared key. A live-only key that is NOT
+    server-managed stays in, so undeclared state on a surface the roster owns is
+    still drift and is still reconciled away.
+    """
+    return {
+        key: value
+        for key, value in live.items()
+        if key in desired or key not in _SERVER_MANAGED_ATTRIBUTE_KEYS
+    }
+
+
+def _attributes_update_value(live: Any, desired: dict[str, Any]) -> dict[str, Any]:
+    """The attributes map to PUT: the roster's, keeping Keycloak's own keys.
+
+    The update payload replaces `attributes` wholesale, so without this the one
+    reconcile that legitimately changes an attribute would also delete the
+    timestamp Keycloak wrote when it minted the client's secret. The roster
+    always wins for a key it declares.
+    """
+    carried = (
+        {
+            key: value
+            for key, value in live.items()
+            if key not in desired and key in _SERVER_MANAGED_ATTRIBUTE_KEYS
+        }
+        if isinstance(live, dict)
+        else {}
+    )
+    return {**carried, **desired}
+
+
+def _field_is_drifted(field: str, live: Any, desired: Any) -> bool:
+    """Whether a declared field differs in the realm, rather than in shape.
+
+    Falls back to the plain inequality for any value whose shape is not what
+    the special case is about, so an unexpected representation is compared the
+    way it always was rather than silently treated as converged.
+    """
+    if (
+        field in _UNORDERED_LIST_FIELDS
+        and isinstance(live, list)
+        and isinstance(desired, list)
+    ):
+        return _canonical_unordered(live) != _canonical_unordered(desired)
+    if field == "attributes" and isinstance(live, dict) and isinstance(desired, dict):
+        return _comparable_attributes(live, desired) != desired
+    return bool(live != desired)
+
+
+def _drifted_fields(existing: dict[str, Any], spec: dict[str, Any]) -> list[str]:
+    """Every declared base field whose live value differs from the roster's.
+
+    One implementation for both callers on purpose: the read-only preflight and
+    the reconcile loop must never disagree about what has drifted, or the
+    survey tells an operator three clients are drifted and the run that follows
+    reports them unchanged.
+    """
+    return sorted(
+        field
+        for field in BASE_FIELDS - {"defaultClientScopes"}
+        if field in spec and _field_is_drifted(field, existing.get(field), spec[field])
+    )
+
 
 def _resolve_client_secret(client_spec: dict[str, Any]) -> str | None:
     secret_env = client_spec.get("secretEnv")
@@ -270,6 +382,10 @@ def _build_update_payload(
     }
     for field in drift_fields:
         update_payload[field] = spec[field]
+    if "attributes" in drift_fields and isinstance(spec.get("attributes"), dict):
+        update_payload["attributes"] = _attributes_update_value(
+            existing.get("attributes"), spec["attributes"]
+        )
     for secret_clearing_flag in _SECRET_CLEARING_FLAGS:
         if secret_clearing_flag not in drift_fields:
             update_payload.pop(secret_clearing_flag, None)
@@ -612,10 +728,7 @@ def _reconcile_client(
         all_changed.append("created")
     else:
         # Drift detection on base fields
-        drift_fields: list[str] = []
-        for field in BASE_FIELDS - {"defaultClientScopes"}:
-            if field in spec and existing.get(field) != spec[field]:
-                drift_fields.append(field)
+        drift_fields = _drifted_fields(existing, spec)
         if drift_fields:
             # OMN-16504: send ONLY the drifted fields, never the full live
             # representation.
@@ -1097,11 +1210,7 @@ def _preflight_client(
     live_value_present: bool | None = None
     drift_fields: list[str] = []
     if existing is not None:
-        drift_fields = sorted(
-            field
-            for field in BASE_FIELDS - {"defaultClientScopes"}
-            if field in spec and existing.get(field) != spec[field]
-        )
+        drift_fields = _drifted_fields(existing, spec)
         if _live_client_requires_secret(existing):
             compare_against = (
                 env_var
