@@ -231,11 +231,34 @@ LOCK_HOLDER="$LOCK_DIR/holder"
 # alive would still be here", not "this is taking a while".
 LOCK_STALE_SECONDS="${ONEX_RECONCILE_LOCK_STALE_SECONDS:-3600}"
 
-# `stat` is not portable: BSD takes -f, GNU takes -c. Both spellings are tried
-# rather than branching on `uname`, because this script runs on the macOS
-# workstation and the Linux lab host and must behave identically on each.
+# `stat` is not portable: BSD spells the mtime `-f %m`, GNU spells it `-c %Y`.
+# Both are tried rather than branching on `uname`, because this script runs on
+# the macOS workstation and the Linux lab host and must behave identically.
+#
+# THE RESULT IS VALIDATED, NOT JUST THE EXIT STATUS, and that is the whole point
+# of this function rather than an inline `stat`. On GNU coreutils `-f` does not
+# mean "format" at all -- it means "report on the FILESYSTEM" -- so
+# `stat -f %m <path>` there succeeds, exits 0, and prints a filesystem dump
+# beginning `File: ...`. A plain `||` fallback therefore never fires on Linux,
+# and the dump flows into the `(( ))` below, where bash reads the bare word
+# `File` as a variable name and `set -u` kills the script with
+# `File: unbound variable`. That is not hypothetical: it is what CI reported on
+# the Linux runner for a version of this file that had been proven green on
+# macOS, where `-f %m` is correct and the bug is invisible.
+#
+# So a candidate is accepted only when it is entirely digits, which an epoch
+# second is and a filesystem dump is not.
 file_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || true
+  local out
+  # shellcheck disable=SC2086  # deliberate: each candidate is a flag PAIR
+  for fmt in "-f %m" "-c %Y"; do
+    out="$(stat $fmt "$1" 2>/dev/null || true)"
+    case "$out" in
+      "" | *[!0-9]*) continue ;;
+      *) printf '%s' "$out"; return 0 ;;
+    esac
+  done
+  return 1
 }
 
 # Seconds since the lock was taken. The holder file when it exists, else the
@@ -245,7 +268,12 @@ lock_age_seconds() {
   local target="$LOCK_DIR" mtime now
   [[ -f "$LOCK_HOLDER" ]] && target="$LOCK_HOLDER"
   mtime="$(file_mtime "$target")"
-  [[ -n "$mtime" ]] || return 1
+  # Belt and braces with file_mtime's own validation: nothing but digits may
+  # reach the arithmetic below, because under `set -u` a stray word there is a
+  # fatal unbound-variable error rather than a bad number.
+  case "$mtime" in
+    "" | *[!0-9]*) return 1 ;;
+  esac
   now="$(date +%s)"
   printf '%s' "$(( now - mtime ))"
 }

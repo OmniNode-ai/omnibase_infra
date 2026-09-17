@@ -331,3 +331,73 @@ def test_the_refusal_names_the_holder_it_is_deferring_to(ws: Workspace) -> None:
     finally:
         live.terminate()
         live.wait()
+
+
+# --------------------------------------------------------------------------- #
+# The mtime probe must survive GNU coreutils, where `-f` is not a format flag
+# --------------------------------------------------------------------------- #
+def _gnu_stat_shim(tmp_path: Path) -> Path:
+    """A ``stat`` that behaves like GNU coreutils rather than BSD.
+
+    The difference is not cosmetic. On GNU, ``-f`` means "report on the
+    FILESYSTEM", so ``stat -f %m <path>`` SUCCEEDS and prints a dump beginning
+    ``File:`` instead of failing the way a BSD-only reader assumes it will.
+
+    ``-c %Y`` answers truthfully, by asking the real ``stat``. A shim that
+    returned a canned number would also distort every OTHER ``stat`` call this
+    script makes, and would then be testing the shim rather than the script.
+
+    Scoped to the mtime probe (``-f %m`` / ``-c %Y``) and passing everything
+    else straight through, for the same reason: the script's other ``stat``
+    calls are BSD-spelled and are not what this regression is about. A blanket
+    GNU shim broke those instead and made the test fail for a reason that had
+    nothing to do with the bug.
+    """
+    shim_dir = tmp_path / "gnu-stat-bin"
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    shim = shim_dir / "stat"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "-f" && "$2" == "%m" ]]; then\n'
+        '  printf "  File: \\"%s\\"\\n  ID: 0 Namelen: 255 Type: apfs\\n" "$3"\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "$1" == "-c" && "$2" == "%Y" ]]; then\n'
+        '  exec /usr/bin/stat -f %m "$3"\n'
+        "fi\n"
+        'exec /usr/bin/stat "$@"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return shim_dir
+
+
+def test_a_gnu_stat_does_not_poison_the_age_arithmetic(
+    ws: Workspace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression pin for a bug that macOS cannot surface at all.
+
+    A version of this file proven green on the workstation died on the Linux CI
+    runner with ``line 250: File: unbound variable``: GNU's ``stat -f`` exited 0
+    with a filesystem dump, the fallback never fired, and bash read the bare
+    word ``File`` in the ``(( ))`` as a variable name under ``set -u``.
+
+    The probe must therefore validate the VALUE, not the exit status. Here the
+    lock is two hours old and its holder is unrecorded, so the run can only
+    reclaim it if the GNU spelling was reached and parsed.
+    """
+    monkeypatch.setenv("PATH", f"{_gnu_stat_shim(tmp_path)}:{os.environ['PATH']}")
+    _seed_lock(ws, age_seconds=7200)
+    _ready(ws)
+
+    proc = _run(ws)
+
+    assert "unbound variable" not in proc.stderr, (
+        f"the filesystem dump reached the age arithmetic: {proc.stderr}"
+    )
+    assert _RECLAIMING in proc.stderr, (
+        f"the GNU mtime spelling was never reached or never parsed: {proc.stderr}"
+    )
+    assert ws.delegate_witness.exists()
