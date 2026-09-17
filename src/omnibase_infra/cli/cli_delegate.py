@@ -140,6 +140,11 @@ from omnibase_infra.cli.delegate_locus import (
     DelegateLocusRefusedError,
     resolve_delegate_locus,
 )
+from omnibase_infra.cli.delegate_terminal_resolver import (
+    DelegateTerminalUnresolvedError,
+    resolve_delegate_terminal,
+)
+from omnibase_infra.cli.model_delegate_terminal import ModelDelegateTerminal
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     OmnimarketDriftError,
@@ -292,47 +297,54 @@ def _atomic_write_text(path: Path, content: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _accepted_attempt(result: dict[str, object]) -> dict[str, object] | None:
-    """Return the accepted routing attempt, or ``None`` when unproven."""
-    attempts = result.get("attempts")
-    if not isinstance(attempts, list):
-        attempts = result.get("escalation_history")
-    if not isinstance(attempts, list | tuple):
-        return None
-    for attempt in attempts:
-        if not isinstance(attempt, dict):
-            continue
-        decision = str(attempt.get("acceptance_decision") or "").lower()
-        if decision == "accept" or (
-            not decision and bool(attempt.get("quality_gate_passed"))
-        ):
-            return attempt
-    return None
+#: Receipt fields a summary-shaped receipt may carry this run's terminal in,
+#: in the order they are tried. ``terminal_payload`` is the runtime's own
+#: record; ``handler_result`` is the same object on the in-process path and
+#: ``null`` on the dispatched one.
+_TERMINAL_CARRIER_FIELDS: tuple[str, ...] = ("terminal_payload", "handler_result")
 
 
-def _delegation_result(envelope: dict[str, object]) -> dict[str, object] | None:
-    """Return this run's delegation payload, or ``None`` if it is not one.
+def _delegation_result(envelope: dict[str, object]) -> ModelDelegateTerminal | None:
+    """Return this run's delegation terminal, or ``None`` if this is not a delegation.
 
-    Two receipt shapes reach here, because ``run_receipt_mode`` builds the typed
-    ``ModelSkillResult[JsonValue]`` receipt ONLY when the run is success-like and
-    otherwise wraps it in a ``ModelReceiptRuntimeSummary``:
+    Two RECEIPT shapes reach here, because ``run_receipt_mode`` builds the typed
+    ``ModelSkillResult[JsonValue]`` receipt ONLY when the run is success-like AND
+    produced a handler result, and otherwise wraps it in a
+    ``ModelReceiptRuntimeSummary``:
 
-    * success-like -> ``result`` IS the delegation result, and ``result_model``
-      names the delegate wire DTO.
-    * anything else -> ``result`` is the summary, and the delegation payload is
-      nested under ``terminal_payload`` (``handler_result`` is the same object).
+    * handler result present -> ``result`` IS the delegation terminal, and
+      ``result_model`` names the delegate wire DTO.
+    * anything else -> ``result`` is the summary and the terminal is carried in
+      one of :data:`_TERMINAL_CARRIER_FIELDS`.
 
-    OMN-16999: only the first shape was recognised, so a run that escalated past
-    a failed rung -- which terminalizes ``failed`` even when a later attempt is
-    ACCEPTED -- returned silently and wrote nothing. That is the ordinary path,
-    not an edge case: measured live 2026-09-05, a delegation whose local rung was
-    refused by the OMN-16419 attribution guard and whose cloud rung then answered
-    ``"OK"`` at quality 1.0 produced no ``runs/`` directory at all.
+    Inside the summary there are then two CARRIER shapes, and that is the second
+    fork OMN-18569 closes: in-process runs record the terminal bare, dispatched
+    runs record the event envelope that delivered it, with the terminal under
+    ``payload``. Both resolve through the one accessor
+    :func:`~omnibase_infra.cli.delegate_terminal_resolver.resolve_delegate_terminal`;
+    nothing here inspects a dict key to decide which shape it is holding.
 
-    The summary unwrap is scoped to the delegate contract by ``workflow``.
-    ``run_receipt_mode`` is shared with ``onex node``/``onex skill``, and a failed
-    proof run of an unrelated node must be ignored rather than raised on as an
-    unattributed delegation.
+    History, because each fix uncovered the next fork:
+
+    * OMN-16999 recognised only the first RECEIPT shape, so a run that escalated
+      past a failed rung -- which terminalizes ``failed`` even when a later
+      attempt is ACCEPTED -- wrote nothing.
+    * OMN-18569 recognised only the bare CARRIER shape, so every DISPATCHED run
+      wrote nothing. Measured live 2026-09-17: correlation
+      ``83aa8b6c-8189-49f0-953d-80c8f015ed0a`` exited 0 with a correct answer
+      and produced no ``result.txt``, ``receipt.json`` or ``run.json``.
+
+    Both times the writer returned quietly rather than failing, which is why
+    both survived a release. So a receipt scoped to the delegate contract whose
+    terminal will not resolve now RAISES. That is not a widening of the refusal:
+    the scoping checks below still return ``None`` for a receipt that is not a
+    delegation at all, because ``run_receipt_mode`` is shared with
+    ``onex node``/``onex skill`` and a failed proof run of an unrelated node
+    must be ignored, not raised on.
+
+    Raises:
+        DelegateTerminalUnresolvedError: the receipt IS a delegation and its
+            terminal could not be resolved from any carrier field.
     """
     result = envelope.get("result")
     if not isinstance(result, dict):
@@ -340,16 +352,26 @@ def _delegation_result(envelope: dict[str, object]) -> dict[str, object] | None:
 
     result_model = str(envelope.get("result_model") or "")
     if "ModelDelegateSkill" in result_model:
-        return result
+        return resolve_delegate_terminal(result)
     if "ModelReceiptRuntimeSummary" not in result_model:
         return None
     if DELEGATE_NODE_NAME not in str(result.get("workflow") or ""):
         return None
-    for key in ("terminal_payload", "handler_result"):
-        nested = result.get(key)
-        if isinstance(nested, dict) and isinstance(nested.get("attempts"), list):
-            return nested
-    return None
+
+    refusals: list[str] = []
+    for field in _TERMINAL_CARRIER_FIELDS:
+        carrier = result.get(field)
+        if carrier is None:
+            refusals.append(f"{field}: absent")
+            continue
+        try:
+            return resolve_delegate_terminal(carrier)
+        except DelegateTerminalUnresolvedError as exc:
+            refusals.append(f"{field}: {exc}")
+    raise DelegateTerminalUnresolvedError(
+        "delegate receipt carries no resolvable delegation terminal, so the "
+        "customer artifacts cannot be written -- " + "; ".join(refusals)
+    )
 
 
 #: Mirrors the wire model's own pattern for a parameterised criterion slug.
@@ -359,42 +381,20 @@ def _delegation_result(envelope: dict[str, object]) -> dict[str, object] | None:
 _MAX_WORDS_PER_SENTENCE_RE = re.compile(r"^max_words_per_sentence_([1-9]\d*)$")
 
 
-_ATTEMPT_EVIDENCE_FIELDS: tuple[str, ...] = (
-    "backend_id",
-    "tier",
-    "model_id",
-    "failure_class",
-    "acceptance_decision",
-    "acceptance_reason",
-    "error_message",
-    "input_tokens_measured",
-    "input_token_budget",
-    "quality_gate_passed",
-    "quality_score",
-    "cost_usd",
-)
-
-
-def _attempt_evidence(result: dict[str, object]) -> list[dict[str, object]]:
+def _attempt_evidence(result: ModelDelegateTerminal) -> list[dict[str, object]]:
     """Return every rung this run attempted, in order, with its own verdict.
 
-    Copied field-by-field rather than wholesale so an attempt record cannot
-    smuggle an unrelated key into the customer artifact, and so a field the
-    runtime stops emitting shows up as ``None`` instead of silently vanishing.
+    The field set is :class:`~omnibase_infra.cli.model_delegate_attempt.ModelDelegateAttempt`'s own declared fields, so an
+    attempt record cannot smuggle an unrelated key into the customer artifact
+    (the model ignores extras), and a field the runtime stops emitting shows up
+    as ``None`` instead of silently vanishing (every field is optional). Both
+    properties used to be enforced by a hand-maintained tuple of field names
+    beside the copy loop; they are now properties of the model itself.
     """
-    attempts = result.get("attempts")
-    if not isinstance(attempts, list):
-        attempts = result.get("escalation_history")
-    if not isinstance(attempts, list | tuple):
-        return []
-    return [
-        {field: attempt.get(field) for field in _ATTEMPT_EVIDENCE_FIELDS}
-        for attempt in attempts
-        if isinstance(attempt, dict)
-    ]
+    return [attempt.model_dump(mode="json") for attempt in result.attempts]
 
 
-def _unattributed_reason(result: dict[str, object]) -> str:
+def _unattributed_reason(result: ModelDelegateTerminal) -> str:
     """Say why no route was attributed, accurately for THIS run.
 
     OMN-18306 landed the receipt; this is its sentence. The reason used to be
@@ -414,12 +414,7 @@ def _unattributed_reason(result: dict[str, object]) -> str:
     tried; the route stays unattributed, because attributing output nobody
     accepted is the lie the refusal exists to prevent (AC3).
     """
-    attempts = result.get("attempts")
-    reached = [
-        str(attempt.get("backend_id"))
-        for attempt in (attempts if isinstance(attempts, list) else [])
-        if isinstance(attempt, dict) and attempt.get("backend_id")
-    ]
+    reached = [attempt.backend_id for attempt in result.attempts if attempt.backend_id]
     if not reached:
         return (
             "no backend was reached: this run was refused before any rung was "
@@ -439,7 +434,7 @@ def _unattributed_reason(result: dict[str, object]) -> str:
 def _write_unattributed_run_files(
     *,
     envelope: dict[str, object],
-    result: dict[str, object],
+    result: ModelDelegateTerminal,
     state_root: Path,
     prompt: str,
     task_type: str,
@@ -459,11 +454,10 @@ def _write_unattributed_run_files(
     run_dir = (state_root / "runs" / run_id).resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    metrics = result.get("metrics")
-    cost_usd = metrics.get("cost_usd") if isinstance(metrics, dict) else None
+    cost_usd = result.metrics.cost_usd if result.metrics is not None else None
     unattributed = _unattributed_reason(result)
 
-    _atomic_write_text(run_dir / "result.txt", str(result.get("response") or ""))
+    _atomic_write_text(run_dir / "result.txt", result.response)
     _atomic_write_text(
         run_dir / "receipt.json",
         json.dumps(
@@ -474,11 +468,11 @@ def _write_unattributed_run_files(
                 "route_attributed": False,
                 "route_unattributed": unattributed,
                 "status": envelope.get("status"),
-                "terminal_failure_cause": result.get("terminal_failure_cause"),
-                "failure_reason": result.get("error_message"),
-                "quality_gates_failed": result.get("quality_gates_failed"),
-                "quality_gate_passed": result.get("quality_gate_passed"),
-                "quality_score": result.get("quality_score"),
+                "terminal_failure_cause": result.terminal_failure_cause,
+                "failure_reason": result.error_message,
+                "quality_gates_failed": list(result.quality_gates_failed),
+                "quality_gate_passed": result.quality_gate_passed,
+                "quality_score": result.quality_score,
                 "cost_usd": cost_usd,
                 "attempts": _attempt_evidence(result),
                 "receipt": envelope,
@@ -527,6 +521,23 @@ def _write_local_run_files(
     Route identity is accepted only from the accepted attempt. Synthesizing a
     route from the last attempted backend would make a failed or escalated run
     look like a truthful answer.
+
+    Three outcomes, and each is distinguishable from the other two (OMN-18569):
+
+    * the receipt is a delegation with an accepted rung -> three attributed
+      files, and a stderr line naming them;
+    * the receipt is a delegation with no accepted rung -> three UNattributed
+      files naming no route, and a stderr line saying so (OMN-18306);
+    * the receipt is not a delegation at all -> nothing written, silently,
+      because ``run_receipt_mode`` is shared and another node's proof run is
+      not this writer's business.
+
+    What is NOT an outcome any more is the fourth one: a delegation whose
+    terminal cannot be resolved returning quietly. :func:`_delegation_result`
+    raises instead, ``run_receipt_mode`` reports the failure on stderr and
+    folds it into a non-zero exit, and the receipt still reaches stdout. A
+    customer who gets no files now learns that from the process, not from
+    listing a directory later.
     """
     if task_type_resolution is None:
         raise ValueError(
@@ -545,7 +556,7 @@ def _write_local_run_files(
     result = _delegation_result(envelope)
     if result is None:
         return
-    accepted = _accepted_attempt(result)
+    accepted = result.accepted_attempt
     if accepted is None:
         # OMN-18306: a run with no accepted attempt is still a run the customer
         # paid for and is owed an account of. Route attribution stays
@@ -564,27 +575,19 @@ def _write_local_run_files(
         )
         return
 
-    model = str(
-        accepted.get("model_id")
-        or accepted.get("model_used")
-        or result.get("model_name")
-        or ""
-    ).strip()
-    backend_id = str(
-        accepted.get("backend_id") or accepted.get("routing_decision_id") or ""
-    ).strip()
-    routing_tier = str(
-        accepted.get("tier")
-        or accepted.get("tier_name")
-        or result.get("cost_tier_name")
-        or ""
-    ).strip()
-    endpoint = str(
-        result.get("endpoint_url")
-        or result.get("provider")
-        or result.get("delegated_to")
-        or ""
-    ).strip()
+    # Route identity comes from the fields the wire contract actually declares
+    # -- ``ModelDelegateSkillAttemptRecord`` for the rung, ``provider`` for the
+    # endpoint. The pre-OMN-18569 spellings this used to fall back through
+    # (``model_used``, ``routing_decision_id``, ``tier_name``, ``endpoint_url``,
+    # ``delegated_to``) are fields of OTHER delegation models -- the routing
+    # decision and the projection row -- and never appear on a terminal, so
+    # they could not fire. They are deleted rather than carried: a fallback
+    # that cannot fire is indistinguishable, to the next reader, from one that
+    # protects a live path.
+    model = (accepted.model_id or result.model_name or "").strip()
+    backend_id = (accepted.backend_id or "").strip()
+    routing_tier = (accepted.tier or "").strip()
+    endpoint = (result.provider or "").strip()
     if not all((model, backend_id, routing_tier, endpoint)):
         raise ValueError(
             "delegate receipt accepted attempt is missing backend, model, tier, "
@@ -595,8 +598,7 @@ def _write_local_run_files(
     correlation_id = str(envelope["correlation_id"])
     run_dir = (state_root / "runs" / run_id).resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
-    response = str(result.get("response") or "")
-    _atomic_write_text(run_dir / "result.txt", response)
+    _atomic_write_text(run_dir / "result.txt", result.response)
     _atomic_write_text(
         run_dir / "receipt.json",
         json.dumps(
