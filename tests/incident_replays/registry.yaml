@@ -157,6 +157,22 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn18595-release-train-cut-on-its-own-bookkeeping
+    guard: scripts/ci/release_train.py
+    incident: OMN-13912
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn18595/pull-3693-post-release-bump.json.captured
+      sha256: 69201b8dba8502e27ba420d84c8293bae490db8cdbdaa85377e68d074053d431
+    capture:
+      method: gh-api
+      source: gh-api:repos/OmniNode-ai/omnibase_infra/pulls/3693
+      captured_at: '2026-09-17T15:00:00Z'
+      captured_by: lane replay (OMN-18595)
+    test: tests/ci/test_incident_replay_omn18595.py::test_the_real_guard_rejects_the_post_release_bump_as_releasable_work
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green being replaced is a RELEASE THAT CONTAINS NOTHING: the OMN-13912 post-release bump edits pyproject.toml, pyproject.toml is a release-relevant path because it carries the dependency floor that ships with the wheel, and a decision surface that counts commits over release-relevant paths therefore sees exactly one the morning after every release -- the machinery's own bookkeeping. Cut on that count, the train publishes a version with no product change, its own post-release bump lands, and the count is one again; once per release, forever. This is not a hypothesis. It is the state origin/dev was in when the guard was written: `git rev-list --count v0.38.30..origin/dev -- src pyproject.toml` returned 1 and `git log --no-merges --format=%s` over the same range returned exactly one line, `chore(OMN-13912): post-release dev version bump to 0.38.31 (#3693)`, while the shipped classifier returned 0 unreleased commits for the same range. The sibling decision surface in omnimarket had to grow its own marker for the identical reason, which decide_release_on_merge.py's docstring records in its own words: without one the post-release commit re-triggers the workflow and releases an empty version, once per merge, forever. THE ARTIFACT IS THE PULL REQUEST, NOT A COMMIT OBJECT, and the reason is that the guard decides on a commit SUBJECT: every repo in this registry is squash-only with no merge queue, so a merged pull request's title IS the subject of the commit it produces plus the suffix git appends, and pulls/3693's merge_commit_sha 695305b303dfd1e1d1b68a2885ea34641cd251ea is the head of origin/dev, which the test reads out of the captured bytes rather than from this paragraph. A commit-object capture would have carried author emails into a PUBLIC repository for no gain; the pulls API carries logins only, and the only address string in either fixture is the standard github.com clone URL. THE DISCRIMINATOR IS MANDATORY AND NOT A FORMALITY - a classifier that called every subject bookkeeping would replay this incident perfectly and make the train cut nothing ever, which is equally broken and far harder to notice because a train that never cuts looks like a quiet week. test_the_same_guard_accepts_real_runtime_work drives the SAME function over a second captured pull request, pulls/3683 (feat(OMN-18567), merge commit 2a4e49511d421c368adb5097131c5d1b985272c3, sha256 0ca7e74942e7ae25160fe2555e9805ee9ec3695c725e2dd7ba1140760937c3ec), and requires the opposite verdict; a third test requires the two fixtures not to be byte-identical and both to be merged into dev, so neither assertion can be vacuous. A fourth pins the narrow half - the patterns anchor at the conventional-commit prefix, so a subject that merely MENTIONS a release is still work, which is the failure mode where a guard written to stop one empty release stops every release. NO MODIFICATIONS: both fixtures are the exact bytes the REST API returned, unedited.
   - id: omn15355-blocked-acl-matrix-had-no-live-apply-gate
     guard: scripts/apply_application_database_acl.py
     incident: OMN-15355

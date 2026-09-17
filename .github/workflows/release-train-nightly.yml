@@ -1,0 +1,321 @@
+---
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# release-train-nightly.yml (OMN-18595)
+#
+# WHY THIS EXISTS
+#   Deciding to cut is the only manual step left in the release chain. Everything
+#   after it already runs by itself: auto-tag-on-merge.yml tags a merged release
+#   PR and dispatches release.yml; release.yml publishes to PyPI and fast-forwards
+#   main; post_release_dev_bump.py restores the one-version-ahead invariant;
+#   dependency-cascade.yml opens the downstream pin bumps. Nothing decides to
+#   start it, so the decision waits for a person and the backlog grows --
+#   measured 2026-09-17, omniintelligence 67 unreleased source commits since a tag
+#   dated 2026-05-26, omniclaude 65 since 2026-06-02.
+#
+#   This workflow is that decision and nothing else. It NEVER tags, NEVER
+#   publishes, NEVER deploys and NEVER merges. Its only write is opening a
+#   changelog-only pull request, which a human or the repo's own auto-merge path
+#   lands under exactly the gates that apply today.
+#
+# WHY A SKIP IS REPORTED RATHER THAN SILENT
+#   A train that says nothing when it does not cut is indistinguishable from a
+#   train that is not running. Every declared repo therefore gets a row in the
+#   decision artifact and in the step summary every night, carrying its own
+#   reason, and the artifact uploads under always().
+#
+# THERE IS NO OVERRIDE
+#   No force input, no skip input, no way to cut without the premises. The
+#   premises live in scripts/ci/release_train.py and their per-repo configuration
+#   in config/release_train_policy.yaml. A repo not declared there refuses rather
+#   than running against a default.
+#
+# TOKEN
+#   Every write authenticates as the onexbot-occ-writer App. There is deliberately
+#   no expression substituting the default workflow token when the mint fails: a
+#   push authored by the default token has its downstream workflows suppressed, so
+#   the release PR would open and nothing would ever tag it -- the credential
+#   confound OMN-18273 corrected. The mint failing fails the job.
+#   tests/scripts/test_release_train_nightly.py asserts both, so reintroducing a
+#   fallback is a red test rather than a review catch.
+
+name: Release Train (nightly)
+
+on:
+  schedule:
+    # 07:11 UTC daily. Past midnight Pacific, and offset off the hour so it does
+    # not land in the same minute as the other scheduled fleet jobs.
+    - cron: "11 7 * * *"
+  workflow_dispatch:
+    inputs:
+      repos:
+        description: >-
+          Comma-separated subset of declared repos to decide. Empty decides every
+          repo in config/release_train_policy.yaml. A name that is not declared
+          refuses the run rather than being skipped.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-train-nightly
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    name: Decide
+    runs-on: >-
+      ${{
+        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 30
+    outputs:
+      cuts: ${{ steps.plan.outputs.cuts }}
+      cut_count: ${{ steps.plan.outputs.cut_count }}
+    steps:
+      - name: Checkout the train
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Sibling repos are private, and the receipt artifacts live in the repo the
+      # sha belongs to, so the decision cannot be made with this repo's own token.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-contents: write
+          permission-actions: read
+          permission-pull-requests: write
+
+      - name: Clone every declared repo
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SELECTED: ${{ inputs.repos }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/train-clones"
+          declared=$(python3 - <<'PY'
+          import pathlib, sys
+          sys.path.insert(0, "scripts/ci")
+          import importlib.util
+          spec = importlib.util.spec_from_file_location(
+              "release_train", "scripts/ci/release_train.py"
+          )
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          print("\n".join(sorted(mod.load_policy(mod.DEFAULT_POLICY_PATH))))
+          PY
+          )
+          if [ -n "${SELECTED}" ]; then
+            wanted=$(printf '%s' "${SELECTED}" | tr ',' '\n' | sed 's/[[:space:]]//g')
+          else
+            wanted="${declared}"
+          fi
+          printf '%s\n' "${wanted}" | while IFS= read -r repo; do
+            [ -n "${repo}" ] || continue
+            echo "cloning ${repo}"
+            git clone --filter=blob:none --no-checkout \
+              "https://x-access-token:${GH_TOKEN}@github.com/OmniNode-ai/${repo}.git" \
+              "${RUNNER_TEMP}/train-clones/${repo}"
+            git -C "${RUNNER_TEMP}/train-clones/${repo}" fetch --tags --quiet origin
+          done
+
+      - name: Decide, per repo
+        id: plan
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SELECTED: ${{ inputs.repos }}
+        run: |
+          set -euo pipefail
+          set +e
+          python3 scripts/ci/release_train.py plan \
+            --policy config/release_train_policy.yaml \
+            --clones-dir "${RUNNER_TEMP}/train-clones" \
+            --repos "${SELECTED}" \
+            --out "${RUNNER_TEMP}/release-train-decision.json" \
+            >"${RUNNER_TEMP}/decision.stdout" 2>"${RUNNER_TEMP}/decision.stderr"
+          code=$?
+          set -e
+          cat "${RUNNER_TEMP}/decision.stderr"
+          {
+            echo "## Release train decision"
+            echo ""
+            cat "${RUNNER_TEMP}/decision.stderr"
+            echo ""
+            echo '<details><summary>decision artifact</summary>'
+            echo ""
+            echo '```json'
+            cat "${RUNNER_TEMP}/release-train-decision.json" 2>/dev/null || echo '{}'
+            echo '```'
+            echo ""
+            echo '</details>'
+          } >>"${GITHUB_STEP_SUMMARY}"
+          cuts=$(python3 -c "
+          import json, os, sys
+          path = os.path.join(os.environ['RUNNER_TEMP'], 'release-train-decision.json')
+          try:
+              payload = json.load(open(path))
+          except (OSError, ValueError):
+              print('[]'); sys.exit(0)
+          rows = [d for d in payload['decisions'] if d['verdict'] == 'CUT']
+          print(json.dumps(rows))
+          ")
+          echo "cuts=${cuts}" >>"${GITHUB_OUTPUT}"
+          echo "cut_count=$(python3 -c "import json,sys; print(len(json.loads(sys.argv[1])))" "${cuts}")" \
+            >>"${GITHUB_OUTPUT}"
+          exit "${code}"
+
+      # always(): a decision record that exists only when the run succeeded
+      # cannot distinguish a failed decision from an unrun one, which is the
+      # whole reason this train reports its skips.
+      - name: Upload the decision
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-train-decision-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-train-decision.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  cut:
+    name: Cut ${{ matrix.decision.repo }}
+    needs: decide
+    if: needs.decide.outputs.cut_count != '0'
+    runs-on: >-
+      ${{
+        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        decision: ${{ fromJSON(needs.decide.outputs.cuts) }}
+    steps:
+      - name: Checkout the train
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          path: _train
+
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: ${{ matrix.decision.repo }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout the repo being cut
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/${{ matrix.decision.repo }}
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ matrix.decision.candidate_sha }}
+          fetch-depth: 0
+          path: _target
+
+      - name: Open the release pull request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_REPO: ${{ matrix.decision.repo }}
+          VERSION: ${{ matrix.decision.candidate_version }}
+          NEEDS_BUMP: ${{ matrix.decision.needs_bump }}
+          CANDIDATE_SHA: ${{ matrix.decision.candidate_sha }}
+          BASE_BRANCH: ${{ matrix.decision.base_branch }}
+          TICKET: OMN-18595
+        run: |
+          set -euo pipefail
+          cd _target
+          branch="automation/release-${VERSION}-omn-18595"
+
+          existing=$(gh pr list --repo "OmniNode-ai/${TARGET_REPO}" \
+            --head "${branch}" --state open --json number --jq 'length')
+          if [ "${existing}" -gt 0 ]; then
+            echo "a release PR for ${branch} is already open — not opening a second"
+            exit 0
+          fi
+
+          git checkout -b "${branch}"
+
+          # The changelog block is the whole diff on the common path. The version
+          # line moves only when dev is NOT already ahead of the latest tag, which
+          # is the recovery case the post-release bump normally prevents.
+          python3 "${GITHUB_WORKSPACE}/_train/scripts/ci/release_train.py" changelog \
+            --policy "${GITHUB_WORKSPACE}/_train/config/release_train_policy.yaml" \
+            --repo "${TARGET_REPO}" \
+            --clone . \
+            --version "${VERSION}" >"${RUNNER_TEMP}/changelog-entry.md"
+
+          python3 - <<'PY'
+          import os, pathlib
+          entry = pathlib.Path(os.environ["RUNNER_TEMP"], "changelog-entry.md").read_text()
+          target = pathlib.Path("CHANGELOG.md")
+          existing = target.read_text() if target.exists() else ""
+          target.write_text(entry.rstrip("\n") + "\n\n" + existing)
+          PY
+
+          if [ "${NEEDS_BUMP}" = "true" ]; then
+            python3 - <<'PY'
+          import os, pathlib, re
+          version = os.environ["VERSION"]
+          path = pathlib.Path("pyproject.toml")
+          body = path.read_text()
+          updated, count = re.subn(
+              r'(?m)^version = "[^"]+"$', f'version = "{version}"', body, count=1
+          )
+          if count != 1:
+              raise SystemExit(
+                  "refusing to cut: could not find exactly one [project].version "
+                  "line to move in pyproject.toml"
+              )
+          path.write_text(updated)
+          PY
+          fi
+
+          git config user.name "onexbot-occ-writer[bot]"
+          git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
+          git add CHANGELOG.md pyproject.toml
+          git commit -m "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
+            --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
+            --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          git push origin "${branch}"
+
+          body=$(cat <<PREOF
+          Opened by the scheduled release train (${TICKET}).
+
+          - Repository: \`OmniNode-ai/${TARGET_REPO}\`
+          - Candidate commit: \`${CANDIDATE_SHA}\`
+          - Version: \`${VERSION}\`
+
+          The train opened this because the repository's declared premises held for
+          that exact commit: it carries unreleased release-relevant work since the
+          latest tag, and its declared lab-evidence rule resolved. The full decision,
+          including every repository the train skipped tonight and why, is the
+          \`release-train-decision-${GITHUB_RUN_ID}\` artifact on the run below.
+
+          Merging this is what cuts the release: the existing tagger recognises the
+          title, pushes the tag and dispatches the publish. The train itself tags
+          nothing, publishes nothing and deploys nothing.
+
+          Decision run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Evidence-Ticket: ${TICKET}
+          PREOF
+          )
+          gh pr create \
+            --repo "OmniNode-ai/${TARGET_REPO}" \
+            --title "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
+            --body "${body}" \
+            --head "${branch}" \
+            --base "${BASE_BRANCH}"

@@ -59,6 +59,12 @@ BRANCH_PUSHERS: dict[str, tuple[str, ...]] = {
     "plugin-pin-cascade.yml": ("update-dockerfile-pins",),
     "dependency-cascade.yml": ("open-bump-pr",),
     "dev-baseline-publisher.yml": ("publish-baseline",),
+    # The scheduled release train (OMN-18595). Its `cut` job pushes the
+    # changelog-only release branch, so it is a branch pusher on exactly the
+    # terms below: it mints the App token with no fallback, commits as the App
+    # identity, and stamps both trailers. It is NOT exempt the way the tag
+    # pushers above are -- it pushes a commit, and a commit can carry a trailer.
+    "release-train-nightly.yml": ("cut",),
 }
 
 # Workflow file -> why it is out of scope. Every exemption is a stated reason, not a
