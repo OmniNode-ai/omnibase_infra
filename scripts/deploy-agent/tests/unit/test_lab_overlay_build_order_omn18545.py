@@ -276,7 +276,7 @@ async def test_a_failing_migration_preflight_still_reaches_the_overlay_build(
     )
     agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     job = store.load(cmd.correlation_id)
     assert job is not None
@@ -312,7 +312,7 @@ async def test_the_overlay_build_runs_for_the_sha_this_job_resolved(
     )
     agent, _ = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert [entry["sha"] for entry in _FakeApplier.calls] == [OTHER_SHA]
     assert [entry["correlation_id"] for entry in _FakeApplier.calls] == [
@@ -335,7 +335,7 @@ async def test_an_overlay_failure_does_not_break_a_lane_running_the_merged_sha(
     agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
     _FakeApplier.raise_with = OVERLAY_ERROR
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     job = store.load(cmd.correlation_id)
     assert job is not None
@@ -370,7 +370,7 @@ async def test_neither_failure_masks_the_other(
     agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
     _FakeApplier.raise_with = OVERLAY_ERROR
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     job = store.load(cmd.correlation_id)
     assert job is not None
@@ -403,7 +403,7 @@ async def test_the_verdict_is_recorded_before_the_overlay_is_attempted(
     _FakeApplier.status_source = store
     _FakeApplier.status_cid = cmd.correlation_id
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert _FakeApplier.observed_status == ["failed"], (
         "the job's terminal status was not already written when the overlay "
@@ -429,7 +429,7 @@ async def test_a_failing_prod_job_never_touches_the_overlay(
     fake_executor = _FakeExecutor(stability_ready_digest=_OTHER_DIGEST)
     agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     job = store.load(cmd.correlation_id)
     assert job is not None
@@ -455,7 +455,7 @@ async def test_a_successful_prod_job_never_touches_the_overlay(
     fake_executor = _FakeExecutor(stability_ready_digest=_DIGEST)
     agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     job = store.load(cmd.correlation_id)
     assert job is not None
@@ -480,7 +480,7 @@ async def test_a_dev_job_that_fails_before_the_sha_is_resolved_applies_nothing(
     fake_executor = _FakeExecutor()
     agent, store = _make_agent(tmp_path, monkeypatch, first, fake_executor)
 
-    await agent._run_deploy(first)
+    agent._run_deploy(first)
     assert [entry["sha"] for entry in _FakeApplier.calls] == [SHA]
 
     second = _dev_cmd()
@@ -489,7 +489,7 @@ async def test_a_dev_job_that_fails_before_the_sha_is_resolved_applies_nothing(
         preflight_error="preflight refused: required compose env unset"
     )
 
-    await agent._run_deploy(second)
+    agent._run_deploy(second)
 
     job = store.load(second.correlation_id)
     assert job is not None
@@ -513,7 +513,7 @@ async def test_the_overlay_stays_off_when_the_operator_disabled_it(
     )
     agent, _ = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert _FakeApplier.calls == []
     assert _FakeApplier.instances == []
@@ -532,7 +532,7 @@ async def test_a_successful_dev_deploy_still_applies_the_overlay_exactly_once(
     _FakeApplier.status_source = store
     _FakeApplier.status_cid = cmd.correlation_id
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     job = store.load(cmd.correlation_id)
     assert job is not None
@@ -569,7 +569,7 @@ async def test_an_unrelated_dev_failure_does_not_trigger_a_repair_build(
     fake_executor = _FakeExecutor(rebuild_error=GATEWAY_ERROR)
     agent, store = _make_agent(tmp_path, monkeypatch, cmd, fake_executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     job = store.load(cmd.correlation_id)
     assert job is not None
@@ -607,7 +607,7 @@ async def test_the_terminal_event_is_still_published_when_the_repair_raises(
     )
     _FakeApplier.raise_with = OVERLAY_ERROR
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert len(_FakeApplier.calls) == 1
     assert len(published) == 1, (

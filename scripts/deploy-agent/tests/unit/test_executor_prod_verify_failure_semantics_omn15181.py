@@ -135,7 +135,7 @@ async def test_digest_mismatch_produces_truthful_failed_completion(
         return _ok()
 
     with patch("deploy_agent.executor._run", side_effect=fake_run):
-        await agent._run_deploy(cmd)
+        agent._run_deploy(cmd)
 
     # 1. No phantom rollback / re-recreate: exactly one rebuild_scope call,
     #    exactly one deploy_and_verify call, nothing after the failure.
@@ -235,7 +235,7 @@ async def test_digest_match_still_marks_verification_success(
         return _ok()
 
     with patch("deploy_agent.executor._run", side_effect=fake_run):
-        await agent._run_deploy(cmd)
+        agent._run_deploy(cmd)
 
     job = store.load(cmd.correlation_id)
     assert job is not None

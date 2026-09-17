@@ -244,7 +244,7 @@ async def test_lane_lock_is_held_through_every_mutating_phase(
     # reading cannot be an artifact of a permanently stuck lock file.
     assert _lock_is_free(lock_path) is True
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     mutating_phases = ("git_pull", "compose_gen", "rebuild_scope", "verify")
     unlocked = [
@@ -280,7 +280,7 @@ async def test_lane_lock_is_released_when_the_deploy_fails(
     executor.rebuild_scope = _boom  # type: ignore[method-assign]
     agent = _make_agent(tmp_path, monkeypatch, cmd, executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert _lock_is_free(lock_path) is True
 
@@ -374,7 +374,7 @@ async def test_successful_dev_deploy_delivers_the_onex_api_pin(
     executor = _LockProbingExecutor(lock_path)
     agent = _make_agent(tmp_path, monkeypatch, cmd, executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert [call["entry"] for call in _FakeApplier.calls] == ["apply"]
     assert executor.delivered, (
@@ -411,7 +411,7 @@ async def test_delivery_runs_after_the_apply_that_builds_the_image(
     executor.deliver_onex_api_pin = _deliver  # type: ignore[method-assign]
     agent = _make_agent(tmp_path, monkeypatch, cmd, executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert order == ["apply", "deliver"]
 
@@ -438,7 +438,7 @@ async def test_delivery_does_not_run_when_the_deploy_failed(
     executor.rebuild_scope = _boom  # type: ignore[method-assign]
     agent = _make_agent(tmp_path, monkeypatch, cmd, executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert executor.delivered == []
 
@@ -465,6 +465,6 @@ async def test_delivery_is_dev_lane_only(
     executor = _LockProbingExecutor(lock_path)
     agent = _make_agent(tmp_path, monkeypatch, cmd, executor)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert executor.delivered == []

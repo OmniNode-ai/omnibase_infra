@@ -363,7 +363,7 @@ async def test_agent_hands_the_commands_git_ref_to_rebuild_scope(
     agent.executor = fake_executor  # type: ignore[assignment]
     monkeypatch.setattr(agent_mod, "publish_result", lambda payload, config: False)
 
-    await agent._run_deploy(cmd)
+    agent._run_deploy(cmd)
 
     assert fake_executor.rebuild_kwargs["git_ref"] == "origin/dev"
     assert fake_executor.rebuild_kwargs["lane"] == EnumRuntimeLane.DEV
