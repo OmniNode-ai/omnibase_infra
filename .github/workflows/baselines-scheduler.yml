@@ -67,7 +67,15 @@ jobs:
     # See "WHAT OMN-17163 CHANGED" above before changing this. The constraint
     # is network namespace, not trust: this job must sit where the .201 lane's
     # published broker port is reachable.
-    runs-on: [self-hosted, omnibase-deploy]
+    #
+    # OMN-18602: the label moved from `omnibase-deploy` to the verify class.
+    # The network-namespace constraint above is UNCHANGED, and `host-201` is
+    # what now carries it -- the bare `omnibase-verify` class would admit the
+    # verify runners on the other lab hosts, which cannot reach this lane's
+    # published broker port. This job computes from what it reads and writes
+    # nothing to the lane, so it never needed the deploy runner's private clone
+    # tree.
+    runs-on: [self-hosted, omnibase-verify, host-201]
     timeout-minutes: 15
     permissions:
       contents: read

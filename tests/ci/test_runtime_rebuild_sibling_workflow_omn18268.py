@@ -180,11 +180,29 @@ def test_the_receipt_is_emitted_even_when_convergence_fails() -> None:
 
 
 def test_the_convergence_job_runs_on_the_lane_host_fleet() -> None:
-    """The lane's docker daemon is on the LAN; hosted compute cannot see it."""
+    """The lane's docker daemon is on the LAN; hosted compute cannot see it.
+
+    OMN-18602 moved this job from `omnibase-deploy` to the verify class, and
+    THIS job is the reason that direction was the only safe one. It is called
+    from omnimarket, so it and the release-train DEPLOY jobs sit in different
+    repositories -- and a GitHub `concurrency` group is scoped to one
+    repository, so no group can ever serialise them against each other.
+    Relieving the queue by adding a SECOND runner to the deploy label would
+    therefore have deleted the only guard that spans both callers. Moving the
+    read-only work off instead leaves the deploy label as one physical runner,
+    which IS the guard.
+
+    The verify runners register into the `omnibase-deploy` runner GROUP, whose
+    visibility covers omnibase_infra and omnimarket, so this caller can reach
+    them; group membership grants repository visibility and the LABEL routes.
+    `host-201` is required because the class has members on two other lab
+    hosts that cannot see this lane.
+    """
     workflow = _load()
     assert workflow["jobs"]["verify-sibling-converged"]["runs-on"] == [
         "self-hosted",
-        "omnibase-deploy",
+        "omnibase-verify",
+        "host-201",
     ]
 
 

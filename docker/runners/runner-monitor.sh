@@ -652,13 +652,23 @@ done
 # RUNNER_NAME_PREFIX (`omninode-runner`), and neither family matches it.
 #
 #   * omninode-customer-plane-runner-1/2 -- the credential-free pair (OMN-18392)
-#   * omninode-verify-runner-1 -- the read-only verify runner (OMN-18408)
+#   * omninode-verify-runner-1/2/3 -- the read-only verify class (OMN-18408,
+#     grown to three by OMN-18602)
 #
-# The verify runner matters more per container than the pair does. Five
-# scheduled/per-merge probes route to it alone, so an unnoticed outage does not
-# lose a canary -- it queues all five indefinitely with no runner to take them,
-# which is the starvation OMN-18408 removed from `omnibase-deploy`, relocated
-# rather than fixed.
+# The verify class matters more per container than the pair does. TEN
+# scheduled/per-merge probes route to it, so an unnoticed outage of the whole
+# class does not lose a canary -- it queues all ten indefinitely with no runner
+# to take them, which is the starvation OMN-18408 removed from
+# `omnibase-deploy`, relocated rather than fixed.
+#
+# OMN-18602 changed the shape of a PARTIAL outage here, and the change is worth
+# stating because it cuts the other way. With one member, losing it stopped
+# every probe, loudly. With three, losing one degrades throughput instead: the
+# remaining two absorb the work and the queue grows, which is quieter and is
+# exactly why each member is enumerated by name below rather than discovered by
+# prefix. The class was sized at three against a measured offered load of 0.83
+# erlangs (OMN-18602); running it at two puts it back in the regime where a
+# quarter of arrivals wait.
 #
 # Each family carries its OWN `*_alert_present` flag and its own finding. A
 # single shared flag would be cheaper and wrong: the Slack message would name
@@ -696,11 +706,20 @@ ALERT_ONLY_RUNNER_NAMES=(
     omninode-customer-plane-runner-1
     omninode-customer-plane-runner-2
     omninode-verify-runner-1
+    omninode-verify-runner-2
+    omninode-verify-runner-3
 )
 declare -A ALERT_ONLY_RUNNER_FAMILY=(
     [omninode-customer-plane-runner-1]=customer-plane
     [omninode-customer-plane-runner-2]=customer-plane
     [omninode-verify-runner-1]=verify
+    # OMN-18602. The prefix above would DISCOVER these two, but discovery only
+    # reports a container that exists -- the enumerated list is what turns an
+    # absent container into "MISSING (no container)". Adding a class member to
+    # the compose file without adding it here buys capacity that can vanish
+    # silently, which is the shape of outage this block exists to remove.
+    [omninode-verify-runner-2]=verify
+    [omninode-verify-runner-3]=verify
 )
 customer_plane_alert_present=false
 verify_runner_alert_present=false

@@ -84,7 +84,28 @@ _PUBLISHER = _REPO_ROOT / "scripts" / "run_baselines_batch_compute.py"
 
 _LANE_OVERLAY_PATH = "config/ci_bus_lanes.yaml"
 _LANE_OVERLAY_REPO = "OmniNode-ai/omnimarket"
-_DEPLOY_RUNNER = ["self-hosted", "omnibase-deploy"]
+#: The literal pin these two probes must carry.
+#:
+#: OMN-18602 changed the VALUE and deliberately not the INVARIANT. What
+#: OMN-17163 AC8 requires is that the job sit in the .201 lane's network
+#: reachability domain by a pin no routing variable can move. `omnibase-deploy`
+#: expressed that only because, when this test was written, that label named
+#: the one container on the host carrying the `host.docker.internal`
+#: host-gateway alias.
+#:
+#: That stopped being true when the verify class was given the same alias, and
+#: both of these probes are read-only -- `dlq-depth-monitor` says so in its own
+#: job name -- so neither ever needed the deploy runner's private clone tree.
+#: Keeping them on a label whose remaining purpose is to SERIALISE lane
+#: mutations queued them behind release-train deploys for no reason.
+#:
+#: `host-201` is the half that carries the network fact now, and it is not
+#: optional: `omnibase-verify` alone would admit the arm64 verify runners on
+#: the other lab hosts, which are in a different network namespace and would
+#: report the lane's broker port unreachable -- a lane outage in appearance,
+#: a routing mistake in fact. The pin stays a literal list, so AC8's real
+#: claim, that no variable flip can move these jobs, is untouched.
+_LANE_DOMAIN_RUNNER = ["self-hosted", "omnibase-verify", "host-201"]
 
 #: The exact address that took 545 runs red, plus the shape of any other
 #: `host:port` literal on the lane's broker port. Matching the PORT rather than
@@ -267,11 +288,17 @@ def test_workflow_exists(workflow_path: Path) -> None:
 def test_runs_on_the_only_runner_in_the_lane_reachability_domain(
     workflow_path: Path,
 ) -> None:
-    assert _sole_job(workflow_path)["runs-on"] == _DEPLOY_RUNNER, (
-        f"{workflow_path.name} must pin the deploy runner literally: it is the "
-        "one runner with the host-gateway alias, and that is a network fact no "
-        "routing variable can express"
+    runs_on = _sole_job(workflow_path)["runs-on"]
+    assert runs_on == _LANE_DOMAIN_RUNNER, (
+        f"{workflow_path.name} must pin a runner inside the .201 lane's network "
+        "reachability domain, literally: the lane's broker port is reachable "
+        "only from that host, and that is a network fact no routing variable "
+        "can express"
     )
+    # The half the label name alone does not carry. A class-only pin schedules
+    # successfully on another lab host and then reports the lane unreachable,
+    # which reads as an outage rather than as a routing mistake.
+    assert "host-201" in runs_on
 
 
 @pytest.mark.unit

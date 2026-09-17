@@ -248,6 +248,21 @@ class Scenario:
                 ],
             }
         )
+        # OMN-18602: the class is three members and the alert-only block checks
+        # each by name, so a baseline registering only the first reports two
+        # missing runners and turns a no-regression assertion red.
+        for _peer in ("omninode-verify-runner-2", "omninode-verify-runner-3"):
+            runners.append(
+                {
+                    "name": _peer,
+                    "status": "online",
+                    "busy": False,
+                    "labels": [
+                        {"name": "self-hosted"},
+                        {"name": "omnibase-verify"},
+                    ],
+                }
+            )
         return json.dumps({"total_count": len(runners), "runners": runners})
 
     def compose_recreate_targets(self) -> list[list[str]]:
@@ -291,6 +306,10 @@ def _make_mock_bin(bindir: Path, scen: Scenario) -> None:
             elif [[ "$*" == *"verify-runner"* ]]; then
               # OMN-18408: same treatment for the second alert-only family.
               printf '%s\\t%s\\n' "omninode-verify-runner-1" "Up (healthy)"
+              # OMN-18602: the class grew to three; every enumerated member
+              # must be staged or the healthy baseline reports it MISSING.
+              printf '%s\\t%s\\n' "omninode-verify-runner-2" "Up (healthy)"
+              printf '%s\\t%s\\n' "omninode-verify-runner-3" "Up (healthy)"
             else
               cat "${{SCEN}}/ps.tsv" 2>/dev/null || true
             fi

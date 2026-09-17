@@ -144,6 +144,31 @@ def _runners_json(*, status: str = "online", busy: bool = False) -> str:
             ],
         }
     )
+    # OMN-18602: the verify class is three interchangeable members. A baseline
+    # that registered only the first would report the other two offline, which
+    # is the same false alarm the enumerated-names list exists to make real.
+    runners.append(
+        {
+            "name": "omninode-verify-runner-2",
+            "status": "online",
+            "busy": False,
+            "labels": [
+                {"name": "self-hosted"},
+                {"name": "omnibase-verify"},
+            ],
+        }
+    )
+    runners.append(
+        {
+            "name": "omninode-verify-runner-3",
+            "status": "online",
+            "busy": False,
+            "labels": [
+                {"name": "self-hosted"},
+                {"name": "omnibase-verify"},
+            ],
+        }
+    )
     return json.dumps({"total_count": len(runners), "runners": runners})
 
 
@@ -180,6 +205,10 @@ def _make_mock_bin(
             elif [[ "$*" == *"verify-runner"* ]]; then
               # OMN-18408: same treatment for the second alert-only family.
               printf '%s\\t%s\\n' "omninode-verify-runner-1" "Up (healthy)"
+              # OMN-18602: the class grew to three; every enumerated member
+              # must be staged or the healthy baseline reports it MISSING.
+              printf '%s\\t%s\\n' "omninode-verify-runner-2" "Up (healthy)"
+              printf '%s\\t%s\\n' "omninode-verify-runner-3" "Up (healthy)"
             else
               for i in $(seq 1 {TEST_FLEET_COUNT}); do
                 printf '%s\\t%s\\n' "{PREFIX}-${{i}}" "{docker_status}"
