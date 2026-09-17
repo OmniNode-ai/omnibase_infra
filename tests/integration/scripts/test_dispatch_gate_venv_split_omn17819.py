@@ -77,7 +77,17 @@ def _make_uv_shim(bin_dir: Path, *, check_exit: int) -> Path:
         "  done\n"
         '  if [[ -n "$_base" ]]; then\n'
         '    mkdir -p "${UV_PROJECT_ENVIRONMENT}/bin"\n'
-        '    printf "home = %s\\n" "${_base%/*}" > "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"\n'
+        # Record the RESOLVED directory, as real uv does: it writes the
+        # interpreter's own location (the Cellar/opt spelling), not the
+        # directory of the path it was handed. A shim that recorded the flag's
+        # dirname would model a uv that does not exist and would make a
+        # correctly-rebuilt venv read as drift.
+        '    _d="$_base"\n'
+        '    while [[ -L "$_d" ]]; do\n'
+        '      _l="$(readlink "$_d")"\n'
+        '      case "$_l" in /*) _d="$_l" ;; *) _d="${_d%/*}/$_l" ;; esac\n'
+        "    done\n"
+        '    printf "home = %s\\n" "$(cd "${_d%/*}" && pwd -P)" > "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"\n'
         "  fi\n"
         "fi\n"
         'for arg in "$@"; do\n'
