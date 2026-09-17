@@ -279,7 +279,7 @@ class TestLlmEndpointsContract:
         coder = by_slot["coder-5090"]
         assert coder["status"] == "running"
         assert coder["endpoint_url"] == "http://192.168.86.201:8000"
-        assert coder["model_hf_id"] == "Qwen/Qwen3.6-35B-A3B"
+        assert coder["model_hf_id"] == "Qwen/Qwen3.8-27B"
         assert coder["context_window_budgeted"] == 131072
 
         # GET .201:8002/v1/models -> id "text-embedding-qwen3",

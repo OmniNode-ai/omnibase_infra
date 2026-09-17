@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 OVERLAY_YAML = ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
 PARITY_FIXTURE = ROOT / "tests" / "fixtures" / "bifrost_lane_overlay_v3.yaml"
+PROBE_FIXTURE = ROOT / "tests" / "fixtures" / "bifrost_served_models_probe.json"
 COMPOSE_INFRA = ROOT / "docker" / "docker-compose.infra.yml"
 OVERLAY_ENV = ROOT / "docker" / "lane-overlays" / "dev.bifrost.env"
 RENDER_SCRIPT = ROOT / "scripts" / "render_bifrost_lane_overlay_env.py"
@@ -65,16 +67,33 @@ def test_dev_overlay_matches_cross_repo_v2_parity_fixture() -> None:
     assert overlay.model_dump(mode="json") == fixture.model_dump(mode="json")
 
     # OMN-16833: the lane serves more than one local rung, so these are pinned
-    # per-backend rather than as single-valued sets.  Live readback 2026-08-28:
-    # .201:8000 -> "Qwen3.6-35B-A3B" (max_model_len 131072); .200:8101 -> "deepseek-v4-flash"
-    # (context_length 131072).
+    # per-backend rather than as single-valued sets.
     by_id = {binding.backend_key: binding for binding in overlay.backends}
     assert set(by_id) == {"local-coder", "local-heavy-reasoning", "local-ds-v4-flash"}
 
+    # OMN-18626: the served id is read from the RECORDED PROBE, not restated.
+    # A literal here is the third copy of a value that already lives in the
+    # overlay and in the authorized table, and three copies of a wrong value
+    # agree with each other perfectly -- which is how the .201 served id stayed
+    # wrong through two flips while every static test passed. The probe fixture
+    # is the only site in this repo with an EXTERNAL referent: it is a
+    # transcript of what the endpoint answered. Pin to that.
+    served_by_endpoint = {
+        probe["endpoint"]: probe["served_model_ids"]
+        for probe in json.loads(PROBE_FIXTURE.read_text(encoding="utf-8"))["probes"]
+    }
     for backend_key in ("local-coder", "local-heavy-reasoning"):
         binding = by_id[backend_key]
         assert binding.endpoint_url == "http://192.168.86.201:8000/v1/chat/completions"
-        assert binding.advertised_model == "Qwen3.6-35B-A3B"
+        assert (
+            binding.advertised_model
+            in served_by_endpoint["http://192.168.86.201:8000/v1/models"]
+        ), (
+            f"{backend_key} advertises {binding.advertised_model!r}, which the "
+            f"recorded /v1/models readback does not list. Re-probe the endpoint "
+            f"and update tests/fixtures/bifrost_served_models_probe.json in the "
+            f"same commit as the binding table."
+        )
         # OMN-18570: read from the authorized table rather than restating it.
         # This assertion carried "27B" for two weeks after the endpoint moved
         # off the Qwen3.8 27B, agreeing with an overlay that was also wrong.
