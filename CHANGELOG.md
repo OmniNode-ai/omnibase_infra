@@ -1,3 +1,21 @@
+## v0.38.29 (2026-09-17)
+
+### Release
+- Cut omnibase_infra from dev at 0.38.29 for the OMN-16976 tenant-authority delivery path and the 116 commits merged since v0.38.27.
+- PyPI currently has 0.38.27 as the latest published omnibase-infra release; dev is already versioned at 0.38.29, so this release intentionally does not edit dependency pins or downgrade the package version.
+- Declared dependency floor is unchanged from dev: `omnibase-core==0.47.16`, `omnibase-spi==0.23.3`, `omnibase-compat==0.5.7`, all published.
+
+### Included Since v0.38.27
+- fix(OMN-18443): anchor the release-identity published set to the evaluated tree (#3655).
+- fix(OMN-17228): the Pattern B broker carries the tenant off the consumed envelope (#3631).
+- feat(OMN-17057): a sibling merge delivers its own named revision to onex-dev staging (#3611).
+- fix(OMN-18419): the delegation chain records its causal edges, and the replay grades the tree it declares (#3610).
+- fix(OMN-16871): resolve the delegate broker from the selected lane, not the ambient env (#3617).
+- fix(OMN-18421): the chain canary submits through the tenant-bearing gateway route (#3625).
+- feat(OMN-17477): make the self-hosted runner fleet multi-arch and multi-host, and declare .105 as its third host (#3642, #3650).
+- fix(OMN-18550): a boot that cannot finish says which contract and which probe (#3669).
+- chore(deps): bump omnibase-core to 0.47.15 and then 0.47.16 (#3612, #3658).
+
 ## v0.38.24 (2026-09-12)
 
 ### Release
