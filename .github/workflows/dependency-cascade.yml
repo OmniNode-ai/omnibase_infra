@@ -113,16 +113,34 @@ jobs:
       - name: Check onexbot-occ-writer App credentials are configured
         id: token_check
         env:
-          APP_ID: ${{ secrets.onexbot-occ-app-id }}
-          APP_PRIVATE_KEY: ${{ secrets.onexbot-occ-private-key }}
+          # Read from BOTH sources, because the two triggers populate different
+          # ones and neither name alone serves both (OMN-18596).
+          #
+          # On workflow_call, release.yml passes these explicitly and only the
+          # declared inputs are populated. On workflow_dispatch those input
+          # names do not exist at all, so reading only them resolved empty,
+          # has_token went false, every later step's `if:` was false, and the
+          # job exited 0 having done nothing. Run 35260585795 dispatched this
+          # workflow against the released v0.38.30 while all three targets were
+          # behind it, and reported four green jobs and zero pull requests.
+          #
+          # The fallback stays INSIDE the App's own identity. Substituting the
+          # default workflow token would suppress the downstream workflows of
+          # anything it pushed, which is the confound OMN-18273 corrected.
+          APP_ID: ${{ secrets.onexbot-occ-app-id || secrets.ONEXBOT_OCC_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.onexbot-occ-private-key || secrets.ONEXBOT_OCC_PRIVATE_KEY }}
         run: |
           if [ -z "$APP_ID" ] || [ -z "$APP_PRIVATE_KEY" ]; then
-            echo "::warning::ONEXBOT_OCC_APP_ID / ONEXBOT_OCC_PRIVATE_KEY are not configured. Skipping dependency bump for ${{ matrix.repo }}." \
-              "Provision the onexbot-occ-writer App org secrets to enable automated dependency cascades."
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
+            # FAIL, never skip. A cascade that cannot authenticate has not
+            # skipped a bump; it has failed to perform one, and a green job is
+            # indistinguishable from a cascade that had nothing to do. Same
+            # reasoning the lab-pass receipt is built on: a result that appears
+            # only when things worked cannot tell "it failed" apart from
+            # "nobody ran it".
+            echo "::error::onexbot-occ-writer App identity did not resolve for ${{ matrix.repo }}. On workflow_call the caller must pass onexbot-occ-app-id and onexbot-occ-private-key; on workflow_dispatch the org-level values must be readable. Refusing to report success for a bump that was never attempted."
+            exit 1
           fi
+          echo "has_token=true" >> "$GITHUB_OUTPUT"
 
       # OMN-16373: mint a short-lived onexbot-occ-writer App installation
       # token, scoped to the one downstream repo this matrix leg touches.
