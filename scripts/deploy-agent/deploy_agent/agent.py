@@ -32,6 +32,7 @@ from deploy_agent.executor import (
     REPO_DIR,
     SCOPE_BUNDLES,
     DeployExecutor,
+    DevLaneMigrationPreflightError,
     assert_prod_request_has_stability_digest,
     resolve_prod_target_service,
 )
@@ -351,6 +352,14 @@ class DeployAgent:
         # method has always discarded the return, which is why every terminal
         # event reported services_restarted=[] for a scope-default deploy.
         services_restarted: list[str] = []
+        # OMN-18545: the resolved sha is a PROPERTY OF THIS JOB, cleared here
+        # like the two above. It lives on the agent, which outlives the job, and
+        # the lab overlay is now reachable from the failing path too (see the
+        # repair build in the `except` below) -- so a job that dies before
+        # git_pull would otherwise build images and stamp a record for the
+        # PREVIOUS job's commit, which this job never deployed. An unresolved sha
+        # must read as unresolved.
+        self._current_git_sha = ""
 
         def on_phase_update(phase: Phase, status: PhaseStatus) -> None:
             self.job_store.update_phase(cid, phase, status)
@@ -460,6 +469,60 @@ class DeployAgent:
         except Exception as e:
             logger.exception("Job %s failed: %s", cid, e)
             self.job_store.complete(cid, status="failed", errors=[str(e)])
+            # OMN-18545 -- THE REPAIR BUILD, AND WHY THE FAILING PATH NEEDED ONE
+            # AT ALL.
+            #
+            # Until now the ONLY call to the lab overlay was the one above, the
+            # last statement of the `try`. That closed a loop the agent could
+            # not open. The compose dev lane runs whatever
+            # ONEX_CLOUD_MIGRATE_IMAGE names; the dev-lane migration preflight
+            # (executor._ensure_runtime_migrations_ready, reached from
+            # _compose_up for the RUNTIME phase, i.e. from inside rebuild_scope)
+            # requires the cloud-migration one-shots to exit 0 USING THAT IMAGE;
+            # and lab_overlay is the only thing in this repository that builds a
+            # replacement CLOUD-migrate image from the archived omninode_infra
+            # overlay tree. (build-and-push-migrate-image.yml builds the same
+            # Dockerfile against THIS repo's tree and pushes the INFRA migrate
+            # image to ECR -- a different image, which does not satisfy this
+            # pin.) So while the
+            # pinned image was broken the preflight raised, control jumped HERE,
+            # and the build never ran -- the agent could not produce the image
+            # that would let the preflight pass. Measured three times on
+            # 2026-09-16; job 6d8316f0 reached terminal `failed` at 20:44:18Z
+            # with `verification: skipped`, and the newest
+            # onex-lab/omninode-cloud-migrate tag on the host stayed the 17:33Z
+            # pre-merge one throughout, which is the mechanical proof the
+            # applier never ran.
+            #
+            # This is a REPAIR BUILD, not the apply above. It builds one image
+            # and touches nothing else -- no runtime promotion, no lane apply.
+            # Running the full apply here would promote
+            # omnibase-infra-omninode-runtime:latest on a premise a failed job
+            # can falsify, rolling the persistent k3s lane to a tag NAMING the
+            # merged sha while it ran the previous commit's binary, and report
+            # PASS. build_repair_migrate_image's docstring carries the full
+            # reasoning and the cost argument.
+            #
+            # The honest limit, stated rather than implied: this makes a
+            # replacement image EXIST on the host. It does not DELIVER it --
+            # ONEX_CLOUD_MIGRATE_IMAGE is operator-held and nothing in this
+            # repository writes it. That half is deliberately out of scope.
+            #
+            # TARGETED, not unconditional. Only a dev-lane migration preflight
+            # failure triggers it, because that is the one deploy failure a fresh
+            # cloud-migrate image can actually fix. A gateway refusal, an
+            # out-of-memory build or an unset compose variable would otherwise
+            # each spend up to sixteen minutes rebuilding an unrelated image
+            # under this agent's single-flight lock -- which rejects every
+            # concurrent rebuild command outright -- on the path that is by
+            # construction the busy one while the lane is broken.
+            #
+            # The isolation from the job's verdict is structural: the verdict is
+            # already written on the line above, and this method swallows. Both
+            # properties are pinned by tests, not by this comment --
+            # tests/unit/test_lab_overlay_build_order_omn18545.py.
+            if isinstance(e, DevLaneMigrationPreflightError):
+                self._build_lab_repair_image(cmd)
 
         # Publish result (don't use on_phase_update — job is already completed,
         # and update_phase would revert status to in_progress)
@@ -493,6 +556,10 @@ class DeployAgent:
     def _apply_lab_overlay(self, cmd: ModelRebuildRequested) -> None:
         """Re-apply the k3s onex-lab overlay for this merge (OMN-18200 AC5).
 
+        Called on the SUCCESS path only. The failing path takes the narrower
+        ``_build_lab_repair_image`` instead (OMN-18545), because the apply
+        promotes the runtime pin on a premise a failed job can falsify.
+
         Swallows every exception by design. The record the applier writes is the
         channel this result travels on; a raise here would convert a lab finding
         into a failed compose deploy, which is the opposite of what the two
@@ -500,32 +567,19 @@ class DeployAgent:
         applier is itself logged and then dropped, because the applier's own
         contract is that it writes a record on both outcomes -- so an escape is a
         defect in the applier, reported as one, not a reason to lose the deploy.
+
+        Swallowing also protects the TERMINAL PUBLISH. This runs inside the
+        deploy job's ``try``/``except`` and the publish block sits after it, so
+        an exception escaping here would skip the publish entirely: the job would
+        be durably ``failed`` on disk with nothing on the bus and
+        ``result_publish_pending`` never set, so the retry loop would not replay
+        it either.
         """
-        if cmd.runtime_lane != EnumRuntimeLane.DEV:
-            return
-        if not LAB_OVERLAY_ENABLED:
-            logger.info(
-                "lab overlay re-apply DISABLED by DEPLOY_AGENT_LAB_OVERLAY=off; "
-                "no onex-lab-k3s record will exist for %s",
-                self._current_git_sha,
-            )
-            return
-        sha = self._current_git_sha
-        if not sha or len(sha) != 40:
-            logger.warning(
-                "lab overlay re-apply skipped: the resolved deploy sha is %r, and a "
-                "record must be keyed by an exact 40-character sha",
-                sha,
-            )
+        sha = self._resolve_lab_overlay_sha(cmd, action="re-apply")
+        if sha is None:
             return
         try:
-            applier = LabOverlayApplier(
-                state_dir=STATE_DIR,
-                repo_dir=Path(REPO_DIR),
-                overlay_source_dir=LAB_OVERLAY_SOURCE_DIR,
-                env=os.environ,
-                budget_seconds=LAB_OVERLAY_BUDGET_SECONDS,
-            )
+            applier = self._lab_overlay_applier()
             path = applier.apply(
                 sha=sha,
                 stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
@@ -538,6 +592,81 @@ class DeployAgent:
                 "onex-lab-k3s receipt for this sha will report a missing record",
                 sha,
             )
+
+    def _build_lab_repair_image(self, cmd: ModelRebuildRequested) -> None:
+        """Build the cloud-migrate repair image after a FAILED deploy (OMN-18545).
+
+        The narrow half of the overlay path: one image build, no runtime
+        promotion, no lane apply. See ``LabOverlayApplier.build_repair_migrate_image``
+        for why the failing path must not take the full apply, and the call site
+        for the loop this opens.
+
+        Swallows for the same two reasons ``_apply_lab_overlay`` does, and the
+        second one binds harder here: this runs inside the deploy job's
+        ``except`` block, so an escape would skip the terminal publish of a job
+        that has ALREADY been recorded as failed.
+        """
+        sha = self._resolve_lab_overlay_sha(cmd, action="repair build")
+        if sha is None:
+            return
+        try:
+            applier = self._lab_overlay_applier()
+            path = applier.build_repair_migrate_image(
+                sha=sha,
+                stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
+                correlation_id=str(cmd.correlation_id),
+            )
+            logger.info("lab overlay repair build recorded at %s", path)
+        except Exception:
+            logger.exception(
+                "lab overlay repair build raised instead of recording for %s; no "
+                "replacement cloud-migrate image was produced for this sha",
+                sha,
+            )
+
+    def _resolve_lab_overlay_sha(
+        self, cmd: ModelRebuildRequested, *, action: str
+    ) -> str | None:
+        """The fence both lab-overlay paths pass through, or ``None`` to skip.
+
+        Dev lane only. A merge to ``main`` targets stability-test, which is a
+        governed lane this agent's fence already refuses, and the lab overlay is
+        not a stability surface.
+
+        The sha is per-job -- cleared at the top of ``_run_deploy`` -- and that
+        clearing is load-bearing now that the failing path reaches here at all: a
+        job that died before ``git_pull`` would otherwise build images for the
+        PREVIOUS job's commit and stamp a record naming it.
+        """
+        if cmd.runtime_lane != EnumRuntimeLane.DEV:
+            return None
+        if not LAB_OVERLAY_ENABLED:
+            logger.info(
+                "lab overlay %s DISABLED by DEPLOY_AGENT_LAB_OVERLAY=off; "
+                "no onex-lab-k3s record will exist for %s",
+                action,
+                self._current_git_sha,
+            )
+            return None
+        sha = self._current_git_sha
+        if not sha or len(sha) != 40:
+            logger.warning(
+                "lab overlay %s skipped: the resolved deploy sha is %r, and a "
+                "record must be keyed by an exact 40-character sha",
+                action,
+                sha,
+            )
+            return None
+        return sha
+
+    def _lab_overlay_applier(self) -> LabOverlayApplier:
+        return LabOverlayApplier(
+            state_dir=STATE_DIR,
+            repo_dir=Path(REPO_DIR),
+            overlay_source_dir=LAB_OVERLAY_SOURCE_DIR,
+            env=os.environ,
+            budget_seconds=LAB_OVERLAY_BUDGET_SECONDS,
+        )
 
     def _publish_rejected(self, cmd: ModelRebuildRequested, *, reason: str) -> None:
         from kafka import KafkaProducer
