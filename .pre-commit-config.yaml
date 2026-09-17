@@ -554,6 +554,18 @@ repos:
         files: ^(src/omnibase_infra/runtime/auto_wiring/handler_wiring\.py|src/omnibase_infra/runtime/observability/consumer_flow_counters\.py|tests/ci/test_omn17214_subscription_flow_counter_gate\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # The PUBLISH-side sibling of the gate above (OMN-17214 Defect B): every
+      # handler_wiring seam that publishes a handler's declared output on
+      # event_bus must attribute it through record_flow_output, or a node whose
+      # output leaves there reports messages_out=0 and derives STALLED while
+      # producing.
+      - id: publish-flow-attribution-gate
+        name: publish flow-attribution gate (OMN-17214)
+        entry: uv run --frozen pytest tests/ci/test_omn17214_publish_flow_attribution_gate.py -q
+        language: system
+        files: ^(src/omnibase_infra/runtime/auto_wiring/handler_wiring\.py|src/omnibase_infra/runtime/observability/consumer_flow_counters\.py|src/omnibase_infra/runtime/service_dispatch_result_applier\.py|tests/ci/test_omn17214_publish_flow_attribution_gate\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement
