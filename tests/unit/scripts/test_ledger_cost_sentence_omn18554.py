@@ -259,14 +259,48 @@ def test_unresolved_window_reports_a_distinguishing_cause(
     assert expected_fragment in resolution.cause
 
 
-def test_unset_clone_root_is_an_unresolved_window_not_a_traceback(
+def test_unset_clone_root_is_a_no_registry_window_not_a_traceback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv(ll.PLAN_PATH_ENV, raising=False)
     monkeypatch.delenv(ll.KB_INTERNAL_ROOT_ENV, raising=False)
     resolution = ll.resolve_window_state(datetime.now(UTC))
-    assert resolution.state == ll.WINDOW_UNRESOLVED
+    assert resolution.state == ll.WINDOW_NO_REGISTRY
     assert resolution.cause is not None and ll.KB_INTERNAL_ROOT_ENV in resolution.cause
+
+
+def test_an_environment_with_no_registry_lands_claim_rows_and_says_so(
+    ledger: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A CI runner has no knowledge-base-internal clone. Refusing there prices
+    nothing -- the rows this gate exists to price are written on machines that DO
+    have the clone -- and would only stop CI appending at all. Caught by CI itself:
+    the first push of this port failed six claim-token tests for exactly this
+    reason, on a runner, where a developer machine with the variable exported saw
+    nothing wrong."""
+    monkeypatch.delenv(ll.PLAN_PATH_ENV, raising=False)
+    monkeypatch.delenv(ll.KB_INTERNAL_ROOT_ENV, raising=False)
+    monkeypatch.delenv(ll.ALLOW_INERT_ENV, raising=False)
+    assert ll.main([str(ledger), "--append", claim_row(priced=False)]) == 0
+    err = capsys.readouterr().err
+    assert "cannot run in this environment" in err
+    assert ll.KB_INTERNAL_ROOT_ENV in err, "the announcement must name what is missing"
+
+
+def test_a_pointed_plan_that_does_not_resolve_still_refuses_without_a_registry(
+    ledger: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The split that keeps the no-registry state from becoming a loophole:
+    pointing LEDGER_LOCK_PLAN_PATH at a plan that does not resolve is a
+    MISCONFIGURED lane machine and still refuses, registry or no registry."""
+    monkeypatch.delenv(ll.KB_INTERNAL_ROOT_ENV, raising=False)
+    monkeypatch.delenv(ll.ALLOW_INERT_ENV, raising=False)
+    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(tmp_path / "no-such-plan.md"))
+    assert ll.main([str(ledger), "--append", claim_row(priced=False)]) == 65
 
 
 # --------------------------------------------------------------------------

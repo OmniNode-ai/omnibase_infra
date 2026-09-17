@@ -1486,6 +1486,21 @@ WINDOW_OPEN = "open"
 WINDOW_STALE = "stale"
 WINDOW_PENDING = "pending"
 WINDOW_UNRESOLVED = "unresolved"
+# A FIFTH state, added after CI caught what a developer machine cannot: a GitHub
+# runner has no knowledge-base-internal clone and no KNOWLEDGE_BASE_INTERNAL_PATH,
+# so the plan is not merely unreadable -- the environment has no way to obtain it.
+#
+# That is a different condition from WINDOW_UNRESOLVED and must not share its
+# refusal. The defect this gate closes was lanes on machines that DO have the
+# registry landing unpriced rows; refusing on a runner that never could have read
+# the plan does not price a single one of those rows, it just stops CI appending.
+#
+# The split is: an explicitly-pointed plan that does not resolve is a MISCONFIGURED
+# lane machine and still REFUSES; an absent registry is an environment that cannot
+# host the gate and lands with a loud announcement. The announcement matters --
+# unsetting the variable would otherwise be a quieter bypass than the sanctioned
+# LEDGER_LOCK_ALLOW_INERT one, which is the shape of hole this whole ticket is about.
+WINDOW_NO_REGISTRY = "no_registry"
 
 
 class PlanSourceUnresolvedError(RuntimeError):
@@ -2090,7 +2105,7 @@ def resolve_window_state(now: datetime) -> WindowResolution:
     try:
         plan_path = plan_path_for_window()
     except PlanSourceUnresolvedError as exc:
-        return WindowResolution(WINDOW_UNRESOLVED, cause=str(exc), plan_path=None)
+        return WindowResolution(WINDOW_NO_REGISTRY, cause=str(exc), plan_path=None)
     window, cause = read_declared_window_detail(plan_path)
     if window is None:
         return WindowResolution(WINDOW_UNRESOLVED, cause=cause, plan_path=plan_path)
@@ -2268,6 +2283,15 @@ def unresolved_window_refusal(resolution: WindowResolution) -> str | None:
     Returning None on the override is deliberate: the escape is real, and the
     caller announces it on stderr so taking it is never silent.
     """
+    if resolution.state == WINDOW_NO_REGISTRY:
+        print(
+            "ledger_lock: rule-4 cost-sentence check cannot run in this environment — "
+            f"{resolution.cause} Claim rows LAND here, unenforced and unpriced. This is "
+            "not a bypass you should reach for on a lane machine: point "
+            f"{KB_INTERNAL_ROOT_ENV} at the clone and the gate runs.",
+            file=sys.stderr,
+        )
+        return None
     if resolution.state != WINDOW_UNRESOLVED:
         return None
     if os.environ.get(ALLOW_INERT_ENV, "").strip():
@@ -2323,7 +2347,7 @@ def validate_claim_payload(
     # gate that was never going to inspect the row, and noise on every write is
     # how a real signal stops being read.
     has_claims = bool(find_claim_lines(payload))
-    if resolution.state == WINDOW_UNRESOLVED:
+    if resolution.state in (WINDOW_UNRESOLVED, WINDOW_NO_REGISTRY):
         if not has_claims:
             return payload, None
         refusal = unresolved_window_refusal(resolution)
@@ -2471,7 +2495,7 @@ def enforce_command_claims(ledger: Path, before: str, existed_before: bool) -> b
     # unresolvable window refuses any claim row this command added and reverts
     # the write; the override, when set, announces itself and lands.
     resolution = resolve_window_state(now)
-    if resolution.state == WINDOW_UNRESOLVED:
+    if resolution.state in (WINDOW_UNRESOLVED, WINDOW_NO_REGISTRY):
         unresolved_refusal = unresolved_window_refusal(resolution)
         if unresolved_refusal is not None:
             for line in added_lines:
