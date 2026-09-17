@@ -532,17 +532,51 @@ venv_base_home() {
   done < "$cfg"
 }
 
+# The installation an interpreter belongs to: its path with the trailing
+# `bin/<exe>` removed, resolved. `/opt/homebrew/bin/python3.13` -> `/opt/homebrew`.
+python_install_root() {
+  local p="${1%/*}"
+  [[ "${p##*/}" == "bin" ]] && p="${p%/*}"
+  real_dir "$p"
+}
+
 # Whether the existing dispatch venv is already on the required interpreter.
 # True when no interpreter is required (non-macOS) so the caller reads the same
 # on every platform.
+#
+# CONTAINMENT, NOT DIRECTORY EQUALITY -- and that is the third attempt at this
+# predicate, so the two measured failures are recorded here rather than left for
+# someone to rediscover:
+#
+#   1. Comparing the two PARENT DIRECTORIES. `/opt/homebrew/bin` is a real
+#      directory full of symlinks, so it resolves to itself, while a venv built
+#      on the interpreter inside it records `/opt/homebrew/opt/python@3.13/bin`.
+#      Never equal.
+#   2. Fully resolving the interpreter FILE. Measured on this host, brew's
+#      `python3.13` resolves through the Cellar and into the framework bundle:
+#         /opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/bin
+#      while the venv records
+#         /opt/homebrew/Cellar/python@3.13/3.13.3/bin
+#      Both are correct paths to one installation, and neither directory equals
+#      the other.
+#
+# Directory equality was simply the wrong question. What rule 11 asks is whether
+# the venv's base interpreter comes from the BREW INSTALLATION -- which holds the
+# macOS Local Network grant -- rather than from uv's managed store. Both brew
+# spellings resolve under `/opt/homebrew`; a uv-managed interpreter resolves
+# under the uv data directory. Containment answers exactly that and is immune to
+# how many symlinks either side happens to traverse.
 dispatch_interpreter_ok() {
-  local want="$1" home want_dir have_dir
+  local want="$1" home want_root have_dir
   [[ -n "$want" ]] || return 0
   home="$(venv_base_home "$DISPATCH_VENV")"
   [[ -n "$home" ]] || return 1
-  want_dir="$(real_file_dir "$want")"
+  want_root="$(python_install_root "$want")"
   have_dir="$(real_dir "$home")"
-  [[ -n "$want_dir" && "$have_dir" == "$want_dir" ]]
+  [[ -n "$want_root" && -n "$have_dir" ]] || return 1
+  # Equal, or underneath. The trailing slash stops `/opt/homebrew-other` from
+  # matching `/opt/homebrew`.
+  [[ "$have_dir" == "$want_root" || "$have_dir" == "$want_root"/* ]]
 }
 
 INSTALL_SCRIPT="${ONEX_RECONCILE_INSTALL_SCRIPT:-$INFRA_DIR/scripts/install-node-skill-package.sh}"

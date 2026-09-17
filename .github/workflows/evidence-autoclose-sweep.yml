@@ -1137,6 +1137,128 @@ jobs:
             cat "${RUNNER_TEMP}/cwd-unclassified.tsv"
           fi
 
+          # OMN-18588. THE BRANCH IS A PROPERTY OF THE REPOSITORY, NOT A CONSTANT.
+          #
+          # Every clone below used to be pinned to a literal `dev`. That is a
+          # true statement about most of this registry and it is not a statement
+          # about repositories, and the difference was invisible for exactly as
+          # long as every declared cwd happened to name a repo whose default
+          # branch is `dev`.
+          #
+          # `knowledge-base-internal` has no `dev` branch at all. A clone of it
+          # pinned to that branch fails with "Remote branch dev not found in
+          # upstream origin" — and it fails into the `else` arm below, whose
+          # status reads UNAVAILABLE_REPO_NOT_READABLE_BY_TOKEN. That string
+          # names a CREDENTIAL problem, and the credential was never the
+          # problem: the App this job mints its token from is installed on ALL
+          # repositories in the organisation (app id 3342522, installation
+          # 123040063, read live 2026-09-17). Three separate readings of this
+          # job's log concluded the token was too narrow, and the remediation
+          # they produced was to relocate the evidence to another repository —
+          # nine days of OMN-17276's thread spent moving a probe to work around
+          # a branch name.
+          #
+          # So: read each repo's default branch from the repo itself, once.
+          #
+          # UNRESOLVED IS REPORTED, NEVER DEFAULTED. A repo whose branch this
+          # cannot answer for is dropped from the materialisation set and named.
+          # Falling back to `dev` would clone a branch nobody chose and ground a
+          # behaviour verdict in it, which is strictly worse than the honest
+          # absence of a verdict — the same releasing-direction refusal the
+          # classifier above already makes for a cwd it cannot place.
+          #
+          # stderr is NOT suppressed on the lookup. A silent `2>/dev/null` here
+          # would reproduce this ticket's whole defect class: a failure whose
+          # cause is discarded and then guessed at from a status string.
+          cut -f2 "${RUNNER_TEMP}/cwd-dests.tsv" | sort -u \
+            | while IFS= read -r repo; do
+                [ -n "${repo}" ] || continue
+                if default_branch="$(gh api "repos/OmniNode-ai/${repo}" --jq '.default_branch' \
+                     2> "${RUNNER_TEMP}/branch-lookup-${repo}.err")"; then
+                  :
+                else
+                  echo "::warning::OMN-18588 ${repo}: default-branch lookup failed -- $(head -1 "${RUNNER_TEMP}/branch-lookup-${repo}.err")"
+                  default_branch=""
+                fi
+                printf '%s\t%s\n' "${repo}" "${default_branch}"
+              done > "${RUNNER_TEMP}/default-branches.tsv"
+
+          echo "== default branch per repo, read from the repo =="
+          cat "${RUNNER_TEMP}/default-branches.tsv"
+
+          # Format conversion only — the resolver's own logic is the delimited
+          # block below, so that tests/ci can execute it rather than restate it.
+          python3 -c 'import json,sys; print(json.dumps(dict(l.split("\t", 1) for l in sys.stdin.read().splitlines() if "\t" in l)))' \
+            < "${RUNNER_TEMP}/default-branches.tsv" \
+            > "${RUNNER_TEMP}/default-branches.json"
+
+          python3 - "${RUNNER_TEMP}/cwd-dests.tsv" "${RUNNER_TEMP}/default-branches.json" \
+            > "${RUNNER_TEMP}/cwd-dests-branch.tsv" \
+            2> "${RUNNER_TEMP}/cwd-branch-unresolved.tsv" <<'PYEOF'
+          # ---8<--- OMN-18588 BEGIN cwd-branch-resolution
+          """Attach the branch to clone to every (destination, repository) pair.
+
+          argv: <dests tsv: dest\trepo> <json: {repo: default_branch}>
+
+          stdout: one ``<dest>\t<repo>\t<branch>`` row per RESOLVED destination.
+          stderr: one ``UNRESOLVED_DEFAULT_BRANCH\t<dest>\t<repo>`` row per
+          destination whose repository has no usable default branch.
+
+          A repository absent from the mapping, or present with a blank value,
+          is UNRESOLVED. It is never given a fallback: an invented branch is
+          how a wrong ref becomes a wrong behaviour verdict, and a blank one
+          renders ``--branch ''``, which git rejects with a message about
+          refspecs naming neither the repository nor the cause.
+
+          Exit status is 0 even with unresolved rows — the same reporting
+          discipline the classifier above uses. A destination that cannot be
+          materialised is already handled downstream; aborting here would take
+          every well-formed destination down with it.
+          """
+          import json
+          import sys
+          from pathlib import Path
+
+          dests_path, branch_map_path = Path(sys.argv[1]), Path(sys.argv[2])
+
+          try:
+              branch_map = json.loads(branch_map_path.read_text(encoding="utf-8"))
+          except (OSError, ValueError) as exc:
+              print(f"BRANCH_MAP_UNREADABLE\t{branch_map_path}\t{exc}", file=sys.stderr)
+              branch_map = {}
+          if not isinstance(branch_map, dict):
+              print(f"BRANCH_MAP_NOT_AN_OBJECT\t{branch_map_path}", file=sys.stderr)
+              branch_map = {}
+
+          for line in dests_path.read_text(encoding="utf-8").splitlines():
+              if not line.strip():
+                  continue
+              parts = line.split("\t")
+              if len(parts) != 2:
+                  print(f"DEST_ROW_MALFORMED\t{line}", file=sys.stderr)
+                  continue
+              dest, repo = (p.strip() for p in parts)
+              branch = str(branch_map.get(repo, "")).strip()
+              if not branch:
+                  print(f"UNRESOLVED_DEFAULT_BRANCH\t{dest}\t{repo}", file=sys.stderr)
+                  continue
+              print(f"{dest}\t{repo}\t{branch}")
+          # ---8<--- OMN-18588 END cwd-branch-resolution
+          PYEOF
+
+          echo "== cwd destinations with their resolved branch =="
+          cat "${RUNNER_TEMP}/cwd-dests-branch.tsv"
+          if [ -s "${RUNNER_TEMP}/cwd-branch-unresolved.tsv" ]; then
+            echo "== destinations with no resolvable branch (reported, never defaulted) =="
+            cat "${RUNNER_TEMP}/cwd-branch-unresolved.tsv"
+            while IFS=$'\t' read -r marker dest repo; do
+              [ -n "${dest:-}" ] || continue
+              echo "::warning::OMN-18588 ${dest}: ${marker} for OmniNode-ai/${repo}. Behaviour checks pinned at this cwd are not executed this run; the branch was not guessed."
+              printf '%s\t%s\t%s\n' "${dest}" "${repo}" "${marker}" \
+                >> "${RUNNER_TEMP}/cwd-materialisation.pending.tsv"
+            done < "${RUNNER_TEMP}/cwd-branch-unresolved.tsv"
+          fi
+
           # Credentials reach git through GIT_ASKPASS only: never written into
           # a clone's config, never on a command line, never in the log. The
           # helper itself is provisioned by its own step above (OMN-17976) so
@@ -1193,14 +1315,29 @@ jobs:
           cache="${RUNNER_TEMP}/cwd-repo-cache"
           mkdir -p "${cache}"
           : > "${RUNNER_TEMP}/cwd-materialisation.tsv"
+          # OMN-18588: the destinations whose branch could not be resolved are
+          # carried into the same record every other destination lands in, so
+          # the step summary names them rather than leaving them absent — an
+          # absent row and a satisfied one are indistinguishable.
+          if [ -s "${RUNNER_TEMP}/cwd-materialisation.pending.tsv" ]; then
+            cat "${RUNNER_TEMP}/cwd-materialisation.pending.tsv" \
+              >> "${RUNNER_TEMP}/cwd-materialisation.tsv"
+          fi
           # OMN-17975: one row per destination recording whether dod_verify can
           # establish that tree's freshness. Read back into the step summary
           # below so a clone that could NOT be normalised is named in the run's
           # own record rather than inferred later from a refused check.
           : > "${RUNNER_TEMP}/cwd-freshness.tsv"
 
-          while IFS=$'\t' read -r dest repo; do
+          while IFS=$'\t' read -r dest repo branch; do
             [ -n "${dest:-}" ] || continue
+            # OMN-18588: the resolver never emits a row with a blank branch, so
+            # this is an assertion that the contract between the two held, not a
+            # fallback. A blank one here would render `--branch ''`.
+            if [ -z "${branch:-}" ]; then
+              echo "::error::OMN-18588 ${dest}: reached the materialisation loop with no resolved branch, which the resolver above is supposed to make impossible." >&2
+              exit 1
+            fi
             target="${OMNI_HOME}/${dest}"
 
             # The gate checkout is already at ${OMNI_HOME}/omnibase_infra by
@@ -1216,12 +1353,12 @@ jobs:
               # the post-sweep purity assertion would otherwise be measuring a
               # different tree than the one it installed.
               freshness_out="$("${GITHUB_WORKSPACE}/scripts/ci/normalize_product_clone.sh" --no-move \
-                "${target}" "https://github.com/OmniNode-ai/${repo}.git" dev 2>&1)" \
+                "${target}" "https://github.com/OmniNode-ai/${repo}.git" "${branch}" 2>&1)" \
                 && freshness_rc=0 || freshness_rc=$?
               echo "    freshness: ${freshness_out}"
               printf '%s\t%s\t%s\n' "${dest}" "${freshness_rc}" "${freshness_out%%$'\n'*}" \
                 >> "${RUNNER_TEMP}/cwd-freshness.tsv"
-              record_clone_pin "${target}" dev
+              record_clone_pin "${target}" "${branch}"
               continue
             fi
             # Containment, asserted before anything destructive runs.
@@ -1242,13 +1379,24 @@ jobs:
             elif [ "${repo}" = "omnimarket" ] && [ -d "${GITHUB_WORKSPACE}/.omnimarket-src" ]; then
               cp -a "${GITHUB_WORKSPACE}/.omnimarket-src" "${src}"
               status="REUSED_OMNIMARKET_CHECKOUT"
-            elif git clone --quiet --depth 1 --branch dev \
+            elif git clone --quiet --depth 1 --branch "${branch}" \
                  "https://github.com/OmniNode-ai/${repo}.git" "${src}" \
                  2> "${RUNNER_TEMP}/clone-${repo}.err"; then
-              status="CLONED_DEV"
+              status="CLONED_DEFAULT_BRANCH"
             else
               rm -rf "${src}"
-              status="UNAVAILABLE_REPO_NOT_READABLE_BY_TOKEN"
+              # OMN-18588: the reason git gave, carried into the status rather
+              # than discarded. The previous revision recorded every clone
+              # failure as UNAVAILABLE_REPO_NOT_READABLE_BY_TOKEN whatever git
+              # actually said, so a missing branch read as a missing permission
+              # and was remediated as one for nine days.
+              clone_err="$(head -1 "${RUNNER_TEMP}/clone-${repo}.err" 2>/dev/null || true)"
+              case "${clone_err}" in
+                *"not found in upstream origin"*)
+                  status="UNAVAILABLE_BRANCH_ABSENT_ON_REMOTE" ;;
+                *)
+                  status="UNAVAILABLE_REPO_NOT_READABLE_BY_TOKEN" ;;
+              esac
             fi
 
             if [ ! -d "${src}" ]; then
@@ -1276,7 +1424,7 @@ jobs:
             # detached tree is one dod_verify refuses to execute in.
             #
             # `REUSED_OMNIMARKET_CHECKOUT` and `REUSED_OCC_CHECKOUT` copy an
-            # `actions/checkout` tree pinned to a resolved SHA; `CLONED_DEV`
+            # `actions/checkout` tree pinned to a resolved SHA; `CLONED_DEFAULT_BRANCH`
             # produces a branch but a `cp -a` of a cached copy carries whatever
             # state the cache had. `EvidenceCollector` establishes freshness by
             # reading `@{upstream}`, which fails outright on a detached HEAD
@@ -1311,7 +1459,7 @@ jobs:
             # reason: the outcome it leaves is exactly the outcome that was
             # already happening.
             freshness_out="$("${GITHUB_WORKSPACE}/scripts/ci/normalize_product_clone.sh" --no-move \
-              "${target}" "https://github.com/OmniNode-ai/${repo}.git" dev 2>&1)" \
+              "${target}" "https://github.com/OmniNode-ai/${repo}.git" "${branch}" 2>&1)" \
               && freshness_rc=0 || freshness_rc=$?
             echo "    freshness: ${freshness_out}"
             if [ "${freshness_rc}" -ne 0 ]; then
@@ -1319,8 +1467,8 @@ jobs:
             fi
             printf '%s\t%s\t%s\n' "${dest}" "${freshness_rc}" "${freshness_out%%$'\n'*}" \
               >> "${RUNNER_TEMP}/cwd-freshness.tsv"
-            record_clone_pin "${target}" dev
-          done < "${RUNNER_TEMP}/cwd-dests.tsv"
+            record_clone_pin "${target}" "${branch}"
+          done < "${RUNNER_TEMP}/cwd-dests-branch.tsv"
 
           # OMN-18117. Render the recorded pins into the file the collector
           # reads (DOD_VERIFY_PRODUCT_CLONE_PIN_FILE, exported on every
@@ -1419,7 +1567,7 @@ jobs:
           echo "== per-dest environments =="
           while IFS=$'\t' read -r dest repo status; do
             case "${status}" in
-              CLONED_DEV|CACHED|REUSED_OCC_CHECKOUT|REUSED_OMNIMARKET_CHECKOUT) : ;;
+              CLONED_DEFAULT_BRANCH|CACHED|REUSED_OCC_CHECKOUT|REUSED_OMNIMARKET_CHECKOUT) : ;;
               *) continue ;;
             esac
             case "${dest}" in

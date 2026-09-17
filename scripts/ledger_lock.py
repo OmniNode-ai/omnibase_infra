@@ -892,8 +892,15 @@ def _portable_path(path: Path, ledger: Path) -> str:
     Preference order, and each fallback is still relative:
 
     1. Relative to the repository root above the ledger -- the form every
-       citation in this fleet uses (`docs/tracking/archive/...`), and the form
-       that survives being read from a clone, a worktree or GitHub.
+       citation in this fleet uses (`<ledger dir>/archive/...`, spelled from the
+       repo root), and the form that survives being read from a clone, a
+       worktree or GitHub. The example is written generically on purpose: this
+       tool is TOLD which ledger to protect and must name no particular one,
+       which is asserted by
+       omni_home tests/test_ledger_lock_path_parametrization.py::
+       test_ledger_path_is_a_positional_argument -- a test that greps this
+       source, so an illustrative literal fails it exactly as a real hardcoded
+       path would.
     2. Relative to the ledger's own directory, when there is no repository
        above it, or when the target sits outside that repository.
 

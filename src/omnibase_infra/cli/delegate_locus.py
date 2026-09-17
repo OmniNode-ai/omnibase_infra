@@ -42,6 +42,7 @@ from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 __all__ = [
     "DelegateLocusRefusedError",
     "contract_command_topic",
+    "contract_terminal_topic",
     "orchestrator_distribution",
     "resolve_delegate_locus",
 ]
@@ -66,6 +67,31 @@ class DelegateLocusRefusedError(RuntimeError):
     when the lane cannot be reached would reproduce it exactly, with the
     added insult of having been asked not to.
     """
+
+
+def contract_terminal_topic(contract_path: Path) -> str:
+    """Read the topic the delegation terminal arrives on, or ``""`` (OMN-17516).
+
+    ``terminal_event`` — the key ``RuntimeLocal`` itself subscribes the terminal
+    listener to.
+
+    Unlike :func:`contract_command_topic` this **never raises**. Its only caller
+    is the timeout-refusal builder, which runs while reporting a failure: a
+    reader that raised there would replace a legible refusal with a traceback
+    about the refusal, which is strictly worse than the empty stdout it exists
+    to remove. An unreadable or silent contract yields ``""`` and the refusal
+    says so in that field, which is itself a finding worth having.
+    """
+    try:
+        raw = yaml.safe_load(  # yaml-safe-load-ok: contract is trusted package data
+            contract_path.read_text(encoding="utf-8")
+        )
+    except (OSError, yaml.YAMLError):
+        return ""
+    if not isinstance(raw, dict):
+        return ""
+    terminal = raw.get("terminal_event")
+    return terminal if isinstance(terminal, str) else ""
 
 
 def contract_command_topic(contract_path: Path) -> str:

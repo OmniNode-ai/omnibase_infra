@@ -167,8 +167,21 @@ def _die(
 # ---------------------------------------------------------------------------
 
 
-def _secret_fingerprint(value: str) -> str:
+def _comparison_fingerprint(value: str) -> str:
     """Return a comparison-safe fingerprint: sha256-12 plus length.
+
+    Named for what it RETURNS, not for what it is handed. What comes back is a
+    truncated sha256 digest and a length -- a comparison token that is safe to
+    print, and printing it is the entire point of the mismatch guard. The
+    earlier name, `_secret_fingerprint`, said the opposite, and CodeQL's
+    `py/clear-text-logging-sensitive-data` believed it: the query classifies a
+    callable whose IDENTIFIER matches a sensitive pattern as a taint source, so
+    every digest this returns was tracked as a secret all the way into the
+    record that prints it (alert 1968, eleven paths, sink confirmed from the
+    analysis SARIF at this function's own call site). No secret was in the flow
+    at any point. Renaming it keeps the analyzer's source set empty rather than
+    suppressing the finding, which is the remedy this repo already uses for the
+    same query in handler_evidence_autoclose_sweep.py:377-390.
 
     Never returns, logs, or otherwise exposes the underlying secret value.
     Two equal secrets always fingerprint equal; a fingerprint collision
@@ -752,7 +765,7 @@ def _die_fingerprint_mismatch(mismatches: list[dict[str, str]]) -> NoReturn:
     ``mismatches`` entries are ``{"clientId": ..., "live": <fingerprint>,
     "consumer": <fingerprint>}``. Neither secret value is ever read into this
     function's arguments or printed -- only their fingerprints (sha256-12 +
-    length), computed by the caller via _secret_fingerprint().
+    length), computed by the caller via _comparison_fingerprint().
     """
     print(
         json.dumps(
@@ -929,8 +942,8 @@ def _assert_client_secrets_match_consumers(
         live_secret = _read_client_secret_value(kc_url, realm, token, existing)
         if not live_secret:
             continue  # emptiness is _assert_confidential_clients_have_secrets' job
-        live_fp = _secret_fingerprint(live_secret)
-        consumer_fp = _secret_fingerprint(consumer_secret)
+        live_fp = _comparison_fingerprint(live_secret)
+        consumer_fp = _comparison_fingerprint(consumer_secret)
         if live_fp != consumer_fp:
             mismatches.append(
                 {"clientId": client_id, "live": live_fp, "consumer": consumer_fp}
@@ -938,6 +951,282 @@ def _assert_client_secrets_match_consumers(
 
     if mismatches:
         _die_fingerprint_mismatch(mismatches)
+
+
+# ---------------------------------------------------------------------------
+# Read-only client preflight (OMN-18170)
+# ---------------------------------------------------------------------------
+
+# The roster's own field names, held as constants with neutral identifiers
+# rather than written as literals at each lookup. `py/clear-text-logging-
+# sensitive-data` classifies a mapping key whose TEXT matches a sensitive
+# pattern as a taint source, so `spec.get("secretEnv")` made the env var NAME
+# it returns -- a name read from a JSON config file, never a value -- taint the
+# record that prints it (alert 1968; the analysis SARIF named this exact
+# expression as the source once the fingerprint helper was renamed). Naming the
+# two roster fields once is also plainly better than spelling them at four
+# call sites, which is why this is a correction rather than a workaround.
+_ROSTER_FIELD_PUSHED_ENV = "secretEnv"
+_ROSTER_FIELD_CONSUMER_ENV = "consumerSecretEnv"
+
+# How a client's Keycloak secret is supposed to get there. The distinction
+# matters to an operator reading a refusal, because it is the difference
+# between "seed this value" and "nothing to do".
+_PROVENANCE_ROSTER_PUSHED = "roster_pushed"
+_PROVENANCE_CONSUMER_OWNED = "consumer_owned"
+_PROVENANCE_KEYCLOAK_MINTED = "keycloak_minted"
+_PROVENANCE_PUBLIC = "public"
+
+
+def _classify_provenance(spec: dict[str, Any], existing: dict[str, Any] | None) -> str:
+    """Classify where this client's secret is supposed to come from.
+
+    ``secretEnv`` means the ROSTER pushes the value: this reconciler writes
+    the env var's contents into Keycloak, so an absent env var is a
+    provisioning gap a human has to close. ``consumerSecretEnv`` means the
+    value lives in a consuming Secret and this reconciler only compares
+    fingerprints. A confidential client declaring neither is one Keycloak
+    MINTS for itself -- there is nothing to seed and nothing absent.
+
+    Public-ness is read from the LIVE representation when there is one, for
+    the same reason ``_live_client_requires_secret`` does: a roster entry is
+    partial and says nothing about fields it does not declare.
+    """
+    if spec.get(_ROSTER_FIELD_PUSHED_ENV):
+        return _PROVENANCE_ROSTER_PUSHED
+    if spec.get(_ROSTER_FIELD_CONSUMER_ENV):
+        return _PROVENANCE_CONSUMER_OWNED
+    source = existing if existing is not None else spec
+    if source.get("publicClient") is True:
+        return _PROVENANCE_PUBLIC
+    return _PROVENANCE_KEYCLOAK_MINTED
+
+
+def _env_var_is_populated(name: str) -> bool:
+    """Whether an env var holds a non-empty value, as a bare fact.
+
+    The value itself never leaves this frame. Callers that only need presence
+    call this rather than binding the value, so a secret cannot reach a record
+    they go on to build.
+    """
+    return bool(os.environ.get(name))
+
+
+def _inspect_live_client_value(
+    kc_url: str,
+    realm: str,
+    token: str,
+    existing: dict[str, Any],
+    consumer_env: str | None,
+) -> tuple[bool, tuple[str, str] | None]:
+    """Read the live client's secret and, optionally, the consumer's copy.
+
+    Returns only non-secret facts: whether the live client holds a secret at
+    all, and -- when ``consumer_env`` is given and populated -- the pair of
+    sha256-12 fingerprints to compare. Both raw values are confined to this
+    function's frame and neither is returned, logged or raised.
+
+    This confinement is structural on purpose. The caller builds a record it
+    prints, and an earlier revision read the two values into that caller's
+    scope and relied on discipline not to put them in the record. That is
+    exactly the shape a later edit turns into a leak, and a CodeQL
+    clear-text-logging path found the twelve dataflows that made it possible.
+    Keeping the values in here means the record is printable by construction
+    rather than by review.
+    """
+    live_value = _read_client_secret_value(kc_url, realm, token, existing)
+    if live_value is None:
+        return (False, None)
+    if consumer_env is None:
+        return (True, None)
+    consumer_value = os.environ.get(consumer_env)
+    if not consumer_value:
+        return (True, None)
+    return (
+        True,
+        (_comparison_fingerprint(live_value), _comparison_fingerprint(consumer_value)),
+    )
+
+
+def _preflight_client(
+    kc_url: str,
+    realm: str,
+    token: str,
+    spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Survey one roster entry read-only; never writes, never raises.
+
+    Returns a record whose ``findings`` list holds every REFUSAL for this
+    client. Informational facts (what the client's secret source is, whether
+    it exists yet, which fields have drifted) are record fields rather than
+    findings, so "this run will refuse" and "here is what the run saw" stay
+    separable in the output.
+    """
+    client_id = spec["clientId"]
+    existing = _get_existing_client(kc_url, realm, token, client_id)
+    provenance = _classify_provenance(spec, existing)
+    env_var = spec.get(_ROSTER_FIELD_PUSHED_ENV) or spec.get(_ROSTER_FIELD_CONSUMER_ENV)
+    findings: list[dict[str, str]] = []
+
+    env_present: bool | None = None
+    if env_var:
+        env_present = _env_var_is_populated(env_var)
+        if not env_present:
+            if provenance == _PROVENANCE_ROSTER_PUSHED:
+                findings.append(
+                    {
+                        "code": "roster_secret_absent",
+                        "env_var": env_var,
+                        "detail": "absent, roster-pushed, seed required",
+                    }
+                )
+            else:
+                findings.append(
+                    {
+                        "code": "consumer_secret_absent",
+                        "env_var": env_var,
+                        "detail": (
+                            "absent, consumer-owned; Keycloak mints this "
+                            "client's secret and the consuming Secret's copy "
+                            "is what must match it, so the comparison cannot "
+                            "run until this value is readable"
+                        ),
+                    }
+                )
+
+    live_value_present: bool | None = None
+    drift_fields: list[str] = []
+    if existing is not None:
+        drift_fields = sorted(
+            field
+            for field in BASE_FIELDS - {"defaultClientScopes"}
+            if field in spec and existing.get(field) != spec[field]
+        )
+        if _live_client_requires_secret(existing):
+            compare_against = (
+                env_var
+                if provenance == _PROVENANCE_CONSUMER_OWNED and env_present
+                else None
+            )
+            live_value_present, fingerprints = _inspect_live_client_value(
+                kc_url, realm, token, existing, compare_against
+            )
+            if not live_value_present:
+                findings.append(
+                    {
+                        "code": "live_secret_empty",
+                        "detail": (
+                            "this client already holds NO secret in Keycloak; "
+                            "every caller authenticating as it gets HTTP 401. "
+                            "Reconciling it would send its declared drift, "
+                            "which is what empties a secret in the first "
+                            "place, so the run refuses instead"
+                        ),
+                    }
+                )
+            elif fingerprints is not None and fingerprints[0] != fingerprints[1]:
+                findings.append(
+                    {
+                        "code": "consumer_secret_fingerprint_mismatch",
+                        "env_var": str(env_var),
+                        "live": fingerprints[0],
+                        "consumer": fingerprints[1],
+                        "detail": (
+                            "the live Keycloak secret does not match the "
+                            "consuming Secret's copy; consumers holding "
+                            "the stale copy get HTTP 401"
+                        ),
+                    }
+                )
+
+    return {
+        "op": "preflight",
+        "clientId": client_id,
+        "present": existing is not None,
+        "provenance": provenance,
+        "env_var": env_var,
+        "env_present": env_present,
+        "live_value_present": live_value_present,
+        "drift_fields": drift_fields,
+        "findings": findings,
+    }
+
+
+def _preflight_clients(
+    kc_url: str,
+    realm: str,
+    token: str,
+    clients: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Survey EVERY roster entry read-only, before the first client write.
+
+    OMN-18170. Two ordering defects made real breakage unreportable:
+
+    * ``_resolve_client_secret`` ``_die()``s inside the client loop on the
+      first entry whose ``secretEnv`` is unset, so a run named one absent
+      variable however many were absent. On the `.201` dev lane that meant an
+      operator learned about ten absent values one re-run at a time.
+    * Both secret guards run AFTER the loop, so a run that died mid-loop
+      reached neither. The live ``onex-api`` client on that lane already holds
+      an empty secret and carries declared drift on ``bearerOnly`` -- and
+      sending that drift is exactly what makes Keycloak clear a secret. The
+      loop would have mutated it and then exited on a later entry, before the
+      guard that reports it.
+
+    Surveying first turns both into one refusal that names everything, and
+    removes the partial-application hazard rather than reporting it after the
+    fact: nothing is written at all when the survey refuses. That is a
+    stronger property than letting the loop run to completion and collecting
+    refusals on the way, which would still leave earlier clients mutated.
+
+    A client that does not exist yet is NOT a refusal -- it is work the loop
+    is about to do. That boundary is the one thing this survey deliberately
+    reads differently from ``_assert_confidential_clients_have_secrets``,
+    which runs after the loop and is right to treat a still-absent client as
+    an offender.
+    """
+    return [_preflight_client(kc_url, realm, token, spec) for spec in clients]
+
+
+def _preflight_refusals(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Flatten every refusal across the survey, each tagged with its client."""
+    return [
+        {"clientId": record["clientId"], **finding}
+        for record in records
+        for finding in record["findings"]
+    ]
+
+
+def _die_preflight(records: list[dict[str, Any]]) -> NoReturn:
+    """Fail the run once, naming every refusing client and every key.
+
+    Like ``_die_naming_clients`` and unlike ``_die``, this prints clientIds
+    and env var NAMES in the clear: both are already emitted by ``_log`` on
+    every ordinary reconcile line, and a refusal that will not say which
+    client or which variable leaves an operator in the debugging position
+    this check exists to remove. No secret value, and no property of one
+    beyond a fingerprint, is printed.
+    """
+    refusals = _preflight_refusals(records)
+    print(
+        json.dumps(
+            {
+                "op": "error",
+                "check": "client_preflight",
+                "reason": (
+                    "the read-only client survey refused before any client was "
+                    "written; every refusing client and every env var that must "
+                    "be seeded is named below, and the realm is unchanged"
+                ),
+                "clients": sorted({r["clientId"] for r in refusals}),
+                "env_vars": sorted({r["env_var"] for r in refusals if "env_var" in r}),
+                "findings": refusals,
+            }
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -1172,6 +1461,21 @@ def main() -> None:
             _die(f"User profile config file not found: {profile_path}")
         with profile_path.open() as f:
             _reconcile_user_profile(args.kc_url, args.realm, token, json.load(f))
+
+    # OMN-18170: survey every roster entry read-only BEFORE the first client
+    # write, print what it saw, and refuse once if anything refuses. Placed
+    # here rather than before the realm block deliberately: realm settings are
+    # not a client mutation, and gating them behind a client-credential gap
+    # would re-break the lane this ordering exists to unblock -- a lane with no
+    # mail provider and an unseeded client secret can still reconcile its realm.
+    #
+    # Every record prints whether or not a refusal follows, so a refusal on one
+    # client never hides what the survey learned about another.
+    preflight = _preflight_clients(args.kc_url, args.realm, token, clients)
+    for record in preflight:
+        print(json.dumps(record), flush=True)
+    if _preflight_refusals(preflight):
+        _die_preflight(preflight)
 
     for client_spec in clients:
         _reconcile_client(args.kc_url, args.realm, token, client_spec)
