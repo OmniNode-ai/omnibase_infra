@@ -41,7 +41,7 @@ endpoints:
     endpoint_url: http://192.168.86.201:8000
     url_env_var: LLM_CODER_URL
     role_env_alias: LLM_CODER_SLOW_URL
-    model_hf_id: Qwen/Qwen3.6-35B-A3B
+    model_hf_id: Qwen/Qwen3.8-27B
     role: coder_slow
     status: running
     hardware: RTX 5090 (.201)
@@ -73,6 +73,23 @@ endpoints:
       CONCURRENCY: vLLM reports "Maximum concurrency for 131,072 tokens per
       request: 1.44x" (GPU KV cache 188,416 tokens / 3.71 GiB). Size callers
       against roughly one full-context request in flight.
+
+      OMN-18626, live readback 2026-09-17T20:17Z: the slot moved AGAIN, and this
+      is the third served id this one endpoint has carried. GET
+      http://192.168.86.201:8000/v1/models now returns exactly one id,
+      "Qwen3.8-27B", owned_by "vllm", root
+      /data/inference/hf-cache/Qwen3.8-27B-NVFP4-RTX5090, max_model_len 131072,
+      http=200 in 0.012s. Negative control the same session, same curl shape:
+      :8001 returns curl exit 7 / http=000, so the 200 is that port answering
+      rather than a proxy answering everything. The served artifact is again a
+      locally-produced quantization -- NVFP4, built for this card, with no
+      upstream HF repo of its own -- so model_hf_id records the BASE model,
+      Qwen/Qwen3.8-27B, read from the weight directory's own README rather than
+      guessed from the directory name. The 35B GPTQ-Int4 paragraph above is
+      RETIRED and kept only as the record of what this slot used to serve.
+      The vLLM-refuses-an-unknown-model note above is now load-bearing rather
+      than illustrative: it is what made this flip a hard outage of the local
+      delegation tier instead of a mis-attribution.
       --- superseded, kept for lineage ---
       OMN-16442 reconcile (2026-08-28) against the canonical inventory
       omni_home/docs/reference/AI_LAB_HARDWARE.md ("Last verified: 2026-08-28").

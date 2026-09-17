@@ -98,20 +98,43 @@ class AuthorizedLabBinding(NamedTuple):
 # misdescribed the hardware to everyone reading it, including the operator, who
 # on 2026-09-17 asked why delegation was "using the 35b model instead of qwen 3.8
 # 27b on the 5090" about a box that had served the 35B for two weeks.
+#
+# OMN-18626: AND THEN THE OPERATOR MOVED THE BOX. On 2026-09-17 at about 15:24Z
+# ``vllm-gpu0.service`` was rebuilt onto the NVFP4 27B these weight sets had been
+# staged for, and ``/v1/models`` began returning exactly one id, ``Qwen3.8-27B``,
+# rooted at ``/data/inference/hf-cache/Qwen3.8-27B-NVFP4-RTX5090``. That is the
+# THIRD flip of this endpoint's served id and the SECOND to leave the local tier
+# dark: vLLM refuses an unknown ``model`` by name, so every delegation's local
+# rung took ``HTTP 404 "The model `Qwen3.6-35B-A3B` does not exist."`` and climbed
+# to a metered cheap_cloud rung. Found by a real delegation at 19:52Z (run
+# ``95df150b-21cc-4b0e-afc6-9e25fbeb3735``), NOT by any test — because the probe
+# fixture that pins this table is a RECORD, and a record cannot notice that the
+# thing it recorded has moved. The mechanism is sound and did its job the moment
+# the record was refreshed; what it cannot do is refresh itself.
+#
+# If you are here because the endpoint moved again: re-probe it, paste the
+# readback into ``tests/fixtures/bifrost_served_models_probe.json``, and change
+# this table IN THE SAME COMMIT. The paired test asserts the two agree, so an
+# unaccompanied edit to either half fails CI rather than shipping a rung that
+# 404s on its first call. Also change ``omnimarket``'s
+# ``configs/bifrost_delegation.yaml`` ``model_name`` in lockstep: the renderer
+# refuses a base/overlay disagreement outright
+# (``render_bifrost_delegation_contract.py`` ``_merge_lane_overlay``), so a
+# half-applied change is a runtime that will not render its contract at all.
 _AUTHORIZED_BINDINGS: Mapping[str, AuthorizedLabBinding] = {
     "local-coder": AuthorizedLabBinding(
         host="192.168.86.201",  # onex-allow-internal-ip OMN-16999 reason="authorized .201 lab binding table"
         port=8000,
-        served_model_id="Qwen3.6-35B-A3B",
-        parameter_count="35B-A3B",
+        served_model_id="Qwen3.8-27B",
+        parameter_count="27B",
         context_window=131_072,
         serving=True,
     ),
     "local-heavy-reasoning": AuthorizedLabBinding(
         host="192.168.86.201",  # onex-allow-internal-ip OMN-16999 reason="authorized .201 lab binding table"
         port=8000,
-        served_model_id="Qwen3.6-35B-A3B",
-        parameter_count="35B-A3B",
+        served_model_id="Qwen3.8-27B",
+        parameter_count="27B",
         context_window=131_072,
         serving=True,
     ),
