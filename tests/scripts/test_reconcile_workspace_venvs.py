@@ -126,7 +126,13 @@ def _make_fake_venv(venv: Path, installed_commit: str | None) -> Path:
     return venv
 
 
-def _make_uv_shim(bin_dir: Path, *, sync_exit: int = 0, check_exit: int = 0) -> Path:
+def _make_uv_shim(
+    bin_dir: Path,
+    *,
+    sync_exit: int = 0,
+    check_exit: int = 0,
+    venv_relocatable: bool = True,
+) -> Path:
     """A ``uv`` on PATH that logs argv and returns canned exit statuses.
 
     ``uv sync --frozen --check`` is the read-only probe (the reconciler adds
@@ -143,6 +149,40 @@ def _make_uv_shim(bin_dir: Path, *, sync_exit: int = 0, check_exit: int = 0) -> 
     uv = bin_dir / "uv"
     uv.write_text(
         "#!/usr/bin/env bash\n"
+        # `uv venv` is a DIFFERENT subcommand with a DIFFERENT calling
+        # convention: the target directory is a positional argument, not
+        # UV_PROJECT_ENVIRONMENT. The reconciler uses it for one reason -- only
+        # `uv venv` accepts --relocatable, and an atomic rebuild is renamed into
+        # place, which a venv with absolute console-script shebangs does not
+        # survive. Measured against real uv 0.11.32: `uv sync` does not honour
+        # UV_VENV_RELOCATABLE and writes absolute shebangs.
+        'if [[ "${1:-}" == "venv" ]]; then\n'
+        "  _reloc=0\n"
+        '  _vbase=""\n'
+        '  _prev=""\n'
+        '  for a in "$@"; do\n'
+        '    [[ "$a" == "--relocatable" ]] && _reloc=1\n'
+        '    [[ "$_prev" == "--python" ]] && _vbase="$a"\n'
+        '    _prev="$a"\n'
+        "  done\n"
+        '  _vdir="${!#}"\n'
+        '  mkdir -p "$_vdir/bin"\n'
+        # A staged venv has no omnimarket in it yet, which is what the provider
+        # co-install is for. Echoing an empty commit models exactly that.
+        '  printf \'#!/usr/bin/env bash\\ncat >/dev/null 2>&1 || true\\nprintf "%s\\\\n" ""\\n\' > "$_vdir/bin/python"\n'
+        '  chmod 0755 "$_vdir/bin/python"\n'
+        '  _d="$_vbase"\n'
+        '  while [[ -L "$_d" ]]; do\n'
+        '    _l="$(readlink "$_d")"\n'
+        '    case "$_l" in /*) _d="$_l" ;; *) _d="${_d%/*}/$_l" ;; esac\n'
+        "  done\n"
+        '  { printf "home = %s\\n" "$(cd "${_d%/*}" && pwd -P)"\n'
+        + ('    printf "relocatable = true\\n"\n' if venv_relocatable else "")
+        + '  } > "$_vdir/pyvenv.cfg"\n'
+        '  printf "venv %s\\n" "$*" >> "$UV_SHIM_LOG"\n'
+        '  printf "uvvenv %s\\n" "$*" >> "$ORDER_LOG"\n'
+        "  exit 0\n"
+        "fi\n"
         # `uv sync` CREATES the environment when it is absent and RECREATES it
         # when --python names a different interpreter. The shim models that much
         # so a test can read the resulting pyvenv.cfg `home` line -- the same
@@ -167,7 +207,19 @@ def _make_uv_shim(bin_dir: Path, *, sync_exit: int = 0, check_exit: int = 0) -> 
         '      _l="$(readlink "$_d")"\n'
         '      case "$_l" in /*) _d="$_l" ;; *) _d="${_d%/*}/$_l" ;; esac\n'
         "    done\n"
-        '    printf "home = %s\\n" "$(cd "${_d%/*}" && pwd -P)" > "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"\n'
+        # PRESERVE an existing `relocatable = true`, which is what real uv
+        # does: a sync into a relocatable venv leaves it relocatable and writes
+        # self-locating shebangs for what it installs. A shim that dropped the
+        # line would model a uv that does not exist, and would make the
+        # pre-swap readback refuse every correctly staged rebuild.
+        '    _keep=""\n'
+        '    if [[ -f "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg" ]] && \\\n'
+        '       grep -q "^relocatable = true$" "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"; then\n'
+        '      _keep="relocatable = true"\n'
+        "    fi\n"
+        '    { printf "home = %s\\n" "$(cd "${_d%/*}" && pwd -P)"\n'
+        '      [[ -n "$_keep" ]] && printf "%s\\n" "$_keep"\n'
+        '    } > "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"\n'
         "  fi\n"
         "fi\n"
         # UV_PROJECT_ENVIRONMENT is how uv is told WHICH venv a project sync
@@ -1218,3 +1270,171 @@ def test_a_sibling_prefix_is_not_accepted_as_containment(ws: _Workspace) -> None
         f"a sibling prefix was accepted as containment; output: {result.stdout!r}"
     )
     assert "wrong interpreter" in result.stdout
+
+
+# --------------------------------------------------------------------------- #
+# A rebuild is staged at a sibling and renamed in, never done in place
+# --------------------------------------------------------------------------- #
+# The dispatch venv is the one path every lane's `onex` execs. Rebuilding it in
+# place makes it a half-built environment with no omnimarket in it for the
+# length of the rebuild, and for the whole of a FAILED one -- measured on the
+# live host on 2026-09-17, where a wrong interpreter predicate rebuilt and then
+# refused its own readback on a ~600s tick and lanes failed against the gap.
+_UV_STAGING_SUFFIX = ".rebuilding"
+
+
+def _drift_the_interpreter(ws: _Workspace) -> Path:
+    """Move the live dispatch venv onto an interpreter outside the brew root.
+
+    Returns the staging path the reconciler is expected to build at. Written as
+    a real directory, because ``real_dir`` resolves by ``cd``-ing and a path
+    that does not exist would make the predicate refuse for the wrong reason.
+    """
+    elsewhere = ws.root / "uv-managed-store" / "cpython-3.12" / "bin"
+    elsewhere.mkdir(parents=True, exist_ok=True)
+    ws.set_dispatch_interpreter(elsewhere)
+    return Path(str(ws.dispatch_venv) + _UV_STAGING_SUFFIX)
+
+
+def _mutating_uv_targets(ws: _Workspace) -> list[str]:
+    """The UV_PROJECT_ENVIRONMENT of every uv call that WRITES.
+
+    ``--check`` calls are read-only probes and legitimately name the live venv;
+    counting them would make "nothing wrote to the live venv" unassertable.
+    """
+    targets: list[str] = []
+    for line in ws.uv_calls():
+        if not line.startswith("env="):
+            continue
+        target, _, argv = line.partition(" ")
+        if "--check" in argv.split():
+            continue
+        targets.append(target[len("env=") :])
+    return targets
+
+
+def test_a_rebuild_never_writes_to_the_live_dispatch_venv(ws: _Workspace) -> None:
+    """Every mutating step of a rebuild targets the sibling, not the live venv.
+
+    This is the property, and it is asserted over the collaborator log rather
+    than over the script's prose: the lock pass and the provider co-install must
+    both name the staging path, and nothing that writes may name the live one.
+    """
+    staging = _drift_the_interpreter(ws)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    targets = _mutating_uv_targets(ws)
+    assert str(staging) in targets, (
+        f"the rebuild did not sync into the staging sibling: {targets!r}"
+    )
+    assert str(ws.dispatch_venv) not in targets, (
+        "a rebuild wrote straight to the live dispatch venv, which is the "
+        f"in-place rebuild this staging exists to end: {targets!r}"
+    )
+    argv = ws.install_argv_log.read_text(encoding="utf-8")
+    assert str(staging / "bin" / "python") in argv, (
+        f"the provider layer was composed into the wrong interpreter: {argv!r}"
+    )
+    assert str(ws.dispatch_venv / "bin" / "python") not in argv, (
+        f"the provider co-install targeted the live venv during a rebuild: {argv!r}"
+    )
+
+
+def test_a_proven_rebuild_is_renamed_into_place(ws: _Workspace) -> None:
+    """The swap actually happens, and leaves no staging directory behind."""
+    staging = _drift_the_interpreter(ws)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert not staging.exists(), (
+        "the staging directory survived a successful swap, so a later run would "
+        "treat live state as scrap"
+    )
+    cfg = (ws.dispatch_venv / "pyvenv.cfg").read_text(encoding="utf-8")
+    assert str(ws.brew_python.parent) in cfg, (
+        f"the live venv was not replaced by the rebuilt one: {cfg!r}"
+    )
+    assert "relocatable = true" in cfg, (
+        "the venv that was renamed into place is not relocatable, so its "
+        f"console scripts name a directory that no longer exists: {cfg!r}"
+    )
+
+
+def test_a_failed_rebuild_leaves_the_live_dispatch_venv_serving(
+    ws: _Workspace,
+) -> None:
+    """The refusal path is the reason to stage at all.
+
+    A rebuild that dies partway used to leave the live venv gutted, which is
+    what broke `onex delegate` for every concurrent lane. Here the sync fails
+    and the live venv must come through byte-for-byte.
+    """
+    _make_uv_shim(ws.bin_dir, sync_exit=1)
+    staging = _drift_the_interpreter(ws)
+    before = (ws.dispatch_venv / "bin" / "python").read_text(encoding="utf-8")
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert "UNTOUCHED" in result.stdout, (
+        f"the refusal does not tell the reader the live venv survived: {result.stdout!r}"
+    )
+    after = (ws.dispatch_venv / "bin" / "python").read_text(encoding="utf-8")
+    assert after == before, "a failed rebuild damaged the live dispatch venv"
+    assert ws.market_head in after, (
+        "the live venv lost the provider commit it was serving before the "
+        "rebuild was attempted"
+    )
+    assert not staging.exists() or staging.is_dir(), (
+        "the staged build is neither absent nor a directory left for diagnosis"
+    )
+
+
+def test_a_staged_venv_that_is_not_relocatable_is_refused(ws: _Workspace) -> None:
+    """Positive control for the relocatability readback.
+
+    Without it the swap would rename in a venv whose ~100 console scripts --
+    `onex` among them -- carry an absolute shebang naming the staging path,
+    which is about to stop existing. That is strictly worse than the in-place
+    rebuild being replaced, so it must refuse rather than swap.
+    """
+    _make_uv_shim(ws.bin_dir, venv_relocatable=False)
+    _drift_the_interpreter(ws)
+    before = (ws.dispatch_venv / "bin" / "python").read_text(encoding="utf-8")
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert "not relocatable" in result.stdout, (
+        f"the refusal does not name the reason: {result.stdout!r}"
+    )
+    after = (ws.dispatch_venv / "bin" / "python").read_text(encoding="utf-8")
+    assert after == before, (
+        "the live dispatch venv was replaced by a venv that cannot be moved"
+    )
+
+
+def test_an_additive_pass_is_not_staged(ws: _Workspace) -> None:
+    """Control: only a REBUILD is staged.
+
+    Staging every pass would double the disk cost and the wall clock of the
+    common case -- the clone advanced, the interpreter did not -- for no gain,
+    because an additive provider or lock pass never leaves the venv unusable.
+    This proves the narrowing is real rather than incidental.
+    """
+    ws.set_installed_commit("0" * _SHA_LEN)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    staging = Path(str(ws.dispatch_venv) + _UV_STAGING_SUFFIX)
+    assert not staging.exists()
+    assert str(ws.dispatch_venv) in _mutating_uv_targets(ws), (
+        "an additive pass stopped writing to the live venv"
+    )
+    assert not any(line.startswith("venv ") for line in ws.uv_calls()), (
+        "an additive pass created a venv, so every tick now pays for a rebuild"
+    )
