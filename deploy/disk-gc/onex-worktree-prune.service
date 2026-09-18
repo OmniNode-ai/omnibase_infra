@@ -1,0 +1,101 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-worktree-prune.service — .201 ledger-CLAIM-aware worktree prune (OMN-18688).
+#
+# A systemd USER unit (NOT a lane container). One-shot, triggered by
+# onex-worktree-prune.timer.
+#
+# WHY THIS REPLACES TWO EXISTING PASSES
+# ------------------------------------
+# Both predecessors drive omniclaude/scripts/prune-worktrees.sh, which removes a
+# clean, pushed, merged worktree with `git worktree remove --force` and reads
+# docs/tracking/ROLLING_WORK_LEDGER.md nowhere. Clean-and-pushed-and-merged is
+# precisely the state a LIVE lane occupies between its push and its post-merge
+# verification, which is the hazard OMN-15551 measured. This unit runs
+# worktree_auto_prune.py instead, whose predicate additionally requires no open
+# ledger CLAIM row and which removes with plain `git worktree remove` (no
+# --force), so git re-checks cleanliness as an independent second gate.
+#
+#   RETIRED by this unit: onex-worktree-reaper.timer/.service (OMN-13228)
+#   RETIRED by this unit: the worktree-gc.sh ExecStart line in onex-disk-gc.service
+#
+# See deploy/disk-gc/README-worktree-prune.md for the disposition and its evidence.
+#
+# WHICH CLONE THIS RUNS FROM
+# --------------------------
+# The omniclaude clone, NOT the omnibase_infra one. Every other ExecStart on this
+# host resolves through %h/Code/omni_home/omnibase_infra, which is pinned at a
+# detached commit; advancing that pin is a separate, separately-approved change
+# and this unit must not require it. The omniclaude clone tracks dev and carries
+# the classifier and its pure predicate together, which is what the script needs
+# on its import path anyway.
+#
+# THE WORKTREES ROOT
+# ------------------
+# %h/Code/omni_home/omni_worktrees, i.e. $OMNI_HOME/omni_worktrees.
+#
+# The retired units both passed `/data/omninode/omni_worktrees`, which is MISSING
+# the omni_home path segment: that directory holds one stale entry, while the real
+# root (/data/omninode/omni_home/omni_worktrees, reached through the %h symlink)
+# holds the 163 the 2026-09-18 census counted. Neither retired pass has ever been
+# able to see, let alone remove, a single real worktree on this host. That is a
+# defect, not a safety margin, and it is fixed here rather than carried forward.
+#
+# Install (on .201, as the runtime user — NO sudo, user scope):
+#   bash deploy/disk-gc/install-worktree-prune.sh
+#
+# Check:
+#   systemctl --user status onex-worktree-prune.timer
+#   journalctl --user -u onex-worktree-prune.service -f
+
+[Unit]
+Description=ONEX .201 ledger-claim-aware worktree prune (OMN-18688)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Service]
+Type=oneshot
+
+Environment="OMNI_HOME=%h/Code/omni_home"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+# LINEAR_API_KEY, if present, only enriches a REPORTED column. Ticket state has
+# decided nothing since the 2026-09-14 ruling, so its absence costs the report a
+# column and changes no verdict. Optional ('-' prefix): a missing env file must
+# never turn into a missing ledger, which WOULD change verdicts.
+EnvironmentFile=-%h/.omnibase/.env
+
+ExecStartPre=/bin/mkdir -p %h/.local/log/onex
+
+# The interpreter is resolved by the installer and written to this drop-in, so a
+# host whose environment cannot import the policy module fails at INSTALL time
+# with a remedy, rather than silently at 04:30 every morning.
+EnvironmentFile=%h/.config/onex/worktree-prune.env
+
+# --execute is deliberate and is the whole point of a scheduled pass. Everything
+# that keeps it safe is in the predicate, not in the flags:
+#   * no open ledger CLAIM row, re-verified LIVE immediately before each removal;
+#   * clean tree, re-checked independently by git itself at removal time;
+#   * merged/closed PR or branch gone upstream — age is never a removal key;
+#   * non-empty orphan dirs and stale-dirty trees are REPORTED, never removed.
+# --measure-reclaim is on so the run can state GB reclaimed (OMN-18688 AC6).
+# The interpreter is invoked through `/bin/bash -c` rather than named directly,
+# because systemd does NOT expand a variable in the FIRST token of ExecStart —
+# the program to execute may not be a variable. Writing `ExecStart=${VAR} ...`
+# is a unit that refuses to start, not one that resolves at runtime. `/bin/bash`
+# is a literal, and bash expands both variables from the env file above. That
+# also keeps the wrapper out of the omnibase_infra clone on this host, which is
+# pinned detached and must not have to be advanced to deploy this unit.
+#
+# $WORKTREE_PRUNE_PYTHON is UNQUOTED on purpose: the installer may resolve it to
+# a multi-word command (`uv run --directory <clone> python`) when uv is present.
+# Every other expansion here is quoted. The value is written by the installer,
+# not by an operator or by anything reaching this host from outside.
+ExecStart=/bin/bash -c 'exec $WORKTREE_PRUNE_PYTHON "$WORKTREE_PRUNE_SCRIPT" --worktrees-root "$HOME/Code/omni_home/omni_worktrees" --ledger "$HOME/Code/omni_home/docs/tracking/ROLLING_WORK_LEDGER.md" --execute --measure-reclaim --report-md "$HOME/.local/log/onex/worktree-prune-latest.md" --report-json "$HOME/.local/log/onex/worktree-prune-latest.json"'
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-worktree-prune
+
+[Install]
+WantedBy=default.target
