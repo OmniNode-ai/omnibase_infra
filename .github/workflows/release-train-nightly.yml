@@ -94,18 +94,22 @@ jobs:
           permission-contents: write
           permission-actions: read
           permission-pull-requests: write
-          # READ-ONLY, and the green-CI premise cannot work without it. That
-          # premise asks which contexts are REQUIRED on a repo's default branch,
-          # and that is branch-protection metadata: the only endpoint carrying it
-          # is /branches/{branch}/protection/required_status_checks, which needs
-          # administration:read. There is no lower-privilege equivalent -- check
-          # runs are readable without it, but WHICH of them gate a merge is not.
+          # administration:read is what the green-CI premise actually needs, and
+          # it is NOT requested here, deliberately. The onexbot-occ-writer App
+          # installation does not carry that permission, and requesting a
+          # permission an installation lacks fails the MINT outright -- dispatch
+          # run 35301341015 died at the token step with "The permissions
+          # requested are not granted to this installation", so the job reported
+          # nothing per repo at all.
           #
-          # Without it the premise fails closed on every repo with
-          # ci_protection_unreadable, which is the correct refusal and also a
-          # train that can never cut. Found by the first real cut attempt, run
-          # 35286327829, not by review.
-          permission-administration: read
+          # A crash is strictly worse than the refusal it replaced: without the
+          # request, the premise still cannot read protection, but it says so per
+          # repo under ci_protection_unreadable and the run stays legible.
+          #
+          # Restoring the request is one line, and it belongs in the same change
+          # that grants the App the permission. Until then the train refuses
+          # every repo, which is correct and is also why nothing can be cut
+          # through it. Tracked as a DECISION-REQUESTED row in the work ledger.
 
       - name: Clone every declared repo
         env:
