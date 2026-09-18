@@ -93,6 +93,17 @@ def _extract_array(name: str) -> str:
     return match.group(0)
 
 
+def _extract_scalar_omn18656(name: str) -> str:
+    """OMN-18656: bind the harness to the script's own `readonly NAME="value"`."""
+    match = re.search(
+        rf'^readonly {re.escape(name)}="[^"]*"$', _script_text(), re.MULTILINE
+    )
+    assert match is not None, (
+        f"could not extract readonly {name}= from deploy-runtime.sh"
+    )
+    return match.group(0)
+
+
 def _write_docker_stub(bin_dir: Path) -> Path:
     """Write a fake `docker` on PATH that answers `compose ps -q`, `inspect`,
     and `exec ... uv pip show` from files under $DOCKER_STUB_DIR, and appends
@@ -195,6 +206,13 @@ def _run_readback(
             _extract_array("DEV_LANE_ONLY_RUNTIME_SERVICES"),
             _extract_array("STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES"),
             _extract_function("resolve_lane_runtime_services"),
+            # OMN-18656: readback_deployed_ref() now partitions by the repo
+            # that BUILT each image before asserting its ref, so its new
+            # collaborators are part of the seam under test here too.
+            _extract_scalar_omn18656("OWN_SOURCE_REPO"),
+            _extract_function("resolve_service_source_repo"),
+            _extract_function("resolve_expected_foreign_revision"),
+            _extract_function("readback_foreign_sourced_service"),
             _extract_function("readback_deployed_ref"),
             override_line,
             f"RUNTIME_BUILD_SERVICES=({services_literal})",

@@ -85,6 +85,17 @@ def _extract_array(name: str) -> str:
     return match.group(0)
 
 
+def _extract_scalar_omn18656(name: str) -> str:
+    """OMN-18656: bind the harness to the script's own `readonly NAME="value"`."""
+    match = re.search(
+        rf'^readonly {re.escape(name)}="[^"]*"$', _script_text(), re.MULTILINE
+    )
+    assert match is not None, (
+        f"could not extract readonly {name}= from deploy-runtime.sh"
+    )
+    return match.group(0)
+
+
 def _write_docker_stub(bin_dir: Path) -> None:
     """A `docker` that distinguishes `ps -q` (running) from `ps -aq` (all), and
     answers `inspect -f <go-template>` per template from files on disk."""
@@ -133,6 +144,8 @@ if [[ "$1" == "inspect" ]]; then
         esac
     done
     case "${fmt}" in
+        *ai.omninode.image.source-repo*)   key="source_repo" ;;
+        *org.opencontainers.image.source*) key="source_url" ;;
         *RestartPolicy*) key="restart" ;;
         *State.Status*)  key="state" ;;
         *ExitCode*)      key="exit_code" ;;
@@ -206,6 +219,13 @@ def _run_readback(
             _extract_function("resolve_lane_runtime_services"),
             _extract_function("service_is_one_shot"),
             _extract_function("readback_one_shot_service"),
+            # OMN-18656: readback_deployed_ref() now partitions by the repo
+            # that BUILT each image before asserting its ref, so its new
+            # collaborators are part of the seam under test here too.
+            _extract_scalar_omn18656("OWN_SOURCE_REPO"),
+            _extract_function("resolve_service_source_repo"),
+            _extract_function("resolve_expected_foreign_revision"),
+            _extract_function("readback_foreign_sourced_service"),
             _extract_function("readback_deployed_ref"),
             f'RUNTIME_BUILD_SERVICES_OVERRIDE="{" ".join(services)}"',
             f"RUNTIME_BUILD_SERVICES=({services_literal})",
