@@ -1,3 +1,14 @@
+## v0.38.32 (2026-09-18)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.32 by the scheduled release train.
+- 2 release-relevant commit(s) merged since v0.38.31.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.31
+- chore(deps): bump omnibase-core to 0.47.17 (OMN-18595) (#3738)
+- fix(OMN-18620): the ACL archive read checks the inode, not just the filename (#3729)
+
 ## v0.38.31 (2026-09-17)
 
 ### Release
