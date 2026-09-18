@@ -12,7 +12,7 @@ decides which drift findings fire.
 
 DEPLOY-GAP CHECK (OMN-14994): a second, independent fact family -- ``DeployFacts``
 -- covers the "merged but never deployed" class that ``RepoFacts`` does not: a
-cloud deploy workflow (e.g. ``omninode_infra``'s ``deploy-onex-dev.yml``) whose
+cloud deploy workflow (e.g. ``omninode_infra``'s ``deploy-onex-staging.yml``) whose
 last SUCCESSFUL run is stale relative to deploy-affecting commits already sitting
 on the target branch. This is the exact incident class that left three
 production-blocking fixes (PRs #619/#620/#622) merged to ``omninode_infra`` dev
@@ -101,6 +101,8 @@ class WorkflowRun:
     conclusion: str | None = None  # "success" | "failure" | "cancelled" | None
     created_at: str | None = None  # ISO-8601
     head_sha: str | None = None  # commit the run executed against
+    run_id: int | None = None  # the run's numeric id (for job-level reads)
+    failed_jobs: tuple[str, ...] = ()  # job names that concluded "failure"
 
 
 @dataclass(frozen=True)
@@ -124,6 +126,8 @@ class RepoFacts:
     release_run: WorkflowRun | None = None
     trigger_run: WorkflowRun | None = None
     probe_errors: tuple[str, ...] = ()
+    release_synced: bool = True
+    release_synced_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -132,7 +136,7 @@ class DeployFacts:
 
     A "deploy target" is a (repo, branch, workflow) triple whose successful
     runs are the only mechanism that moves code from "merged" to "running" --
-    e.g. ``omninode_infra`` dev -> ``deploy-onex-dev.yml`` -> the onex-dev k3s
+    e.g. ``omninode_infra`` dev -> ``deploy-onex-staging.yml`` -> the onex-dev k3s
     namespace. Distinct from ``RepoFacts``, which is about PyPI/tag/main-vs-dev
     lineage, not a live runtime target.
     """
@@ -140,8 +144,9 @@ class DeployFacts:
     repo: str
     target: str  # human label, e.g. "onex-dev"
     branch: str  # branch the target deploys from, e.g. "dev"
-    workflow: str  # workflow filename, e.g. "deploy-onex-dev.yml"
+    workflow: str  # workflow filename, e.g. "deploy-onex-staging.yml"
     last_success: WorkflowRun | None = None
+    last_success_readable: bool = True
     branch_head_sha: str | None = None
     branch_head_at: str | None = None  # ISO-8601 commit date of branch HEAD
     deploy_affecting_paths_changed: tuple[str, ...] = ()
@@ -187,6 +192,8 @@ class DriftReport:
     probe_errors: tuple[str, ...]
     generated_at: str
     thresholds: DriftThresholds = field(default_factory=DriftThresholds)
+    blind_verdicts: tuple[DriftFinding, ...] = ()
+    lineage_skipped: tuple[str, ...] = ()
 
     @property
     def diverged(self) -> bool:
@@ -195,7 +202,7 @@ class DriftReport:
     @property
     def blind(self) -> bool:
         """True when the monitor could not gather some facts (partial visibility)."""
-        return len(self.probe_errors) > 0
+        return len(self.probe_errors) > 0 or len(self.blind_verdicts) > 0
 
 
 # --------------------------------------------------------------------------- #
@@ -237,7 +244,7 @@ def evaluate_repo(
 
     # 2) main bumped past the latest tag -> a version was set on main that was
     #    never tagged/released (the auto-tag chain stopped firing).
-    if main is not None and tag is not None and main > tag:
+    if facts.release_synced and main is not None and tag is not None and main > tag:
         findings.append(
             DriftFinding(
                 code="MAIN_AHEAD_OF_TAG",
@@ -257,7 +264,12 @@ def evaluate_repo(
     #    lineage running behind what has already shipped.
     released_candidates = [v for v in (pypi, tag) if v is not None]
     released = max(released_candidates) if released_candidates else None
-    if main is not None and released is not None and main < released:
+    if (
+        facts.release_synced
+        and main is not None
+        and released is not None
+        and main < released
+    ):
         findings.append(
             DriftFinding(
                 code="MAIN_BEHIND_RELEASED",
@@ -276,7 +288,8 @@ def evaluate_repo(
     # 4) large unreleased dev->main backlog (the "six weeks of merged, never
     #    released" signal at commit granularity).
     if (
-        facts.dev_ahead_commits is not None
+        facts.release_synced
+        and facts.dev_ahead_commits is not None
         and facts.dev_ahead_commits >= thresholds.dev_ahead_warn
     ):
         findings.append(
@@ -322,31 +335,75 @@ def evaluate_repo(
             )
         )
 
-    # 6) the release workflow's last run failed outright.
+    # 6) the release workflow's last run failed.
+    #
+    #    OMN-18348: a failed RUN is not the same fact as a failed PUBLISH, and
+    #    the monitor must not assert the second from the first. A release run
+    #    fans out well past the publish step -- version sync, runtime-rebuild
+    #    trigger, post-release checks, the downstream dependency cascade -- and
+    #    any one of those failing turns the whole run red while the artifact is
+    #    already on PyPI. The live case: omnibase_infra run 35329990280
+    #    (v0.38.32, 2026-09-18) concluded "failure" on
+    #    "Dependency Cascade / Bump omniintelligence" alone, with PyPI serving
+    #    0.38.32, and this check reported "no publish has succeeded since".
+    #
+    #    The publish outcome is DERIVED from facts the monitor already holds --
+    #    PyPI at or past the highest tag -- never assumed. With no published-
+    #    artifact fact to derive from, the P1 verdict stands (fail-loud).
     if (
         facts.release_run is not None
         and facts.release_run.exists
         and facts.release_run.conclusion == "failure"
     ):
-        findings.append(
-            DriftFinding(
-                code="RELEASE_WORKFLOW_FAILED",
-                severity="P1",
-                repo=facts.repo,
-                signature=f"{facts.repo}:release-workflow-failed",
-                summary=f"{facts.release_run.name} last run concluded 'failure'",
-                detail=(
-                    f"The most recent {facts.release_run.name} run "
-                    f"({facts.release_run.created_at}) failed. The release chain "
-                    "is broken; no publish has succeeded since."
-                ),
+        publish_landed = pypi is not None and tag is not None and pypi >= tag
+        if publish_landed:
+            jobs = (
+                ", ".join(facts.release_run.failed_jobs)
+                if facts.release_run.failed_jobs
+                else "an unidentified downstream job"
             )
-        )
+            findings.append(
+                DriftFinding(
+                    code="RELEASE_CASCADE_FAILED",
+                    severity="P2",
+                    repo=facts.repo,
+                    signature=f"{facts.repo}:release-cascade-failed",
+                    summary=(
+                        f"{facts.release_run.name} last run concluded 'failure' "
+                        f"after the publish landed ({facts.pypi_package} {pypi})"
+                    ),
+                    detail=(
+                        f"The most recent {facts.release_run.name} run "
+                        f"({facts.release_run.created_at}) concluded 'failure', but "
+                        f"the publish itself landed: PyPI serves {pypi} and the "
+                        f"highest tag is v{tag}. The failing job(s) are downstream "
+                        f"of the publish: {jobs}. Fix the downstream job -- the "
+                        "released artifact is not at risk."
+                    ),
+                )
+            )
+        else:
+            findings.append(
+                DriftFinding(
+                    code="RELEASE_WORKFLOW_FAILED",
+                    severity="P1",
+                    repo=facts.repo,
+                    signature=f"{facts.repo}:release-workflow-failed",
+                    summary=f"{facts.release_run.name} last run concluded 'failure'",
+                    detail=(
+                        f"The most recent {facts.release_run.name} run "
+                        f"({facts.release_run.created_at}) failed and no published "
+                        f"artifact confirms the publish landed (PyPI {facts.pypi_version}, "
+                        f"highest tag {facts.latest_tag}). The release chain is broken."
+                    ),
+                )
+            )
 
     # 7) release workflow stale while main is ahead of the tag -> the train has
     #    stalled (a bump landed, but no release run has moved it in N days).
     if (
-        main is not None
+        facts.release_synced
+        and main is not None
         and tag is not None
         and main > tag
         and facts.release_run is not None
@@ -415,7 +472,13 @@ def evaluate_deploy_target(
     now = now or datetime.now(tz=UTC)
     findings: list[DriftFinding] = []
 
-    if facts.last_success is None or not facts.last_success.exists:
+    # OMN-18348: an UNREADABLE probe is not a fact about the deploy target.
+    # It is reported by ``blind_verdicts_for_deploy_target`` as its own
+    # PROBE_UNREADABLE verdict; no finding is made about the surface here.
+    if not facts.last_success_readable or facts.last_success is None:
+        return findings
+
+    if not facts.last_success.exists or facts.last_success.head_sha is None:
         findings.append(
             DriftFinding(
                 code="MISSING_SUCCESSFUL_DEPLOY",
@@ -424,10 +487,10 @@ def evaluate_deploy_target(
                 signature=f"{facts.repo}:{facts.target}:missing-successful-deploy",
                 summary=(f"{facts.workflow} has no successful run for {facts.target}"),
                 detail=(
-                    f"No successful run of {facts.workflow} was found for the "
-                    f"{facts.target} deploy target. Either the workflow has never "
-                    "run clean, or the monitor cannot see any run -- either way "
-                    "there is no known-good deploy to compare the branch against."
+                    f"The monitor read {facts.workflow} for the {facts.target} "
+                    "deploy target and found no successful run: the workflow has "
+                    "never run clean, so there is no known-good deploy to compare "
+                    "the branch against."
                 ),
             )
         )
@@ -475,6 +538,49 @@ def evaluate_deploy_target(
     return findings
 
 
+def blind_verdicts_for_deploy_target(facts: DeployFacts) -> list[DriftFinding]:
+    """Return the PROBE_UNREADABLE verdict(s) for one deploy target (OMN-18348).
+
+    A verdict is a statement about the MONITOR -- "I could not read this
+    surface" -- and is deliberately kept out of ``findings``, which are
+    statements about the monitored surface. The distinction matters because a
+    finding survives any fix to the surface it names: the live 403 on
+    ``omninode_infra`` produced a P1 ``MISSING_SUCCESSFUL_DEPLOY`` that no
+    amount of deploying would ever clear, because the monitor was never
+    reading the deploy in the first place.
+
+    A blind verdict still turns the run red (``exit_code_for`` -> 2). Blind is
+    never green.
+    """
+    if facts.last_success_readable and facts.last_success is not None:
+        return []
+    reason = (
+        "; ".join(facts.probe_errors)
+        if facts.probe_errors
+        else "the probe returned no result and no error"
+    )
+    return [
+        DriftFinding(
+            code="PROBE_UNREADABLE",
+            severity="P1",
+            repo=facts.repo,
+            signature=f"{facts.repo}:{facts.target}:probe-unreadable",
+            summary=(
+                f"the monitor cannot read {facts.workflow} runs for {facts.target}"
+            ),
+            detail=(
+                f"The last-successful-run probe for {facts.workflow} "
+                f"({facts.repo}, target {facts.target}) could not be read, so the "
+                "monitor has NO facts about this deploy target -- neither good nor "
+                f"bad. Reason: {reason}. This is a monitor visibility gap, not a "
+                "defect in the deploy target; fix the monitor's access (or drop "
+                "the target from the probe set with the reason recorded) rather "
+                "than chasing a deploy."
+            ),
+        )
+    ]
+
+
 def evaluate_deploy_targets(
     facts: list[DeployFacts],
     thresholds: DriftThresholds,
@@ -500,17 +606,23 @@ def evaluate_all(
     deploy_facts = deploy_facts or []
     all_findings: list[DriftFinding] = []
     all_probe_errors: list[str] = []
+    all_blind_verdicts: list[DriftFinding] = []
+    lineage_skipped: list[str] = []
     for repo_facts in facts:
         all_findings.extend(evaluate_repo(repo_facts, thresholds, now))
         all_probe_errors.extend(
             f"{repo_facts.repo}: {err}" for err in repo_facts.probe_errors
         )
+        if not repo_facts.release_synced:
+            note = repo_facts.release_synced_note or "not on a release train"
+            lineage_skipped.append(f"{repo_facts.repo}: {note}")
     all_findings.extend(evaluate_deploy_targets(deploy_facts, thresholds, now))
     for target_facts in deploy_facts:
         all_probe_errors.extend(
             f"{target_facts.repo}:{target_facts.target}: {err}"
             for err in target_facts.probe_errors
         )
+        all_blind_verdicts.extend(blind_verdicts_for_deploy_target(target_facts))
     all_findings.sort(
         key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), f.repo, f.code)
     )
@@ -520,6 +632,8 @@ def evaluate_all(
         probe_errors=tuple(all_probe_errors),
         generated_at=now.isoformat(),
         thresholds=thresholds,
+        blind_verdicts=tuple(all_blind_verdicts),
+        lineage_skipped=tuple(lineage_skipped),
     )
 
 
@@ -545,6 +659,7 @@ __all__ = [
     "DriftThresholds",
     "RepoFacts",
     "WorkflowRun",
+    "blind_verdicts_for_deploy_target",
     "evaluate_all",
     "evaluate_deploy_target",
     "evaluate_deploy_targets",

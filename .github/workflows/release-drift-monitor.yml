@@ -17,12 +17,12 @@
 # weeks" (main is at 0.38.4) on day one instead of after six weeks of silence.
 #
 # DEPLOY-GAP CHECK (OMN-14994): also checks a small set of cloud deploy targets
-# (currently omninode_infra dev -> deploy-onex-dev.yml -> onex-dev) for the
+# (currently omninode_infra dev -> deploy-onex-staging.yml -> onex-dev) for the
 # "merged but never deployed" gap -- deploy-affecting commits sitting on the
 # target branch with no successful deploy run since. This is what would have
 # caught three production-blocking fixes (omninode_infra PRs #619/#620/#622)
 # sitting merged to dev undeployed for ~28h with nothing red anywhere, because
-# deploy-onex-dev.yml's push trigger only fires on main/m7/**, never dev (the
+# the deploy workflow's push trigger only fired on main/m7/**, never dev (the
 # repo's actual default branch). Scope is onex-dev only -- never prod.
 #
 # Token: mints a onexbot-occ-writer App token when configured (OMN-16373;
@@ -76,6 +76,16 @@ jobs:
       # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
       # onexbot-occ-writer App installation token for the sibling-repo reads
       # this monitor performs.
+      #
+      # OMN-18348: `permission-actions: read` is REQUIRED, not decorative. The
+      # token was minted with `contents` alone, which reads workflow runs on a
+      # PUBLIC repo (they are public data) but 403s on a PRIVATE one. Every
+      # monitored PyPI repo is public and every one of their probes worked;
+      # omninode_infra is private, so its deploy probe returned
+      # `Resource not accessible by integration (HTTP 403)` on all 31 runs and
+      # the monitor turned the unreadable probe into a P1 finding about the
+      # deploy target. Same App, same permission, already proven on this repo's
+      # deliver-dev-candidate-to-staging.yml and release-train-nightly.yml.
       - name: Mint onexbot-occ-writer app token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -84,6 +94,7 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           permission-contents: write
+          permission-actions: read
 
       - name: Run release/deploy drift monitor (fail-loud)
         id: monitor
