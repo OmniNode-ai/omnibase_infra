@@ -19,6 +19,12 @@ from typing import Any
 
 from aiohttp import web
 
+from deploy_agent.accept_backlog import (
+    DEFAULT_SAMPLE_INTERVAL_SECONDS,
+    DEFAULT_UNDRAINED_BOUND_SECONDS,
+    AcceptBacklogWatchdog,
+    read_accept_queue,
+)
 from deploy_agent.consumer import DeployConsumer
 from deploy_agent.events import (
     TOPIC_REBUILD_REJECTED,
@@ -41,7 +47,7 @@ from deploy_agent.executor import (
     resolve_prod_target_service,
 )
 from deploy_agent.health import create_health_app
-from deploy_agent.job_state import JobStore
+from deploy_agent.job_state import EnumJobSettlingStage, JobStore
 from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lab_overlay import (
     DEFAULT_APPLY_BUDGET_SECONDS,
@@ -68,6 +74,16 @@ STATE_DIR = Path(
 )
 HEALTH_PORT = int(os.environ.get("DEPLOY_AGENT_PORT", "8099"))
 PUBLISH_RETRY_INTERVAL = 30
+
+#: OMN-18636 AC4. The accept-backlog watchdog's declared bound and cadence.
+#:
+#: Named here, at module scope, rather than passed from a call site, because the
+#: bound is the criterion: "the queue has been non-empty and undrained for
+#: longer than a declared bound". See ``accept_backlog`` for what the numbers
+#: mean and why thirty seconds is the bound on the DEFECT rather than on a
+#: deploy.
+ACCEPT_BACKLOG_BOUND_SECONDS = DEFAULT_UNDRAINED_BOUND_SECONDS
+ACCEPT_BACKLOG_INTERVAL_SECONDS = DEFAULT_SAMPLE_INTERVAL_SECONDS
 
 #: OMN-18200. How often an IDLE agent re-checks whether the code it loaded is
 #: still the code in its clone.
@@ -174,6 +190,18 @@ class DeployAgent:
             max_workers=JOB_POOL_MAX_WORKERS,
             thread_name_prefix="deploy-agent-job",
         )
+        # OMN-18636 AC4. Started once the socket is bound (see ``run``), stopped
+        # in the same ``finally`` that tears the site down. It holds no handle on
+        # the pool above and cannot curtail anything: it samples the listen
+        # socket from its own thread and writes a verdict where a reader can
+        # find it even when this loop is not running.
+        self._accept_backlog = AcceptBacklogWatchdog(
+            port=HEALTH_PORT,
+            state_dir=STATE_DIR,
+            bound_seconds=ACCEPT_BACKLOG_BOUND_SECONDS,
+            interval_seconds=ACCEPT_BACKLOG_INTERVAL_SECONDS,
+            probe=lambda: read_accept_queue(HEALTH_PORT),
+        )
 
     def _get_state(self) -> str:
         return self._state
@@ -266,6 +294,7 @@ class DeployAgent:
         health_app = create_health_app(
             job_store=self.job_store,
             get_agent_state=self._get_state,
+            get_accept_backlog=self._accept_backlog.latest,
         )
         runner = web.AppRunner(health_app)
         await runner.setup()
@@ -278,6 +307,17 @@ class DeployAgent:
         )
         await site.start()
         logger.info("Health endpoint listening on port %d", HEALTH_PORT)
+
+        # AFTER the bind, because before it there is no listening socket to
+        # sample and the probe would read "no such socket" as indeterminate for
+        # as long as startup took.
+        self._accept_backlog.start()
+        logger.info(
+            "Accept-backlog watchdog sampling port %d every %.1fs, bound %.1fs",
+            HEALTH_PORT,
+            ACCEPT_BACKLOG_INTERVAL_SECONDS,
+            ACCEPT_BACKLOG_BOUND_SECONDS,
+        )
 
         # Step 5+6: Main loop
         consumer = DeployConsumer(
@@ -318,6 +358,10 @@ class DeployAgent:
         finally:
             publish_retry_task.cancel()
             consumer.close()
+            # Stopped before the site goes away: once the socket is closed the
+            # probe reads nothing and the last verdict would be overwritten with
+            # an indeterminate one, erasing the evidence a reader came for.
+            self._accept_backlog.stop()
             await runner.cleanup()
             # Last, and waiting. The loop above only exits once its own awaited
             # offload has returned, so nothing of this agent's own work is in
@@ -594,9 +638,26 @@ class DeployAgent:
                         on_phase_update=on_phase_update, lane=cmd.runtime_lane
                     )
 
-                # Complete
-                self.job_store.complete(cid, status="success")
-                logger.info("Job %s completed successfully", cid)
+                # Complete -- AND SAY WHAT IS STILL RUNNING (OMN-18636 AC5).
+                #
+                # The verdict below is final and is deliberately not affected by
+                # anything that follows it. What follows it is nevertheless this
+                # job's work, on this job's thread: the lab-overlay apply, the
+                # onex-api pin delivery, the terminal publish. On 2026-09-17 that
+                # tail ran for 3m38s after a record that read `success`, and
+                # nothing the agent served could tell the two apart.
+                #
+                # The stage travels IN this write. A `complete` followed by a
+                # separate `set_settling` would reopen the window by exactly the
+                # gap between two file writes.
+                self.job_store.complete(
+                    cid,
+                    status="success",
+                    settling_stage=EnumJobSettlingStage.LAB_OVERLAY,
+                )
+                logger.info(
+                    "Job %s completed successfully; settling (lab overlay)", cid
+                )
 
                 # OMN-18200 AC5 -- the k3s onex-lab overlay's half of rule 24(a).
                 #
@@ -612,6 +673,8 @@ class DeployAgent:
                 # is a governed lane this agent's fence already refuses, and the lab
                 # overlay is not a stability surface.
                 self._apply_lab_overlay(cmd)
+
+                self.job_store.set_settling(cid, EnumJobSettlingStage.ONEX_API_PIN)
 
                 # OMN-18572. The applier above BUILT a fresh onex-api image;
                 # this is what DELIVERS it. Inside the lock, because it
@@ -635,7 +698,16 @@ class DeployAgent:
             self.job_store.complete(cid, status="failed", errors=[str(e)])
         except Exception as e:
             logger.exception("Job %s failed: %s", cid, e)
-            self.job_store.complete(cid, status="failed", errors=[str(e)])
+            # OMN-18636 AC5: the failing path has a tail of its own -- the
+            # terminal publish always, and the repair build below on the one
+            # failure a fresh image can fix -- so its terminal write names a
+            # settling stage for the same reason the success path does.
+            self.job_store.complete(
+                cid,
+                status="failed",
+                errors=[str(e)],
+                settling_stage=EnumJobSettlingStage.PUBLISH,
+            )
             # OMN-18545 -- THE REPAIR BUILD, AND WHY THE FAILING PATH NEEDED ONE
             # AT ALL.
             #
@@ -689,10 +761,12 @@ class DeployAgent:
             # properties are pinned by tests, not by this comment --
             # tests/unit/test_lab_overlay_build_order_omn18545.py.
             if isinstance(e, DevLaneMigrationPreflightError):
+                self.job_store.set_settling(cid, EnumJobSettlingStage.REPAIR_BUILD)
                 self._build_lab_repair_image(cmd)
 
         # Publish result (don't use on_phase_update — job is already completed,
         # and update_phase would revert status to in_progress)
+        self.job_store.set_settling(cid, EnumJobSettlingStage.PUBLISH)
         job = self.job_store.load(cid)
         if job:
             job.phase_results[Phase.PUBLISH] = PhaseStatus.IN_PROGRESS
@@ -717,6 +791,15 @@ class DeployAgent:
                 job.result_publish_pending = True
                 self.job_store._save(job)
                 logger.warning("Publish failed for %s, marked pending", cid)
+
+        # OMN-18636 AC5. Nothing further runs for this job, so it stops
+        # reporting itself as settling. A flag that is only ever set makes every
+        # finished job look like a working one, which distinguishes nothing.
+        # This is cleared whether the publish succeeded or not: a publish still
+        # owed to the bus is durable in `result_publish_pending` and is replayed
+        # by the retry loop, which is a different fact from "this job's own work
+        # is still executing on the job thread".
+        self.job_store.clear_settling(cid)
 
         self._state = "idle"
 

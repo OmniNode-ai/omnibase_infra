@@ -11,6 +11,10 @@ from uuid import UUID
 
 from aiohttp import web
 
+from deploy_agent.accept_backlog import (
+    EnumAcceptBacklogStatus,
+    ModelAcceptBacklogVerdict,
+)
 from deploy_agent.job_state import JobStore
 from deploy_agent.lab_overlay import load_latest_record, load_record
 from deploy_agent.loaded_code import loaded_code_sha_if_recorded
@@ -21,10 +25,19 @@ _start_time = time.monotonic()
 def create_health_app(
     job_store: JobStore,
     get_agent_state: Callable[[], str],
+    get_accept_backlog: Callable[[], ModelAcceptBacklogVerdict | None] | None = None,
 ) -> web.Application:
+    """Build the agent's HTTP surface.
+
+    ``get_accept_backlog`` is the watchdog's latest verdict (OMN-18636 AC4). It
+    is optional because the watchdog is a property of a running agent and this
+    app is also built by tests that are not exercising it; where it is absent
+    the payload says INDETERMINATE rather than claiming a healthy queue.
+    """
     app = web.Application()
     app["job_store"] = job_store
     app["get_agent_state"] = get_agent_state
+    app["get_accept_backlog"] = get_accept_backlog
 
     app.router.add_get("/health", _health_handler)
     app.router.add_get("/job/{correlation_id}", _job_handler)
@@ -86,9 +99,25 @@ async def _health_handler(request: web.Request) -> web.Response:
             if latest.completed_at
             else None,
             "phase_results": {str(k): str(v) for k, v in latest.phase_results.items()},
+            # OMN-18636 AC5. A reader that only looks at /health must be able to
+            # tell a finished job from one whose post-terminal work is still
+            # running on this agent's job thread.
+            "settling": latest.settling_stage is not None,
+            "settling_stage": (
+                latest.settling_stage.value if latest.settling_stage else None
+            ),
         }
 
     pending_publish = len(store.get_pending_publish())
+
+    # OMN-18636 AC4. An accept queue that nothing has drained past the declared
+    # bound means this process is not serving its own socket -- which, to every
+    # reader downstream, has until now looked like INDETERMINATE rather than a
+    # failure. The status code goes with it: RED rather than silent.
+    backlog = _accept_backlog_block(request)
+    status_code = (
+        503 if backlog["status"] == EnumAcceptBacklogStatus.UNHEALTHY.value else 200
+    )
 
     return web.json_response(
         {
@@ -105,8 +134,41 @@ async def _health_handler(request: web.Request) -> web.Response:
             "active_job": active_job,
             "last_result": last_result,
             "pending_publish_count": pending_publish,
-        }
+            "accept_backlog": backlog,
+        },
+        status=status_code,
     )
+
+
+def _accept_backlog_block(request: web.Request) -> dict[str, object]:
+    """The watchdog's latest verdict, or an honest statement that there is none.
+
+    An absent watchdog is INDETERMINATE, never healthy: a payload that reported
+    a healthy accept queue on the strength of nobody having looked would assert
+    exactly the fact this block exists to establish.
+    """
+    getter = request.app.get("get_accept_backlog")
+    verdict = getter() if getter is not None else None
+    if verdict is None:
+        return {
+            "status": EnumAcceptBacklogStatus.INDETERMINATE.value,
+            "queue_depth": None,
+            "undrained_seconds": 0.0,
+            "bound_seconds": None,
+            "observed_at": None,
+            "evidence": (
+                "no accept-backlog verdict has been produced in this process "
+                "yet; the queue depth is unknown, which is not the same as empty"
+            ),
+        }
+    return {
+        "status": verdict.status.value,
+        "queue_depth": verdict.queue_depth,
+        "undrained_seconds": verdict.undrained_seconds,
+        "bound_seconds": verdict.bound_seconds,
+        "observed_at": verdict.observed_at.isoformat(),
+        "evidence": verdict.evidence,
+    }
 
 
 async def _job_handler(request: web.Request) -> web.Response:
@@ -132,6 +194,15 @@ async def _job_handler(request: web.Request) -> web.Response:
             "accepted_at": job.accepted_at.isoformat(),
             "completed_at": job.completed_at.isoformat() if job.completed_at else None,
             "result_publish_pending": job.result_publish_pending,
+            # OMN-18636 AC5. "Terminal" and "the agent is done with this job"
+            # were the same fact on this payload, and for 3m38s on 2026-09-17
+            # they were not the same fact in reality. ``settling`` is the
+            # boolean a reader branches on; ``settling_stage`` names which
+            # post-terminal host mutation is in flight.
+            "settling": job.settling_stage is not None,
+            "settling_stage": (
+                job.settling_stage.value if job.settling_stage else None
+            ),
         }
     )
 
