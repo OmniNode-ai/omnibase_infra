@@ -27,6 +27,11 @@
 #     changed the migration runner and produced NO trigger (run 34330947198),
 #     so the seam never executed on the lane. The list is unioned with the
 #     canonical result, never replacing it — see LANE_STATE_PATH_PATTERNS.
+#     OMN-18671 added the repo-root dependency manifest and lock to that same
+#     list: the runtime image is BUILT from them, so a floor bump IS the change.
+#     omnimarket#2629 raised the omnibase-infra floor 0.38.30 -> 0.38.31, which
+#     swapped the installed lab binding table, and run 35323097013 classified it
+#     inert — no rebuild, no verify, no announce, no receipt.
 #
 # Control-bus routing is independent of the requested runtime lane. Both dev
 # and stability-test commands enter through the dev control bus where
