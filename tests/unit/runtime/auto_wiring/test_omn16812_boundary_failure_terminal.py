@@ -270,6 +270,7 @@ async def _drive_one_failing_record(
     contract_path: Path,
     *,
     collect_topics: tuple[str, ...],
+    tenant_id: str | None = None,
 ) -> dict[str, list[ModelEventEnvelope[object]]]:
     """Wire the contract for real, publish one record, return what each topic saw."""
     correlation_id = UUID(_CORRELATION)
@@ -304,6 +305,7 @@ async def _drive_one_failing_record(
         payload=_routing_intent_wire(),
         correlation_id=correlation_id,
         event_type="omnibase-infra.delegation-routing-request",
+        tenant_id=tenant_id,
     )
     await bus.publish(
         _SUBSCRIBE_TOPIC, None, command.model_dump_json().encode("utf-8"), None
@@ -630,3 +632,66 @@ def test_declared_failure_terminal_topics_resolves_the_mirror_contract(
     # An undeclared topic is never a valid answer address: publishing there
     # would break the contract's own publish allowlist.
     assert cast("tuple[str, ...]", resolved) != ()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_failure_terminal_records_the_consumed_tenant(
+    contract_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-16831 ruled item 2, on the failure path.
+
+    A boundary failure terminal is the only thing a tenant's abandoned request
+    ever produces, and it was published with no tenant recorded on it. That is
+    worse than the success path it mirrors: the success path at least reaches a
+    fail-closed refusal that DLQs loudly, while an unattributed failure terminal
+    is simply an unattributable record of a customer's failed request.
+
+    The tenant is read off the record this boundary consumed. Nothing here
+    sources one -- see the control below.
+    """
+    monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+    bus = _DlqRecordingInmemoryBus(environment="test", group="omn-16831-tenant")
+    await bus.start()
+    try:
+        seen = await _drive_one_failing_record(
+            bus,
+            contract_path,
+            collect_topics=(_FAILURE_TOPIC,),
+            tenant_id="acme",
+        )
+    finally:
+        await bus.close()
+
+    assert seen[_FAILURE_TOPIC], "the terminal itself must still be emitted"
+    assert seen[_FAILURE_TOPIC][0].tenant_id == "acme"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_failure_terminal_invents_no_tenant(
+    contract_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: an unattributed record yields an unattributed terminal.
+
+    OMN-16831 AC2 and OMN-16804 AC3 forbid the runtime inventing or defaulting a
+    tenant. Without this control the carriage assertion above is satisfied by a
+    hardcoded value just as well as by propagation.
+    """
+    monkeypatch.setenv(_BOUNDARY_DLQ_ENV, "1")
+
+    bus = _DlqRecordingInmemoryBus(environment="test", group="omn-16831-notenant")
+    await bus.start()
+    try:
+        seen = await _drive_one_failing_record(
+            bus,
+            contract_path,
+            collect_topics=(_FAILURE_TOPIC,),
+            tenant_id=None,
+        )
+    finally:
+        await bus.close()
+
+    assert seen[_FAILURE_TOPIC], "the terminal itself must still be emitted"
+    assert seen[_FAILURE_TOPIC][0].tenant_id is None

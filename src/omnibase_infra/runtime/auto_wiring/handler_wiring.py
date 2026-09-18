@@ -1542,6 +1542,52 @@ def _extract_dispatch_event_type(envelope: object) -> object | None:
     return getattr(envelope, "event_type", None)
 
 
+def _extract_dispatch_tenant_id(envelope: object) -> str | None:
+    """The tenant DIMENSION recorded on a consumed record, or ``None``.
+
+    OMN-16831 ruled item 2. This READS an attribution a producer already
+    recorded; it never derives, defaults or invents one. A record that recorded
+    no tenant yields ``None`` here and stays unattributed all the way to the
+    projection writer's fail-closed refusal, which is the designed behaviour
+    (OMN-16831 AC2, OMN-16804 AC3).
+
+    A blank string is treated as no tenant for the same reason
+    ``ModelEventEnvelope`` refuses one outright: it reads as recorded to a
+    writer and is indistinguishable from none to a reader.
+    """
+    candidate: object = None
+    if isinstance(envelope, Mapping):
+        candidate = envelope.get("tenant_id")
+    if candidate is None:
+        candidate = getattr(envelope, "tenant_id", None)
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate
+    return None
+
+
+def _tenant_id_from_raw_message(message: object) -> str | None:
+    """The tenant recorded on an undecoded transport record, or ``None``.
+
+    OMN-16831 item 2, failure path. The boundary terminal is emitted from a
+    point that holds the RAW record rather than a materialized envelope, so the
+    dimension has to be read out of the body the same way the callback's own
+    lineage recovery reads ``correlation_id`` from it. An unreadable body yields
+    ``None`` and the terminal is still emitted unattributed -- withholding the
+    terminal over a missing tenant would restore the 120 s silent timeout
+    OMN-16812 exists to remove.
+    """
+    raw = getattr(message, "value", None)
+    if raw is None:
+        return None
+    try:
+        decoded: object = json.loads(
+            raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError, AttributeError, TypeError):
+        return None
+    return _extract_dispatch_tenant_id(decoded)
+
+
 def _materialize_raw_event_envelope(
     envelope: object,
     raw_payload: object,
@@ -1584,6 +1630,12 @@ def _materialize_raw_event_envelope(
         ),
         event_type=str(event_type or fallback_event_type),
         source_tool="auto-wiring",
+        # OMN-16831 item 2: this re-hydration is the dict-delivery branch -- the
+        # shape EVERY Kafka record takes -- and it carried correlation, timestamp
+        # and event type across while dropping the tenant, so a handler
+        # downstream saw an unattributed envelope even when the wire record was
+        # attributed. Read, never sourced: see `_extract_dispatch_tenant_id`.
+        tenant_id=_extract_dispatch_tenant_id(envelope),
     )
 
 
@@ -1622,6 +1674,10 @@ def _materialize_typed_event_envelope(
         event_type=str(event_type or fallback_event_type),
         payload_type=type(typed_payload).__name__,
         source_tool="auto-wiring",
+        # OMN-16831 item 2: same hop, typed branch. Both branches feed the same
+        # handler, so fixing one alone would leave the dimension dependent on
+        # whether the payload happened to validate as the declared model.
+        tenant_id=_extract_dispatch_tenant_id(envelope),
     )
 
 
@@ -4913,6 +4969,12 @@ async def _emit_projection_terminal_event(
             envelope_timestamp=datetime.now(UTC),
             event_type=terminal_event,
             source_tool="projection-reducer",
+            # OMN-16831 item 2: this publish is a handler's own DECLARED output
+            # and, by construction (OMN-17214 Defect B, noted below), does NOT
+            # go through the result applier -- so the OMN-16831 carriage fix in
+            # #3573 never reached it. A tenant's projection terminal was
+            # published unattributed.
+            tenant_id=_extract_dispatch_tenant_id(source_envelope),
         )
         raw = terminal_envelope.model_dump_json().encode("utf-8")
         if hasattr(event_bus, "publish"):
@@ -7064,6 +7126,10 @@ def _make_event_bus_callback(
             source_tool="auto-wiring-boundary",
             target_tool=terminal_topic,
             payload_type=type(terminal).__name__,
+            # OMN-16831 item 2: a boundary failure terminal is the ONLY thing a
+            # tenant's abandoned request ever produces, and it was published
+            # unattributed. Read off the consumed record, never sourced.
+            tenant_id=_tenant_id_from_raw_message(message),
         )
         try:
             await publish_fn(
@@ -7352,6 +7418,7 @@ def _make_event_bus_callback(
                         envelope_timestamp=datetime.now(UTC),
                         event_type=derived or topic,
                         source_tool="auto-wiring",
+                        tenant_id=_extract_dispatch_tenant_id(data),
                     )
                 # OMN-18013 (operator ruling item 2): the event type a handler
                 # matches on is read from the TOPIC — the publisher's contract
@@ -7573,6 +7640,7 @@ def _make_raw_event_projection_callback(
                     or raw_message.headers.event_type
                 ),
                 source_tool=raw_message.headers.source,
+                tenant_id=_tenant_id_from_raw_message(raw_message),
             )
             if flow_counters is None or consumer_group is None:
                 await _dispatch_and_apply_raw_projection(envelope)

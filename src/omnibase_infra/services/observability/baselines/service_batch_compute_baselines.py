@@ -322,6 +322,7 @@ class ServiceBatchComputeBaselines:
                 payload=payload,
                 correlation_id=correlation_id,
                 source_tool="ServiceBatchComputeBaselines",
+                tenant_id=None,
             )
 
             await self._event_bus.publish_envelope(envelope, TOPIC_BASELINES_COMPUTED)

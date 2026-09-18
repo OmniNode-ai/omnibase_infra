@@ -220,6 +220,7 @@ class DispatcherTopicCatalogQuery(MixinAsyncCircuitBreaker):
                     envelope_timestamp=now,
                     correlation_id=correlation_id,
                     source_tool=self.dispatcher_id,
+                    tenant_id=None,
                 )
             )
 

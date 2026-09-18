@@ -145,6 +145,7 @@ class HandlerCodingAgentOrchestrator:
                 payload=validate_command,
                 correlation_id=command.correlation_id,
                 event_type=TOPIC_WORKSPACE_VALIDATE,
+                tenant_id=envelope.tenant_id,
             )
         ]
 
@@ -168,6 +169,7 @@ class HandlerCodingAgentOrchestrator:
                     payload=advance,
                     correlation_id=command.correlation_id,
                     event_type=TOPIC_FSM_ADVANCE,
+                    tenant_id=envelope.tenant_id,
                 )
             ]
 
@@ -176,6 +178,7 @@ class HandlerCodingAgentOrchestrator:
                 payload=command,
                 correlation_id=command.correlation_id,
                 event_type=TOPIC_INVOKE,
+                tenant_id=envelope.tenant_id,
             )
         ]
 

@@ -72,6 +72,7 @@ def _make_routing_decided_callback(
             correlation_id=str(event.get("correlation_id") or ""),
             event_type="routing-decided",
             source_tool="AdapterModelRouter",
+            tenant_id=None,
         )
         try:
             await event_bus.publish_envelope(envelope=envelope, topic=routing_topic)

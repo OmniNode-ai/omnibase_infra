@@ -317,6 +317,7 @@ class AdapterProtocolEventPublisherInmemory:
             correlation_id=corr_uuid,
             source_tool=f"{self._service_name}.{self._instance_id}",
             metadata=envelope_metadata,
+            tenant_id=None,
         )
 
         return envelope

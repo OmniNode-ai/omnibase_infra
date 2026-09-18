@@ -251,6 +251,7 @@ async def publish_runtime_manifest(
         correlation_id=correlation_id,
         event_type=event_type,
         source_tool="service_kernel",
+        tenant_id=None,
     )
     await event_bus.publish_envelope(envelope=envelope, topic=topic)
     return payload

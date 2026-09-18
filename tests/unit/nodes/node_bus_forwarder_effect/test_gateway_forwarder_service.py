@@ -617,3 +617,45 @@ async def test_delegation_request_payload_stamp_survives_real_model_round_trip()
     assert reconstructed.task_type == "code_review"
     assert reconstructed.correlation_id == request_correlation_id
     assert "tenant_slug" not in consumer_view.payload
+
+
+async def test_heartbeat_records_its_bound_tenant_on_the_envelope_dimension() -> None:
+    """OMN-16831 ruled item 2: a producer with a tenant in scope records it.
+
+    The gateway heartbeat is the most attributable event the platform emits --
+    the forwarder's ``tenant_identity`` is bound at deploy time, is not
+    client-writable, and is already in hand at the construction site. It was
+    written into the PAYLOAD and into two metadata tags, and left off
+    ``ModelEventEnvelope.tenant_id``, which is the only field
+    ``envelope_tenant_identity`` (omnimarket) reads. That is the same
+    producer/consumer split across two fields that ``#3573`` closed for the
+    ``tenant_scoped_ingress`` stamp, on a second site.
+
+    The sibling assertions on ``payload["tenant_id"]`` above stay as they are:
+    the payload copy is what the OMN-14367 gateway seam and the OMN-14058
+    downstream flow read, so both carry the same verified value rather than one
+    replacing the other.
+    """
+    local_bus = _MockGatewayBus()
+    cloud_bus = _MockGatewayBus()
+    config = _config().model_copy(
+        update={
+            "mirror_topics": ModelGatewayMirrorTopics(
+                inbound=(INBOUND_TOPIC,),
+                outbound=(OUTBOUND_TOPIC, HEARTBEAT_TOPIC),
+            )
+        }
+    )
+    service = ServiceGatewayForwarder(
+        config=config,
+        local_bus=local_bus,
+        cloud_bus=cloud_bus,
+    )
+
+    await service.publish_heartbeat()
+
+    for bus in (cloud_bus, local_bus):
+        envelope = ModelEventEnvelope[dict[str, object]].model_validate_json(
+            bus.published[0].value
+        )
+        assert envelope.tenant_id == "acme"
