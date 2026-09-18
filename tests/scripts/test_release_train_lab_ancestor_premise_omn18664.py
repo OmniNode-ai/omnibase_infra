@@ -147,6 +147,7 @@ def _seams(
     runtime_shas: set[str] | None = None,
     pending: set[str] | None = None,
     queried: list[str] | None = None,
+    queried_repos: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the four injectable seams `decide` takes for the lab premise.
 
@@ -161,6 +162,8 @@ def _seams(
     def _list(repo: str, name: str) -> list[dict[str, Any]]:
         if queried is not None:
             queried.append(name)
+        if queried_repos is not None:
+            queried_repos.append(repo)
         for sha in have:
             if name.endswith(sha):
                 return [{"id": 1, "created_at": "2026-09-18T02:53:14Z"}]
@@ -587,3 +590,108 @@ class TestPendingProbeWireShape:
     ) -> None:
         monkeypatch.setattr(rt, "default_gating_sha", lambda repo, sha: "")
         assert rt.default_rebuild_pending("omnibase_infra", _HEAD) is False
+
+
+# --------------------------------------------------------------------------- #
+# Which REPOSITORY the receipt is queried in (OMN-18664 follow-up).             #
+# --------------------------------------------------------------------------- #
+class TestReceiptIsQueriedInTheShasOwnRepository:
+    """The rebuild trigger is reusable, so its receipt lands in the CALLER's repo.
+
+    Each repository invokes the reusable rebuild trigger from its own workflow,
+    so the run belongs to that repository and ``upload-artifact`` publishes the
+    receipt into ITS artifact surface.
+    ``deliver-dev-candidate-to-staging.yml`` mints a sibling-scoped
+    ``actions: read`` token for exactly this reason (OMN-17057).
+
+    Measured live 2026-09-18: omnimarket sha ``31119d98e834`` returns 2
+    artifacts in omnimarket and 0 in omnibase_infra. A lookup naming one
+    repository literally would therefore report a clean zero for every other
+    repo the train decides -- a false zero shaped exactly like a finding, which
+    is the rule-16 failure mode this premise cannot afford. A sibling lane's
+    probe hit precisely that on 2026-09-18 by querying omnibase_infra for shas
+    belonging to several repositories.
+    """
+
+    def test_an_omnimarket_sha_is_looked_up_in_omnimarket(self) -> None:
+        repos: list[str] = []
+        rt.decide(
+            policy=_policy(
+                repo="omnimarket",
+                package="omnimarket",
+                mode=rt.EnumTrainMode.CUT,
+            ),
+            facts=_facts(repo="omnimarket"),
+            **_seams(
+                receipted={_HEAD: _receipt(_HEAD)},
+                branch=[_HEAD],
+                runtime_shas={_HEAD},
+                queried_repos=repos,
+            ),
+        )
+        assert repos == ["OmniNode-ai/omnimarket"], (
+            "the receipt for an omnimarket sha lives in omnimarket's artifact "
+            f"surface, not in any other repository; queried {repos!r}"
+        )
+
+    def test_an_infra_sha_is_looked_up_in_infra(self) -> None:
+        """The flipped sibling. The same code, a different repo, no constant."""
+        repos: list[str] = []
+        rt.decide(
+            policy=_policy(),
+            facts=_facts(),
+            **_seams(
+                receipted={_HEAD: _receipt(_HEAD)},
+                branch=[_HEAD],
+                runtime_shas={_HEAD},
+                queried_repos=repos,
+            ),
+        )
+        assert repos == ["OmniNode-ai/omnibase_infra"]
+
+    def test_an_inherited_ancestor_is_looked_up_in_the_same_repository(self) -> None:
+        """Inheriting a receipt must not change WHICH artifact surface is read.
+
+        The ancestor comes from the decided repo's own first-parent walk, so it
+        belongs to that repo. Reading it anywhere else would resolve a receipt
+        for an unrelated commit that happens to share a sha prefix, or -- far
+        more likely -- return a false zero.
+        """
+        repos: list[str] = []
+        decision = rt.decide(
+            policy=_policy(
+                repo="omnimarket", package="omnimarket", mode=rt.EnumTrainMode.CUT
+            ),
+            facts=_facts(repo="omnimarket"),
+            **_seams(
+                receipted={_RECEIPTED: _receipt(_RECEIPTED)},
+                branch=[_HEAD, _WORKFLOW_ONLY_1, _RECEIPTED],
+                runtime_shas={_RECEIPTED},
+                queried_repos=repos,
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.CUT
+        assert set(repos) == {"OmniNode-ai/omnimarket"}
+
+    def test_the_lab_premise_names_no_repository_literally(self) -> None:
+        body = _MODULE.read_text(encoding="utf-8")
+        section = body.split("def classify_lab_receipt", 1)[1].split("\ndef decide", 1)[
+            0
+        ]
+        code = "\n".join(
+            line for line in section.splitlines() if not line.strip().startswith("#")
+        )
+        # Strip the docstring, which cites the measured repositories on purpose.
+        code = code.split('"""', 2)[-1]
+        for repo_name in (
+            "omnibase_infra",
+            "omnimarket",
+            "omnibase_core",
+            "omninode_infra",
+        ):
+            assert repo_name not in code, (
+                f"{repo_name!r} is named literally in the lab premise's code. The "
+                "receipt lives in the repository the sha belongs to, so a "
+                "constant here returns a clean zero for every other repo the "
+                "train decides"
+            )
