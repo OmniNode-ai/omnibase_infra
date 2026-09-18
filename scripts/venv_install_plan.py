@@ -55,14 +55,21 @@ EXIT_USAGE = 2
 EXIT_REFUSED = 3
 EXIT_UV_ERROR = 4
 
-# uv renders its install plan as one line per changed distribution:
-#   " + omnibase-compat==0.5.5"
+# uv renders its install plan as one line per changed distribution, in TWO
+# shapes. A resolved distribution carries its version:
 #   " - omnibase-compat==0.5.7"
-# Local-version and direct-URL installs carry a trailing " (from ...)" or a
-# "+local" segment, both of which are kept in the version string verbatim so a
-# VCS reinstall is never mistaken for a version change.
-_CHANGE_LINE = re.compile(
+#   " + omnibase-compat==0.5.5"
+#   " - omnimarket==0.4.118 (from git+https://github.com/.../omnimarket.git@948be2e1)"
+# A direct reference that has not been built yet carries its SOURCE and no
+# version at all, because uv does not know the version until it builds:
+#   " + omnimarket @ git+https://github.com/.../omnimarket.git@53d6e445"
+# Parsing only the first shape reads a VCS ref bump as an unpaired removal,
+# which is a false refusal of the one operation this script exists to perform.
+_CHANGE_LINE_PINNED = re.compile(
     r"^\s*(?P<sign>[-+])\s+(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)==(?P<version>\S+)"
+)
+_CHANGE_LINE_DIRECT = re.compile(
+    r"^\s*(?P<sign>[-+])\s+(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s+@\s+(?P<source>\S+)"
 )
 
 
@@ -74,10 +81,22 @@ class PlanVerdict(str, Enum):
     REINSTALL = "REINSTALL"
     DOWNGRADE = "DOWNGRADE"
     REMOVE = "REMOVE"
+    SOURCE = "SOURCE"
     UNKNOWN = "UNKNOWN"
 
 
 #: Verdicts that make the whole plan unsafe to apply to a shared venv.
+#:
+#: SOURCE is deliberately NOT here. A direct reference (``name @ git+...``)
+#: carries no version, so no ordering exists to regress: the caller pinned a
+#: SOURCE, explicitly, and that source is the object of the operation. Treating
+#: it as unorderable-and-therefore-refused would make every VCS ref bump
+#: impossible, which is the one thing this script is for, and a guard that
+#: blocks the correct action is a guard that gets routed around. The regression
+#: this module exists to stop was two ``==`` pins, and those stay fully ordered
+#: and refused. A version regression a plan cannot see is still caught after the
+#: fact, by the entry-point import check the installer runs before reporting
+#: success.
 REFUSING_VERDICTS = frozenset(
     {PlanVerdict.DOWNGRADE, PlanVerdict.REMOVE, PlanVerdict.UNKNOWN}
 )
@@ -120,14 +139,27 @@ def _parse_version(raw: str) -> tuple[object, ...] | None:
         return None
 
 
-def classify(name: str, before: str | None, after: str | None) -> PlanChange:
-    """Classify one before/after pair into a :class:`PlanVerdict`."""
+def classify(
+    name: str,
+    before: str | None,
+    after: str | None,
+    *,
+    direct: bool = False,
+) -> PlanChange:
+    """Classify one before/after pair into a :class:`PlanVerdict`.
+
+    ``direct`` marks a side that names a SOURCE rather than a version, which is
+    how uv renders a direct reference it has not built yet.
+    """
     if before is None and after is None:
         return PlanChange(name, before, after, PlanVerdict.UNKNOWN)
     if before is None:
         return PlanChange(name, before, after, PlanVerdict.INSTALL)
     if after is None:
         return PlanChange(name, before, after, PlanVerdict.REMOVE)
+    if direct:
+        # A source change, not a version change. See REFUSING_VERDICTS.
+        return PlanChange(name, before, after, PlanVerdict.SOURCE)
     if before == after:
         return PlanChange(name, before, after, PlanVerdict.REINSTALL)
 
@@ -145,20 +177,29 @@ def parse_plan(output: str) -> list[PlanChange]:
     """Parse uv's ``+``/``-`` change lines into classified per-package changes."""
     removed: dict[str, str] = {}
     added: dict[str, str] = {}
+    direct: set[str] = set()
     order: list[str] = []
     for line in output.splitlines():
-        match = _CHANGE_LINE.match(line)
+        match = _CHANGE_LINE_PINNED.match(line)
+        value_group = "version"
         if match is None:
-            continue
+            match = _CHANGE_LINE_DIRECT.match(line)
+            value_group = "source"
+            if match is None:
+                continue
         name = normalize_name(match.group("name"))
-        version = match.group("version")
+        if value_group == "source":
+            direct.add(name)
         if name not in order:
             order.append(name)
         if match.group("sign") == "-":
-            removed[name] = version
+            removed[name] = match.group(value_group)
         else:
-            added[name] = version
-    return [classify(name, removed.get(name), added.get(name)) for name in order]
+            added[name] = match.group(value_group)
+    return [
+        classify(name, removed.get(name), added.get(name), direct=name in direct)
+        for name in order
+    ]
 
 
 def _run_uv(
