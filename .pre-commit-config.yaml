@@ -92,8 +92,37 @@ repos:
   - repo: https://github.com/OmniNode-ai/onex_change_control
     rev: 8d7e85bc00e7f1b1306d1cb40949be1ab6e7e91a # pragma: allowlist secret
     hooks:
+      # OMN-18691 adds ONE path to this exclude: docker/docker-compose.ci-bus.yml.
+      # Read the reason before adding a second — an allowlist entry is never a way
+      # to unblock a failing gate.
+      #
+      # WHAT THE GATE PROTECTS: a topic name written in source drifting from the
+      # contract that declares it. Every other lane satisfies it the same way —
+      # nobody writes topic names anywhere, because the runtime's TopicProvisioner
+      # creates each contract-declared topic at boot by READING the contracts.
+      #
+      # WHY THAT MECHANISM IS UNAVAILABLE HERE, AND ONLY HERE: the CI-bus project
+      # runs no runtime. It is one Redpanda and its one-shots, deliberately — a
+      # broker that survives a dev-lane rebuild cannot be hosted inside anything
+      # that a lane rebuild recreates. With no contract-reading process on that
+      # broker, the topics are nobody's job unless the bring-up one-shot does it,
+      # and relying on broker auto-create instead yields a 1-partition topic with
+      # default retention, silently, on first publish.
+      #
+      # WHAT REPLACES THE GATE RATHER THAN MERELY EXCUSING IT: the topic set in
+      # that file is pinned by `test_ci_bus_topics_are_exactly_the_ci_bus_set` in
+      # tests/unit/docker/test_ci_bus_broker_isolation_omn18691.py, which asserts
+      # the exact five names and cross-checks the one it can resolve against the
+      # canonical registry constant. An edit to the list is a red test, which is
+      # the property the gate was providing.
+      #
+      # The central validator requirement already classes YAML as an allowed
+      # exclude for this hook (onex_change_control
+      # architecture-handshakes/validator-requirements.yaml, `no-hardcoded-topics`
+      # -> excludes.allowed includes `\.yaml$`); this entry is narrower than that
+      # allowance, naming one file rather than a suffix.
       - id: no-hardcoded-topics
-        exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|nodes/.*/contracts|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|topics/service_topic_registry\.py|validation|contracts/)|scripts/|tests/|contracts/|src/dep_health_allowlist\.yaml)
+        exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|nodes/.*/contracts|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|topics/service_topic_registry\.py|validation|contracts/)|scripts/|tests/|contracts/|src/dep_health_allowlist\.yaml|docker/docker-compose\.ci-bus\.yml)
       - id: no-bare-feature-flags
         # YAML formatting (standard across ecosystem)
       - id: no-untracked-todos

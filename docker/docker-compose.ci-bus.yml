@@ -1,0 +1,400 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# docker-compose.ci-bus.yml — the fleet's DEDICATED CI bus broker (OMN-18691).
+#
+# =============================================================================
+# WHAT THIS IS, AND WHY IT IS ITS OWN COMPOSE PROJECT
+# =============================================================================
+# The thin CI publishers (OCC autobind, the OCC companion effect, the pr-merged
+# event, the runtime-rebuild trigger) publish to a Kafka broker on .201. Until
+# this file they published to the DEV LANE's Redpanda — `omninode-pc…:19092`,
+# compose project `omnibase-infra`, declared as lane `dev` in omnimarket
+# `config/ci_bus_lanes.yaml`.
+#
+# That coupling is the defect. The dev lane is, by its own lane-map entry, a
+# "fully mutable test platform": it is rebuilt on every runtime-affecting merge
+# to `dev`, and it is torn down and recreated by the deploy agent several times
+# a day. Every one of those windows is a window in which the FLEET'S CI cannot
+# publish.
+#
+# Measured, 2026-09-18: the deploy agent's compose-up watchdog has a hardcoded
+# 300 s per-phase ceiling. Under host load1 ~28/32 the core phase overran, the
+# watchdog killed `docker compose up` mid-recreate, and redpanda and valkey were
+# left REMOVED while postgres was half-recreated. The agent then crash-looped on
+# NoBrokersAvailable against the broker it had just destroyed. Because the CI bus
+# WAS that broker, every Receipt Gate across the fleet went red for ~35 minutes —
+# on pull requests that had nothing to do with the dev lane.
+#
+# A dedicated project fixes the coupling structurally rather than by making the
+# lane rebuild more reliable. `docker compose -p omnibase-infra …` — every form
+# of it, including the deploy agent's own recreate and a `--cold` workspace
+# rebuild — is scoped to its project and cannot touch containers, volumes or
+# networks belonging to `omninode-ci-bus`. That is the whole argument for a
+# separate project, and it is a property of compose rather than of anybody's
+# care.
+#
+# NOT ADOPTED: pointing the CI bus at the stability-test lane's Redpanda. That
+# lane is the surface the `stability-proven` promotion premise is resolved from
+# on the compose path (CLAUDE.md rule 12), it is governed by the OMN-15218
+# attribution interlock, and putting fleet CI traffic on it would make every CI
+# publish a write to a promotion-evidence surface. Operator ruling, in-session
+# 2026-09-18T14:21:54Z, verbatim: "dedicated broker is fine"
+# (docs/tracking/ROLLING_WORK_LEDGER.md:4277).
+#
+# =============================================================================
+# STANDALONE, NOT AN OVERLAY — AND THAT IS LOAD-BEARING
+# =============================================================================
+# This file declares its own `name:`, its own network and its own volume, and it
+# merges NOTHING from docker-compose.infra.yml. It is brought up with
+#
+#     docker compose -f docker/docker-compose.ci-bus.yml up -d
+#
+# and never with `-f docker/docker-compose.infra.yml -f …`. Merging the base file
+# would re-create the exact coupling this project exists to remove: the base
+# file's `redpanda` service, its network and its `redpanda_data` volume all
+# belong to the lane, and a merged render would either collide with them or
+# silently inherit the lane's lifecycle.
+#
+# =============================================================================
+# WHAT THIS PROJECT DOES *NOT* CONTAIN, STATED RATHER THAN IMPLIED
+# =============================================================================
+# It is a BROKER and its topics. It contains no runtime, no Postgres, no Valkey.
+#
+# The consumers of every CI-bus topic — node_pr_lifecycle_fix_effect,
+# node_occ_companion_effect, node_pr_merged_projection and
+# node_redeploy_orchestrator — all declare `runtime_profiles: [effects]` and are
+# therefore hosted by `omninode-runtime-effects`, a service of the DEV LANE
+# compose project, wired by docker-compose.infra.yml's shared `x-runtime-env`
+# anchor to the single hardcoded bootstrap `redpanda:9092`. One bootstrap, one
+# broker, for the whole container: the runtime kernel cannot attach to two buses.
+#
+# So this project, on its own, protects the PUBLISH leg and only the publish leg.
+# That is a real and sufficient win for phase 1 — a publish that used to fail
+# closed and redden an unrelated Receipt Gate now succeeds, and the command sits
+# durably on a broker the rebuild does not touch — but it is HALF a bus. Until a
+# consumer attaches to this broker, a repointed publisher would be green and
+# silent, which is a worse failure than a red one. The cutover order in the
+# runbook therefore attaches a consumer BEFORE it repoints a publisher, and this
+# file is deliberately inert until then: nothing reads `ci_bus_lanes.yaml` lane
+# `ci-bus` yet.
+#
+# =============================================================================
+# PORTS
+# =============================================================================
+# 21092 (Kafka) and 21644 (admin). Read off .201 read-only on 2026-09-18:
+# neither has a listener, and neither is in any lane's reserved block. The
+# X9092/X9644 convention the lanes use (dev 19092/9644, stability-test
+# 39092/29644, judge 49092, lakshman 55092/55644) is NOT extended here because
+# it has no free pair left — 29092 is free but its admin sibling 29644 is held by  # cloud-bus-ok OMN-18691
+# `omnibase-infra-stability-test-redpanda`. A pair that is free on both numbers
+# is worth more than a pattern that is free on one.
+#
+# =============================================================================
+# CREDENTIAL — NAMED HERE, CREATED IN PHASE 2
+# =============================================================================
+# The publisher principal is `ci-bus-publisher`, SCRAM-SHA-256 over PLAINTEXT,
+# exactly as the dev lane's listener speaks since OMN-18012 Phase B. Its username
+# and password are `CI_BUS_KAFKA_SASL_USERNAME` / `CI_BUS_KAFKA_SASL_PASSWORD`,
+# resolved from the operator env file and never inlined — the same `:?` discipline
+# as DEV_KAFKA_SASL_*.
+#
+# CREATING that credential is NOT this change and is NOT this lane's to do. Under
+# Operating Rule 22 a new principal needs its own OPERATOR-CONSENT ledger row
+# naming the credential. This file names it so the row can be written; bring-up
+# is phase 2 and every command is in the runbook.
+#
+# Ticket: OMN-18691. Parent: OMN-18096. History: OMN-18012 (the SASL transport),
+# OMN-14800/OMN-14801 (why the lane->broker map is committed at all).
+name: omninode-ci-bus
+x-ci-bus-logging: &ci_bus_logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+services:
+  # ===========================================================================
+  # (1) THE BROKER
+  # ===========================================================================
+  # Same image as every lane (`redpandadata/redpanda:v24.2.7`) on purpose: the
+  # host already holds that image for four lanes, it is already in the disk-gc
+  # keep-list under `redpandadata/redpanda`, and a second Redpanda generation on
+  # one host is a second set of upgrade semantics nobody asked for.
+  #
+  # `--smp 1` and a 1 GB memory reservation, against the lanes' 8 G: this broker
+  # carries five low-volume CI topics, not a runtime. Sizing it like a lane would
+  # take 8 GB from a host that ran out of headroom this morning.
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-ci-bus-redpanda
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:21092
+      # No silent default, for the OMN-15173 reason: a `${VAR:-localhost}` here
+      # renders a broker address that no off-host client — which is every client
+      # this broker has, they are all GitHub Actions runners — can resolve, and
+      # the symptom surfaces far from this file.
+      - --advertise-kafka-addr internal://redpanda:9092,external://${CI_BUS_REDPANDA_ADVERTISE_HOST:?CI_BUS_REDPANDA_ADVERTISE_HOST is required - it is the address CI runners reach this broker on (the .201 tailnet name), never localhost - a localhost default renders an address no off-host publisher can resolve}:${CI_BUS_REDPANDA_EXTERNAL_PORT:-21092}
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory ${CI_BUS_REDPANDA_MEMORY:-1G}
+      - --default-log-level=warn
+    ports:
+      - "${CI_BUS_REDPANDA_EXTERNAL_PORT:-21092}:21092"
+      # Admin API. `rpk security user` and `rpk cluster config` talk to this, and
+      # so does the healthcheck; it is NOT gated by `enable_sasl`, which is the
+      # only reason the phase-2 SASL flip below is performable at all.
+      - "${CI_BUS_REDPANDA_ADMIN_PORT:-21644}:9644"
+    volumes:
+      - ci_bus_redpanda_data:/var/lib/redpanda/data
+    networks:
+      - ci-bus-network
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging: *ci_bus_logging
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=redpanda"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.lane=ci-bus"
+      - "com.omninode.ticket=OMN-18691"
+  # ===========================================================================
+  # (2) THE CI TOPICS — created explicitly, never by broker auto-create
+  # ===========================================================================
+  # None of the four publishers creates a topic. They build a
+  # `confluent_kafka.Producer` and call `produce`/`flush`; there is no
+  # `AdminClient` in any of them. On the dev lane they never needed one, because
+  # the effects runtime's TopicProvisioner creates every contract-declared topic
+  # at boot. THIS project runs no runtime, so on this broker the topics are
+  # nobody's job unless they are this one-shot's job.
+  #
+  # Relying on broker auto-create instead would be the wrong kind of working: it
+  # yields a 1-partition topic with default retention, silently, on first
+  # publish, and partitions can only ever be INCREASED. The first consumer to
+  # attach would then find drift it can repair in only one direction.
+  #
+  # PARTITIONS = 6, RF = 1. Six is `DEFAULT_EVENT_TOPIC_PARTITIONS`
+  # (src/omnibase_infra/topics/model_topic_spec.py:40) and none of these four
+  # topics' contracts declares an override, so six is exactly what the effects
+  # runtime's provisioner would create. Matching it means a consumer attaching in
+  # phase 3 finds no drift to reconcile. RF 1 because this is a single-node
+  # cluster; a higher factor would leave every topic under-replicated forever.
+  #
+  # RETENTION = 7 days, on purpose and short. These are CI commands, not a
+  # ledger. The value they carry is "a command published while the consumer was
+  # down is still there when it comes back" — a window measured in the length of
+  # a lane rebuild, not in history. Seven days is two orders of magnitude more
+  # than that and still small enough that this broker cannot grow into the disk
+  # problem that produced this morning's outage. Segments are capped at 128 MiB
+  # so retention can actually reclaim rather than waiting on one huge open
+  # segment.
+  #
+  # Idempotent by LIST-then-CREATE and NOT by `|| true`, for the OMN-18012
+  # reason: a swallowed exit code here means the project reports up with topics
+  # that do not exist, and the first publish discovers it instead.
+  #
+  # The trailing per-topic readback is the point of the service, not decoration.
+  ci-bus-topics:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-ci-bus-topics
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        BROKER="-X brokers=redpanda:9092"
+        ADMIN="-X admin.hosts=redpanda:9644"
+        # Match the lanes' per-shard partition ceiling so a future topic
+        # addition does not hit the Redpanda default of 1000 (OMN-7302).
+        /usr/bin/rpk cluster config set topic_partitions_per_shard 7000 $$ADMIN
+        TOPICS="onex.cmd.omnimarket.occ-autobind.v1 onex.cmd.omnimarket.occ-companion-effect-requested.v1 onex.evt.github.pr-merged.v1 onex.cmd.omnimarket.redeploy-start.v1 onex.evt.deploy.rebuild-completed.v1"
+        for t in $$TOPICS; do
+          if /usr/bin/rpk topic list $$BROKER | awk '{print $$1}' | grep -qx "$$t"; then
+            echo "OMN-18691: topic already present: $$t"
+          else
+            /usr/bin/rpk topic create "$$t" \
+              --partitions 6 \
+              --replicas 1 \
+              -c retention.ms=604800000 \
+              -c cleanup.policy=delete \
+              -c segment.bytes=134217728 \
+              $$BROKER
+            echo "OMN-18691: topic created: $$t"
+          fi
+        done
+        for t in $$TOPICS; do
+          /usr/bin/rpk topic list $$BROKER | awk '{print $$1}' | grep -qx "$$t"
+        done
+        echo "OMN-18691: readback confirms all five CI-bus topics exist"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - ci-bus-network
+    restart: "no"
+    logging: *ci_bus_logging
+    labels:
+      - "com.omninode.service=ci-bus-topics"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.lane=ci-bus"
+      - "com.omninode.ticket=OMN-18691"
+  # ===========================================================================
+  # (3) THE PUBLISHER PRINCIPAL — phase A of the SASL pair
+  # ===========================================================================
+  # Modelled directly on the dev lane's `redpanda-scram-user`
+  # (docker/docker-compose.dev-lane.yml), including the reasons, because the
+  # reasons are the same and were paid for once already:
+  #
+  #   * `rpk security user` talks to the ADMIN API, which `enable_sasl` does not
+  #     gate. That split is the ONLY thing that makes a safe flip possible: the
+  #     principal can be created while the Kafka listener is still open, so
+  #     phase B never lands on a broker with SASL required and zero users — a
+  #     broker locked out of itself with no unauthenticated way back in.
+  #
+  #   * `RP_BOOTSTRAP_USER` is NOT usable. Redpanda honours it only on FIRST
+  #     cluster formation. It would work on this project's very first bring-up
+  #     and then silently stop working forever after, which is the worst of the
+  #     three options.
+  #
+  #   * Idempotent by LIST-then-CREATE, never `|| true`.
+  #
+  # NOT A CREDENTIAL ROTATION (Operating Rule 22): this provisions a NEW
+  # principal on a NEW broker. Nothing is rotated, re-issued or revoked, and no
+  # existing credential is read or written. It does still require its own
+  # OPERATOR-CONSENT row naming `ci-bus-publisher` before phase 2 runs it,
+  # because minting a credential is the operator's call and not a lane's.
+  #
+  # `$$` is a compose escape: the container's shell expands it from the container
+  # environment, so no value is rendered into `docker compose config` output or
+  # onto a command line visible in `ps`.
+  ci-bus-scram-user:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-ci-bus-scram-user
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      CI_BUS_KAFKA_SASL_USERNAME: ${CI_BUS_KAFKA_SASL_USERNAME:?CI_BUS_KAFKA_SASL_USERNAME must be set - the CI bus provisions its own SCRAM principal `ci-bus-publisher` (OMN-18691); it is resolved from the operator env file, never inlined here}
+      CI_BUS_KAFKA_SASL_PASSWORD: ${CI_BUS_KAFKA_SASL_PASSWORD:?CI_BUS_KAFKA_SASL_PASSWORD must be set - the CI bus provisions its own SCRAM principal `ci-bus-publisher` (OMN-18691); it is resolved from the operator env file, never inlined here}
+    command:
+      - |
+        set -eu
+        ADMIN="-X admin.hosts=redpanda:9644"
+        if /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$CI_BUS_KAFKA_SASL_USERNAME"; then
+          echo "OMN-18691: SCRAM principal already present"
+        else
+          /usr/bin/rpk security user create "$$CI_BUS_KAFKA_SASL_USERNAME" -p "$$CI_BUS_KAFKA_SASL_PASSWORD" --mechanism SCRAM-SHA-256 $$ADMIN
+          echo "OMN-18691: SCRAM principal created"
+        fi
+        /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$CI_BUS_KAFKA_SASL_USERNAME"
+        echo "OMN-18691: readback confirms the principal exists"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - ci-bus-network
+    restart: "no"
+    logging: *ci_bus_logging
+    labels:
+      - "com.omninode.service=ci-bus-scram-user"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.lane=ci-bus"
+      - "com.omninode.ticket=OMN-18691"
+  # ===========================================================================
+  # (4) THE SASL FLIP — phase B, the service that makes the refusal exist
+  # ===========================================================================
+  # Until `enable_sasl` is true, this broker accepts a client built with no
+  # credentials at all. It is reachable on the tailnet, so that is not an
+  # abstract concern.
+  #
+  # A cluster-config one-shot rather than a `--set` on the broker command, for
+  # the OMN-18012 reason: `--set` is a NODE-STARTUP flag, seeded only on first
+  # cluster formation. Once this project's volume exists the controller log is
+  # the source of truth and the flag is ignored — the change renders, deploys,
+  # logs nothing, and leaves the listener open. It reads as landed and is not.
+  #
+  # ORDER INSIDE THE SCRIPT IS LOAD-BEARING, AND IT IS SUPERUSER FIRST.
+  # `kafka_enable_authorization` is null by default, which in Redpanda means
+  # "follow enable_sasl". The instant SASL comes on, ACLs come on with it, and a
+  # principal that is not a superuser and holds no ACLs authenticates fine and
+  # then can do nothing — every client fails on AUTHORIZATION instead of
+  # AUTHENTICATION, which is indistinguishable in a client log and is a broker
+  # locked out of itself. Granting first closes that window; the reverse order
+  # opens it.
+  #
+  # `service_completed_successfully` on the principal one-shot and not
+  # `service_healthy` on the broker: flipping SASL on a cluster whose user
+  # creation silently failed is the invisible-failure class this pattern exists
+  # to remove.
+  #
+  # The readback is three assertions in this order, and the third is a POSITIVE
+  # CONTROL PAIR:
+  #   1. the principal is in `superusers`   (the grant landed)
+  #   2. `enable_sasl` reads true           (the flip landed)
+  #   3. an UNAUTHENTICATED rpk against the Kafka listener FAILS *and* an
+  #      authenticated one SUCCEEDS
+  # Without the second half of (3) a broker that is simply DOWN also refuses the
+  # anonymous client, and this service would report green on a dead broker.
+  ci-bus-sasl-enable:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-ci-bus-sasl-enable
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      CI_BUS_KAFKA_SASL_USERNAME: ${CI_BUS_KAFKA_SASL_USERNAME:?CI_BUS_KAFKA_SASL_USERNAME must be set - the CI bus flips its broker to SASL and grants its own principal (OMN-18691); it is resolved from the operator env file, never inlined here}
+      CI_BUS_KAFKA_SASL_PASSWORD: ${CI_BUS_KAFKA_SASL_PASSWORD:?CI_BUS_KAFKA_SASL_PASSWORD must be set - the CI bus flips its broker to SASL and grants its own principal (OMN-18691); it is resolved from the operator env file, never inlined here}
+    command:
+      - |
+        set -eu
+        ADMIN="-X admin.hosts=redpanda:9644"
+        BROKER="-X brokers=redpanda:9092"
+        AUTH="-X sasl.mechanism=SCRAM-SHA-256 -X user=$$CI_BUS_KAFKA_SASL_USERNAME -X pass=$$CI_BUS_KAFKA_SASL_PASSWORD"
+        /usr/bin/rpk cluster config set superusers "['$$CI_BUS_KAFKA_SASL_USERNAME']" $$ADMIN
+        /usr/bin/rpk cluster config set enable_sasl true $$ADMIN
+        /usr/bin/rpk cluster config get superusers $$ADMIN | grep -q "$$CI_BUS_KAFKA_SASL_USERNAME"
+        echo "OMN-18691: superuser grant confirmed"
+        /usr/bin/rpk cluster config get enable_sasl $$ADMIN | grep -qx true
+        echo "OMN-18691: enable_sasl confirmed true"
+        if /usr/bin/rpk topic list $$BROKER >/dev/null 2>&1; then
+          echo "OMN-18691 FAIL: an UNAUTHENTICATED client reached the Kafka listener" >&2
+          exit 1
+        fi
+        echo "OMN-18691: unauthenticated client refused"
+        /usr/bin/rpk topic list $$BROKER $$AUTH >/dev/null
+        echo "OMN-18691: authenticated client accepted - positive control"
+    depends_on:
+      ci-bus-scram-user:
+        condition: service_completed_successfully
+      ci-bus-topics:
+        condition: service_completed_successfully
+    networks:
+      - ci-bus-network
+    restart: "no"
+    logging: *ci_bus_logging
+    labels:
+      - "com.omninode.service=ci-bus-sasl-enable"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.lane=ci-bus"
+      - "com.omninode.ticket=OMN-18691"
+networks:
+  ci-bus-network:
+    # Spelled explicitly so the network is identifiable on a host that runs six
+    # compose projects side by side, and so it can never be confused with
+    # `omnibase-infra_default`.
+    name: omninode-ci-bus-network
+    driver: bridge
+volumes:
+  ci_bus_redpanda_data:
+    # Named for the same reason. This volume is the durability the whole design
+    # rests on: it is what makes a command published during a lane rebuild still
+    # be there afterwards. It belongs to this project, so no teardown of the lane
+    # project can reach it — not even one that removes that project's volumes,
+    # because a compose teardown is scoped to the project it names.
+    name: omninode-ci-bus-redpanda-data
