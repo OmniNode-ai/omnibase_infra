@@ -78,7 +78,7 @@ import os
 import re
 import sys
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -115,32 +115,69 @@ DEFAULT_BUILDER_CACHE_MAX_SIZE = "100GB"
 # `runtime-fc61f41242dcc01b`). It is a per-sha tag too, but a pattern that broad
 # would also match ordinary meaningful tags, and an unmatched tag simply means
 # KEEP -- the safe direction. Narrow it in, never out.
-_STAMP_SHA_TAG_RE = re.compile(r"^\d{8}T\d{6}Z?-[0-9a-f]{7,40}$")
-_SHA_STAMP_TAG_RE = re.compile(r"^[0-9a-f]{7,40}-\d{8}T\d{6}Z?$")
-_PREFIXED_SHA_TAG_RE = re.compile(r"^[A-Za-z0-9._-]+-sha-[0-9a-f]{6,40}$")
-_BARE_SHA40_TAG_RE = re.compile(r"^[0-9a-f]{40}$")
+# The DEFAULT shapes. They are defaults, not policy: the operative list is
+# `generation_tag_patterns` in the keep-list, so widening what counts as a build
+# stamp is a config review rather than a code change.
+DEFAULT_GENERATION_TAG_PATTERNS: tuple[str, ...] = (
+    r"^\d{8}T\d{6}Z?-[0-9a-f]{7,40}$",  # 20260918T111918Z-e49dea8f
+    r"^[0-9a-f]{7,40}-\d{8}T\d{6}Z?$",  # ffd61901-20260918T111918Z
+    r"^sha-[0-9a-f]{6,40}$",  # sha-ffd6190
+    r"^[A-Za-z0-9._-]+-sha-[0-9a-f]{6,40}$",  # dev-sha-ffd6190
+    r"^[0-9a-f]{40}$",  # bare 40-hex content tag
+)
 
 # How many newest generations of a per-sha family to retain, and the floor below
-# which nothing is reaped however superseded it is. The floor is in HOURS, not
-# days: the deploy agent rebuilds roughly hourly, so a day-scale floor keeps ~72
+# which nothing is reaped however superseded. The floor is in HOURS, not days:
+# the deploy agent rebuilds roughly hourly, so a day-scale floor keeps ~72
 # generations permanently ineligible and a keep-newest-N window never bites.
 DEFAULT_GENERATION_KEEP = 3
 DEFAULT_GENERATION_MIN_AGE_HOURS = 6
 
+# docker prints SI sizes ("3.66GB", "611MB", "24.73kB").
+_SIZE_RE = re.compile(r"^\s*([0-9.]+)\s*([a-zA-Z]*B)\s*$")
+_SIZE_UNITS = {
+    "B": 1,
+    "KB": 1000,
+    "MB": 1000**2,
+    "GB": 1000**3,
+    "TB": 1000**4,
+    "KIB": 1024,
+    "MIB": 1024**2,
+    "GIB": 1024**3,
+    "TIB": 1024**4,
+}
 
-def _is_build_stamped_tag(tag: str) -> bool:
+
+def _parse_size(value: str) -> int:
+    """Docker size string -> bytes. Unparseable -> 0, never an exception.
+
+    A wrong total is worse than a missing one only if it is silently wrong, so an
+    unreadable size contributes nothing rather than guessing.
+    """
+    m = _SIZE_RE.match(value or "")
+    if not m:
+        return 0
+    try:
+        return int(float(m.group(1)) * _SIZE_UNITS.get(m.group(2).upper(), 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_build_stamped_tag(tag: str, patterns: Sequence[str]) -> bool:
     """True if the tag is a per-build artifact rather than a meaningful pointer.
 
     Moving pointers (`dev`, `main`), release names and the keep tags all fail this
-    check and are therefore never reaped by the generation rule.
+    check and are therefore never reaped by the generation rule. An unparseable
+    pattern is skipped rather than raising: a broken config must not turn a GC
+    into a crash, and skipping lands on KEEP.
     """
-    return bool(
-        _STAMP_SHA_TAG_RE.match(tag)
-        or _SHA_STAMP_TAG_RE.match(tag)
-        or _SHA_TAG_RE.match(tag)
-        or _PREFIXED_SHA_TAG_RE.match(tag)
-        or _BARE_SHA40_TAG_RE.match(tag)
-    )
+    for pattern in patterns:
+        try:
+            if re.match(pattern, tag):
+                return True
+        except re.error:
+            continue
+    return False
 
 
 def _is_generation_bounded_repo(repo: str, patterns: list[str]) -> bool:
@@ -311,6 +348,9 @@ def build_plan(
     generation_min_age_hours: float = float(
         keep_list.get("generation_min_age_hours", DEFAULT_GENERATION_MIN_AGE_HOURS)
     )
+    generation_tag_patterns: Sequence[str] = (
+        keep_list.get("generation_tag_patterns") or DEFAULT_GENERATION_TAG_PATTERNS
+    )
 
     remove_image_ids: list[str] = []
     kept_reasons: dict[str, str] = {}
@@ -390,7 +430,7 @@ def build_plan(
             and tag
             and tag != "<none>"
             and _is_generation_bounded_repo(repo, generation_bounded_repos)
-            and _is_build_stamped_tag(tag)
+            and _is_build_stamped_tag(tag, generation_tag_patterns)
         ):
             if age * 24.0 < generation_min_age_hours:
                 kept_reasons[image_id] = (
@@ -486,11 +526,23 @@ def build_plan(
         image_id: refs_by_id.get(image_id, []) for image_id in remove_image_ids
     }
 
+    # OMN-16367: summed nominal size of the removal set, so a dry run prints a
+    # number a host-rollout consent row can cite. NOMINAL, not reclaim: shared
+    # base layers collapse, and a prior measured pass on this host recovered 17.6%
+    # of nominal. The caller must not present this as expected disk returned.
+    size_by_id: dict[str, int] = {}
+    for image in images:
+        iid = str(image.get("ID", ""))
+        if iid and iid not in size_by_id:
+            size_by_id[iid] = _parse_size(str(image.get("Size", "")))
+    remove_nominal_bytes = sum(size_by_id.get(i, 0) for i in remove_image_ids)
+
     return {
         "min_age_days": min_age_days,
         "builder_cache_max_size": builder_cache_max_size,
         "remove_image_ids": remove_image_ids,
         "remove_image_refs": remove_image_refs,
+        "remove_nominal_bytes": remove_nominal_bytes,
         "remove_container_ids": remove_container_ids,
         "kept_reasons": kept_reasons,
     }
