@@ -718,7 +718,10 @@ def test_the_declared_settle_budget_is_unchanged_by_this_ticket() -> None:
 
 def test_the_converge_wall_clock_leaves_room_for_the_settle_and_the_tail() -> None:
     """The bound is derived, and the derivation is the thing under test."""
-    from scripts.ci.lane_settle_budget import converge_wall_clock_seconds
+    from scripts.ci.lane_settle_budget import (
+        STEP_OVERHEAD_SECONDS,
+        converge_wall_clock_seconds,
+    )
 
     seconds = converge_wall_clock_seconds(
         lane="compose-dev",
@@ -726,7 +729,11 @@ def test_the_converge_wall_clock_leaves_room_for_the_settle_and_the_tail() -> No
         elapsed_seconds=0,
         reserved_tail_seconds=120,
     )
-    assert seconds == 45 * 60 - 900 - 120
+    # The job's own inter-step cost is reserved too (OMN-18436): without it a
+    # watch that runs to this bound leaves the probe less than the declared
+    # settle budget, and the affordability check then fails by that cost on a
+    # lane it has just proven healthy. Receipt 63cea2aa, short by 2s.
+    assert seconds == 45 * 60 - 900 - 120 - STEP_OVERHEAD_SECONDS
     # A job that has already spent its ceiling gets zero, never a negative
     # bound that would read as "wait forever".
     assert (

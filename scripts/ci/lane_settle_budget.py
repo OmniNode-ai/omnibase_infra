@@ -62,6 +62,7 @@ from scripts.ci.lab_pass_receipt import ModelSettleBudget
 
 __all__ = [
     "DEFAULT_DECLARATION_PATH",
+    "STEP_OVERHEAD_SECONDS",
     "converge_wall_clock_seconds",
     "ModelLaneSettleDeclaration",
     "SettleBudgetError",
@@ -81,6 +82,30 @@ DEFAULT_DECLARATION_PATH: Final[Path] = (
 )
 
 SCHEMA_VERSION: Final[int] = 1
+
+#: Seconds the convergence watch holds back for the emitting job's OWN cost
+#: between the two elapsed-time reads, on top of the settle budget and the tail.
+#:
+#: WHY THIS EXISTS (OMN-18436, the 2026-09-18 recurrence on merge sha
+#: ``63cea2aa``). The converge step and the probe step each measure their
+#: elapsed time from the same ``LAB_PASS_STARTED_AT`` epoch, and
+#: :func:`converge_wall_clock_seconds` used to hand the watch every second the
+#: settle budget and the tail did not already claim. So a watch that ran to its
+#: full bound left the probe an affordance of ``declared - d``, where ``d`` is
+#: the real cost of returning from the watch, changing step and starting a
+#: python process to re-derive the budget. ``sufficient`` is
+#: ``affordable >= declared``, so it was false for every ``d > 0`` -- a
+#: GUARANTEED shortfall on the full-length path rather than a flake. The emitted
+#: receipt recorded ``d = 2`` and FAILed a lane that had answered in 101s.
+#:
+#: 60s rather than the 2s measured: the cost is a cold ``uv run`` on a shared
+#: host, so an observation is a floor on it and never an estimate of it -- the
+#: same reasoning the declaration's own lower bound uses. It is paid out of
+#: ceiling slack that was already unallocated (2700 - 1500 - 900 - 120 = 180),
+#: so it takes nothing from the lane's own 25-minute grant;
+#: ``tests/ci/test_settle_affordance_omn18436.py`` asserts both halves against
+#: the parsed workflows rather than against this comment.
+STEP_OVERHEAD_SECONDS: Final[int] = 60
 
 #: ``start_period: 1800s``. Compose accepts a duration string; the receipt needs
 #: seconds. Only the units compose itself documents are accepted -- an
@@ -358,6 +383,13 @@ def converge_wall_clock_seconds(
     Derived from the declaration, never chosen: the settle budget is read from
     the same fail-closed reader the probe uses, so a missing declaration raises
     here exactly as it does there.
+
+    :data:`STEP_OVERHEAD_SECONDS` is held back as well (OMN-18436). Without it
+    this bound claims every second the settle budget and the tail do not, so a
+    watch that runs to the bound leaves the probe ``declared - d`` and the
+    affordability check fails for every non-zero cost of getting from one step
+    to the next. Reserving the job's own overhead is what makes "the watch used
+    all its time" and "the lane's budget was short" two different facts.
     """
     declaration = load_declaration(lane, path)
     return max(
@@ -365,7 +397,8 @@ def converge_wall_clock_seconds(
         job_ceiling_seconds
         - elapsed_seconds
         - declaration.settle_budget_seconds
-        - reserved_tail_seconds,
+        - reserved_tail_seconds
+        - STEP_OVERHEAD_SECONDS,
     )
 
 

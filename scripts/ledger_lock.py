@@ -1660,7 +1660,14 @@ GRACE_DEADLINE_UTC = datetime(2026, 8, 2, 0, 0, 0, tzinfo=UTC)
 # --- is retired rather than re-cut ----------------------------------------
 #
 # Operator ruling, 2026-09-18T18:32:57Z, verbatim "retire it", recorded at
-# docs/tracking/ROLLING_WORK_LEDGER.md:4469. The hand-maintained rolling
+# ROLLING_WORK_LEDGER.md:4469 in omni_home's tracking directory. That
+# directory is named here in prose rather than spelled as a path, because
+# tests/test_ledger_lock_path_parametrization.py greps this whole file for
+# the literal and a citation is not a hardcoded ledger location -- but a
+# grep cannot tell the two apart, and the check is right to be blunt about a
+# tool whose entire premise is that it is TOLD which ledger to protect.
+# OMN-18757 restored the green: the literal arrived in a comment with
+# OMN-18751 (43045ce9a) and left that test red on dev. The hand-maintained rolling
 # seven-day plan OMN-18554 pointed this gate at is retired. It was 43 days
 # stale when the ruling landed, and its staleness was load-bearing: this gate
 # reads it for the DENOMINATOR every rule-4 price is measured against, so
@@ -3282,7 +3289,13 @@ def validate_ruling_payload(payload: str, ledger: Path) -> str | None:
     if guard is None:
         return None
     existing = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
-    return guard.refusal_for_payload(payload, existing, ledger_display_name(ledger))
+    # Annotated rather than returned straight through: the guard is imported
+    # from a path at runtime, so mypy sees Any and a bare return silently
+    # widens this function's declared type at every call site.
+    refusal: str | None = guard.refusal_for_payload(
+        payload, existing, ledger_display_name(ledger)
+    )
+    return refusal
 
 
 # --- OMN-18274: friction recording is mechanical, not remembered ----------
@@ -3333,7 +3346,13 @@ def validate_friction_payload(payload: str, ledger: Path) -> str | None:
     if guard is None:
         return None
     existing = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
-    return guard.refusal_for_payload(payload, existing, ledger_display_name(ledger))
+    # Annotated rather than returned straight through: the guard is imported
+    # from a path at runtime, so mypy sees Any and a bare return silently
+    # widens this function's declared type at every call site.
+    refusal: str | None = guard.refusal_for_payload(
+        payload, existing, ledger_display_name(ledger)
+    )
+    return refusal
 
 
 # --- OMN-18433: the stranded-clone signal ---------------------------------
@@ -3495,6 +3514,117 @@ def signal_stranded_clone(ledger: Path, payload: str) -> int:
         return 0
 
 
+# --- OMN-18433 / OMN-18757: the verbatim replay path ---------------------
+#
+# WHAT IT IS FOR. A row that already existed on some copy of this ledger is
+# being restored, byte for byte, after being recovered from a tree that was
+# never committed. On 2026-09-16, replaying the 50 rows stranded on
+# `jonah/omn-16642-ledger-rows` landed 45 and left 5 refused by the OMN-18274
+# mandatory-friction guard. A historical row must not be rewritten to pass a
+# present-day guard -- a row edited to satisfy a later reader is no longer
+# evidence of anything -- so without this path the only choices were falsify
+# the row or lose it.
+#
+# WHAT IT IS NOT FOR. It is not a way to write a row a guard would refuse
+# today. Every refusal below is fail-closed, and the positive control for the
+# whole feature is that the same payload WITHOUT the flag is still refused.
+#
+# WHY THIS LIVES HERE AND THE DECIDING LOGIC DOES NOT. `replay_refusal` and
+# `replay_marker_row` are in the committed guard module, which is tracked and
+# therefore tested in CI; this file only wires them to argv. That split is
+# deliberate and it is the reason there is NO inline fallback for the waiver,
+# unlike `signal_stranded_clone` above. The two cases are opposites: there,
+# the danger is SILENCE, so a caller that cannot reach the module must still
+# fire; here, the danger is a WAIVER, so a caller that cannot reach the module
+# must refuse. A waiver granted by a caller that cannot read the rule it is
+# waiving is not a waiver, it is a bypass -- and an inline copy of the rule
+# would be a second implementation of it, free to drift towards permissive.
+#
+# WHY IT WAS REBUILT. OMN-18433 shipped these two flags on 2026-09-16 and used
+# them: five `| REPLAY |` marker rows stamped 2026-09-16T11:26:21Z are in the
+# live ledger, landed by omni_home#326. They existed only in the gitignored
+# omni_home copy of this script, so nothing carried them into a commit, and
+# the OMN-18554 port of that copy into this committed one (#3688, 80dc408ba)
+# carried the six guards and not the flags. Three tests in
+# `tests/test_ledger_stranded_clone.py` have been red ever since. The tests in
+# `tests/unit/scripts/test_ledger_lock_replay_omn18757.py` exist so that the
+# next port of this file cannot drop the flags silently a second time.
+
+
+def parse_replay_window(parser: argparse.ArgumentParser, raw: str) -> datetime:
+    """`--replay-before` as an aware UTC instant, or a usage error.
+
+    Deliberately strict about the form: this flag waives guards, so a value
+    the operator mistyped must stop the command rather than be coerced into
+    some nearby instant that silently widens the window.
+    """
+    try:
+        return datetime.strptime(raw.strip(), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        parser.error(
+            "--replay-before must be an ISO-8601 UTC instant of the exact form "
+            f"2026-09-16T10:41:37Z, not {raw!r}"
+        )
+        raise AssertionError("unreachable: parser.error exits")  # pragma: no cover
+
+
+def resolve_replay(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    payload: str | None,
+) -> tuple[str | None, str | None]:
+    """Decide whether this append is a sanctioned verbatim replay.
+
+    Returns ``(None, None)`` when no replay was requested, ``(marker, None)``
+    when one is sanctioned, and ``(None, reason)`` when one is refused.
+
+    Pairing and shape problems go through ``parser.error`` (exit 2) rather
+    than becoming refusals, because nothing about the payload or the ledger
+    was consulted to reach them -- they are the operator holding the tool
+    wrongly. A refusal (exit 65) is a judgement about the bytes.
+    """
+    if args.replay_before is None and args.replay_source is None:
+        return None, None
+    if args.replay_before is None:
+        parser.error(
+            "--replay-source requires --replay-before: naming a source does not by "
+            "itself declare anything to be a restore"
+        )
+    if args.replay_source is None or not args.replay_source.strip():
+        parser.error(
+            "--replay-before requires --replay-source: a restore carrying no named "
+            "provenance is indistinguishable from a bypass"
+        )
+    if payload is None:
+        parser.error(
+            "--replay-before applies to --append/--append-file only; there is no "
+            "payload to restore under -- COMMAND or --roll-section"
+        )
+    before = parse_replay_window(parser, args.replay_before)
+
+    if not _STRANDED_GUARD_PATH.is_file():
+        return None, (
+            "OMN-18433 replay REFUSED -- the committed deciding logic is not reachable "
+            f"at {_STRANDED_GUARD_PATH}, and this tool holds no inline copy of it on "
+            "purpose: a waiver granted by a caller that cannot read the rule it is "
+            "waiving is a bypass. Nothing was written. Restore the module, or replay "
+            "from a clone that has it"
+        )
+    guard = load_stranded_clone_guard()
+    if guard is None:
+        return None, (
+            "OMN-18433 replay REFUSED -- the committed deciding logic at "
+            f"{_STRANDED_GUARD_PATH} could not be imported, so no waiver can be "
+            "granted. Nothing was written"
+        )
+
+    now = resolve_now()
+    refusal = guard.replay_refusal(payload, before, now)
+    if refusal is not None:
+        return None, f"OMN-18433 replay REFUSED -- {refusal}. Nothing was written"
+    return guard.replay_marker_row(payload, now, args.replay_source.strip()), None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Acquire a per-ledger mutex before appending to or editing a shared ledger.",
@@ -3632,6 +3762,28 @@ def build_parser() -> argparse.ArgumentParser:
             "silently applies to more than the one row it is matched to). REASON is "
             "recorded verbatim in that row only, visible in the ledger -- this is not a "
             "silent bypass. Whitespace-only REASON is rejected."
+        ),
+    )
+    parser.add_argument(
+        "--replay-before",
+        metavar="ISO8601",
+        help=(
+            "restore a row RECOVERED from a tree that was never committed: waive the "
+            "append-time guards for this one payload, whose own leading UTC timestamp "
+            "must be strictly before ISO8601. The row is written byte for byte and a "
+            "REPLAY marker row recording its provenance lands immediately before it. "
+            "Requires --replay-source. Not a way to write a row a guard would refuse "
+            "today: a payload with no leading timestamp, one stamped at or after "
+            "ISO8601, and a future ISO8601 are each refused (exit 65, nothing written)"
+        ),
+    )
+    parser.add_argument(
+        "--replay-source",
+        metavar="NAME",
+        help=(
+            "where the recovered bytes came from, recorded verbatim in the REPLAY "
+            "marker row; required with --replay-before, because a restore carrying no "
+            "provenance is indistinguishable from a bypass"
         ),
     )
     return parser
@@ -3899,6 +4051,16 @@ def main(argv: list[str] | None = None) -> int:
             "--cost-unknown only applies to --append/--append-file, not -- COMMAND"
         )
 
+    # --- OMN-18433: is this a sanctioned verbatim replay? Resolved BEFORE the
+    # lint chain below, because a sanctioned replay is precisely the case in
+    # which that chain must not run: the chain judges a row being written now,
+    # and these bytes were written at their own timestamp on a copy of this
+    # ledger that was lost. A refusal here writes nothing at all.
+    replay_marker, replay_refusal_reason = resolve_replay(parser, args, payload)
+    if replay_refusal_reason is not None:
+        print(f"ledger_lock: {replay_refusal_reason}", file=sys.stderr)
+        return 65
+
     # --- OMN-18554: the pre-append lint chain, ported from the omni_home copy.
     # Order is load-bearing and is the order that copy used. The first three are
     # row-class-agnostic and are NOT window- or grace-scoped: a row that miscounts
@@ -3907,7 +4069,7 @@ def main(argv: list[str] | None = None) -> int:
     # cost-sentence gate (OMN-15649/OMN-18554) runs last because it is the only
     # one of the four that is scoped -- to claim rows, and to a declared window.
     payload_to_write: str | None = payload
-    if payload is not None:
+    if payload is not None and replay_marker is None:
         quant_reason = validate_quantitative_claims_payload(payload)
         if quant_reason is not None:
             print(
@@ -3947,13 +4109,25 @@ def main(argv: list[str] | None = None) -> int:
             if args.roll_section:
                 return run_roll_section(args)
             if payload is not None:
-                shape_rc = enforce_row_shape(args, payload)
+                # A replay writes TWO rows, so the shape and cap checks judge
+                # both: the marker is a row like any other and must not be
+                # able to overflow a capped section or extend the row above
+                # it just because it rides in beside a restored row.
+                projected = (
+                    payload if replay_marker is None else f"{replay_marker}\n{payload}"
+                )
+                shape_rc = enforce_row_shape(args, projected)
                 if shape_rc is not None:
                     return shape_rc
-                cap_rc = enforce_section_caps(args, payload)
+                cap_rc = enforce_section_caps(args, projected)
                 if cap_rc is not None:
                     return cap_rc
-                claim_shaped = is_claim_row(payload)
+                # A replayed row never mints a claim token. Its claim, if it
+                # made one, was made at its own timestamp and whatever it
+                # authorized is long settled; a fresh token minted now could
+                # be cited to authorize a mutation TODAY, which is exactly the
+                # bypass this path must not open.
+                claim_shaped = is_claim_row(payload) and replay_marker is None
                 # Dedup check runs inside the held lock, against whatever is
                 # actually on disk right now -- race-free against other
                 # writers, and against our own prior attempt if this is a
@@ -3978,14 +4152,26 @@ def main(argv: list[str] | None = None) -> int:
                 # OMN-18258 / OMN-18274: both are STATE-dependent (they read
                 # rows already in this ledger), so they run here inside the held
                 # lock rather than in the pre-lock chain above.
-                ruling_reason = validate_ruling_payload(payload, args.ledger)
-                if ruling_reason is not None:
-                    print(f"ledger_lock: {ruling_reason}", file=sys.stderr)
-                    return 65
-                friction_reason = validate_friction_payload(payload, args.ledger)
-                if friction_reason is not None:
-                    print(f"ledger_lock: {friction_reason}", file=sys.stderr)
-                    return 65
+                #
+                # Both are skipped for a sanctioned replay, for the same
+                # reason the pre-lock chain is: the OMN-18274 friction guard
+                # is the gate that refused five of the recovered rows in the
+                # first place, and a restore that has to satisfy it is a
+                # rewrite, not a restore.
+                if replay_marker is None:
+                    ruling_reason = validate_ruling_payload(payload, args.ledger)
+                    if ruling_reason is not None:
+                        print(f"ledger_lock: {ruling_reason}", file=sys.stderr)
+                        return 65
+                    friction_reason = validate_friction_payload(payload, args.ledger)
+                    if friction_reason is not None:
+                        print(f"ledger_lock: {friction_reason}", file=sys.stderr)
+                        return 65
+                else:
+                    # The marker lands FIRST, so the offset computed below is
+                    # the restored row's own, and a reader scanning upwards
+                    # from the row finds its provenance on the line above.
+                    append_text(args.ledger, replay_marker)
                 offset = _ledger_size(args.ledger)
                 line_no = len(_offsets_and_lines(args.ledger)) + 1
                 appended_at = utc_now()
