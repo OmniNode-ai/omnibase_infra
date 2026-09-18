@@ -94,6 +94,18 @@ jobs:
           permission-contents: write
           permission-actions: read
           permission-pull-requests: write
+          # READ-ONLY, and the green-CI premise cannot work without it. That
+          # premise asks which contexts are REQUIRED on a repo's default branch,
+          # and that is branch-protection metadata: the only endpoint carrying it
+          # is /branches/{branch}/protection/required_status_checks, which needs
+          # administration:read. There is no lower-privilege equivalent -- check
+          # runs are readable without it, but WHICH of them gate a merge is not.
+          #
+          # Without it the premise fails closed on every repo with
+          # ci_protection_unreadable, which is the correct refusal and also a
+          # train that can never cut. Found by the first real cut attempt, run
+          # 35286327829, not by review.
+          permission-administration: read
 
       - name: Clone every declared repo
         env:
