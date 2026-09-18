@@ -1,36 +1,49 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 """Tests for the rule-4 cost-sentence window resolution in scripts/ledger_lock.py
-(OMN-18554, closing the inert-gate defect left by OMN-15649's window source).
+(OMN-18554, closing the inert-gate defect left by OMN-15649's window source;
+re-sourced onto the goal file by OMN-18751).
 
-Context (fact, measured 2026-09-17): ``DEFAULT_PLAN_PATH`` pointed at
-``docs/plans/ROLLING_SEVEN_DAY_PLAN.md`` in this repo. That file was deleted
-outright by omni_home#341 (``17bbbac6``) when the plans corpus migrated to
-knowledge-base-internal, and no successor was created at that path. So
-``read_declared_window()`` returned ``None`` on every invocation, and
+Context (fact, measured 2026-09-17): ``DEFAULT_PLAN_PATH`` pointed at the
+rolling seven-day plan under ``docs/plans/`` in this repo. That file was
+deleted outright by omni_home#341 (``17bbbac6``) when the plans corpus
+migrated to knowledge-base-internal, and no successor was created at that
+path. So ``read_declared_window()`` returned ``None`` on every invocation, and
 ``resolve_enforcement_window()`` treated "no window could be resolved" as
 identical to "we are outside an open window" -- it printed an INERT warning
 and returned False, and every CLAIM row on the fleet's primary coordination
 surface landed with zero rule-4 enforcement. 143 of the 146 CLAIM rows in the
 24h before the ticket was filed carry no cost sentence at all.
 
-These tests pin four separable behaviours:
+Second context (OMN-18751, operator ruling 2026-09-18, verbatim "retire it").
+OMN-18554 re-pointed the gate at the same hand-maintained plan in the
+knowledge-base-internal clone, where it promptly went 43 days stale and put a
+staleness banner on every append the fleet wrote. That plan is now RETIRED
+rather than re-cut, and the freshness source is ``beta/GOAL.md``'s
+``state_as_of:`` stamp, which the morning ground-state workflow rewrites. The
+window is ``(state_as_of, state_as_of + FRESHNESS_HORIZON_DAYS)``.
 
-1. The plan is resolved from the knowledge-base-internal clone, fail-fast on
-   an unset ``KNOWLEDGE_BASE_INTERNAL_PATH`` (rule 8: no silent default, and
-   in particular no omni_home fallback -- the omni_home path is the one that
-   just evaporated).
-2. A window whose end date is in the PAST is a loud, still-enforcing state,
-   not an inert one. The rule-4 requirement is that a claim row carries its
-   price; the declared window supplies the denominator that price is read
-   against, and a lapsed denominator is a reason to shout, never a reason to
-   stop asking for the price.
-3. A plan that cannot be read at all refuses CLAIM rows with a named cause,
-   instead of accepting them silently. The explicit ``LEDGER_LOCK_ALLOW_INERT``
-   override is the only way to land a claim row with the gate unresolved, and
-   taking it is visible on stderr.
+These tests pin five separable behaviours:
+
+1. The freshness source is ``beta/GOAL.md`` in the knowledge-base-internal
+   clone, fail-fast on an unset ``KNOWLEDGE_BASE_INTERNAL_PATH`` (rule 8: no
+   silent default, and in particular no omni_home fallback -- the omni_home
+   path is the one that evaporated), and the retired plan is named nowhere in
+   the script.
+2. A goal file re-measured longer ago than the horizon is a loud,
+   still-enforcing state, not an inert one, and the banner asks for a
+   re-measurement rather than a re-cut of a document that no longer exists.
+   The rule-4 requirement is that a claim row carries its price; the goal file
+   supplies the denominator that price is read against, and a stale
+   denominator is a reason to shout, never a reason to stop asking.
+3. A goal file that cannot be read at all refuses CLAIM rows with a named
+   cause, instead of accepting them silently. The explicit
+   ``LEDGER_LOCK_ALLOW_INERT`` override is the only way to land a claim row
+   with the gate unresolved, and taking it is visible on stderr.
 4. "Unresolvable" and "outside an open window" are distinguishable outcomes
    (OMN-18554 AC4), which is exactly what the pre-fix code conflated.
+5. The horizon is seven days, pinned at its own boundary rather than only
+   well inside and well outside it.
 
 Non-claim rows (TERMINAL, NOTE, RULING, PROGRESS) are never touched by any of
 this -- they were not touched before and a gate that blocked them would take
@@ -69,7 +82,7 @@ _spec.loader.exec_module(ll)
 
 
 # --------------------------------------------------------------------------
-# Fixtures: a ledger, and plan files in each of the four window states
+# Fixtures: a ledger, and goal files in each of the four window states
 # --------------------------------------------------------------------------
 
 
@@ -114,43 +127,42 @@ def ledger(tmp_path: Path) -> Path:
     return path
 
 
-def _plan(tmp_path: Path, start: date, end: date, name: str) -> Path:
+def _goal(tmp_path: Path, state_as_of: date, name: str) -> Path:
+    """A goal file in the real shape: ``state_as_of:`` on its own first line,
+    with the trailing parenthetical the live file carries, so the parser is
+    tested against the format it will actually meet rather than a bare date."""
     path = tmp_path / name
     path.write_text(
-        f"# Rolling Seven-Day Plan\n\n**Window:** {start.isoformat()} → {end.isoformat()}\n",
+        f"state_as_of: {state_as_of.isoformat()} (fixture, written by the test suite)\n"
+        "L1 | a row | R2-UNMET | ticket:OMN-18554 | fixture row\n",
         encoding="utf-8",
     )
     return path
 
 
 @pytest.fixture
-def open_plan(tmp_path: Path) -> Path:
+def open_goal(tmp_path: Path) -> Path:
+    """Re-measured two days ago: inside the seven-day freshness horizon."""
     today = datetime.now(UTC).date()
-    return _plan(
-        tmp_path, today - timedelta(days=2), today + timedelta(days=4), "open-plan.md"
-    )
+    return _goal(tmp_path, today - timedelta(days=2), "open-goal.md")
 
 
 @pytest.fixture
-def stale_plan(tmp_path: Path) -> Path:
+def stale_goal(tmp_path: Path) -> Path:
+    """Re-measured 48 days ago -- the real condition this replaces, where the
+    retired rolling plan's window had lapsed 43 days and every append said so."""
     today = datetime.now(UTC).date()
-    return _plan(
-        tmp_path,
-        today - timedelta(days=48),
-        today - timedelta(days=42),
-        "stale-plan.md",
-    )
+    return _goal(tmp_path, today - timedelta(days=48), "stale-goal.md")
 
 
 @pytest.fixture
-def pending_plan(tmp_path: Path) -> Path:
+def pending_goal(tmp_path: Path) -> Path:
+    """A stamp dated in the FUTURE. The file describes a state that has not
+    happened, so it is not yet in force and the row lands unenforced -- the
+    state that keeps "not current" observably different from "unresolvable"
+    (OMN-18554 AC4)."""
     today = datetime.now(UTC).date()
-    return _plan(
-        tmp_path,
-        today + timedelta(days=10),
-        today + timedelta(days=16),
-        "pending-plan.md",
-    )
+    return _goal(tmp_path, today + timedelta(days=10), "pending-goal.md")
 
 
 def _append(ledger: Path, line: str) -> int:
@@ -158,29 +170,52 @@ def _append(ledger: Path, line: str) -> int:
 
 
 # --------------------------------------------------------------------------
-# 1. Plan source: knowledge-base-internal, fail-fast, no omni_home fallback
+# 1. Window source: beta/GOAL.md in knowledge-base-internal, fail-fast
 # --------------------------------------------------------------------------
 
 
-def test_plan_path_resolves_from_the_knowledge_base_internal_clone(
+def test_window_source_resolves_to_the_goal_file_in_the_clone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """RED before the fix: DEFAULT_PLAN_PATH was omni_home/docs/plans/...,
-    a path deleted by the OMN-16978 migration."""
-    monkeypatch.delenv(ll.PLAN_PATH_ENV, raising=False)
+    """OMN-18751 AC1. RED before this change: the resolver returned
+    ``beta/plans/ROLLING_SEVEN_DAY_PLAN.md``, a hand-maintained document that
+    was 43 days stale when the operator retired it."""
+    monkeypatch.delenv(ll.GOAL_PATH_ENV, raising=False)
     monkeypatch.setenv(ll.KB_INTERNAL_ROOT_ENV, str(tmp_path))
-    assert (
-        ll.plan_path_for_window()
-        == tmp_path / "beta" / "plans" / "ROLLING_SEVEN_DAY_PLAN.md"
+    assert ll.goal_path_for_window() == tmp_path / "beta" / "GOAL.md"
+
+
+def test_the_retired_rolling_plan_is_named_nowhere_in_the_script(
+    tmp_path: Path,
+) -> None:
+    """OMN-18751 AC1, second half. A dormant mention is how a gate gets
+    re-pointed at an unmaintained document the next time someone reaches for a
+    default, which is the OMN-18554 defect exactly.
+
+    The positive control is the point of the second half: an empty grep and a
+    broken grep are the same two characters of output (CLAUDE.md rule 16), so
+    the same search is run against a fixture that DOES carry the name.
+    """
+    retired = "ROLLING_SEVEN_DAY_PLAN"
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert retired not in source, (
+        f"{SCRIPT} still names the retired rolling seven-day plan. It was retired by "
+        "the operator on 2026-09-18 (OMN-18751); the window source is beta/GOAL.md."
+    )
+    control = tmp_path / "control.md"
+    control.write_text(f"beta/plans/{retired}.md\n", encoding="utf-8")
+    assert retired in control.read_text(encoding="utf-8"), (
+        "positive control failed: the search itself is broken, so the assertion "
+        "above proved nothing"
     )
 
 
-def test_explicit_plan_path_override_still_wins(
+def test_explicit_goal_path_override_still_wins(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(ll.KB_INTERNAL_ROOT_ENV, str(tmp_path))
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(tmp_path / "elsewhere.md"))
-    assert ll.plan_path_for_window() == tmp_path / "elsewhere.md"
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(tmp_path / "elsewhere.md"))
+    assert ll.goal_path_for_window() == tmp_path / "elsewhere.md"
 
 
 def test_unset_clone_root_fails_fast_and_never_falls_back_to_omni_home(
@@ -189,10 +224,10 @@ def test_unset_clone_root_fails_fast_and_never_falls_back_to_omni_home(
     """Rule 8: an unset required env var raises, naming itself. The failure
     mode this replaces is a silent default that resolves to a path nobody
     maintains -- which is how the gate went inert in the first place."""
-    monkeypatch.delenv(ll.PLAN_PATH_ENV, raising=False)
+    monkeypatch.delenv(ll.GOAL_PATH_ENV, raising=False)
     monkeypatch.delenv(ll.KB_INTERNAL_ROOT_ENV, raising=False)
-    with pytest.raises(ll.PlanSourceUnresolvedError) as excinfo:
-        ll.plan_path_for_window()
+    with pytest.raises(ll.GoalSourceUnresolvedError) as excinfo:
+        ll.goal_path_for_window()
     message = str(excinfo.value)
     assert ll.KB_INTERNAL_ROOT_ENV in message
     assert "omni_home" not in message.lower().replace("omni_home/docs", ""), (
@@ -200,7 +235,7 @@ def test_unset_clone_root_fails_fast_and_never_falls_back_to_omni_home(
     )
 
 
-def test_no_omni_home_default_plan_path_constant_survives() -> None:
+def test_no_omni_home_default_path_constant_survives() -> None:
     """The constant that pointed at the deleted file is gone, not merely
     unreferenced -- a dormant default is what silently re-points the gate at a
     path nobody maintains the next time someone reaches for one."""
@@ -215,20 +250,20 @@ def test_no_omni_home_default_plan_path_constant_survives() -> None:
 
 
 def test_window_states_are_four_way_not_boolean(
-    open_plan: Path,
-    stale_plan: Path,
-    pending_plan: Path,
+    open_goal: Path,
+    stale_goal: Path,
+    pending_goal: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = datetime.now(UTC)
     for plan, expected in (
-        (open_plan, ll.WINDOW_OPEN),
-        (stale_plan, ll.WINDOW_STALE),
-        (pending_plan, ll.WINDOW_PENDING),
+        (open_goal, ll.WINDOW_OPEN),
+        (stale_goal, ll.WINDOW_STALE),
+        (pending_goal, ll.WINDOW_PENDING),
         (tmp_path / "does-not-exist.md", ll.WINDOW_UNRESOLVED),
     ):
-        monkeypatch.setenv(ll.PLAN_PATH_ENV, str(plan))
+        monkeypatch.setenv(ll.GOAL_PATH_ENV, str(plan))
         assert ll.resolve_window_state(now).state == expected, plan
 
 
@@ -236,9 +271,9 @@ def test_window_states_are_four_way_not_boolean(
     ("body", "expected_fragment"),
     [
         (None, "file missing"),
-        ("# Rolling Seven-Day Plan\n\nno front matter here\n", "no '**Window:**' line"),
-        ("**Window:** 2026-13-45 → 2026-13-46\n", "malformed date"),
-        ("**Window:** 2026-02-30 → 2026-03-04\n", "malformed date"),
+        ("# Goal\n\nno front matter here\n", "no 'state_as_of:' line"),
+        ("state_as_of: 2026-13-45\n", "malformed date"),
+        ("state_as_of: 2026-02-30\n", "malformed date"),
     ],
 )
 def test_unresolved_window_reports_a_distinguishing_cause(
@@ -252,7 +287,7 @@ def test_unresolved_window_reports_a_distinguishing_cause(
     plan = tmp_path / "plan.md"
     if body is not None:
         plan.write_text(body, encoding="utf-8")
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(plan))
     resolution = ll.resolve_window_state(datetime.now(UTC))
     assert resolution.state == ll.WINDOW_UNRESOLVED
     assert resolution.cause is not None
@@ -262,7 +297,7 @@ def test_unresolved_window_reports_a_distinguishing_cause(
 def test_unset_clone_root_is_a_no_registry_window_not_a_traceback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv(ll.PLAN_PATH_ENV, raising=False)
+    monkeypatch.delenv(ll.GOAL_PATH_ENV, raising=False)
     monkeypatch.delenv(ll.KB_INTERNAL_ROOT_ENV, raising=False)
     resolution = ll.resolve_window_state(datetime.now(UTC))
     assert resolution.state == ll.WINDOW_NO_REGISTRY
@@ -280,7 +315,7 @@ def test_an_environment_with_no_registry_lands_claim_rows_and_says_so(
     the first push of this port failed six claim-token tests for exactly this
     reason, on a runner, where a developer machine with the variable exported saw
     nothing wrong."""
-    monkeypatch.delenv(ll.PLAN_PATH_ENV, raising=False)
+    monkeypatch.delenv(ll.GOAL_PATH_ENV, raising=False)
     monkeypatch.delenv(ll.KB_INTERNAL_ROOT_ENV, raising=False)
     monkeypatch.delenv(ll.ALLOW_INERT_ENV, raising=False)
     assert ll.main([str(ledger), "--append", claim_row(priced=False)]) == 0
@@ -289,17 +324,17 @@ def test_an_environment_with_no_registry_lands_claim_rows_and_says_so(
     assert ll.KB_INTERNAL_ROOT_ENV in err, "the announcement must name what is missing"
 
 
-def test_a_pointed_plan_that_does_not_resolve_still_refuses_without_a_registry(
+def test_a_pointed_goal_file_that_does_not_resolve_still_refuses_without_a_registry(
     ledger: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The split that keeps the no-registry state from becoming a loophole:
-    pointing LEDGER_LOCK_PLAN_PATH at a plan that does not resolve is a
+    pointing LEDGER_LOCK_GOAL_PATH at a goal file that does not resolve is a
     MISCONFIGURED lane machine and still refuses, registry or no registry."""
     monkeypatch.delenv(ll.KB_INTERNAL_ROOT_ENV, raising=False)
     monkeypatch.delenv(ll.ALLOW_INERT_ENV, raising=False)
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(tmp_path / "no-such-plan.md"))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(tmp_path / "no-such-goal.md"))
     assert ll.main([str(ledger), "--append", claim_row(priced=False)]) == 65
 
 
@@ -308,15 +343,18 @@ def test_a_pointed_plan_that_does_not_resolve_still_refuses_without_a_registry(
 # --------------------------------------------------------------------------
 
 
-def test_stale_window_refuses_an_unpriced_claim_row_and_names_the_window(
+def test_stale_goal_refuses_an_unpriced_claim_row_and_names_its_age(
     ledger: Path,
-    stale_plan: Path,
+    stale_goal: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """RED before the fix: a lapsed window returned False from
-    resolve_enforcement_window and the row landed unpriced and unremarked."""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(stale_plan))
+    """RED before OMN-18554: a lapsed window returned False from
+    resolve_enforcement_window and the row landed unpriced and unremarked.
+    OMN-18751 AC2: the banner now names the goal file's own staleness, in
+    days, so the remedy it asks for is a re-measurement and not a re-cut of a
+    document that no longer exists."""
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(stale_goal))
     before = ledger.read_text(encoding="utf-8")
     rc = _append(ledger, claim_row(priced=False))
     err = capsys.readouterr().err
@@ -324,39 +362,89 @@ def test_stale_window_refuses_an_unpriced_claim_row_and_names_the_window(
     assert ledger.read_text(encoding="utf-8") == before, (
         "a refused claim row must not land"
     )
-    assert "STALE WINDOW" in err
-    start, end = ll.read_declared_window(stale_plan)  # type: ignore[misc]
-    assert start.isoformat() in err and end.isoformat() in err
+    assert "STALE GOAL" in err
+    start, _end = ll.read_declared_window(stale_goal)  # type: ignore[misc]
+    assert start.isoformat() in err, "the banner must name the stamp it read"
+    assert "48 day(s)" in err, (
+        "the banner must name the goal file's age in days, so a reader can tell "
+        "a two-day lapse from a six-week one"
+    )
 
 
-def test_stale_window_lands_a_priced_claim_row(
+def test_a_fresh_goal_enforces_silently(
     ledger: Path,
-    stale_plan: Path,
+    open_goal: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """OMN-18751 AC2, the other half. A freshness banner that fires while the
+    goal file IS fresh is noise on every append, which is how a real signal
+    stops being read."""
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(open_goal))
+    assert _append(ledger, claim_row(priced=True)) == 0
+    err = capsys.readouterr().err
+    # Scoped to this gate's own vocabulary rather than to an empty stderr. Other
+    # guards in this script announce their own absence on a checkout that has no
+    # docs/ tree -- a CI runner, for one -- and those announcements are theirs to
+    # make. Asserting an empty stream here would fail on their output and say
+    # nothing about freshness, which is the only thing under test.
+    for fragment in ("STALE GOAL", "state_as_of", "freshness", "horizon"):
+        assert fragment not in err, (
+            f"a fresh goal file must produce no freshness chatter; stderr named "
+            f"{fragment!r}: {err!r}"
+        )
+
+
+@pytest.mark.parametrize(
+    ("age_days", "expected"),
+    [
+        (0, "open"),
+        (7, "open"),
+        (8, "stale"),
+    ],
+)
+def test_the_freshness_horizon_is_seven_days_inclusive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, age_days: int, expected: str
+) -> None:
+    """OMN-18751 AC2: the boundary itself, pinned. Seven days old is still
+    fresh; the eighth day is stale. A horizon nobody tested at its edge is a
+    horizon that drifts by one on the next refactor."""
+    today = datetime.now(UTC).date()
+    goal = _goal(tmp_path, today - timedelta(days=age_days), f"age-{age_days}.md")
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(goal))
+    state = ll.resolve_window_state(datetime.now(UTC)).state
+    assert state == (ll.WINDOW_OPEN if expected == "open" else ll.WINDOW_STALE)
+    assert ll.FRESHNESS_HORIZON_DAYS == 7
+
+
+def test_stale_goal_lands_a_priced_claim_row(
+    ledger: Path,
+    stale_goal: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Enforcement, not blockade: the priced row is exactly what the gate
-    wants, and a stale window must not refuse it."""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(stale_plan))
+    wants, and a stale goal file must not refuse it."""
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(stale_goal))
     rc = _append(ledger, claim_row(priced=True))
     assert rc == 0
     assert "] CLAIM OMN-18554" in ledger.read_text(encoding="utf-8")
-    assert "STALE WINDOW" in capsys.readouterr().err, (
-        "a lapsed window is announced even on success"
+    assert "STALE GOAL" in capsys.readouterr().err, (
+        "a stale goal file is announced even on success"
     )
 
 
 def test_open_window_enforces_exactly_as_before(
-    ledger: Path, open_plan: Path, monkeypatch: pytest.MonkeyPatch
+    ledger: Path, open_goal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(open_plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(open_goal))
     assert _append(ledger, claim_row(priced=False)) == 65
     assert _append(ledger, claim_row(priced=True)) == 0
 
 
 def test_a_non_claim_payload_gets_no_window_announcement(
     ledger: Path,
-    stale_plan: Path,
+    stale_goal: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -365,17 +453,17 @@ def test_a_non_claim_payload_gets_no_window_announcement(
     that was never going to inspect the row, and noise on every write is how a
     real signal stops being read -- the rolling plan has been un-re-cut for
     weeks, so this fires on the whole fleet's writes otherwise."""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(stale_plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(stale_goal))
     assert _append(ledger, terminal_row()) == 0
-    assert "STALE WINDOW" not in capsys.readouterr().err
+    assert "STALE GOAL" not in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------
-# 4. An unresolvable plan refuses; AC4 distinguishability
+# 4. An unresolvable goal file refuses; AC4 distinguishability
 # --------------------------------------------------------------------------
 
 
-def test_unresolvable_plan_refuses_an_unpriced_claim_row_with_a_named_cause(
+def test_unresolvable_goal_refuses_an_unpriced_claim_row_with_a_named_cause(
     ledger: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -383,8 +471,8 @@ def test_unresolvable_plan_refuses_an_unpriced_claim_row_with_a_named_cause(
 ) -> None:
     """OMN-18554 AC1 -- the headline defect. Before the fix this exited 0 and
     wrote the row."""
-    missing = tmp_path / "no-such-plan.md"
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(missing))
+    missing = tmp_path / "no-such-goal.md"
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(missing))
     monkeypatch.delenv(ll.ALLOW_INERT_ENV, raising=False)
     before = ledger.read_text(encoding="utf-8")
     rc = _append(ledger, claim_row(priced=False))
@@ -396,25 +484,25 @@ def test_unresolvable_plan_refuses_an_unpriced_claim_row_with_a_named_cause(
     assert "file missing" in err
 
 
-def test_unresolvable_plan_refuses_even_a_priced_claim_row(
+def test_unresolvable_goal_refuses_even_a_priced_claim_row(
     ledger: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The refusal is about the gate being unable to run, not about the row.
     A gate that cannot read its own input has not passed; it has not run
     (CLAUDE.md rule 16). Accepting the well-formed subset would make the
     refusal a style check."""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(tmp_path / "no-such-plan.md"))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(tmp_path / "no-such-goal.md"))
     monkeypatch.delenv(ll.ALLOW_INERT_ENV, raising=False)
     assert _append(ledger, claim_row(priced=True)) == 65
 
 
-def test_unresolvable_plan_never_blocks_a_non_claim_row(
+def test_unresolvable_goal_never_blocks_a_non_claim_row(
     ledger: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """TERMINAL / NOTE / RULING rows were never in this gate's scope and stay
     out of it -- the coordination surface must keep working while the window
     source is being repaired."""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(tmp_path / "no-such-plan.md"))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(tmp_path / "no-such-goal.md"))
     monkeypatch.delenv(ll.ALLOW_INERT_ENV, raising=False)
     assert _append(ledger, terminal_row()) == 0
     assert "| TERMINAL |" in ledger.read_text(encoding="utf-8")
@@ -426,7 +514,7 @@ def test_allow_inert_override_lands_the_row_and_says_so(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(tmp_path / "no-such-plan.md"))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(tmp_path / "no-such-goal.md"))
     monkeypatch.setenv(ll.ALLOW_INERT_ENV, "1")
     rc = _append(ledger, claim_row(priced=False))
     err = capsys.readouterr().err
@@ -436,20 +524,20 @@ def test_allow_inert_override_lands_the_row_and_says_so(
 
 
 def test_pending_window_lands_an_unpriced_claim_row(
-    ledger: Path, pending_plan: Path, monkeypatch: pytest.MonkeyPatch
+    ledger: Path, pending_goal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """OMN-18554 AC4: a window that RESOLVES but is not current still lands
     the row unenforced, which is what makes it distinguishable from an
     unresolvable one. (The lapsed half of "not current" enforces instead --
     see test_stale_window_refuses_...; the two are deliberately different and
     the divergence from AC4's parenthetical is recorded on the ticket.)"""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(pending_plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(pending_goal))
     assert _append(ledger, claim_row(priced=False)) == 0
     assert "] CLAIM OMN-18554" in ledger.read_text(encoding="utf-8")
 
 
 def test_unresolvable_and_out_of_window_are_not_the_same_outcome(
-    ledger: Path, pending_plan: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ledger: Path, pending_goal: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """AC4's first clause, stated as one assertion: the two states the pre-fix
     code collapsed into a single `return False` now produce different rcs for
@@ -457,10 +545,10 @@ def test_unresolvable_and_out_of_window_are_not_the_same_outcome(
     monkeypatch.delenv(ll.ALLOW_INERT_ENV, raising=False)
     row = claim_row(priced=False)
 
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(pending_plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(pending_goal))
     out_of_window_rc = _append(ledger, row)
 
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(tmp_path / "no-such-plan.md"))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(tmp_path / "no-such-goal.md"))
     unresolvable_rc = _append(ledger, row + " ")
 
     assert out_of_window_rc == 0
@@ -482,7 +570,7 @@ def test_command_verb_reverts_an_unpriced_claim_row_when_the_window_is_unresolva
 ) -> None:
     """There is no editor bypass: the same row refused by --append is refused
     and reverted here."""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(tmp_path / "no-such-plan.md"))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(tmp_path / "no-such-goal.md"))
     monkeypatch.delenv(ll.ALLOW_INERT_ENV, raising=False)
     before = ledger.read_text(encoding="utf-8")
     rc = _write_via_command(ledger, claim_row(priced=False))
@@ -491,9 +579,9 @@ def test_command_verb_reverts_an_unpriced_claim_row_when_the_window_is_unresolva
 
 
 def test_command_verb_reverts_an_unpriced_claim_row_when_the_window_is_stale(
-    ledger: Path, stale_plan: Path, monkeypatch: pytest.MonkeyPatch
+    ledger: Path, stale_goal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(stale_plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(stale_goal))
     before = ledger.read_text(encoding="utf-8")
     rc = _write_via_command(ledger, claim_row(priced=False))
     assert rc == 65
@@ -626,10 +714,10 @@ def _pipe_row(moment: datetime, *, priced: bool, lane: str = "grace-lane") -> st
 
 def test_before_the_cutover_an_unpriced_pipe_lead_row_lands_and_is_reported(
     capsys: pytest.CaptureFixture[str],
-    stale_plan: Path,
+    stale_goal: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(stale_plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(stale_goal))
     before_cutover = ll.RULE4_PIPE_LEAD_CUTOVER_UTC - timedelta(days=1)
     row = _pipe_row(before_cutover, priced=False)
     written, rejection = ll.validate_claim_payload(
@@ -646,11 +734,11 @@ def test_before_the_cutover_an_unpriced_pipe_lead_row_lands_and_is_reported(
 
 
 def test_at_the_cutover_the_same_row_is_refused(
-    stale_plan: Path, monkeypatch: pytest.MonkeyPatch
+    stale_goal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The falsifier for the whole dated-grace design: same row, same plan, one
     second past the cutover, opposite outcome."""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(stale_plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(stale_goal))
     at_cutover = ll.RULE4_PIPE_LEAD_CUTOVER_UTC + timedelta(seconds=1)
     _written, rejection = ll.validate_claim_payload(
         _pipe_row(at_cutover, priced=False), cost_unknown=[], now=at_cutover
@@ -660,12 +748,12 @@ def test_at_the_cutover_the_same_row_is_refused(
 
 
 def test_a_priced_pipe_lead_row_is_accepted_on_both_sides_of_the_cutover(
-    stale_plan: Path, monkeypatch: pytest.MonkeyPatch
+    stale_goal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The cutover changes what happens to an UNPRICED row. A priced one was
     always fine and stays fine -- otherwise the date would read as a deadline for
     the row SHAPE rather than for the price."""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(stale_plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(stale_goal))
     for moment in (
         ll.RULE4_PIPE_LEAD_CUTOVER_UTC - timedelta(days=1),
         ll.RULE4_PIPE_LEAD_CUTOVER_UTC + timedelta(days=1),
@@ -678,13 +766,13 @@ def test_a_priced_pipe_lead_row_is_accepted_on_both_sides_of_the_cutover(
 
 def test_an_unpriced_pipe_lead_row_lands_through_main_today(
     ledger: Path,
-    stale_plan: Path,
+    stale_goal: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """End-to-end on the REAL clock, which is what every lane hits today: the
     dominant shape is now inspected, reported, and still lands."""
-    monkeypatch.setenv(ll.PLAN_PATH_ENV, str(stale_plan))
+    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(stale_goal))
     assert datetime.now(UTC) < ll.RULE4_PIPE_LEAD_CUTOVER_UTC, (
         "this test is only meaningful before the cutover; after it, the companion "
         "test_at_the_cutover_the_same_row_is_refused is the live one"
@@ -719,21 +807,21 @@ def test_the_recognized_claim_shape_this_file_tests_with_is_really_recognized() 
 # --------------------------------------------------------------------------
 
 
-def test_live_plan_source_declares_a_resolvable_window(
+def test_live_goal_source_declares_a_resolvable_stamp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Skips rather than fails where the clone is absent -- a machine without
-    the private clone is not evidence about the plan's contents. Where the
+    the private clone is not evidence about the goal file's contents. Where the
     clone IS present this is the AC3 falsifier: read_declared_window against
-    the real resolved path must return a (start, end) tuple with no override."""
-    monkeypatch.delenv(ll.PLAN_PATH_ENV, raising=False)
+    the real resolved path must return a (start, end) pair with no override."""
+    monkeypatch.delenv(ll.GOAL_PATH_ENV, raising=False)
     try:
-        plan_path = ll.plan_path_for_window()
-    except ll.PlanSourceUnresolvedError as exc:
+        goal_path = ll.goal_path_for_window()
+    except ll.GoalSourceUnresolvedError as exc:
         pytest.skip(f"knowledge-base-internal clone not resolvable here: {exc}")
-    if not plan_path.is_file():
-        pytest.skip(f"plan not present in this clone: {plan_path}")
-    window = ll.read_declared_window(plan_path)
-    assert window is not None, f"{plan_path} carries no parseable '**Window:**' line"
+    if not goal_path.is_file():
+        pytest.skip(f"goal file not present in this clone: {goal_path}")
+    window = ll.read_declared_window(goal_path)
+    assert window is not None, f"{goal_path} carries no parseable 'state_as_of:' line"
     start, end = window
-    assert start <= end
+    assert end - start == timedelta(days=ll.FRESHNESS_HORIZON_DAYS)
