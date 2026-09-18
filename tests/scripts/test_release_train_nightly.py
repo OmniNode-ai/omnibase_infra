@@ -1341,7 +1341,19 @@ class TestTheDecideJobCanReadWhatThePremiseNeeds:
 
     WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-train-nightly.yml"
 
-    def test_the_deciding_job_mints_administration_read(self) -> None:
+    def test_the_deciding_job_requests_no_ungranted_permission(self) -> None:
+        """Inverted from what it asserted an hour ago, and the inversion is the point.
+
+        The premise genuinely needs `administration: read`. The App installation
+        does not carry it, and requesting a permission an installation lacks
+        fails the MINT -- dispatch run 35301341015 died at the token step, so
+        the job reported nothing per repo at all, which is strictly worse than
+        the ci_protection_unreadable refusal it replaced.
+
+        So this asserts the request is ABSENT while the grant is absent. When
+        the App is granted the permission, this test and the request flip back
+        together, in one change, which is what keeps them from drifting apart.
+        """
         import yaml as _yaml
 
         parsed = _yaml.safe_load(self.WORKFLOW.read_text(encoding="utf-8"))
@@ -1353,10 +1365,11 @@ class TestTheDecideJobCanReadWhatThePremiseNeeds:
         ]
         assert mints, "the decide job mints no App token"
         for mint in mints:
-            assert mint["with"].get("permission-administration") == "read", (
-                "the decide job's token cannot read branch protection, so the "
-                "green-CI premise refuses every repo with "
-                "ci_protection_unreadable and the train can never cut"
+            assert "permission-administration" not in mint["with"], (
+                "the decide job requests a permission the onexbot-occ-writer "
+                "installation does not carry, which fails the mint and makes "
+                "the whole job report nothing. Grant it on the App first, then "
+                "restore the request and this assertion together"
             )
 
     def test_that_permission_is_read_not_write(self) -> None:
