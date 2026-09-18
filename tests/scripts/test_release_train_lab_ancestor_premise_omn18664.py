@@ -528,3 +528,62 @@ class TestReceiptKeyedByMergeCommit:
             "classify_lab_receipt must not reach for the gating (pull request "
             "head) sha; the receipt is named for the merge commit"
         )
+
+
+# --------------------------------------------------------------------------- #
+# The pending probe's own wire shape (OMN-18664 follow-up).                     #
+# --------------------------------------------------------------------------- #
+class TestPendingProbeWireShape:
+    """A probe that 404s on every call reports "never pending" and says nothing.
+
+    Measured live 2026-09-18: ``default_rebuild_pending`` passed its filter
+    through ``gh api -f head_sha=…``. ``gh`` switches to POST the moment any
+    ``-f`` is present, that endpoint has no POST, and the 404 was caught one
+    frame up -- so the probe silently answered "not pending" for a sha whose
+    trigger run was ``in_progress`` at that exact moment. AC3 was wired, tested
+    through its seam, and dead on the real API.
+    """
+
+    def test_the_probe_issues_a_get_with_the_filter_in_the_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[list[str]] = []
+
+        class _Completed:
+            stdout = "in_progress\n"
+
+        def _fake_run(argv: list[str], **kwargs: Any) -> Any:
+            seen.append(argv)
+            return _Completed()
+
+        monkeypatch.setattr(rt, "default_gating_sha", lambda repo, sha: _PR_HEAD)
+        monkeypatch.setattr(rt.subprocess, "run", _fake_run)
+
+        assert rt.default_rebuild_pending("omnibase_infra", _HEAD) is True
+        argv = seen[-1]
+        assert "-f" not in argv and "-F" not in argv, (
+            "gh api switches to POST as soon as -f/-F is present, and the "
+            "workflow-runs endpoint has no POST; the filter belongs in the URL"
+        )
+        url = next(a for a in argv if a.startswith("repos/"))
+        assert f"head_sha={_PR_HEAD}" in url, (
+            f"the head sha must be a URL query parameter; got {url!r}"
+        )
+
+    def test_a_concluded_run_is_not_pending(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The flipped sibling: every run completed means the receipt is absent."""
+
+        class _Completed:
+            stdout = "completed\ncompleted\n"
+
+        monkeypatch.setattr(rt, "default_gating_sha", lambda repo, sha: _PR_HEAD)
+        monkeypatch.setattr(rt.subprocess, "run", lambda *a, **k: _Completed())
+        assert rt.default_rebuild_pending("omnibase_infra", _HEAD) is False
+
+    def test_no_merged_pull_request_is_not_pending(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(rt, "default_gating_sha", lambda repo, sha: "")
+        assert rt.default_rebuild_pending("omnibase_infra", _HEAD) is False

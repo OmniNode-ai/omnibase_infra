@@ -811,10 +811,14 @@ def default_rebuild_pending(repo: str, sha: str) -> bool:
         [
             "gh",
             "api",
+            # The filter goes in the URL, NOT through `-f`. `gh api` switches
+            # to POST as soon as any `-f` is present, and this endpoint has no
+            # POST, so the `-f` form 404s every time. The exception was caught
+            # one frame up and the refusal stayed ABSENT, so the probe reported
+            # "never pending" silently -- measured live on 2026-09-18 against
+            # 06fc4fe8d474, whose trigger run WAS in_progress at the time.
             f"repos/OmniNode-ai/{repo}/actions/workflows"
-            "/runtime-rebuild-trigger.yml/runs",
-            "-f",
-            f"head_sha={head}",
+            f"/runtime-rebuild-trigger.yml/runs?head_sha={head}",
             "--jq",
             ".workflow_runs[].status",
         ],
