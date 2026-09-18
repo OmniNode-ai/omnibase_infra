@@ -34,6 +34,9 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
+from omnibase_infra.runtime.util_contract_content_hash import (
+    contract_content_hash,
+)
 from omnibase_infra.utils.util_runtime_packages import (
     get_active_runtime_packages,
     is_gateway_cloud_mirroring_enabled,
@@ -455,8 +458,14 @@ def _parse_contract(
         node_type=raw.get("node_type", "UNKNOWN"),
         description=raw.get("description", ""),
         contract_version=contract_version,
-        node_version=str(raw.get("node_version", "1.0.0")),
+        node_version=_render_node_version(raw.get("node_version")),
         contract_path=contract_path,
+        # OMN-18708: hash the file this contract was parsed from, on the
+        # discovery pass that parsed it, so the introspection manifest served
+        # by a running lane carries the same triple the image label was
+        # stamped with. Computed here rather than lazily by a reader: the file
+        # is open on this code path and may not exist on any other.
+        contract_content_hash=contract_content_hash(contract_path),
         entry_point_name=entry_point_name,
         package_name=package_name,
         package_version=package_version,
@@ -474,6 +483,36 @@ def _parse_contract(
         handler_routing=handler_routing,
         db_io=db_io,
     )
+
+
+def _render_node_version(raw_value: object) -> str:
+    """Render a contract's declared ``node_version`` as a version STRING.
+
+    OMN-18708. This field was ``str(raw.get("node_version", "1.0.0"))``, which
+    is correct for the 77 contracts that declare a string and produces a Python
+    dict repr for the 67 that declare the ``{major, minor, patch}`` mapping --
+    ``"{'major': 1, 'minor': 0, 'patch': 0}"``. That value was already being
+    served on ``/v1/introspection/manifest``; it becomes load-bearing here,
+    because it is one third of the triple an image label is stamped with and a
+    promotion gate compares.
+
+    A mapping renders as ``major.minor.patch``, using 0 for an absent or
+    non-integer component rather than guessing at a different shape. Anything
+    else renders with ``str`` exactly as before, so no contract that already
+    declared a string moves.
+    """
+    if isinstance(raw_value, dict):
+
+        def _component(key: str) -> int:
+            value = raw_value.get(key, 0)
+            return (
+                value if isinstance(value, int) and not isinstance(value, bool) else 0
+            )
+
+        return f"{_component('major')}.{_component('minor')}.{_component('patch')}"
+    if raw_value is None:
+        return "1.0.0"
+    return str(raw_value)
 
 
 def _extract_runtime_profiles(raw: dict) -> tuple[str, ...]:

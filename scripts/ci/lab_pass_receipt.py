@@ -161,6 +161,113 @@ ARTIFACT_RETENTION_DAYS = 90
 #: a gate that resolves a prefix is a gate that can match the wrong commit.
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
+#: OMN-18708. A contract content hash as
+#: ``omnibase_infra/runtime/util_contract_content_hash.py`` declares it: 64
+#: lowercase hex, no prefix. Refused rather than normalised -- two contracts
+#: can share a prefix, and a reader that normalises can match the wrong one.
+_CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+
+#: The runtime's own introspection surface, served by the health server on the
+#: SAME port as ``/ready`` and ``/health`` (``ServiceHealth`` route table). It
+#: is the lane's answer about itself, which is why it is the evidence for the
+#: inventory check: a restatement of what the build stamped would prove only
+#: that the emitter can echo its own input.
+INTROSPECTION_MANIFEST_PATH: Final[str] = "/v1/introspection/manifest"
+
+
+@dataclass(frozen=True)
+class ModelNodeInventoryTriple:
+    """One node the LANE reports running, as (name, version, contract hash).
+
+    OMN-18708. The same triple the image label carries, read from the other
+    end: the label says what an image SHIPS, this says what a lane WIRED. They
+    are not the same set -- a lane wires the profile-filtered subset of the
+    image's contracts -- and conflating them would be a claim nobody made. What
+    they do share is the third field: both compute it with the one canonical
+    hasher over the same contract file, so a contract whose body drifted is
+    visible from either end.
+
+    Defined here rather than imported from ``omnibase_infra.runtime`` for the
+    reason ``test_the_module_imports_nothing_outside_the_stdlib`` records: run
+    34235502322 died at import on a bare runner and took a whole delivery with
+    it. This module is stdlib-only, repo-local imports included.
+    """
+
+    name: str
+    node_version: str
+    contract_content_hash: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name:
+            msg = "node inventory triple: name is required and must be non-empty"
+            raise ValueError(msg)
+        if not isinstance(self.node_version, str) or not self.node_version:
+            msg = (
+                f"node inventory triple {self.name!r}: node_version is required "
+                "and must be non-empty"
+            )
+            raise ValueError(msg)
+        if not isinstance(
+            self.contract_content_hash, str
+        ) or not _CONTENT_HASH_RE.match(self.contract_content_hash):
+            msg = (
+                f"node inventory triple {self.name!r}: contract_content_hash="
+                f"{self.contract_content_hash!r} is not 64 lowercase hex "
+                "characters. A truncated or absent hash cannot detect the drift "
+                "class the field exists for, so it is refused rather than kept."
+            )
+            raise ValueError(msg)
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "node_version": self.node_version,
+            "contract_content_hash": self.contract_content_hash,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Any) -> ModelNodeInventoryTriple:
+        if not isinstance(payload, dict):
+            msg = (
+                "a node inventory triple must be an object, got "
+                f"{type(payload).__name__}"
+            )
+            raise ValueError(msg)
+        unknown = sorted(
+            set(payload) - {"name", "node_version", "contract_content_hash"}
+        )
+        if unknown:
+            msg = f"unknown node inventory field(s) {unknown}"
+            raise ValueError(msg)
+        try:
+            return cls(
+                name=payload["name"],
+                node_version=payload["node_version"],
+                contract_content_hash=payload["contract_content_hash"],
+            )
+        except KeyError as exc:
+            msg = f"node inventory triple is missing required field {exc.args[0]!r}"
+            raise ValueError(msg) from exc
+
+
+def parse_node_inventory(payload: Any) -> tuple[ModelNodeInventoryTriple, ...]:
+    """Parse a triple list, refusing duplicates and anything unrecognised."""
+    if not isinstance(payload, list):
+        msg = f"node inventory must be a list, got {type(payload).__name__}"
+        raise ValueError(msg)
+    triples = tuple(ModelNodeInventoryTriple.from_dict(row) for row in payload)
+    names = [t.name for t in triples]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        msg = (
+            f"duplicate node name(s) {duplicates} in the node inventory. A "
+            "reader resolving a name would have to pick one, and whichever it "
+            "picked would look authoritative."
+        )
+        raise ValueError(msg)
+    return tuple(sorted(triples, key=lambda t: (t.name, t.node_version)))
+
+
 # Declared by omnimarket's projection API
 # (src/omnimarket/projection/api_server.py::list_projections) and pinned by
 # tests/test_projection_api_server.py::test_projections_entry_has_required_fields.
@@ -412,6 +519,20 @@ class ModelLabPassReceipt:
     #: its apply is performed by the agent as part of one rebuild correlation
     #: (OMN-18200), which is another respect in which the two are not one lane.
     agent_command_id: str | None
+    #: OMN-18708. The (name, node_version, contract_content_hash) triples the
+    #: LANE reported for itself, read from its introspection manifest by the
+    #: ``node_inventory`` check. Empty when that check did not run, which is
+    #: the pre-OMN-18708 shape and is why the field defaults rather than being
+    #: required: a receipt from an emitter that never probed the manifest is
+    #: still a valid receipt about the checks it did run.
+    #:
+    #: It is written to the wire ONLY when non-empty, so every receipt written
+    #: before this change still parses byte-identically and a reader predating
+    #: it refuses exactly the receipts it could not have interpreted -- the
+    #: same rule ``ModelLabPassCheck.to_dict`` applies to ``outcome``. That is
+    #: why ``RECEIPT_VERSION`` is unchanged: no existing field moved, and a
+    #: bump would have made the gate refuse every receipt already in flight.
+    node_inventory: tuple[ModelNodeInventoryTriple, ...] = ()
     receipt_version: str = RECEIPT_VERSION
 
     def __post_init__(self) -> None:
@@ -420,6 +541,7 @@ class ModelLabPassReceipt:
         self._validate_checks_present()
         self._validate_result_matches_checks()
         self._validate_window()
+        self._validate_node_inventory()
 
     def _validate_version(self) -> None:
         if self.receipt_version != RECEIPT_VERSION:
@@ -488,6 +610,39 @@ class ModelLabPassReceipt:
             )
             raise ValueError(msg)
 
+    def _validate_node_inventory(self) -> None:
+        """A passing inventory check must be backed by the triples it read.
+
+        The check's verdict says "I read the lane's manifest and it named its
+        nodes". If the receipt then carries no triples, the check asserts
+        something the record does not contain -- the "green while doing
+        nothing" shape this module refuses everywhere else. Duplicates are
+        refused for the same reason two checks with one name are.
+        """
+        names = [t.name for t in self.node_inventory]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            msg = (
+                f"duplicate node name(s) {duplicates} in node_inventory. A "
+                "reader resolving a name would have to pick one."
+            )
+            raise ValueError(msg)
+        inventory_check = next(
+            (c for c in self.checks if c.name == NODE_INVENTORY_CHECK), None
+        )
+        if (
+            inventory_check is not None
+            and inventory_check.ok
+            and not self.node_inventory
+        ):
+            msg = (
+                f"the {NODE_INVENTORY_CHECK!r} check passed but the receipt "
+                "carries no node_inventory. The check asserts the lane named "
+                "its nodes; a receipt that then carries none does not support "
+                "its own check."
+            )
+            raise ValueError(msg)
+
     def _validate_window(self) -> None:
         if self.finished_at < self.started_at:
             msg = (
@@ -508,6 +663,14 @@ class ModelLabPassReceipt:
                 "result": self.result.value,
                 "checks": [c.to_dict() for c in self.checks],
                 "agent_command_id": self.agent_command_id,
+                # Omitted entirely when empty, so a receipt from an emitter
+                # that did not probe the manifest is byte-identical to one
+                # written before OMN-18708.
+                **(
+                    {"node_inventory": [t.to_dict() for t in self.node_inventory]}
+                    if self.node_inventory
+                    else {}
+                ),
             },
             indent=indent,
         )
@@ -535,7 +698,11 @@ class ModelLabPassReceipt:
             "checks",
             "agent_command_id",
         }
-        unknown = sorted(set(payload) - known)
+        # OMN-18708: present only on receipts whose emitter probed the lane's
+        # introspection manifest, so it is known-but-optional rather than
+        # required. Absent means "not probed", which is a real answer.
+        optional = {"node_inventory"}
+        unknown = sorted(set(payload) - known - optional)
         if unknown:
             msg = f"unknown receipt field(s) {unknown}"
             raise ValueError(msg)
@@ -560,6 +727,11 @@ class ModelLabPassReceipt:
             result=EnumLabPassResult(payload["result"]),
             checks=tuple(ModelLabPassCheck.from_dict(c) for c in raw_checks),
             agent_command_id=agent_command_id,
+            node_inventory=(
+                parse_node_inventory(payload["node_inventory"])
+                if "node_inventory" in payload
+                else ()
+            ),
         )
 
 
@@ -849,11 +1021,17 @@ class ModelSettleBudget:
 #: ``curl http://host.docker.internal:3002/projections`` -> ``HTTP_200``,
 #: identically to ``http://host.docker.internal:8085/ready``. Same host, same
 #: published-port mechanism, no additional isolation layer between the two.
+#: ``node_inventory`` (OMN-18708): the lane's own answer to "which nodes, at
+#: which contract bodies, are you running". It is on this list rather than in
+#: PROBES_NOT_YET_WIRED because it needs nothing the other four do not -- the
+#: introspection manifest is served by the same health server, on the same
+#: port, as ``/ready`` and ``/health``.
 COMPOSE_DEV_HTTP_CHECKS = (
     "ready_main",
     "ready_effects",
     "health_dimensions",
     "projection_ready",
+    "node_inventory",
 )
 
 #: Named here rather than silently absent, so a reader can see what a
@@ -1040,6 +1218,158 @@ def check_health_dimensions(url: str, timeout_seconds: float) -> ModelLabPassChe
             f"GET {url} -> 200, {len(dimensions)} dimensions, "
             + ("all healthy" if not unhealthy else f"unhealthy: {unhealthy}")
         ),
+    )
+
+
+#: OMN-18708. Named as a constant because the receipt model validates against
+#: it: a passing check under this name must be backed by triples on the record.
+NODE_INVENTORY_CHECK: Final[str] = "node_inventory"
+
+
+@dataclass(frozen=True)
+class ModelNodeInventoryProbe:
+    """One read of the lane's introspection manifest: its verdict AND its data.
+
+    The check and the triples travel together, from ONE read, deliberately.
+    Two separate reads could disagree -- a lane recreated between them would
+    make the receipt assert a check about one generation and carry the
+    inventory of another -- and nothing on the record would show it.
+    """
+
+    check: ModelLabPassCheck
+    triples: tuple[ModelNodeInventoryTriple, ...]
+
+
+def check_node_inventory(url: str, timeout_seconds: float) -> ModelNodeInventoryProbe:
+    """Read the lane's own node inventory off ``/v1/introspection/manifest``.
+
+    OMN-18708 (AC3). The evidence for this check is what the LANE said about
+    itself, never a restatement of what the build stamped: an emitter echoing
+    its own input proves only that it can echo. What the lane serves is the
+    auto-wiring manifest, whose ``contracts`` each carry ``name``,
+    ``node_version`` and -- since this change -- ``contract_content_hash``,
+    computed by the discovery pass over the contract file it parsed.
+
+    The set here is the profile-filtered subset the lane WIRED, which is a
+    subset of what the image ships and is deliberately not compared to the
+    image label for equality. The third field is what ties the two together:
+    both ends compute it with the one canonical hasher over the same file, so
+    a contract whose body drifted is detectable from either.
+
+    A contract served with no content hash FAILS the check rather than being
+    dropped from the triples: a silently shorter inventory is a PASS narrower
+    than it looks, which is the shape this module refuses everywhere else.
+    """
+    status, body = _http_get(url, timeout_seconds)
+    if status != 200:
+        return ModelNodeInventoryProbe(
+            check=ModelLabPassCheck(
+                name=NODE_INVENTORY_CHECK,
+                ok=False,
+                evidence=f"GET {url} -> {status} {_truncate(body)}",
+            ),
+            triples=(),
+        )
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        return ModelNodeInventoryProbe(
+            check=ModelLabPassCheck(
+                name=NODE_INVENTORY_CHECK,
+                ok=False,
+                evidence=f"GET {url} -> 200 but body is not JSON: {exc}",
+            ),
+            triples=(),
+        )
+    if not isinstance(payload, dict):
+        return ModelNodeInventoryProbe(
+            check=ModelLabPassCheck(
+                name=NODE_INVENTORY_CHECK,
+                ok=False,
+                evidence=(
+                    f"GET {url} -> 200 but the manifest is a "
+                    f"{type(payload).__name__}, not an object"
+                ),
+            ),
+            triples=(),
+        )
+    contracts = payload.get("contracts")
+    if not isinstance(contracts, list) or not contracts:
+        return ModelNodeInventoryProbe(
+            check=ModelLabPassCheck(
+                name=NODE_INVENTORY_CHECK,
+                ok=False,
+                evidence=(
+                    f"GET {url} -> 200 but 'contracts' is absent or empty "
+                    f"({_truncate(body)}). A lane that wired no contracts has "
+                    "no inventory to report."
+                ),
+            ),
+            triples=(),
+        )
+
+    rows: list[dict[str, str]] = []
+    missing_hash: list[str] = []
+    for contract in contracts:
+        if not isinstance(contract, dict):
+            missing_hash.append(f"<{type(contract).__name__}>")
+            continue
+        name = contract.get("name")
+        content_hash = contract.get("contract_content_hash")
+        if not isinstance(name, str) or not name:
+            missing_hash.append("<unnamed>")
+            continue
+        if not isinstance(content_hash, str) or not content_hash:
+            missing_hash.append(name)
+            continue
+        rows.append(
+            {
+                "name": name,
+                "node_version": str(contract.get("node_version", "")),
+                "contract_content_hash": content_hash,
+            }
+        )
+
+    if missing_hash:
+        return ModelNodeInventoryProbe(
+            check=ModelLabPassCheck(
+                name=NODE_INVENTORY_CHECK,
+                ok=False,
+                evidence=(
+                    f"GET {url} -> 200, {len(contracts)} contract(s), but "
+                    f"{len(missing_hash)} carry no contract_content_hash: "
+                    f"{_truncate(', '.join(sorted(missing_hash)[:20]))}. A lane "
+                    "that cannot name a contract's body cannot be checked for "
+                    "drift in it."
+                ),
+            ),
+            triples=(),
+        )
+
+    try:
+        triples = parse_node_inventory(rows)
+    except ValueError as exc:
+        return ModelNodeInventoryProbe(
+            check=ModelLabPassCheck(
+                name=NODE_INVENTORY_CHECK,
+                ok=False,
+                evidence=f"GET {url} -> 200 but the inventory is unusable: {exc}",
+            ),
+            triples=(),
+        )
+
+    sample = ", ".join(f"{t.name}@{t.node_version}" for t in triples[:5])
+    return ModelNodeInventoryProbe(
+        check=ModelLabPassCheck(
+            name=NODE_INVENTORY_CHECK,
+            ok=True,
+            evidence=(
+                f"GET {url} -> 200; the lane reports {len(triples)} wired "
+                f"contract(s), each with a content hash (e.g. {sample}"
+                f"{', ...' if len(triples) > 5 else ''})"
+            ),
+        ),
+        triples=triples,
     )
 
 
@@ -1320,6 +1650,7 @@ def probe_compose_dev(
     budget: ModelSettleBudget | None = None,
     expected_generation: ModelLaneGeneration | None = None,
     generation_container: str | None = None,
+    node_inventory_probe: ModelNodeInventoryProbe | None = None,
 ) -> list[ModelLabPassCheck]:
     """The read-only probes the ``.201`` dev lane emitter runs.
 
@@ -1334,6 +1665,12 @@ def probe_compose_dev(
     makes both and is held to both. ``generation_container`` with
     ``expected_generation=None`` is the job saying convergence produced no
     record, which is a failure and not an absence.
+
+    ``node_inventory_probe`` follows the same rule (OMN-18708): it is passed in
+    already read, rather than read here, so the check and the triples the
+    receipt carries come from ONE read of the manifest. A caller that did not
+    probe the manifest passes nothing and makes no claim about the lane's
+    inventory -- it does not emit an empty one.
     """
     # BOTH readiness endpoints, not just main. Measured on the .201 lane
     # 2026-09-10: at 12:36:29Z omninode-runtime read "Up 3 minutes (health:
@@ -1373,6 +1710,17 @@ def probe_compose_dev(
         )
         for check in checks
     ]
+    if node_inventory_probe is not None:
+        # Annotated with the same settle phrase as the four HTTP checks above:
+        # an inventory read before the lane reported itself up is a different
+        # fact from one read after, and the receipt should not hide that.
+        annotated.append(
+            ModelLabPassCheck(
+                name=node_inventory_probe.check.name,
+                ok=node_inventory_probe.check.ok,
+                evidence=f"{node_inventory_probe.check.evidence} [{settle}]",
+            )
+        )
     if budget is not None:
         annotated.append(settle_budget_check(budget, outcome=outcome))
     if settle_timeout_seconds > 0:
@@ -1493,6 +1841,22 @@ def load_checks_json(path: Path | None) -> list[ModelLabPassCheck]:
     return [ModelLabPassCheck.from_dict(entry) for entry in payload]
 
 
+def load_node_inventory_json(
+    path: Path | None,
+) -> tuple[ModelNodeInventoryTriple, ...]:
+    """Load the triples ``probe-lane --node-inventory-out`` wrote.
+
+    A missing or unparseable file RAISES, for the same reason
+    :func:`load_checks_json` does: an emitter that pointed at a probe output
+    and got nothing must not quietly emit a receipt carrying less than it
+    believes it carries.
+    """
+    if path is None:
+        return ()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return parse_node_inventory(payload)
+
+
 def build_receipt(
     sha: str,
     lane: EnumLabLane,
@@ -1500,6 +1864,7 @@ def build_receipt(
     finished_at: datetime,
     checks: Sequence[ModelLabPassCheck],
     agent_command_id: str | None,
+    node_inventory: Sequence[ModelNodeInventoryTriple] = (),
 ) -> ModelLabPassReceipt:
     """Build a receipt whose verdict is DERIVED from its checks.
 
@@ -1519,6 +1884,7 @@ def build_receipt(
         result=result,
         checks=tuple(checks),
         agent_command_id=agent_command_id,
+        node_inventory=tuple(node_inventory),
     )
 
 
@@ -1615,6 +1981,17 @@ def render_receipt(receipt: ModelLabPassReceipt) -> str:
         f"    [{_CHECK_BADGE[c.outcome]}] {c.name}: {c.evidence}"
         for c in receipt.checks
     )
+    if receipt.node_inventory:
+        # Printed as a count plus a sample, never in full: a lane reports
+        # ~150 contracts and a wall of them buries the verdict above it. The
+        # full set is on the receipt for a reader that wants it.
+        sample = ", ".join(
+            f"{t.name}@{t.node_version}" for t in receipt.node_inventory[:5]
+        )
+        ellipsis = ", ..." if len(receipt.node_inventory) > 5 else ""
+        lines.append(
+            f"  inventory  : {len(receipt.node_inventory)} node(s) ({sample}{ellipsis})"
+        )
     return "\n".join(lines)
 
 
@@ -1808,6 +2185,29 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--projection-url", required=True)
     probe.add_argument("--timeout-seconds", type=float, default=15.0)
     probe.add_argument(
+        "--manifest-url",
+        default="",
+        help=(
+            "the lane's introspection base URL (OMN-18708). Supplying it emits "
+            "the node_inventory check, whose evidence is the lane's own "
+            f"{INTROSPECTION_MANIFEST_PATH}. Omitting it makes no claim about "
+            "the lane's inventory rather than claiming an empty one. Normally "
+            "the same value as --main-url: the manifest is served by the same "
+            "health server, on the same port, as /ready and /health."
+        ),
+    )
+    probe.add_argument(
+        "--node-inventory-out",
+        type=Path,
+        default=None,
+        help=(
+            "write the triples read from the manifest to this path, for "
+            "`emit --node-inventory-json` to carry onto the receipt. Written "
+            "only when the inventory check passed: a file here always contains "
+            "triples the lane actually reported."
+        ),
+    )
+    probe.add_argument(
         "--settle-timeout-seconds",
         type=float,
         default=0.0,
@@ -1877,6 +2277,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     emit.add_argument(
+        "--node-inventory-json",
+        type=Path,
+        default=None,
+        help=(
+            "a JSON array of {name, node_version, contract_content_hash} "
+            "objects, as written by `probe-lane --node-inventory-out`. Carried "
+            "onto the receipt so a later reader learns which nodes, at which "
+            "contract bodies, this lab pass actually exercised (OMN-18708)."
+        ),
+    )
+    emit.add_argument(
         "--agent-command-id",
         default=None,
         help=(
@@ -1938,6 +2349,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     file=sys.stderr,
                 )
 
+        inventory_probe: ModelNodeInventoryProbe | None = None
+        if args.manifest_url.strip():
+            inventory_probe = check_node_inventory(
+                f"{args.manifest_url.rstrip('/')}{INTROSPECTION_MANIFEST_PATH}",
+                args.timeout_seconds,
+            )
+
         checks = probe_compose_dev(
             args.main_url,
             args.effects_url,
@@ -1947,7 +2365,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             budget=budget,
             expected_generation=expected_generation,
             generation_container=args.generation_container,
+            node_inventory_probe=inventory_probe,
         )
+        if args.node_inventory_out is not None:
+            # Written even when the probe found nothing usable, as an empty
+            # array: a downstream `emit` that pointed here must get a file, so
+            # a missing one stays a real error rather than an empty inventory.
+            args.node_inventory_out.parent.mkdir(parents=True, exist_ok=True)
+            args.node_inventory_out.write_text(
+                json.dumps(
+                    [
+                        t.to_dict()
+                        for t in (inventory_probe.triples if inventory_probe else ())
+                    ],
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
         print(json.dumps([c.to_dict() for c in checks], indent=2))
         return 0
 
@@ -1969,6 +2403,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 finished_at=_parse_ts(args.finished_at),
                 checks=checks,
                 agent_command_id=parse_agent_command_id(args.agent_command_id),
+                node_inventory=load_node_inventory_json(args.node_inventory_json),
             )
         except (ValueError, TypeError, KeyError, OSError) as exc:
             print(

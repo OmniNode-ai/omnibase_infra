@@ -282,6 +282,11 @@ jobs:
           mkdir -p "${LAB_PASS_WORK}/receipt"
           echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
           echo "LAB_PASS_CHECKS=${LAB_PASS_WORK}/checks.json" >> "$GITHUB_ENV"
+          # OMN-18708: the (name, node_version, contract_content_hash) triples
+          # probe-lane reads off the lane's own /v1/introspection/manifest, and
+          # emit carries onto the receipt. A separate file from checks.json
+          # because it is DATA the receipt carries, not a verdict it reports.
+          echo "LAB_PASS_INVENTORY=${LAB_PASS_WORK}/node-inventory.json" >> "$GITHUB_ENV"
 
       - name: Wait for the lane's onex-api to report this revision
         id: converge
@@ -369,6 +374,8 @@ jobs:
             --settle-budget-json "$SETTLE_BUDGET_JSON" \
             --generation-container "$DEV_LANE_CONTAINER" \
             --expect-generation "$CONVERGE_GENERATION" \
+            --manifest-url "$DEV_LANE_MAIN_URL" \
+            --node-inventory-out "${LAB_PASS_INVENTORY}" \
             > "${LAB_PASS_CHECKS}"
           cat "${LAB_PASS_CHECKS}"
 
@@ -416,6 +423,7 @@ jobs:
             --check "onex_api_revision:${REVISION_VERDICT}:${EVIDENCE}" \
             --check "onex_api_health:${HEALTH_VERDICT}:curl http://host.docker.internal:8090/health from the omnibase-deploy runner -> HTTP ${HEALTH_CODE:-000}" \
             --checks-json "${LAB_PASS_CHECKS}" \
+            --node-inventory-json "${LAB_PASS_INVENTORY}" \
             --out "${LAB_PASS_DIR}/receipt.json"
 
       # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,

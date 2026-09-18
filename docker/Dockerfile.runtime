@@ -1000,6 +1000,65 @@ USER root
 # This should match the port your runtime listens on for health checks
 EXPOSE 8085
 
+# ---------------------------------------------------------------------------
+# OMN-18708: the node inventory this image ships.
+# ---------------------------------------------------------------------------
+# Until this label, nothing in the chain from a contract to a deployed image
+# named a node. The revision label above says WHICH COMMIT built the image; it
+# does not say which nodes are in it, at which contract bodies. A promotion
+# gate holding only a digest, with no cluster access, could not answer that at
+# all -- the only surface carrying the link was the running process's
+# /v1/introspection/manifest, which such a gate cannot reach.
+#
+# The value is one compact JSON object: a schema marker plus one
+# {name, node_version, contract_content_hash} triple per contract the image's
+# OWN discovery pass finds, sorted by (name, node_version) so two builds of one
+# commit render byte-identical strings. The hash is the canonical content hash
+# declared by src/omnibase_infra/runtime/util_contract_content_hash.py, which a
+# consumer reproduces with `perl -pe 's/\r\n/\n/g; s/\r/\n/g' contract.yaml
+# | shasum -a 256` and no Python at all.
+#
+# WHY THE ARG IS PLACED HERE, at the end of the stage. A Dockerfile cannot turn
+# a RUN step's output into a LABEL, so the value has to arrive as a build
+# argument. An ARG invalidates the build cache for every instruction after it,
+# so declaring it here means the two-pass build the sanctioned path performs
+# (build -> run `emit` inside the result -> rebuild stamping what it printed)
+# re-executes only this guard and the metadata instructions below it. Every
+# COPY and every apt layer is a cache hit on the second pass.
+#
+# WHY THE GUARD IS NOT CEREMONY. Without it the label would say whatever the
+# build script was told to say, which is a claim the build CONTEXT made about
+# the image rather than a fact about the image. `verify` re-runs the same
+# discovery pass INSIDE this image and refuses the build unless the stamped
+# value is byte-identical, so a stale, hand-edited, truncated or empty value
+# fails here -- in the image it purports to describe. There is no --force and
+# no skip: an empty inventory is refused rather than stamped, because an empty
+# label asserts "this image ships no nodes", which is never true and is
+# indistinguishable from "nobody stamped this image".
+#
+# WHAT THE LABEL MEANS, precisely. It is the discovery pass's answer under
+# BUILD-TIME env, where ONEX_ACTIVE_RUNTIME_PACKAGES is unset and therefore no
+# package filter applies -- so it is the full set the image SHIPS. A running
+# lane wires a profile-filtered subset of it, so that lane's introspection
+# manifest is a subset of this label, not an equal set. Both carry the same
+# triple for any node in both, because both compute the hash with the same
+# function over the same file.
+#
+# UNSTAMPED BUILDS. NODE_INVENTORY defaults to empty and an empty value skips
+# the guard, so an ad hoc `docker compose build` that passes no inventory still
+# works and simply carries no inventory. That is the honest outcome: the
+# readback distinguishes an ABSENT label from an empty one and refuses both, so
+# no consumer is ever handed an empty inventory as if it were an answer. The
+# sanctioned build path (scripts/deploy-runtime.sh) always stamps.
+ARG NODE_INVENTORY=""
+RUN set -eu; \
+    if [ -n "${NODE_INVENTORY}" ]; then \
+      python -m omnibase_infra.runtime.node_inventory verify --expect "${NODE_INVENTORY}"; \
+    else \
+      echo "NODE_INVENTORY not supplied; image carries no node inventory label (OMN-18708)"; \
+    fi
+LABEL com.omninode.node_inventory="${NODE_INVENTORY}"
+
 # OMN-15217: semantic health check.
 #
 # The previous check was `curl --fail --silent .../health`, and the comment here
