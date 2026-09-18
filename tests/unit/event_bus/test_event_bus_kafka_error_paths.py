@@ -8,6 +8,7 @@ Covers the surfaces flagged by Repowise as hotspots:
 - publish() with KafkaError after all retries -> InfraConnectionError
 - publish() with TimeoutError after all retries -> InfraTimeoutError
 - publish() with UnknownTopicOrPartitionError -> ProtocolConfigurationError (no retry)
+- publish() with TopicAuthorizationFailedError -> EventTopicAuthorizationError (no retry, OMN-18627)
 - subscribe() without on_message -> ValueError
 - subscribe() without node_identity or group_id -> ValueError
 - subscribe() when not started: consumer not launched
@@ -27,10 +28,15 @@ from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aiokafka.errors import KafkaError, UnknownTopicOrPartitionError
+from aiokafka.errors import (
+    KafkaError,
+    TopicAuthorizationFailedError,
+    UnknownTopicOrPartitionError,
+)
 from pydantic import ValidationError
 
 from omnibase_infra.errors import (
+    EventTopicAuthorizationError,
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
@@ -292,6 +298,100 @@ class TestEventBusKafkaPublishErrors:
                     await bus.publish("onex.evt.test.missing.v1", b"k", b"v")
                 # Circuit breaker failure counter stays at zero
                 assert bus._circuit_breaker_failures == 0  # type: ignore[attr-defined]
+            finally:
+                await bus.close()
+
+    @pytest.mark.asyncio
+    async def test_publish_topic_authorization_failure_raises_typed_error(
+        self,
+    ) -> None:
+        """OMN-18627: an ACL refusal is attributable and is not retried.
+
+        Before this, the denial fell through to the generic ``KafkaError``
+        arm: four attempts with exponential backoff, which outlasted the
+        caller's publish timeout, so what surfaced was ``TimeoutError``. A
+        caller deciding whether a spooled record can EVER be published had
+        nothing to branch on and re-queued it forever.
+        """
+        mock_producer = _make_mock_producer()
+        mock_producer.send = AsyncMock(
+            side_effect=TopicAuthorizationFailedError("not authorized")
+        )
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            config = _make_config(max_retry_attempts=3)
+            bus = EventBusKafka(config=config)
+            await bus.start()
+            try:
+                with pytest.raises(EventTopicAuthorizationError) as excinfo:
+                    await bus.publish("onex.evt.test.ungranted.v1", b"k", b"v")
+                # The topic is carried as a field, so a caller naming the
+                # missing grant never has to parse the message string.
+                assert excinfo.value.topic == "onex.evt.test.ungranted.v1"
+                # ONE attempt. An ACL does not appear between two attempts
+                # milliseconds apart, and the backoff sleeps are what pushed
+                # the denial past the caller's timeout.
+                assert mock_producer.send.call_count == 1
+            finally:
+                await bus.close()
+
+    @pytest.mark.asyncio
+    async def test_publish_topic_authorization_failure_does_not_trip_breaker(
+        self,
+    ) -> None:
+        """OMN-18627: the broker ANSWERED. That is not evidence it is down.
+
+        Counting an ACL refusal as a connection failure would let one
+        ungranted topic open the shared breaker and take every healthy topic
+        down with it.
+        """
+        mock_producer = _make_mock_producer()
+        mock_producer.send = AsyncMock(
+            side_effect=TopicAuthorizationFailedError("not authorized")
+        )
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            config = _make_config()
+            bus = EventBusKafka(config=config)
+            await bus.start()
+            try:
+                with pytest.raises(EventTopicAuthorizationError):
+                    await bus.publish("onex.evt.test.ungranted.v1", b"k", b"v")
+                assert bus._circuit_breaker_failures == 0  # type: ignore[attr-defined]
+            finally:
+                await bus.close()
+
+    @pytest.mark.asyncio
+    async def test_generic_kafka_error_still_retries_and_is_connection_error(
+        self,
+    ) -> None:
+        """Positive control: only the ACL arm changed.
+
+        Without this, the two tests above are also satisfied by a bus that
+        stopped retrying everything -- which would silently convert every
+        transient broker blip into a permanent failure.
+        """
+        mock_producer = _make_mock_producer()
+        mock_producer.send = AsyncMock(side_effect=KafkaError("leader not available"))
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            config = _make_config(max_retry_attempts=2, retry_backoff_base=0.001)
+            bus = EventBusKafka(config=config)
+            await bus.start()
+            try:
+                with pytest.raises(InfraConnectionError):
+                    await bus.publish("onex.evt.test.transient.v1", b"k", b"v")
+                assert mock_producer.send.call_count == 3
+                assert bus._circuit_breaker_failures > 0  # type: ignore[attr-defined]
             finally:
                 await bus.close()
 
