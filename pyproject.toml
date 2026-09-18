@@ -193,6 +193,10 @@ registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:Servi
 
 [dependency-groups]
 dev = [
+    # Effects-only candidate builds use `uv build --offline --no-build-isolation`.
+    # Keep its declared Hatch backend in the frozen development environment;
+    # the helper refuses to bootstrap a backend at execution time.
+    "hatchling>=1.27.0,<2.0.0",
     "pytest>=8.4.0,<10.0.0",
     "pytest-asyncio>=0.25.0,<1.5.0",
     "pytest-mock>=3.11.0,<4.0.0",
