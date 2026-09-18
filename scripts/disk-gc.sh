@@ -75,7 +75,28 @@ SCRATCH="$(mktemp -d "$(dirname "$LOG_FILE")/disk-gc.XXXXXX")"
 trap 'rm -rf "$SCRATCH"' EXIT
 docker image ls --all --no-trunc --format '{{json .}}' >"$SCRATCH/images.ndjson" 2>/dev/null || : >"$SCRATCH/images.ndjson"
 docker ps --all --no-trunc --format '{{json .}}' >"$SCRATCH/ps.ndjson" 2>/dev/null || : >"$SCRATCH/ps.ndjson"
-docker ps --all --format '{{.Image}}' 2>/dev/null | sort -u >"$SCRATCH/inuse.txt" || : >"$SCRATCH/inuse.txt"
+# OMN-16367: resolve the in-use set by each container's .Image DIGEST.
+#
+# `docker ps --format '{{.Image}}'` prints the image NAME for a name-referenced
+# container and the id only for an id-referenced one. Cross-referencing on that
+# field returned a FALSE ZERO on 29 of 30 rows on this host, and a plan built
+# from it selected an image a running container was sitting on (a dangling
+# postgres layer, 611 MB, measured 2026-09-18 against a live capture).
+#
+# It matters most exactly where it is least visible: the stability-test, judge
+# and lakshman lanes run containers on digests OLDER than their own `:latest`,
+# so a name-based check protects the tag while the running layer goes
+# unprotected. The digest is the only sound identifier for those.
+#
+# The name list is still unioned in. It can only ADD protection -- a stale name
+# ref keeps an image that might not have needed keeping, which is the safe
+# direction -- but it is never the sole source.
+{
+  for cid in $(docker ps -aq 2>/dev/null); do
+    docker inspect -f '{{.Image}}' "$cid" 2>/dev/null || true
+  done
+  docker ps --all --format '{{.Image}}' 2>/dev/null || true
+} | sort -u >"$SCRATCH/inuse.txt" || : >"$SCRATCH/inuse.txt"
 
 # Build the stdin JSON envelope from the scratch files (SCRATCH_DIR env tells the
 # encoder where to read), then pipe it straight into the planner. Two simple
@@ -121,8 +142,14 @@ for iid in plan["remove_image_ids"]:
 
 log "Plan: $(echo "$IMAGE_IDS" | grep -c . || true) image(s), $(echo "$CONTAINER_IDS" | grep -c . || true) stopped container(s), builder cache capped at ${BUILDER_CACHE_MAX_SIZE}"
 
+REMOVE_NOMINAL_BYTES="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("remove_nominal_bytes",0))')"
+REMOVE_NOMINAL_GB="$(python3 -c "print(f'{${REMOVE_NOMINAL_BYTES}/1000**3:.1f}')")"
+
 if [[ "$EXECUTE" != true ]]; then
-  log "DRY-RUN — would remove the above. Re-run with --execute to act."
+  # The number a host-rollout consent row cites. NOMINAL, not reclaim: shared
+  # base layers collapse, and a measured pass on this host recovered 17.6% of
+  # nominal. Say nominal, so nobody quotes it as expected disk returned.
+  log "DRY-RUN — would remove $(echo "$IMAGE_IDS" | grep -c . || true) image(s), ${REMOVE_NOMINAL_GB} GB nominal (NOT reclaim: shared layers collapse). Re-run with --execute to act."
   [[ -n "$IMAGE_IDS" ]] && { echo "IMAGES TO REMOVE:"; echo "$IMAGE_IDS"; } >&2
   [[ -n "$CONTAINER_IDS" ]] && { echo "STOPPED CONTAINERS TO REMOVE:"; echo "$CONTAINER_IDS"; } >&2
   exit 0
@@ -171,6 +198,7 @@ fi
 #
 # `--all` stays because including internal/frontend images is correct for a
 # scheduled GC, not because it unlocks anything.
+log "Plan totals: $(echo "$IMAGE_IDS" | grep -c . || true) image(s), ${REMOVE_NOMINAL_GB} GB nominal (NOT reclaim)"
 log "Pruning builder cache to a ceiling of ${BUILDER_CACHE_MAX_SIZE}"
 PRUNE_OUT=""
 if PRUNE_OUT="$(docker builder prune --all --force --max-used-space "$BUILDER_CACHE_MAX_SIZE" 2>&1)"; then

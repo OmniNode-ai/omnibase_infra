@@ -115,3 +115,22 @@ generation_keep: 3
 # Floor in HOURS. Nothing younger is reaped however superseded. Hours, not days,
 # is the whole point — see defect 2 above.
 generation_min_age_hours: 6
+# Tag shapes that count as a per-build artifact. Every one of these was read off
+# .201 on 2026-09-18, not invented. Anything NOT matching is treated as a
+# meaningful pointer and is never reaped by the generation rule -- `dev`, `main`,
+# a release name, anything in keep_image_tags.
+#
+# These live here rather than in the script so widening what counts as disposable
+# is a config review. Narrow them IN, never out: an unmatched tag means KEEP,
+# which is the safe direction, while an over-broad pattern reaps something that
+# mattered.
+#
+# DELIBERATELY ABSENT: the loose `<word>-<hex>` shape (`main-f3d4029`,
+# `runtime-fc61f41242dcc01b`). Those are per-sha tags too, but a pattern that
+# broad would also match ordinary meaningful tags.
+generation_tag_patterns:
+  - "^\\d{8}T\\d{6}Z?-[0-9a-f]{7,40}$" # 20260918T111918Z-e49dea8f
+  - "^[0-9a-f]{7,40}-\\d{8}T\\d{6}Z?$" # ffd61901-20260918T111918Z
+  - "^sha-[0-9a-f]{6,40}$" # sha-ffd6190
+  - "^[A-Za-z0-9._-]+-sha-[0-9a-f]{6,40}$" # dev-sha-ffd6190
+  - "^[0-9a-f]{40}$" # bare 40-hex content tag
