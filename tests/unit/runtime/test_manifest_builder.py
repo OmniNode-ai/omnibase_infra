@@ -7,6 +7,12 @@ from mock auto-wiring results without importing any handler or node classes.
 
 These tests are skipped when omnibase_core.models.runtime_manifest is not yet
 available (PR #1098 not merged).
+
+OMN-18709: the per-contract hash is now taken over the contract file's canonical
+bytes, so every discovered contract in these fixtures points at a real file on
+disk rather than at a path that never existed. That is what the runtime does --
+discovery records the path it wired the contract from, and the builder hashes
+that same file.
 """
 
 from __future__ import annotations
@@ -57,7 +63,19 @@ runtime_manifest_available = pytest.mark.skipif(
 )
 
 
+def _write_contract(root: pathlib.Path, name: str) -> pathlib.Path:
+    """Write a real contract file for `name` and return its path."""
+    path = root / name / "contract.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"name: {name}\nversion: 1.0.0\nnode_type: EFFECT_GENERIC\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _make_discovered_contract(
+    contract_root: pathlib.Path,
     name: str = "test-node",
     publish_topics: tuple[str, ...] = (),
     subscribe_topics: tuple[str, ...] = (),
@@ -67,7 +85,7 @@ def _make_discovered_contract(
         name=name,
         node_type="EFFECT_GENERIC",
         contract_version=ModelContractVersion(major=1, minor=0, patch=0),
-        contract_path=pathlib.Path("/fake/contract.yaml"),
+        contract_path=_write_contract(contract_root, name),
         entry_point_name=f"onex.nodes.{name}",
         package_name="test-package",
         event_bus=ModelEventBusWiring(
@@ -157,11 +175,14 @@ def test_build_manifest_empty_report() -> None:
 
 
 @runtime_manifest_available
-def test_build_manifest_wired_contracts_populate_correctly() -> None:
+def test_build_manifest_wired_contracts_populate_correctly(
+    tmp_path: pathlib.Path,
+) -> None:
     """Wired contracts are projected into contracts tuple with correct metadata."""
     from omnibase_infra.runtime.manifest_builder import build_runtime_manifest
 
     discovered = _make_discovered_contract(
+        tmp_path,
         name="node-alpha",
         publish_topics=("onex.cmd.svc.action.v1",),
         subscribe_topics=("onex.evt.svc.event.v1",),
@@ -189,7 +210,9 @@ def test_build_manifest_wired_contracts_populate_correctly() -> None:
 
 
 @runtime_manifest_available
-def test_build_manifest_skipped_and_failed_segregated() -> None:
+def test_build_manifest_skipped_and_failed_segregated(
+    tmp_path: pathlib.Path,
+) -> None:
     """Skipped/failed contracts go to their respective tuples, not contracts."""
     from omnibase_infra.runtime.manifest_builder import build_runtime_manifest
 
@@ -200,9 +223,9 @@ def test_build_manifest_skipped_and_failed_segregated() -> None:
     report = ModelAutoWiringReport(results=(wired, skipped, failed))
     manifest = ModelAutoWiringManifest(
         contracts=(
-            _make_discovered_contract("good-node"),
-            _make_discovered_contract("skipped-node"),
-            _make_discovered_contract("failed-node"),
+            _make_discovered_contract(tmp_path, "good-node"),
+            _make_discovered_contract(tmp_path, "skipped-node"),
+            _make_discovered_contract(tmp_path, "failed-node"),
         )
     )
 
@@ -235,11 +258,11 @@ def test_build_manifest_image_digest_forwarded() -> None:
 
 
 @runtime_manifest_available
-def test_build_manifest_contract_hash_deterministic() -> None:
+def test_build_manifest_contract_hash_deterministic(tmp_path: pathlib.Path) -> None:
     """Calling build_runtime_manifest twice with identical input yields same contract_hash."""
     from omnibase_infra.runtime.manifest_builder import build_runtime_manifest
 
-    discovered = _make_discovered_contract("stable-node")
+    discovered = _make_discovered_contract(tmp_path, "stable-node")
     wired = _make_wired_result("stable-node")
     report = ModelAutoWiringReport(results=(wired,))
     manifest = ModelAutoWiringManifest(contracts=(discovered,))
