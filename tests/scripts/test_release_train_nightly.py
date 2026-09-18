@@ -1336,27 +1336,34 @@ class TestTheDecideJobCanReadWhatThePremiseNeeds:
     `ci_protection_unreadable` -- the correct refusal, and also a train that can
     never cut anything. The unit tests could not catch it: they inject a seam
     that replaces the real fetch, so the token the real fetch would use is not
-    exercised anywhere in them.
+    exercised anywhere in them. These assertions are the only place the
+    credential the real fetch runs under is checked at all, which is why they
+    read the workflow rather than the module.
+
+    Three facts have to hold together and each is its own test: the permission
+    is requested, the App it is requested from is the one that carries it, and
+    nothing writable is requested alongside it. Any one alone is satisfiable in
+    a way that is wrong -- a request from an App without the grant fails the
+    mint, and the right App with write scopes hands a read-only premise a token
+    that could rewrite the gates it checks.
     """
 
     WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-train-nightly.yml"
 
-    def test_the_deciding_job_requests_no_ungranted_permission(self) -> None:
-        """Inverted from what it asserted an hour ago, and the inversion is the point.
+    WRITE_SCOPES = ("write", "admin")
 
-        The premise genuinely needs `administration: read`. The App installation
-        does not carry it, and requesting a permission an installation lacks
-        fails the MINT -- dispatch run 35301341015 died at the token step, so
-        the job reported nothing per repo at all, which is strictly worse than
-        the ci_protection_unreadable refusal it replaced.
+    @staticmethod
+    def _decide_mints(workflow: Path) -> list[dict[str, Any]]:
+        """Every App-token mint declared by the decide job, parsed not grepped.
 
-        So this asserts the request is ABSENT while the grant is absent. When
-        the App is granted the permission, this test and the request flip back
-        together, in one change, which is what keeps them from drifting apart.
+        Parsed because a text match cannot tell a request apart from a comment
+        explaining why a request is absent, and this file carries several
+        paragraphs of exactly that prose. Same class of mistake as a gate that
+        fires on documentation about the gate.
         """
         import yaml as _yaml
 
-        parsed = _yaml.safe_load(self.WORKFLOW.read_text(encoding="utf-8"))
+        parsed = _yaml.safe_load(workflow.read_text(encoding="utf-8"))
         decide = parsed["jobs"]["decide"]
         mints = [
             step
@@ -1364,19 +1371,90 @@ class TestTheDecideJobCanReadWhatThePremiseNeeds:
             if "create-github-app-token" in str(step.get("uses", ""))
         ]
         assert mints, "the decide job mints no App token"
-        for mint in mints:
-            assert "permission-administration" not in mint["with"], (
-                "the decide job requests a permission the onexbot-occ-writer "
-                "installation does not carry, which fails the mint and makes "
-                "the whole job report nothing. Grant it on the App first, then "
-                "restore the request and this assertion together"
+        return mints
+
+    def test_the_deciding_job_requests_the_permission_its_premise_needs(
+        self,
+    ) -> None:
+        """Inverted BACK, and which App it is minted from is why.
+
+        This assertion has been both ways round inside one day, and neither
+        reading was wrong at the time. #3733 asserted the request was present,
+        because the premise cannot read protection without it. #3737 asserted it
+        was absent, because the onexbot-occ-writer installation does not carry
+        it and requesting an ungranted permission fails the MINT -- dispatch run
+        35301341015 died at the token step and the job reported nothing per repo
+        at all, which is strictly worse than the ci_protection_unreadable
+        refusal it replaced.
+
+        What changed is not the grant. No REST endpoint widens an App's granted
+        set, so waiting for one was waiting on an org-level change. It is the
+        APP: the deciding job now mints from `onexbot`, whose installation
+        already carries `administration: read` with `repository_selection: all`,
+        and which evidence-autoclose-sweep.yml in this repository has minted for
+        the same reason since OMN-16832.
+
+        So the premise and the identity that can satisfy it are asserted
+        together, and the paired test below pins that identity. Moving the mint
+        back to an App without the grant turns one of the two red.
+        """
+        for mint in self._decide_mints(self.WORKFLOW):
+            assert mint["with"].get("permission-administration") == "read", (
+                "the decide job must request administration:read -- the "
+                "required-context membership its green-CI premise reads lives "
+                "only behind branch protection, and without the request the "
+                "train refuses every repo under ci_protection_unreadable"
             )
 
-    def test_that_permission_is_read_not_write(self) -> None:
-        """A premise that only reads must not hold a token that can rewrite the
-        protection it is reading."""
-        body = self.WORKFLOW.read_text(encoding="utf-8")
-        assert "permission-administration: write" not in body, (
-            "administration is granted for reading required contexts; write "
-            "would let this workflow alter the very gates it checks"
-        )
+    def test_the_deciding_job_mints_from_the_app_that_carries_the_grant(
+        self,
+    ) -> None:
+        """A permission request is only satisfiable against the right App.
+
+        Asserted on the SECRET NAMES rather than on a comment naming the App,
+        because the secrets are what the mint actually authenticates with. The
+        two App credentials differ by one path segment in their secret names,
+        which is exactly the kind of difference a review misses and a mint
+        failure reports an hour later.
+        """
+        for mint in self._decide_mints(self.WORKFLOW):
+            assert "ONEXBOT_APP_ID" in str(mint["with"].get("app-id", "")), (
+                "the decide job must mint from the onexbot App, the one whose "
+                "installation carries administration:read; onexbot-occ-writer "
+                "does not carry it and the mint fails outright"
+            )
+            assert "ONEXBOT_APP_PRIVATE_KEY" in str(
+                mint["with"].get("private-key", "")
+            ), "the decide job's private key must match the App id it declares"
+            assert "ONEXBOT_OCC_APP_ID" not in str(mint["with"].get("app-id", "")), (
+                "ONEXBOT_OCC_APP_ID is the write-capable App used by the cut "
+                "job; the deciding job writes nothing and must not hold it"
+            )
+
+    def test_the_deciding_job_requests_no_write_scope_at_all(self) -> None:
+        """The decide job writes nothing to GitHub, so it holds nothing that could.
+
+        It clones, plans, writes a step summary and uploads an artifact. Every
+        write in this workflow is in the separate `cut` job, under its own token
+        narrowed to the one repository being cut. Asserted over EVERY declared
+        permission rather than over a named list, so a scope added later is
+        covered by a test written before it existed.
+        """
+        for mint in self._decide_mints(self.WORKFLOW):
+            granted = {
+                key: value
+                for key, value in mint["with"].items()
+                if str(key).startswith("permission-")
+            }
+            assert granted, "the decide job's mint declares no permissions at all"
+            offenders = {
+                key: value
+                for key, value in granted.items()
+                if str(value).strip().lower() in self.WRITE_SCOPES
+            }
+            assert not offenders, (
+                f"the decide job requests write scopes {sorted(offenders)}; it "
+                "reads to decide and writes nothing, and a token that can "
+                "rewrite the gates it is checking is the one thing this premise "
+                "must not hold. Writes belong in the cut job"
+            )

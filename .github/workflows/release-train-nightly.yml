@@ -31,14 +31,25 @@
 #   in config/release_train_policy.yaml. A repo not declared there refuses rather
 #   than running against a default.
 #
-# TOKEN
-#   Every write authenticates as the onexbot-occ-writer App. There is deliberately
-#   no expression substituting the default workflow token when the mint fails: a
-#   push authored by the default token has its downstream workflows suppressed, so
-#   the release PR would open and nothing would ever tag it -- the credential
-#   confound OMN-18273 corrected. The mint failing fails the job.
-#   tests/scripts/test_release_train_nightly.py asserts both, so reintroducing a
-#   fallback is a red test rather than a review catch.
+# TOKENS -- TWO APPS, SPLIT ON WHETHER THE JOB WRITES
+#   The deciding job reads and the cutting job writes, so they authenticate as
+#   different Apps and the deciding one holds no write scope at all.
+#
+#   decide -> the `onexbot` App, read-only. Its premise must read branch
+#     protection, which needs `administration: read`; onexbot-occ-writer's
+#     installation does not carry that permission and cannot be made to, since
+#     no REST endpoint changes an App's granted set. onexbot does carry it, and
+#     evidence-autoclose-sweep.yml already mints it here for the same reason
+#     (OMN-16832). See that step's own comment block for the per-scope reasons.
+#   cut -> the `onexbot-occ-writer` App, narrowed to the one repository being
+#     cut, with the two write scopes opening a pull request requires.
+#
+#   There is deliberately no expression substituting the default workflow token
+#   when either mint fails: a push authored by the default token has its
+#   downstream workflows suppressed, so the release PR would open and nothing
+#   would ever tag it -- the credential confound OMN-18273 corrected. The mint
+#   failing fails the job. tests/scripts/test_release_train_nightly.py asserts
+#   both, so reintroducing a fallback is a red test rather than a review catch.
 
 name: Release Train (nightly)
 
@@ -84,32 +95,58 @@ jobs:
 
       # Sibling repos are private, and the receipt artifacts live in the repo the
       # sha belongs to, so the decision cannot be made with this repo's own token.
-      - name: Mint onexbot-occ-writer app token
+      #
+      # WHY A DIFFERENT APP THAN THE CUT JOB
+      #   The green-CI premise asks which contexts are REQUIRED on a repo's
+      #   default branch. That fact lives at one endpoint,
+      #   `/repos/{o}/{r}/branches/{b}/protection/required_status_checks`, and
+      #   reading it needs `administration: read`. Check runs are readable
+      #   without it; WHICH of them gate a merge is not.
+      #
+      #   The onexbot-occ-writer installation (app 4361937) does not carry that
+      #   permission, and requesting a permission an installation lacks fails
+      #   the MINT outright -- dispatch run 35301341015 died at the token step
+      #   with "The permissions requested are not granted to this installation",
+      #   so the job reported nothing per repo at all. The onexbot installation
+      #   (app 3342522, installation 123040063) DOES carry it, with
+      #   `repository_selection: all`, and evidence-autoclose-sweep.yml in this
+      #   repository has minted exactly this token from exactly these org
+      #   secrets since OMN-16832, for exactly this reason. Nothing is granted
+      #   here and no new credential exists: this is the second consumer of a
+      #   grant the org already made.
+      #
+      # WHY READ-ONLY, AND WHY THAT IS A REDUCTION
+      #   This job writes nothing to GitHub. It clones, plans, writes a step
+      #   summary and uploads an artifact; every write in this workflow is in
+      #   the `cut` job below, which mints its own occ-writer token narrowed to
+      #   the one repository being cut. So the requested set is exactly what the
+      #   decision reads and nothing more -- which is strictly LESS than the
+      #   contents:write + pull-requests:write this step used to hold.
+      #
+      #   Each scope below is owed to a specific call, so a reader can delete
+      #   one by deleting its caller:
+      #     administration  -> branches/{b}/protection/required_status_checks
+      #     contents        -> the private sibling clones in the next step
+      #     pull-requests   -> commits/{sha}/pulls, which resolves the gating sha
+      #     checks          -> commits/{sha}/check-runs
+      #     actions         -> the lab-pass receipt artifact query and download
+      #     metadata        -> required of every fine-grained token
+      #   The installation grants checks:write and pull-requests:write; narrowing
+      #   a granted scope at mint time is allowed and widening one is not, which
+      #   is why read is requested for both.
+      - name: Mint onexbot app token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
-          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
           owner: OmniNode-ai
-          permission-contents: write
+          permission-administration: read
+          permission-contents: read
+          permission-pull-requests: read
+          permission-checks: read
           permission-actions: read
-          permission-pull-requests: write
-          # administration:read is what the green-CI premise actually needs, and
-          # it is NOT requested here, deliberately. The onexbot-occ-writer App
-          # installation does not carry that permission, and requesting a
-          # permission an installation lacks fails the MINT outright -- dispatch
-          # run 35301341015 died at the token step with "The permissions
-          # requested are not granted to this installation", so the job reported
-          # nothing per repo at all.
-          #
-          # A crash is strictly worse than the refusal it replaced: without the
-          # request, the premise still cannot read protection, but it says so per
-          # repo under ci_protection_unreadable and the run stays legible.
-          #
-          # Restoring the request is one line, and it belongs in the same change
-          # that grants the App the permission. Until then the train refuses
-          # every repo, which is correct and is also why nothing can be cut
-          # through it. Tracked as a DECISION-REQUESTED row in the work ledger.
+          permission-metadata: read
 
       - name: Clone every declared repo
         env:
