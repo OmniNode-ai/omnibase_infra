@@ -65,6 +65,13 @@ min_age_days: 3
 # own default derives a 341.8 GiB permanent floor from disk size, which is
 # untenable beside 674 GB of volumes and the containerd layer store.
 #
+# The matching daemon-level standing ceiling is the fragment
+# deploy/disk-gc/daemon-builder-gc.json (committed, NOT applied — applying it
+# needs a dockerd reload that bounces every lane, so it is the operator's
+# window). Keep the two numbers in step; a test fails if they drift. The apply
+# procedure and the two flag traps are the knowledge-base-internal runbook
+# runbooks/2026-09-18-buildkit-cache-ceiling-201.md.
+#
 # Lowering this makes the next build colder, never less correct. The deploy
 # agent already models a cold cache (COLD_CACHE_MULTIPLIER in
 # deploy_agent/host_conditions.py) and widens its ceiling accordingly.
