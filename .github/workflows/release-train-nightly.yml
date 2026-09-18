@@ -176,6 +176,30 @@ jobs:
             git -C "${RUNNER_TEMP}/train-clones/${repo}" fetch --tags --quiet origin
           done
 
+      # OMN-18664. The lab premise asks whether each commit between a receipted
+      # commit and the head is runtime-affecting, and that question has exactly
+      # one owner: omniclaude's deploy-gate validator, which
+      # runtime-rebuild-trigger.yml loads by this same path. Checked out here so
+      # the train reads the identical classifier rather than a second path list
+      # -- a second list would let the train inherit a lab proof across a commit
+      # the trigger thought changed the lane.
+      #
+      # A failure to fetch it does not fail the run: the train reports the
+      # fallback on the row and decides every repo on the exact-head premise,
+      # which refuses rather than inherits.
+      - name: Fetch the canonical deploy-path classifier
+        continue-on-error: true
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omniclaude
+          ref: main
+          path: .deploy-gate-source
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+          sparse-checkout: |
+            .github/actions/deploy-gate/validate_pr_deploy_required.py
+          sparse-checkout-cone-mode: false
+
       - name: Decide, per repo
         id: plan
         env:
@@ -183,11 +207,21 @@ jobs:
           SELECTED: ${{ inputs.repos }}
         run: |
           set -euo pipefail
+          validator=".deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py"
+          validator_args=()
+          if [ -f "${validator}" ]; then
+            validator_args+=(--runtime-path-validator "${validator}")
+          else
+            echo "::warning::the canonical deploy-path classifier was not " \
+              "checked out; the lab premise falls back to the exact head sha " \
+              "and cannot inherit an ancestor's receipt"
+          fi
           set +e
           python3 scripts/ci/release_train.py plan \
             --policy config/release_train_policy.yaml \
             --clones-dir "${RUNNER_TEMP}/train-clones" \
             --repos "${SELECTED}" \
+            "${validator_args[@]}" \
             --out "${RUNNER_TEMP}/release-train-decision.json" \
             >"${RUNNER_TEMP}/decision.stdout" 2>"${RUNNER_TEMP}/decision.stderr"
           code=$?

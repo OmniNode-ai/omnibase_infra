@@ -41,7 +41,7 @@ repos:
     release_relevant_paths: [src, pyproject.toml]
     lab_evidence: compose-dev
     lab_evidence_note: >-
-      the compose dev lane on the lab host; runtime-rebuild-trigger.yml emits a lab-pass-receipt-compose-dev-<sha> artifact in this repo for every merge
+      the compose dev lane on the lab host. runtime-rebuild-trigger.yml emits a lab-pass-receipt-compose-dev-<sha> artifact in this repo for a RUNTIME-AFFECTING merge only -- its receipt job is gated on published == 'true' and runtime_lane == 'dev' -- so a workflow-only or scripts-only merge has no receipt of its own, at any time, and never will. Measured 2026-09-18: seven of the eight most recent dev merges carried none, by design. The premise therefore asks for the receipt of the nearest runtime-affecting ancestor of the head, and accepts it only when no commit between that ancestor and the head is runtime-affecting by the trigger's own classifier (OMN-18664). One runtime-affecting commit in that gap voids the inheritance and the train refuses, naming it.
     mode: cut
   omnimarket:
     package: omnimarket
@@ -49,7 +49,7 @@ repos:
     release_relevant_paths: [src, pyproject.toml]
     lab_evidence: compose-dev
     lab_evidence_note: >-
-      the compose dev lane; this repo carries its own runtime-rebuild-trigger.yml and its receipts are published here, in the repo the sha belongs to
+      the compose dev lane; this repo carries its own runtime-rebuild-trigger.yml and its receipts are published here, in the repo the sha belongs to. As in omnibase_infra, a receipt exists only for a RUNTIME-AFFECTING merge, so the premise asks for the nearest runtime-affecting ancestor of the head and accepts it only when nothing between that ancestor and the head is runtime-affecting (OMN-18664).
     mode: report_only
     mode_note: >-
       release-on-merge.yml already releases this repo on every source-touching merge to dev (OMN-18010), proven by the automated post-release bump PRs from 0.4.85 onward. A second cutter would race it. The train reports this repo instead, so a run that finds unreleased work here is the signal that release-on-merge has stopped firing.

@@ -40,11 +40,42 @@ Two, and they are deliberately not three.
    ``v*`` tag and the default branch's head touches a path the policy declares
    release-relevant, and is not the train's own bookkeeping.
 2. **Lab evidence**, declared per repo. ``compose-dev`` requires a PASS
-   ``lab-pass-receipt-compose-dev-<sha>`` for the exact candidate sha, resolved
-   through the rule-24(b) reader's own primitives in ``lab_pass_receipt.py`` --
-   there is no second implementation of that query here. ``none`` is a declared
-   statement that the repo has no lab lane, which is true of five of the seven
-   repos in scope, and it must carry its reason.
+   ``lab-pass-receipt-compose-dev-<sha>``, resolved through the rule-24(b)
+   reader's own primitives in ``lab_pass_receipt.py`` -- there is no second
+   implementation of that query here. ``none`` is a declared statement that the
+   repo has no lab lane, which is true of five of the seven repos in scope, and
+   it must carry its reason.
+
+WHICH SHA THE LAB PREMISE IS ABOUT (OMN-18664)
+----------------------------------------------
+Not always the head. ``runtime-rebuild-trigger.yml`` emits a receipt only for a
+RUNTIME-AFFECTING merge -- its receipt job is gated on
+``published == 'true' && runtime_lane == 'dev'`` -- so a workflow-only or
+``scripts/ci``-only merge landing last has no receipt, at any time, and never
+will. Measured 2026-09-18: seven of the eight most recent dev merges carried no
+receipt by design, and release-train run 35316314098 skipped this repo with
+``lab_receipt_absent`` on a head whose own change could not reach the lane.
+
+So the premise resolves the newest commit R at or below the head such that no
+commit in ``R..HEAD`` is runtime-affecting, and asks for R's receipt. The claim
+it rests on is narrow and checkable: if nothing between R and HEAD changes what
+the lane runs, the lane that ran R is running HEAD's runtime. One
+runtime-affecting commit in that gap voids it and the premise refuses, naming
+that commit.
+
+The predicate is the trigger's own, imported from
+``scripts/runtime_change_classifier.py`` -- the module the trigger itself reads
+it from. A second path list here would let the train inherit a receipt across a
+commit the trigger thought mattered, which is a cut on a lane proof that does
+not describe the code being cut. When the classifier cannot be loaded at all the
+train does not guess: it falls back to the exact head, which is the pre-OMN-18664
+behaviour and refuses rather than inherits.
+
+The receipt is ALWAYS named for a commit on the default branch, never for a
+workflow run's ``head_sha``. On a squash-only repo those differ by construction:
+run 35257835048 carries head sha ``0e5014b53d74`` and emitted
+``lab-pass-receipt-compose-dev-5be72e12f1e9…``. A query keyed by the run's head
+is a false zero that reads exactly like a finding.
 
 A third premise, "dev CI concluded green on the candidate sha", is deliberately
 NOT re-derived. Every repo in this registry is squash-only with no merge queue
@@ -88,6 +119,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import functools
 import importlib.util
 import json
 import re
@@ -108,8 +140,8 @@ _REPO_ROOT = _HERE.parents[1]
 DEFAULT_POLICY_PATH = _REPO_ROOT / "config" / "release_train_policy.yaml"
 
 
-def _load_sibling(name: str) -> Any:
-    """Import a sibling script by path.
+def _load_module_at(path: Path, name: str) -> Any:
+    """Import a script by path.
 
     These modules are scripts rather than an installed package, and this one is
     itself loaded by path in tests, so a plain ``import`` resolves differently
@@ -118,9 +150,9 @@ def _load_sibling(name: str) -> Any:
     module_name = f"_release_train_{name}"
     if module_name in sys.modules:
         return sys.modules[module_name]
-    spec = importlib.util.spec_from_file_location(module_name, _HERE / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
-        msg = f"cannot load sibling module {name}"
+        msg = f"cannot load module {name} at {path}"
         raise RuntimeError(msg)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
@@ -128,9 +160,29 @@ def _load_sibling(name: str) -> Any:
     return module
 
 
+def _load_sibling(name: str) -> Any:
+    """Import a script sitting beside this one."""
+    return _load_module_at(_HERE / f"{name}.py", name)
+
+
 #: The rule-24(b) receipt reader. Its primitives are the ONLY path to a receipt
 #: here; this module classifies what they return and never queries in parallel.
 lab_pass_receipt = _load_sibling("lab_pass_receipt")
+
+#: The runtime-change path classifier, in ``scripts/`` rather than ``scripts/ci``.
+#: The SAME module ``trigger_rebuild_on_merge.py`` reads its own patterns from,
+#: so the train's "is this commit runtime-affecting" and the trigger's cannot
+#: disagree. Loaded lazily and by path: this module is stdlib-plus-pyyaml and
+#: runs on bare python3 before any project install, while the trigger imports
+#: click and pydantic at module scope.
+_CLASSIFIER_PATH = _REPO_ROOT / "scripts" / "runtime_change_classifier.py"
+
+#: How far back the ancestor walk goes before refusing. A bound rather than an
+#: unbounded walk because an unbounded one on a repo that has never emitted a
+#: receipt reads every commit in its history to reach the same refusal. 200
+#: first-parent commits is roughly a fortnight of merges on the busiest repo
+#: here; beyond it the honest answer is that nothing recent proved the lane.
+LAB_ANCESTOR_WALK_LIMIT = 200
 
 _FINAL_SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
@@ -185,6 +237,12 @@ class EnumTrainReason(StrEnum):
     NO_UNRELEASED_RELEASE_RELEVANT_WORK = "no_unreleased_release_relevant_work"
     MODE_REPORT_ONLY = "mode_report_only"
     LAB_RECEIPT_ABSENT = "lab_receipt_absent"
+    # A rebuild for this sha is running and has not emitted yet. Distinct from
+    # ABSENT because the two belong to different readers: ABSENT says the lane
+    # was never asked, and PENDING says it was asked and is still answering.
+    # Collapsing them told a reader on 2026-09-18 that a healthy loop had never
+    # exercised the sha, and cost four hours investigating a working system.
+    LAB_RECEIPT_PENDING = "lab_receipt_pending"
     LAB_RECEIPT_FAIL = "lab_receipt_fail"
     LAB_RECEIPT_NAME_PAYLOAD_DISAGREE = "lab_receipt_name_payload_disagree"
     LAB_RECEIPT_UNREADABLE = "lab_receipt_unreadable"
@@ -600,6 +658,175 @@ def collect_repo_facts(policy: ModelRepoReleasePolicy, clone: Path) -> ModelRepo
 
 
 # --------------------------------------------------------------------------- #
+# Which commit the lab premise is about (OMN-18664).                            #
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class ModelLabCandidate:
+    """The commit whose receipt the lab premise asks for, and how it got there.
+
+    ``sha`` empty means the walk resolved nothing and the caller must fall back
+    to the head. That is the fail-closed direction: the head is the sha the
+    pre-OMN-18664 premise used, and it refuses rather than inherits.
+    """
+
+    sha: str
+    #: Non-runtime-affecting commits walked past to reach ``sha``, newest first.
+    skipped: tuple[str, ...]
+    #: Why no candidate was resolved, empty when one was. Carried onto the
+    #: refusal so a reader is told the walk did not run, rather than being told
+    #: the head was never exercised when nobody looked past it.
+    unresolved_reason: str = ""
+
+    @property
+    def inherited(self) -> bool:
+        return bool(self.sha) and bool(self.skipped)
+
+
+def resolve_lab_candidate(
+    head_sha: str,
+    *,
+    branch_commits: Callable[[], Sequence[str]],
+    runtime_affecting: Callable[[str], bool],
+    walk_limit: int = LAB_ANCESTOR_WALK_LIMIT,
+) -> ModelLabCandidate:
+    """The newest commit at-or-below head with no runtime-affecting commit above.
+
+    Walks first-parent from the head, newest first, stopping at the first
+    runtime-affecting commit. A runtime-affecting head stops the walk
+    immediately and resolves to itself, so an exact-head receipt is always
+    preferred and nothing is inherited when nothing needs to be.
+
+    Every failure resolves NOTHING rather than guessing. A classifier that
+    raises, a branch listing that raises, an empty listing and a walk that
+    reaches its limit all return an empty ``sha`` with the reason named, and the
+    caller then asks for the head's own receipt exactly as it did before.
+    """
+    try:
+        commits = list(branch_commits())
+    except Exception as exc:  # noqa: BLE001 - rule 16: an unread surface is a finding
+        return ModelLabCandidate("", (), f"the branch commit listing failed: {exc}")
+
+    if not commits:
+        return ModelLabCandidate("", (), "the branch commit listing was empty")
+
+    skipped: list[str] = []
+    for sha in commits[:walk_limit]:
+        try:
+            if runtime_affecting(sha):
+                return ModelLabCandidate(sha, tuple(skipped))
+        except Exception as exc:  # noqa: BLE001 - same reasoning
+            return ModelLabCandidate(
+                "",
+                (),
+                f"the runtime-change classifier failed on {sha[:12]}: {exc}",
+            )
+        skipped.append(sha)
+
+    return ModelLabCandidate(
+        "",
+        (),
+        f"no runtime-affecting commit in the {min(len(commits), walk_limit)} "
+        f"first-parent commit(s) below {head_sha[:12]}, so no sha in that span "
+        "can carry a compose-dev receipt",
+    )
+
+
+def load_runtime_affecting(clone: Path, validator_path: Path) -> Callable[[str], bool]:
+    """Build the "is this commit runtime-affecting" predicate for one clone.
+
+    The predicate is the TRIGGER'S, reached through the module the trigger reads
+    its own patterns from, so the two cannot disagree about which merges produce
+    a receipt. Nothing about the union is restated here.
+
+    Raises rather than returning a permissive default when the classifier module
+    or the canonical deploy-gate validator cannot be loaded. A predicate that
+    answered "not runtime-affecting" because it could not read the canonical
+    list would inherit a receipt across a source change, which is the one
+    outcome this premise exists to prevent.
+    """
+    classifier_module = _load_module_at(_CLASSIFIER_PATH, "runtime_change_classifier")
+    canonical = classifier_module.load_runtime_path_classifier(validator_path)
+
+    def _runtime_affecting(sha: str) -> bool:
+        changed = default_changed_files(clone, sha)
+        return bool(classifier_module.classify_runtime_paths(changed, canonical))
+
+    return _runtime_affecting
+
+
+def default_branch_commits(clone: Path, head_ref: str) -> list[str]:
+    """First-parent commits from the branch head, newest first.
+
+    First-parent deliberately: a squash-only repo's default branch IS its
+    first-parent chain, and following every parent of an imported merge would
+    walk commits that never ran on the lane as a unit.
+    """
+    raw = _git(
+        clone,
+        "rev-list",
+        "--first-parent",
+        f"--max-count={LAB_ANCESTOR_WALK_LIMIT}",
+        head_ref,
+    )
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+def default_changed_files(clone: Path, sha: str) -> list[str]:
+    """Paths one commit changed, relative to the repo root.
+
+    ``diff-tree -m`` rather than ``show --name-only`` so a merge commit reports
+    the union of its per-parent diffs instead of nothing at all. A merge that
+    reported no changed files would read as non-runtime-affecting, which is the
+    fail-OPEN direction.
+    """
+    raw = _git(
+        clone,
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        "-m",
+        sha,
+    )
+    seen: list[str] = []
+    for line in raw.splitlines():
+        path = line.strip()
+        if path and path not in seen:
+            seen.append(path)
+    return seen
+
+
+def default_rebuild_pending(repo: str, sha: str) -> bool:
+    """True when a rebuild trigger run for ``sha`` exists and has not concluded.
+
+    Resolved through the merged pull request's head sha, because the trigger
+    runs on ``pull_request: closed`` and GitHub keys the RUN by the pull request
+    head. That is the one place a head sha is the right key -- it identifies the
+    RUN, never the receipt, which stays named for the merge commit.
+    """
+    head = default_gating_sha(repo, sha)
+    if not head:
+        return False
+    raw = subprocess.run(
+        [
+            "gh",
+            "api",
+            f"repos/OmniNode-ai/{repo}/actions/workflows"
+            "/runtime-rebuild-trigger.yml/runs",
+            "-f",
+            f"head_sha={head}",
+            "--jq",
+            ".workflow_runs[].status",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    statuses = [line.strip() for line in raw.splitlines() if line.strip()]
+    return any(status != "completed" for status in statuses)
+
+
+# --------------------------------------------------------------------------- #
 # The lab-evidence premise.                                                     #
 # --------------------------------------------------------------------------- #
 # --------------------------------------------------------------------------- #
@@ -825,11 +1052,18 @@ def classify_lab_receipt(
     *,
     list_artifacts: Callable[[str, str], list[dict[str, Any]]],
     download_receipt: Callable[[str, int], Any],
+    rebuild_pending: Callable[[str, str], bool] | None = None,
 ) -> tuple[EnumTrainReason | None, str]:
     """Resolve the compose-dev receipt for one sha into a reason, or None on PASS.
 
     ``None`` means the premise holds. Every other return names WHICH way it did
-    not, because the four cases belong to four different owners.
+    not, because the cases belong to different owners.
+
+    ``sha`` is always a commit on the repo's default branch -- the head, or the
+    runtime-affecting ancestor the caller resolved. It is never a workflow run's
+    ``head_sha``: on a squash-only repo the run carries the PULL REQUEST head and
+    the receipt is named for the merge commit, so a query keyed by the run's head
+    returns a false zero that reads exactly like a finding (OMN-18664).
 
     The receipt is looked up in the repo the sha belongs to, by exact artifact
     name, because a paginated listing returns a false zero and a failed rebuild
@@ -847,9 +1081,24 @@ def classify_lab_receipt(
             f"the artifact query for {name} failed: {exc}",
         )
     if not artifacts:
+        # A rebuild that is still running is not a lane that was never asked.
+        # Probed only on the empty branch, and only to REFINE a refusal that has
+        # already been decided, so a probe that raises leaves the refusal exactly
+        # as it was rather than changing a verdict.
+        if rebuild_pending is not None:
+            try:
+                if rebuild_pending(repo, sha):
+                    return (
+                        EnumTrainReason.LAB_RECEIPT_PENDING,
+                        f"a runtime-rebuild-trigger run for {sha[:12]} is still "
+                        f"in flight, so {name} does not exist YET; the lane is "
+                        "answering and this repo is decidable on the next run",
+                    )
+            except Exception:  # noqa: BLE001 - refines a refusal, never grants one
+                pass
         return (
             EnumTrainReason.LAB_RECEIPT_ABSENT,
-            f"no artifact named {name} exists in {full_repo}; the sha has not "
+            f"no artifact named {name} exists in {full_repo}; {sha[:12]} has not "
             "been exercised on the compose dev lane, or its rebuild never emitted",
         )
 
@@ -904,6 +1153,9 @@ def decide(
     required_contexts: Callable[[str, str], list[str]] | None = None,
     check_runs: Callable[[str, str], list[dict[str, Any]]] | None = None,
     gating_sha: Callable[[str, str], str] | None = None,
+    branch_commits: Callable[[], Sequence[str]] | None = None,
+    runtime_affecting: Callable[[str], bool] | None = None,
+    rebuild_pending: Callable[[str, str], bool] | None = None,
 ) -> ModelTrainDecision:
     """Decide whether this repo cuts tonight, and say why either way.
 
@@ -1016,13 +1268,31 @@ def decide(
             needs_bump=needs_bump,
         )
 
+    # WHICH sha the receipt is asked for (OMN-18664). The head when the head is
+    # runtime-affecting; otherwise the newest runtime-affecting commit below it,
+    # provided nothing in between can change what the lane runs. With no
+    # ancestry seams supplied -- or with either of them unreadable -- the
+    # candidate is the head, which is the pre-OMN-18664 premise and refuses
+    # rather than inherits.
+    candidate = ModelLabCandidate("", (), "no runtime-change classifier available")
+    if branch_commits is not None and runtime_affecting is not None:
+        candidate = resolve_lab_candidate(
+            facts.dev_head_sha,
+            branch_commits=branch_commits,
+            runtime_affecting=runtime_affecting,
+        )
+    lab_sha = candidate.sha or facts.dev_head_sha
+
     reason, detail = classify_lab_receipt(
         policy.repo,
-        facts.dev_head_sha,
+        lab_sha,
         list_artifacts=list_artifacts,
         download_receipt=download_receipt,
+        rebuild_pending=rebuild_pending,
     )
     if reason is not None:
+        if not candidate.sha and candidate.unresolved_reason:
+            detail = f"{detail}. The ancestor premise did not run: {candidate.unresolved_reason}"
         return _build(
             EnumTrainVerdict.SKIP,
             reason,
@@ -1030,6 +1300,17 @@ def decide(
             candidate_version=candidate_version,
             needs_bump=needs_bump,
         )
+
+    if candidate.inherited:
+        # Both shas and the count, because a reader of a CUT row has to be able
+        # to re-derive the inheritance rather than take it on trust.
+        detail = (
+            f"{detail}, inherited by {facts.dev_head_sha[:12]}: the "
+            f"{len(candidate.skipped)} commit(s) between "
+            f"{lab_sha[:12]} and it change nothing the dev lane runs, so the "
+            "lane that proved that sha is running this one's runtime"
+        )
+
     return _build(
         EnumTrainVerdict.CUT,
         EnumTrainReason.UNRELEASED_WORK_LAB_PROVEN,
@@ -1124,6 +1405,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma-separated subset to decide; empty means every declared repo",
     )
     plan.add_argument("--out", type=Path, default=None)
+    # The canonical deploy-gate classifier, checked out from omniclaude by the
+    # workflow. OPTIONAL rather than required: without it the lab premise is the
+    # exact-head one it was before OMN-18664, which refuses rather than
+    # inherits, so a run that cannot fetch it still decides every repo -- it
+    # just cannot inherit an ancestor's receipt, and says so on the row.
+    plan.add_argument(
+        "--runtime-path-validator",
+        type=Path,
+        default=None,
+        help=(
+            "path to omniclaude's canonical deploy-gate validator source; "
+            "enables the nearest-runtime-affecting-ancestor lab premise"
+        ),
+    )
 
     # The workflow needs the declared set before it can clone anything, and it
     # needs it from THIS module so the listing and the decision cannot disagree.
@@ -1218,7 +1513,37 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             continue
-        decisions.append(decide(policy=policy, facts=facts))
+        # Built per clone, because the predicate reads that clone's commits.
+        # A failure to build it is REPORTED on the row rather than raised: the
+        # train still decides the repo, on the narrower exact-head premise.
+        branch_commits: Callable[[], Sequence[str]] | None = None
+        runtime_affecting: Callable[[str], bool] | None = None
+        if args.runtime_path_validator is not None:
+            try:
+                runtime_affecting = load_runtime_affecting(
+                    clone, args.runtime_path_validator
+                )
+                head_ref = f"origin/{policy.default_branch}"
+                branch_commits = functools.partial(
+                    default_branch_commits, clone, head_ref
+                )
+            except Exception as exc:  # noqa: BLE001 - reported, never silent
+                print(
+                    f"::warning::{name}: the runtime-change classifier could not "
+                    f"be loaded ({exc}); the lab premise falls back to the exact "
+                    "head sha",
+                    file=sys.stderr,
+                )
+
+        decisions.append(
+            decide(
+                policy=policy,
+                facts=facts,
+                branch_commits=branch_commits,
+                runtime_affecting=runtime_affecting,
+                rebuild_pending=default_rebuild_pending,
+            )
+        )
 
     report = render_report_json(decisions)
     if args.out is not None:
