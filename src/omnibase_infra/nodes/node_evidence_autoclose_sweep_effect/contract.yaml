@@ -455,13 +455,32 @@
 #     stage after the probe is the ABSENCE OF A PROOF POINTER, not a pass --
 #     every other conjunct of this sweep still applies to it.
 #
+#   - OMN-18749 (node_version 1.15.1): A TICKET-DECLARED SUCCESSOR CLEARS A
+#     CLOSED CITATION THAT IS NOT A CASCADE BUMP. The cascade-supersession
+#     conjunct above proves supersession only for a version-pin bump; a
+#     closed proof pull request that isn't one -- reopened on a clean
+#     branch, closed by an accidental rename -- never resolves there and
+#     blocked forever while the held-reason text told its reader to merge
+#     something that could never merge (OMN-18172: two closed proof pull
+#     requests whose work had landed in a third, refused identically every
+#     tick). A second, narrower predicate
+#     (`declared_supersession.resolve_declared_supersession`) is now tried
+#     after the cascade one: it accepts only a `<owner/repo#N> superseded by
+#     <owner/repo#M>` line in the ticket's own description, and only when
+#     the named successor's own merge state probes merged -- the ticket's
+#     say-so alone is never sufficient. The held-reason text is now
+#     conditional: when at least one unmerged citation is CLOSED it stops
+#     telling the reader to merge it and instead names the declare-a-
+#     successor path. No input/output model changed; contract_version is
+#     unchanged.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 10
   patch: 0
-node_version: "1.16.0"
+node_version: "1.16.1"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, holds a criterion whose only declaring check marks it a proposal until a person accepts it, holds a criterion whose accepted binding is pinned to a revision of the criterion text the ticket no longer carries, and excludes explicitly superseded duplicate criteria from the live criteria set only when an unmarked replacement with the same label is present. Every outcome that reached a dod_verify verdict records one row per check -- id, status, proof class, declared bindings and a bounded message excerpt -- and a gap comment names the failing check ids, so a reader is never handed a tally with no names in it (OMN-18490). DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
