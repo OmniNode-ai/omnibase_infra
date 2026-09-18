@@ -24,7 +24,7 @@ friction -> Linear precedent.
 DEPLOY-GAP CHECK (OMN-14994): in addition to the per-repo PyPI/tag/main/dev
 checks, this shell also gathers ``DeployFacts`` for a small set of cloud deploy
 targets (repo + branch + workflow, e.g. ``omninode_infra`` dev ->
-``deploy-onex-dev.yml``) and evaluates them via
+``deploy-onex-staging.yml``) and evaluates them via
 ``release_drift_monitor_lib.evaluate_deploy_target``. This closes the "merged
 but never deployed" gap that let three production-blocking fixes
 (omninode_infra PRs #619/#620/#622) sit merged to dev for ~28 hours with
@@ -89,10 +89,21 @@ _TRIGGER_WORKFLOW = "runtime-rebuild-trigger.yml"
 
 @dataclass(frozen=True)
 class RepoConfig:
-    """A repo to monitor and the PyPI package it publishes (None if not published)."""
+    """A repo to monitor and the PyPI package it publishes (None if not published).
+
+    ``release_synced`` records whether the repo's ``main`` is advanced by a
+    release (the release-synced-main policy: ``main`` IS the last release).
+    The lineage checks -- main-vs-tag, main-vs-released, dev-ahead-of-main,
+    release-train-stalled -- all presume that policy holds. On a repo where it
+    does not, they are not drift findings, they are a restatement of the
+    repo's design, and they can never be cleared. Set it False with a
+    ``release_synced_note`` rather than leaving a permanent false finding.
+    """
 
     repo: str
     pypi_package: str | None
+    release_synced: bool = True
+    release_synced_note: str = ""
 
 
 # Default monitor set. onex_change_control publishes nothing to PyPI, so its
@@ -104,7 +115,25 @@ DEFAULT_REPOS: tuple[RepoConfig, ...] = (
     RepoConfig("omnibase_spi", "omnibase-spi"),
     RepoConfig("omnibase_compat", "omnibase-compat"),
     RepoConfig("omnimarket", "omnimarket"),
-    RepoConfig("onex_change_control", None),
+    # OMN-18348: onex_change_control is NOT release-synced. It carries no
+    # release.yml on dev or on main (verified 2026-09-18 against both refs),
+    # and its `main` is a deliberately separate lineage -- the CODEOWNERS-gated
+    # grants anchor the prod-promotion gate resolves from, which is why
+    # compare/main...dev reports diverged (dev ahead 7019, main ahead 90)
+    # rather than a fast-forward. Nothing promotes dev to main there, so
+    # MAIN_BEHIND_RELEASED and DEV_AHEAD_OF_MAIN fired on every run since the
+    # monitor was built and could never be cleared by any release. The repo
+    # stays in the monitor set: its PyPI, override-drift and workflow-health
+    # checks still apply and still fire.
+    RepoConfig(
+        "onex_change_control",
+        None,
+        release_synced=False,
+        release_synced_note=(
+            "no release.yml on dev or main; main is a separate CODEOWNERS-gated "
+            "lineage (the prod-promotion grants anchor), not the last release"
+        ),
+    ),
 )
 
 
@@ -125,17 +154,25 @@ class DeployTargetConfig:
 # Scope is deliberately onex-dev only -- this monitor never touches or reasons
 # about prod. Extend this tuple (never hand-roll a parallel check) when another
 # repo/branch/workflow triple needs the same gap coverage.
+# OMN-18348: the workflow named here was RENAMED. `deploy-onex-dev.yml` became
+# `deploy-onex-staging.yml` in omninode_infra#789 (OMN-10854); the old file is
+# absent from both dev and main, and its last run of any kind was 2026-08-01.
+# GitHub still resolves the retired filename and serves its final runs, so the
+# monitor kept comparing onex-dev against a 2026-07-31 dispatch -- it would
+# have reported a ~7-week-stale P1 the moment its 403 was fixed. `onex-dev` on
+# the dev-system cluster is deployed by `deploy-onex-staging.yml`, which
+# re-applies k8s/onex-dev-overlay-dev on every push to dev.
 DEPLOY_TARGETS: tuple[DeployTargetConfig, ...] = (
     DeployTargetConfig(
         repo="omninode_infra",
         target="onex-dev",
         branch="dev",
-        workflow="deploy-onex-dev.yml",
+        workflow="deploy-onex-staging.yml",
         deploy_paths=(
             "k8s/onex-dev",
             "k8s/onex-dev-overlay-dev",
             "k8s/onex-dev-rbac",
-            ".github/workflows/deploy-onex-dev.yml",
+            ".github/workflows/deploy-onex-staging.yml",
             "scripts/post-deploy-verify.sh",
             "scripts/validate-deployment-env-vars.sh",
             "docker/onex-api",
@@ -261,7 +298,7 @@ def _workflow_last_run(
     """Last run of a workflow (any branch). exists=False when the workflow is absent."""
     data, err = _gh_api(
         f"repos/{_ORG}/{repo}/actions/workflows/{workflow}/runs?per_page=1",
-        jq=".workflow_runs[0] | {conclusion, created_at, status}",
+        jq=".workflow_runs[0] | {conclusion, created_at, status, id}",
     )
     if err is not None:
         if "Not Found" in err or "404" in err:
@@ -274,15 +311,37 @@ def _workflow_last_run(
         parsed = json.loads(str(data))
     except json.JSONDecodeError as exc:
         return None, f"{workflow} runs: invalid JSON: {exc}"
+    run_id = parsed.get("id")
+    failed_jobs: tuple[str, ...] = ()
+    if parsed.get("conclusion") == "failure" and run_id is not None:
+        # OMN-18348: which JOB failed decides whether the publish itself broke
+        # or something downstream of it did. Read it only when there is a
+        # failure to explain -- one extra API call per red release run.
+        failed_jobs, _ = _failed_job_names(repo, int(run_id))
     return (
         WorkflowRun(
             name=workflow,
             exists=True,
             conclusion=parsed.get("conclusion"),
             created_at=parsed.get("created_at"),
+            run_id=int(run_id) if run_id is not None else None,
+            failed_jobs=failed_jobs,
         ),
         None,
     )
+
+
+def _failed_job_names(repo: str, run_id: int) -> tuple[tuple[str, ...], str | None]:
+    """Names of the jobs in one workflow run that concluded ``failure``."""
+    data, err = _gh_api(
+        f"repos/{_ORG}/{repo}/actions/runs/{run_id}/jobs?per_page=100",
+        jq='.jobs[] | select(.conclusion == "failure") | .name',
+    )
+    if err is not None:
+        return (), f"run {run_id} jobs: {err}"
+    if not data:
+        return (), None
+    return tuple(line.strip() for line in str(data).splitlines() if line.strip()), None
 
 
 def _workflow_last_success(
@@ -373,6 +432,10 @@ def gather_deploy_facts(cfg: DeployTargetConfig) -> DeployFacts:
     errors: list[str] = []
 
     last_success, err = _workflow_last_success(cfg.repo, cfg.workflow)
+    # OMN-18348: a probe error means the monitor has NO facts about this
+    # target. That is a visibility gap, reported as its own PROBE_UNREADABLE
+    # verdict -- never as a MISSING_SUCCESSFUL_DEPLOY finding about the target.
+    last_success_readable = err is None and last_success is not None
     if err is not None:
         errors.append(err)
 
@@ -399,6 +462,7 @@ def gather_deploy_facts(cfg: DeployTargetConfig) -> DeployFacts:
         branch=cfg.branch,
         workflow=cfg.workflow,
         last_success=last_success,
+        last_success_readable=last_success_readable,
         branch_head_sha=branch_head_sha,
         branch_head_at=branch_head_at,
         deploy_affecting_paths_changed=deploy_affecting,
@@ -451,6 +515,8 @@ def gather_repo_facts(cfg: RepoConfig) -> RepoFacts:
         release_run=release_run,
         trigger_run=trigger_run,
         probe_errors=tuple(errors),
+        release_synced=cfg.release_synced,
+        release_synced_note=cfg.release_synced_note,
     )
 
 
@@ -471,13 +537,20 @@ def _resolve_friction_dir(explicit: str | None) -> Path:
 
 
 def emit_friction(report: DriftReport, friction_dir: Path) -> list[str]:
-    """Write one friction YAML per finding signature; return the paths written."""
-    if not report.findings:
+    """Write one friction YAML per finding/verdict signature; return the paths.
+
+    OMN-18348: blind verdicts get a record too. A surface the monitor cannot
+    read is a real, durable problem -- it is just a problem with the MONITOR,
+    and its record says so under its own code and signature rather than
+    manufacturing a ticket about the surface.
+    """
+    entries = (*report.findings, *report.blind_verdicts)
+    if not entries:
         return []
     friction_dir.mkdir(parents=True, exist_ok=True)
     occurred_at = datetime.now(tz=UTC).isoformat()
     written: list[str] = []
-    for finding in report.findings:
+    for finding in entries:
         event = {
             "event_type": "release_deploy_drift",
             "occurred_at": occurred_at,
@@ -519,6 +592,25 @@ def _render_human(report: DriftReport, friction_paths: list[str]) -> str:
             "No drift detected -- PyPI/tag/main/dev aligned, workflows healthy, "
             "deploy targets current."
         )
+    if report.blind_verdicts:
+        lines.append("")
+        lines.append(
+            f"BLIND VERDICTS ({len(report.blind_verdicts)}) -- surfaces the monitor "
+            "could not read (NOT findings about those surfaces):"
+        )
+        for verdict in report.blind_verdicts:
+            lines.append("")
+            lines.append(f"  [{verdict.severity}] {verdict.code} -- {verdict.repo}")
+            lines.append(f"      {verdict.summary}")
+            lines.append(f"      {verdict.detail}")
+    if report.lineage_skipped:
+        lines.append("")
+        lines.append(
+            f"LINEAGE CHECKS SKIPPED ({len(report.lineage_skipped)}) -- repos whose "
+            "main is not advanced by a release:"
+        )
+        for skipped in report.lineage_skipped:
+            lines.append(f"  - {skipped}")
     if report.probe_errors:
         lines.append("")
         lines.append(
@@ -552,6 +644,18 @@ def _report_to_dict(report: DriftReport, friction_paths: list[str]) -> dict[str,
             }
             for f in report.findings
         ],
+        "blind_verdicts": [
+            {
+                "code": v.code,
+                "severity": v.severity,
+                "repo": v.repo,
+                "signature": v.signature,
+                "summary": v.summary,
+                "detail": v.detail,
+            }
+            for v in report.blind_verdicts
+        ],
+        "lineage_skipped": list(report.lineage_skipped),
         "probe_errors": list(report.probe_errors),
         "friction_paths": friction_paths,
     }
