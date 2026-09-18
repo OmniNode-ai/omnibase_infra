@@ -313,6 +313,7 @@ class WiringHealthChecker:
             correlation_id=correlation_id,
             event_type="wiring-health-snapshot",
             source_tool="WiringHealthChecker",
+            tenant_id=None,
         )
         try:
             await self._event_bus.publish_envelope(

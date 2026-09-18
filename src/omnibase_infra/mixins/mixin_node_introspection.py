@@ -1733,6 +1733,7 @@ class MixinNodeIntrospection:
                     envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
                         payload=publish_event,
                         correlation_id=final_correlation_id,
+                        tenant_id=None,
                     )
                     await event_bus.publish_envelope(
                         # Why: Runtime wiring validates and narrows this payload shape before use.
@@ -1880,6 +1881,7 @@ class MixinNodeIntrospection:
                 envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
                     payload=heartbeat,
                     correlation_id=heartbeat.correlation_id,
+                    tenant_id=None,
                 )
                 await event_bus.publish_envelope(
                     # Why: Runtime wiring validates and narrows this payload shape before use.
@@ -2348,6 +2350,7 @@ class MixinNodeIntrospection:
                 envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
                     payload=ack_command,
                     correlation_id=correlation_id,
+                    tenant_id=None,
                 )
                 # Why: Runtime factory dispatch accepts this dynamic constructor shape.
                 await event_bus.publish_envelope(  # type: ignore[call-arg]

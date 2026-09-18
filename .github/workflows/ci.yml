@@ -479,6 +479,20 @@ jobs:
       - name: Check operation_match fan-out gate (OMN-16088)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.operation_match_fanout src/omnibase_infra
 
+      # OMN-16831 ruled item 2 (operator ruling 2026-08-28, option D). A producer
+      # records which tenant its event belongs to AT WRITE TIME; the projection
+      # tenant authority only verifies that claim and must never source one.
+      # `ModelEventEnvelope.tenant_id` defaults to None, so an omission and a
+      # deliberate "this family has no tenant" are byte-identical at the model
+      # and the declaration at the call site is the only thing separating them.
+      # Unenforced, that decayed exactly as expected: the gateway heartbeat, both
+      # dispatch re-materialization helpers and the projection terminal publisher
+      # each recorded a tenant somewhere and left the dimension off, and every one
+      # ended at a tenant-classified projection write refused fail-closed.
+      # SYNC with pre-commit hook 'envelope-tenant-dimension'.
+      - name: Check envelope tenant dimension gate (OMN-16831)
+        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.envelope_tenant_dimension src/omnibase_infra
+
       - name: Check type-ignore budget gate (OMN-10822)
         run: PYTHONPATH=src uv run python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
 

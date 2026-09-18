@@ -36,6 +36,7 @@ class EventBusLifecycleEventSink:
         envelope = ModelEventEnvelope[dict[str, object]](
             correlation_id=event.correlation_id,
             payload=event.model_dump(mode="json"),
+            tenant_id=None,
         )
         await self._event_bus.publish(
             self._lifecycle_topic,

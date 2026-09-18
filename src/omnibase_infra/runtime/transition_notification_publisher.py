@@ -325,6 +325,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 payload=notification,
                 correlation_id=notification.correlation_id,
                 source_tool=self._publisher_id,
+                tenant_id=None,
             )
 
             # Publish to event bus

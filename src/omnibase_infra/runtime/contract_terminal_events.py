@@ -421,6 +421,21 @@ def _is_already_envelope(body: Mapping[str, object]) -> bool:
     return bool(_ENVELOPE_MARKER_KEYS & set(body)) and "payload" in body
 
 
+def _terminal_body_tenant_id(body: dict[str, object]) -> str | None:
+    """The tenant a terminal body recorded, or ``None`` (OMN-16831 item 2).
+
+    This wrapper synthesizes an envelope around a terminal a producer published
+    as a bare body. The only attribution available here is the one that producer
+    wrote into the body itself, so it is READ rather than derived: a body that
+    recorded no tenant yields an envelope that records none, and the downstream
+    fail-closed refusal stays reachable (OMN-16831 AC2, OMN-16804 AC3).
+    """
+    candidate = body.get("tenant_id")
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate
+    return None
+
+
 def envelope_terminal_payload(
     *,
     topic: str,
@@ -481,6 +496,7 @@ def envelope_terminal_payload(
         payload=body,
         correlation_id=correlation_id,
         envelope_timestamp=datetime.now(UTC),
+        tenant_id=_terminal_body_tenant_id(body),
     )
     event_type = derive_event_type_from_topic(topic)
     if event_type is not None:

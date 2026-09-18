@@ -265,6 +265,7 @@ class ServiceFreshnessMonitor:
             correlation_id=generate_correlation_id(),
             event_type=event_type,
             source_tool="ServiceFreshnessMonitor",
+            tenant_id=None,
         )
         try:
             await self._event_bus.publish_envelope(envelope=envelope, topic=topic)

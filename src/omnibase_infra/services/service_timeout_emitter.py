@@ -588,6 +588,7 @@ class ServiceTimeoutEmitter:
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=event,
             correlation_id=correlation_id,
+            tenant_id=None,
         )
         await self._event_bus.publish_envelope(
             # Why: Runtime wiring validates and narrows this payload shape before use.
@@ -683,6 +684,7 @@ class ServiceTimeoutEmitter:
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=event,
             correlation_id=correlation_id,
+            tenant_id=None,
         )
         await self._event_bus.publish_envelope(
             # Why: Runtime wiring validates and narrows this payload shape before use.

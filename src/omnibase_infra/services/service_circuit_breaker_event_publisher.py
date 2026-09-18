@@ -101,6 +101,7 @@ class CircuitBreakerEventPublisher:
             envelope_timestamp=now,
             correlation_id=correlation_id if correlation_id else uuid4(),
             source_tool="circuit_breaker_event_publisher",
+            tenant_id=None,
         )
 
         try:

@@ -1032,6 +1032,18 @@ repos:
       # that does not exist cannot take a row; a shrink-only ratchet can, and every
       # OMN-16939 live victim was a baselined row. SYNC with the ci.yml step
       # 'Check no baseline refreeze (OMN-18013)'.
+      # OMN-16831 ruled item 2: a producer must SAY which tenant its event belongs
+      # to. `tenant_id=None` is the declaration for a family that has none; an
+      # omission is not, because the two are indistinguishable at the model.
+      # SYNC with the ci.yml step
+      # 'Check envelope tenant dimension gate (OMN-16831)'.
+      - id: envelope-tenant-dimension
+        name: Every event producer declares its tenant dimension (OMN-16831)
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.envelope_tenant_dimension src/omnibase_infra
+        language: system
+        files: ^src/omnibase_infra/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: no-baseline-refreeze
         name: A burned gate baseline may not come back (OMN-18013)
         entry: uv run --frozen python -m omnibase_infra.validators.no_baseline_refreeze .

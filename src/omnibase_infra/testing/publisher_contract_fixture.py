@@ -181,4 +181,5 @@ class PublisherContractCorpus:
             correlation_id=correlation_id or uuid4(),
             event_type=self.event_type_for(topic),
             source_tool=source_tool,
+            tenant_id=None,
         )

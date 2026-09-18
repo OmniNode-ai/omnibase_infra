@@ -935,6 +935,7 @@ class ServiceRuntimeHealthMonitor:
             correlation_id=event.correlation_id,
             event_type="runtime-health-check",
             source_tool="ServiceRuntimeHealthMonitor",
+            tenant_id=None,
         )
         try:
             await self._event_bus.publish_envelope(

@@ -847,6 +847,7 @@ class ServiceLlmEndpointHealth:
             correlation_id=correlation_id,
             event_type="llm-endpoint-health",
             source_tool="ServiceLlmEndpointHealth",
+            tenant_id=None,
         )
 
         try:

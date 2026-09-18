@@ -655,6 +655,16 @@ class ServiceGatewayForwarder:
                     "source_tenant_principal_id": identity.principal_id,
                 }
             ),
+            # OMN-16831 item 2: the heartbeat is the most attributable event
+            # the platform emits -- ``tenant_identity`` is bound at deploy
+            # time and is not client-writable -- and it recorded the tenant in
+            # the payload and in two metadata tags while leaving the DIMENSION
+            # off. ``envelope_tenant_identity`` (omnimarket) reads only the
+            # dimension, so producer and consumer sat on different fields. The
+            # payload copy stays: the OMN-14367 gateway seam and the OMN-14058
+            # downstream flow read it, and dropping it would trade this defect
+            # for that one.
+            tenant_id=identity.tenant_slug,
         )
         canonical_topic = next(
             topic
