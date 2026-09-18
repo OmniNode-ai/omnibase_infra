@@ -144,6 +144,19 @@ jobs:
       runtime_lane: ${{ steps.publish.outputs.runtime_lane }}
       source_repo: ${{ steps.publish.outputs.source_repo }}
       sibling_sha: ${{ steps.publish.outputs.sibling_sha }}
+      # OMN-18638. The deploy agent's correlation id for THIS rebuild, so the
+      # sibling receipt below can be joined to the agent job that produced it.
+      # OMN-18573 added this output to omnibase_infra's own caller and to
+      # `lab_pass_receipt.py`, but not here -- so every sibling receipt ever
+      # emitted carried `agent_command_id: null` while the id sat legible in the
+      # publisher's own output, and no pin bump could deliver the fix.
+      #
+      # Empty when nothing was published, which `parse_agent_command_id` reads
+      # as the honest "this run published no command". That is the fail-closed
+      # direction on purpose: the field is never filled from this workflow's run
+      # id or from the start command, because a correlation no agent job can be
+      # resolved by is worse than an absent one -- a reader would believe it.
+      correlation_id: ${{ steps.publish.outputs.correlation_id }}
 
     steps:
       # Into the workspace ROOT, so `./.github/actions/setup-python-uv` below
@@ -472,6 +485,11 @@ jobs:
           SIBLING_SHA: ${{ needs.trigger-rebuild.outputs.sibling_sha }}
           SOURCE_REPO: ${{ needs.trigger-rebuild.outputs.source_repo }}
           GIT_REF: ${{ needs.trigger-rebuild.outputs.git_ref }}
+          # OMN-18638: dereferenced, never interpolated into the run body -- the
+          # same script-injection rule the direct caller's emitters follow, and
+          # the reason the verdict below moved out of the `--check` string too.
+          CORRELATION_ID: ${{ needs.trigger-rebuild.outputs.correlation_id }}
+          SIBLING_REVISION_VERDICT: ${{ steps.converge.outcome == 'success' && 'ok' || 'fail' }}
         run: |
           set -euo pipefail
           uv run python scripts/ci/lab_pass_receipt.py emit \
@@ -479,8 +497,9 @@ jobs:
             --lane compose-dev \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --check "sibling_revision:${{ steps.converge.outcome == 'success' && 'ok' || 'fail' }}:check_lane_sibling_revision.py --repo $SOURCE_REPO --expect-revision $SIBLING_SHA against the omnibase-infra compose project, rebuilt at omnibase_infra $GIT_REF" \
+            --check "sibling_revision:${SIBLING_REVISION_VERDICT}:check_lane_sibling_revision.py --repo $SOURCE_REPO --expect-revision $SIBLING_SHA against the omnibase-infra compose project, rebuilt at omnibase_infra $GIT_REF" \
             --checks-json "${LAB_PASS_CHECKS}" \
+            --agent-command-id "${CORRELATION_ID}" \
             --out "${LAB_PASS_DIR}/receipt.json"
 
       # The zero-byte case `if-no-files-found: error` cannot see, since the

@@ -61,7 +61,27 @@ pytestmark = pytest.mark.unit
 OBSERVED_CORRELATION_ID = "29dfee72-1fc1-4702-bfd7-96a1534fc632"
 OBSERVED_SHA = "78bbba2f9b28cf11ef8dccf45e07a251381700d4"
 
-WORKFLOW = REPO_ROOT / ".github/workflows/runtime-rebuild-trigger.yml"
+# OMN-18638. BOTH workflows, because the OMN-18573 wiring landed in the direct
+# caller only and the reusable — the ONLY path a sibling repository's receipt is
+# emitted through — passed no ``--agent-command-id`` at any revision. A test that
+# parses one workflow cannot see a defect that lives in the other, which is
+# exactly how this reached a month of sibling receipts unnoticed.
+#
+# The value is the set of job names expected to emit. It is asserted exactly, so
+# a NEW emitter in either workflow turns this red rather than inheriting the
+# test's silence.
+EMITTING_JOBS: dict[Path, set[str]] = {
+    REPO_ROOT / ".github/workflows/runtime-rebuild-trigger.yml": {
+        "verify-lane-converged",
+        "verify-lab-overlay-converged",
+    },
+    # One emitter, not two: the reusable has no onex-lab-k3s job at all. The lab
+    # overlay is applied by omnibase_infra's own caller, so there is no second
+    # invocation here that could deliberately omit the argument (AC2).
+    REPO_ROOT / ".github/workflows/runtime-rebuild-trigger-reusable.yml": {
+        "verify-sibling-converged",
+    },
+}
 
 
 def _emit(tmp_path: Path, agent_command_id: str | None) -> dict:
@@ -167,8 +187,8 @@ def test_the_normaliser_refuses_anything_that_is_not_a_uuid(raw: str) -> None:
 # ---------------------------------------------------------------------------
 # The wiring, pinned. A normaliser no emitter calls changes nothing.
 # ---------------------------------------------------------------------------
-def _emit_steps() -> dict[str, dict]:
-    model = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+def _emit_steps(workflow: Path) -> dict[str, dict]:
+    model = yaml.safe_load(workflow.read_text(encoding="utf-8"))
     found: dict[str, dict] = {}
     for job_name, job in model["jobs"].items():
         for step in job.get("steps", []):
@@ -177,21 +197,48 @@ def _emit_steps() -> dict[str, dict]:
     return found
 
 
-def test_both_emitters_pass_the_correlation_id_from_the_job_output() -> None:
-    steps = _emit_steps()
-    assert set(steps) == {"verify-lane-converged", "verify-lab-overlay-converged"}, (
-        "a third emitter appeared in this workflow; decide whether it owes the "
-        "correlation id rather than inheriting this test's silence"
+@pytest.mark.parametrize("workflow", sorted(EMITTING_JOBS), ids=lambda p: p.name)
+def test_every_emitter_passes_the_correlation_id_from_the_job_output(
+    workflow: Path,
+) -> None:
+    steps = _emit_steps(workflow)
+    assert set(steps) == EMITTING_JOBS[workflow], (
+        f"the set of lab_pass_receipt emitters in {workflow.name} changed; "
+        "decide whether the new one owes the correlation id rather than "
+        "letting it inherit this test's silence"
     )
     for job_name, step in steps.items():
-        assert "--agent-command-id" in step["run"], job_name
+        assert "--agent-command-id" in step["run"], f"{workflow.name}:{job_name}"
         assert (
             "needs.trigger-rebuild.outputs.correlation_id"
             in step["env"]["CORRELATION_ID"]
-        ), job_name
+        ), f"{workflow.name}:{job_name}"
 
 
-def test_the_correlation_id_is_dereferenced_never_interpolated() -> None:
+@pytest.mark.parametrize("workflow", sorted(EMITTING_JOBS), ids=lambda p: p.name)
+def test_the_publishing_job_exports_the_correlation_id_as_an_output(
+    workflow: Path,
+) -> None:
+    """The env reference above resolves to nothing unless the job declares it.
+
+    A `needs.<job>.outputs.<name>` that the producing job never declares is not
+    an error in Actions — it evaluates to the empty string, which
+    ``parse_agent_command_id`` reads as the honest "no command was published".
+    So a missing output would reproduce the exact null this ticket exists to
+    fix, silently and with every other assertion still green.
+    """
+    model = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+    outputs = model["jobs"]["trigger-rebuild"].get("outputs", {})
+    assert "correlation_id" in outputs, workflow.name
+    assert "steps.publish.outputs.correlation_id" in outputs["correlation_id"], (
+        workflow.name
+    )
+
+
+@pytest.mark.parametrize("workflow", sorted(EMITTING_JOBS), ids=lambda p: p.name)
+def test_the_correlation_id_is_dereferenced_never_interpolated(
+    workflow: Path,
+) -> None:
     """The same script-injection rule the evidence string already follows."""
-    for job_name, step in _emit_steps().items():
-        assert "${{" not in step["run"], job_name
+    for job_name, step in _emit_steps(workflow).items():
+        assert "${{" not in step["run"], f"{workflow.name}:{job_name}"
