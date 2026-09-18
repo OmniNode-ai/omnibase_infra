@@ -380,7 +380,10 @@ def test_append_in_a_live_row_shape_is_accepted(tmp_path: Path) -> None:
     # cost sentence for the same reason the claim-token fixtures do -- this test is
     # about the ROW-SHAPE guard, and a row refused earlier in the chain never
     # reaches it.
-    priced = "est ~2 lane-hours; displaces nothing; (OMN-17403)"
+    # OMN-18766: the same three CLAIM rows also carry actor=, because a claim row
+    # must name its executor and one that does not is refused ahead of the
+    # row-shape guard this test is actually about.
+    priced = "actor=claude:opus5 est ~2 lane-hours; displaces nothing; (OMN-17403)"
     for index, payload in enumerate(
         (
             _live_stamp(

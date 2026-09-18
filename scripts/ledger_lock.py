@@ -2060,6 +2060,161 @@ def claim_row_lane(line: str) -> str:
     return match.group(1) if match else "<no lane= field>"
 
 
+# --- OMN-18766: a CLAIM row names the executor that pays for it ------------
+#
+# The ledger records what a claim COSTS (the rule-4 cost sentence, OMN-15649 /
+# OMN-18554) and what it COST (the friction row, OMN-18274). Until this gate it
+# did not record WHO paid, so neither number could be compared across
+# executors.
+#
+# Measured over the live ledger plus its two most recent archive splits,
+# 2026-09-11 -> 2026-09-18, 4,293 dated rows: 613 of 1,163 distinct lanes (53%)
+# and 2,648 of the rows (62.1%) carry no `actor=` and no `model=` field
+# anywhere, and their lane names give no executor hint either. A codex-vs-claude
+# throughput comparison drawn from that ledger covers 12.3% of its rows.
+#
+# Two properties of this gate are deliberate and each is load-bearing:
+#
+#   * The accepted value is FREE-FORM, not an enum. The live vocabulary
+#     includes 40+ distinct `actor=codex:/root/<session>` values, one per codex
+#     session; a closed set would have refused every one of them and the field
+#     would have been abandoned rather than filled.
+#   * A PLACEHOLDER is refused. `actor=unknown` satisfies a presence check and
+#     records nothing, so a gate that accepted it would convert a missing field
+#     into a filled one and make the measurement look answered. The live ledger
+#     already carries `model=none` and a bare `model=,`, which is how that
+#     failure starts.
+#
+# Scope: this is NOT window-scoped. The rule-4 cost gate is calendar-gated on
+# the goal file's freshness because a price needs a denominator; attribution is
+# not a pricing question and holds whether or not that window is open.
+ATTRIBUTION_FIELD_PATTERN = re.compile(r"\b(actor|model)\s*=\s*([^\s|]*)")
+
+# Trailing punctuation the live rows carry around a value (`model=glm-5.3`,`
+# and `model=gemini-2.5-flash,` are both real specimens), plus the quoting one
+# lane wrote. Stripped before the placeholder comparison so a value is judged
+# on what it names, never on how the row punctuated it.
+ATTRIBUTION_VALUE_STRIP = "`'\",;.:()[]{}<>"
+
+# A value that satisfies the letter of the field and records nothing. Compared
+# case-folded against the stripped value.
+ATTRIBUTION_PLACEHOLDERS = frozenset(
+    {
+        "",
+        "-",
+        "--",
+        "?",
+        "??",
+        "n/a",
+        "na",
+        "none",
+        "nil",
+        "null",
+        "tbd",
+        "tbc",
+        "unknown",
+        "x",
+    }
+)
+
+# Read from the live ledger on 2026-09-18 (`grep -ohE '\bactor=[^ |]+'` over the
+# ledger and its archive splits, ranked by count) rather than invented here, so
+# the refusal tells a lane what its peers actually write. The codex form is
+# shown with a placeholder session segment because the real values are one per
+# session; every other entry is a verbatim live value.
+ATTRIBUTION_VOCABULARY: tuple[str, ...] = (
+    "actor=codex",
+    "actor=codex:/root/<session>",
+    "actor=claude",
+    "actor=claude-sonnet",
+    "actor=claude:opus5",
+    "actor=claude:opus5:subagent",
+    "actor=claude:subagent",
+    "actor=claude:sonnet5",
+    "actor=claude:sonnet5:subagent",
+    "model=claude-opus-5",
+    "model=claude-sonnet-5",
+    "model=qwen3.8",
+    "model=glm-5-turbo",
+    "model=gemini-2.5-flash",
+)
+
+
+def normalize_attribution_value(value: str) -> str:
+    """The value a row NAMES, stripped of the punctuation the row wrapped it
+    in and case-folded. Never used to rewrite a row — only to decide whether
+    the row named an executor at all."""
+    return value.strip().strip(ATTRIBUTION_VALUE_STRIP).strip().casefold()
+
+
+def executor_attribution(line: str) -> str | None:
+    """The first substantive `actor=`/`model=` value on `line`, or None.
+
+    "Substantive" excludes the placeholder set: a row may carry
+    `actor=none` and still name no executor, and treating that as an answer is
+    the failure this gate exists to prevent. A row carrying BOTH a placeholder
+    and a real value (`actor=none | model=claude-opus-5`) is attributed — the
+    real value is the answer and the placeholder is noise."""
+    for match in ATTRIBUTION_FIELD_PATTERN.finditer(line):
+        raw_value = match.group(2)
+        if normalize_attribution_value(raw_value) not in ATTRIBUTION_PLACEHOLDERS:
+            return raw_value.strip().strip(ATTRIBUTION_VALUE_STRIP).strip()
+    return None
+
+
+def attribution_refusal_for_line(line: str) -> str | None:
+    """The refusal reason for one claim row, or None when it names an
+    executor. Callers decide what to do with it; this function never prints,
+    never writes, and never inspects a non-claim row."""
+    if not is_rule4_claim_row(line):
+        return None
+    if executor_attribution(line) is not None:
+        return None
+    present = [
+        f"{match.group(1)}={match.group(2) or '<empty>'}"
+        for match in ATTRIBUTION_FIELD_PATTERN.finditer(line)
+    ]
+    if present:
+        cause = (
+            "carries only placeholder attribution ("
+            + ", ".join(present)
+            + "), which names no executor"
+        )
+    else:
+        cause = "carries neither an actor= nor a model= field"
+    return (
+        f"OMN-18766 executor attribution: claim row (lane={claim_row_lane(line)}) "
+        f"{cause}. Add actor=<who ran this> or model=<the model id> to the row. "
+        "Accepted vocabulary, read from the live ledger: "
+        + ", ".join(ATTRIBUTION_VOCABULARY)
+        + ". The value is free-form — a codex session writes its own "
+        "actor=codex:/root/<session> — but a placeholder ("
+        + ", ".join(sorted(p for p in ATTRIBUTION_PLACEHOLDERS if p))
+        + ") is refused, because a field that records nothing is worse than an "
+        "absent one: it makes the measurement look answered."
+    )
+
+
+def validate_executor_attribution(payload: str) -> str | None:
+    """Payload-level gate for `--append`. Returns a refusal naming every
+    offending row, or None.
+
+    Deliberately runs BEFORE the rule-4 window resolution: an unresolvable or
+    closed cost-sentence window says nothing about whether a row named its
+    executor, and a gate that went inert with its neighbour would be off on
+    exactly the days the neighbour is off."""
+    reasons = [
+        reason
+        for line in payload.splitlines()
+        if (reason := attribution_refusal_for_line(line.rstrip("\n"))) is not None
+    ]
+    if not reasons:
+        return None
+    if len(reasons) == 1:
+        return reasons[0]
+    return " || ".join(f"[row {i + 1}] {reason}" for i, reason in enumerate(reasons))
+
+
 # The EN DASH in the range alternation is load-bearing, not a typo: the live
 # ledger carries both "est ~3-4 lane-hours" and "est ~3–4 lane-hours", and
 # dropping it would silently stop pricing every row written with the second.
@@ -2586,6 +2741,14 @@ def validate_claim_payload(
     plan's front matter, via resolve_enforcement_window) to be open for
     "now"; outside an open window, claims land without a cost sentence.
     """
+    # OMN-18766: attribution is checked FIRST, ahead of every window-scoped
+    # check below. Whether the cost-sentence window resolves says nothing about
+    # whether a row named its executor, and a gate that went inert alongside its
+    # neighbour would be off on exactly the days the neighbour is off.
+    attribution_refusal = validate_executor_attribution(payload)
+    if attribution_refusal is not None:
+        return payload, attribution_refusal
+
     # OMN-18554: an unresolvable window is its own outcome, checked before the
     # enforce/do-not-enforce split. It refuses claim rows outright (rather than
     # running checks a gate that cannot read its own input has no standing to
@@ -2738,6 +2901,15 @@ def enforce_command_claims(ledger: Path, before: str, existed_before: bool) -> b
             refusals.append(
                 f"(OMN-17427 clock guard: {clock_reason}): {line.strip()[:120]}"
             )
+
+    # OMN-18766: same reason r5 gave for the window parity below — a gate one
+    # write verb honours and the other narrates is not a gate. Collected here,
+    # ahead of the window short-circuit, because attribution is not
+    # window-scoped on the `--append` path either.
+    for line in added_lines:
+        attribution_reason = attribution_refusal_for_line(line)
+        if attribution_reason is not None:
+            refusals.append(f"({attribution_reason}): {line.strip()}")
 
     # OMN-18554: identical window handling to --append, for the same reason r5
     # gave — a gate one verb honours and the other narrates is not a gate. An
