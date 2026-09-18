@@ -148,7 +148,50 @@ LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
     # 09:00:53Z and the lane was still running that squash's PARENT at 11:15Z,
     # with tenant creation on the lab impossible throughout.
     "docker/onex-api/**",
+    # OMN-18671: the dependency manifests and locks the runtime image is BUILT
+    # from. A floor bump IS the change, not a description of one.
+    #
+    # MEASURED: omnimarket#2629 (``d4fb6ddd``, 2026-09-18T08:11:09Z) raised the
+    # omnibase-infra floor 0.38.30 -> 0.38.31, which swaps the installed lab
+    # binding table (Qwen3.6-35B -> Qwen3.8-27B). Run 35323097013 reported "no
+    # runtime_change label or runtime path changes detected", skipped verify and
+    # announce, and produced no lab-pass receipt for that sha -- the exact-name
+    # query returns 0 against a positive control of 4.
+    #
+    # The canonical classifier is right to miss these for its own question. Its
+    # list is the required deploy gate on four repositories, so carrying these
+    # there would demand deploy evidence of every dependency bump in all four;
+    # and because this trigger pins omniclaude's ``main``, which advances only
+    # on a release fast-forward, a widening there would not reach this trigger
+    # until a release cut. This file is this repository's own and takes effect
+    # on merge.
+    #
+    # Root-anchored deliberately, never ``**/pyproject.toml``: omnimarket
+    # carries ``experiments/adk_eval/track_a_adk/pyproject.toml``, which no
+    # runtime image installs from, and every match here costs a full dev-lane
+    # rebuild. The three repositories that publish through this trigger --
+    # omnibase_infra, omnimarket, omninode_infra -- all declare their runtime
+    # dependencies in a root ``pyproject.toml`` with a root ``uv.lock``.
+    # omninode_infra's ``docker/onex-api/requirements*.txt`` are already covered
+    # by the ``docker/onex-api/**`` entry above.
+    # Deliberately NOT ``scripts/deploy-agent/pyproject.toml`` or its lock.
+    # OMN-18200 weighed the deploy agent's subtree and admitted two named
+    # directories rather than opening ``scripts/deploy-agent/**``, pinning the
+    # exclusion in tests/scripts/test_trigger_deploy_agent_source_omn18200.py.
+    # The agent is a systemd unit on the lab host, not a layer of the lane
+    # image, so its manifests are a different argument from the three
+    # repository roots above. Overturning that decision belongs to a ticket
+    # that makes it, not to this one -- stated as a residual rather than taken.
+    "pyproject.toml",
+    "uv.lock",
 )
+
+#: What a matched path is attributed to when no pattern in this module claims
+#: it -- i.e. the canonical deploy-gate classifier matched it. Re-deriving WHICH
+#: canonical pattern matched would mean a second implementation of that
+#: repository's matcher here, which is the divergence this module exists to
+#: prevent, so the SOURCE is named and the pattern is not guessed.
+CANONICAL_CLASSIFIER_SOURCE = "canonical-deploy-gate"
 
 
 def _matches_pattern(path: str, pattern: str) -> bool:
@@ -191,6 +234,35 @@ def find_lane_state_paths(changed_files: list[str]) -> list[str]:
         ):
             hits.append(candidate)
     return hits
+
+
+def attribute_runtime_paths(runtime_paths: list[str]) -> list[tuple[str, str]]:
+    """Pair each matched path with the pattern that claimed it (OMN-18671).
+
+    The decision line used to print the matched FILES only, which says that a
+    rebuild was triggered but not on what grounds. When a merge is classified
+    runtime-affecting for a reason nobody expected -- or, as in omnimarket#2629,
+    when it is NOT and should have been -- the pattern is the fact that settles
+    it, and reading it out of the run log beats re-deriving it by hand.
+
+    A path no pattern here claims came from the canonical deploy-gate classifier
+    and is attributed to ``CANONICAL_CLASSIFIER_SOURCE``. The first matching
+    pattern wins, so the attribution is stable under list order rather than
+    under dict iteration.
+    """
+    attributed: list[tuple[str, str]] = []
+    for path in runtime_paths:
+        pattern = next(
+            (p for p in LANE_STATE_PATH_PATTERNS if _matches_pattern(path, p)),
+            CANONICAL_CLASSIFIER_SOURCE,
+        )
+        attributed.append((path, pattern))
+    return attributed
+
+
+def format_runtime_path_attribution(attributed: list[tuple[str, str]]) -> str:
+    """Render the attribution for one log line: ``path <- pattern`` per hit."""
+    return ", ".join(f"{path} <- {pattern}" for path, pattern in attributed)
 
 
 def classify_runtime_paths(

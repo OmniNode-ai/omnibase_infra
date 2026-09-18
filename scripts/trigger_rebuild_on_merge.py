@@ -735,6 +735,13 @@ _runtime_change_classifier = _load_runtime_change_classifier_module()
 LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
     _runtime_change_classifier.LANE_STATE_PATH_PATTERNS  # type: ignore[attr-defined]
 )
+CANONICAL_CLASSIFIER_SOURCE: str = (
+    _runtime_change_classifier.CANONICAL_CLASSIFIER_SOURCE  # type: ignore[attr-defined]
+)
+attribute_runtime_paths = _runtime_change_classifier.attribute_runtime_paths  # type: ignore[attr-defined]
+format_runtime_path_attribution = (
+    _runtime_change_classifier.format_runtime_path_attribution  # type: ignore[attr-defined]
+)
 _matches_pattern = _runtime_change_classifier._matches_pattern  # type: ignore[attr-defined]
 find_lane_state_paths = _runtime_change_classifier.find_lane_state_paths  # type: ignore[attr-defined]
 load_runtime_path_classifier = (
@@ -1146,12 +1153,16 @@ def main(
     # undelivered, so wording it as "Redeploy triggered" made an intent read as
     # a receipt. The only publication evidence is the final "Published
     # redeploy-start ..." line, which carries the broker-assigned coordinates.
+    # OMN-18671: name the PATTERN, not only the file. A run log that says only
+    # which files matched cannot answer why a merge was classified
+    # runtime-affecting -- or, as in omnimarket#2629, settle why one was not.
     click.echo(
         f"Runtime change detected (delivery NOT yet confirmed): "
         f"runtime_lane={runtime_lane} source_branch={base_branch} "
         f"source_repo={source_repo} source_sha={source_sha} "
         f"git_ref={publish_ref} correlation_id={corr_id} labels={label_list} "
-        f"files_matched={runtime_paths}"
+        f"files_matched={runtime_paths} "
+        f"matched_by=[{format_runtime_path_attribution(attribute_runtime_paths(runtime_paths))}]"
     )
 
     if dry_run:
