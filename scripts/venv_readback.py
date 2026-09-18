@@ -255,6 +255,41 @@ def _is_omni_internal(name: str) -> bool:
     )
 
 
+def _declared_floor(requirement: object) -> str | None:
+    """The lowest version a requirement admits, or None if it sets no minimum.
+
+    Only the FLOOR is asserted, never the ceiling, and that is a deliberate
+    boundary rather than an omission. ``[tool.uv] override-dependencies``
+    exists precisely to raise a ceiling a lower-layer artifact declared: on
+    2026-09-18 omnibase-infra 0.38.32 declared ``omnibase-spi==0.23.3`` while
+    the venv correctly carried 0.23.4, because omniclaude overrides that pin
+    to ``>=0.23.1,<0.24.0``. Asserting the ceiling would fire on every
+    sanctioned override, make this readback permanently red on a correct venv,
+    and get itself routed around -- the failure mode rule 5 warns about from
+    the other direction.
+
+    An override raises a ceiling; it never lowers a floor. So the floor is the
+    half that stays assertable, and it is the half the live defect violated
+    (omnimarket declaring ``omnibase-infra>=0.38.31`` against an installed
+    0.38.30).
+    """
+    specifier = getattr(requirement, "specifier", None)
+    if specifier is None:
+        return None
+    floors: list[str] = []
+    for spec in specifier:
+        if spec.operator in (">=", "==", "===", "~=", ">"):
+            floors.append(spec.version.rstrip("*").rstrip("."))
+    if not floors:
+        return None
+    try:
+        from packaging.version import Version
+
+        return str(max(floors, key=Version))
+    except (ImportError, ValueError):
+        return floors[0]
+
+
 def packaged_floor_rows(
     installed: dict[str, dict[str, object]],
 ) -> list[ReadbackRow]:
@@ -330,11 +365,17 @@ def packaged_floor_rows(
                 {"extra": ""}
             ):
                 continue
+            floor = _declared_floor(requirement)
+            if floor is None:
+                # A specifier with no lower bound (``<0.39.0`` alone) says
+                # nothing about a minimum, so there is nothing to assert.
+                continue
             dependency = normalize_name(requirement.name)
             dep_facts = installed.get(dependency, {})
             dep_version = dep_facts.get("version")
             row = classify_sibling(
-                raw, dep_version if isinstance(dep_version, str) else None
+                f"{requirement.name}>={floor}",
+                dep_version if isinstance(dep_version, str) else None,
             )
             # Re-subject the row so it names WHO declared the floor. Without
             # that, a reader sees a version complaint and cannot tell which
