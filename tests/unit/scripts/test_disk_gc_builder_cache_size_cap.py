@@ -196,19 +196,23 @@ class TestBuilderCacheSizeCap:
         )
 
     def test_primary_prune_passes_all(self, tmp_path: Path) -> None:
-        """`--all` is load-bearing on a containerd-snapshotter host, not aggression.
+        """`--all` widens the prune's scope to internal/frontend images.
 
-        .201 runs `io.containerd.snapshotter.v1`, so build-cache records share the
-        content store with image layers and a DEFAULT builder prune excludes every
-        record an existing image references. Measured live 2026-09-18:
-        `docker builder prune --force --max-used-space 200GB` WITHOUT `--all`
-        reclaimed **0B at exit 0**, twice, while `buildx du` reported 655-678 GB
-        reclaimable (ROLLING_WORK_LEDGER.md:3932, :3933).
+        CORRECTION to this test's first revision, which claimed `--all` was
+        load-bearing because a default prune excludes image-referenced records.
+        That was wrong. On this host `docker builder prune` resolves to
+        `docker buildx prune`, where `-a, --all` reads "Include internal/frontend
+        images" -- a scope modifier that reads like a force flag, not the classic
+        CLI's "remove all unused build cache".
 
-        A correct cap flag without `--all` is a silent no-op on this host -- the
-        worst shape a disk-pressure remedy can take, because a caller reading only
-        the exit status records a successful prune that freed nothing. This test
-        exists so a future "that looks too aggressive" edit is RED.
+        A third approved prune carrying `--all` also reclaimed **0B** (ledger
+        :4054-:4060), because `buildx du` reads Shared 723.5GB of Total 750GB and
+        no builder prune can return content shared into the image store.
+
+        `--all` is still asserted because widening a scheduled GC to internal and
+        frontend images is correct, and dropping it would narrow the prune for no
+        reason -- but it buys scope, not reclaim, and this test no longer claims
+        otherwise.
         """
         _, _, recorded = _run(tmp_path)
         primary = _builder_prunes(recorded)[0]

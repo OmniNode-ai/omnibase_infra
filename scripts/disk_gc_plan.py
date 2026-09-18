@@ -103,6 +103,55 @@ PR_STATE_UNKNOWN = "unknown"  # lookup error or PR number not found → keep
 # size string. Overridable per host via keep-list `builder_cache_max_size`.
 DEFAULT_BUILDER_CACHE_MAX_SIZE = "100GB"
 
+# OMN-16367 (DoD item 2): build-stamped tag shapes for per-sha image families.
+# Every shape here was read off .201 on 2026-09-18, not invented:
+#   20260918T111918Z-e49dea8f   deploy agent, <stamp>-<sha>
+#   ffd61901-20260918T111918Z   deploy agent, <sha>-<stamp>
+#   sha-ffd6190                 bare sha- tag
+#   dev-sha-ffd6190             prefixed sha- tag (ECR)
+#   ffd619017106...1222aa6      bare 40-hex content tag (ECR)
+#
+# DELIBERATELY NOT MATCHED: the loose `<word>-<hex>` shape (`main-f3d4029`,
+# `runtime-fc61f41242dcc01b`). It is a per-sha tag too, but a pattern that broad
+# would also match ordinary meaningful tags, and an unmatched tag simply means
+# KEEP -- the safe direction. Narrow it in, never out.
+_STAMP_SHA_TAG_RE = re.compile(r"^\d{8}T\d{6}Z?-[0-9a-f]{7,40}$")
+_SHA_STAMP_TAG_RE = re.compile(r"^[0-9a-f]{7,40}-\d{8}T\d{6}Z?$")
+_PREFIXED_SHA_TAG_RE = re.compile(r"^[A-Za-z0-9._-]+-sha-[0-9a-f]{6,40}$")
+_BARE_SHA40_TAG_RE = re.compile(r"^[0-9a-f]{40}$")
+
+# How many newest generations of a per-sha family to retain, and the floor below
+# which nothing is reaped however superseded it is. The floor is in HOURS, not
+# days: the deploy agent rebuilds roughly hourly, so a day-scale floor keeps ~72
+# generations permanently ineligible and a keep-newest-N window never bites.
+DEFAULT_GENERATION_KEEP = 3
+DEFAULT_GENERATION_MIN_AGE_HOURS = 6
+
+
+def _is_build_stamped_tag(tag: str) -> bool:
+    """True if the tag is a per-build artifact rather than a meaningful pointer.
+
+    Moving pointers (`dev`, `main`), release names and the keep tags all fail this
+    check and are therefore never reaped by the generation rule.
+    """
+    return bool(
+        _STAMP_SHA_TAG_RE.match(tag)
+        or _SHA_STAMP_TAG_RE.match(tag)
+        or _SHA_TAG_RE.match(tag)
+        or _PREFIXED_SHA_TAG_RE.match(tag)
+        or _BARE_SHA40_TAG_RE.match(tag)
+    )
+
+
+def _is_generation_bounded_repo(repo: str, patterns: list[str]) -> bool:
+    """Substring match, same convention as keep_image_repos.
+
+    Opt-in by repo: a repo nobody listed keeps its previous behaviour entirely.
+    This is what holds the governed stability / judge / lakshman lanes out of
+    scope structurally rather than by a name check that could drift.
+    """
+    return any(pattern and pattern in repo for pattern in patterns)
+
 
 def _parse_created_at(value: str, now: datetime) -> float:
     """Return age in days for a docker CreatedAt string. Unparseable → 0.0 (treat as new → keep)."""
@@ -251,6 +300,17 @@ def build_plan(
     builder_cache_max_size: str = str(
         keep_list.get("builder_cache_max_size", DEFAULT_BUILDER_CACHE_MAX_SIZE)
     )
+    # OMN-16367 DoD item 2: per-sha families to bound by generation count.
+    # Empty list (the default) is a real off switch -- nothing changes.
+    generation_bounded_repos: list[str] = (
+        keep_list.get("generation_bounded_repos", []) or []
+    )
+    generation_keep: int = int(
+        keep_list.get("generation_keep", DEFAULT_GENERATION_KEEP)
+    )
+    generation_min_age_hours: float = float(
+        keep_list.get("generation_min_age_hours", DEFAULT_GENERATION_MIN_AGE_HOURS)
+    )
 
     remove_image_ids: list[str] = []
     kept_reasons: dict[str, str] = {}
@@ -263,6 +323,9 @@ def build_plan(
 
     # Group superseded candidates per repo so we can keep the N newest.
     superseded_by_repo: dict[str, list[tuple[float, str]]] = {}
+    # OMN-16367: separate bucket, because this class is bounded by GENERATION
+    # COUNT on an hours-scale floor rather than by the day-scale min_age_days.
+    generations_by_repo: dict[str, list[tuple[float, str]]] = {}
 
     for img in images:
         image_id = img.get("ID", "") or img.get("Id", "")
@@ -313,6 +376,31 @@ def build_plan(
             # sha-* tag: no PR number to look up; age-based path only.
             # Fall through to normal age/generation logic below.
 
+        # --- Generation-bounded per-sha families (OMN-16367, DoD item 2) ---
+        # Placed BEFORE the day-scale age gate on purpose. At the deploy agent's
+        # roughly-hourly cadence every generation is younger than min_age_days,
+        # so the gate below would keep all of them -- which is precisely why 60
+        # live generations of onex-lab/omninode-runtime (219.3 GB) existed on
+        # 2026-09-18. keep_image_tags and protect_running are both checked ABOVE
+        # this point and still win.
+        if (
+            generation_bounded_repos
+            and repo
+            and repo != "<none>"
+            and tag
+            and tag != "<none>"
+            and _is_generation_bounded_repo(repo, generation_bounded_repos)
+            and _is_build_stamped_tag(tag)
+        ):
+            if age * 24.0 < generation_min_age_hours:
+                kept_reasons[image_id] = (
+                    f"younger than generation_min_age_hours "
+                    f"({age * 24.0:.1f}h<{generation_min_age_hours}h)"
+                )
+                continue
+            generations_by_repo.setdefault(repo, []).append((age, image_id))
+            continue
+
         # --- Age gate (applies to all remaining images) ---
 
         if age < min_age_days:
@@ -338,6 +426,18 @@ def build_plan(
         # KEEP. We only reap explicitly-tracked (keep_image_repos) superseded
         # generations and dangling images, never random third-party images.
         kept_reasons[image_id] = "repo not in keep_image_repos (conservative keep)"
+
+    # Per-sha families: keep the newest `generation_keep`, reap the rest.
+    for repo, gen_entries in generations_by_repo.items():
+        gen_entries.sort(key=lambda e: e[0])  # newest first (smallest age first)
+        for idx, (_age, image_id) in enumerate(gen_entries):
+            if idx < generation_keep:
+                kept_reasons[image_id] = (
+                    f"newest {generation_keep} generation(s) of per-sha family "
+                    f"'{repo}' (rollback headroom)"
+                )
+            else:
+                remove_image_ids.append(image_id)
 
     # Per-repo retention: keep the newest `keep_generations`, mark the rest for removal.
     for repo, entries in superseded_by_repo.items():

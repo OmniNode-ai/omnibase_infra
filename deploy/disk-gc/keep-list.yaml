@@ -76,3 +76,42 @@ min_age_days: 3
 # agent already models a cold cache (COLD_CACHE_MULTIPLIER in
 # deploy_agent/host_conditions.py) and widens its ceiling accordingly.
 builder_cache_max_size: "100GB"
+# OMN-16367 (DoD item 2) — generation-bounded retention for per-sha image families.
+#
+# WHY: measured on .201 on 2026-09-18, the disk is held by the deploy agent's
+# per-sha tags, rebuilt roughly hourly and never reaped:
+#
+#     60 images   219.3 GB   onex-lab/omninode-runtime
+#    179 images   205.1 GB   ECR omnicloud/core
+#     93 images   106.3 GB   onex-lab/omnicloud-core
+#
+# Two planner defects let that happen, and both are fixed by these three keys:
+#   1. A repo matching no keep_image_repos substring fell through to a
+#      conservative permanent KEEP, so omnicloud/core, omnicloud-core,
+#      omninode-cloud-migrate and omniweb grew without bound (~408 images).
+#   2. Repos that DID match were still gated behind min_age_days: 3, and at an
+#      hourly cadence ~72 generations are always too young for a keep-newest-N
+#      window to bite. Hence the hours-scale floor below.
+#
+# It is NOT the build cache and NOT CI proof images. Three approved builder
+# prunes reclaimed 0B (buildx du reads Shared 723.5GB of Total 750GB — shared
+# with image layers, unreturnable while those images exist), and exactly 3
+# proof-pattern images exist host-wide because the compose teardown's
+# `--rmi local` genuinely works.
+#
+# SAFETY: opt-in twice over. A repo not listed here is untouched, and a tag that
+# is not build-stamped (`dev`, `main`, a release name, anything in
+# keep_image_tags) is untouched. Both failure directions land on KEEP. The
+# governed stability / judge / lakshman lanes are held out of scope structurally
+# — their repo names match nothing below.
+generation_bounded_repos:
+  - onex-lab/
+  - omnicloud/core
+  - omninode-cloud-migrate
+  - omniweb
+# Newest generations retained per family. Never below 2: the deploy agent needs a
+# rollback target, and the current generation is one of the N.
+generation_keep: 3
+# Floor in HOURS. Nothing younger is reaped however superseded. Hours, not days,
+# is the whole point — see defect 2 above.
+generation_min_age_hours: 6
