@@ -51,3 +51,28 @@ superseded_image_keep_generations: 2
 # Age threshold (days) below which NOTHING is removed, even dangling images.
 # Conservative: a just-built image is never reaped.
 min_age_days: 3
+# OMN-16367 — CEILING on retained BuildKit build cache, as a docker-parseable
+# size string handed to `docker builder prune --max-used-space`.
+#
+# WHY a size cap and not an age filter: on 2026-09-18 `docker buildx du` on .201
+# reported 749.7 GB across 9,183 records, 100% reclaimable, while the hourly GC
+# reclaimed kilobytes. `until=` filters on LAST ACCESSED, and every large record
+# (the 1.47 GB /app/.venv layer, the torch/uv base) is refreshed by the next
+# proof build's cache hit, so the big records were never eligible. An age filter
+# is structurally incapable of bounding this cache.
+#
+# Sized against the lab's working set, NOT against the 3.6 TB volume: BuildKit's
+# own default derives a 341.8 GiB permanent floor from disk size, which is
+# untenable beside 674 GB of volumes and the containerd layer store.
+#
+# The matching daemon-level standing ceiling is the fragment
+# deploy/disk-gc/daemon-builder-gc.json (committed, NOT applied — applying it
+# needs a dockerd reload that bounces every lane, so it is the operator's
+# window). Keep the two numbers in step; a test fails if they drift. The apply
+# procedure and the two flag traps are the knowledge-base-internal runbook
+# runbooks/2026-09-18-buildkit-cache-ceiling-201.md.
+#
+# Lowering this makes the next build colder, never less correct. The deploy
+# agent already models a cold cache (COLD_CACHE_MULTIPLIER in
+# deploy_agent/host_conditions.py) and widens its ceiling accordingly.
+builder_cache_max_size: "100GB"

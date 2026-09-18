@@ -100,6 +100,12 @@ fi
 # Honor min_age via docker's own filter so we don't drop a cache layer from a build
 # that's seconds old.
 MIN_AGE_DAYS="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["min_age_days"])')"
+# OMN-16367: the builder-cache CEILING, from the keep-list via the planner.
+BUILDER_CACHE_MAX_SIZE="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["builder_cache_max_size"])')"
+# The age fallback is expressed in HOURS. Name and unit must agree: the
+# pre-OMN-16367 line interpolated MIN_AGE_DAYS straight into `until=...h0m0s`,
+# so `min_age_days: 3` silently meant THREE HOURS while the log said "3d".
+MIN_AGE_HOURS="$(( MIN_AGE_DAYS * 24 ))"
 IMAGE_IDS="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;[print(i) for i in json.load(sys.stdin)["remove_image_ids"]]')"
 CONTAINER_IDS="$(echo "$PLAN_JSON" | python3 -c 'import json,sys;[print(c) for c in json.load(sys.stdin)["remove_container_ids"]]')"
 # OMN-15804: id<TAB>ref1,ref2,... — one line per removal-candidate image id, refs
@@ -113,7 +119,7 @@ for iid in plan["remove_image_ids"]:
     print(f"{iid}\t{joined}")
 ')"
 
-log "Plan: $(echo "$IMAGE_IDS" | grep -c . || true) image(s), $(echo "$CONTAINER_IDS" | grep -c . || true) stopped container(s), builder cache > ${MIN_AGE_DAYS}d"
+log "Plan: $(echo "$IMAGE_IDS" | grep -c . || true) image(s), $(echo "$CONTAINER_IDS" | grep -c . || true) stopped container(s), builder cache capped at ${BUILDER_CACHE_MAX_SIZE}"
 
 if [[ "$EXECUTE" != true ]]; then
   log "DRY-RUN — would remove the above. Re-run with --execute to act."
@@ -123,9 +129,53 @@ if [[ "$EXECUTE" != true ]]; then
 fi
 
 # --- Execute ---------------------------------------------------------------
-log "Pruning builder cache older than ${MIN_AGE_DAYS}d"
-docker builder prune --force --filter "until=${MIN_AGE_DAYS}h0m0s" >>"$LOG_FILE" 2>&1 || \
-  docker builder prune --force >>"$LOG_FILE" 2>&1 || log "builder prune failed (non-fatal)"
+# OMN-16367: bound the build cache by SIZE, not by age.
+#
+# The previous bound was an `until=` age filter fed by the min-age-in-DAYS value
+# interpolated into an hours-unit duration, and it reclaimed
+# kilobytes per hourly pass while `docker buildx du` on .201 stood at 749.7 GB
+# across 9,183 records, 100% reclaimable. `until=` filters on LAST ACCESSED, not
+# on creation: every large record (the 1.47 GB /app/.venv layer, the torch/uv
+# base) is served as a cache hit by the next proof build minutes later, which
+# refreshes its timestamp. The big records were therefore never eligible, and an
+# age-filtered prune is STRUCTURALLY incapable of bounding this cache.
+#
+# `--max-used-space` is a CEILING on retained cache and is the correct bound.
+# Note `--keep-storage` is NOT the same thing: on buildx >= 0.17 it is deprecated
+# and maps to `--reserved-space`, the FLOOR (space always kept) — the opposite.
+#
+# The age filter survives only as a FALLBACK for a docker too old to know the cap
+# flag, never as an AND-constraint on the capped call: combining them would
+# restore the bug exactly, since the oversized records are the recently-accessed
+# ones the age filter excludes.
+#
+# `--all` IS LOAD-BEARING ON THIS HOST — do not drop it as "too aggressive".
+# .201 runs the containerd snapshotter (`docker info`: Storage Driver overlayfs,
+# driver-type io.containerd.snapshotter.v1), so build-cache records share the
+# content store with image layers and a DEFAULT builder prune deliberately
+# excludes every record an existing image references. Measured live on
+# 2026-09-18: `docker builder prune --force --max-used-space 200GB` WITHOUT
+# `--all` reclaimed 0B at exit 0, twice, while `buildx du` reported 655-678 GB
+# reclaimable. Evidence: ROLLING_WORK_LEDGER.md:3932 and :3933 (verbatim command,
+# output and readbacks). A capped prune without `--all` is a silent no-op here.
+log "Pruning builder cache to a ceiling of ${BUILDER_CACHE_MAX_SIZE}"
+PRUNE_OUT=""
+if PRUNE_OUT="$(docker builder prune --all --force --max-used-space "$BUILDER_CACHE_MAX_SIZE" 2>&1)"; then
+  printf '%s\n' "$PRUNE_OUT" >>"$LOG_FILE"
+elif PRUNE_OUT="$(docker builder prune --all --force --filter "until=${MIN_AGE_HOURS}h0m0s" 2>&1)"; then
+  printf '%s\n' "$PRUNE_OUT" >>"$LOG_FILE"
+  log "size cap unsupported by this docker; FELL BACK to age filter (>${MIN_AGE_HOURS}h). Cache is NOT bounded by size on this host."
+else
+  printf '%s\n' "$PRUNE_OUT" >>"$LOG_FILE"
+  log "builder prune failed (non-fatal)"
+  PRUNE_OUT=""
+fi
+
+# Surface the reclaim on our own tagged line. docker prints a bare `Total:\t<n>`
+# that blends into the log; AC2's live falsifier ("three consecutive entries
+# reporting Total: <1MB") is only checkable if the figure is attributable.
+BUILDER_RECLAIMED="$(printf '%s\n' "$PRUNE_OUT" | awk -F'\t' '/^Total:/ {last=$2} END {if (last != "") print last}')"
+log "builder cache reclaimed: ${BUILDER_RECLAIMED:-unknown} (ceiling ${BUILDER_CACHE_MAX_SIZE})"
 
 if [[ -n "$CONTAINER_IDS" ]]; then
   while IFS= read -r cid; do
