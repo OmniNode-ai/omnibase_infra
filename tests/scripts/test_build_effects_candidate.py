@@ -15,6 +15,10 @@ from typing import Any
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts/runtime_build"
 BASE = "sha256:" + "1" * 64
 CANDIDATE = "sha256:" + "2" * 64
@@ -32,7 +36,11 @@ def test_offline_builder_backend_is_declared_in_frozen_dev_environment() -> None
 
 def _git(root: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(root), *args], text=True, capture_output=True, check=True
+        ["git", "-C", str(root), *args],
+        text=True,
+        capture_output=True,
+        check=True,
+        env=scrub_git_location_env(),
     ).stdout.strip()
 
 

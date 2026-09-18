@@ -23,6 +23,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = REPO_ROOT / "scripts" / "runtime_build" / "deploy_source_ref.py"
 
@@ -43,7 +47,7 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env={**scrub_git_location_env(), "GIT_TERMINAL_PROMPT": "0"},
     )
     return result.stdout.strip()
 
