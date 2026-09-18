@@ -40,6 +40,20 @@ Usage
         --prs 6751,6752,6753 --operation rerun-failed \\
         --wave-size 5 --queue-depth-threshold 150
 
+Fleet-status token (OMN-18655)
+------------------------------
+Load-creating operations probe the ``omnibase-ci`` org-runner seam, which needs
+a token with org read scope. It is resolved in this order, and the refusal names
+every source it tried:
+
+1. ``RUNNER_FLEET_STATUS_TOKEN`` (environment)
+2. ``CROSS_REPO_PAT`` (environment)
+3. the stored gh CLI credential, read via ``gh auth token``
+
+CI sets one of the first two. A lane session normally sets neither and is picked
+up by the third, so no ambient variable and no new credential is needed. A host
+with none of the three still refuses -- the gate stays fail-closed.
+
 Exit codes: 0 = all waves completed with all PR operations succeeding
 (or a dry-run plan was printed), 1 = refused (bad input / cap exceeded /
 runner-capacity starvation or probe failure) or at least one PR operation failed.
@@ -88,6 +102,37 @@ DEFAULT_MAX_BLOCK_SECONDS = 1800.0
 DEFAULT_GH_TIMEOUT_SECONDS = 120.0
 RUNNER_GROUP = "omnibase-ci"
 DEFAULT_GITHUB_API_URL = "https://api.github.com"  # url-authority-ok: canonical public GitHub REST base; probe_fleet scheme-pins it to https before any request
+
+# Ordered sources the fleet-status token is resolved from (OMN-18655). The two
+# environment variables come first so CI behaviour is byte-for-byte unchanged.
+# The gh CLI credential is last: a lane session is already authenticated as an
+# identity held in gh's own credential store, and reading it there is what lets
+# the sanctioned throttle run off-CI without an ambient variable and without
+# minting anything. A lane with no credential at all still resolves ``None``
+# and still refuses -- this widens where a token may come from, never whether
+# one is required.
+FLEET_STATUS_TOKEN_ENV_VARS: tuple[str, ...] = (
+    "RUNNER_FLEET_STATUS_TOKEN",
+    "CROSS_REPO_PAT",
+)
+FLEET_STATUS_TOKEN_SOURCES: tuple[str, ...] = (
+    *FLEET_STATUS_TOKEN_ENV_VARS,
+    "the stored gh CLI credential (gh auth token)",
+)
+
+# Operator-facing hints appended to a probe refusal whose cause is actionable.
+# The refusal named its failure class but not the thing to fix, so every caller
+# had to read this module's source to learn which variable it wanted -- recorded
+# as friction four separate times before OMN-18655.
+PROBE_ERROR_HINTS: Mapping[str, str] = MappingProxyType(
+    {
+        "missing_token": (
+            "no fleet-status token resolved; tried "
+            + ", ".join(FLEET_STATUS_TOKEN_SOURCES)
+            + ", in that order"
+        ),
+    }
+)
 
 # True means the operation can create or unlock check-suite load and must wait
 # for runner capacity. The historical public field name remains
@@ -288,7 +333,11 @@ def _runner_fleet_counts(fleet: Mapping[str, object]) -> tuple[int, int, int]:
     if fleet.get("ok") is not True:
         raw_error = fleet.get("error")
         error = raw_error if isinstance(raw_error, str) and raw_error else "unknown"
-        raise RunnerFleetProbeError(f"runner fleet probe refused: {error}")
+        hint = PROBE_ERROR_HINTS.get(error)
+        message = f"runner fleet probe refused: {error}"
+        if hint is not None:
+            message = f"{message} -- {hint}"
+        raise RunnerFleetProbeError(message)
 
     online = fleet.get("online")
     busy = fleet.get("busy")
@@ -671,11 +720,45 @@ def gh_queue_depth(owner: str, repo: str) -> int:
         ) from exc
 
 
+def _gh_auth_token() -> str | None:
+    """Return the stored gh CLI credential, or ``None`` if there is not one.
+
+    Never raises and never prints the value. An unauthenticated or missing gh
+    resolves ``None``, which keeps the capacity gate fail-closed.
+    """
+    result = _run_gh(["auth", "token"])
+    if result.returncode != 0:
+        return None
+    return (result.stdout or "").strip() or None
+
+
+def resolve_fleet_status_token(
+    *,
+    env: Mapping[str, str] | None = None,
+    gh_auth_token: Callable[[], str | None] | None = None,
+) -> str | None:
+    """Resolve the fleet-status token from :data:`FLEET_STATUS_TOKEN_SOURCES`.
+
+    Environment first, so a CI run resolves exactly the token it always did.
+    The stored gh CLI credential last, so a lane session authenticates as the
+    identity it already holds rather than refusing ``missing_token`` and
+    forcing the hand-paced reruns the bulk-PR runbook forbids (OMN-18655).
+
+    No credential is created here: every source is read-only, and a lane with
+    none still gets ``None`` and still refuses (rule 22).
+    """
+    environ: Mapping[str, str] = os.environ if env is None else env
+    for name in FLEET_STATUS_TOKEN_ENV_VARS:
+        value = (environ.get(name) or "").strip()
+        if value:
+            return value
+    resolver = _gh_auth_token if gh_auth_token is None else gh_auth_token
+    return (resolver() or "").strip() or None
+
+
 def gh_runner_fleet() -> dict[str, object]:
     """Probe the sanctioned ``omnibase-ci`` org-runner capacity seam."""
-    token = os.environ.get("RUNNER_FLEET_STATUS_TOKEN") or os.environ.get(
-        "CROSS_REPO_PAT"
-    )
+    token = resolve_fleet_status_token()
     api_url = os.environ.get(
         "GITHUB_API_URL", DEFAULT_GITHUB_API_URL
     )  # url-authority-ok: Actions-injected GitHub REST base; probe_fleet rejects non-HTTPS authority

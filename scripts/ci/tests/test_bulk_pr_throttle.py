@@ -1675,3 +1675,122 @@ class TestMainCli:
             ]
         )
         assert result == 1
+
+
+# ---------------------------------------------------------------------------
+# Fleet-status token resolution (OMN-18655)
+# ---------------------------------------------------------------------------
+
+
+class TestFleetStatusTokenResolution:
+    """Pin where the fleet probe is allowed to get its token from.
+
+    The defect: the probe read the token ONLY from two ambient environment
+    variables, so every lane session refused ``missing_token`` and reruns got
+    paced by hand -- which the bulk-PR runbook forbids. ``rerun-failed`` does
+    place check-suite load on the fleet (``OPERATION_QUEUE_DEPTH_POLICY`` marks
+    it ``True`` and ``_gh_rerun_failed`` calls ``rerun-failed-jobs``), so the
+    capacity gate must keep applying to it; the fix is the token source, never
+    skipping the probe.
+    """
+
+    def test_resolves_the_stored_gh_credential_when_no_env_var_is_set(self):
+        from bulk_pr_throttle import resolve_fleet_status_token
+
+        assert (
+            resolve_fleet_status_token(
+                env={}, gh_auth_token=lambda: "stored-lane-identity"
+            )
+            == "stored-lane-identity"
+        )
+
+    def test_env_vars_keep_precedence_over_the_stored_credential(self):
+        from bulk_pr_throttle import (
+            FLEET_STATUS_TOKEN_ENV_VARS,
+            resolve_fleet_status_token,
+        )
+
+        # CI behaviour must be byte-for-byte unchanged: each env var, in its
+        # declared order, still wins over the gh CLI credential.
+        assert FLEET_STATUS_TOKEN_ENV_VARS == (
+            "RUNNER_FLEET_STATUS_TOKEN",
+            "CROSS_REPO_PAT",
+        )
+        first, second = FLEET_STATUS_TOKEN_ENV_VARS
+        assert (
+            resolve_fleet_status_token(
+                env={first: "from-first", second: "from-second"},
+                gh_auth_token=lambda: "stored",
+            )
+            == "from-first"
+        )
+        assert (
+            resolve_fleet_status_token(
+                env={second: "from-second"}, gh_auth_token=lambda: "stored"
+            )
+            == "from-second"
+        )
+
+    def test_blank_env_var_falls_through_rather_than_resolving_empty(self):
+        from bulk_pr_throttle import resolve_fleet_status_token
+
+        assert (
+            resolve_fleet_status_token(
+                env={"RUNNER_FLEET_STATUS_TOKEN": "   "},
+                gh_auth_token=lambda: "stored",
+            )
+            == "stored"
+        )
+
+    def test_unauthenticated_gh_still_resolves_nothing_and_fails_closed(self):
+        from bulk_pr_throttle import resolve_fleet_status_token
+
+        # No credential anywhere is still a refusal. The fix widens where a
+        # token may come from; it never invents one and never fails open.
+        assert resolve_fleet_status_token(env={}, gh_auth_token=lambda: None) is None
+        assert resolve_fleet_status_token(env={}, gh_auth_token=lambda: "") is None
+
+    def test_missing_token_refusal_names_every_source_it_tried(self):
+        from bulk_pr_throttle import (
+            FLEET_STATUS_TOKEN_SOURCES,
+            RunnerFleetProbeError,
+            runner_fleet_is_starved,
+        )
+
+        # The recurring friction was that the refusal named the failure class
+        # but not the thing to fix, so callers had to read this module's source.
+        with pytest.raises(RunnerFleetProbeError) as excinfo:
+            runner_fleet_is_starved({"ok": False, "error": "missing_token"})
+        message = str(excinfo.value)
+        assert "missing_token" in message
+        for source in FLEET_STATUS_TOKEN_SOURCES:
+            assert source in message
+
+    def test_gh_runner_fleet_passes_the_resolved_token_to_the_probe(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.delenv("RUNNER_FLEET_STATUS_TOKEN", raising=False)
+        monkeypatch.delenv("CROSS_REPO_PAT", raising=False)
+        monkeypatch.setattr(
+            bulk_pr_throttle, "_gh_auth_token", lambda: "stored-lane-identity"
+        )
+        seen: list[object] = []
+
+        def fake_probe(token, runner_group, api_url):
+            seen.append((token, runner_group, api_url))
+            return {"ok": True, "online": 88, "busy": 2, "total": 88}
+
+        monkeypatch.setattr(bulk_pr_throttle, "probe_fleet", fake_probe)
+        fleet = bulk_pr_throttle.gh_runner_fleet()
+
+        assert fleet["ok"] is True
+        assert seen[0][0] == "stored-lane-identity"
+        assert seen[0][1] == bulk_pr_throttle.RUNNER_GROUP
+
+    def test_rerun_failed_remains_capacity_gated(self):
+        from bulk_pr_throttle import queue_depth_gate_for_operation
+
+        # Guards the branch this fix deliberately did NOT take: rerun-failed
+        # dispatches jobs onto the fleet, so skipping its probe would reinstate
+        # the saturation the throttle exists to prevent (OMN-16284).
+        assert queue_depth_gate_for_operation("rerun-failed") is True
