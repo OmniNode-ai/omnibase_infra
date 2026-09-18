@@ -1,0 +1,110 @@
+{
+  "provenance": {
+    "query": "gh pr list --state merged --base dev --limit 30, then commits/<headRefOid>/check-runs per PR",
+    "window": "last 30 merged dev PRs, enumerated 2026-09-18T23:2xZ",
+    "context": "verify / verify"
+  },
+  "prs_sampled": 30,
+  "prs_with_a_transient_red": 16,
+  "never_recovered": 0,
+  "max_recovery_minutes": 6.8,
+  "median_recovery_minutes": 1.9,
+  "rows": [
+    {
+      "pr": "3787",
+      "first_red": "2026-09-18T22:19:00Z",
+      "last_green": "2026-09-18T22:20:31Z",
+      "mins": 1.5
+    },
+    {
+      "pr": "3785",
+      "first_red": "2026-09-18T22:16:58Z",
+      "last_green": "2026-09-18T22:18:38Z",
+      "mins": 1.7
+    },
+    {
+      "pr": "3783",
+      "first_red": "2026-09-18T20:42:45Z",
+      "last_green": "2026-09-18T20:48:01Z",
+      "mins": 5.3
+    },
+    {
+      "pr": "3781",
+      "first_red": "2026-09-18T20:22:35Z",
+      "last_green": "2026-09-18T20:24:30Z",
+      "mins": 1.9
+    },
+    {
+      "pr": "3780",
+      "first_red": "2026-09-18T20:21:54Z",
+      "last_green": "2026-09-18T20:27:46Z",
+      "mins": 5.9
+    },
+    {
+      "pr": "3779",
+      "first_red": "2026-09-18T20:20:30Z",
+      "last_green": "2026-09-18T20:27:16Z",
+      "mins": 6.8
+    },
+    {
+      "pr": "3778",
+      "first_red": "2026-09-18T20:05:44Z",
+      "last_green": "2026-09-18T20:07:39Z",
+      "mins": 1.9
+    },
+    {
+      "pr": "3777",
+      "first_red": "2026-09-18T19:18:49Z",
+      "last_green": "2026-09-18T19:20:39Z",
+      "mins": 1.8
+    },
+    {
+      "pr": "3776",
+      "first_red": "2026-09-18T18:50:31Z",
+      "last_green": "2026-09-18T18:52:35Z",
+      "mins": 2.1
+    },
+    {
+      "pr": "3773",
+      "first_red": "2026-09-18T18:34:40Z",
+      "last_green": "2026-09-18T18:36:55Z",
+      "mins": 2.3
+    },
+    {
+      "pr": "3771",
+      "first_red": "2026-09-18T18:42:22Z",
+      "last_green": "2026-09-18T18:43:19Z",
+      "mins": 1
+    },
+    {
+      "pr": "3769",
+      "first_red": "2026-09-18T16:35:36Z",
+      "last_green": "2026-09-18T16:38:09Z",
+      "mins": 2.6
+    },
+    {
+      "pr": "3767",
+      "first_red": "2026-09-18T15:58:29Z",
+      "last_green": "2026-09-18T15:59:56Z",
+      "mins": 1.5
+    },
+    {
+      "pr": "3766",
+      "first_red": "2026-09-18T15:24:39Z",
+      "last_green": "2026-09-18T15:26:02Z",
+      "mins": 1.4
+    },
+    {
+      "pr": "3765",
+      "first_red": "2026-09-18T15:23:25Z",
+      "last_green": "2026-09-18T15:24:29Z",
+      "mins": 1.1
+    },
+    {
+      "pr": "3763",
+      "first_red": "2026-09-18T14:39:02Z",
+      "last_green": "2026-09-18T14:40:07Z",
+      "mins": 1.1
+    }
+  ]
+}

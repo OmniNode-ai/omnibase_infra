@@ -48,6 +48,7 @@ from scripts.ci.ci_summary_gate import (
     EXIT_FAILURE,
     EXIT_PENDING,
     EXPECTED_EXTERNAL_CONTEXTS,
+    EXTERNAL_FAILURE_SUPERSESSION_GRACE_S,
     SKIPPABLE_GATE_JOBS,
     STRICT_GATE_JOBS,
     evaluate,
@@ -272,7 +273,10 @@ class TestSupersededCancellationIsNotAVerdict:
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
             now=PR3512_POLL_INSTANT,
         )
-        assert "awaiting a replacement after cancellation" in report
+        # Wording widened by OMN-17864, which added a second reason a context
+        # can be awaiting a replacement. What this test pins is the DISCLOSURE:
+        # a wait is never silent, and it names the context it is waiting on.
+        assert "awaiting an automatic replacement" in report
         assert CANCELLED_CONTEXT in report
 
     def test_the_replacement_row_resolves_it_green(self) -> None:
@@ -312,12 +316,40 @@ class TestSupersededCancellationIsNotAVerdict:
         assert CANCELLED_CONTEXT in failures
 
     def test_discriminator_a_real_failure_in_the_same_slice_still_fails(self) -> None:
-        """DISCRIMINATOR: only a cancellation waits; a verdict is still a verdict."""
+        """DISCRIMINATOR, NARROWED BY OMN-17864.
+
+        This test used to read "only a cancellation waits; a verdict is still a
+        verdict", and asserted that a ``failure`` substituted into this slice
+        failed on the poll that observed it. OMN-17864 overturned that premise
+        deliberately: a ``failure`` produced before the OCC evidence companion
+        exists is also awaiting an automatic replacement, and is held for
+        :data:`EXTERNAL_FAILURE_SUPERSESSION_GRACE_S`.
+
+        What still discriminates, and is asserted here, is that the wait is
+        BOUNDED per conclusion. A substituted failure fails once its own grace
+        expires — it is not exempt, only deferred — and a conclusion belonging
+        to neither grace still fails on the poll that observes it.
+        """
         rows = [dict(row) for row in self._slice()]
         for row in rows:
             if row.get("name") == CANCELLED_CONTEXT:
                 row["conclusion"] = "failure"
+
+        past_failure_grace = datetime.fromtimestamp(
+            datetime.fromisoformat("2026-09-14T00:01:03+00:00").timestamp()
+            + EXTERNAL_FAILURE_SUPERSESSION_GRACE_S
+            + 1,
+            tz=PR3512_POLL_INSTANT.tzinfo,
+        )
         failures, _ = evaluate_external_contexts(
-            rows, EXPECTED_EXTERNAL_CONTEXTS, now=PR3512_POLL_INSTANT
+            rows, EXPECTED_EXTERNAL_CONTEXTS, now=past_failure_grace
         )
         assert CANCELLED_CONTEXT in failures
+
+        for row in rows:
+            if row.get("name") == CANCELLED_CONTEXT:
+                row["conclusion"] = "timed_out"
+        immediate, _ = evaluate_external_contexts(
+            rows, EXPECTED_EXTERNAL_CONTEXTS, now=PR3512_POLL_INSTANT
+        )
+        assert CANCELLED_CONTEXT in immediate

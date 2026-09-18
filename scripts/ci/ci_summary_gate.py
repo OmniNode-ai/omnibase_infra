@@ -775,6 +775,50 @@ NON_VERDICT_CONCLUSIONS: frozenset[str] = frozenset({"skipped", "neutral"})
 # window where a replacement is demonstrably on its way.
 CANCELLED_SUPERSESSION_GRACE_S: int = 600
 
+# OMN-17864 -- how long a `failure` external context is treated as "a verdict a
+# re-run is about to replace" rather than as this head's answer.
+#
+# OMN-18355 (above) closed the `cancelled` half of this and said so explicitly:
+# "`failure`, `timed_out` and `action_required` still fail on the poll that
+# observes them". That residual is the larger half, and this constant closes it
+# for `failure` alone.
+#
+# MECHANISM, measured on `omnibase_infra#3779` (head `ec6c7636`, captures in
+# tests/fixtures/omn17864/): on a ticketed PR the OCC evidence companion is
+# minted by AUTOMATION after the PR opens. Until it lands the PR body carries no
+# evidence-source line and the Receipt Gate (`verify / verify`) is legitimately
+# red. When the companion merges, automation PATCHes the PR body; every workflow
+# whose `types:` include `edited` re-fires; the Receipt Gate re-runs and goes
+# green ON ITS OWN. `CI Summary` polled inside that window, recorded FAILURE at
+# 20:24:26Z on a row that had completed 47 seconds earlier, and exited. The
+# replacement row concluded `success` at 20:27:16Z. Only a human `gh run rerun`
+# cleared it, and that rerun passed with NO CHANGE TO THE PR -- which is the
+# proof that nothing was ever wrong with the head.
+#
+# THE WINDOW IS MEASURED, NOT CHOSEN. Over the last 30 merged `dev` PRs, 16
+# exhibited a red `verify / verify` that later went green on the same head;
+# every one of the 16 recovered, the slowest in 6.8 minutes, the median in 1.9
+# (tests/fixtures/omn17864/verify-verify-recovery-window.json.captured, replayed
+# by test_the_grace_exceeds_every_measured_recovery). 20 minutes is ~3x the
+# slowest observed and still under a quarter of the poller's 90-minute deadline.
+# Over HALF the merged PRs sampled hit this shape: it is the norm, not an
+# outlier, which is why a mechanism is warranted rather than a rerun habit.
+#
+# THIS COSTS ALMOST NOTHING IN THE COMMON CASE. The poller already runs until
+# every IN-RUN gate completes -- typically far longer than this grace -- so a
+# genuinely-red external context is usually reported at the same moment it would
+# have been anyway. The bounded worst case is a docs-shaped PR whose own gates
+# finish first: its FAILURE is recorded up to 20 minutes later than before.
+#
+# THIS RELAXES NOTHING THAT WAS EVER A STABLE VERDICT: a red older than the
+# grace still fails, an absent/unparseable/future `completed_at` still fails,
+# `timed_out` and `action_required` are untouched, a missing clock restores the
+# strict pre-grace reading, the deadline still converts a sustained PENDING into
+# FAILURE, and NOTHING here can resolve a context green -- only a real green
+# check-run can. The only behaviour removed is the terminal verdict issued
+# inside the window where a replacement is demonstrably on its way.
+EXTERNAL_FAILURE_SUPERSESSION_GRACE_S: int = 1200
+
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 EXIT_PENDING = 2
@@ -1049,6 +1093,60 @@ def cancellation_is_provisional(state: JobState, now: datetime | None) -> bool:
     return -CANCELLED_SUPERSESSION_GRACE_S <= age_s <= CANCELLED_SUPERSESSION_GRACE_S
 
 
+def failure_is_provisional(state: JobState, now: datetime | None) -> bool:
+    """True while a ``failure`` external context is inside its re-run window.
+
+    OMN-17864, the residual OMN-18355 named and left open. A red produced
+    before the OCC evidence companion exists is a verdict about the PR's
+    METADATA AT THAT MOMENT, not about the head: automation lands the companion,
+    PATCHes the body, the producer re-fires on the ``edited`` event and replaces
+    its own row with a green one. Inside
+    :data:`EXTERNAL_FAILURE_SUPERSESSION_GRACE_S` of the failure, the right
+    answer is "a replacement is due, poll again" — not a terminal FAILURE the
+    only cure for which is a human rerun that changes nothing.
+
+    Scoped to ``failure`` DELIBERATELY. ``timed_out`` and ``action_required``
+    are left terminal: the measured mechanism is an automatic re-run of a
+    producer that decided, and neither of those is that shape.
+
+    FAIL-CLOSED IN EVERY UNCERTAIN CASE, on exactly the terms
+    :func:`cancellation_is_provisional` already sets:
+
+    * ``now is None`` (no clock supplied) → not provisional → fails now, so a
+      caller that forgets the time enforces the OLD, stricter behaviour.
+    * an absent or unparseable ``completed_at`` → not provisional → fails now.
+    * a failure older than the grace → not provisional → fails now.
+    * a ``completed_at`` further in the FUTURE than the grace (a clock so wrong
+      the row cannot be reasoned about) → not provisional → fails now, rather
+      than waiting forever on a skewed timestamp.
+
+    And the poller's own deadline still converts a sustained PENDING into
+    FAILURE, so nothing here can make the required context green or absent.
+    """
+
+    if state.conclusion != "failure" or now is None:
+        return False
+    completed = _parse_timestamp(state.completed_at)
+    if completed is None:
+        return False
+    age_s = (now - completed).total_seconds()
+    return (
+        -EXTERNAL_FAILURE_SUPERSESSION_GRACE_S
+        <= age_s
+        <= EXTERNAL_FAILURE_SUPERSESSION_GRACE_S
+    )
+
+
+def verdict_is_provisional(state: JobState, now: datetime | None) -> bool:
+    """True when this row is a verdict an automatic replacement is due to replace.
+
+    The union of the two graces, and the single place the poller's
+    "keep waiting" decision is made, so the two cannot drift apart.
+    """
+
+    return cancellation_is_provisional(state, now) or failure_is_provisional(state, now)
+
+
 def applicable_external_contexts(
     expected: tuple[str, ...],
     pr_author: str | None,
@@ -1098,11 +1196,36 @@ def evaluate_external_contexts(
             unresolved.append(context)
         elif state.conclusion in EXTERNAL_GOOD_CONCLUSIONS:
             continue
-        elif cancellation_is_provisional(state, now):
+        elif verdict_is_provisional(state, now):
             unresolved.append(context)
         else:
             failures.append(context)
     return sorted(failures), sorted(unresolved)
+
+
+def provisional_external_verdicts(
+    check_runs: list[dict[str, object]] | None,
+    expected: tuple[str, ...],
+    now: datetime | None,
+) -> list[str]:
+    """The subset of ``expected`` held PENDING by a due automatic replacement.
+
+    Reporting only — the union of the OMN-18355 cancellation grace and the
+    OMN-17864 failure grace. The poller's log is the diagnostic surface for a
+    wedged PR, and "pending because a red is about to be re-run" must not read
+    the same as "pending because nothing has started".
+    """
+
+    if not expected:
+        return []
+    latest = latest_check_run_by_name(check_runs or [])
+    return sorted(
+        context
+        for context in expected
+        if (state := latest.get(context)) is not None
+        and state.status == "completed"
+        and verdict_is_provisional(state, now)
+    )
 
 
 def provisional_cancellations(
@@ -1249,7 +1372,9 @@ def evaluate(
     external_failures, external_unresolved = evaluate_external_contexts(
         check_runs, external_contexts, now=now
     )
-    external_provisional = provisional_cancellations(check_runs, external_contexts, now)
+    external_provisional = provisional_external_verdicts(
+        check_runs, external_contexts, now
+    )
 
     all_failures = (
         strict_failures + skippable_failures + sweep_failures + external_failures
@@ -1356,7 +1481,8 @@ def _report(
             # run was cancelled and its replacement has not written a check-run
             # yet". Both are PENDING; only one of them resolves on its own.
             lines.append(
-                "  external contexts awaiting a replacement after cancellation: "
+                "  external contexts awaiting an automatic replacement "
+                "(cancelled, or failed inside the re-run grace): "
                 + ", ".join(external_provisional)
             )
     return "\n".join(lines)
