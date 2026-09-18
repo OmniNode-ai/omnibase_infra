@@ -178,6 +178,9 @@ from omnibase_infra.gate_binding import (
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.cascade_supersession import (
     resolve_verified_supersession,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.declared_supersession import (
+    resolve_declared_supersession,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_ac_binding_check_status import (
     EnumAcBindingCheckStatus,
 )
@@ -5727,6 +5730,9 @@ class HandlerEvidenceAutocloseSweep:
                     pre_write_head_entry_id=pre_write_head_entry_id,
                 )
             unmerged_citations: list[str] = []
+            # OMN-18749: set when at least one holding citation is CLOSED, so
+            # the reason can stop telling the reader to merge it.
+            closed_unmerged_citations = False
             for cited_repo, cited_number in cited_refs:
                 if cited_repo is None:
                     # The guard blocks on an unresolvable ref and so does this.
@@ -5790,11 +5796,38 @@ class HandlerEvidenceAutocloseSweep:
                         )
                         if supersession.superseded:
                             continue
+                        # OMN-18749. THE TICKET-DECLARED SUPERSESSION PREDICATE.
+                        #
+                        # The clause above proves supersession for a cascade
+                        # bump, by reading a pin. Most closed citations are not
+                        # bumps — a proof pull request reopened on a clean
+                        # branch, one closed by an accidental branch rename —
+                        # and clause 1 does not resolve for them, so they block
+                        # forever while this conjunct tells their reader to
+                        # merge something closed. OMN-18172 is the measured
+                        # case: two closed proof pull requests whose work
+                        # landed in a third, refused identically every tick.
+                        #
+                        # For those the only durable statement of where the
+                        # work went is the TICKET's, and it is accepted only
+                        # when the successor's own probe says merged. Tried
+                        # second, so the cascade predicate keeps deciding the
+                        # shape it was built for.
+                        declared = await resolve_declared_supersession(
+                            repo=cited_repo,
+                            closed_pr_number=cited_number,
+                            description=description,
+                            run_gh_command=self._run_gh_command,
+                            gh_timeout_seconds=request.gh_timeout_seconds,
+                        )
+                        if declared.superseded:
+                            continue
                         unmerged_citations.append(
                             f"{cited_repo}#{cited_number}: state={state}, "
                             f"merged_at=null, and not proven superseded — "
-                            f"{supersession.detail}"
+                            f"{supersession.detail}; {declared.detail}"
                         )
+                        closed_unmerged_citations = True
                         continue
                     unmerged_citations.append(
                         f"{cited_repo}#{cited_number}: state={state}, merged_at=null"
@@ -5815,8 +5848,23 @@ class HandlerEvidenceAutocloseSweep:
                         "guard's refusal and is not a fact dod_verify's checks "
                         "can see: "
                         + "; ".join(unmerged_citations)
-                        + ". Held, not judged: merging the cited PR is all "
-                        "this candidate needs — the next tick re-offers it."
+                        + (
+                            # OMN-18749: this sentence was unconditional and is
+                            # false for a closed citation — the next tick
+                            # refuses identically, forever. Say what can
+                            # actually be done instead.
+                            ". Held, not judged: at least one of these is "
+                            "CLOSED and can never merge. Declare its successor "
+                            "on one line of the ticket description, as "
+                            "`<owner/repo#N> superseded by <owner/repo#M>`, "
+                            "and that successor must itself be merged; if "
+                            "nothing replaced it, the citation belongs off the "
+                            "ticket."
+                            if closed_unmerged_citations
+                            else ". Held, not judged: merging the cited PR is "
+                            "all this candidate needs — the next tick "
+                            "re-offers it."
+                        )
                     ),
                     dod_verify_total_checks=total_checks,
                     dod_verify_verified_count=verified_count,
