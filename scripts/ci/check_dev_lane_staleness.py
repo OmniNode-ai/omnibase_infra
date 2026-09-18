@@ -1058,9 +1058,12 @@ def queue_exceeds_bound(
     """Why this run cannot afford the queue, or ``""`` when it can.
 
     The point of answering this BEFORE the wait rather than after it. Today a
-    queued-behind merge spends the job's whole ceiling -- 43 minutes of the one
-    physical verify runner on the lab host -- to arrive at an INDETERMINATE
-    that names no cause. Answering up front costs seconds, frees the runner for
+    queued-behind merge spends its whole affordable clock -- 1680s, the
+    45-minute job ceiling less the declared settle budget and the reserved
+    tail, on the one physical verify runner on the lab host -- to arrive at an
+    INDETERMINATE that names no cause. Measured at the parent commit by
+    replaying the 2026-09-18 timeline through this same loop: 0h28m watched,
+    verdict INDETERMINATE, evidence naming no depth. Answering up front costs seconds, frees the runner for
     the next merge's guard (AC4), and the receipt says "third in line" instead
     of "ran out of clock".
 

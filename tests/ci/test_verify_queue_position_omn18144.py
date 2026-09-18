@@ -20,9 +20,9 @@ agent caught up passed first time.
 
 THE SHAPES
 ----------
-* three commands ahead at ~24 min each, 43 minutes of affordable clock ->
+* two commands ahead at ~24 min each against 1680s of affordable clock ->
   INDETERMINATE **naming the depth**, taken in seconds rather than after the
-  full ceiling, and never a FAIL;
+  whole 28-minute watch, and never a FAIL;
 * nothing ahead -> byte-for-byte today's behaviour;
 * an unreadable queue -> today's behaviour, with the evidence saying in words
   that the queue could not be read;
@@ -184,8 +184,12 @@ class TestTheMeasuredTimeline:
         assert result.outcome is not EnumConvergenceOutcome.FAIL
 
     def test_the_refusal_is_taken_in_seconds_not_after_the_whole_ceiling(self) -> None:
-        """AC4: the single physical verify runner is not held for 43 minutes to
-        reach a verdict that was knowable at the start."""
+        """AC4: the single physical verify runner is not held for 28 minutes to
+        reach a verdict that was knowable at the start.
+
+        Measured at the parent commit on this same loop and this same
+        timeline: 0h28m watched, INDETERMINATE, no depth named.
+        """
         clock = _Clock(T0)
         result = _wait(clock=clock, queue=_queue(2))
 
