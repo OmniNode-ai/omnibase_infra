@@ -722,7 +722,16 @@ _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
 #: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
 #: cannot drift into describing a rule the closer no longer applies.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.15.0"
+#:
+#: 1.15.0 -> 1.16.0 (OMN-18490) is a deliberate, one-off refresh of every
+#: standing gap comment, and it is the case this field was built for: the
+#: closer has learned to say something new -- WHICH checks failed -- and a
+#: statement already on a ticket does not carry it. Bumping restates each
+#: open gap once, with the names in it. Not bumping would have left the
+#: entire existing board reading `N failed` forever, fixed only for tickets
+#: whose verdict happened to move afterwards, which is most of the defect
+#: left in place.
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.16.0"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
