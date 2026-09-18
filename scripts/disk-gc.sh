@@ -149,15 +149,28 @@ fi
 # restore the bug exactly, since the oversized records are the recently-accessed
 # ones the age filter excludes.
 #
-# `--all` IS LOAD-BEARING ON THIS HOST — do not drop it as "too aggressive".
-# .201 runs the containerd snapshotter (`docker info`: Storage Driver overlayfs,
-# driver-type io.containerd.snapshotter.v1), so build-cache records share the
-# content store with image layers and a DEFAULT builder prune deliberately
-# excludes every record an existing image references. Measured live on
-# 2026-09-18: `docker builder prune --force --max-used-space 200GB` WITHOUT
-# `--all` reclaimed 0B at exit 0, twice, while `buildx du` reported 655-678 GB
-# reclaimable. Evidence: ROLLING_WORK_LEDGER.md:3932 and :3933 (verbatim command,
-# output and readbacks). A capped prune without `--all` is a silent no-op here.
+# CORRECTION (OMN-16367, 2026-09-18, later the same day). An earlier revision of
+# this comment claimed `--all` was load-bearing because a default prune excludes
+# image-referenced records. THAT WAS WRONG, and the correction matters more than
+# the flag does. On this host `docker builder prune` resolves to
+# `docker buildx prune`, where `-a, --all` is documented as "Include
+# internal/frontend images" -- NOT the classic CLI's "remove all unused build
+# cache". It is a scope modifier that reads like a force flag.
+#
+# What actually happened: a third approved prune, carrying `--all` and this exact
+# ceiling, also reclaimed 0B (08:48Z, ledger :4054-:4060). `docker buildx du`
+# reads Shared 723.5GB against Total 750GB -- ~96% of the cache is content shared
+# with image layers in the containerd snapshot store, which NO builder prune can
+# return while those images exist.
+#
+# So this prune bounds FUTURE cache growth and recovers ~nothing on a host whose
+# cache is already shared into the image store. That is worth keeping and worth
+# not overselling. The disk itself is reclaimed by the generation-bounded image
+# retention in disk_gc_plan.py (keep-list `generation_bounded_repos`), which is
+# where the per-sha deploy-agent families are actually bounded.
+#
+# `--all` stays because including internal/frontend images is correct for a
+# scheduled GC, not because it unlocks anything.
 log "Pruning builder cache to a ceiling of ${BUILDER_CACHE_MAX_SIZE}"
 PRUNE_OUT=""
 if PRUNE_OUT="$(docker builder prune --all --force --max-used-space "$BUILDER_CACHE_MAX_SIZE" 2>&1)"; then
