@@ -33,6 +33,7 @@ from venv_install_plan import (
     EXIT_OK,
     EXIT_REFUSED,
     EXIT_UV_ERROR,
+    REFUSING_VERDICTS,
     PlanVerdict,
     classify,
     normalize_name,
@@ -60,6 +61,22 @@ Would install 1 package
 """
 
 _NOOP_PLAN = "Resolved 3 packages in 90ms\nAudited 3 packages in 1ms\n"
+
+# Verbatim uv output for a real omnimarket VCS ref bump, captured 2026-09-18
+# against the live shared CLI venv. The `+` line names a SOURCE and carries no
+# version, because uv has not built the wheel yet. An earlier revision of this
+# module parsed only the `name==version` shape, saw the `-` line unpaired, and
+# refused the ref bump as a REMOVE -- a false refusal of the one operation the
+# installer exists to perform, which blocked every lane on the host.
+_VCS_REF_BUMP_PLAN = """\
+Using Python 3.13.3 environment at: /Users/x/.venv
+Resolved 3 packages in 103ms
+Would download 1 package
+Would uninstall 1 package
+Would install 1 package
+ - omnimarket==0.4.118 (from git+https://github.com/OmniNode-ai/omnimarket.git@948be2e1a517a7def9efff96e32ec91b4b17b30a)
+ + omnimarket @ git+https://github.com/OmniNode-ai/omnimarket.git@53d6e4454a554588f0fc104c6a13cf76ade86e8e
+"""
 
 
 def _write_fake_uv(tmp_path: Path, plan: str) -> Path:
@@ -115,6 +132,47 @@ def test_a_vcs_reinstall_at_the_same_version_is_not_a_downgrade() -> None:
     """The git-sourced omnimarket line is the whole point of the install."""
     changes = {c.name: c for c in parse_plan(_DOWNGRADE_PLAN)}
     assert changes["omnimarket"].verdict is PlanVerdict.REINSTALL
+
+
+def test_a_vcs_ref_bump_is_a_source_change_not_a_removal() -> None:
+    """Regression: the `+` line of an unbuilt direct reference carries no version."""
+    changes = parse_plan(_VCS_REF_BUMP_PLAN)
+    assert len(changes) == 1
+    change = changes[0]
+    assert change.name == "omnimarket"
+    assert change.verdict is PlanVerdict.SOURCE
+    assert change.before == "0.4.118"
+    assert "53d6e4454a554588f0fc104c6a13cf76ade86e8e" in (change.after or "")
+    assert change.verdict not in REFUSING_VERDICTS
+
+
+def test_a_vcs_ref_bump_is_applied_not_refused(tmp_path: Path) -> None:
+    """The end-to-end falsifier for the false refusal, driven through the CLI."""
+    bin_dir = _write_fake_uv(tmp_path, _VCS_REF_BUMP_PLAN)
+    result = _run(
+        bin_dir,
+        "--python",
+        sys.executable,
+        "--no-deps",
+        "--apply",
+        "--",
+        "omnimarket @ git+https://github.com/OmniNode-ai/omnimarket.git@53d6e445",
+    )
+    assert result.returncode == EXIT_OK, result.stdout + result.stderr
+    assert "SOURCE" in result.stdout
+    invocations = (tmp_path / "uv-argv.log").read_text(encoding="utf-8").splitlines()
+    assert len(invocations) == 2, invocations
+    assert "--dry-run" not in invocations[1]
+
+
+def test_a_pinned_downgrade_beside_a_source_change_still_refuses() -> None:
+    """Allowing SOURCE must not weaken the `==` refusal that is the whole point."""
+    mixed = _VCS_REF_BUMP_PLAN + (
+        " - omnibase-compat==0.5.7\n + omnibase-compat==0.5.5\n"
+    )
+    verdicts = {c.name: c.verdict for c in parse_plan(mixed)}
+    assert verdicts["omnimarket"] is PlanVerdict.SOURCE
+    assert verdicts["omnibase-compat"] is PlanVerdict.DOWNGRADE
 
 
 def test_classify_covers_every_verdict() -> None:
