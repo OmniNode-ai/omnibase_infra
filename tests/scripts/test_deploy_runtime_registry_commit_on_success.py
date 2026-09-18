@@ -360,6 +360,11 @@ def _build_harness(tmp_path: Path) -> tuple[str, dict[str, str]]:
             'COMPOSE_PROFILE="runtime"',
             'MODE="execute"',
             "PRINT_COMPOSE_CMD=false",
+            # OMN-18656: main() now has a non-mutating readback-only return
+            # above every mutating phase, and a health verdict the rollback
+            # reads. Both are flags main() consults under `set -u`.
+            "READBACK_ONLY=false",
+            "HEALTH_PROBES_PASSED=false",
             "PROD_LANE=false",
             "COLD_FULL_BRINGUP=false",
             "COLD_START_KAFKA_TIMEOUT_SECONDS=180",

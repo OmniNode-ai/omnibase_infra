@@ -509,6 +509,13 @@ DEPLOY_DIR_TO_CLEANUP=""
 # Default is hardcoded and safe; any changes must comply with ^[a-zA-Z0-9_-]+$ (see parse_args).
 COMPOSE_PROFILE="runtime"
 PRINT_COMPOSE_CMD=false
+# OMN-18656: non-mutating RT-6 readback. Runs the terminal deploy readback
+# against the lane as it stands and exits -- no sync, no build, no recreate, no
+# retag, no registry write. It exists because the readback is the one phase an
+# operator needs to be able to exercise WITHOUT taking the lane through a
+# deploy: the 2026-09-18T02:48Z incident could only be reproduced by running a
+# full warm redeploy, which is what made its rollback destructive.
+READBACK_ONLY=false
 # When true (--cold), run the cold-lane FULL bring-up path (OMN-13414): build in
 # workspace mode from the merged-dev siblings, bring up deps + migration
 # one-shots, then bring the WHOLE --profile runtime project up (not just the
@@ -517,6 +524,12 @@ PRINT_COMPOSE_CMD=false
 # the build must be workspace-sourced (release packages cannot carry un-released
 # merged-dev code, so a release image starts a cold lane on stale code).
 COLD_FULL_BRINGUP=false
+# OMN-18656: set true the moment verify_deployment()'s health probe answers
+# green. It is what partitions a HEALTH failure from a READBACK-ONLY failure in
+# cleanup_on_exit(): a `:latest` tag rollback is a remedy for a lane that came
+# up broken, and it is pure damage on a lane that came up healthy and merely
+# failed an assertion about its own identity.
+HEALTH_PROBES_PASSED=false
 # When true (--prod, or ONEX_DEPLOY_LANE=prod), the prod promotion-lineage guard
 # runs before any build: the source tree must be clean AND HEAD must be an
 # ancestor-of/equal-to origin/main. Prevents building the prod image from a
@@ -638,6 +651,8 @@ OPTIONS
                         knowledge-base:runbooks/cold-lane-full-bringup.md.
     --profile <name>    Docker compose profile (default: runtime).
     --print-compose-cmd Print exact compose commands without executing, then exit.
+    --readback-only     Run the RT-6 deploy readback against the lane as it stands and exit.
+                        Non-mutating: no sync, build, recreate, retag or registry write.
     --prod              Enforce the prod promotion-lineage guard before build:
                         source tree must be clean AND HEAD an ancestor-of/equal-to
                         origin/main. Also honored via ONEX_DEPLOY_LANE=prod.
@@ -761,6 +776,13 @@ parse_args() {
                 ;;
             --print-compose-cmd)
                 PRINT_COMPOSE_CMD=true
+                shift
+                ;;
+            --readback-only)
+                # OMN-18656: run the RT-6 readback against the lane as it
+                # stands and exit. Non-mutating by construction -- it returns
+                # before the lane lock, the sync, the build and the recreate.
+                READBACK_ONLY=true
                 shift
                 ;;
             --prod)
@@ -2688,6 +2710,37 @@ restore_latest_image_tags() {
     if [[ -z "${LATEST_TAG_SNAPSHOT_FILE}" || ! -f "${LATEST_TAG_SNAPSHOT_FILE}" ]]; then
         return 0
     fi
+
+    # OMN-18656: a tag rollback is a REMEDY for a lane that came up broken. On a
+    # lane whose health probes all answered green it is pure damage, and the
+    # damage outlives the run: `docker tag` cannot recall a container that was
+    # already force-recreated on the new image, so the containers keep running
+    # the new build while `<project>-<service>:latest` is walked BACKWARDS to a
+    # pre-build id. Nothing on the host then agrees about what `:latest` means,
+    # and the next `docker compose up -d` without --build silently re-adopts the
+    # rolled-back image -- a trap laid by the recovery path, for the next deploy.
+    #
+    # Measured: on 2026-09-18T02:48Z a healthy warm redeploy of the .201 dev lane
+    # failed RT-6 on a cross-repo image-ref comparison (the defect this ticket's
+    # other half fixes), and this function retagged
+    # `omnibase-infra-omninode-runtime:latest` backwards on a lane where every
+    # container was running the intended build and every health probe was green.
+    #
+    # The same lesson is already recorded on the one-shot branch of RT-6
+    # (OMN-16729): "the ensuing rollback restored :latest TAGS while the
+    # recreated containers kept running the new image, which no tag rollback can
+    # recall." That fix removed one cause of a false readback failure. This one
+    # removes the retag from EVERY readback-only failure, known cause or not.
+    if [[ "${HEALTH_PROBES_PASSED}" == true ]]; then
+        log_warn "NOT restoring :latest image tags: every health probe passed this run (OMN-18656)."
+        log_warn "  This deploy failed AFTER the lane came up healthy, so the failure is an"
+        log_warn "  assertion about image identity, not a broken lane. The containers are already"
+        log_warn "  running the new images and a tag rollback cannot recall them -- retagging here"
+        log_warn "  would leave :latest pointing at an image the lane is not running."
+        log_warn "  Fix the readback finding and re-run; nothing was retagged."
+        return 0
+    fi
+
     if [[ -z "${DEPLOY_COMPOSE_PROJECT}" ]]; then
         log_warn "DEPLOY_COMPOSE_PROJECT is unset; cannot restore :latest image tags."
         return 0
@@ -3330,6 +3383,11 @@ verify_deployment() {
 
     if [[ "${healthy}" == true ]]; then
         log_info "Health check passed."
+        # OMN-18656: every probe that can say the lane came up BROKEN has now
+        # answered green. Anything that fails after this line is an assertion
+        # about identity, not about health, and must not trigger the `:latest`
+        # tag rollback (see restore_latest_image_tags()).
+        HEALTH_PROBES_PASSED=true
     else
         log_error "Health check FAILED after ${HEALTH_CHECK_RETRIES} attempts."
         log_error "Service is not responding at ${HEALTH_CHECK_URL}"
@@ -3474,6 +3532,139 @@ readback_one_shot_service() {
     log_info "Deploy readback passed: ${service} (${container_id:0:12}) one-shot exited 0 at ${finished_at} (RT-6)."
 }
 
+# OMN-18656: the repository whose build produces THIS repo's images. A service
+# whose running image names any other repository is not built by this run and
+# cannot carry this run's ref.
+readonly OWN_SOURCE_REPO="omnibase_infra"
+
+resolve_service_source_repo() {
+    # Which repository BUILT the image this container runs?
+    #
+    # Read off the container's own labels -- the provenance the builder stamped
+    # -- never a hardcoded list of service names here. A name list is exactly
+    # what goes stale the next time a lane gains a foreign-sourced service, and
+    # the OMN-13826/OMN-16729 lessons in this file are both that same lesson.
+    #
+    # Two spellings, in priority order:
+    #   ai.omninode.image.source-repo   -- explicit, a bare repo name. Stamped by
+    #       deploy_agent/lab_overlay.py's `build_and_import` on the onex-api
+    #       image, and already the structured provenance fact two CI guards read
+    #       (scripts/ci/check_lane_onex_api_revision.py, SOURCE_REPO_LABEL).
+    #   org.opencontainers.image.source -- the OCI standard repo URL. Stamped by
+    #       docker/Dockerfile.runtime on every image this repo builds, so every
+    #       lane-built service resolves through this arm.
+    #
+    # Empty means UNKNOWN provenance, never "ours" -- the caller decides, and it
+    # decides fail-closed.
+    local container_id="$1"
+    local explicit oci
+
+    explicit="$(docker inspect -f '{{index .Config.Labels "ai.omninode.image.source-repo"}}' "${container_id}" 2>/dev/null || true)"
+    if [[ -n "${explicit}" && "${explicit}" != "<no value>" ]]; then
+        printf '%s\n' "${explicit}"
+        return 0
+    fi
+
+    oci="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.source"}}' "${container_id}" 2>/dev/null || true)"
+    if [[ -n "${oci}" && "${oci}" != "<no value>" ]]; then
+        # A repo URL projects onto a repo name by its last path segment, so
+        # both label spellings land in the same vocabulary.
+        printf '%s\n' "${oci##*/}"
+        return 0
+    fi
+
+    printf '\n'
+}
+
+resolve_expected_foreign_revision() {
+    # The ref an operator declares for a FOREIGN-sourced service, read from
+    # READBACK_EXPECTED_REVISIONS ("<service>=<sha>[,<service>=<sha>...]").
+    #
+    # It is the sibling of READBACK_EXPECTED_VERSIONS and exists for the same
+    # reason: this repo's deploy knows its own ref and cannot know another
+    # repo's, so the only honest way to assert one is for the caller that DOES
+    # know it to declare it. Unset is the normal case.
+    local service="$1"
+    local raw="${READBACK_EXPECTED_REVISIONS:-}"
+    [[ -n "${raw}" ]] || { printf '\n'; return 0; }
+
+    local pair
+    local IFS=','
+    for pair in ${raw}; do
+        pair="${pair#"${pair%%[![:space:]]*}"}"
+        if [[ "${pair%%=*}" == "${service}" ]]; then
+            printf '%s\n' "${pair#*=}"
+            return 0
+        fi
+    done
+    printf '\n'
+}
+
+readback_foreign_sourced_service() {
+    # OMN-18656: RT-6 assertion for a service whose image a DIFFERENT repository
+    # builds.
+    #
+    # The defect this closes: RT-6 compared every in-scope service's
+    # org.opencontainers.image.revision to THIS repo's git sha. `onex-api` is
+    # tag-referenced from an omninode_infra image (docker/onex-api is a
+    # self-contained python:3.12-slim app with no omnibase wheel, built by the
+    # lab-overlay applier and pinned through ONEX_API_IMAGE), so its revision is
+    # an omninode_infra commit and can never equal an omnibase_infra one. On
+    # 2026-09-18T02:48Z that comparison failed a warm redeploy of the .201 dev
+    # lane on which every other service had read back correctly and every health
+    # probe was green.
+    #
+    # What is asserted instead, in order of strength:
+    #   1. When the owning repo's ref is declared (READBACK_EXPECTED_REVISIONS),
+    #      assert the container's revision against THAT ref, through the same
+    #      comparator the lane-built services use -- so a foreign service pinned
+    #      to a stale image still fails.
+    #   2. Otherwise assert that provenance EXISTS: a readable, non-empty
+    #      revision naming the repo that built it.
+    #
+    # An absent label is UNKNOWN, never unchanged. Images built before OMN-18113
+    # carry no OCI labels at all, and a branch that read a missing label as
+    # "nothing to compare, carry on" is how a lane reports converged having
+    # proven nothing -- the false-green shape OMN-18200 removed and OMN-18268
+    # refused to reintroduce.
+    local service="$1"
+    local container_id="$2"
+    local source_repo="$3"
+    local python_bin="$4"
+    local readback="$5"
+    local own_ref="$6"
+
+    local expected
+    expected="$(resolve_expected_foreign_revision "${service}")"
+
+    if [[ -n "${expected}" ]]; then
+        log_cmd "${python_bin} ${readback} --container ${container_id} --expected-revision ${expected}"
+        if ! "${python_bin}" "${readback}" \
+            --container "${container_id}" \
+            --expected-revision "${expected}"; then
+            log_error "Deploy readback FAILED (RT-6): foreign-sourced service '${service}' (container ${container_id:0:12})"
+            log_error "  is not at the declared ${source_repo} ref ${expected}."
+            log_error "  Declared via READBACK_EXPECTED_REVISIONS. Re-pin the image and re-run."
+            exit 1
+        fi
+        log_info "Deploy readback passed: ${service} (${container_id:0:12}) revision == ${expected} (${source_repo}, RT-6)."
+        return 0
+    fi
+
+    local revision
+    revision="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${container_id}" 2>/dev/null || true)"
+    if [[ -z "${revision}" || "${revision}" == "<no value>" ]]; then
+        log_error "Deploy readback FAILED (RT-6): foreign-sourced service '${service}' (container ${container_id:0:12})"
+        log_error "  names ${source_repo} as its source repo but carries NO org.opencontainers.image.revision label."
+        log_error "  An image with no provenance is UNKNOWN, never unchanged. Refusing to certify this deploy."
+        exit 1
+    fi
+
+    log_info "Deploy readback passed: ${service} (${container_id:0:12}) is sourced from ${source_repo} at revision ${revision} (RT-6)."
+    log_info "  Not compared to this repo's ref ${own_ref}: ${OWN_SOURCE_REPO} does not build this image."
+    log_info "  To assert its ref too, declare READBACK_EXPECTED_REVISIONS=\"${service}=<${source_repo} sha>\"."
+}
+
 readback_deployed_ref() {
     # TERMINAL deploy readback: read a fact only the freshly-built image could
     # carry off the RUNNING container and assert it equals the intended ref
@@ -3610,6 +3801,19 @@ readback_deployed_ref() {
                 log_error "Refusing to certify this deploy. Rebuild + recreate the lane's runtime and re-run."
                 exit 1
             fi
+        fi
+
+        # OMN-18656: partition by the repository that BUILT the running image
+        # before asserting anything about its ref. Every branch below this point
+        # assumes the image came out of THIS repo's build, which is true of
+        # every lane-built service and false of a tag-referenced one.
+        local source_repo
+        source_repo="$(resolve_service_source_repo "${container_name}")"
+        if [[ -n "${source_repo}" && "${source_repo}" != "${OWN_SOURCE_REPO}" ]]; then
+            readback_foreign_sourced_service \
+                "${service}" "${container_name}" "${source_repo}" \
+                "${python_bin}" "${readback}" "${git_sha}"
+            continue
         fi
 
         local -a readback_args=(
@@ -3874,6 +4078,77 @@ main() {
     # --print-compose-cmd: show commands and exit
     if [[ "${PRINT_COMPOSE_CMD}" == true ]]; then
         print_compose_commands "${deploy_target}" "${compose_project}" "${git_sha}"
+        exit 0
+    fi
+
+    # --readback-only: run the terminal RT-6 readback against the lane as it
+    # stands, and exit (OMN-18656).
+    #
+    # Placed HERE, above the lane lock, the sync, the build and the recreate, so
+    # it is non-mutating by construction rather than by a promise in a comment:
+    # every function that writes to the host is below this return, and the
+    # cleanup trap's rollback needs a `:latest` snapshot this path never takes.
+    #
+    # The intended ref defaults to the clone HEAD -- the same identity every
+    # other phase of this script means by "intended" -- and READBACK_INTENDED_REF
+    # overrides it for a lane whose ref this clone is not currently at.
+    #
+    # It is deliberately NOT read from the lane's deploy record. registry.json is
+    # written only on a FULL deploy success by this script, so on a lane the
+    # deploy agent also rebuilds it lags the running containers: measured on the
+    # .201 dev lane 2026-09-18, registry.omnibase-infra.json declared 0.38.22 /
+    # 17047498145d while every runtime container carried 68e9395fd5b7. Defaulting
+    # to that record would have turned a correct lane into a finding -- the
+    # false-negative shape this ticket exists to remove, reintroduced by the tool
+    # meant to diagnose it.
+    if [[ "${READBACK_ONLY}" == true ]]; then
+        local readback_ref="${READBACK_INTENDED_REF:-${git_sha}}"
+        if [[ -n "${READBACK_INTENDED_REF:-}" ]]; then
+            log_info "Readback-only: intended ref ${readback_ref} (READBACK_INTENDED_REF)."
+        else
+            log_info "Readback-only: intended ref ${readback_ref} (clone HEAD)."
+        fi
+
+        if [[ -f "${REGISTRY_FILE}" ]]; then
+            local registered_sha
+            registered_sha="$(jq -r '.git_sha // empty' "${REGISTRY_FILE}" 2>/dev/null || true)"
+            if [[ -n "${registered_sha}" && "${registered_sha}" != "${readback_ref}" ]]; then
+                log_warn "Readback-only: this lane's deploy record declares ${registered_sha}, which is not the ref being read back."
+                log_warn "  That divergence is information, not an error: registry.json is written only by a"
+                log_warn "  full successful run of this script, so an agent-path rebuild moves the lane without it."
+            fi
+        fi
+
+        # The readback needs a directory that CONTAINS docker/, to spell the
+        # lane's `-f` sequence. A deploy run always has one, because it just
+        # synced it. A readback-only run may not: this clone's version need
+        # never have been deployed on this host, and on the .201 dev lane it
+        # routinely has not, because the deploy agent recreates that lane from
+        # the ambient clone rather than from a versioned deploy root.
+        #
+        # Falling back to the clone is the same usage compose_files.sh already
+        # documents for the refresh wrappers ("the ambient clone for the refresh
+        # wrappers"), and it is the topology the lane is actually running: the
+        # dev lane's containers name the clone's two compose files in their own
+        # com.docker.compose.project.config_files label.
+        local readback_target="${deploy_target}"
+        local -a readback_compose_args
+        resolve_compose_file_args readback_compose_args "${readback_target}" "${compose_project}"
+        if [[ ! -f "${readback_compose_args[1]}" ]]; then
+            log_warn "Readback-only: ${readback_target}/docker/ does not exist on this host."
+            log_warn "  Reading the lane's compose topology from the clone instead: ${repo_root}/docker/"
+            readback_target="${repo_root}"
+            resolve_compose_file_args readback_compose_args "${readback_target}" "${compose_project}"
+        fi
+        if [[ ! -f "${readback_compose_args[1]}" ]]; then
+            log_error "Readback-only: no compose topology at ${readback_target}/docker/."
+            log_error "  Cannot resolve the lane's services. Refusing to report a readback result."
+            exit 1
+        fi
+
+        log_warn "Readback-only mode: nothing is synced, built, recreated, retagged or written."
+        readback_deployed_ref \
+            "${readback_ref}" "${version}" "${compose_project}" "${repo_root}" "${readback_target}"
         exit 0
     fi
 
