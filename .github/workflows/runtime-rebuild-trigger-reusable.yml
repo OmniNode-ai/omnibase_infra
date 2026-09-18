@@ -369,21 +369,76 @@ jobs:
           echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
           echo "LAB_PASS_CHECKS=${LAB_PASS_WORK}/checks.json" >> "$GITHUB_ENV"
 
+      # OMN-18685, porting OMN-18573 from the direct caller's guard. The 25
+      # minutes below is the LANE's budget and is measured from the moment the
+      # deploy agent ACCEPTS the rebuild command, not from when this step
+      # starts. The redeploy-start effect is serial, so the wait between the
+      # merge and the agent taking the command is a queue the lane is not
+      # responsible for. Measured on omnimarket#2641 (2026-09-18, receipt
+      # artifact 10546422861): publish 11:57:25Z, this step's clock opened
+      # 11:58:01Z, acceptance 12:08:41Z behind an in-flight 42m07s job, and the
+      # agent's own build argv read OMNIMARKET_REF=8d52a7ccf563... verbatim --
+      # yet the guard wrote `[SIBLING_NOT_CONVERGED] ... which is behind` at
+      # 12:23:16Z. `sibling_revision` was the only failing check of eight, and
+      # rule 24(b) then refused a good sha for delivery.
+      #
+      # `--wall-clock-seconds` is a BOUND on how long THIS step may watch, not
+      # the budget: the ceiling less the elapsed time, the lane's declared
+      # settle budget and the reserved tail, derived by the same fail-closed
+      # reader the probe below uses. When the bound is what stops the wait, or
+      # when the acceptance cannot be established at all, the guard reports
+      # INDETERMINATE and says which -- never a FAIL asserting the lane
+      # misbehaved. The receipt is still non-PASS either way, so rule 24(b)
+      # stays closed. Nothing here widens the ceiling.
       - name: Wait for the dev lane to vendor the merged sibling revision
         id: converge
+        # The guard exits 3 for INDETERMINATE, which is non-zero and must not
+        # abort the job before the receipt is written. The emit step below reads
+        # this step's `verdict` OUTPUT, which carries all three values, and the
+        # emitter itself still exits non-zero on any non-PASS receipt -- so
+        # `deliver-sibling-candidate`'s `success()` gating is unchanged and a
+        # non-converged sibling still cannot announce itself to staging.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_REPO: ${{ needs.trigger-rebuild.outputs.source_repo }}
           REPO_SLUG: ${{ inputs.repo_slug }}
           SIBLING_SHA: ${{ needs.trigger-rebuild.outputs.sibling_sha }}
+          CORRELATION_ID: ${{ needs.trigger-rebuild.outputs.correlation_id }}
+          # The deploy agent's own HTTP surface on this host, the same one the
+          # direct caller's converge step reads. Its /job/<correlation_id>
+          # endpoint serves the acceptance timestamp.
+          DEPLOY_AGENT_URL: http://host.docker.internal:8098
+          # Must equal this job's own `timeout-minutes`, which is DERIVED from
+          # the declared parts and asserted by tests/ci/test_lab_pass_settle_budget.py.
+          JOB_TIMEOUT_MINUTES: 45
+          RESERVED_TAIL_SECONDS: 120
         run: |
           set -euo pipefail
+          STARTED_EPOCH=$(date -u -d "${LAB_PASS_STARTED_AT}" +%s 2>/dev/null \
+            || python3 -c "import datetime,os;print(int(datetime.datetime.strptime(os.environ['LAB_PASS_STARTED_AT'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.UTC).timestamp()))")
+          ELAPSED=$(( $(date -u +%s) - STARTED_EPOCH ))
+
+          # Derived by a tested Python step, never shell arithmetic, and
+          # fail-closed: an unresolvable declaration exits non-zero and prints
+          # nothing, so a partial capture cannot become a guessed bound.
+          CONVERGE_WALL_CLOCK=$(uv run python scripts/ci/lane_settle_budget.py \
+            --lane compose-dev \
+            --converge-wall-clock \
+            --job-ceiling-seconds "$(( JOB_TIMEOUT_MINUTES * 60 ))" \
+            --elapsed-seconds "$ELAPSED" \
+            --reserved-tail-seconds "$RESERVED_TAIL_SECONDS")
+          echo "converge wall clock: ${CONVERGE_WALL_CLOCK}s"
+
           uv run python scripts/ci/check_lane_sibling_revision.py \
             --repo "$SOURCE_REPO" \
             --repo-slug "$REPO_SLUG" \
             --expect-revision "$SIBLING_SHA" \
             --wait-timeout 25m \
-            --poll-interval 60s
+            --poll-interval 60s \
+            --agent-url "$DEPLOY_AGENT_URL" \
+            --correlation-id "$CORRELATION_ID" \
+            --wall-clock-seconds "$CONVERGE_WALL_CLOCK"
 
       # The readiness and health-dimension reads an integration pass makes by
       # hand. What a compose-dev receipt does NOT cover is named in
@@ -489,15 +544,64 @@ jobs:
           # same script-injection rule the direct caller's emitters follow, and
           # the reason the verdict below moved out of the `--check` string too.
           CORRELATION_ID: ${{ needs.trigger-rebuild.outputs.correlation_id }}
-          SIBLING_REVISION_VERDICT: ${{ steps.converge.outcome == 'success' && 'ok' || 'fail' }}
+          CONVERGE_OUTCOME: ${{ steps.converge.outcome }}
+          # OMN-18685. The guard's own three-valued verdict -- pass, fail or
+          # indeterminate. It is an OUTPUT rather than the step's status
+          # because the status has two values and this has three, and the
+          # difference is the whole ticket: "the lane did not vendor the merge"
+          # and "we could not establish whether it had a chance to" are
+          # different findings, and a fail-closed gate must say which it
+          # refused on. The status remains the fallback for a step that died
+          # before writing anything.
+          CONVERGE_VERDICT: ${{ steps.converge.outputs.verdict }}
+          # The guard writes one line naming the revision the lane was actually
+          # observed vendoring and how it relates to the merge sha. The static
+          # string it replaces named only which flags were passed, so a reader
+          # of a FAIL receipt could not tell a lane vendoring an older sibling
+          # from a lane whose budget had never started.
+          #
+          # Passed through env and dereferenced in the shell, never
+          # interpolated into the run block: an expression-substituted value in
+          # a script body is the workflow script-injection shape (OMN-18638).
+          CONVERGE_EVIDENCE: ${{ steps.converge.outputs.evidence }}
         run: |
           set -euo pipefail
+          # The fallback covers the step dying before it could write its output
+          # (a crash, or the job being cancelled mid-poll). A receipt check with
+          # an empty evidence field is refused by ModelLabPassCheck, so the
+          # receipt would not be written at all -- and an unwritten receipt is
+          # the one outcome worse than a failing one.
+          if [[ "$SIBLING_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            SAFE_SIBLING_SHA="$SIBLING_SHA"
+          else
+            SAFE_SIBLING_SHA="<invalid-sibling-sha>"
+          fi
+          case "$CONVERGE_VERDICT" in
+            pass|fail|indeterminate)
+              SIBLING_REVISION_VERDICT="$CONVERGE_VERDICT"
+              ;;
+            *)
+              # The guard wrote no verdict, so it died before reaching its own
+              # decision. That is not a statement about the lane either, so it
+              # is INDETERMINATE rather than a FAIL. The receipt is still
+              # non-PASS.
+              SIBLING_REVISION_VERDICT=indeterminate
+              CONVERGE_EVIDENCE="INDETERMINATE: the sibling-revision guard ended ${CONVERGE_OUTCOME} without writing a verdict, so no sibling-revision fact was established for ${SAFE_SIBLING_SHA}"
+              ;;
+          esac
+          # The receipt vocabulary spells a passing check 'ok'; the guard's own
+          # vocabulary spells it 'pass'. One translation, here, rather than two
+          # enums that can drift.
+          if [[ "$SIBLING_REVISION_VERDICT" == "pass" ]]; then
+            SIBLING_REVISION_VERDICT=ok
+          fi
+          EVIDENCE="${CONVERGE_EVIDENCE:-check_lane_sibling_revision.py --repo $SOURCE_REPO --expect-revision ${SAFE_SIBLING_SHA} against the omnibase-infra compose project, rebuilt at omnibase_infra $GIT_REF (the guard wrote no evidence)}"
           uv run python scripts/ci/lab_pass_receipt.py emit \
             --sha "$SIBLING_SHA" \
             --lane compose-dev \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --check "sibling_revision:${SIBLING_REVISION_VERDICT}:check_lane_sibling_revision.py --repo $SOURCE_REPO --expect-revision $SIBLING_SHA against the omnibase-infra compose project, rebuilt at omnibase_infra $GIT_REF" \
+            --check "sibling_revision:${SIBLING_REVISION_VERDICT}:${EVIDENCE}" \
             --checks-json "${LAB_PASS_CHECKS}" \
             --agent-command-id "${CORRELATION_ID}" \
             --out "${LAB_PASS_DIR}/receipt.json"

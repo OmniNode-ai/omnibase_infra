@@ -754,3 +754,486 @@ def test_an_unresolvable_declaration_refuses_a_converge_bound(tmp_path: Path) ->
             reserved_tail_seconds=120,
             path=tmp_path / "absent.yaml",
         )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18685 -- the same budget, on the SIBLING guard.
+#
+# OMN-18573 above moved the convergence budget off the step's clock and onto the
+# deploy agent's acceptance, in `check_dev_lane_staleness.py`. That guard serves
+# the DIRECT caller: an omnibase_infra merge, proven by the container's
+# `org.opencontainers.image.revision` label. A SIBLING merge (omnimarket,
+# omnibase_core, omnibase_compat) does not move that label at all, so the
+# sibling path runs a second guard -- `check_lane_sibling_revision.py`, reading
+# `/app/build-provenance.json` -- and the port was never made to it. It kept a
+# bare wall clock opened at `main()`.
+#
+# MEASURED, omnimarket#2641 on 2026-09-18. Receipt artifact 10546422861,
+# `lab-pass-receipt-compose-dev-8d52a7ccf563...`: FAIL on `sibling_revision`
+# alone, its other seven checks green including every readiness probe. Publish
+# 11:57:25Z, guard opened its 25-minute clock 11:58:01Z, the agent did not
+# accept until 12:08:41Z (queued behind a job that ran 42m07s), and
+# accept-to-recreate on that lane is about 22m15s. The agent's own build argv
+# read `OMNIMARKET_REF=8d52a7ccf563...` verbatim -- it resolved exactly the
+# right sha. The lane needed ~32m40s from the guard's start and had 25m00s.
+# ---------------------------------------------------------------------------
+
+from scripts.ci.check_lane_sibling_revision import (
+    EXIT_INDETERMINATE as SIBLING_EXIT_INDETERMINATE,
+)
+from scripts.ci.check_lane_sibling_revision import (
+    ModelSiblingObservation,
+    run_sibling_convergence_wait,
+    sibling_convergence_evidence,
+)
+
+SIBLING_REPO = "omnimarket"
+SIBLING_MERGE_SHA = "8d52a7ccf56333ceaf82039cdbe82b6f30653a98"
+SIBLING_STALE_SHA = "948be2e1a517d04d63f6d0a1f2e3c4b5a6978899"
+
+#: 11:57:25Z, the moment the trigger published redeploy-start for #2641.
+S_PUBLISH = datetime(2026, 9, 18, 11, 57, 25, tzinfo=UTC)
+#: 11:58:01Z, the moment the guard opened its clock -- 36s after the publish.
+S_GUARD_START = datetime(2026, 9, 18, 11, 58, 1, tzinfo=UTC)
+#: 12:08:41Z, the moment the deploy agent accepted the command: 11m16s of queue
+#: behind an in-flight 42m07s job, none of it the lane's doing.
+S_ACCEPT = datetime(2026, 9, 18, 12, 8, 41, tzinfo=UTC)
+#: accept + 22m15s, the measured accept-to-recreate on this lane.
+S_RECREATE = S_ACCEPT + timedelta(minutes=22, seconds=15)
+
+
+def _sibling_wait(
+    *,
+    clock: _Clock,
+    converges_at: datetime | None,
+    acceptance_at: datetime | None,
+    acceptance_reason: str = "",
+    acceptance_visible_from: datetime | None = None,
+    wall_clock: timedelta = WALL_CLOCK,
+    unreadable_until: datetime | None = None,
+):
+    """Drive the real sibling loop over an injected clock, lane and agent."""
+
+    def observe() -> ModelSiblingObservation:
+        if unreadable_until is not None and clock.now < unreadable_until:
+            return ModelSiblingObservation(
+                lane_revision="",
+                containment="",
+                unreadable_reason=(
+                    "docker exec omninode-runtime-effects cat "
+                    "/app/build-provenance.json failed (exit 1): No such container"
+                ),
+            )
+        if converges_at is not None and clock.now >= converges_at:
+            return ModelSiblingObservation(
+                lane_revision=SIBLING_MERGE_SHA,
+                containment="ahead",
+                unreadable_reason="",
+            )
+        return ModelSiblingObservation(
+            lane_revision=SIBLING_STALE_SHA, containment="behind", unreadable_reason=""
+        )
+
+    def resolve_acceptance() -> ModelAcceptanceProbe:
+        if acceptance_at is None:
+            return ModelAcceptanceProbe(acceptance=None, reason=acceptance_reason)
+        visible = acceptance_visible_from or acceptance_at
+        if clock.now < visible:
+            return ModelAcceptanceProbe(
+                acceptance=None,
+                reason=(
+                    f"the deploy agent reports no job for correlation "
+                    f"{CORRELATION_ID} yet"
+                ),
+            )
+        return ModelAcceptanceProbe(
+            acceptance=ModelAgentAcceptance(
+                correlation_id=CORRELATION_ID,
+                accepted_at=acceptance_at,
+                source=f"http://host.docker.internal:8098/job/{CORRELATION_ID}",
+            ),
+            reason="",
+        )
+
+    return run_sibling_convergence_wait(
+        observe=observe,
+        resolve_acceptance=resolve_acceptance,
+        declared_budget=DECLARED,
+        wall_clock=wall_clock,
+        poll_interval=timedelta(seconds=60),
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+
+def _sibling_evidence(result) -> str:
+    return sibling_convergence_evidence(
+        repo=SIBLING_REPO, expected_revision=SIBLING_MERGE_SHA, result=result
+    )
+
+
+# --- AC1: the budget starts at acceptance ---------------------------------
+
+
+def test_a_queue_then_a_convergence_inside_the_lane_budget_passes() -> None:
+    """AC1. The shape a step-anchored clock reports as NOT_CONVERGED.
+
+    Acceptance is 11m16s after the guard starts, and the lane comes to vendor
+    the merge 27 minutes in -- past a 25-minute bound measured from the step,
+    comfortably inside the same 25 minutes measured from acceptance.
+    """
+    clock = _Clock(S_GUARD_START)
+    result = _sibling_wait(
+        clock=clock,
+        converges_at=S_GUARD_START + timedelta(minutes=27),
+        acceptance_at=S_ACCEPT,
+    )
+    assert result.outcome is EnumConvergenceOutcome.OK
+    assert result.waited >= timedelta(minutes=25), (
+        "the point of the ticket: the wait ran PAST the old 25-minute bound"
+    )
+    evidence = _sibling_evidence(result)
+    assert SIBLING_MERGE_SHA[:12] in evidence
+    assert SIBLING_STALE_SHA[:12] not in evidence
+    # A passing receipt that does not say where the lane's clock started cannot
+    # be used to check that it started in the right place.
+    assert S_ACCEPT.isoformat() in evidence
+    assert CORRELATION_ID in evidence
+
+
+def test_the_same_convergence_is_not_converged_on_a_step_anchored_budget() -> None:
+    """The positive control for the test above: the anchor is what changed.
+
+    Same lane, same convergence. The only difference is that the budget is
+    anchored at the guard's own start instead of at the agent's acceptance --
+    which is the pre-OMN-18685 shape -- and it reports the lane as failing.
+    """
+    clock = _Clock(S_GUARD_START)
+    result = _sibling_wait(
+        clock=clock,
+        converges_at=S_GUARD_START + timedelta(minutes=27),
+        acceptance_at=S_GUARD_START,
+    )
+    assert result.outcome is EnumConvergenceOutcome.FAIL
+    assert result.observation.lane_revision == SIBLING_STALE_SHA
+
+
+def test_a_lane_granted_its_whole_budget_from_acceptance_still_fails() -> None:
+    """The FAIL is unchanged and is still a statement ABOUT THE LANE.
+
+    The wall clock here is wide enough for the lane's whole 25-minute budget to
+    actually elapse. That is the only condition under which this guard is
+    entitled to say the lane failed, and the next test pins the consequence.
+    """
+    clock = _Clock(S_GUARD_START)
+    result = _sibling_wait(
+        clock=clock,
+        converges_at=None,
+        acceptance_at=S_ACCEPT,
+        wall_clock=timedelta(minutes=40),
+    )
+    assert result.outcome is EnumConvergenceOutcome.FAIL
+    assert result.budget.exhausted(result.finished_at)
+    evidence = _sibling_evidence(result)
+    assert "behind relative to" in evidence or "is behind relative" in evidence
+    assert "INDETERMINATE" not in evidence
+
+
+def test_a_queue_longer_than_the_jobs_spare_clock_can_never_be_a_lane_fail() -> None:
+    """A property worth stating plainly, because it is a consequence not a bug.
+
+    The job can watch for 1680s (its 45-minute ceiling less the declared 900s
+    settle budget and the 120s tail). Once the agent's acceptance is 11 minutes
+    after the guard starts, the lane's 1500s budget outlives the job's own
+    clock, so this guard can no longer reach a FAIL at all on that shape -- it
+    reports INDETERMINATE and says the job ran out of clock.
+
+    That is the honest answer and it is fail-closed: the receipt is still
+    non-PASS and rule 24(b) still refuses the sha. Making the verdict reachable
+    again means giving the job a clock that covers the budget, which is the
+    ceiling work tracked as OMN-18637, NOT shrinking the lane's budget back
+    onto the step.
+    """
+    clock = _Clock(S_GUARD_START)
+    result = _sibling_wait(clock=clock, converges_at=None, acceptance_at=S_ACCEPT)
+    assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+    assert not result.budget.exhausted(result.finished_at)
+    assert "could NOT afford the lane's declared budget" in _sibling_evidence(result)
+
+
+# --- AC2: no acceptance is INDETERMINATE, never a PASS and never a FAIL ----
+
+
+@pytest.mark.parametrize(
+    ("reason", "fragment"),
+    [
+        (
+            "the publishing job recorded no correlation id for this run, so the "
+            "deploy agent's acceptance cannot be located and the lane's "
+            "convergence budget has no start",
+            "recorded no correlation id",
+        ),
+        (
+            "http://host.docker.internal:8098/job/"
+            + CORRELATION_ID
+            + " could not be read: URLError: <urlopen error [Errno 111] "
+            "Connection refused>",
+            "could not be read",
+        ),
+        (
+            "the deploy agent reports no job for correlation "
+            + CORRELATION_ID
+            + " (http://host.docker.internal:8098/job/"
+            + CORRELATION_ID
+            + " -> HTTP 404). The command has not been handed to the agent yet, "
+            "so the lane's budget has not started.",
+            "reports no job for correlation",
+        ),
+    ],
+    ids=["no-correlation-id", "agent-unreachable", "agent-404-all-window"],
+)
+def test_an_unestablished_acceptance_is_indeterminate(
+    reason: str, fragment: str
+) -> None:
+    """AC2, one case per cause. None of the three is a PASS or a FAIL."""
+    clock = _Clock(S_GUARD_START)
+    result = _sibling_wait(
+        clock=clock, converges_at=None, acceptance_at=None, acceptance_reason=reason
+    )
+    assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+    assert result.reason == reason
+    evidence = _sibling_evidence(result)
+    assert evidence.startswith("INDETERMINATE:")
+    assert fragment in evidence
+    assert "asserts nothing about the lane" in evidence
+    # It is still not a pass: the receipt's check outcome is non-ok either way.
+    check = parse_check_argument(
+        f"sibling_revision:{convergence_check_outcome(result.outcome).value}:{evidence}"
+    )
+    assert check.ok is False
+    assert check.outcome is EnumLabPassCheckOutcome.INDETERMINATE
+
+
+def test_an_acceptance_that_lands_mid_wait_starts_the_budget_retroactively() -> None:
+    """The agent usually accepts DURING the wait, and the budget starts then."""
+    clock = _Clock(S_GUARD_START)
+    result = _sibling_wait(
+        clock=clock,
+        converges_at=S_GUARD_START + timedelta(minutes=27),
+        acceptance_at=S_ACCEPT,
+        acceptance_visible_from=S_ACCEPT,
+    )
+    assert result.outcome is EnumConvergenceOutcome.OK
+    assert result.budget.acceptance is not None
+    assert result.budget.acceptance.accepted_at == S_ACCEPT
+
+
+# --- AC3: the 8d52a7ccf timeline, replayed ---------------------------------
+
+
+def test_the_8d52a7ccf_timeline_no_longer_blames_the_lane() -> None:
+    """AC3. The real run, replayed against the real bounds.
+
+    Publish 11:57:25Z, guard start 11:58:01Z, acceptance 12:08:41Z, the lane
+    recreated at acceptance + 22m15s = 12:30:56Z. The job can afford 28 minutes
+    of watching (its 45-minute ceiling less the declared 900s settle budget and
+    the 120s tail), so it still stops before the lane is there.
+
+    What changes is the VERDICT it stops on. The run that produced receipt
+    10546422861 wrote FAIL -- `the dev lane still vendors omnimarket at
+    948be2e1a517, which is behind` -- a statement that the lane misbehaved,
+    about a lane whose budget had 8 minutes left. It is now INDETERMINATE, and
+    the evidence says the JOB ran out of clock rather than that the lane failed.
+    Rule 24(b) still refuses the sha; what changes is what the refusal says.
+    """
+    clock = _Clock(S_GUARD_START)
+    result = _sibling_wait(clock=clock, converges_at=S_RECREATE, acceptance_at=S_ACCEPT)
+    assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+    assert not result.budget.exhausted(result.finished_at), (
+        "the lane still had budget left when this job had to stop"
+    )
+    evidence = _sibling_evidence(result)
+    assert evidence.startswith("INDETERMINATE:")
+    assert "could NOT afford the lane's declared budget" in evidence
+    assert "1500s granted from acceptance" in evidence
+    assert "1680s wall clock" in evidence
+    assert S_ACCEPT.isoformat() in evidence
+    # The lane is named, but never accused.
+    assert SIBLING_STALE_SHA[:12] in evidence
+    assert "which is behind relative to" not in evidence
+
+
+def test_the_8d52a7ccf_timeline_converges_when_the_job_can_afford_the_budget() -> None:
+    """The same timeline with a wall clock that covers the lane's budget.
+
+    This is what the fix buys once OMN-18637's ceiling work lands: the queue is
+    no longer charged to the lane, so a job able to watch for the whole budget
+    reports the PASS the lane earned.
+    """
+    clock = _Clock(S_GUARD_START)
+    result = _sibling_wait(
+        clock=clock,
+        converges_at=S_RECREATE,
+        acceptance_at=S_ACCEPT,
+        wall_clock=timedelta(minutes=40),
+    )
+    assert result.outcome is EnumConvergenceOutcome.OK
+    assert _sibling_evidence(result).startswith("lane vendors omnimarket at")
+
+
+# --- fail-closed cases the port does not relax -----------------------------
+
+
+def test_an_unreadable_lane_with_a_spent_budget_still_fails_closed() -> None:
+    clock = _Clock(S_GUARD_START)
+    result = _sibling_wait(
+        clock=clock,
+        converges_at=None,
+        acceptance_at=S_ACCEPT,
+        wall_clock=timedelta(minutes=40),
+        unreadable_until=S_GUARD_START + timedelta(hours=4),
+    )
+    assert result.outcome is EnumConvergenceOutcome.FAIL
+    evidence = _sibling_evidence(result)
+    assert "could not be read" in evidence
+    assert "fails closed" in evidence
+
+
+def test_an_unrecognised_compare_status_is_refused_not_waited_out() -> None:
+    clock = _Clock(S_GUARD_START)
+
+    def observe() -> ModelSiblingObservation:
+        return ModelSiblingObservation(
+            lane_revision=SIBLING_STALE_SHA,
+            containment="unknown_status",
+            unreadable_reason="",
+        )
+
+    result = run_sibling_convergence_wait(
+        observe=observe,
+        resolve_acceptance=lambda: ModelAcceptanceProbe(
+            acceptance=ModelAgentAcceptance(
+                correlation_id=CORRELATION_ID,
+                accepted_at=S_ACCEPT,
+                source="http://host.docker.internal:8098",
+            ),
+            reason="",
+        ),
+        declared_budget=DECLARED,
+        wall_clock=WALL_CLOCK,
+        poll_interval=timedelta(seconds=60),
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    assert result.outcome is EnumConvergenceOutcome.FAIL
+    assert "does not recognise" in _sibling_evidence(result)
+
+
+def test_an_observation_cannot_be_both_readable_and_unreadable() -> None:
+    with pytest.raises(ValueError, match="EXACTLY one"):
+        ModelSiblingObservation(
+            lane_revision=SIBLING_MERGE_SHA, containment="ahead", unreadable_reason="x"
+        )
+    with pytest.raises(ValueError, match="EXACTLY one"):
+        ModelSiblingObservation(lane_revision="", containment="", unreadable_reason="")
+
+
+def test_the_sibling_guard_exits_three_for_indeterminate() -> None:
+    """Non-zero, and distinct from 1, so a caller reading only the status can
+    still tell 'the lane did not converge' from 'nothing was established'."""
+    assert SIBLING_EXIT_INDETERMINATE == 3
+
+
+# ---------------------------------------------------------------------------
+# OMN-18685 -- the sibling REUSABLE's own wiring.
+#
+# The guard can only start the budget at acceptance if the workflow hands it a
+# correlation id and an agent surface, so the flags are asserted here for the
+# same reason the direct caller's are above: a capability the calling YAML never
+# reaches is detection, not enforcement. This is the file omnimarket,
+# omnibase_core and omnibase_compat all call, at a pinned ref.
+# ---------------------------------------------------------------------------
+SIBLING_WORKFLOW = REPO_ROOT / ".github/workflows/runtime-rebuild-trigger-reusable.yml"
+
+
+def _sibling_job() -> dict:
+    import yaml
+
+    model = yaml.safe_load(SIBLING_WORKFLOW.read_text(encoding="utf-8"))
+    job = model["jobs"]["verify-sibling-converged"]
+    assert isinstance(job, dict)
+    return job
+
+
+def _sibling_converge_step() -> dict:
+    step = next(s for s in _sibling_job()["steps"] if s.get("id") == "converge")
+    assert isinstance(step, dict)
+    return step
+
+
+def test_the_sibling_converge_step_is_handed_the_agent_surface_and_correlation() -> (
+    None
+):
+    body = _sibling_converge_step()["run"]
+    assert "--agent-url" in body
+    assert "--correlation-id" in body
+    assert "--wall-clock-seconds" in body
+    # The lane's budget is unchanged: the flags above bound the WAIT, and a fix
+    # that quietly widened the grant would show up right here.
+    assert "--wait-timeout 25m" in body
+
+
+def test_the_sibling_converge_wall_clock_is_derived_not_typed() -> None:
+    body = _sibling_converge_step()["run"]
+    assert "lane_settle_budget.py" in body
+    assert "--converge-wall-clock" in body
+
+
+def test_the_sibling_converge_step_survives_an_indeterminate_exit() -> None:
+    """Exit 3 must not abort the job before the receipt is written.
+
+    A job that dies on the guard's non-zero status uploads no receipt at all,
+    which is the one outcome worse than a failing one -- and it is the shape
+    that makes "it failed" and "nobody ran it" indistinguishable.
+    """
+    assert _sibling_converge_step()["continue-on-error"] is True
+
+
+def test_the_sibling_emit_step_reads_the_three_valued_verdict() -> None:
+    emit = next(
+        s for s in _sibling_job()["steps"] if "emit" in str(s.get("name", "")).lower()
+    )
+    assert "steps.converge.outputs.verdict" in emit["env"]["CONVERGE_VERDICT"]
+    assert "steps.converge.outputs.evidence" in emit["env"]["CONVERGE_EVIDENCE"]
+    assert "indeterminate" in emit["run"]
+    # The evidence is dereferenced from env in the shell, never interpolated
+    # into the run body (OMN-18638, the workflow script-injection rule).
+    assert "${{" not in emit["run"]
+
+
+def test_the_sibling_job_ceiling_and_settle_budget_are_unchanged() -> None:
+    """This port moves the ANCHOR, never the grant."""
+    assert _sibling_job()["timeout-minutes"] == 45
+
+
+def test_the_sibling_delivery_announcement_is_still_gated_on_the_verify_job() -> None:
+    """AC: the fail-closed direction is untouched by `continue-on-error`.
+
+    `continue-on-error` is on the converge STEP. The emit step still exits
+    non-zero on any non-PASS receipt, so the JOB still fails, so this job's
+    default `success()` gating still skips the staging announcement. Nothing in
+    this change lets a non-converged sibling announce itself.
+    """
+    import yaml
+
+    model = yaml.safe_load(SIBLING_WORKFLOW.read_text(encoding="utf-8"))
+    deliver = model["jobs"]["deliver-sibling-candidate"]
+    assert deliver["needs"] == ["trigger-rebuild", "verify-sibling-converged"]
+    assert "if" not in deliver, (
+        "an `if` here would replace the implicit success() gating that keeps a "
+        "failed lab pass from announcing itself"
+    )
+    emit = next(
+        s for s in _sibling_job()["steps"] if "emit" in str(s.get("name", "")).lower()
+    )
+    assert emit["if"] == "always()"
