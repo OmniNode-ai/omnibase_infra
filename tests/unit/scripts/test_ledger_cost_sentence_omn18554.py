@@ -383,10 +383,16 @@ def test_a_fresh_goal_enforces_silently(
     monkeypatch.setenv(ll.GOAL_PATH_ENV, str(open_goal))
     assert _append(ledger, claim_row(priced=True)) == 0
     err = capsys.readouterr().err
-    assert "STALE GOAL" not in err
-    assert err.strip() == "" or "CLAIM-TOKEN" in err, (
-        f"a fresh goal file must produce no freshness chatter; got {err!r}"
-    )
+    # Scoped to this gate's own vocabulary rather than to an empty stderr. Other
+    # guards in this script announce their own absence on a checkout that has no
+    # docs/ tree -- a CI runner, for one -- and those announcements are theirs to
+    # make. Asserting an empty stream here would fail on their output and say
+    # nothing about freshness, which is the only thing under test.
+    for fragment in ("STALE GOAL", "state_as_of", "freshness", "horizon"):
+        assert fragment not in err, (
+            f"a fresh goal file must produce no freshness chatter; stderr named "
+            f"{fragment!r}: {err!r}"
+        )
 
 
 @pytest.mark.parametrize(
