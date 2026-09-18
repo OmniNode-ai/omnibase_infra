@@ -1069,9 +1069,27 @@ def classify_lab_receipt(
     the receipt is named for the merge commit, so a query keyed by the run's head
     returns a false zero that reads exactly like a finding (OMN-18664).
 
-    The receipt is looked up in the repo the sha belongs to, by exact artifact
-    name, because a paginated listing returns a false zero and a failed rebuild
-    is precisely when a receipt should exist.
+    WHICH REPOSITORY IS QUERIED, AND WHY IT IS NEVER A CONSTANT
+    -----------------------------------------------------------
+    ``repo``, always -- the repo the sha belongs to. The rebuild trigger is a
+    reusable workflow invoked BY each repository, so it runs as that
+    repository's workflow and ``upload-artifact`` publishes the receipt into
+    that repository's artifact surface. An omnimarket sha's receipt is in
+    omnimarket and is NOT in omnibase_infra; measured 2026-09-18, omnimarket
+    ``31119d98e834`` returns 2 artifacts in omnimarket and 0 in omnibase_infra.
+    ``deliver-dev-candidate-to-staging.yml`` mints a sibling-scoped token for
+    exactly this reason (OMN-17057).
+
+    So a lookup that named a repository literally would return a clean zero for
+    every other repo the train decides -- a false zero shaped exactly like a
+    finding, which is the rule-16 failure this premise cannot afford. The walk
+    that produces ``sha`` reads the decided repo's own clone, so the sha and the
+    artifact surface are the same repository by construction, and
+    ``tests/scripts/test_release_train_lab_ancestor_premise_omn18664.py`` pins
+    that they stay that way.
+
+    The name is exact rather than a paginated listing, because a listing returns
+    a false zero and a failed rebuild is precisely when a receipt should exist.
     """
     lane = lab_pass_receipt.EnumLabLane.COMPOSE_DEV
     full_repo = f"OmniNode-ai/{repo}"
