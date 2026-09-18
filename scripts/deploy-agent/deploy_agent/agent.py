@@ -66,6 +66,7 @@ from deploy_agent.publisher import (
     build_completion_payload,
     publish_result,
 )
+from deploy_agent.queue_depth import LagSampler
 
 logger = logging.getLogger(__name__)
 
@@ -291,10 +292,18 @@ class DeployAgent:
         self._retry_pending_publishes()
 
         # Step 4: Start health endpoint
+        # OMN-18144. Created BEFORE the health app and handed to both sides:
+        # the consumer (below) writes into it from the worker thread, this
+        # surface reads it from the loop thread. Built here rather than beside
+        # the consumer because the health app must be able to answer /queue
+        # from the moment it binds -- before the first poll it answers
+        # "never sampled", which is true, rather than an empty queue.
+        self._lag_sampler = LagSampler()
         health_app = create_health_app(
             job_store=self.job_store,
             get_agent_state=self._get_state,
             get_accept_backlog=self._accept_backlog.latest,
+            get_control_topic_lag=self._lag_sampler.latest,
         )
         runner = web.AppRunner(health_app)
         await runner.setup()
@@ -336,6 +345,7 @@ class DeployAgent:
             job_store=self.job_store,
             allowed_lanes=self._allowed_lanes,
             self_update_hook=self._self_update_pre_accept,
+            lag_sampler=self._lag_sampler,
         )
 
         # Handle signals

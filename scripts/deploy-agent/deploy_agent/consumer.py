@@ -79,6 +79,7 @@ from deploy_agent.lane_policy import (
     LaneNotAllowedError,
     assert_lane_allowed,
 )
+from deploy_agent.queue_depth import LagSampler, ModelControlTopicLag
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,14 @@ def deserialize_command_value(raw: bytes) -> Any:
 
 
 class DeployConsumer:
+    #: OMN-18144. The queue observer, optional and absent by default because
+    #: this consumer is also built by tests and by paths that are not serving
+    #: the queue endpoint. Declared on the CLASS so a partially constructed
+    #: consumer has the attribute: an observer nobody injected is None, which
+    #: means nothing is sampled, which means the endpoint reports the lag
+    #: unknown -- never zero.
+    lag_sampler: LagSampler | None = None
+
     def __init__(
         self,
         kafka_config: ModelDeployAgentKafkaConfig,
@@ -163,6 +172,7 @@ class DeployConsumer:
         allowed_lanes: frozenset[EnumRuntimeLane],
         self_update_hook: SelfUpdateHook,
         quarantine_dir: Path | None = None,
+        lag_sampler: LagSampler | None = None,
     ) -> None:
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
@@ -181,6 +191,11 @@ class DeployConsumer:
             or os.environ.get(ENV_QUARANTINE_DIR)
             or job_store.state_dir.parent / "quarantine"
         )
+        # OMN-18144. The observer also holds the committed offsets the lag is
+        # measured against: `consumer.committed()` is a coordinator round trip
+        # and this is sampled once per poll, so the values this process itself
+        # committed are both cheaper and exact.
+        self.lag_sampler = lag_sampler
         logger.info(
             "Deploy agent lane fence: %s",
             ",".join(sorted(lane.value for lane in self.allowed_lanes)),
@@ -209,6 +224,13 @@ class DeployConsumer:
             records = self.consumer.poll(timeout_ms=1000)
         except UNDECODABLE_FETCH_ERRORS as exc:
             return None, self._quarantine_undecodable_fetch(exc)
+
+        # OMN-18144. Sampled after the poll, on EVERY path including the empty
+        # one, because "nothing arrived" is exactly when a reader most needs to
+        # know whether the queue behind it is empty or three deep. Sampling is
+        # read-only and never fails the poll: a lag that cannot be read is
+        # recorded as unknown.
+        self._sample_lag()
 
         if not records:
             return None, None
@@ -332,6 +354,77 @@ class DeployConsumer:
         logger.info("Accepted command %s (scope=%s)", cmd.correlation_id, cmd.scope)
         return cmd, None
 
+    def _sample_lag(self) -> None:
+        """Record how many control-topic records this agent has not dealt with.
+
+        Measured against the COMMITTED offset, not the fetch position. After a
+        poll that returned a batch the position is already past records
+        ``poll_and_accept`` left buffered and has never looked at, so a
+        position-based lag reports zero while commands wait -- the same
+        off-by-a-batch OMN-18613 found in ``_commit_through``, from the other
+        side. Where this process has not committed anything yet the position is
+        used and the basis says so, because a first-poll under-report by one
+        batch is better than no number at all and the reader can see which it got.
+
+        Never raises. A sampler that could fail a poll would trade the agent's
+        actual job for an observation of it.
+        """
+        if self.lag_sampler is None:
+            return
+        try:
+            assignment = self.consumer.assignment()
+            if not assignment:
+                self.lag_sampler.record(
+                    ModelControlTopicLag.unknown(
+                        "this consumer holds no partition assignment yet, so "
+                        "there is no offset to measure a lag against"
+                    )
+                )
+                return
+            total = 0
+            bases: set[str] = set()
+            for topic_partition in assignment:
+                highwater = self.consumer.highwater(topic_partition)
+                if highwater is None:
+                    self.lag_sampler.record(
+                        ModelControlTopicLag.unknown(
+                            f"no highwater is known for {topic_partition} yet, "
+                            "so the records beyond this agent cannot be counted"
+                        )
+                    )
+                    return
+                committed = self.lag_sampler.committed(topic_partition)
+                if committed is None:
+                    committed = self.consumer.position(topic_partition)
+                    basis = "position"
+                else:
+                    basis = "committed"
+                if committed is None:
+                    self.lag_sampler.record(
+                        ModelControlTopicLag.unknown(
+                            f"no offset is known for {topic_partition} yet, so "
+                            "this agent's place in the topic cannot be read"
+                        )
+                    )
+                    return
+                bases.add(basis)
+                total += max(0, int(highwater) - int(committed))
+            self.lag_sampler.record(
+                ModelControlTopicLag(
+                    value=total,
+                    basis="+".join(sorted(bases)),
+                    observed_at=datetime.now(UTC),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - an unreadable lag is unknown, never fatal
+            logger.debug("control-topic lag unreadable: %s", exc)
+            self.lag_sampler.record(
+                ModelControlTopicLag.unknown(
+                    f"the control-topic lag could not be read: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            )
+
     def _commit_through(self, msg: Any) -> None:
         """Commit past THIS record and no further.
 
@@ -362,6 +455,9 @@ class DeployConsumer:
                 )
             }
         )
+        # OMN-18144: what the next lag sample measures against.
+        if self.lag_sampler is not None:
+            self.lag_sampler.note_commit(topic_partition, msg.offset + 1)
 
     def _rewind_committed_offset_to(self, msg: Any) -> None:
         """Commit this message's own offset so it is re-read, not skipped.
@@ -385,6 +481,11 @@ class DeployConsumer:
                 )
             }
         )
+        # OMN-18144: a rewind moves the committed offset BACK, and a lag
+        # measured against the old value would under-report the record this
+        # rewind exists to have re-read.
+        if self.lag_sampler is not None:
+            self.lag_sampler.note_commit(topic_partition, msg.offset)
         logger.info(
             "Rewound committed offset to %s@%d:%d before self-update re-exec",
             msg.topic,
@@ -425,6 +526,10 @@ class DeployConsumer:
                     )
                 }
             )
+            # OMN-18144: a quarantined record has been dealt with, so the lag
+            # must not keep counting it.
+            if self.lag_sampler is not None:
+                self.lag_sampler.note_commit(tp, position + 1)
             advanced.append(
                 {
                     "topic": tp.topic,

@@ -868,6 +868,225 @@ def read_agent_acceptance(
     )
 
 
+@dataclass(frozen=True)
+class ModelQueueFacts:
+    """This command's place in the deploy agent's queue, or why that is unknown.
+
+    OMN-18144. OMN-18573 anchored the LANE's budget to the agent's acceptance,
+    which fixed everything after acceptance and left the wait BEFORE it bounded
+    by nothing but this job's own ceiling. Measured 2026-09-18: four runtime
+    merges inside 33 minutes against an agent servicing ~32 minutes per
+    command put the fourth merge third in line; its ``/job`` answered 404 for
+    the whole window and the receipt for ``11e8951f`` read FAIL against a lane
+    that was healthy and strictly monotone throughout.
+
+    Exactly one of a readable queue and an ``unread_reason``. An unread queue
+    and an empty one must not be the same value -- that collapse is the defect,
+    one layer up.
+
+    These are EVIDENCE. Nothing here is a verdict input in the sense the
+    receipt means: the lab-pass verdict stays derived from the checks, and the
+    only thing this decides is whether the wait is worth starting.
+    """
+
+    commands_ahead: int | None
+    mean_service_time_seconds: float | None
+    service_sample_size: int
+    in_flight_correlation_id: str | None
+    unread_reason: str
+    source: str
+
+    def __post_init__(self) -> None:
+        readable = self.commands_ahead is not None
+        if readable == bool(self.unread_reason):
+            msg = (
+                "queue facts carry EXACTLY one of a commands-ahead count and "
+                f"an unread reason; got commands_ahead={self.commands_ahead!r}, "
+                f"unread_reason={self.unread_reason!r}"
+            )
+            raise ValueError(msg)
+
+    @classmethod
+    def unread(cls, reason: str, source: str = "") -> ModelQueueFacts:
+        return cls(
+            commands_ahead=None,
+            mean_service_time_seconds=None,
+            service_sample_size=0,
+            in_flight_correlation_id=None,
+            unread_reason=reason,
+            source=source,
+        )
+
+    @property
+    def queue_position_at_start(self) -> int | None:
+        """This command's 1-based place in line. ``1`` means nothing is ahead of it."""
+        if self.commands_ahead is None:
+            return None
+        return self.commands_ahead + 1
+
+    def derived_wait_bound_seconds(
+        self, *, lane_budget_seconds: int, margin_seconds: int
+    ) -> int | None:
+        """How long this run would have to watch for, given the queue.
+
+        ``commands_ahead x mean service time`` is the wait for the agent to
+        REACH this command; the lane's declared budget is what it gets after
+        that; the margin is this guard's own poll interval, because it cannot
+        notice anything sooner than it looks.
+
+        Every term is declared or measured. ``None`` when the queue could not
+        be read, or when this agent has completed nothing to take a mean over
+        -- a bound derived from an absent service time would be a guess wearing
+        a number's clothes.
+        """
+        if self.commands_ahead is None or self.mean_service_time_seconds is None:
+            return None
+        queue_wait = self.commands_ahead * self.mean_service_time_seconds
+        return round(queue_wait + lane_budget_seconds + margin_seconds)
+
+    def evidence_clause(self, *, lane_budget_seconds: int, margin_seconds: int) -> str:
+        """The named fields AC5 requires the receipt's check to carry."""
+        if self.commands_ahead is None:
+            return (
+                "queue_position_at_start=UNREAD commands_ahead=UNREAD "
+                "derived_wait_bound_s=UNREAD mean_service_time_s=UNREAD "
+                f"(the deploy agent's queue could not be read: {self.unread_reason}; "
+                "the wait fell back to this job's wall-clock bound)"
+            )
+        bound = self.derived_wait_bound_seconds(
+            lane_budget_seconds=lane_budget_seconds, margin_seconds=margin_seconds
+        )
+        mean = self.mean_service_time_seconds
+        return (
+            f"queue_position_at_start={self.queue_position_at_start} "
+            f"commands_ahead={self.commands_ahead} "
+            f"derived_wait_bound_s={bound if bound is not None else 'UNDERIVABLE'} "
+            f"mean_service_time_s={f'{mean:.1f}' if mean is not None else 'UNREAD'} "
+            f"(over {self.service_sample_size} completed job(s), read from "
+            f"{self.source or 'the deploy agent'})"
+        )
+
+
+def read_agent_queue(
+    agent_url: str,
+    *,
+    request_timeout_seconds: float = 10.0,
+    opener: Callable[[str, float], tuple[int, str]] | None = None,
+) -> ModelQueueFacts:
+    """Read the deploy agent's ``/queue`` surface. Never raises.
+
+    Every failure comes back as unread facts carrying the reason in words,
+    because this read is additive: a guard that died because the queue surface
+    was unreachable would be strictly worse than the clock-bounded guard it
+    replaces. A 404 specifically means an agent too old to serve the route --
+    it self-updates from ``dev``, so this is the normal state between a merge
+    and the agent's next re-exec, and it is named as such rather than reported
+    as an outage.
+    """
+    if not agent_url.strip():
+        return ModelQueueFacts.unread("no deploy-agent URL was supplied to this guard")
+    url = f"{agent_url.rstrip('/')}/queue"
+    fetch = opener or _http_get_json
+    try:
+        status, body = fetch(url, request_timeout_seconds)
+    except Exception as exc:  # noqa: BLE001 - transport failure IS the evidence
+        return ModelQueueFacts.unread(
+            f"{url} could not be read: {type(exc).__name__}: {exc}", source=url
+        )
+    if status == 404:
+        return ModelQueueFacts.unread(
+            f"{url} answered HTTP 404, so this deploy agent predates the queue "
+            "endpoint and cannot report its depth",
+            source=url,
+        )
+    if status != 200:
+        return ModelQueueFacts.unread(
+            f"{url} answered HTTP {status}: {body[:200]}", source=url
+        )
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        return ModelQueueFacts.unread(
+            f"{url} returned an unreadable body ({exc}): {body[:200]}", source=url
+        )
+    if not isinstance(payload, dict):
+        return ModelQueueFacts.unread(
+            f"{url} returned {type(payload).__name__}, not an object", source=url
+        )
+    ahead = payload.get("commands_ahead")
+    if ahead is None:
+        return ModelQueueFacts.unread(
+            f"{url} reports its depth unknown: "
+            f"{payload.get('control_topic_lag_reason') or 'no reason given'}",
+            source=url,
+        )
+    if not isinstance(ahead, int) or isinstance(ahead, bool) or ahead < 0:
+        return ModelQueueFacts.unread(
+            f"{url} returned commands_ahead={ahead!r}, which is not a count",
+            source=url,
+        )
+    raw_mean = payload.get("mean_service_time_seconds")
+    mean = (
+        float(raw_mean)
+        if isinstance(raw_mean, (int, float)) and not isinstance(raw_mean, bool)
+        else None
+    )
+    if mean is not None and mean <= 0:
+        mean = None
+    raw_sample = payload.get("service_sample_size")
+    sample = raw_sample if isinstance(raw_sample, int) and raw_sample >= 0 else 0
+    raw_in_flight = payload.get("in_flight_correlation_id")
+    return ModelQueueFacts(
+        commands_ahead=ahead,
+        mean_service_time_seconds=mean if sample else None,
+        service_sample_size=sample if mean else 0,
+        in_flight_correlation_id=(
+            str(raw_in_flight) if isinstance(raw_in_flight, str) else None
+        ),
+        unread_reason="",
+        source=url,
+    )
+
+
+def queue_exceeds_bound(
+    facts: ModelQueueFacts,
+    *,
+    lane_budget_seconds: int,
+    wall_clock_seconds: int,
+    margin_seconds: int,
+) -> str:
+    """Why this run cannot afford the queue, or ``""`` when it can.
+
+    The point of answering this BEFORE the wait rather than after it. Today a
+    queued-behind merge spends the job's whole ceiling -- 43 minutes of the one
+    physical verify runner on the lab host -- to arrive at an INDETERMINATE
+    that names no cause. Answering up front costs seconds, frees the runner for
+    the next merge's guard (AC4), and the receipt says "third in line" instead
+    of "ran out of clock".
+
+    An unreadable queue is NOT a refusal. Falling back to the clock is exactly
+    today's behaviour, which is the right fallback: the change may only ever
+    make a verdict better informed, never harder to obtain.
+    """
+    bound = facts.derived_wait_bound_seconds(
+        lane_budget_seconds=lane_budget_seconds, margin_seconds=margin_seconds
+    )
+    if bound is None or bound <= wall_clock_seconds:
+        return ""
+    assert facts.commands_ahead is not None
+    assert facts.mean_service_time_seconds is not None
+    return (
+        f"the deploy agent has {facts.commands_ahead} command(s) ahead of this "
+        f"one, so this merge is number {facts.queue_position_at_start} in line. "
+        f"At the agent's observed {facts.mean_service_time_seconds:.0f}s mean "
+        f"service time that is {bound}s before the lane could be expected to "
+        f"carry this sha, against the {wall_clock_seconds}s this job can watch "
+        "for. The wait is not started: the lane is not late, this run cannot "
+        "afford the queue ahead of it, and holding the verify runner open for "
+        "the difference would delay the next merge's guard behind this one"
+    )
+
+
 def _http_get_json(url: str, timeout_seconds: float) -> tuple[int, str]:
     """GET one JSON surface. HTTP errors come back as a status, not an exception."""
     try:
@@ -890,6 +1109,11 @@ class ModelConvergenceResult:
     budget: ModelConvergenceBudget
     waited: timedelta
     finished_at: datetime
+    #: OMN-18144. The queue this command was behind when the wait started, or
+    #: the named reason it could not be read. Always present, on every verdict,
+    #: because a PASS that does not say what the queue looked like cannot be
+    #: used to check that a later non-PASS was really the queue's doing.
+    queue: ModelQueueFacts | None = None
 
 
 def run_convergence_wait(
@@ -903,6 +1127,7 @@ def run_convergence_wait(
     poll_interval: timedelta,
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
+    resolve_queue: Callable[[], ModelQueueFacts] | None = None,
 ) -> ModelConvergenceResult:
     """Wait for the lane to contain the merge sha, on the LANE's clock.
 
@@ -936,12 +1161,51 @@ def run_convergence_wait(
     lane = read_lane()
     ancestry = resolve_ancestry(lane.revision)
 
+    queue = (
+        resolve_queue()
+        if resolve_queue is not None
+        else ModelQueueFacts.unread(
+            "this guard was invoked with no queue reader, so the commands "
+            "ahead of this one were never asked for"
+        )
+    )
+
     def _converged(observed: LaneRevision, relation: Ancestry | None) -> bool:
         if revisions_match(observed.revision, expected_revision):
             return True
         if relation is None or not relation.observed_on_branch:
             return False
         return relation.relation in _CONTAINING_RELATIONS
+
+    # OMN-18144. Refuse the wait up front when the queue ahead of this command
+    # is longer than this run can outlast.
+    #
+    # Scoped to an UNESTABLISHED acceptance on purpose, and the scope is what
+    # makes this additive. Once the agent has accepted this command the queue
+    # ahead of it is spent, the lane's own budget governs (OMN-18573), and this
+    # branch is unreachable -- so every run whose command was already accepted
+    # behaves byte-for-byte as it did before. What it changes is the one case
+    # it was built for: a command the agent has not reached, behind a queue
+    # whose length is now readable.
+    if not budget.established and not _converged(lane, ancestry):
+        refusal = queue_exceeds_bound(
+            queue,
+            lane_budget_seconds=int(declared_budget.total_seconds()),
+            wall_clock_seconds=int(wall_clock.total_seconds()),
+            margin_seconds=int(poll_interval.total_seconds()),
+        )
+        if refusal:
+            now = clock()
+            return ModelConvergenceResult(
+                outcome=EnumConvergenceOutcome.INDETERMINATE,
+                reason=refusal,
+                lane=lane,
+                ancestry=ancestry,
+                budget=budget,
+                waited=now - started,
+                finished_at=now,
+                queue=queue,
+            )
 
     while not _converged(lane, ancestry):
         now = clock()
@@ -982,6 +1246,7 @@ def run_convergence_wait(
             budget=budget,
             waited=waited,
             finished_at=now,
+            queue=queue,
         )
     if not budget.established:
         return ModelConvergenceResult(
@@ -992,6 +1257,7 @@ def run_convergence_wait(
             budget=budget,
             waited=waited,
             finished_at=now,
+            queue=queue,
         )
     if budget.exhausted(now):
         return ModelConvergenceResult(
@@ -1002,6 +1268,7 @@ def run_convergence_wait(
             budget=budget,
             waited=waited,
             finished_at=now,
+            queue=queue,
         )
     return ModelConvergenceResult(
         outcome=EnumConvergenceOutcome.INDETERMINATE,
@@ -1011,6 +1278,7 @@ def run_convergence_wait(
         budget=budget,
         waited=waited,
         finished_at=now,
+        queue=queue,
     )
 
 
@@ -1023,6 +1291,7 @@ def convergence_evidence(
     budget: ModelConvergenceBudget | None = None,
     now: datetime | None = None,
     indeterminate_reason: str = "",
+    queue_clause: str = "",
 ) -> str:
     """Render the one-line evidence the lab-pass receipt's check carries.
 
@@ -1048,6 +1317,12 @@ def convergence_evidence(
         phrase = budget.acceptance_phrase(reference)
         acceptance_clause = f"; {phrase}" if phrase else ""
 
+    # OMN-18144 AC5: the four queue fields ride on EVERY verdict, not only the
+    # one they explain. A PASS that does not say what the queue looked like
+    # cannot be used to check that a later non-PASS was really the queue's
+    # doing, and that comparison is the whole reason the fields are recorded.
+    queue_suffix = f" {queue_clause}" if queue_clause else ""
+
     if indeterminate_reason:
         line = (
             f"INDETERMINATE: lane at {observed}; whether it contains merge sha "
@@ -1055,7 +1330,7 @@ def convergence_evidence(
             f"Reason: {indeterminate_reason}. This asserts nothing about the "
             "lane; the receipt is still non-PASS."
         )
-        return " ".join(line.translate(_EVIDENCE_UNSAFE).split())
+        return " ".join((line + queue_suffix).translate(_EVIDENCE_UNSAFE).split())
 
     if converged and revisions_match(lane.revision, expected_revision):
         line = (
@@ -1087,7 +1362,9 @@ def convergence_evidence(
             f"(relation: {ancestry.relation} on {ancestry.branch}); not converged "
             f"after {waited_text}"
         )
-    return " ".join((line + acceptance_clause).translate(_EVIDENCE_UNSAFE).split())
+    return " ".join(
+        (line + acceptance_clause + queue_suffix).translate(_EVIDENCE_UNSAFE).split()
+    )
 
 
 def _run(argv: list[str]) -> str:
@@ -1525,6 +1802,12 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
             return ModelAcceptanceProbe(acceptance=None, reason=str(exc))
         return ModelAcceptanceProbe(acceptance=acceptance, reason="")
 
+    def _resolve_queue() -> ModelQueueFacts:
+        return read_agent_queue(
+            args.agent_url,
+            request_timeout_seconds=args.agent_timeout_seconds,
+        )
+
     result = run_convergence_wait(
         expected_revision=expected,
         read_lane=lambda: _read_lane(args),
@@ -1535,9 +1818,17 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         poll_interval=args.poll_interval,
         clock=lambda: datetime.now(UTC),
         sleep=time.sleep,
+        resolve_queue=_resolve_queue,
     )
     lane = result.lane
     ancestry = result.ancestry
+    queue = result.queue or ModelQueueFacts.unread(
+        "the convergence wait returned no queue facts at all"
+    )
+    queue_clause = queue.evidence_clause(
+        lane_budget_seconds=int(args.wait_timeout.total_seconds()),
+        margin_seconds=int(args.poll_interval.total_seconds()),
+    )
 
     evidence = convergence_evidence(
         lane=lane,
@@ -1552,6 +1843,7 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
             if result.outcome is EnumConvergenceOutcome.INDETERMINATE
             else ""
         ),
+        queue_clause=queue_clause,
     )
     # OMN-18388 AC2: the receipt's deployed_revision check carries this, so the
     # artifact names the revision the lane was actually observed at and how it
@@ -1600,6 +1892,7 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
             f"- lane budget: {budget.declared_seconds}s from acceptance; this "
             f"job could watch for {budget.wall_clock_seconds}s",
             f"- watched: {_format_age(result.waited)}",
+            f"- queue at start: {queue_clause}",
             *([f"- reason: {result.reason}"] if result.reason else []),
             "",
             "Convergence is CONTAINMENT: a lane running a descendant of the merge "
