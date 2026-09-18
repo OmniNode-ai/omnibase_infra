@@ -14,12 +14,53 @@ OMN-14060 PR body, not re-exercised here.
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 pytestmark = pytest.mark.unit
+
+
+def _scrubbed_git_env() -> dict[str, str]:
+    """A git environment that cannot reach out of ``tmp_path`` (OMN-14891).
+
+    git exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE into every hook
+    environment, and those OVERRIDE both ``cwd=`` and ``git -C``: a fixture that
+    shells out to git while running under a pre-commit or pre-push hook would
+    mutate the REAL invoking worktree. ``scrub_git_location_env`` removes them.
+
+    It also removes every ``GIT_CONFIG*`` key, including the conftest fixture's
+    protective ones (OMN-16584), so the neutral overrides are put back after the
+    scrub -- otherwise a developer's ``[tag] gpgsign = true`` (or any global
+    hook config) leaks into these fixtures.
+    """
+    env = scrub_git_location_env(os.environ)
+    # Named literally as well as scrubbed: the OMN-14891 guard verifies a
+    # module-local scrubber by reading the keys it drops, and a delegated call
+    # is invisible to that check.
+    for key in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ):
+        env.pop(key, None)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_EDITOR"] = "true"
+    return env
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "check-omnimarket-venv-drift.sh"
@@ -31,18 +72,48 @@ def _init_bare_remote(root: Path) -> Path:
     """Create a local bare git repo with one commit on `dev`; return its path."""
     work = root / "work"
     work.mkdir()
-    subprocess.run(["git", "init", "--quiet", "-b", "dev"], cwd=work, check=True)
     subprocess.run(
-        ["git", "config", "user.email", "test@example.com"], cwd=work, check=True
+        ["git", "init", "--quiet", "-b", "dev"],
+        cwd=work,
+        check=True,
+        env=_scrubbed_git_env(),
     )
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=work, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=work,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=work,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
     (work / "f.txt").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "add", "f.txt"], cwd=work, check=True)
-    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=work, check=True)
+    # The OMN-18663 post-repair readback reads [project].version out of the ref
+    # being installed, so the fixture repo has to look like omnimarket does.
+    (work / "pyproject.toml").write_text(
+        '[project]\nname = "omnimarket"\nversion = "0.0.1"\n', encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "add", "f.txt", "pyproject.toml"],
+        cwd=work,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "init"],
+        cwd=work,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
 
     bare = root / "bare.git"
     subprocess.run(
-        ["git", "clone", "--quiet", "--bare", str(work), str(bare)], check=True
+        ["git", "clone", "--quiet", "--bare", str(work), str(bare)],
+        check=True,
+        env=_scrubbed_git_env(),
     )
     return bare
 
@@ -53,9 +124,13 @@ def _make_local_omnimarket_clone(root: Path, bare_remote: Path) -> Path:
     subprocess.run(
         ["git", "clone", "--quiet", str(bare_remote), str(omnimarket_root)],
         check=True,
+        env=_scrubbed_git_env(),
     )
     subprocess.run(
-        ["git", "checkout", "--quiet", "dev"], cwd=omnimarket_root, check=True
+        ["git", "checkout", "--quiet", "dev"],
+        cwd=omnimarket_root,
+        check=True,
+        env=_scrubbed_git_env(),
     )
     # A committer identity is required for any test that later commits
     # directly into this clone (e.g. the diverged-clone case below). Setting
@@ -68,9 +143,13 @@ def _make_local_omnimarket_clone(root: Path, bare_remote: Path) -> Path:
         ["git", "config", "user.email", "test@example.com"],
         cwd=omnimarket_root,
         check=True,
+        env=_scrubbed_git_env(),
     )
     subprocess.run(
-        ["git", "config", "user.name", "Test"], cwd=omnimarket_root, check=True
+        ["git", "config", "user.name", "Test"],
+        cwd=omnimarket_root,
+        check=True,
+        env=_scrubbed_git_env(),
     )
     return omnimarket_root
 
@@ -82,18 +161,52 @@ def _canon_head(omnimarket_root: Path) -> str:
         capture_output=True,
         text=True,
         check=True,
+        env=_scrubbed_git_env(),
     )
     return result.stdout.strip()
 
 
-def _make_fake_python_shim(root: Path, installed_sha: str) -> Path:
-    """A fake 'python' that reads (and discards) the heredoc script piped to
-    it via stdin, then prints a canned installed-commit SHA (or empty string
-    for "not installed") -- exactly what the real probe expects on stdout.
+def _make_fake_python_shim(
+    root: Path,
+    installed_sha: str,
+    *,
+    readback_sha: str | None = None,
+    readback_version: str = "0.0.1",
+) -> Path:
+    """A fake 'python' standing in for a venv's interpreter.
+
+    It answers the two probes this script makes and runs everything else for
+    real:
+
+    * ``python -`` (heredoc on stdin) is the installed-commit probe. It prints
+      ``installed_sha``, or the empty string for "not installed".
+    * ``python -c`` is the OMN-18663 readback probe. It prints the JSON facts
+      the readback expects; ``readback_sha`` defaults to ``installed_sha``, and
+      passing a different one models an install that actually landed.
+    * anything else -- ``heavy_lock.py``, ``venv_readback.py`` -- is a real
+      program that has to really run, so it execs the test interpreter.
     """
+    facts = json.dumps(
+        {
+            "omnimarket": {
+                "version": readback_version if installed_sha or readback_sha else None,
+                "commit": (readback_sha or installed_sha) or None,
+            }
+        }
+    )
     shim = root / "fake_python.sh"
     shim.write_text(
-        "#!/usr/bin/env bash\ncat >/dev/null\necho " + f'"{installed_sha}"\n',
+        "#!/usr/bin/env bash\n"
+        'if [[ "${1:-}" == "-" ]]; then\n'
+        "  cat >/dev/null\n"
+        f'  echo "{installed_sha}"\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "${1:-}" == "-c" ]]; then\n'
+        f"  printf '%s' {json.dumps(facts)}\n"
+        "  exit 0\n"
+        "fi\n"
+        f'exec {sys.executable} "$@"\n',
         encoding="utf-8",
     )
     shim.chmod(0o755)
@@ -224,6 +337,18 @@ def _make_repair_harness(tmp_path: Path, *, stub_exit: int = 0) -> tuple[Path, P
     harness_dir = tmp_path / "harness"
     harness_dir.mkdir()
 
+    # SCRIPT_DIR-relative collaborators the script resolves at run time: the
+    # OMN-18663 lock helper, the fcntl lock it composes, and the readback that
+    # decides whether the repair landed. Copied rather than stubbed, because
+    # the point of the harness is to exercise the real ones.
+    (harness_dir / "lib").mkdir()
+    shutil.copy2(
+        _REPO_ROOT / "scripts" / "lib" / "venv_reconcile_lock.sh",
+        harness_dir / "lib" / "venv_reconcile_lock.sh",
+    )
+    for collaborator in ("heavy_lock.py", "venv_readback.py"):
+        shutil.copy2(_REPO_ROOT / "scripts" / collaborator, harness_dir / collaborator)
+
     script_copy = harness_dir / "check-omnimarket-venv-drift.sh"
     script_copy.write_text(_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
     script_copy.chmod(0o755)
@@ -258,26 +383,45 @@ def test_repair_fast_forwards_canonical_clone_to_installed_commit(
     # configured, unlike the `work` repo the bare remote was mirrored from).
     advance_clone = tmp_path / "advance_clone"
     subprocess.run(
-        ["git", "clone", "--quiet", str(bare), str(advance_clone)], check=True
+        ["git", "clone", "--quiet", str(bare), str(advance_clone)],
+        check=True,
+        env=_scrubbed_git_env(),
     )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
         cwd=advance_clone,
         check=True,
+        env=_scrubbed_git_env(),
     )
     subprocess.run(
-        ["git", "config", "user.name", "Test"], cwd=advance_clone, check=True
+        ["git", "config", "user.name", "Test"],
+        cwd=advance_clone,
+        check=True,
+        env=_scrubbed_git_env(),
     )
     (advance_clone / "f2.txt").write_text("y", encoding="utf-8")
-    subprocess.run(["git", "add", "f2.txt"], cwd=advance_clone, check=True)
     subprocess.run(
-        ["git", "commit", "--quiet", "-m", "advance"], cwd=advance_clone, check=True
+        ["git", "add", "f2.txt"], cwd=advance_clone, check=True, env=_scrubbed_git_env()
     )
-    subprocess.run(["git", "push", "--quiet"], cwd=advance_clone, check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "advance"],
+        cwd=advance_clone,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
+    subprocess.run(
+        ["git", "push", "--quiet"],
+        cwd=advance_clone,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
     ahead_sha = _canon_head(advance_clone)
     assert ahead_sha != behind_sha
 
-    fake_python = _make_fake_python_shim(tmp_path, behind_sha)  # stale/drifted
+    # Stale before the install, carrying the new commit after it: a stub
+    # installer cannot move a real venv, so the readback (OMN-18663) is told
+    # what a landed install would leave behind.
+    fake_python = _make_fake_python_shim(tmp_path, behind_sha, readback_sha=ahead_sha)
     script_copy, marker = _make_repair_harness(tmp_path)
 
     result = subprocess.run(
@@ -313,11 +457,17 @@ def test_repair_refuses_when_canonical_clone_diverged(tmp_path: Path) -> None:
     # "local is ahead by one commit" case is trivially ff-able and would not
     # exercise the refusal path at all).
     (omnimarket_root / "local_only.txt").write_text("z", encoding="utf-8")
-    subprocess.run(["git", "add", "local_only.txt"], cwd=omnimarket_root, check=True)
+    subprocess.run(
+        ["git", "add", "local_only.txt"],
+        cwd=omnimarket_root,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
     subprocess.run(
         ["git", "commit", "--quiet", "-m", "local-only"],
         cwd=omnimarket_root,
         check=True,
+        env=_scrubbed_git_env(),
     )
     diverged_sha = _canon_head(omnimarket_root)
 
@@ -326,24 +476,41 @@ def test_repair_refuses_when_canonical_clone_diverged(tmp_path: Path) -> None:
     # `diverged_sha`, not its ancestor, and a fast-forward is impossible.
     advance_clone = tmp_path / "advance_clone"
     subprocess.run(
-        ["git", "clone", "--quiet", str(bare), str(advance_clone)], check=True
+        ["git", "clone", "--quiet", str(bare), str(advance_clone)],
+        check=True,
+        env=_scrubbed_git_env(),
     )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
         cwd=advance_clone,
         check=True,
+        env=_scrubbed_git_env(),
     )
     subprocess.run(
-        ["git", "config", "user.name", "Test"], cwd=advance_clone, check=True
+        ["git", "config", "user.name", "Test"],
+        cwd=advance_clone,
+        check=True,
+        env=_scrubbed_git_env(),
     )
     (advance_clone / "remote_only.txt").write_text("w", encoding="utf-8")
-    subprocess.run(["git", "add", "remote_only.txt"], cwd=advance_clone, check=True)
+    subprocess.run(
+        ["git", "add", "remote_only.txt"],
+        cwd=advance_clone,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
     subprocess.run(
         ["git", "commit", "--quiet", "-m", "remote-only"],
         cwd=advance_clone,
         check=True,
+        env=_scrubbed_git_env(),
     )
-    subprocess.run(["git", "push", "--quiet"], cwd=advance_clone, check=True)
+    subprocess.run(
+        ["git", "push", "--quiet"],
+        cwd=advance_clone,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
 
     fake_python = _make_fake_python_shim(tmp_path, "f" * _CANON_SHA_LEN)
     script_copy, marker = _make_repair_harness(tmp_path)

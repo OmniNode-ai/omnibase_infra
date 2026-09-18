@@ -57,6 +57,25 @@
 # is planned before it is applied and REFUSED if it would move any installed
 # package backwards (scripts/venv_install_plan.py). There is no bypass flag.
 #
+# READBACK (OMN-18663): steps 3 and 4 below prove the venv still WORKS -- the
+# mapped nodes resolve, every onex.cli entry point imports. Neither proves the
+# venv carries THIS REF. `uv pip install` exits 0 for "already satisfied" as
+# readily as for "3 packages installed", so an install that resolved to nothing
+# at all passed every check here and reported success, while the drift guard
+# went on refusing the same interpreter ("a reconcile ran, reported SUCCESS,
+# and the venv is STILL drifted", twice on 2026-09-18). Step 5 now reads the
+# venv back -- installed omnimarket VCS commit and version against the ref, and
+# every co-installed sibling against the requirement the ref declares -- and
+# fails naming both values. Success is a readback, never an exit status.
+#
+# ONE WRITER, ONE READER (OMN-18663): the whole sequence -- plan, install, read
+# back -- runs while this process holds an exclusive fcntl lock for the target
+# venv, and so does a plan-only run, because a dry run resolved against a venv
+# mid-install describes a state that never existed (2026-09-18: a VCS-ref bump
+# read as a REMOVE and refused, then planned cleanly seconds later). A caller
+# that already holds that exact lock is not made to take it twice. See
+# scripts/lib/venv_reconcile_lock.sh.
+#
 # Usage:
 #   scripts/install-node-skill-package.sh [--execute] [PYTHON]
 #     PYTHON  path to the target venv python (default: $VIRTUAL_ENV/bin/python,
@@ -68,11 +87,20 @@
 #                      pin versions are read from the ref's own pyproject.toml
 #                      via this clone, and there is no baked-in default to fall
 #                      back to (omni_home/CLAUDE.md rule 8).
+#     ONEX_VENV_LOCK_TIMEOUT
+#                      how long to wait for the venv lock (default 120s). Not a
+#                      bypass: it changes how long a waiter waits, never whether
+#                      the lock is required.
+#
+# There is NO flag and NO variable that skips the readback or runs the install
+# unserialized (omni_home/CLAUDE.md rule 10).
 #
 # Exit codes:
-#   0  plan printed (dry run), or install applied and verified
-#   1  a precondition failed, or verification failed after install
+#   0  plan printed (dry run), or install applied, verified AND read back
+#   1  a precondition failed, or verification/readback failed after install
 #   3  REFUSED — an install step would downgrade/remove an installed package
+#   4  BUSY — another lane holds this venv's reconcile lock; nothing was read
+#      and nothing was changed
 # ----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -119,6 +147,38 @@ fi
 if [[ ! -f "$PLAN_TOOL" ]]; then
   echo "ERROR: missing install planner at $PLAN_TOOL (OMN-18675)." >&2
   exit 1
+fi
+
+READBACK_TOOL="$SCRIPT_DIR/venv_readback.py"
+if [[ ! -f "$READBACK_TOOL" ]]; then
+  echo "ERROR: missing install readback at $READBACK_TOOL (OMN-18663)." >&2
+  echo "  Without it this script could only report its own exit status as" >&2
+  echo "  proof, which is the defect OMN-18663 closed. Refusing." >&2
+  exit 1
+fi
+
+# --------------------------------------------------------------------------- #
+# OMN-18663: hold the target venv's exclusive lock for the whole sequence.
+# --------------------------------------------------------------------------- #
+# Re-runs this script under the lock and returns. A caller that already holds
+# this exact lock (check-omnimarket-venv-drift.sh, which wraps its own critical
+# section) sets the marker, and the nested run proceeds without a second
+# acquisition -- a child process taking its own parent's lock would deadlock.
+# shellcheck source=scripts/lib/venv_reconcile_lock.sh
+source "$SCRIPT_DIR/lib/venv_reconcile_lock.sh"
+VENV_LOCK_PATH="$(venv_reconcile_lock_path "$PYTHON_BIN")"
+if [[ "${ONEX_VENV_RECONCILE_LOCK:-}" != "$VENV_LOCK_PATH" ]]; then
+  set +e
+  venv_reconcile_run_locked "$PYTHON_BIN" "$VENV_LOCK_PATH" \
+    "omnimarket co-install ($PYTHON_BIN)" \
+    -- bash "${BASH_SOURCE[0]}" "$@"
+  locked_status=$?
+  set -e
+  if [[ "$locked_status" -eq "$VENV_LOCK_TIMEOUT_EXIT" ]]; then
+    venv_reconcile_say_busy "$VENV_LOCK_PATH" "$PYTHON_BIN"
+    exit 4
+  fi
+  exit "$locked_status"
 fi
 
 # The canonical clone is REQUIRED: it is where the co-installed pin versions
@@ -199,6 +259,7 @@ echo "  step 1 (--no-deps): git+${OMNIMARKET_GIT}@${OMNIMARKET_REF} ${OMNI_INTER
 echo "  step 2          : ${PYPI_LEAF_DEPS[*]}"
 echo "  step 3          : verify merge_sweep / session / aislop_sweep nodes resolve"
 echo "  step 4          : verify every advertised onex.cli entry point imports"
+echo "  step 5          : read the venv back — it must CARRY this ref (OMN-18663)"
 echo
 
 PLAN_ARGS=()
@@ -279,4 +340,28 @@ if failures:
 print(f"OK: all {len(eps)} onex.cli entry points import cleanly.")
 PYEOF
 
-echo "== done: node-skill package installed and verified =="
+# OMN-18663: steps 3 and 4 prove the venv WORKS. This step proves it carries
+# what was just asked for. They are different questions, and only the second one
+# can tell an install that landed from an install that resolved to nothing --
+# the state in which every check above passes and the drift guard still refuses.
+echo
+echo "== step 5: read the venv back against the installed ref =="
+READBACK_ARGS=()
+for pin in "${OMNI_INTERNAL_PINS[@]}"; do
+  READBACK_ARGS+=(--sibling "$pin")
+done
+if ! env -u PYTHONPATH "$PYTHON_BIN" "$READBACK_TOOL" \
+    --python "$PYTHON_BIN" \
+    --clone "$OMNIMARKET_CLONE" \
+    --ref "$OMNIMARKET_REF" \
+    --label "co-install readback (OMN-18663)" \
+    ${READBACK_ARGS[@]+"${READBACK_ARGS[@]}"}; then
+  echo >&2
+  echo "FAIL: the install steps all reported success and $PYTHON_BIN does not" >&2
+  echo "  carry ${OMNIMARKET_REF}. This is NOT a completed install -- do not" >&2
+  echo "  dispatch from this interpreter and do not record this run as a" >&2
+  echo "  repair. Re-run the failing uv step by hand and read its output." >&2
+  exit 1
+fi
+
+echo "== done: node-skill package installed, verified and read back =="

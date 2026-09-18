@@ -582,10 +582,10 @@ def check_omnimarket_drift(
             # being used -- it just makes the failure a dead end (the exact
             # argument in this module's docstring for naming it at all).
             raise OmnimarketDriftError(
-                f"{detail} A reconcile was attempted and FAILED: "
-                f"{outcome.detail}. That makes this a BROKEN venv, not merely a "
-                f"stale one, so fix the reconcile rather than working around it "
-                f"-- re-run it directly and read the error:\n"
+                f"{detail} Reconcile run {outcome.run_id} was attempted and "
+                f"FAILED: {outcome.detail}. That makes this a BROKEN venv, not "
+                f"merely a stale one, so fix the reconcile rather than working "
+                f"around it -- re-run it directly and read the error:\n"
                 f"  {outcome.command}\n"
                 f"To dispatch anyway despite the drift (results are NOT "
                 f"evidence), set {DRIFT_OVERRIDE_ENV}=1."
@@ -604,13 +604,21 @@ def check_omnimarket_drift(
             )
             return
 
+        # Reaching here means the reconcile outcome claimed a readback-proven
+        # success and this guard, making the SAME comparison, disagrees
+        # (OMN-18663 made ``ok`` derive from that readback precisely so the two
+        # cannot differ). So this is no longer the ordinary "the repair did not
+        # land" path -- that one now arrives above as a failed reconcile naming
+        # both values. It is a claim about the reconciler itself, which is why
+        # it names the run rather than describing drift generically.
         raise OmnimarketDriftError(
-            f"{detail} A reconcile ran, reported SUCCESS, and the venv is "
-            f"STILL drifted: installed {(installed or 'ABSENT')[:12]} != "
-            f"canonical $OMNI_HOME/omnimarket HEAD {canonical[:12]}. The "
-            f"reconciler and this guard therefore disagree about what "
-            f"'reconciled' means, which no retry will resolve. Reproduce "
-            f"with:\n"
+            f"{detail} Reconcile run {outcome.run_id} reported a "
+            f"readback-PROVEN success and this venv is STILL drifted: installed "
+            f"{(installed or 'ABSENT')[:12]} != canonical "
+            f"$OMNI_HOME/omnimarket HEAD {canonical[:12]}. That is a "
+            f"contradiction between two readings of the same fact, not a stale "
+            f"venv, and no retry will resolve it. Reproduce run "
+            f"{outcome.run_id} with:\n"
             f"  {outcome.command}\n"
             f"To dispatch anyway despite the drift (results are NOT "
             f"evidence), set {DRIFT_OVERRIDE_ENV}=1."

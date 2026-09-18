@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError
@@ -22,6 +23,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 from omnibase_infra.cli import omnimarket_drift_guard as guard
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
@@ -40,26 +44,71 @@ from omnibase_infra.cli.workspace_reconcile import (
 
 pytestmark = pytest.mark.unit
 
+
+def _scrubbed_git_env() -> dict[str, str]:
+    """A git environment that cannot reach out of ``tmp_path`` (OMN-14891).
+
+    git exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE into every hook
+    environment, and those OVERRIDE both ``cwd=`` and ``git -C``: a fixture that
+    shells out to git while running under a pre-commit or pre-push hook would
+    mutate the REAL invoking worktree. The keys are named literally as well as
+    scrubbed, because the guard verifies a module-local scrubber by reading the
+    keys it drops and a delegated call is invisible to that check.
+    """
+    env = scrub_git_location_env(os.environ)
+    for key in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ):
+        env.pop(key, None)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_EDITOR"] = "true"
+    return env
+
+
 _FAKE_SHA_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 _FAKE_SHA_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 
 def _make_git_repo(root: Path) -> str:
     """Init a throwaway git repo at ``root`` with one commit; return its HEAD sha."""
-    subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
     subprocess.run(
-        ["git", "config", "user.email", "test@example.com"], cwd=root, check=True
+        ["git", "init", "--quiet"], cwd=root, check=True, env=_scrubbed_git_env()
     )
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=root,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=root,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
     (root / "README.md").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "add", "README.md"], cwd=root, check=True)
-    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "add", "README.md"], cwd=root, check=True, env=_scrubbed_git_env()
+    )
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "init"],
+        cwd=root,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=root,
         capture_output=True,
         text=True,
         check=True,
+        env=_scrubbed_git_env(),
     )
     return result.stdout.strip()
 
@@ -778,7 +827,13 @@ class _Reconciler:
         on_success: object = None,
     ) -> None:
         self.outcome = ModelReconcileOutcome(
-            ok=ok, command="bash /w/reconcile-workspace-venvs.sh", detail=detail
+            ok=ok,
+            command="bash /w/reconcile-workspace-venvs.sh",
+            detail=detail,
+            # Every attempt is identifiable (OMN-18663): the guard's refusals
+            # name the run they disagree with, so a fake reconciler has to
+            # carry one too.
+            run_id="reconcile-20260918T000000Z-testfake",
         )
         self._on_success = on_success
         self.calls = 0
@@ -980,7 +1035,9 @@ def test_missing_reconcile_script_is_a_failed_outcome_not_a_raise(
 def _detach_head(root: Path) -> None:
     """Detach ``root``'s HEAD at its current commit."""
     subprocess.run(
-        ["git", "-C", str(root), "checkout", "--quiet", "--detach", "HEAD"], check=True
+        ["git", "-C", str(root), "checkout", "--quiet", "--detach", "HEAD"],
+        check=True,
+        env=_scrubbed_git_env(),
     )
 
 

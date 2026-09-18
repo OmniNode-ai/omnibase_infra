@@ -41,6 +41,26 @@
 # move any installed package backwards, and `--dry-run` prints that plan
 # without touching the venv or the clone. There is no bypass flag.
 #
+# READBACK BEFORE SUCCESS (OMN-18663): this script used to exit on the install
+# script's exit STATUS. uv exits 0 for "already satisfied" exactly as readily as
+# for "3 packages installed", so a --repair that resolved to nothing at all was
+# indistinguishable from one that landed, and the guard this remedy exists to
+# satisfy went on refusing -- in its own words, "a reconcile ran, reported
+# SUCCESS, and the venv is STILL drifted" (observed twice on 2026-09-18).
+# --repair now RE-RUNS the same comparison it opened with, against the venv it
+# just wrote, and exits non-zero naming both values when the venv does not
+# carry the ref. Success is a readback, never a status.
+#
+# ONE WRITER, ONE READER (OMN-18663): the target is usually the SHARED plugin
+# CLI venv (omni_home/CLAUDE.md rule 11) and every lane on this host uses it.
+# The whole critical section -- resolve, plan, install, read back -- runs while
+# this process holds an exclusive fcntl lock for that venv, and --dry-run takes
+# the SAME lock, because a plan resolved against a venv mid-install describes a
+# state that never existed (2026-09-18: a VCS-ref bump read as a REMOVE and
+# refused, then planned cleanly seconds later). A reader that cannot take the
+# lock reports BUSY and prints no verdict at all. See
+# scripts/lib/venv_reconcile_lock.sh.
+#
 # Usage:
 #   scripts/check-omnimarket-venv-drift.sh [--repair|--dry-run] [PYTHON]
 #     --repair   fast-forward the clone and apply the repair
@@ -50,13 +70,22 @@
 #                ./.venv/bin/python)
 #   Env:
 #     OMNI_HOME  canonical repo registry root (required)
+#     ONEX_VENV_LOCK_TIMEOUT  how long to wait for the venv lock (default 120s).
+#                Not a bypass: it changes how long a waiter waits, never whether
+#                the lock is required.
+#
+# There is NO flag and NO variable that skips the readback or runs the install
+# unserialized. A repair that cannot be proven is not a repair (rule 10).
 #
 # Exit codes:
-#   0  no drift (or drift found and successfully repaired with --repair; or a
-#      clean plan printed with --dry-run)
-#   1  drift detected and not repaired (either neither flag was passed, or
-#      omnimarket is not installed / not a VCS install in the target venv)
+#   0  no drift (or drift found, repaired with --repair, AND PROVEN by the
+#      readback; or a clean plan printed with --dry-run)
+#   1  drift detected and not repaired -- either no flag was passed, omnimarket
+#      is not installed / not a VCS install, or --repair ran and the readback
+#      shows the venv STILL does not carry the canonical ref
 #   3  REFUSED — the repair would downgrade/remove an installed package
+#   4  BUSY — another lane holds this venv's reconcile lock; nothing was read
+#      and nothing was changed
 # ----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -89,6 +118,11 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The provider co-install this script delegates to. Overridable so the repair
+# path is testable without a network install; not a bypass -- it changes WHICH
+# installer runs, never whether the readback below has to pass.
+INSTALL_SCRIPT="${ONEX_DRIFT_INSTALL_SCRIPT:-$SCRIPT_DIR/install-node-skill-package.sh}"
+
 # Resolve the target interpreter — fail fast, never silently pick a default.
 if [[ -z "$PYTHON_BIN" ]]; then
   if [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
@@ -104,6 +138,32 @@ fi
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "ERROR: target python is not executable: $PYTHON_BIN" >&2
   exit 1
+fi
+
+# --------------------------------------------------------------------------- #
+# OMN-18663: hold this venv's exclusive lock for the WHOLE critical section.
+# --------------------------------------------------------------------------- #
+# Re-runs this script under the lock and returns. The nested invocation sees the
+# ONEX_VENV_RECONCILE_LOCK marker for this exact lock path and proceeds without
+# trying to take it again (a child is a different process; a second acquisition
+# would deadlock against its own parent). Everything below this point therefore
+# runs with the lock held -- the fetch, the comparison, the plan, the install
+# and the readback -- so no peer can rewrite site-packages underneath any of it.
+# shellcheck source=scripts/lib/venv_reconcile_lock.sh
+source "$SCRIPT_DIR/lib/venv_reconcile_lock.sh"
+VENV_LOCK_PATH="$(venv_reconcile_lock_path "$PYTHON_BIN")"
+if [[ "${ONEX_VENV_RECONCILE_LOCK:-}" != "$VENV_LOCK_PATH" ]]; then
+  set +e
+  venv_reconcile_run_locked "$PYTHON_BIN" "$VENV_LOCK_PATH" \
+    "omnimarket venv drift check ($PYTHON_BIN)" \
+    -- bash "${BASH_SOURCE[0]}" "$@"
+  locked_status=$?
+  set -e
+  if [[ "$locked_status" -eq "$VENV_LOCK_TIMEOUT_EXIT" ]]; then
+    venv_reconcile_say_busy "$VENV_LOCK_PATH" "$PYTHON_BIN"
+    exit 4
+  fi
+  exit "$locked_status"
 fi
 
 echo "== refreshing canonical omnimarket clone from origin/dev =="
@@ -147,7 +207,7 @@ fi
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo
   echo "== dry run: resolving the repair plan (nothing will be changed) =="
-  OMNIMARKET_REF="$CANONICAL_SHA" bash "$SCRIPT_DIR/install-node-skill-package.sh" "$PYTHON_BIN"
+  OMNIMARKET_REF="$CANONICAL_SHA" bash "$INSTALL_SCRIPT" "$PYTHON_BIN"
   exit 0
 fi
 
@@ -156,7 +216,7 @@ if [[ "$REPAIR" -ne 1 ]]; then
   echo "Re-run with --dry-run to see exactly what would change (nothing is"
   echo "mutated), then:"
   echo "Re-run with --repair to fix, or by hand:"
-  echo "  OMNIMARKET_REF=$CANONICAL_SHA $SCRIPT_DIR/install-node-skill-package.sh --execute $PYTHON_BIN"
+  echo "  OMNIMARKET_REF=$CANONICAL_SHA $INSTALL_SCRIPT --execute $PYTHON_BIN"
   exit 1
 fi
 
@@ -190,4 +250,30 @@ fi
 
 echo
 echo "== repairing: re-running canonical co-install at $CANONICAL_SHA =="
-OMNIMARKET_REF="$CANONICAL_SHA" bash "$SCRIPT_DIR/install-node-skill-package.sh" --execute "$PYTHON_BIN"
+OMNIMARKET_REF="$CANONICAL_SHA" bash "$INSTALL_SCRIPT" --execute "$PYTHON_BIN"
+
+# OMN-18663: the install script's exit status is NOT the verdict. Re-run the
+# comparison this script opened with, against the venv that was just written --
+# the same installed-VCS-commit read, against the same canonical sha. A repair
+# whose result the venv does not carry is a repair that did not happen, and
+# reporting it as success is what made the guard and this remedy disagree.
+echo
+if ! env -u PYTHONPATH "$PYTHON_BIN" "$SCRIPT_DIR/venv_readback.py" \
+    --python "$PYTHON_BIN" \
+    --clone "$OMNIMARKET_CLONE" \
+    --ref "$CANONICAL_SHA" \
+    --label "post-repair readback (OMN-18663)"; then
+  echo >&2
+  echo "DRIFTED: the repair reported success and the venv does not carry it." >&2
+  echo "  requested : $CANONICAL_SHA" >&2
+  echo "  venv      : $PYTHON_BIN" >&2
+  echo >&2
+  echo "  Do NOT dispatch from this interpreter: the drift guard will refuse it" >&2
+  echo "  and it would be right to. Re-run the install by hand and read the uv" >&2
+  echo "  output:" >&2
+  echo "    OMNIMARKET_REF=$CANONICAL_SHA $INSTALL_SCRIPT --execute $PYTHON_BIN" >&2
+  exit 1
+fi
+
+echo
+echo "== repaired and PROVEN: $PYTHON_BIN carries omnimarket ${CANONICAL_SHA:0:12} =="
