@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+import packaging
 import pytest
 
 from omnibase_core.validators.no_unguarded_git_subprocess import (
@@ -120,7 +122,18 @@ def _make_omni_home(root: Path, *, version: str) -> tuple[Path, str]:
 
 
 def _make_real_venv(root: Path) -> tuple[Path, Path]:
-    """A real venv. Returns (its python, its site-packages)."""
+    """A real venv, carrying what a real co-install venv carries.
+
+    Returns (its python, its site-packages).
+
+    ``packaging`` is seeded deliberately (OMN-18752). A venv built
+    ``--without-pip`` has none, and a co-installed runtime venv on any real
+    host always does — so a fixture without it is not a smaller version of
+    the real shape, it is a different one, and a readback step that needs a
+    specifier parser would be exercised against a venv no operator has. It is
+    COPIED from the running interpreter rather than installed, so the test
+    stays hermetic: no network, no uv, no pip.
+    """
     venv = root / "target-venv"
     subprocess.run(
         [sys.executable, "-m", "venv", "--without-pip", str(venv)],
@@ -129,6 +142,10 @@ def _make_real_venv(root: Path) -> tuple[Path, Path]:
     )
     python_bin = venv / "bin" / "python"
     site_packages = next((venv / "lib").glob("python3.*/site-packages"))
+
+    packaging_src = Path(packaging.__file__).parent
+    shutil.copytree(packaging_src, site_packages / "packaging")
+
     return python_bin, site_packages
 
 
