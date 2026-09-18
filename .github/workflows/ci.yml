@@ -304,6 +304,16 @@ jobs:
       - name: Check hosted-runner steps install uv before invoking it (OMN-18364)
         run: uv run python scripts/ci/check_workflow_uv_available.py
 
+      # OMN-18684. A `run:` heredoc importing a repository module is a call
+      # site no rename tool can see, so OMN-18412's rename of
+      # `load_route_policy` left dev-lane-liveness.yml's saturation monitor
+      # failing at its first step on every scheduled run -- producing no
+      # saturation record at all, not a stale one. Same checker as the
+      # `workflow-inline-python-imports` pre-commit hook, so the local and CI
+      # verdicts cannot diverge.
+      - name: Check inline workflow Python imports resolve (OMN-18684)
+        run: uv run python scripts/ci/check_workflow_inline_python_imports.py
+
       - name: Check Kafka bootstrap no localhost fallback (OMN-8783)
         run: uv run python scripts/ci_check_kafka_no_localhost_default.py
 
