@@ -21,6 +21,14 @@ Inputs:
 Output: a single JSON object on stdout:
   {
     "min_age_days": int,
+    "builder_cache_max_size": str,   # OMN-16367: docker-parseable size string
+                                     # (e.g. "100GB") passed to
+                                     # `docker builder prune --max-used-space`.
+                                     # A CEILING on retained build cache. The
+                                     # previous age-only bound could not shrink
+                                     # the cache at all: `until=` filters on LAST
+                                     # ACCESS, and every large record is refreshed
+                                     # by the next build's cache hit.
     "remove_image_ids": [str, ...],
     "remove_image_refs": {image_id: [repo:tag, ...]},  # OMN-15804: every tag
                                                          # reference an id carries,
@@ -90,6 +98,10 @@ PR_STATE_MERGED = "merged"
 PR_STATE_CLOSED = "closed"
 PR_STATE_OPEN = "open"
 PR_STATE_UNKNOWN = "unknown"  # lookup error or PR number not found → keep
+
+# OMN-16367: default ceiling on retained BuildKit cache, as a docker-parseable
+# size string. Overridable per host via keep-list `builder_cache_max_size`.
+DEFAULT_BUILDER_CACHE_MAX_SIZE = "100GB"
 
 
 def _parse_created_at(value: str, now: datetime) -> float:
@@ -232,6 +244,13 @@ def build_plan(
     protect_running: bool = bool(keep_list.get("protect_running", True))
     keep_generations: int = int(keep_list.get("superseded_image_keep_generations", 2))
     min_age_days: int = int(keep_list.get("min_age_days", 3))
+    # OMN-16367: single source of truth for the builder-cache ceiling. Default
+    # sized to the lab's working set, NOT to the 3.6 TB disk -- BuildKit's own
+    # default derives a 341.8 GiB reserved floor from volume size, which is
+    # untenable beside 674 GB of volumes and the containerd layer store.
+    builder_cache_max_size: str = str(
+        keep_list.get("builder_cache_max_size", DEFAULT_BUILDER_CACHE_MAX_SIZE)
+    )
 
     remove_image_ids: list[str] = []
     kept_reasons: dict[str, str] = {}
@@ -369,6 +388,7 @@ def build_plan(
 
     return {
         "min_age_days": min_age_days,
+        "builder_cache_max_size": builder_cache_max_size,
         "remove_image_ids": remove_image_ids,
         "remove_image_refs": remove_image_refs,
         "remove_container_ids": remove_container_ids,

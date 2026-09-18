@@ -1,0 +1,19 @@
+{
+  "builder": {
+    "gc": {
+      "enabled": true,
+      "policy": [
+        {
+          "filter": ["unused-for=168h"],
+          "reservedSpace": "10GB"
+        },
+        {
+          "all": true,
+          "reservedSpace": "10GB",
+          "maxUsedSpace": "100GB",
+          "minFreeSpace": "200GB"
+        }
+      ]
+    }
+  }
+}
