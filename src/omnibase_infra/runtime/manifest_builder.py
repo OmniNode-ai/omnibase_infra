@@ -13,6 +13,16 @@ failed) reaches the ``runtime_manifests`` projection instead of dying in the
 log stream. :func:`publish_runtime_manifest` is the seam a test can drive with
 a recording bus — the kernel calls exactly this function, so a test that
 asserts on the captured envelope is asserting on the artifact that runs.
+
+OMN-18709: the per-contract hash on the snapshot is a hash of the contract
+file's canonical bytes, computed by
+:func:`omnibase_infra.runtime.util_contract_content_hash.contract_content_hash`.
+It was previously a hash of the contract's name and version, which meant a
+contract whose body was rewritten kept its hash -- so the field could not detect
+the drift class it exists for. The canonical form is declared in that module so
+a consumer outside this repository reproduces it without importing anything.
+The name and version stay on the manifest as their own fields; this changed what
+the hash means, not what the manifest carries.
 """
 
 from __future__ import annotations
@@ -21,6 +31,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_infra.errors.error_contract_content_hash import ContractContentHashError
 from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
     ModelAutoWiringManifest,
@@ -30,6 +41,7 @@ from omnibase_infra.runtime.auto_wiring.report import (
     ModelAutoWiringReport,
     ModelContractWiringResult,
 )
+from omnibase_infra.runtime.util_contract_content_hash import contract_content_hash
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.model_runtime_attach_readiness import (
@@ -75,6 +87,12 @@ def build_runtime_manifest(
 
     Raises:
         ImportError: If omnibase_core.models.runtime_manifest is not installed.
+        ContractContentHashError: A contract file could not be read for hashing,
+            or a wiring result names a contract the manifest does not carry
+            (OMN-18709). The kernel's manifest-emission boundary degrades this
+            to a logged warning and an unemitted manifest, which is a visible
+            gap rather than a manifest carrying a hash that is not a content
+            hash.
     """
     from omnibase_core.models.runtime_manifest.model_manifest_contract import (
         ModelManifestContract,
@@ -101,19 +119,29 @@ def build_runtime_manifest(
         result: ModelContractWiringResult,
     ) -> ModelManifestContract:
         discovered = contract_by_name.get(result.contract_name)
-        version = str(discovered.contract_version) if discovered else "unknown"
-        node_type = discovered.node_type if discovered else "unknown"
-        # Stable hash: SHA-256 of "{name}:{version}"
-        import hashlib
-
-        contract_hash = hashlib.sha256(
-            f"{result.contract_name}:{version}".encode()
-        ).hexdigest()
+        if discovered is None:
+            # The report is produced by wire_from_manifest() over the same
+            # filtered manifest this function is handed, so every result name
+            # resolves on the path that runs. If one does not, the contract's
+            # file is unknown and no content hash exists for it -- which is
+            # exactly the case that must not be papered over with a hash of the
+            # name, because that is the value this ticket removed.
+            raise ContractContentHashError(
+                "Wiring result has no discovered contract in the manifest, so "
+                f"its contract file is unknown: {result.contract_name}",
+                contract_name=result.contract_name,
+            )
+        # OMN-18709: the hash is over the contract file's canonical bytes, not
+        # over its name and version. The canonical form is declared in
+        # util_contract_content_hash so a consumer outside this repository --
+        # an image label, a board resolver -- reproduces it without importing
+        # this module. name and version remain their own fields below; this
+        # replaced what the hash means, not what the manifest carries.
         return ModelManifestContract(
             name=result.contract_name,
-            version=version,
-            node_type=node_type,
-            contract_hash=contract_hash,
+            version=str(discovered.contract_version),
+            node_type=discovered.node_type,
+            contract_hash=contract_content_hash(discovered.contract_path),
         )
 
     wired_results = sorted(
@@ -209,6 +237,12 @@ async def publish_runtime_manifest(
 
     Raises:
         ImportError: If omnibase_core.models.runtime_manifest is not installed.
+        ContractContentHashError: A contract file could not be read for hashing,
+            or a wiring result names a contract the manifest does not carry
+            (OMN-18709). The kernel's manifest-emission boundary degrades this
+            to a logged warning and an unemitted manifest, which is a visible
+            gap rather than a manifest carrying a hash that is not a content
+            hash.
     """
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.runtime.models.model_runtime_manifest_published import (

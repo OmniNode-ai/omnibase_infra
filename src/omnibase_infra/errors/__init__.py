@@ -41,6 +41,7 @@ Exports:
     RepositoryTimeoutError: Query timeout exceeded
     DbOwnershipMismatchError: Database is owned by a different service
     DbOwnershipMissingError: db_metadata table or ownership row missing
+    ContractContentHashError: A contract file could not be content-hashed (OMN-18709)
     SchemaFingerprintMismatchError: Live schema fingerprint != expected
     SchemaFingerprintMissingError: Expected fingerprint not in db_metadata
     EventRegistryFingerprintMismatchError: Live event registry fingerprint != expected
@@ -129,6 +130,9 @@ from omnibase_infra.errors.error_container_wiring import (
     ServiceRegistryUnavailableError,
     ServiceResolutionError,
 )
+from omnibase_infra.errors.error_contract_content_hash import (
+    ContractContentHashError,
+)
 from omnibase_infra.errors.error_db_ownership import (
     DbOwnershipMismatchError,
     DbOwnershipMissingError,
@@ -213,6 +217,8 @@ __all__: list[str] = [
     "ContainerValidationError",
     # Container wiring errors
     "ContainerWiringError",
+    # Contract content hash errors (OMN-18709)
+    "ContractContentHashError",
     # DB ownership errors
     "DbOwnershipMismatchError",
     "DbOwnershipMissingError",
