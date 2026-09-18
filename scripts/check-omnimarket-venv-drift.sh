@@ -30,28 +30,51 @@
 # `onex skill` dispatch — the hot path only detects and instructs; this script
 # is the actual repair.
 #
+# DOWNGRADE REFUSAL (OMN-18675): the target venv is usually the SHARED plugin
+# CLI venv that serves `onex` for every lane on the host (omni_home/CLAUDE.md
+# rule 11), so a repair that moves an unrelated package backwards breaks every
+# lane, not just the one that ran it. That is not hypothetical: on 2026-09-18
+# this remedy fixed the omnimarket pin and silently downgraded omnibase-compat
+# 0.5.7 -> 0.5.5 and omninode-memory 0.18.0 -> 0.15.0, which removed
+# `omnibase_compat.contracts.pr_occ_stamp` and took the whole `onex` CLI down
+# host-wide. Every install step is now planned first and REFUSED if it would
+# move any installed package backwards, and `--dry-run` prints that plan
+# without touching the venv or the clone. There is no bypass flag.
+#
 # Usage:
-#   scripts/check-omnimarket-venv-drift.sh [--repair] [PYTHON]
-#     PYTHON  target venv python (default: $VIRTUAL_ENV/bin/python, else
-#             ./.venv/bin/python)
+#   scripts/check-omnimarket-venv-drift.sh [--repair|--dry-run] [PYTHON]
+#     --repair   fast-forward the clone and apply the repair
+#     --dry-run  print the repair plan (resolved versions, before -> after for
+#                every package that would change) and change NOTHING
+#     PYTHON     target venv python (default: $VIRTUAL_ENV/bin/python, else
+#                ./.venv/bin/python)
 #   Env:
 #     OMNI_HOME  canonical repo registry root (required)
 #
 # Exit codes:
-#   0  no drift (or drift found and successfully repaired with --repair)
-#   1  drift detected and not repaired (either --repair was not passed, or
+#   0  no drift (or drift found and successfully repaired with --repair; or a
+#      clean plan printed with --dry-run)
+#   1  drift detected and not repaired (either neither flag was passed, or
 #      omnimarket is not installed / not a VCS install in the target venv)
+#   3  REFUSED — the repair would downgrade/remove an installed package
 # ----------------------------------------------------------------------------
 set -euo pipefail
 
 REPAIR=0
+DRY_RUN=0
 PYTHON_BIN=""
 for arg in "$@"; do
   case "$arg" in
     --repair) REPAIR=1 ;;
+    --dry-run) DRY_RUN=1 ;;
     *) PYTHON_BIN="$arg" ;;
   esac
 done
+
+if [[ "$REPAIR" -eq 1 && "$DRY_RUN" -eq 1 ]]; then
+  echo "ERROR: --repair and --dry-run are mutually exclusive." >&2
+  exit 1
+fi
 
 if [[ -z "${OMNI_HOME:-}" ]]; then
   echo "ERROR: OMNI_HOME is not set. Export OMNI_HOME=/path/to/omni_home." >&2
@@ -116,8 +139,22 @@ else
   exit 0
 fi
 
+# OMN-18675: --dry-run resolves and prints the exact plan the repair would
+# apply — including the versions resolved from the ref's own pyproject.toml and
+# a before -> after line for every package that would change — without touching
+# the venv OR fast-forwarding the canonical clone. Run this before --repair on
+# any shared venv.
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo
+  echo "== dry run: resolving the repair plan (nothing will be changed) =="
+  OMNIMARKET_REF="$CANONICAL_SHA" bash "$SCRIPT_DIR/install-node-skill-package.sh" "$PYTHON_BIN"
+  exit 0
+fi
+
 if [[ "$REPAIR" -ne 1 ]]; then
   echo
+  echo "Re-run with --dry-run to see exactly what would change (nothing is"
+  echo "mutated), then:"
   echo "Re-run with --repair to fix, or by hand:"
   echo "  OMNIMARKET_REF=$CANONICAL_SHA $SCRIPT_DIR/install-node-skill-package.sh --execute $PYTHON_BIN"
   exit 1
