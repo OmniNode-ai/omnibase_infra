@@ -73,6 +73,16 @@
 #   lane on which six of those fourteen do not exist. That is precisely the phantom-lane
 #   claim retro B-6 made unwritable. The block regenerates truthfully from the next census
 #   after the lanes are refreshed.
+# verified: 2026-09-18 via read-only ssh jonah@192.168.86.201 `ss -ltn`,
+#   `docker ps -a --format '{{.Label "com.docker.compose.project"}}' | sort | uniq -c` and
+#   `docker network ls --filter name=ci-bus` — OMN-18691, the attestation for the `ci-bus`
+#   entry this PR adds. STATE AT THIS LINE: five compose projects carry containers on the host
+#   (omnibase-infra 33, omnibase-infra-stability-test 19, omnibase-infra-judge 7,
+#   omnibase-infra-lakshman 7, plus the non-lane projects), `omninode-ci-bus` has ZERO
+#   containers and no network, and neither 21092 nor 21644 has a listener. The new entry is
+#   therefore DECLARED-BUT-ABSENT by design and is marked `optional: true` until phase 2 brings
+#   it up under an operator consent row — see the entry's own comment for why that flag is
+#   temporary and what flips it.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -446,6 +456,67 @@ lanes:
       - name: omnimarket-lakshman-projection-api
         kind: service
         replicas: 1
+  # ---------------------------------------------------------------------------
+  # ci-bus — the fleet's DEDICATED CI bus broker (OMN-18691)
+  # ---------------------------------------------------------------------------
+  # NOT A RUNTIME LANE, and declared here anyway. It runs no runtime, no
+  # Postgres and no Valkey; it is one Redpanda and the three one-shots that make
+  # it usable. It is in this file for the one reason this file exists: a
+  # running-but-UNDECLARED container is invisible, and that is the dangerous
+  # direction. The `judge` lane was absent from the CLAUDE.md table while running
+  # (retro B-6 / OMN-13034) and that is exactly the shape being avoided.
+  #
+  # WHAT IT IS FOR. The thin CI publishers used to publish to the DEV lane's
+  # Redpanda. The dev lane is a fully mutable test platform that the deploy agent
+  # rebuilds on every runtime-affecting merge, so every rebuild window was a
+  # window in which fleet CI could not publish. On 2026-09-18 a watchdog kill
+  # mid-recreate left that broker REMOVED and every Receipt Gate on the fleet was
+  # red for ~35 minutes. A separate compose project is immune by construction:
+  # `docker compose -p omnibase-infra …` cannot reach another project's
+  # containers, volumes or network.
+  #
+  # `optional: true`, DELIBERATELY AND TEMPORARILY. This entry is declared BEFORE
+  # the project is built, following the `lakshman` reservation precedent above.
+  # The project's bring-up needs a SCRAM principal, and minting a credential
+  # needs its own OPERATOR-CONSENT row under Operating Rule 22 — a wait this lane
+  # cannot bound. A non-optional entry would therefore fail the census hard on
+  # every tick, for an unknown number of days, on a project nobody has yet been
+  # authorised to build. That is noise, not signal, and it trains a reader to
+  # ignore the census.
+  #
+  # THE FLIP TO `optional: false` IS PART OF PHASE 2, in the same change that
+  # records the bring-up. Once this broker exists it must always be up: it is the
+  # durability the whole design rests on, and a CI bus that is down is a CI bus
+  # that is silently queueing nothing. Leaving it optional after bring-up would
+  # be the defect this file exists to catch, one level up.
+  #
+  # verified: 2026-09-18 via read-only `ssh jonah@192.168.86.201`:
+  #   `docker ps -a --filter label=com.docker.compose.project=omninode-ci-bus
+  #     --format '{{.Names}}' | wc -l`            -> 0
+  #   `docker network ls --filter name=ci-bus --format '{{.Name}}' | wc -l` -> 0
+  #   `ss -ltn` -> no listener on 21092 and none on 21644 (the full listener set
+  #     read in the same command holds 19092, 29644, 39092, 55092, 55644 and
+  #     59092/59644, so the X9092/X9644 convention has no free PAIR left; 29092  # cloud-bus-ok OMN-18691
+  #     is free but 29644 belongs to omnibase-infra-stability-test-redpanda).
+  # So: the project does not exist, its network does not exist, and both ports it
+  # claims are unheld at the moment this file claims them. Declared-but-absent is
+  # the loud direction and is intended.
+  ci-bus:
+    compose_file: docker/docker-compose.ci-bus.yml
+    compose_project: omninode-ci-bus
+    network: omninode-ci-bus-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omninode-ci-bus-redpanda
+        kind: service
+        replicas: 1
+      - name: omninode-ci-bus-topics
+        kind: oneshot
+      - name: omninode-ci-bus-scram-user
+        kind: oneshot
+      - name: omninode-ci-bus-sasl-enable
+        kind: oneshot
 # ---------------------------------------------------------------------------
 # hook_edge — which lane the Claude Code hook edge publishes to (OMN-17204)
 # ---------------------------------------------------------------------------

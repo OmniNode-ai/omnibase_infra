@@ -32,6 +32,28 @@ keep_image_repos:
   - projection-api
   # Core infra base images — removing these forces slow re-pulls and can wedge a
   # lane restart while /data is already tight.
+  #
+  # OMN-18691 raises the stakes on `redpandadata/redpanda` specifically, and the
+  # entry is recorded here rather than left to be rediscovered. That image is now
+  # also the FLEET'S CI BUS: the dedicated `omninode-ci-bus` compose project
+  # (docker/docker-compose.ci-bus.yml) runs one Redpanda whose whole purpose is to
+  # survive a dev-lane rebuild, so reaping it would wedge every repository's
+  # Receipt Gate and not merely a lane restart. No new key is added for that
+  # project, deliberately — a redundant entry reads as the protection when it is
+  # not. The three mechanisms that already cover it, verified against
+  # scripts/disk_gc_plan.py and scripts/disk-gc.sh on 2026-09-18:
+  #   * its image matches this substring, so it is never removed at any age;
+  #   * `protect_running: true` plus the OMN-15804 fresh `ancestor` re-check keeps
+  #     any image a container references, and the broker container is running;
+  #   * its data volume is out of scope entirely — disk-gc.sh removes no volume
+  #     (`scripts/disk-gc.sh:26`), which is what makes the durability the CI bus
+  #     design rests on actually durable.
+  # Its three one-shots DO sit Exited(0) and the planner removes any stopped
+  # container older than `min_age_days` with no keep-list and no project scoping
+  # (`scripts/disk_gc_plan.py:494-508`). That is harmless and is not worth an
+  # exemption: the lane census treats an absent run-to-completion container as
+  # correct, not as drift (`scripts/lane_census_plan.py:224-227`), exactly as it
+  # already does for every lane's migration and partition-cap one-shots.
   - postgres
   - redpandadata/redpanda
   - valkey

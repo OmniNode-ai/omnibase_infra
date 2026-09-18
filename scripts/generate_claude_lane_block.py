@@ -78,6 +78,14 @@ _LANE_BOUNDARY: dict[str, str] = {
         "collaborator lane — owned by Lakshman; mutable by him; NOT a proof "
         "lane; never sourced for stability/prod grants"
     ),
+    # OMN-18691. NOT a runtime lane: no runtime main, no effects, no Postgres.
+    # It is in the census because a running-but-undeclared container is the
+    # dangerous direction (retro B-6), and the boundary line has to say what the
+    # blank main/effects columns otherwise leave a reader to guess.
+    "ci-bus": (
+        "fleet CI bus — a broker only; NOT a runtime lane, never a proof lane, "
+        "and never sourced for stability/prod grants"
+    ),
 }
 
 _BEGIN_MARKER = "<!-- GENERATED_LANE_TABLE BEGIN"
