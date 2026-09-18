@@ -199,6 +199,10 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_linea
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_ac_binding_row import (
     ModelAcBindingRow,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_check_result_row import (
+    MESSAGE_EXCERPT_MAX_CHARS,
+    ModelCheckResultRow,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_outcome import (
     ModelEvidenceAutocloseOutcome,
 )
@@ -2966,6 +2970,89 @@ def _check_id(check: dict[str, object]) -> str:
     return str(check.get(_CHECK_ID_KEY) or "<unnamed check>")
 
 
+def _check_result_rows(
+    verdict: dict[str, object],
+) -> tuple[ModelCheckResultRow, ...]:
+    """Every check on this verdict, as the record the outcome carries.
+
+    OMN-18490. The counters beside this list have always been recorded and the
+    list itself never was, so ``30/94 ACs verified, 3 failed`` was the whole
+    of what any reader got — on the outcome, in the ticket comment and in the
+    job log. Naming the three costs one pass over data the run already has in
+    hand.
+
+    Goes through :func:`_check_records` like every other consumer, so an
+    unreadable payload means here exactly what it means there: no rows, never
+    a fabricated one. Nothing is derived and nothing is counted — a verdict
+    whose declared tally disagrees with its own check list is recorded as the
+    disagreement it is, because re-deriving the counters here would quietly
+    make this function part of the flip predicate.
+    """
+    return tuple(
+        ModelCheckResultRow(
+            evidence_check=_check_id(check),
+            status=EnumAcBindingCheckStatus.from_verdict(_check_status(check)),
+            proof_class=str(check.get(_CHECK_PROOF_CLASS_KEY) or ""),
+            binds_ac=_declared_labels(check),
+            message_excerpt=_excerpt(str(check.get(_CHECK_MESSAGE_KEY) or "")),
+        )
+        for check in _check_records(verdict)
+    )
+
+
+def _declared_labels(check: dict[str, object]) -> tuple[str, ...]:
+    """``binds_ac`` as a tuple of strings, or ``()`` when unreadable.
+
+    An absent key and a non-list value both give ``()``. The distinction
+    OMN-18056 draws — absent means a verifier that predates bindings, empty
+    means a contract that declares none — is adjudicated by
+    `_declared_ac_bindings`, which the flip predicate reads. This row is a
+    report of what was on the record, not a second adjudication of it.
+    """
+    declared = check.get(_CHECK_BINDS_AC_KEY)
+    if not isinstance(declared, list):
+        return ()
+    return tuple(str(label) for label in declared)
+
+
+def _excerpt(message: str) -> str:
+    """``message`` bounded to one triage line, with the cut made visible.
+
+    An elision marker rather than a hard slice: a truncated assertion that
+    ends mid-word reads like the verifier produced it that way, and somebody
+    will eventually chase the malformed message rather than the failure.
+    """
+    collapsed = " ".join(message.split())
+    if len(collapsed) <= MESSAGE_EXCERPT_MAX_CHARS:
+        return collapsed
+    return collapsed[: MESSAGE_EXCERPT_MAX_CHARS - 1].rstrip() + "…"
+
+
+def _format_failing_checks(rows: tuple[ModelCheckResultRow, ...]) -> str:
+    """The failing checks as comment lines, or ``""`` when none failed.
+
+    Empty on a clean verdict deliberately: a "Failing checks" heading over an
+    empty list states a failure the verifier did not find, which is the class
+    of wrong statement `_gap_shortfall` already exists to stop one field over.
+
+    Only FAILED rows. A skipped check is a different fact with a different
+    remedy (`_live_check_not_executed` reports it and names its cause), and
+    folding the two together would hand a reader "fix these five" when three
+    of them were never run.
+    """
+    failing = [row for row in rows if row.status is EnumAcBindingCheckStatus.FAILED]
+    if not failing:
+        return ""
+    lines = [
+        f"- `{row.evidence_check}`"
+        + (f" — {row.message_excerpt}" if row.message_excerpt else "")
+        for row in failing
+    ]
+    return "\n\nFailing checks ({count}):\n{body}".format(
+        count=len(failing), body="\n".join(lines)
+    )
+
+
 def _live_check_not_executed(verdict: dict[str, object]) -> tuple[str, str]:
     """The first check the run never executed.
 
@@ -5132,6 +5219,59 @@ class HandlerEvidenceAutocloseSweep:
         apply_writes: bool,
         disarmed_by: str,
         flip_budget_remaining: int,
+        companion_merged_at: str,
+        prefetched_issue: dict[str, object] | None = None,
+    ) -> ModelEvidenceAutocloseOutcome:
+        """Adjudicate one candidate, and record the checks behind the verdict.
+
+        OMN-18490. The adjudication itself is
+        :meth:`_adjudicate_candidate` below, unchanged. This wrapper exists
+        for one reason: that method reaches a terminal outcome from roughly
+        thirty ``return`` statements, and the per-check rows have to travel on
+        every one of them that saw a verdict — including the ones a later
+        ticket adds.
+
+        Attaching the rows at each ``return`` would be thirty edits whose
+        omission at the thirty-first is invisible in review, which is the
+        shape of the defect this ticket is fixing: a fact the run held and did
+        not write down. Attaching them HERE, outside every return, makes the
+        record structural. ``rows_out`` is the one channel for it; the inner
+        method appends to it once, immediately after the verdict parses.
+
+        The rows are applied only when the outcome does not already carry
+        them, so a future path that wants to report a narrowed set can still
+        do so and is not silently overwritten by the full list.
+        """
+        rows_out: list[ModelCheckResultRow] = []
+        outcome = await self._adjudicate_candidate(
+            ticket_id=ticket_id,
+            companion_pr_number=companion_pr_number,
+            companion_pr_url=companion_pr_url,
+            companion_title=companion_title,
+            request=request,
+            apply_writes=apply_writes,
+            disarmed_by=disarmed_by,
+            flip_budget_remaining=flip_budget_remaining,
+            companion_merged_at=companion_merged_at,
+            prefetched_issue=prefetched_issue,
+            rows_out=rows_out,
+        )
+        if rows_out and not outcome.check_results:
+            return outcome.model_copy(update={"check_results": tuple(rows_out)})
+        return outcome
+
+    async def _adjudicate_candidate(
+        self,
+        *,
+        rows_out: list[ModelCheckResultRow],
+        ticket_id: str,
+        companion_pr_number: int,
+        companion_pr_url: str,
+        companion_title: str,
+        request: ModelEvidenceAutocloseSweepRequest,
+        apply_writes: bool,
+        disarmed_by: str,
+        flip_budget_remaining: int,
         # OMN-18106. WHEN the evidence companion landed, carried down from the
         # enumeration payload that already had it rather than re-fetched. The
         # prior-revert fence reads it to answer the only question it was ever
@@ -5400,6 +5540,12 @@ class HandlerEvidenceAutocloseSweep:
         # "the ticket is not proven". Absent counts still fail closed: nothing
         # is coerced to 0 and nothing unread is ever counted as proof.
         verdict, verdict_refusal = _extract_dod_verify_verdict(dod_result)
+        if verdict is not None:
+            # OMN-18490. The ONE site that records the checks, placed the
+            # moment the verdict parses and ahead of every branch that reads
+            # it. `_process_ticket` attaches them to whatever this method
+            # returns, so no decision path can forget to carry them.
+            rows_out.extend(_check_result_rows(verdict))
         if verdict is None:
             decision = (
                 EnumEvidenceAutocloseDecision.ERROR_VERIFY_UNPARSEABLE
@@ -6753,5 +6899,12 @@ class HandlerEvidenceAutocloseSweep:
                 f"Merged evidence companion: {companion_pr_url}\n"
                 f"dod_verify: {verified_count}/{total_checks} ACs verified, "
                 f"{failed_count} failed — {shortfall}"
+                # OMN-18490. The counters say HOW MANY; this says WHICH. The
+                # sentence above was the whole of what a reader got, and on
+                # OMN-18426 ("30/94 ACs verified, 3 failed") it was asked
+                # twice what the three were and could not answer. The section
+                # is empty when nothing failed, so a hold with no failures
+                # does not grow a heading claiming one.
+                + _format_failing_checks(_check_result_rows(verdict))
             ),
         )

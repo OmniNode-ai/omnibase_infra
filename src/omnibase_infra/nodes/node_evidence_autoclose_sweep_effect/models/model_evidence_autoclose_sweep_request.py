@@ -107,8 +107,28 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "short-circuit now discards completed tickets before it runs."
         ),
     )
+    # OMN-18748. THIS VALUE IS A CLAIM ABOUT THE CRON, AND IT WENT STALE.
+    #
+    # It was 30, matching the `*/30 * * * *` schedule the sweep ran on when the
+    # backfill arm shipped. The cron moved to `0 */2 * * *` on 2026-09-15 and
+    # this did not follow, so from that day consecutive scheduled runs advanced
+    # the tick by FOUR while the slice was five wide: the start index jumped
+    # twenty positions per run and five were read. Against the live pool of 150
+    # that left 75 positions reachable and 75 not, indefinitely — not a slow
+    # drain, a partition. Measured on run 35299192253's own receipt; found
+    # because a collaborator noticed OMN-18172 had never once appeared as a
+    # candidate although verified work sat on it.
+    #
+    # The starvation was silent in the worst available way: a ticket in the
+    # unreachable half is never refused, never commented and never named in any
+    # receipt, which is byte-for-byte how a ticket with no evidence reads.
+    #
+    # `tests/ci/test_evidence_autoclose_sweep_rotation_period_omn18748.py`
+    # reads the cron out of the workflow and fails if the two disagree, so the
+    # next cadence change is a red test naming both files rather than three
+    # more days of half a pool.
     backfill_rotation_minutes: int = Field(
-        default=30,
+        default=120,
         ge=1,
         le=1440,
         description=(
@@ -116,9 +136,11 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "slice index is derived from the run's own wall clock divided by "
             "this period, so two runs in the same period examine the same "
             "slice (a retry re-does its work rather than skipping a slice) and "
-            "consecutive scheduled runs advance by exactly one. Set it to the "
-            "workflow's real cron interval; the default matches the sweep's "
-            "*/30 schedule."
+            "consecutive scheduled runs advance by exactly one. It MUST equal "
+            "the workflow's real cron interval: a period shorter than the "
+            "interval skips whole slices every run and starves part of the "
+            "pool permanently (OMN-18748). The default matches the sweep's "
+            "`0 */2 * * *` schedule and is pinned against it by a CI test."
         ),
     )
 
