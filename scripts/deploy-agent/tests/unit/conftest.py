@@ -142,6 +142,50 @@ def _derive_runtime_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.fixture(autouse=True)
+def _derive_deps_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-18692: derive the DEPS compose-up ceiling from THIS checkout.
+
+    Same path repoint, same reason, as the runtime budget above: ``REPO_DIR``
+    is a deploy-HOST path absent from the unit-test sandbox, and the deps
+    derivation refuses fail-closed when it cannot read the compose model.
+
+    A REPOINT, NOT A STUB. The real derivation runs against the real
+    ``docker/docker-compose.infra.yml`` and the dev-lane overlay, so an edit
+    that moves ``postgres``'s ``start_period`` or removes the ``service_healthy``
+    gate on it moves what these tests observe. Like the image-build and gateway
+    repoints above, it re-implements the production call and therefore must
+    carry EVERY argument that call passes -- including the host term, reached
+    through ``executor_mod`` so a test that pins a machine still reaches this
+    closure. Omitting it would silently revert the ceiling to a machine-blind
+    number for every test while still reporting green, which is the failure
+    mode those two docstrings record happening twice.
+    """
+    from deploy_agent import compose_budget, recreate_supervisor
+    from deploy_agent import executor as executor_mod
+
+    docker_dir = Path(__file__).resolve().parents[4] / "docker"
+    compose_files = (
+        str(docker_dir / "docker-compose.infra.yml"),
+        str(docker_dir / "docker-compose.dev-lane.yml"),
+    )
+
+    def _budget(
+        lane: object, expected_services: list[str]
+    ) -> recreate_supervisor.ModelDepsRecreateBudget:
+        model = compose_budget.derive_runtime_phase_budget(
+            compose_files,
+            expected_services,
+            margin_seconds=recreate_supervisor.DEPS_COMPOSE_UP_MARGIN_SECONDS,
+            floor_seconds=recreate_supervisor.DEPS_COMPOSE_UP_FLOOR_SECONDS,
+        )
+        return recreate_supervisor.derive_deps_recreate_budget(
+            model, executor_mod.probe_host_conditions()
+        )
+
+    monkeypatch.setattr(executor_mod, "deps_compose_up_budget", _budget)
+
+
+@pytest.fixture(autouse=True)
 def _derive_image_build_budget_from_this_checkout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -334,6 +378,64 @@ def _resolve_gateway_lane_from_this_checkout(
         executor_mod.DeployExecutor,
         "_deploy_gateway_lane",
         lambda self, *args, **kwargs: None,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _keep_the_deps_recreate_off_the_docker_daemon(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-18692: run the deps recreate through ``_run`` unless a test opts in.
+
+    The DEPS compose-up is no longer a ``subprocess.run`` with a flat timeout.
+    It is SUPERVISED: it spawns a live child through ``_spawn_compose``, polls
+    ``docker compose ps`` while it runs, and reads ``/proc/loadavg`` plus
+    ``docker builder du`` to derive its ceiling. Every one of those reaches the
+    real machine, and dozens of existing tests drive ``Scope.CORE`` or
+    ``Scope.FULL`` while stubbing only ``executor_mod._run``. Left live, those
+    tests would run a real ``docker compose up --force-recreate`` on whatever
+    machine the suite happens to be on -- which on the lab host is the dev lane.
+
+    So the supervised method is replaced by default with a shim that calls the
+    same ``_run`` seam those tests already stub, carrying the same compose argv.
+    They therefore observe exactly what they observed before this change, and
+    they observe it through the stub they installed rather than through a
+    bypass they cannot see.
+
+    This is the same visible arrangement ``_stub_promotion_guard`` and
+    ``_resolve_gateway_lane_from_this_checkout`` already use above, and it is
+    not a hole in the coverage: tests that exercise the supervisor opt out with
+    the ``deps_recreate`` marker and drive the real method, and the
+    supervisor's own behaviour -- the anchored ceiling, the refusal to cancel a
+    live recreate, the deferral and the deps convergence -- is asserted
+    directly in ``test_deps_recreate_supervisor_omn18692.py`` and
+    ``test_executor_deps_recreate_omn18692.py``.
+    """
+    if request.node.get_closest_marker("deps_recreate") is not None:
+        return
+
+    from deploy_agent import executor as executor_mod
+
+    def _run_deps_through_the_stubbed_seam(
+        self: object,
+        cmd: list[str],
+        *,
+        phase: object,
+        expected: list[str],
+        lane: object,
+        extra_env: object = None,
+    ) -> str:
+        result = executor_mod._run(
+            cmd,
+            timeout=executor_mod.PHASE_TIMEOUTS[executor_mod.Phase.CORE],
+            env=executor_mod._compose_env(extra_env),
+        )
+        return result.stderr.strip() if result.returncode != 0 else ""
+
+    monkeypatch.setattr(
+        executor_mod.DeployExecutor,
+        "_supervised_deps_recreate",
+        _run_deps_through_the_stubbed_seam,
     )
 
 

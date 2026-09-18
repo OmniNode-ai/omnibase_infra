@@ -315,6 +315,9 @@ class _RefRecordingExecutor:
         # OMN-17135: and the sibling SHAs the build vendored, since the
         # command's git_ref pins omnibase_infra alone.
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-18692: the agent reads this when it builds the terminal event,
+        # so a double that omits it no longer models the object it replaces.
+        self.recreate_supervision: list[object] = []
 
     def preflight(self, **kwargs: object) -> None:
         pass

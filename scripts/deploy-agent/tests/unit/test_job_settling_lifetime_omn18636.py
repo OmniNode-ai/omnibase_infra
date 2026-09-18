@@ -115,6 +115,9 @@ class _FastExecutor:
         self.calls: list[str] = []
         self.container_residue: list[object] = []
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-18692: the agent reads this when it builds the terminal event,
+        # so a double that omits it no longer models the object it replaces.
+        self.recreate_supervision: list[object] = []
         self._pin_gate = pin_gate
         self._pin_running = pin_running
 

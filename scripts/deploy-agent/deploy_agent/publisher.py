@@ -18,6 +18,7 @@ from deploy_agent.events import (
     ModelContainerResidue,
     ModelHealthCheck,
     ModelRebuildCompleted,
+    ModelRecreateSupervision,
     Phase,
 )
 from deploy_agent.job_state import JobState
@@ -79,6 +80,7 @@ def build_completion_payload(
     services_restarted: list[str] | None = None,
     container_residue: list[ModelContainerResidue] | None = None,
     sibling_refs: dict[str, str] | None = None,
+    recreate_supervision: list[ModelRecreateSupervision] | None = None,
 ) -> dict[str, Any]:
     """Build the completion event payload from job state.
 
@@ -104,6 +106,14 @@ def build_completion_payload(
     of this event could not previously say which omnibase_core or omnimarket
     commit the image carried without going to the host and opening
     ``/app/build-provenance.json``.
+
+    OMN-18692 adds ``recreate_supervision``: what the deps-phase ceiling did.
+    A deferral taken before the lane was touched, and a wait held past the
+    ceiling rather than cancelling a live recreate, are both DECISIONS this
+    agent made about a production-shaped mutation, and until now neither left
+    any durable artifact. The 2026-09-18 kill had to be reconstructed from the
+    dockerd journal by a third lane, because the terminal event recorded only
+    that the phase failed.
     """
     started_at = job.accepted_at
     completed_at = job.completed_at or datetime.now(UTC)
@@ -141,6 +151,7 @@ def build_completion_payload(
         errors=job.errors,
         health_checks=list(health_checks or []),
         container_residue=list(container_residue or []),
+        recreate_supervision=list(recreate_supervision or []),
     )
     return completed.model_dump(mode="json")
 

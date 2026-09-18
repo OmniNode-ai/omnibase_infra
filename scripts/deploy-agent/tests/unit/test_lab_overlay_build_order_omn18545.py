@@ -118,6 +118,9 @@ class _FakeExecutor:
         self._stability_ready_digest = stability_ready_digest
         self.container_residue: list[object] = []
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-18692: the agent reads this when it builds the terminal event,
+        # so a double that omits it no longer models the object it replaces.
+        self.recreate_supervision: list[object] = []
 
     def resolve_stability_ready_digest(
         self, service: str = "omninode-runtime"

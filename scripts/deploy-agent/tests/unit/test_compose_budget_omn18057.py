@@ -276,36 +276,31 @@ class TestComposeUpUsesTheDerivedCeiling:
         assert seen == [expected]
         assert seen != [300]
 
-    def test_core_compose_up_keeps_its_flat_phase_bound(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Core services are not gated on a runtime healthcheck; nothing changed there."""
+    def test_the_core_compose_up_no_longer_takes_the_flat_phase_bound(self) -> None:
+        """SUPERSEDED BY OMN-18692. This assertion used to be the opposite.
+
+        It read: "Core services are not gated on a runtime healthcheck; nothing
+        changed there", and it pinned
+        ``PHASE_TIMEOUTS[Phase.CORE]`` as the deps compose-up ceiling. That was
+        an accurate statement of OMN-18057's deliberate scope -- it fixed the
+        RUNTIME phase and left the core phase alone -- and it was wrong about
+        the core phase's risk. Nine days later, on 2026-09-18, that flat 300
+        fired during a deps removal under ``load1 28.42`` on 32 cores, left the
+        lane with no redpanda container at all, and took the agent's own
+        control bus and the fleet's CI bus down with it for 35 minutes.
+
+        The deps ceiling is now derived from the compose model AND the machine,
+        and the command it bounds is supervised rather than killed. The
+        assertion is inverted rather than deleted, so the supersession is
+        legible at the place that carried the old claim; the new behaviour's
+        own coverage lives in ``test_executor_deps_recreate_omn18692.py`` and
+        ``test_deps_recreate_supervisor_omn18692.py``.
+        """
         from deploy_agent import executor as executor_mod
 
-        seen: list[int] = []
-
-        def _fake_run(cmd: list[str], timeout: int, **kwargs: Any) -> Any:
-            if "up" in cmd and "--force-recreate" in cmd:
-                seen.append(timeout)
-            return subprocess.CompletedProcess(
-                args=cmd, returncode=0, stdout=json.dumps({}), stderr=""
-            )
-
-        def _all_running(
-            lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
-        ) -> dict[str, tuple[str, int | None]]:
-            return dict.fromkeys(SCOPE_SERVICES[Scope.CORE], ("running", None))
-
-        monkeypatch.setattr(executor_mod, "_run", _fake_run)
-        monkeypatch.setattr(executor_mod, "_compose_service_states", _all_running)
-        monkeypatch.setattr(executor_mod, "_compose_env", lambda *a, **k: {})
-
-        DeployExecutor()._compose_up(
-            Phase.CORE,
-            Scope.CORE,
-            [],
-            lambda phase, status: None,
-            lane=EnumRuntimeLane.DEV,
+        budget = executor_mod.deps_compose_up_budget(
+            EnumRuntimeLane.DEV, list(SCOPE_SERVICES[Scope.CORE])
         )
 
-        assert seen == [executor_mod.PHASE_TIMEOUTS[Phase.CORE]]
+        assert budget.timeout_seconds > executor_mod.PHASE_TIMEOUTS[Phase.CORE]
+        assert budget.source_service == "postgres"

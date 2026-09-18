@@ -390,6 +390,83 @@ class ModelContainerResidue(BaseModel):
     recovered: bool = False
 
 
+class EnumRecreateOutcome(StrEnum):
+    """How a supervised deps-phase compose recreate ended (OMN-18692).
+
+    FIVE values, not two, because "the ceiling blew" was recorded as one fact
+    on 2026-09-18 and it is at least three different facts, each of which
+    demands a different next action:
+
+    * ``completed`` -- the command returned on its own. The only ending that
+      says nothing about the ceiling.
+    * ``deferred_host_contention`` -- the recreate was never STARTED, because
+      the host stayed above the committed saturation threshold. THE LANE WAS
+      NOT TOUCHED; this is the one outcome that guarantees that.
+    * ``ended_lane_settled`` -- past the ceiling with every expected service
+      running and compose still not returned. Ending the command here cannot
+      destroy the lane, because nothing was mid-removal.
+    * ``killed_mid_recreate_stalled`` -- past the ceiling, mid-recreate, and
+      the lane's container state had not changed for the declared stall
+      window. Read as wedged rather than slow.
+    * ``killed_hard_upper_bound`` -- past the ceiling, mid-recreate, still
+      changing, and out of budget. The only ending that cancels a LIVE
+      recreate, and the caller must converge the deps immediately after it.
+
+    The 2026-09-18 kill was the last shape, recorded with none of this
+    vocabulary, so the agent's own log could not distinguish it from a slow
+    deploy and the next reader had to reconstruct it from the dockerd journal.
+    """
+
+    COMPLETED = "completed"
+    DEFERRED_HOST_CONTENTION = "deferred_host_contention"
+    ENDED_LANE_SETTLED = "ended_lane_settled"
+    KILLED_MID_RECREATE_STALLED = "killed_mid_recreate_stalled"
+    KILLED_HARD_UPPER_BOUND = "killed_hard_upper_bound"
+
+
+class ModelRecreateSupervision(BaseModel):
+    """What the deps-phase ceiling did, and what it was measured against.
+
+    Carried on the terminal event beside ``container_residue`` so a WAIT and a
+    DEFERRAL are durable facts rather than journal lines someone has to go and
+    find on the host. ``anchored_elapsed_seconds`` and ``elapsed_seconds`` are
+    both present deliberately: their difference is how long the command spent
+    queueing before it touched a container, which is the quantity the flat
+    ceiling was unknowingly charging against the recreate.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    phase: str
+    outcome: EnumRecreateOutcome
+    ceiling_seconds: int
+    hard_upper_bound_seconds: int
+    elapsed_seconds: float
+    anchored_elapsed_seconds: float
+    waited_past_ceiling_seconds: float
+    deferred_seconds: float
+    anchored_at_first_container_change: bool
+    mid_recreate_at_decision: bool
+    returncode: int | None = None
+    budget_description: str = ""
+
+    def describe(self) -> str:
+        """One-line, log-ready statement of the ending and the wait it took."""
+        parts = [
+            f"phase {self.phase} {self.outcome.value}",
+            f"ceiling {self.budget_description or f'{self.ceiling_seconds}s'}",
+            f"elapsed {self.elapsed_seconds:.0f}s "
+            f"(anchored {self.anchored_elapsed_seconds:.0f}s)",
+        ]
+        if self.deferred_seconds:
+            parts.append(f"deferred {self.deferred_seconds:.0f}s before starting")
+        if self.waited_past_ceiling_seconds:
+            parts.append(
+                f"WAITED {self.waited_past_ceiling_seconds:.0f}s past the ceiling "
+                f"rather than cancelling a live recreate"
+            )
+        return "; ".join(parts)
+
+
 class ModelRebuildRequested(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID
@@ -460,6 +537,12 @@ class ModelRebuildCompleted(BaseModel):
     errors: list[str] = Field(default_factory=list)
     health_checks: list[ModelHealthCheck] = Field(default_factory=list)
     container_residue: list[ModelContainerResidue] = Field(default_factory=list)
+    # OMN-18692: what the deps-phase ceiling DID -- whether it deferred before
+    # touching the lane, waited past its ceiling rather than cancelling a live
+    # recreate, or ended the command and why. Empty for a deploy whose deps
+    # phase was never reached, which is a different fact from a deploy whose
+    # deps phase ran without incident (that one carries a `completed` entry).
+    recreate_supervision: list[ModelRecreateSupervision] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_phase_results_are_settled(self) -> ModelRebuildCompleted:

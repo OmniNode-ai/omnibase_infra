@@ -286,6 +286,9 @@ class _IdleExecutor:
     def __init__(self) -> None:
         self.container_residue: list[object] = []
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-18692: the agent reads this when it builds the terminal event,
+        # so a double that omits it no longer models the object it replaces.
+        self.recreate_supervision: list[object] = []
 
     def self_update(self, *, boundary: Any, **kwargs: Any) -> None:
         pass
