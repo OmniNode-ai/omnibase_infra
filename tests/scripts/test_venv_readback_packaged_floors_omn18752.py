@@ -166,3 +166,56 @@ def test_every_installed_package_is_a_source_of_floors_not_just_omnimarket() -> 
 
 def test_a_package_declaring_no_omni_internal_pins_yields_no_rows() -> None:
     assert packaged_floor_rows({"omnimarket": _facts("0.4.123", ())}) == []
+
+
+# --------------------------------------------------------------------------
+# floors only — a ceiling is what an override exists to raise
+# --------------------------------------------------------------------------
+
+
+def test_a_version_above_an_exact_pin_is_not_a_floor_violation() -> None:
+    """A declared ceiling is not this assertion's business.
+
+    Found live on the operator Mac minutes after the first version shipped:
+    omnibase-infra 0.38.32 declares ``omnibase-spi==0.23.3`` while the venv
+    carries 0.23.4 -- because omniclaude's ``[tool.uv] override-dependencies``
+    declares ``omnibase-spi>=0.23.1,<0.24.0`` and that override is the whole
+    point of the mechanism. Asserting the ceiling would fire on every
+    sanctioned override, make the converge permanently red on a correct venv,
+    and get itself routed around.
+
+    The AC is about FLOORS, and an override raises a ceiling; it never lowers
+    a floor. So only the lower bound is asserted.
+    """
+    rows = packaged_floor_rows(
+        {
+            "omnibase-infra": _facts("0.38.32", ("omnibase-spi==0.23.3",)),
+            "omnibase-spi": _facts("0.23.4"),
+        }
+    )
+    assert [row.verdict for row in rows] == [ReadbackVerdict.MATCH], (
+        "an installed version ABOVE a declared exact pin was reported as a "
+        "violation; that is the override case, not a defect"
+    )
+
+
+def test_a_version_below_an_exact_pin_is_still_a_floor_violation() -> None:
+    """Dropping the ceiling must not drop the floor the same pin implies."""
+    rows = packaged_floor_rows(
+        {
+            "omnibase-infra": _facts("0.38.32", ("omnibase-spi==0.23.3",)),
+            "omnibase-spi": _facts("0.23.2"),
+        }
+    )
+    assert [row.verdict for row in rows] == [ReadbackVerdict.MISMATCH]
+
+
+def test_a_specifier_with_no_lower_bound_is_not_a_floor() -> None:
+    """``<0.39.0`` alone says nothing about a minimum, so there is nothing to assert."""
+    rows = packaged_floor_rows(
+        {
+            "omnimarket": _facts("0.4.123", ("omnibase-infra<0.39.0",)),
+            "omnibase-infra": _facts("0.38.32"),
+        }
+    )
+    assert rows == []
