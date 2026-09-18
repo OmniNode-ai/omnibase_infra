@@ -735,6 +735,53 @@ class ModelLabPassReceipt:
         )
 
 
+#: OMN-18769. The topic the receipt's VERDICT is published on, beside the
+#: artifact, at the moment the artifact is written.
+#:
+#: The artifact stays the durable evidence and the gate keeps reading it; this
+#: event changes nothing about that. What it adds is renderability: an artifact
+#: is reachable only by an exact-name REST query with ``actions: read``, which
+#: a dashboard panel cannot make, so a lab-pass verdict has until now been
+#: invisible to every surface except the gate that consumes it.
+#:
+#: It is published for a FAIL exactly as for a PASS, for the same reason the
+#: artifact is written under ``always()``: a record that exists only on success
+#: cannot distinguish a failed lab pass from one nobody ran, and telling those
+#: apart is the whole job.
+LAB_PASS_EVENT_TOPIC = "onex.evt.infra.lab-pass-receipt.v1"
+
+
+def build_bus_event(receipt: ModelLabPassReceipt) -> dict[str, Any]:
+    """Render the receipt as the bus event a lane-health projection folds.
+
+    It is a PROJECTION of the receipt, not a second source of truth: every
+    field is copied from the receipt, the verdict included, and nothing is
+    re-derived here. ``ModelLabPassReceipt`` derives ``result`` from the check
+    set precisely so an emitter cannot record green over a failed readback, and
+    re-deriving it in this function would reintroduce exactly that seam.
+
+    ``failing_checks`` is a convenience the consumer would otherwise have to
+    compute, and it is named rather than implied: a check that is INDETERMINATE
+    is not passing, so it appears here. A panel that showed only hard failures
+    would report an unprobed lane as fully checked.
+    """
+    return {
+        "schema_version": "1.0.0",
+        "event_type": "lab-pass-receipt",
+        "topic": LAB_PASS_EVENT_TOPIC,
+        "receipt_version": receipt.receipt_version,
+        "sha": receipt.sha,
+        "lane": receipt.lane.value,
+        "started_at": receipt.started_at.isoformat(),
+        "finished_at": receipt.finished_at.isoformat(),
+        "result": receipt.result.value,
+        "checks": [check.to_dict() for check in receipt.checks],
+        "failing_checks": [check.name for check in receipt.checks if not check.ok],
+        "artifact_name": artifact_name(receipt.lane, receipt.sha),
+        "agent_command_id": receipt.agent_command_id,
+    }
+
+
 def artifact_name(lane: EnumLabLane, sha: str) -> str:
     """The exact-name key the gate queries.
 
@@ -2297,6 +2344,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     emit.add_argument("--out", required=True, type=Path)
+    emit.add_argument(
+        "--event-out",
+        type=Path,
+        default=None,
+        help=(
+            "also write the bus event document (OMN-18769) to this path. The "
+            "emitting job publishes it with rpk when it has a broker; this "
+            "script never opens a broker connection itself, because the "
+            "emitting jobs differ in whether they can reach one and a "
+            "publish failure must never fail a lab pass that genuinely ran."
+        ),
+    )
 
     gate = sub.add_parser("gate", help="fail closed unless a PASS receipt exists")
     gate.add_argument("--sha", required=True)
@@ -2412,6 +2471,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(receipt.to_json(indent=2), encoding="utf-8")
+        if args.event_out is not None:
+            # Written for a FAIL receipt exactly as for a PASS: the record of a
+            # failed lab pass is as valuable as the record of a passing one.
+            args.event_out.parent.mkdir(parents=True, exist_ok=True)
+            args.event_out.write_text(
+                json.dumps(build_bus_event(receipt), indent=2), encoding="utf-8"
+            )
+            print(f"wrote lab-pass bus event -> {args.event_out}")
         print(f"wrote {artifact_name(receipt.lane, receipt.sha)} -> {args.out}")
         print(render_receipt(receipt))
         # A FAIL receipt is still EMITTED — the record of a failed lab pass is

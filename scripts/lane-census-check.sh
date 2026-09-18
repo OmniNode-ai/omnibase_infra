@@ -56,6 +56,11 @@ EMIT_JSON=false
 SNAPSHOT_OUT=""
 LOG_FILE="${HOME}/.local/log/onex/lane-census.log"
 DRIFT_TOPIC="onex.evt.infra.lane-census-drift.v1"
+# OMN-18769: published on EVERY run, drift or not. The drift topic stays the
+# ALERT authority (a consumer opens a ticket from it); this one is the FACT
+# a lane-health projection reads, and without a clean-run message that
+# projection cannot tell a matching fleet from a census that stopped running.
+OBSERVED_TOPIC="onex.evt.infra.lane-census-observed.v1"
 # Inventory unobservable — NOT drift. See the exit-code table above (OMN-15466).
 EXIT_INVENTORY_UNAVAILABLE=4
 
@@ -191,6 +196,26 @@ if [[ -n "$SNAPSHOT_OUT" ]]; then
     printf '%s\n' "$EVENT_JSON" >"$SNAPSHOT_OUT"
     log "census snapshot written: $SNAPSHOT_OUT"
   fi
+fi
+
+# OMN-18769: publish the census-OBSERVED fact BEFORE the no-drift early exit, so
+# the clean case -- the one the drift topic structurally cannot carry -- reaches
+# the bus. This block never changes this script's exit-code contract: a publish
+# failure is logged and the run continues to its drift verdict, because a broker
+# that is down is not a lane that has drifted.
+OBSERVED_JSON="$(echo "$PLAN_JSON" | LANE_CENSUS_HOST="$HOST" "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_event.py" --observed)"
+
+if [[ "$DRY_RUN" == true ]]; then
+  log "DRY-RUN — not publishing census-observed event."
+elif [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
+  # Rule 8: fail loud, never a localhost default. The systemd unit injects it.
+  log "KAFKA_BOOTSTRAP_SERVERS unset — census-observed event NOT published."
+elif ! command -v rpk >/dev/null 2>&1; then
+  log "rpk not found — census-observed event NOT published."
+elif echo "$OBSERVED_JSON" | rpk topic produce "$OBSERVED_TOPIC" --brokers "$KAFKA_BOOTSTRAP_SERVERS" >>"$LOG_FILE" 2>&1; then
+  log "published lane-census-observed event to $OBSERVED_TOPIC via rpk"
+else
+  log "FAILED to publish census-observed via rpk (broker=$KAFKA_BOOTSTRAP_SERVERS)"
 fi
 
 if [[ "$HAS_DRIFT" != "True" ]]; then

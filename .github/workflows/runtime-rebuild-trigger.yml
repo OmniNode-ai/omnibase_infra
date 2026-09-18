@@ -647,7 +647,47 @@ jobs:
             --check "deployed_revision:${DEPLOYED_REVISION_VERDICT}:${EVIDENCE}" \
             --checks-json "${LAB_PASS_CHECKS}" \
             --agent-command-id "${CORRELATION_ID}" \
-            --out "${LAB_PASS_DIR}/receipt.json"
+            --out "${LAB_PASS_DIR}/receipt.json" \
+            --event-out "${LAB_PASS_DIR}/event.json"
+
+      # OMN-18769: the verdict, on the bus, beside the artifact.
+      #
+      # The ARTIFACT remains the durable evidence and the delivery gate keeps
+      # reading it; nothing about that changes. What this adds is
+      # renderability: an artifact is reachable only by an exact-name REST
+      # query with `actions: read`, which a dashboard panel cannot make, so a
+      # lab-pass verdict has been invisible to every surface except the gate.
+      #
+      # `if: always()` for the same reason the artifact is written under
+      # always(): a record that exists only on success cannot distinguish a
+      # failed lab pass from one nobody ran.
+      #
+      # `continue-on-error` is deliberate and is NOT a swallowed failure. This
+      # step reports a FACT about a lab pass that has already happened; a
+      # broker that is unreachable is not a lane that failed, and failing the
+      # job here would turn an observability publish into a delivery outage.
+      # The failure is loud in the log and the artifact — the authority — is
+      # unaffected either way.
+      - name: Publish the compose-dev lab-pass verdict to the bus
+        if: always()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          if [[ ! -f "${LAB_PASS_DIR}/event.json" ]]; then
+            echo "::warning::no lab-pass event document was written — nothing to publish"
+            exit 0
+          fi
+          if [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
+            echo "::warning::KAFKA_BOOTSTRAP_SERVERS unset — lab-pass verdict NOT published"
+            exit 0
+          fi
+          if ! command -v rpk >/dev/null 2>&1; then
+            echo "::warning::rpk not found — lab-pass verdict NOT published"
+            exit 0
+          fi
+          rpk topic produce onex.evt.infra.lab-pass-receipt.v1 \
+            --brokers "${KAFKA_BOOTSTRAP_SERVERS}" \
+            < "${LAB_PASS_DIR}/event.json"
 
       # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
       # since the directory matches whether or not the receipt carries bytes.
