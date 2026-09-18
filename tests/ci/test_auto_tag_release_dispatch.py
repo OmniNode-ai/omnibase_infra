@@ -9,16 +9,31 @@ authored events, so the pushed tag never fired ``release.yml`` (``on: push:
 tags``). v0.38.0-v0.38.3 were tagged by ``github-actions[bot]`` and NEVER
 published; PyPI omnibase-infra stalled at 0.36.1 for six weeks.
 
-Fix: after pushing the tag, dispatch ``release.yml`` explicitly via
-``workflow_dispatch`` — the documented exception to the suppression rule.
+First fix (OMN-14468): push the tag with the workflow token anyway, then
+dispatch ``release.yml`` explicitly via ``workflow_dispatch`` — the documented
+exception to the suppression rule. That published, but every cut then arrived as
+``event: workflow_dispatch``, which proves the job ran rather than that the tag
+was consumable.
+
+Second fix (OMN-18662, superseding the dispatch workaround): push the tag with an
+``onexbot-occ-writer`` installation token, which DOES start push-driven CI in
+this org, and delete the dispatch step. OMN-18273 established the App-token
+property and showed the earlier org-wide "App tokens are suppressed too" finding
+to be a credential confound; live proof is ``omnibase_spi`` run ``35134173847``
+(``event: push``, ``actor: onexbot-occ-writer[bot]``).
 
 These tests prove:
 * the auto-tag ``if:`` still FIRES on the v0.38.0 merge condition
   (title ``chore: release v0.38.0``) — the trigger was never the problem,
-* the previously-missing link is now present: an explicit ``release.yml``
-  dispatch step wired to the tag, with the ``actions: write`` permission it
-  needs, and
+* the link from tag to publish is present in its CURRENT form: the tag is pushed
+  with a fail-closed App-token mint from a checkout that persists no workflow
+  credential, and the superseded ``workflow_dispatch`` workaround is gone so it
+  cannot race the push-triggered run, and
 * the 8b publish-resilience wiring (retry wrapper + widened cascade window).
+
+The two conditions in the second bullet are asserted separately because they fail
+independently, and a job that gets either half wrong pushes as the workflow token
+while still reporting success.
 """
 
 from __future__ import annotations
@@ -86,42 +101,131 @@ def test_workflow_if_encodes_the_release_title_condition() -> None:
     assert "contains(github.event.pull_request.labels.*.name, 'release')" in condition
 
 
-def test_workflow_has_actions_write_permission_for_dispatch() -> None:
+def test_workflow_holds_no_write_scope_of_its_own() -> None:
+    """The workflow token carries no scope the tag push could accidentally use.
+
+    OMN-18662 moved the write scope onto the App installation token. Leaving
+    ``contents: write`` here would not by itself reintroduce the defect, but it
+    would leave a usable workflow-token write path next to a push that must not
+    take one — and ``actions: write`` existed only for the deleted dispatch.
+    """
     workflow = _load_yaml(AUTO_TAG_WORKFLOW)
     permissions = workflow["permissions"]
-    # contents:write to push the tag; actions:write to dispatch release.yml.
-    assert permissions["contents"] == "write"
-    assert permissions["actions"] == "write"
+    assert permissions["contents"] == "read", (
+        "auto-tag-on-merge.yml grants the workflow token contents:write. The tag "
+        "push authenticates with the onexbot-occ-writer installation token "
+        "(OMN-18662); the workflow token needs read only."
+    )
+    assert "actions" not in permissions, (
+        "actions:write existed solely to dispatch release.yml. That dispatch was "
+        "deleted by OMN-18662 — a tag pushed with the App token starts release.yml "
+        "from the push itself."
+    )
 
 
-def test_workflow_pushes_tag_then_dispatches_release() -> None:
+def test_workflow_pushes_the_tag_with_a_fail_closed_app_token() -> None:
+    """The tag push authenticates as the App, with no route back to the workflow token.
+
+    A tag pushed with the workflow token is worse than no tag: ``release.yml``
+    cannot consume it, and it cannot be re-pushed without deleting it first. So an
+    unmintable token must stop the push rather than degrade it.
+    """
     workflow = _load_yaml(AUTO_TAG_WORKFLOW)
     steps = workflow["jobs"]["auto-tag"]["steps"]
 
-    # The tag is still created + pushed.
+    mint = next(
+        (
+            step
+            for step in steps
+            if "actions/create-github-app-token" in str(step.get("uses", ""))
+        ),
+        None,
+    )
+    assert mint is not None, (
+        "auto-tag-on-merge.yml pushes a release tag but never mints an App "
+        "installation token. release.yml triggers on `push: tags:`, and a "
+        "workflow-token push delivers no push event, so the tag would sit "
+        "unconsumed (OMN-14468, OMN-18662)."
+    )
+    with_block = mint.get("with") or {}
+    assert with_block.get("app-id") == "${{ secrets.ONEXBOT_OCC_APP_ID }}", (
+        "the mint must use the onexbot-occ-writer app id org secret"
+    )
+    assert with_block.get("private-key") == "${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}", (
+        "the mint must use the onexbot-occ-writer private key org secret"
+    )
+
     tag_step = next(
-        step for step in steps if "Create and push release tag" in step.get("name", "")
+        step for step in steps if "Create and push tag" in step.get("name", "")
     )
-    assert "git tag" in tag_step["run"]
-    assert "git push origin" in tag_step["run"]
+    run_script = tag_step["run"]
+    assert "git tag" in run_script
+    # The credential travels in the remote URL. A bare `git push origin` would
+    # find no credential at all now that the checkout persists none.
+    assert "x-access-token:${APP_TOKEN}" in run_script, (
+        "the tag push does not carry the App token in its remote URL; with "
+        "persist-credentials: false there is no other credential for it to use."
+    )
+    assert tag_step["env"]["APP_TOKEN"] == "${{ steps.app-token.outputs.token }}"
 
-    # The load-bearing new link: an explicit release.yml dispatch AFTER the tag.
-    dispatch_step = next(
-        step for step in steps if "Dispatch release.yml" in step.get("name", "")
+    job_text = yaml.safe_dump(workflow["jobs"]["auto-tag"], default_flow_style=False)
+    assert "secrets.GITHUB_TOKEN" not in job_text, (
+        "the tag job references secrets.GITHUB_TOKEN. The push must have no route "
+        "back to the workflow token in any form — a fallback silently restores it, "
+        "the push is suppressed again, and the job still reports success."
     )
-    run_script = dispatch_step["run"]
-    assert "gh workflow run release.yml" in run_script
-    assert "--ref" in run_script
-    assert "-f tag=" in run_script
-    assert dispatch_step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert "github.token" not in job_text, (
+        "the tag job references github.token. Same failure as above, spelled the "
+        "other way."
+    )
 
-    # Ordering: push before dispatch.
-    names = [step.get("name", "") for step in steps]
-    push_idx = next(
-        i for i, n in enumerate(names) if "Create and push release tag" in n
+
+def test_workflow_checks_out_without_persisting_credentials() -> None:
+    """The other half of the pair, and the one that is silently defeated.
+
+    A default ``actions/checkout`` leaves the workflow token in the local git
+    config, where it overrides the App credential in the push URL — so a job that
+    mints correctly and checks out with the default still pushes as
+    ``github-actions[bot]`` and still delivers no push event. Omitting the flag is
+    not a smaller version of the fix; it defeats it entirely. This is the exact
+    confound that produced the wrong org-wide finding in August (OMN-18273).
+    """
+    workflow = _load_yaml(AUTO_TAG_WORKFLOW)
+    checkouts = [
+        step
+        for step in workflow["jobs"]["auto-tag"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout")
+    ]
+    assert checkouts, (
+        "auto-tag-on-merge.yml runs no actions/checkout, so this assertion cannot "
+        "mean anything. Either the job stopped checking out or the job id moved."
     )
-    dispatch_idx = next(i for i, n in enumerate(names) if "Dispatch release.yml" in n)
-    assert push_idx < dispatch_idx
+    for step in checkouts:
+        assert (step.get("with") or {}).get("persist-credentials") is False, (
+            "the tag job checks out without `persist-credentials: false`. The "
+            "persisted workflow-token credential overrides the App credential in "
+            "the push URL, the tag is pushed as github-actions[bot], no push event "
+            "is delivered, and release.yml never starts — while this job still "
+            "reports success."
+        )
+
+
+def test_the_superseded_dispatch_workaround_is_gone() -> None:
+    """A retained dispatch would race the push-triggered run and reinstate the
+    ``workflow_dispatch`` event OMN-18662 exists to remove.
+
+    Its idempotency check ("has release.yml already run for this tag") cannot
+    distinguish "the push trigger worked" from "the push trigger has not fired
+    yet", so keeping it as a belt-and-braces fallback would make the release event
+    intermittent rather than safe.
+    """
+    workflow = _load_yaml(AUTO_TAG_WORKFLOW)
+    job_text = yaml.safe_dump(workflow["jobs"]["auto-tag"], default_flow_style=False)
+    assert "gh workflow run release.yml" not in job_text, (
+        "auto-tag-on-merge.yml dispatches release.yml again. OMN-18662's proof is a "
+        "release run whose event is `push`; a dispatch here races that run and "
+        "makes the event intermittent."
+    )
 
 
 def test_workflow_no_longer_delegates_to_token_pushing_reusable() -> None:

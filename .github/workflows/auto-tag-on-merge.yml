@@ -1,31 +1,61 @@
 name: Auto-Tag on Merge
 
-# When a `chore: release vX.Y.Z` PR merges, tag the release commit AND trigger
-# release.yml. This workflow was previously a thin caller of
-# omnibase_core/.github/workflows/auto-tag-reusable.yml, which pushes the tag
-# using the default GITHUB_TOKEN. GitHub deliberately suppresses new workflow
-# runs from events created by the built-in GITHUB_TOKEN (recursive-workflow
-# prevention), so the pushed tag NEVER triggered release.yml (on: push: tags).
-# That silently broke publishing after v0.37.2 (the last manually-pushed tag):
-# v0.38.0-v0.38.3 were tagged by github-actions[bot] but never published, and
-# PyPI omnibase-infra stalled at 0.36.1 for six weeks. See OMN-14468.
+# When a `chore: release vX.Y.Z` PR merges, tag the release commit so that
+# `release.yml` -- whose only automatic trigger is `push: tags: ['v*']` -- starts
+# from that push.
 #
-# Fix: after pushing the tag, dispatch release.yml explicitly via
-# workflow_dispatch — the documented EXCEPTION to the GITHUB_TOKEN suppression
-# rule (workflow_dispatch/repository_dispatch DO create runs from GITHUB_TOKEN).
-# release.yml already exposes a workflow_dispatch `tag` input, so this reuses the
-# existing publish path rather than adding a new one.
+# History, because the shape of this file is a correction of a correction:
+#
+#   * It was once a thin caller of omnibase_core's shared
+#     `auto-tag-reusable.yml`, which pushes the tag with the job's default
+#     workflow token. A push made with that token delivers no push event, so the
+#     tag sat unconsumed: v0.38.0-v0.38.3 were tagged and never published, and
+#     PyPI omnibase-infra stalled at 0.36.1 for six weeks (OMN-14468).
+#   * OMN-14468 worked around that by pushing with the workflow token anyway and
+#     then dispatching `release.yml` by hand from the job -- `workflow_dispatch`
+#     being the documented exception to the suppression. That published, but it
+#     left every cut arriving as `event: workflow_dispatch`, which is indirect
+#     evidence at best: it proves the job ran, not that the tag was consumable.
+#   * OMN-18273 established that an App-token push DOES start push-driven CI in
+#     this org, and that the earlier org-wide "App tokens are suppressed too"
+#     finding was a credential confound. Live proof: omnibase_spi run
+#     35134173847 (`event: push`, `actor: onexbot-occ-writer[bot]`).
+#
+# So the tag is now pushed with an `onexbot-occ-writer` installation token and
+# the dispatch workaround is gone. Two conditions make the App-token push start
+# CI, and both are properties of THIS JOB rather than of the token:
+#
+#   1. the checkout does not persist credentials. A default `actions/checkout`
+#      writes a basic-auth `http.<origin>.extraheader` carrying the workflow
+#      token, and that header OVERRIDES any credential in the remote URL -- the
+#      exact confound that produced the wrong finding in August.
+#   2. the mint fails closed. No `|| secrets.GITHUB_TOKEN` (or `github.token`)
+#      fallback anywhere in the job: a fallback silently restores the workflow
+#      token, the push is suppressed again, and the job still reports success.
+#
+# The dispatch step is deliberately NOT retained as a belt-and-braces fallback.
+# Keeping it would race the push-triggered run, and its "has release.yml already
+# run for this tag" check cannot distinguish "the push trigger worked" from "the
+# push trigger has not fired yet" -- so a retained fallback would reintroduce the
+# `workflow_dispatch` event it exists to make unnecessary, intermittently, which
+# is worse than either shape on its own. If the App-token push ever stops
+# starting `release.yml`, that is a defect to see, not one to paper over.
+#
+# Why this is inlined here rather than fixed in the shared reusable: callers pin
+# that reusable at a ref on omnibase_core's `main`, which is release-synced
+# (OMN-16289) and only advances when a release publishes, so a fix there would
+# not be live for the next cut. The reusable also cannot see the org App
+# credentials unless every caller passes them. See OMN-18658 / OMN-18662.
 
 on:
   pull_request:
     types: [closed]
 
 permissions:
-  contents: write # push the release tag
-  actions: write # dispatch release.yml (workflow_dispatch)
+  contents: read # the App installation token carries the write scope, not this
 
 concurrency:
-  # One tag+dispatch per merged release PR; never cancel an in-flight publish.
+  # One tag per merged release PR; never cancel an in-flight publish.
   group: auto-tag-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
@@ -48,15 +78,25 @@ jobs:
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
+      # Condition 1. `persist-credentials: false` is load-bearing, not hygiene:
+      # with the default `true`, checkout v7 leaves the workflow token in the
+      # local git config, where it overrides the App credential in the push URL
+      # below and the push authenticates as github-actions[bot] again.
+      #
+      # `fetch-depth: 0` + `fetch-tags: true` are retained so the tag-exists
+      # check below can be answered locally -- with no persisted credential
+      # there is nothing left to authenticate a `git ls-remote` with.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
           ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
 
       - name: Extract version from pyproject.toml
         id: version
         run: |
+          set -euo pipefail
           VERSION=$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
           if [ -z "$VERSION" ]; then
             echo "::error::could not read [project].version from pyproject.toml"
@@ -66,47 +106,75 @@ jobs:
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "Detected version: $VERSION (tag: v$VERSION)"
 
-      - name: Create and push release tag (idempotent)
-        id: tag
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists on origin — not re-pushing"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag "${TAG}" -m "Release ${TAG}"
-            git push origin "${TAG}"
-            echo "Pushed tag ${TAG}"
-          fi
-
-      - name: Dispatch release.yml (GITHUB_TOKEN-pushed tags do not trigger it)
+      - name: Check if tag already exists
+        id: check
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
-          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # A tag pushed with the built-in GITHUB_TOKEN does NOT fire
-          # release.yml's `on: push: tags` trigger. workflow_dispatch is the
-          # documented exception, so we dispatch release.yml at the tag ref and
-          # pass the tag as the workflow input. This is the load-bearing fix for
-          # the six-week publish gap (OMN-14468).
-          #
-          # Idempotency: skip if release.yml already has a run for this tag, so a
-          # re-run of this job (or a future restoration of the push trigger) does
-          # not double-publish. release.yml is itself idempotent (publish retry
-          # treats "already exists" as success), so a race here is safe.
-          existing=$(gh run list \
-            --workflow=release.yml \
-            --repo "${REPO}" \
-            --branch "${TAG}" \
-            --json databaseId \
-            --jq 'length' 2>/dev/null || echo 0)
-          if [ "${existing:-0}" -gt 0 ]; then
-            echo "release.yml already has ${existing} run(s) for ${TAG} — not dispatching again"
-            exit 0
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} already exists — skipping"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "Dispatching release.yml for ${TAG}"
-          gh workflow run release.yml --repo "${REPO}" --ref "${TAG}" -f tag="${TAG}"
-          echo "Dispatched release.yml for ${TAG}"
+
+      # Condition 2. `actions/create-github-app-token` fails the step when it
+      # cannot mint, which fails the job. There is deliberately no `||`
+      # expression joining this output to the workflow token: an unmintable
+      # token must stop the tag from being pushed at all, because a tag pushed
+      # with the workflow token is worse than no tag -- it is unconsumable and
+      # cannot be re-pushed without deleting it first.
+      #
+      # `permission-*` REPLACES the installation's permission set with exactly
+      # what is listed. Both scopes are required: `contents` to create the ref,
+      # `workflows` because a release commit can legitimately carry changes under
+      # .github/workflows/ and GitHub refuses a push that introduces them
+      # without it.
+      - name: Mint onexbot-occ-writer app token
+        id: app-token
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-workflows: write
+
+      - name: Create and push tag
+        if: steps.check.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          # Belt-and-braces on the fail-closed mint. The action above already
+          # fails the step when it cannot mint, but an empty token here would
+          # otherwise produce an unauthenticated push whose failure mode is a
+          # confusing 403 rather than a named one.
+          if [ -z "${APP_TOKEN}" ]; then
+            echo "::error::onexbot-occ-writer token is empty; refusing to push ${TAG}"
+            exit 1
+          fi
+
+          # An annotated tag carries a tagger identity. Use the App's real
+          # account address -- the numeric prefix is what links it to the bot
+          # account; a fabricated address renders unlinked and proves nothing
+          # (OMN-18273 AC-4).
+          git config user.name "onexbot-occ-writer[bot]"
+          git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
+
+          git tag "${TAG}" -m "Release ${TAG}"
+
+          # The credential travels in the remote URL for this one command. With
+          # `persist-credentials: false` above there is no leftover credential
+          # to override it, which is the whole point of the pair.
+          git push \
+            "https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "refs/tags/${TAG}"
+
+          echo "Pushed tag ${TAG} as onexbot-occ-writer[bot]"
+          echo "release.yml is expected to start from this push, with event=push and no workflow_dispatch"
