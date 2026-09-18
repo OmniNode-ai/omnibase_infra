@@ -22,19 +22,88 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "install-node-skill-package.sh"
 
-# A fixed, syntactically-valid 40-hex SHA used to pin OMNIMARKET_REF in every
-# exec test below, so none of them trigger the live `git ls-remote` resolution
-# path (OMN-14060) — keeps this suite hermetic regardless of network state.
-_PINNED_TEST_REF = "0123456789abcdef0123456789abcdef01234567"
-
 
 def _script_text() -> str:
     return _SCRIPT.read_text(encoding="utf-8")
+
+
+# OMN-18675: the script reads the co-installed pin versions out of the ref's own
+# pyproject.toml, so an exec test must name a ref it can actually resolve. A
+# throwaway local clone keeps that hermetic — a CI runner has no $OMNI_HOME
+# registry, and depending on one would make this suite pass only on a developer
+# machine.
+_FIXTURE_PYPROJECT = """\
+[project]
+name = "omnimarket"
+version = "0.0.0"
+dependencies = [
+    "omnibase-compat==0.5.7",
+    "omninode-memory==0.18.0",
+]
+"""
+
+
+def _make_fixture_registry(root: Path) -> tuple[Path, str]:
+    """Build a throwaway $OMNI_HOME/omnimarket clone; return (omni_home, sha)."""
+    omni_home = root / "omni_home"
+    clone = omni_home / "omnimarket"
+    clone.mkdir(parents=True)
+
+    def git(*argv: str) -> None:
+        # GIT_DIR/GIT_WORK_TREE from a hook environment override cwd= and would
+        # retarget the real worktree (OMN-14891).
+        subprocess.run(
+            argv,
+            cwd=clone,
+            check=True,
+            capture_output=True,
+            timeout=30,
+            env=scrub_git_location_env(os.environ),
+        )
+
+    git("git", "init", "--quiet", "-b", "dev")
+    git("git", "config", "user.email", "test@example.com")
+    git("git", "config", "user.name", "Test")
+    (clone / "pyproject.toml").write_text(_FIXTURE_PYPROJECT, encoding="utf-8")
+    git("git", "add", "pyproject.toml")
+    git("git", "commit", "--quiet", "-m", "fixture")
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=scrub_git_location_env(os.environ),
+    ).stdout.strip()
+    return omni_home, sha
+
+
+def _fake_uv_on_path(root: Path) -> Path:
+    """A `uv` that prints an empty change plan, so no network or venv is touched.
+
+    The plan path now runs a real `uv pip install --dry-run` (OMN-18675), which
+    would otherwise try to fetch the fixture sha from github. Stubbing uv keeps
+    this suite offline while still driving the script's own plan plumbing.
+    """
+    bin_dir = root / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    fake = bin_dir / "uv"
+    fake.write_text(
+        "#!/usr/bin/env bash\necho 'Audited 3 packages in 1ms'\nexit 0\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    return bin_dir
 
 
 def test_script_exists_and_executable() -> None:
@@ -90,9 +159,13 @@ def test_no_deps_used_for_market_provider_layer() -> None:
     # omnimarket sits ABOVE the infra layer; it must be composed --no-deps so its
     # metadata never re-resolves (or downgrades) the infra layer beneath it.
     assert "--no-deps" in text
-    assert "omnibase-compat==0.5.5" in text
-    assert "omninode-memory==0.15.0" in text
     assert "OmniNode-ai/omnimarket.git" in text
+    # OMN-18675: the NAMES are fixed here, the VERSIONS come from the ref being
+    # installed. A version literal beside either name is the recurrence
+    # mechanism that downgraded a shared venv and broke the onex CLI host-wide.
+    assert "OMNI_INTERNAL_NO_DEPS_PKGS=(omnibase-compat omninode-memory)" in text
+    assert 'COMPAT_PIN="omnibase-compat==' not in text
+    assert 'MEMORY_PIN="omninode-memory==' not in text
 
 
 def test_verifies_merge_sweep_and_session_nodes() -> None:
@@ -139,24 +212,34 @@ def test_dry_run_prints_plan_and_does_not_require_execute() -> None:
     assert "not executable" in (result.stdout + result.stderr)
 
 
-def test_dry_run_with_current_interpreter_prints_plan() -> None:
+def test_dry_run_with_current_interpreter_prints_plan(tmp_path: Path) -> None:
     # Using the running interpreter (guaranteed executable) exercises the plan
     # print path; without --execute it must not install anything. OMNIMARKET_REF
-    # is pinned so this never triggers the live `git ls-remote` resolution path
-    # (OMN-14060) — keeps the test hermetic regardless of network state.
+    # is pinned to a throwaway fixture clone so this never triggers the live
+    # `git ls-remote` resolution path (OMN-14060) and still names a ref whose
+    # pyproject the OMN-18675 pin resolution can read.
+    omni_home, pinned_test_ref = _make_fixture_registry(tmp_path)
     result = subprocess.run(
         ["bash", str(_SCRIPT), sys.executable],
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
-        env={**os.environ, "OMNIMARKET_REF": _PINNED_TEST_REF},
+        timeout=120,
+        env={
+            **os.environ,
+            "PATH": f"{_fake_uv_on_path(tmp_path)}{os.pathsep}{os.environ['PATH']}",
+            "OMNIMARKET_REF": pinned_test_ref,
+            "OMNI_HOME": str(omni_home),
+        },
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert "node-skill-package install plan" in result.stdout
     assert "DRY RUN" in result.stdout
-    assert _PINNED_TEST_REF in result.stdout
+    assert pinned_test_ref in result.stdout
     assert "OMNIMARKET_REF override (pinned/offline use)" in result.stdout
+    # The pins printed are the fixture ref's, not any literal in the script.
+    assert "omnibase-compat==0.5.7" in result.stdout
+    assert "omninode-memory==0.18.0" in result.stdout
 
 
 def test_dry_run_without_override_does_not_touch_network_before_python_check() -> None:

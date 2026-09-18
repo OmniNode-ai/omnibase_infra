@@ -169,7 +169,9 @@ if ! git -C "$OMNIMARKET_CLONE" cat-file -e "${OMNIMARKET_REF}^{commit}" 2>/dev/
   exit 1
 fi
 
-PYPROJECT_TMP="$(mktemp -t omnimarket-pyproject)"
+# GNU mktemp requires the XXXXXX suffix in a template; BSD mktemp accepts it
+# too. `-t <prefix>` alone is BSD-only and fails on Linux runners.
+PYPROJECT_TMP="$(mktemp "${TMPDIR:-/tmp}/omnimarket-pyproject.XXXXXX")"
 trap 'rm -f "$PYPROJECT_TMP"' EXIT
 git -C "$OMNIMARKET_CLONE" show "${OMNIMARKET_REF}:pyproject.toml" >"$PYPROJECT_TMP"
 
