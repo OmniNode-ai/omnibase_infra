@@ -280,16 +280,12 @@ jobs:
         run: |
           set -uo pipefail
           python3 - <<'PYEOF' > fleet-status.json
-          import json, os, sys
+          import json, os, sys, pathlib
           sys.path.insert(0, "scripts/ci")
-          # Both names are stdlib-plus-PyYAML by construction. The typed
-          # `load_contract_policy` reads the same contract field but imports
-          # the model, and with it omnibase_core and pydantic, which this bare
-          # `python3` has no install behind it to provide (OMN-18684).
-          from runner_route_decision import probe_fleet, load_contract_runner_group
-          runner_group = load_contract_runner_group()
+          from runner_route_decision import probe_fleet, load_route_policy
+          policy = load_route_policy(pathlib.Path("config/runner_routing_policy.yaml"))
           token = os.environ.get("RUNNER_FLEET_STATUS_TOKEN") or os.environ.get("CROSS_REPO_PAT")
-          print(json.dumps(probe_fleet(token, runner_group, "https://api.github.com")))
+          print(json.dumps(probe_fleet(token, str(policy["runner_group"]), "https://api.github.com")))
           PYEOF
           cat fleet-status.json
 

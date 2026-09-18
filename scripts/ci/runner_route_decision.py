@@ -107,6 +107,44 @@ def load_contract_policy(path: Path = NODE_CONTRACT) -> ModelCIRunnerRoutePolicy
     return ModelCIRunnerRoutePolicy.model_validate(config)
 
 
+def load_contract_runner_group(path: Path = NODE_CONTRACT) -> str:
+    """The runner group capacity is observed from, read WITHOUT pydantic.
+
+    Same contract file and same field as :func:`load_contract_policy`; this
+    reader exists because of who calls it, not because there is a second
+    policy. ``load_contract_policy`` imports the typed model, which pulls in
+    ``omnibase_infra`` and therefore ``omnibase_core`` and pydantic. The
+    ``saturation-record`` job in ``dev-lane-liveness.yml`` runs on a bare
+    hosted image's ``python3`` with no ``uv sync`` behind it -- deliberately,
+    because that monitor has to survive the saturation it reports on -- and
+    has exactly one question for the contract: which runner group to probe.
+    Asking it through the typed loader means asking it to install the
+    repository first.
+
+    This is the same stdlib-plus-PyYAML shape as
+    :func:`load_fleet_expected_count` and :func:`load_hosted_workflows`, for
+    the same reason those have it, and PyYAML is what the caller already
+    relies on -- ``runner_saturation_record.py`` imports it at module scope
+    two steps later in the same job.
+
+    ONE VALUE, TWO READERS, PINNED. ``tests/ci/test_runner_route_decision.py``
+    asserts this returns exactly ``load_contract_policy().runner_group``, so
+    the two cannot drift into two policies that agree until someone edits one.
+    """
+    import yaml
+
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path} must contain a YAML mapping")
+    config = loaded.get("config")
+    if not isinstance(config, dict):
+        raise KeyError(f"{path} is missing the required 'config:' block")
+    runner_group = config.get("runner_group")
+    if not isinstance(runner_group, str) or not runner_group:
+        raise KeyError(f"{path} config block is missing a usable 'runner_group'")
+    return runner_group
+
+
 # The runner class this router places work on. The router decides between the
 # shared action fleet and GitHub-hosted runners; it never routes deploy- or
 # verify-class jobs, which are pinned by label at the workflow.

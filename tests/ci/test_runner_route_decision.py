@@ -515,6 +515,73 @@ def test_a_contract_with_no_config_block_raises(tmp_path: Path) -> None:
         route.load_contract_policy(contract)
 
 
+# --------------------------------------------------------------------------
+# OMN-18684: the runner group has two readers and they may not drift.
+# --------------------------------------------------------------------------
+
+
+def test_the_two_runner_group_readers_return_the_same_value() -> None:
+    """ONE value, two readers, pinned.
+
+    ``load_contract_runner_group`` exists so the ``saturation-record`` job can
+    ask the contract one question on a bare hosted ``python3`` without
+    installing the repository to do it. That is a dependency-footprint reason,
+    not a second policy -- so this asserts the cheap reader returns exactly
+    what the typed one does. Drift here is the failure the OMN-18412 commit
+    message named: two copies that agree until someone edits one.
+    """
+    assert (
+        route.load_contract_runner_group() == route.load_contract_policy().runner_group
+    )
+
+
+def test_the_runner_group_reader_does_not_need_pydantic_or_the_package() -> None:
+    """The property the whole function exists for.
+
+    ``load_contract_policy`` imports the typed model, which pulls in
+    ``omnibase_infra`` and with it ``omnibase_core`` and pydantic. The
+    saturation monitor's step has no install behind it. A naive rename of the
+    workflow's import to the typed loader would have swapped OMN-18684's
+    ``ImportError`` for a ``ModuleNotFoundError`` and stayed just as red.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.path.insert(0, 'scripts/ci'); "
+            "from runner_route_decision import load_contract_runner_group; "
+            "group = load_contract_runner_group(); "
+            "heavy = sorted(m for m in sys.modules "
+            "if m in ('pydantic',) or m.startswith('omnibase_')); "
+            "print(group); print(heavy)",
+        ],
+        check=False,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    group, heavy = result.stdout.strip().splitlines()
+    assert group == route.load_contract_policy().runner_group
+    # The positive control for this assertion is
+    # ``test_load_contract_policy_still_needs_pyyaml_when_actually_called``
+    # and the typed loader's own tests: the heavy imports are genuinely
+    # reachable from this module, they are simply not on this path.
+    assert heavy == "[]", f"the cheap reader pulled in {heavy}"
+
+
+def test_a_contract_with_no_runner_group_raises_naming_it(tmp_path: Path) -> None:
+    """CLAUDE.md rule 8: fail at load naming the field, never silently default."""
+    section = _policy()
+    del section["runner_group"]
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(json.dumps({"config": section}), encoding="utf-8")
+    with pytest.raises(KeyError) as excinfo:
+        route.load_contract_runner_group(contract)
+    assert "runner_group" in str(excinfo.value)
+
+
 def test_the_committed_contract_loads_and_carries_every_threshold() -> None:
     """The real contract must satisfy the same typed loader.
 
@@ -784,7 +851,7 @@ def test_load_contract_policy_still_needs_pyyaml_when_actually_called() -> None:
     """Positive control for the two tests above: proves ``-S`` really does
     remove PyYAML from view, so their passing is the lazy-import fix and not
     an accident of the interpreter already lacking PyYAML for some other
-    reason. ``load_route_policy`` is the one function still allowed to need
+    reason. ``load_contract_policy`` is the one function still allowed to need
     it, and only when called.
     """
     result = _run_with_site_packages_hidden(
