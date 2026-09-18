@@ -38,9 +38,15 @@
 # WHY HERE AND NOT IN A NEW WORKFLOW. The plan is explicit -- no new alert
 # channel and no new scheduler. This file is already the repository's scheduled
 # reader of PR CI state: same REST surface (check-runs on pull-request heads),
-# same GitHub-hosted requirement, same CROSS_REPO_PAT convention for repos that
-# are not this one. Adding a third scheduler to read the same API would be a
-# second thing to keep alive for no new capability.
+# same GitHub-hosted requirement, same cross-repo read problem. Adding a third
+# scheduler to read the same API would be a second thing to keep alive for no
+# new capability.
+#
+# The two jobs do NOT share a credential, and that is deliberate rather than an
+# oversight. The zombie detector WRITES (force-cancel) to two repos and keeps
+# CROSS_REPO_PAT; the alerter only READS, but reads a PRIVATE repo's check-runs
+# and a branch's protection, which that PAT cannot do -- see the OMN-18254
+# comment on its mint step below.
 #
 # The workflow's name still says "Zombie Detector" and now carries a second,
 # adjacent concern. That is named here rather than papered over: both jobs
@@ -152,13 +158,82 @@ jobs:
       - name: Install PyYAML (the policy reader's only dependency)
         run: python3 -m pip install --quiet pyyaml
 
+      # OMN-18254, 2026-09-18: this job had never succeeded. Every scheduled
+      # run since the earliest retained one (400 of 400, back to
+      # 2026-09-15T05:08:01Z) died here, so neither the above-threshold alert
+      # nor its below-threshold control was ever produced by a live run. The
+      # sibling zombie-detector job was green throughout, which is why the red
+      # read as a known-flaky neighbour rather than as a dead mechanism.
+      #
+      # THE FAILURE, from run 35403376118:
+      #   gh api repos/OmniNode-ai/omniweb/commits/<sha>/check-runs failed:
+      #   Resource not accessible by personal access token (HTTP 403)
+      #
+      # CROSS_REPO_PAT is a fine-grained PAT. `omnibase_infra` and `omnimarket`
+      # are public, so their check-runs read succeeds on public access alone;
+      # `omniweb` is PRIVATE and the token carries no Checks permission there.
+      # The repo loop hits omniweb second, so omnimarket was never reached
+      # either -- one private repo took the whole sweep down.
+      #
+      # WHY onexbot AND NOT onexbot-occ-writer. Read back live from
+      # `gh api /orgs/OmniNode-ai/installations` on 2026-09-18: `onexbot`
+      # (app id 3342522, installation 123040063, repository_selection: all)
+      # carries administration/actions/checks/contents/metadata/pull-requests.
+      # `onexbot-occ-writer` (4361937) carries every one of those EXCEPT
+      # `administration`, and this script reads
+      # `branches/{branch}/protection/required_status_checks` -- a branch-
+      # protection read, which needs Administration. So the two Apps are not
+      # interchangeable here, and nothing is being minted, rotated or widened:
+      # both permission sets already existed. Same step shape as
+      # evidence-autoclose-sweep.yml, which chose the same App under OMN-16832.
+      #
+      # `repositories:` is pinned to exactly the three repos the script reads.
+      # The autoclose sweep uses `owner:` because its repo list is resolved at
+      # run time; this one is a literal in the run step below, so the narrower
+      # scope is available and is the correct one.
+      - name: Mint the onexbot App token (OMN-18254)
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: |
+            omnibase_infra
+            omniweb
+            omnimarket
+          permission-administration: read
+          permission-actions: read
+          permission-checks: read
+          permission-contents: read
+          permission-metadata: read
+          permission-pull-requests: read
+
+      # The mint action already fails its own step, so this is belt-and-braces
+      # for the one shape it cannot catch: an empty token that still exits 0.
+      # It exists because the ONLY wrong answer here is a token that reads
+      # SOME repos -- that is exactly what produced a silent hole for three
+      # days, and a sweep that cannot read must never read as clean.
+      - name: Refuse an empty minted token
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_TOKEN}" ]; then
+            echo "::error::onexbot App token mint produced an empty token. Failing closed -- this job does NOT fall back to GITHUB_TOKEN, because a partial-visibility token reports a clean sweep over the repos it cannot see."
+            exit 1
+          fi
+          echo "onexbot App token minted."
+
       - name: Evaluate non-required check failure rates
         env:
-          # Cross-repo reads (omniweb, omnimarket) need a token the default
-          # GITHUB_TOKEN cannot provide. Absent, the step fails loudly rather
-          # than reporting zero rows -- an empty result is not evidence of
-          # absence, and a sweep that cannot read must never read as clean.
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+          # Cross-repo reads (omniweb is private) need Checks on a private
+          # repo, and the branch-protection read needs Administration; neither
+          # the default GITHUB_TOKEN nor CROSS_REPO_PAT provides both. There is
+          # deliberately NO `|| secrets.GITHUB_TOKEN` fallback: a silent
+          # downgrade reproduces the 403 one repo later instead of failing at
+          # the mint, and an empty result is not evidence of absence.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # Same channel the fleet canary and the saturation monitor already
           # alert to -- inherited, not chosen here. Absent tokens degrade to
           # annotation plus artifact.

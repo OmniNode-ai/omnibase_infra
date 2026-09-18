@@ -363,9 +363,9 @@ repos:
       # and an alerter that is correct look identical from a green run.
       - id: nonrequired-check-failure-rate
         name: Non-required check failure-rate alert (OMN-18254, OMN-18322)
-        entry: uv run --frozen pytest tests/ci/test_nonrequired_check_failure_rate_omn18254.py tests/ci/test_incident_replay_omn18254.py tests/ci/test_scheduled_run_failure_rate_omn18322.py -q
+        entry: uv run --frozen pytest tests/ci/test_nonrequired_check_failure_rate_omn18254.py tests/ci/test_incident_replay_omn18254.py tests/ci/test_scheduled_run_failure_rate_omn18322.py tests/ci/test_alert_token_source_omn18254.py -q
         language: system
-        files: ^(scripts/ci/nonrequired_check_failure_rate\.py|config/runner_routing_policy\.yaml|tests/ci/test_nonrequired_check_failure_rate_omn18254\.py|tests/ci/test_incident_replay_omn18254\.py|tests/fixtures/omn18254/.*|tests/ci/test_scheduled_run_failure_rate_omn18322\.py|tests/fixtures/omn18322/.*)$
+        files: ^(scripts/ci/nonrequired_check_failure_rate\.py|config/runner_routing_policy\.yaml|\.github/workflows/pr-ci-zombie-detector\.yml|tests/ci/test_nonrequired_check_failure_rate_omn18254\.py|tests/ci/test_incident_replay_omn18254\.py|tests/fixtures/omn18254/.*|tests/ci/test_scheduled_run_failure_rate_omn18322\.py|tests/fixtures/omn18322/.*|tests/ci/test_alert_token_source_omn18254\.py)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-18345: the lane-presence guard. Pins BOTH directions -- a lane that
