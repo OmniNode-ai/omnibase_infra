@@ -74,11 +74,19 @@ It is written to ``sys.stderr`` directly rather than through ``logger``
 because a logger can be configured to nothing, and a check that logging
 config can silence is the silent pass this mode exists to remove.
 
-Exit behaviour is unchanged in kind: IN_SYNC returns, DRIFTED raises (and
-``allow_drift`` downgrades it to a warning exactly as on-registry), SKIPPED
-returns -- but SKIPPED still prints its line and its reason. No ``reconcile``
-is attempted off-registry: the bound reconciler repairs a venv against the
-canonical clone, and there is no clone here for it to repair against.
+**Off registry the guard REPORTS and never refuses.** Operator ruling,
+2026-09-18 (the OMN-17255 re-scope under the local-path goal, row L2): the
+guard must not block dispatch on a machine with no clone. The two positions
+that look opposed are not about the same thing -- the goal needs the guard not
+to REFUSE off-registry, this ticket needs it not to be SILENTLY ABSENT, and a
+comparison against the packaged pins satisfies both. A refusal would also be a
+remedy nobody on that machine can apply: there is no clone to reconcile against
+and no repair command that is true there, so it would close a customer's only
+path with nothing to do about it. Every off-registry verdict therefore exits 0,
+and DRIFTED additionally logs the mismatch in prose. ``allow_drift`` is not
+consulted here because nothing is refused; it keeps its full meaning on the
+canonical-clone path. No ``reconcile`` is attempted either: the bound
+reconciler repairs a venv against the clone that does not exist here.
 
 On a machine that DOES have the canonical clone, "omnimarket is not
 installed from git" (absent entirely, or installed from PyPI/a non-VCS
@@ -546,18 +554,18 @@ def _emit_off_registry_line(check: ModelOffRegistryCheck) -> None:
 
 
 def _off_registry_detail(check: ModelOffRegistryCheck) -> str:
-    """The human half of a DRIFTED off-registry refusal.
+    """The human half of a DRIFTED off-registry report.
 
     Names no canonical clone and no clone-based repair command: on this machine
-    neither exists, and a refusal pointing at a path the reader does not have is
+    neither exists, and a report pointing at a path the reader does not have is
     how a guard teaches people to ignore it.
     """
     installed = check.installed or "ABSENT"
     others = [name for name in check.unsatisfied if name != check.pin_name]
     also = f" Also unsatisfied: {', '.join(others)}." if others else ""
     return (
-        f"omnimarket OFF-REGISTRY drift: the installed omni-internal layer does "
-        f"not satisfy the pins packaged with "
+        f"omnimarket OFF-REGISTRY DRIFT (reported, not blocked): the installed "
+        f"omni-internal layer does not satisfy the pins packaged with "
         f"{check.anchor}=={check.anchor_version}. {check.pin_name} is "
         f"{installed}, and {check.anchor}=={check.anchor_version} requires "
         f"{check.pin_name}{check.expected}.{also} No canonical clone was "
@@ -568,32 +576,43 @@ def _off_registry_detail(check: ModelOffRegistryCheck) -> str:
     )
 
 
-def _run_off_registry_check(*, allow_drift: bool) -> ModelOffRegistryCheck:
-    """The off-registry branch of :func:`check_omnimarket_drift`."""
+def _run_off_registry_check() -> ModelOffRegistryCheck:
+    """The off-registry branch of :func:`check_omnimarket_drift`.
+
+    **Reports; never refuses.** Operator ruling, 2026-09-18 (OMN-17255 re-scope
+    under the local-path goal, row L2): off registry the guard must not block
+    dispatch. The two positions that look opposed are not about the same thing
+    -- the goal needs the guard not to REFUSE on a machine with no clone, and
+    this ticket needs the guard not to be SILENTLY ABSENT. A comparison against
+    the packaged pins satisfies both: it asserts something, and what it asserts
+    is resolvable without a clone.
+
+    Blocking here would also be a remedy nobody on that machine can apply. The
+    guard has no clone to reconcile against and no repair command that is true
+    there, so a refusal would leave a customer with their only path closed and
+    nothing to do about it. That is how a gate gets routed around rather than
+    fixed. The line is the deliverable; the exit code never was.
+
+    ``allow_drift`` is not consulted: there is nothing to override, because
+    nothing is refused. It keeps its full meaning on the canonical-clone path.
+    """
     check = resolve_off_registry_check()
-    # Emitted BEFORE any refusal, and for every verdict. A line that only
-    # appears when something is wrong cannot distinguish a clean run from an
-    # unrun check, which is the defect this whole mode addresses.
+    # Emitted for EVERY verdict. A line that only appears when something is
+    # wrong cannot distinguish a clean run from an unrun check, which is the
+    # defect this whole mode addresses.
     _emit_off_registry_line(check)
 
-    if check.verdict is not EnumOffRegistryVerdict.DRIFTED:
-        return check
-
-    detail = _off_registry_detail(check)
-    if allow_drift:
+    if check.verdict is EnumOffRegistryVerdict.DRIFTED:
+        # Prose detail is best-effort (a library logger can have no handler),
+        # which is exactly why it is not the only surface: the structured line
+        # above already names the pin, the requirement and the installed
+        # version, and it is written to stderr unconditionally.
         logger.warning(
-            "%s DISPATCHING ANYWAY because %s is set -- results from "
-            "market-provided nodes come from an UNVERIFIED omnimarket build "
-            "and must not be treated as evidence.",
-            detail,
-            DRIFT_OVERRIDE_ENV,
+            "%s Results from market-provided nodes come from an UNVERIFIED "
+            "omnimarket build and must not be treated as evidence.",
+            _off_registry_detail(check),
         )
-        return check
-
-    raise OmnimarketDriftError(
-        f"{detail} To dispatch anyway despite the drift (results are NOT "
-        f"evidence), set {DRIFT_OVERRIDE_ENV}=1."
-    )
+    return check
 
 
 def check_omnimarket_drift(
@@ -610,9 +629,10 @@ def check_omnimarket_drift(
 
     * Falls back to the OFF-REGISTRY comparison when the canonical local clone
       cannot be determined (OMN-17255) -- against the pins packaged in the
-      installed artifacts, with an explicit verdict line for every outcome.
-      Before that it returned in silence, which is where the guard could not be
-      told apart from a guard that had never run. See the module docstring.
+      installed artifacts, with an explicit verdict line for every outcome and
+      no refusal. Before that it returned in silence, which is where the guard
+      could not be told apart from a guard that had never run. See the module
+      docstring for why that branch reports rather than blocks.
     * Downgrades to a loud WARNING when ``allow_drift`` is True -- the
       operator's explicit opt-out, bound at the CLI boundary to
       ``ONEX_ALLOW_OMNIMARKET_DRIFT`` (:data:`DRIFT_OVERRIDE_ENV`,
@@ -648,9 +668,8 @@ def check_omnimarket_drift(
             would be an astonishing default.
 
     Raises:
-        OmnimarketDriftError: off registry, the installed omni-internal layer
-            does not satisfy the pins packaged with the anchor distribution and
-            ``allow_drift`` is False. Or, on registry: a canonical clone IS
+        OmnimarketDriftError: never on the off-registry branch, which reports
+            and does not refuse. On registry: a canonical clone IS
             present locally, no
             ``reconcile`` repaired the drift, ``allow_drift`` is False, and
             either (a) omnimarket is not installed from git in the current
@@ -663,11 +682,12 @@ def check_omnimarket_drift(
     canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
     if canonical is None:
         # OMN-17255. No canonical clone: this is a customer machine (or a CI
-        # runner, or a fresh one). ``reconcile`` is deliberately not passed
-        # down -- it repairs a venv AGAINST the clone that does not exist here,
-        # so invoking it would burn an install and then refuse anyway, the same
-        # reasoning the detached-HEAD branch below records.
-        return _run_off_registry_check(allow_drift=allow_drift)
+        # runner, or a fresh one). That branch REPORTS and never refuses, per
+        # the 2026-09-18 operator ruling -- see :func:`_run_off_registry_check`.
+        # ``reconcile`` is deliberately not passed down: it repairs a venv
+        # AGAINST the clone that does not exist here, the same reasoning the
+        # detached-HEAD branch below records.
+        return _run_off_registry_check()
 
     # OMN-17313: a DETACHED canonical clone is drift in its own right, and it
     # has to be judged BEFORE the commit comparison below -- because that

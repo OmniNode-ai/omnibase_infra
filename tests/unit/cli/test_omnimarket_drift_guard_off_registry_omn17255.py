@@ -21,14 +21,14 @@ alone never was.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from omnibase_infra.cli import omnimarket_drift_guard as guard
 from omnibase_infra.cli.omnimarket_drift_guard import (
-    DRIFT_OVERRIDE_ENV,
     EnumOffRegistryReason,
     EnumOffRegistryVerdict,
-    OmnimarketDriftError,
     check_omnimarket_drift,
     resolve_off_registry_check,
 )
@@ -115,18 +115,29 @@ def test_off_registry_in_sync_emits_one_verdict_line(
     assert fields["anchor"] == "omnimarket@0.4.121"
 
 
-def test_off_registry_drift_refuses_and_names_the_unsatisfied_pin(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_off_registry_drift_is_reported_and_does_NOT_block_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The live 2026-09-18 shape: the installed omnibase-infra is BELOW the
-    floor the installed omnimarket wheel declares. Off-registry that is now a
-    determinable, actionable state, so it refuses -- and the line is emitted
-    before the refusal, not instead of it."""
+    floor the installed omnimarket wheel declares.
+
+    Operator ruling, 2026-09-18 (the OMN-17255 re-scope under the local-path
+    goal, row L2): off registry the guard must not block dispatch. The two
+    positions that look opposed are not about the same thing -- the goal needs
+    the guard not to REFUSE on a machine with no clone, this ticket needs it
+    not to be SILENTLY ABSENT. So: the verdict is DRIFTED, it is stated in
+    full, and the call returns. Blocking would also be a remedy nobody on that
+    machine can apply.
+    """
     _bind_env(monkeypatch, _DRIFTED_ENV)
 
-    with pytest.raises(OmnimarketDriftError) as exc_info:
-        check_omnimarket_drift(omni_home=None)
+    with caplog.at_level(logging.WARNING):
+        check = check_omnimarket_drift(omni_home=None)  # must NOT raise
 
+    assert check is not None
+    assert check.verdict is EnumOffRegistryVerdict.DRIFTED
     lines = _off_registry_lines(capsys.readouterr().err)
     assert len(lines) == 1, lines
     fields = _fields(lines[0])
@@ -137,13 +148,36 @@ def test_off_registry_drift_refuses_and_names_the_unsatisfied_pin(
     assert ">=0.38.31" in fields["expected"]
     assert fields["unsatisfied"] == "1"
 
-    message = str(exc_info.value)
-    assert "omnibase-infra" in message
-    assert "0.38.30" in message
-    # The refusal stays actionable off-registry: it may not name a canonical
-    # clone (there is none) and must name the override it honours.
-    assert "$OMNI_HOME/omnimarket" not in message
-    assert DRIFT_OVERRIDE_ENV in message
+    # The prose half is best-effort (a library logger can have no handler),
+    # which is why the structured line above carries the same facts.
+    detail = caplog.text
+    assert "omnibase-infra" in detail
+    assert "0.38.30" in detail
+    # It stays actionable off-registry: no canonical clone is named, because
+    # there is none here, and a pointer to a path the reader does not have is
+    # how a guard teaches people to ignore it.
+    assert "$OMNI_HOME/omnimarket" not in detail
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [_HEALTHY_ENV, _DRIFTED_ENV, {}],
+    ids=["in_sync", "drifted", "nothing_to_compare"],
+)
+def test_off_registry_never_raises_for_any_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    environment: dict[str, tuple[str, tuple[str, ...]]],
+) -> None:
+    """The goal-row invariant, pinned on its own so a later change that makes
+    one verdict blocking is RED rather than a review catch: off registry, the
+    guard reports and NEVER refuses."""
+    _bind_env(monkeypatch, environment)
+
+    check = check_omnimarket_drift(omni_home=None)
+
+    assert check is not None
+    assert len(_off_registry_lines(capsys.readouterr().err)) == 1
 
 
 def test_off_registry_skip_line_is_emitted_when_nothing_can_be_compared(
@@ -222,19 +256,24 @@ def test_workspace_set_keeps_todays_behaviour_and_emits_no_line(
 # --------------------------------------------------------------------------- #
 
 
-def test_off_registry_override_downgrades_to_a_warning_but_still_emits(
+def test_the_override_changes_nothing_off_registry_because_nothing_is_refused(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``allow_drift`` behaves off-registry exactly as it does on-registry: the
-    refusal downgrades, the evidence does not disappear."""
+    """``allow_drift`` is not consulted off-registry: there is nothing to
+    override. Setting it must not suppress the line either -- an override that
+    silenced the evidence would restore the exact silence this mode removes.
+    """
     _bind_env(monkeypatch, _DRIFTED_ENV)
 
-    check = check_omnimarket_drift(omni_home=None, allow_drift=True)
+    without = check_omnimarket_drift(omni_home=None)
+    without_line = _off_registry_lines(capsys.readouterr().err)
+    with_override = check_omnimarket_drift(omni_home=None, allow_drift=True)
+    with_line = _off_registry_lines(capsys.readouterr().err)
 
-    assert check is not None
-    assert check.verdict is EnumOffRegistryVerdict.DRIFTED
-    fields = _fields(_off_registry_lines(capsys.readouterr().err)[0])
-    assert fields["verdict"] == "DRIFTED"
+    assert without == with_override
+    assert without_line == with_line
+    assert len(with_line) == 1
+    assert _fields(with_line[0])["verdict"] == "DRIFTED"
 
 
 def test_off_registry_never_invokes_the_reconciler(
@@ -250,9 +289,10 @@ def test_off_registry_never_invokes_the_reconciler(
         calls.append(1)
         raise AssertionError("the reconciler must not run off-registry")
 
-    with pytest.raises(OmnimarketDriftError):
-        check_omnimarket_drift(omni_home=None, reconcile=_reconcile)
+    check = check_omnimarket_drift(omni_home=None, reconcile=_reconcile)
 
+    assert check is not None
+    assert check.verdict is EnumOffRegistryVerdict.DRIFTED
     assert calls == []
 
 
