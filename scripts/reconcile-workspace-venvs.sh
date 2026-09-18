@@ -177,6 +177,27 @@
 # reconcile-host.sh, not this script's own repair mode.
 #
 # ============================================================================
+# WHAT THE VERDICT COVERS, AND WHAT IT ONLY REPORTS (OMN-18663)
+# ============================================================================
+# Two surfaces were invisible to the verdict until OMN-18663, in opposite ways.
+#
+# 1. The DISPATCH venv's lock leg asked uv a question the repair path never
+#    answers. The repair syncs with `--python "$base_python"`; the check did
+#    not, so uv resolved the interpreter from `.python-version` (3.12) while the
+#    venv is correctly on the brew 3.13 rule 11 requires, and answered "would
+#    replace this environment". The result was a permanent DRIFT verdict that no
+#    repair could clear, with repair ticks reporting success into it. The check
+#    now passes the same interpreter argument the repair does.
+#
+# 2. The plugin CLI venv (rule 11's CLI-venv row) was omitted ENTIRELY and
+#    silently, because `hook_venv_projects` requires a `uv.lock` and that venv
+#    is built from a requirements.txt. It is still not owned here -- taking it
+#    over would give one directory two owners -- but it is now named in both
+#    modes, its lock layer reported as unowned with the script that does own it,
+#    and its provider layer read back against the canonical clone. A surface
+#    this script cannot repair is a surface it must still be honest about.
+#
+# ============================================================================
 # INTERIM BY DESIGN -- the node-based successor
 # ============================================================================
 # movement-proof-delegated-to: scripts/reconcile-host.sh
@@ -1006,6 +1027,95 @@ hook_venv_projects() {
 }
 
 # --------------------------------------------------------------------------- #
+# The plugin CLI venv: a surface this script does NOT own (OMN-18663)
+# --------------------------------------------------------------------------- #
+# `hook_venv_projects` above skips a candidate that has no `uv.lock`, and it
+# does so SILENTLY. On this Mac exactly one directory is in that state, and it
+# is the one that matters most: the plugin CLI venv from CLAUDE.md rule 11's
+# table, which serves `onex` for every lane reaching the CLI through the plugin
+# rather than through `omnibase_infra/scripts/onex`. It is built from a
+# requirements.txt by `repair-plugin-venv.sh`, so it has no lock for this
+# script to apply, and the header above records the deliberate decision NOT to
+# take it over -- one directory, one owner.
+#
+# Not owning it is a defensible boundary. Not MENTIONING it is not. Measured
+# 2026-09-18T15:45Z: the reconciler reported zero failures while that venv sat
+# one omnimarket bump behind the canonical clone and the drift guard inside it
+# refused every `onex delegate` through the plugin path. A verdict that is
+# silent about a surface reads, to the operator and to the SessionStart line, as
+# a verdict that covered it.
+#
+# So the census below names it either way. Its LOCK layer is reported as
+# unowned, naming the script that does own it. Its PROVIDER layer is READ BACK
+# against the canonical clone -- the same comparison the in-process guard makes
+# -- and that half is verdict-bearing in `--check`, because a drifted provider
+# layer there blocks dispatch just as surely as one in a venv this script writes.
+#
+# Resolved WITHOUT depending on $CLAUDE_PLUGIN_DATA being exported. A cron or
+# SessionStart tick does not carry it, which is precisely how this surface
+# stayed invisible; rule 11 documents the default path, so the default is used
+# when the variable is absent.
+DEFAULT_CLI_VENV_DIR="$HOME/.claude/plugins/data/onex-omninode-tools"
+
+cli_venv_candidates() {
+  local seen=""
+  local candidate
+  for candidate in "${CLAUDE_PLUGIN_DATA:-}" "$DEFAULT_CLI_VENV_DIR"; do
+    [[ -n "$candidate" ]] || continue
+    [[ -x "$candidate/.venv/bin/python" ]] || continue
+    # A candidate WITH a lock is reconciled by hook_venv_projects; this census
+    # is for the ones that fall through it.
+    [[ -f "$candidate/uv.lock" ]] && continue
+    case " $seen " in *" $candidate "*) continue ;; esac
+    seen="$seen $candidate"
+    printf '%s\n' "$candidate"
+  done
+}
+
+# Report every unowned CLI venv. Returns 1 when any of them is drifted against
+# the canonical clone, so the caller can decide what that means for its verdict.
+report_unowned_cli_venvs() {
+  local head="$1"
+  local candidate python_bin drifted=0
+  local readback="$_VENV_SCRIPT_DIR/venv_readback.py"
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    python_bin="$candidate/.venv/bin/python"
+    say "CLI venv (not owned here): $candidate/.venv"
+    say "  lock layer : NOT RECONCILED -- no uv.lock; owned by scripts/repair-plugin-venv.sh"
+    if [[ ! -f "$readback" ]]; then
+      say "  provider   : UNREADABLE -- no readback at $readback"
+      drifted=1
+      continue
+    fi
+    # RUN the readback on the dispatch interpreter, not on the venv being read.
+    # The venv under inspection is the one suspected of being broken, and a
+    # broken interpreter that exits 0 without running the program would report
+    # "in sync" about itself. venv_readback.py probes its --python target in a
+    # subprocess, so the reader and the read need not be the same interpreter.
+    if [[ ! -x "$DISPATCH_PYTHON" ]]; then
+      say "  provider   : UNREADABLE -- no dispatch interpreter to run the readback"
+      drifted=1
+      continue
+    fi
+    if env -u PYTHONPATH "$DISPATCH_PYTHON" "$readback" \
+        --python "$python_bin" --clone "$MARKET_CLONE" --ref "$head" \
+        --label "unowned CLI venv census (OMN-18663)" >/dev/null 2>&1; then
+      say "  provider   : in sync (omnimarket ${head:0:12})"
+    else
+      say "  provider   : DRIFT -- does not carry omnimarket ${head:0:12}"
+      say "  Every \`onex delegate\` through the plugin path refuses until this is"
+      say "  converged. This script does not write that venv; the sanctioned"
+      say "  remedy is:"
+      say "    OMNI_HOME=$OMNI_HOME bash $_VENV_SCRIPT_DIR/check-omnimarket-venv-drift.sh \\"
+      say "      --repair $python_bin"
+      drifted=1
+    fi
+  done < <(cli_venv_candidates)
+  return "$drifted"
+}
+
+# --------------------------------------------------------------------------- #
 # --check : verdict only, zero mutation
 # --------------------------------------------------------------------------- #
 run_check() {
@@ -1038,6 +1148,10 @@ run_check() {
     # calls to the lab host fail silently (CLAUDE.md rule 11).
     local base_python
     base_python="$(dispatch_base_python)"
+    # Built exactly as the repair path builds it, and used for the lock check
+    # below so the two cannot ask uv different questions (OMN-18663).
+    local -a dispatch_python_arg=()
+    [[ -n "$base_python" ]] && dispatch_python_arg=(--python "$base_python")
     if dispatch_requires_base_python && [[ -z "$base_python" ]]; then
       say "DRIFT: no brew Python to build the dispatch venv on; looked at:"
       say "  $(dispatch_base_python_candidates)"
@@ -1050,7 +1164,32 @@ run_check() {
       drift=1
     fi
 
-    if ! lock_layer_ok_in "$INFRA_DIR" "$DISPATCH_VENV" --inexact; then
+    # THE SAME QUESTION THE REPAIR ANSWERS, flag for flag (OMN-18663).
+    #
+    # `--inexact` was already here and is right: the composed provider layer is
+    # deliberately absent from the lock. The INTERPRETER was not, and that is a
+    # difference uv acts on. The repair syncs this venv with
+    # `--python "$base_python"` (the brew interpreter rule 11 requires for the
+    # macOS LAN grant); a check that omits it lets uv resolve the interpreter
+    # its own way -- from `.python-version`, which pins 3.12 in this project
+    # while the venv is correctly built on 3.13. uv then answers a question
+    # nobody asked, "would you replace this environment", and says yes.
+    #
+    # Measured on this host, single variable, everything else identical:
+    #
+    #   uv sync --frozen --check --inexact                       -> exit 1
+    #   uv sync --frozen --check --inexact --python <brew 3.13>   -> exit 0
+    #                                                               "Would make
+    #                                                                no changes"
+    #
+    # So the pre-OMN-18663 check reported DRIFT for a dispatch venv that was
+    # exactly what the repair had just built, permanently: no repair could ever
+    # clear it, and two consecutive repair ticks reported success into it
+    # (2026-09-18T15:45Z). A check that a correct repair cannot satisfy is not a
+    # strict check, it is a broken one -- it trains the reader to disbelieve the
+    # verdict, which is worse than not having it.
+    if ! lock_layer_ok_in "$INFRA_DIR" "$DISPATCH_VENV" --inexact \
+        "${dispatch_python_arg[@]}"; then
       say "DRIFT: dispatch venv does not satisfy $INFRA_DIR/uv.lock"
       drift=1
     fi
@@ -1087,6 +1226,14 @@ run_check() {
       drift=1
     fi
   done < <(hook_venv_projects)
+
+  # ---- CLI venvs this script does not own (OMN-18663) --------------------- #
+  # Verdict-bearing on the provider layer, for the reason the clone leg above
+  # is verdict-bearing: the reader is asking about the workspace, not about the
+  # subset of it this script happens to write.
+  if ! report_unowned_cli_venvs "$head"; then
+    drift=1
+  fi
 
   if [[ "$drift" -eq 1 ]]; then
     say "verdict: DRIFT"
@@ -1467,6 +1614,14 @@ run_repair() {
     # to reconcile on this surface. Creating one is repair-plugin-venv.sh's job.
     say "hook venv: SKIP (no existing hook venv found to reconcile)"
   fi
+
+  # ---- CLI venvs this script does not own (OMN-18663) --------------------- #
+  # REPORT-ONLY here, on exactly the terms the clone leg is report-only: the
+  # exit code answers for the surfaces this script WRITES, and a venv it is
+  # forbidden to write is not one of them. What changes is that a drifted one is
+  # now named, with its remedy, instead of leaving a reader to infer from
+  # "reconciled" that every venv on the host was covered.
+  report_unowned_cli_venvs "$(market_head)" || true
 
   exit "$EXIT_OK"
 }
