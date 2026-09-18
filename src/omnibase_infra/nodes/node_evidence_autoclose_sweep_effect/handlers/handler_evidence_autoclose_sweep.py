@@ -734,7 +734,14 @@ _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 #: entire existing board reading `N failed` forever, fixed only for tickets
 #: whose verdict happened to move afterwards, which is most of the defect
 #: left in place.
-_GAP_FINGERPRINT_CONTRACT_VERSION = "1.16.0"
+#:
+#: 1.16.0 -> 1.16.1 (OMN-18749) follows the contract's own bump, which the
+#: Wave C contract-sync gate requires of a handler-behaviour change. The
+#: closer did learn to say something new here -- a closed citation's hold now
+#: names a remedy that can be performed instead of recommending a merge that
+#: cannot happen -- so a one-time restatement of the standing gap comments is
+#: the intended consequence rather than an accident of version ordering.
+_GAP_FINGERPRINT_CONTRACT_VERSION = "1.16.1"
 
 # OMN-16106. Linear transient-failure retry policy defaults. See
 # ``_LinearClient``'s class docstring for the live measurement these exist to
