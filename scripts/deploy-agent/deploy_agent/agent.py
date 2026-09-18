@@ -319,6 +319,17 @@ class DeployAgent:
             ACCEPT_BACKLOG_BOUND_SECONDS,
         )
 
+        # Step 4b: converge the lane's deps BEFORE the consumer exists
+        # (OMN-18692). This agent's control bus IS the dev lane's redpanda, so
+        # a half-recreated lane is not merely a lane this process cannot
+        # deploy to -- it is a broker this process cannot CONNECT to. On
+        # 2026-09-18 the CORE phase removed that container, the agent
+        # crash-looped on NoBrokersAvailable against the broker it had just
+        # destroyed, and systemd gave up after seven restarts; the lane then sat
+        # broken for 22 minutes until an operator ran the deps-only `up -d` by
+        # hand. Nothing in this startup path read the lane first.
+        self._converge_deps_before_consuming()
+
         # Step 5+6: Main loop
         consumer = DeployConsumer(
             kafka_config=self._kafka_config,
@@ -371,6 +382,54 @@ class DeployAgent:
             # result goes missing.
             self._job_pool.shutdown(wait=True)
             logger.info("Deploy agent stopped")
+
+    def _converge_deps_before_consuming(self) -> bool:
+        """Bring a half-recreated lane's deps up before the consumer is built.
+
+        Returns whether convergence was attempted, so a test can assert the
+        fence below rather than infer it from the absence of a docker call.
+
+        THE FENCE IS THE POINT, and it is fail-closed. This runs ONLY when the
+        agent's declared lane set is exactly ``{dev}`` -- the lane
+        ``omni_home/CLAUDE.md``'s lane table calls a "fully mutable test
+        platform". An agent that also carries ``stability-test`` or ``prod``
+        does nothing here, because bringing containers up on a governed lane
+        without an accepted command is an unattributed lane mutation, which is
+        precisely what the OMN-15243 raw-bypass signature set and the OMN-15218
+        attribution interlock exist to refuse. A recovery that had to violate a
+        deploy gate to run would be a worse defect than the one it repairs.
+
+        Deliberately NON-FATAL. A convergence that fails must not stop the agent
+        from starting: the process still has a job store to recover, a health
+        surface to serve and pending publishes to retry, and an agent that
+        refused to start because its lane was broken is an agent that cannot
+        report that its lane is broken.
+        """
+        if self._allowed_lanes != {EnumRuntimeLane.DEV}:
+            logger.info(
+                "Skipping the startup deps convergence: this agent's declared "
+                "lanes are %s, and convergence runs only for an agent fenced to "
+                "the dev lane alone -- an un-commanded container start on a "
+                "governed lane is an unattributed lane mutation",
+                ",".join(sorted(lane.value for lane in self._allowed_lanes)),
+            )
+            return False
+        try:
+            converged, was_down = self.executor.converge_deps(lane=EnumRuntimeLane.DEV)
+        except Exception:
+            logger.exception(
+                "Startup deps convergence raised; continuing to start. The lane "
+                "may still be missing its broker, which this process will "
+                "report through /health rather than by crash-looping."
+            )
+            return True
+        if was_down:
+            logger.warning(
+                "Startup deps convergence found %s not running and %s",
+                was_down,
+                "converged the lane" if converged else "COULD NOT converge the lane",
+            )
+        return True
 
     def _handle_shutdown(self) -> None:
         logger.info("Shutdown signal received")
@@ -778,6 +837,10 @@ class DeployAgent:
                 health_checks,
                 services_restarted=services_restarted,
                 container_residue=self.executor.container_residue,
+                # OMN-18692: what the deps-phase ceiling did -- the deferral it
+                # took before touching the lane, or the wait it held rather
+                # than cancelling a live recreate.
+                recreate_supervision=self.executor.recreate_supervision,
                 # OMN-17135: which sibling commits this build actually vendored.
                 # The command's git_ref pins omnibase_infra alone.
                 sibling_refs=self.executor.sibling_source_refs,

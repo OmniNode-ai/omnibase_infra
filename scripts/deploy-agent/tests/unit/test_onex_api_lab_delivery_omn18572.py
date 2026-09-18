@@ -100,6 +100,9 @@ class _LockProbingExecutor:
         self.lock_held_during: dict[str, bool] = {}
         self.container_residue: list[object] = []
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-18692: the agent reads this when it builds the terminal event,
+        # so a double that omits it no longer models the object it replaces.
+        self.recreate_supervision: list[object] = []
         self.delivered: list[dict[str, Any]] = []
 
     def _record(self, phase: str) -> None:

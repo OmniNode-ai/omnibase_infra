@@ -15,13 +15,14 @@ import sys
 import tempfile
 import time
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from deploy_agent import recreate_supervisor
 from deploy_agent.build_budget import (
     HARD_UPPER_BOUND_SECONDS,
     EnumBuildOutcome,
@@ -38,11 +39,13 @@ from deploy_agent.events import (
     DEV_LANE_ONLY_MIGRATION_SERVICES,
     GATEWAY_COMPOSE_PROJECT,
     BuildSource,
+    EnumRecreateOutcome,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
     ModelContainerResidue,
     ModelHealthCheck,
     ModelRebuildRequested,
+    ModelRecreateSupervision,
     Phase,
     PhaseStatus,
     Scope,
@@ -60,6 +63,14 @@ from deploy_agent.lane_lock_client import (
     lane_lock,
 )
 from deploy_agent.loaded_code import loaded_code_sha
+from deploy_agent.recreate_supervisor import (
+    DEPS_COMPOSE_UP_FLOOR_SECONDS,
+    DEPS_COMPOSE_UP_MARGIN_SECONDS,
+    ModelDepsRecreateBudget,
+    defer_until_host_quiesces,
+    derive_deps_recreate_budget,
+    supervise_compose_up,
+)
 from deploy_agent.ref_fence import (
     ModelRefLineageFacts,
     assert_ref_not_stale_branch,
@@ -119,6 +130,12 @@ PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
     Phase.GIT: 60,
     Phase.COMPOSE_GEN: 120,
+    # OMN-18692: this entry no longer bounds the deps compose-up either. That
+    # command is SUPERVISED (deploy_agent.recreate_supervisor) under a ceiling
+    # derived from the compose model and the machine, because a flat 300 here
+    # killed a healthy recreate mid-removal on 2026-09-18 and took the lane's
+    # broker -- and this agent's own control bus -- with it. The entry remains
+    # for the non-compose-up work the phase still bounds.
     Phase.CORE: 300,
     # OMN-18057: this entry no longer bounds the runtime compose-up. It bounds
     # the runtime IMAGE operations (build, pinned-digest pull) and the migration
@@ -147,6 +164,13 @@ RUNTIME_COMPOSE_UP_MARGIN_SECONDS = 300
 # sits above it with room, and applies when the compose model declares no
 # health-gated start_period at all.
 RUNTIME_COMPOSE_UP_FLOOR_SECONDS = 600
+
+# OMN-18692: how long the deps-only convergence `up -d` is given. It starts
+# what is absent and leaves what is running alone, so it is bounded by a
+# container start rather than by a recreate; the measured hand recovery on
+# 2026-09-18 had all three deps Up healthy in 32 seconds on a quiet host, and
+# this is an order of magnitude above that for a loaded one.
+DEPS_CONVERGENCE_TIMEOUT_SECONDS = 600
 
 # OMN-18072: the runtime IMAGE-BUILD ceiling's two derived terms. `docker
 # compose --profile runtime build` runs ONE BuildKit solve over the Dockerfile
@@ -1055,6 +1079,57 @@ def runtime_compose_up_budget(
     )
 
 
+def deps_compose_up_budget(
+    lane: EnumRuntimeLane, expected_services: list[str]
+) -> ModelDepsRecreateBudget:
+    """Derive the DEPS compose-up ceiling from the compose model AND the host.
+
+    Two terms, because the 2026-09-18 kill needed both and had neither
+    (OMN-18692). The compose half reuses the OMN-18057 derivation over the deps
+    service list -- ``postgres`` declares ``start_period: 180s`` and is gated on
+    via ``depends_on: {condition: service_healthy}``, so the model contributes a
+    real number rather than a constant. The host half is read, never asserted:
+    ``probe_host_conditions``'s readers are keyword seams that argv cannot
+    reach, so nothing a command carries can buy itself a wider ceiling.
+
+    The deps phase gets its own floor and its own contention calibration rather
+    than the runtime phase's, because the two phases fail differently: a killed
+    runtime recreate leaves containers in ``Created``, while a killed deps
+    recreate leaves the broker this agent reads its own commands from ABSENT.
+    See ``deploy_agent.recreate_supervisor`` for both calibrations and their
+    measurements.
+    """
+    model_budget = derive_runtime_phase_budget(
+        lane_config_for(lane).compose_files,
+        expected_services,
+        margin_seconds=DEPS_COMPOSE_UP_MARGIN_SECONDS,
+        floor_seconds=DEPS_COMPOSE_UP_FLOOR_SECONDS,
+    )
+    return derive_deps_recreate_budget(model_budget, probe_host_conditions())
+
+
+def _spawn_compose(
+    cmd: list[str], *, env: Mapping[str, str], output: Any
+) -> subprocess.Popen[str]:
+    """Start a compose command whose output goes to a FILE, never to a pipe.
+
+    A named module-level seam for two reasons. It is the one place the deps
+    recreate becomes a live child process, so a unit test can replace it
+    without also replacing ``_run`` (which every other compose call still
+    uses). And the file destination is load-bearing rather than incidental: the
+    supervisor deliberately does not read from the child while it runs, so an
+    unread ``PIPE`` would fill at 64 KiB and deadlock the recreate this whole
+    mechanism exists to let finish.
+    """
+    return subprocess.Popen(
+        cmd,
+        stdout=output,
+        stderr=output,
+        text=True,
+        env=dict(env),
+    )
+
+
 def runtime_image_build_budget(
     profile: str, compose_files: tuple[str, ...] = (COMPOSE_FILE,)
 ) -> ModelBuildBudget:
@@ -1394,6 +1469,14 @@ class DeployExecutor:
         # builds the terminal event so residue is a recorded fact rather than
         # something an operator has to go and find on the host.
         self.container_residue: list[ModelContainerResidue] = []
+        # OMN-18692: what the deps-phase ceiling did on this rebuild -- the
+        # deferral it took before touching the lane, the wait it held rather
+        # than cancelling a live recreate, and how the command ended. Read by
+        # the agent when it builds the terminal event, for the same reason
+        # residue is: a wait that only exists in the journal is a fact the next
+        # reader has to reconstruct from the dockerd log, which is what this
+        # incident cost three lanes.
+        self.recreate_supervision: list[ModelRecreateSupervision] = []
         # OMN-17135: repo -> the commit SHA RT-1 actually resolved and vendored
         # for that sibling. The requested ref pins omnibase_infra only, so
         # without this the terminal event named one repository's commit and left
@@ -1404,6 +1487,7 @@ class DeployExecutor:
         """Clear per-job observations at the start of a rebuild."""
         self.container_residue = []
         self.sibling_source_refs = {}
+        self.recreate_supervision = []
 
     def _record_container_residue(
         self, stuck: list[str], *, lane: EnumRuntimeLane
@@ -3351,6 +3435,188 @@ class DeployExecutor:
                 f"{result.stderr}"
             )
 
+    def _deps_compose_argv(
+        self, lane: EnumRuntimeLane, services: Sequence[str]
+    ) -> list[str]:
+        """Return the deps-only ``up -d`` argv the 2026-09-18 recovery used.
+
+        Byte-equivalent in shape to the command the recovery lane ran by hand at
+        13:35:56Z (ledger row :4256) once the agent had destroyed the lane:
+        the same compose project, the same file list, the same profile, the
+        three deps named positionally. Reproduced here so the agent can take
+        its own recovery rather than needing an operator on the host --
+        `--force-recreate` is deliberately ABSENT, because convergence must
+        start what is missing and leave what is already running alone.
+        """
+        config = lane_config_for(lane)
+        return [
+            "docker",
+            "compose",
+            *_compose_file_args(lane),
+            "-p",
+            config.compose_project,
+            "--profile",
+            "runtime",
+            "up",
+            "-d",
+            *services,
+        ]
+
+    def converge_deps(
+        self, *, lane: EnumRuntimeLane = EnumRuntimeLane.DEV
+    ) -> tuple[bool, list[str]]:
+        """Bring the lane's deps up if any is absent or not running (OMN-18692).
+
+        Returns ``(converged, services_that_were_down)``. Reads first and acts
+        only on a real gap, so calling it on a healthy lane costs one
+        ``docker compose ps`` and mutates nothing -- which is what lets the
+        agent call it unconditionally before it consumes a command.
+
+        THIS IS THE ACTION THE AGENT COULD NOT TAKE ON 2026-09-18. Its own
+        control bus is the lane's redpanda, so once the CORE phase removed that
+        container the process crash-looped on ``NoBrokersAvailable`` and systemd
+        gave up after seven restarts. Nothing in the agent read the lane before
+        reaching for the broker, so a container that ``docker compose ps`` would
+        have reported absent was instead discovered by an operator 22 minutes
+        later.
+        """
+        deps = services_for_scope(Scope.CORE)
+        try:
+            states = _compose_service_states(lane)
+        except RuntimeError as exc:
+            # An unreadable lane is not a converged one. Bringing the deps up
+            # is idempotent, so acting on an unreadable reading is strictly
+            # safer than assuming the broker is there.
+            logger.warning(
+                "converge_deps: could not read lane state (%s); running the "
+                "deps-only up anyway -- it is idempotent, and assuming a lane "
+                "we cannot see is healthy is the assumption that cost 35 "
+                "minutes of fleet CI on 2026-09-18",
+                exc,
+            )
+            states = {}
+        down = [
+            service
+            for service in deps
+            if states.get(service, ("missing", None))[0] != "running"
+        ]
+        if not down:
+            logger.info("converge_deps: all deps running on lane %s", lane.value)
+            return True, []
+
+        logger.warning(
+            "converge_deps: %d dep(s) not running on lane %s: %s -- converging "
+            "before anything else",
+            len(down),
+            lane.value,
+            down,
+        )
+        result = _run(
+            self._deps_compose_argv(lane, deps),
+            timeout=DEPS_CONVERGENCE_TIMEOUT_SECONDS,
+            env=_compose_env(),
+        )
+        if result.returncode != 0:
+            logger.error(
+                "converge_deps: deps-only up exited %s: %s",
+                result.returncode,
+                result.stderr[:500],
+            )
+        ok, still_down = verify_containers_up(
+            deps, timeout_s=CONTAINER_VERIFY_TIMEOUT_SECONDS, lane=lane
+        )
+        if ok:
+            logger.info("converge_deps: deps converged on lane %s", lane.value)
+        else:
+            logger.error(
+                "converge_deps: deps STILL not running on lane %s: %s",
+                lane.value,
+                still_down,
+            )
+        return ok, down
+
+    def _supervised_deps_recreate(
+        self,
+        cmd: list[str],
+        *,
+        phase: Phase,
+        expected: list[str],
+        lane: EnumRuntimeLane,
+        extra_env: Mapping[str, str] | None,
+    ) -> str:
+        """Run the deps recreate under the OMN-18692 supervisor.
+
+        Returns the compose error text the caller already knows how to handle
+        (empty string on a clean exit), so the verify + per-container recovery
+        below it is reached on exactly the same terms as before. The supervisor
+        decides only ONE thing: whether the command is allowed to be cancelled
+        while the lane is mid-recreate. Everything downstream -- the residue
+        record, the docker-start recovery, the phase verdict from live state --
+        is OMN-18057's and is unchanged.
+
+        ``HostContentionDeferralError`` propagates. That is the ending where the
+        lane was never touched, and collapsing it into a generic compose error
+        would throw away the one fact an operator needs to know before deciding
+        whether to look at the host.
+        """
+        budget = deps_compose_up_budget(lane, expected)
+        logger.info("Phase %s deps recreate ceiling %s", phase.value, budget.describe())
+
+        # THE POLICY CONSTANTS ARE READ AT THE CALL SITE, not taken as default
+        # arguments. Two reasons, and the second is the load-bearing one: the
+        # production numbers are visible where the decision is made, and a test
+        # can compress a 900-second wait without replacing the function whose
+        # behaviour it is asserting. A default-argument binding is captured at
+        # import and cannot be moved at all, which would leave every one of
+        # these paths provable only by a fifteen-minute test.
+        deferred_seconds, _host = defer_until_host_quiesces(
+            threshold=recreate_supervisor.DEPS_RECREATE_DEFER_SATURATION,
+            max_wait_seconds=recreate_supervisor.DEPS_RECREATE_DEFER_MAX_WAIT_SECONDS,
+            poll_seconds=recreate_supervisor.DEPS_RECREATE_DEFER_POLL_SECONDS,
+        )
+
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
+            env = _compose_env(extra_env)
+            supervision = supervise_compose_up(
+                cmd,
+                phase=phase.value,
+                expected_services=expected,
+                budget=budget,
+                state_reader=lambda: _compose_service_states(lane),
+                spawn=lambda argv: _spawn_compose(argv, env=env, output=output),
+                # The child writes to `output` by file descriptor, so its size
+                # on disk is the live byte count -- `output.tell()` would only
+                # ever report this process's own position, which never moves.
+                progress_reader=lambda: os.fstat(output.fileno()).st_size,
+                poll_seconds=recreate_supervisor.SUPERVISOR_POLL_INTERVAL_SECONDS,
+                stall_seconds=recreate_supervisor.MID_RECREATE_STALL_SECONDS,
+                deferred_seconds=deferred_seconds,
+            )
+            output.seek(0)
+            compose_output = output.read()
+
+        self.recreate_supervision.append(supervision)
+        logger.info("Phase %s deps recreate: %s", phase.value, supervision.describe())
+
+        if supervision.outcome is EnumRecreateOutcome.COMPLETED:
+            if supervision.returncode == 0:
+                return ""
+            return (
+                f"docker compose up for phase {phase.value} exited "
+                f"{supervision.returncode}: {compose_output.strip()[-2000:]}"
+            )
+
+        # Every non-COMPLETED ending means the command was ended by the
+        # supervisor. Converge the deps FIRST, before the generic recovery, so
+        # the broker is back before anything else in this process needs it --
+        # including the terminal publish this job is going to attempt.
+        converged, was_down = self.converge_deps(lane=lane)
+        return (
+            f"{supervision.outcome.value}: {supervision.describe()}; deps "
+            f"convergence {'succeeded' if converged else 'FAILED'} for "
+            f"{was_down or 'no absent service'}"
+        )
+
     def _compose_up(
         self,
         phase: Phase,
@@ -3377,6 +3643,13 @@ class DeployExecutor:
             else services_for_scope(scope, lane=lane)
         )
 
+        # OMN-18692: the DEPS recreate is supervised rather than bounded by a
+        # `subprocess.run` timeout. It is the one phase whose cancellation can
+        # remove the broker this agent reads its own commands from, so it gets
+        # a ceiling that can see the machine and a supervisor that refuses to
+        # cancel a live recreate. Every other phase's execution is unchanged.
+        deps_phase = scope == Scope.CORE
+        timeout = 0
         if scope == Scope.RUNTIME:
             # OMN-18057: derived from the compose model, never a bare constant.
             budget = runtime_compose_up_budget(lane, expected)
@@ -3389,7 +3662,7 @@ class DeployExecutor:
             self._ensure_runtime_migrations_ready(
                 lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME]
             )
-        else:
+        elif not deps_phase:
             timeout = PHASE_TIMEOUTS.get(phase, 300)
         cmd = [
             "docker",
@@ -3418,24 +3691,35 @@ class DeployExecutor:
         # here and the verify + per-container recovery below -- the recovery a
         # non-zero exit already gets -- never ran at all, which is how command
         # 23edaf62 left three services in Created with :8086 down.
-        try:
-            result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
-        except subprocess.TimeoutExpired:
-            compose_up_error = (
-                f"docker compose up exceeded its {timeout}s ceiling for phase "
-                f"{phase.value} and was killed with the lane mid-recreate"
-            )
-            logger.warning(
-                "%s; verifying live service state before deciding the phase verdict",
-                compose_up_error,
+        if deps_phase:
+            compose_up_error = self._supervised_deps_recreate(
+                cmd,
+                phase=phase,
+                expected=expected,
+                lane=lane,
+                extra_env=extra_env,
             )
         else:
-            compose_up_error = result.stderr.strip() if result.returncode != 0 else ""
-            if compose_up_error:
-                logger.warning(
-                    "Docker compose up returned non-zero; verifying live service state before failing: %s",
-                    compose_up_error[:500],
+            try:
+                result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
+            except subprocess.TimeoutExpired:
+                compose_up_error = (
+                    f"docker compose up exceeded its {timeout}s ceiling for phase "
+                    f"{phase.value} and was killed with the lane mid-recreate"
                 )
+                logger.warning(
+                    "%s; verifying live service state before deciding the phase verdict",
+                    compose_up_error,
+                )
+            else:
+                compose_up_error = (
+                    result.stderr.strip() if result.returncode != 0 else ""
+                )
+                if compose_up_error:
+                    logger.warning(
+                        "Docker compose up returned non-zero; verifying live service state before failing: %s",
+                        compose_up_error[:500],
+                    )
 
         # Verify containers actually reached running state — docker compose up exits 0
         # even when containers land in Created state (hit twice in production, 01:33 + 04:48).
