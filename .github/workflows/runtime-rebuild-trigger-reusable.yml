@@ -368,6 +368,11 @@ jobs:
           mkdir -p "${LAB_PASS_WORK}/receipt"
           echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
           echo "LAB_PASS_CHECKS=${LAB_PASS_WORK}/checks.json" >> "$GITHUB_ENV"
+          # OMN-18708: the (name, node_version, contract_content_hash) triples
+          # probe-lane reads off the lane's own /v1/introspection/manifest, and
+          # emit carries onto the receipt. A separate file from checks.json
+          # because it is DATA the receipt carries, not a verdict it reports.
+          echo "LAB_PASS_INVENTORY=${LAB_PASS_WORK}/node-inventory.json" >> "$GITHUB_ENV"
 
       # OMN-18685, porting OMN-18573 from the direct caller's guard. The 25
       # minutes below is the LANE's budget and is measured from the moment the
@@ -527,6 +532,8 @@ jobs:
             --settle-budget-json "$SETTLE_BUDGET_JSON" \
             --generation-container "$DEV_LANE_CONTAINER" \
             --expect-generation "$CONVERGE_GENERATION" \
+            --manifest-url "$DEV_LANE_MAIN_URL" \
+            --node-inventory-out "${LAB_PASS_INVENTORY}" \
             > "${LAB_PASS_CHECKS}"
           cat "${LAB_PASS_CHECKS}"
 
@@ -603,6 +610,7 @@ jobs:
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --check "sibling_revision:${SIBLING_REVISION_VERDICT}:${EVIDENCE}" \
             --checks-json "${LAB_PASS_CHECKS}" \
+            --node-inventory-json "${LAB_PASS_INVENTORY}" \
             --agent-command-id "${CORRELATION_ID}" \
             --out "${LAB_PASS_DIR}/receipt.json"
 

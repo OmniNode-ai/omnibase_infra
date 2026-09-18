@@ -2873,12 +2873,14 @@ build_images() {
         --build-arg "OMNI_HOME=${omni_home}"
         --build-arg "OMNIBASE_COMPAT_REF=${compat_ref}"
         --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
-        # OMN-14873: scope the build to RUNTIME_BUILD_SERVICES (defaults to the full
-        # RUNTIME_SERVICES fan-out; see the override comment above its declaration).
-        # OMN-17448: plus the dev-lane-only standalone projection writers, which
-        # are declared in that lane's overlay and must be built for it.
-        "${build_scope[@]}"
     )
+    # OMN-14873: scope the build to RUNTIME_BUILD_SERVICES (defaults to the full
+    # RUNTIME_SERVICES fan-out; see the override comment above its declaration).
+    # OMN-17448: plus the dev-lane-only standalone projection writers, which
+    # are declared in that lane's overlay and must be built for it.
+    # Held out of ``cmd`` so the NODE_INVENTORY build-arg can be inserted
+    # between the options and the service list on each of the two passes below
+    # (``docker compose build`` takes OPTIONS before SERVICEs).
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
     log_info "Build scope: ${build_scope[*]}"
@@ -2889,12 +2891,106 @@ build_images() {
 
     # Use timeout to prevent indefinite hangs after build completes (OMN-5462).
     # Exit code 124 = timeout fired; we treat this as success if images exist.
-    if timeout "${build_timeout}" "${cmd[@]}"; then
-        log_info "Image build complete."
+    #
+    # OMN-18708 -- PASS 1 of 2. Built with an EMPTY node inventory, because the
+    # inventory is a property of the image and cannot be known before the image
+    # exists. The empty value skips the Dockerfile's verify guard, so this pass
+    # behaves exactly as every build before this change did.
+    if timeout "${build_timeout}" "${cmd[@]}" --build-arg "NODE_INVENTORY=" "${build_scope[@]}"; then
+        log_info "Image build complete (pass 1 of 2: no node inventory stamped yet)."
     elif [[ $? -eq 124 ]]; then
         log_warn "Build timed out after ${build_timeout}s — images may still be usable. Continuing."
     else
         log_error "Image build failed."
+        return 1
+    fi
+
+    stamp_node_inventory cmd build_scope compose_args "${compose_project}" "${build_timeout}"
+}
+
+# =============================================================================
+# Node inventory stamping -- OMN-18708, pass 2 of the two-pass build
+# =============================================================================
+
+resolve_built_runtime_image() {
+    # Print the image reference compose assigns to the first service in scope.
+    #
+    # Read from `compose config --images` rather than reconstructed as
+    # "<project>-<service>": the naming rule is compose's, not ours, and a
+    # reconstruction that silently drifts from it would resolve to an image
+    # that does not exist -- or worse, to a stale one with the same name.
+    local -n _rbri_compose_args="$1"
+    local -n _rbri_build_scope="$2"
+    local compose_project="$3"
+    docker compose \
+        -p "${compose_project}" \
+        "${_rbri_compose_args[@]}" \
+        --profile "${COMPOSE_PROFILE}" \
+        config --images "${_rbri_build_scope[0]}" 2>/dev/null | head -1
+}
+
+stamp_node_inventory() {
+    # PASS 2 of 2. Ask the image ITSELF which nodes it ships, then rebuild
+    # stamping that answer as com.omninode.node_inventory.
+    #
+    # Why the image is asked rather than the build context (OMN-18708): the
+    # contracts a runtime discovers come from `onex.nodes` entry points across
+    # every installed sibling distribution, not from this repository's tree, so
+    # a host-side scan of the build context would enumerate a different set and
+    # the label would be a claim about the wrong thing. Running the discovery
+    # pass inside the built image is the only enumeration that is true of the
+    # image by construction. The Dockerfile's `verify` guard then re-derives it
+    # a second time, inside the image, and refuses the build if what we stamp
+    # disagrees -- so a stale or hand-edited value cannot survive this pass.
+    #
+    # The second build is cheap: NODE_INVENTORY's ARG is declared at the very
+    # end of the runtime stage, so every COPY and apt layer is a cache hit and
+    # only the guard plus the metadata instructions re-execute.
+    #
+    # FAIL-CLOSED. Every failure here fails the deploy. The sanctioned build
+    # path always stamps, which is what lets a consumer read an ABSENT label as
+    # "this image did not come from the sanctioned path" instead of as noise.
+    local -n _sni_cmd="$1"
+    local -n _sni_build_scope="$2"
+    local -n _sni_compose_args="$3"
+    local compose_project="$4"
+    local build_timeout="$5"
+
+    log_step "Stamp Node Inventory (OMN-18708)"
+
+    local image_ref
+    image_ref="$(resolve_built_runtime_image _sni_compose_args _sni_build_scope "${compose_project}")"
+    if [[ -z "${image_ref}" ]]; then
+        log_error "Could not resolve the built image for service '${_sni_build_scope[0]}'; cannot stamp the node inventory."
+        return 1
+    fi
+    log_info "Reading the node inventory from ${image_ref}..."
+
+    local inventory
+    if ! inventory="$(docker run --rm --entrypoint python "${image_ref}" \
+            -m omnibase_infra.runtime.node_inventory emit)"; then
+        log_error "The image's own discovery pass could not emit a node inventory (image=${image_ref})."
+        return 1
+    fi
+    if [[ -z "${inventory}" ]]; then
+        log_error "The image emitted an EMPTY node inventory. Refusing to stamp an empty label: it would assert the image ships no nodes."
+        return 1
+    fi
+
+    local node_count
+    node_count="$(printf '%s' "${inventory}" | tr ',' '\n' | grep -c '"name":' || true)"
+    log_info "Node inventory: ${node_count} node(s), ${#inventory} bytes. Rebuilding to stamp it."
+
+    if timeout "${build_timeout}" "${_sni_cmd[@]}" \
+            --build-arg "NODE_INVENTORY=${inventory}" "${_sni_build_scope[@]}"; then
+        log_info "Node inventory stamped and verified inside the image."
+    else
+        local rc=$?
+        if [[ ${rc} -eq 124 ]]; then
+            log_error "Node inventory stamping pass timed out after ${build_timeout}s."
+        else
+            log_error "Node inventory stamping pass failed (exit ${rc}). The in-image verify guard refuses a stamped value that disagrees with the image's own discovery pass."
+        fi
         return 1
     fi
 }

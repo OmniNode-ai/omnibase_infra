@@ -39,6 +39,21 @@ class ModelDiscoveredContract(BaseModel):
     )
     node_version: str = Field(default="1.0.0", description="Node version string")
     contract_path: Path = Field(..., description="Filesystem path to contract.yaml")
+    contract_content_hash: str | None = Field(
+        default=None,
+        description=(
+            "Canonical content hash of the contract file at contract_path "
+            "(OMN-18708). Lowercase hex SHA-256 over the file's bytes with "
+            "line endings normalised -- the form declared by "
+            "omnibase_infra.runtime.util_contract_content_hash, so a consumer "
+            "outside this repository reproduces it without importing anything. "
+            "Explicitly nullable and null by default: only the discovery pass "
+            "reads a contract off disk, so a contract constructed any other "
+            "way has no file to hash and must SAY so rather than carry a value "
+            "that is not a content hash. A reader that needs the triple "
+            "refuses a null rather than treating it as agreement."
+        ),
+    )
     entry_point_name: str = Field(..., description="Name of the onex.nodes entry point")
     package_name: str = Field(
         ..., description="Distribution package that registered the entry point"
