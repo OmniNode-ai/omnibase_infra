@@ -20,6 +20,7 @@ Exports:
     InfraRequestRejectedError: Request rejected by provider (400/422)
     InfraProtocolError: Invalid response format from provider
     EventPayloadTooLargeError: Publish payload exceeds max_request_size (fail-fast, no retry)
+    EventTopicAuthorizationError: Broker refused the publish on the topic's ACLs (fail-fast, no retry)
     EnvelopeValidationError: Envelope validation errors (pre-dispatch)
     UnknownHandlerTypeError: Unknown handler type prefix errors
     PolicyRegistryError: Policy registry operation errors
@@ -40,6 +41,7 @@ Exports:
     RepositoryTimeoutError: Query timeout exceeded
     DbOwnershipMismatchError: Database is owned by a different service
     DbOwnershipMissingError: db_metadata table or ownership row missing
+    ContractContentHashError: A contract file could not be content-hashed (OMN-18709)
     SchemaFingerprintMismatchError: Live schema fingerprint != expected
     SchemaFingerprintMissingError: Expected fingerprint not in db_metadata
     EventRegistryFingerprintMismatchError: Live event registry fingerprint != expected
@@ -128,6 +130,9 @@ from omnibase_infra.errors.error_container_wiring import (
     ServiceRegistryUnavailableError,
     ServiceResolutionError,
 )
+from omnibase_infra.errors.error_contract_content_hash import (
+    ContractContentHashError,
+)
 from omnibase_infra.errors.error_db_ownership import (
     DbOwnershipMismatchError,
     DbOwnershipMissingError,
@@ -144,6 +149,7 @@ from omnibase_infra.errors.error_event_registry_fingerprint import (
 from omnibase_infra.errors.error_infra import (
     EnvelopeValidationError,
     EventPayloadTooLargeError,
+    EventTopicAuthorizationError,
     InfraAuthenticationError,
     InfraConnectionError,
     InfraProtocolError,
@@ -211,6 +217,8 @@ __all__: list[str] = [
     "ContainerValidationError",
     # Container wiring errors
     "ContainerWiringError",
+    # Contract content hash errors (OMN-18709)
+    "ContractContentHashError",
     # DB ownership errors
     "DbOwnershipMismatchError",
     "DbOwnershipMissingError",
@@ -225,6 +233,7 @@ __all__: list[str] = [
     "LaneMirrorRecordRefusedError",
     # Payload-size errors (OMN-16267)
     "EventPayloadTooLargeError",
+    "EventTopicAuthorizationError",
     # Event registry fingerprint errors
     "EventRegistryFingerprintMismatchError",
     "EventRegistryFingerprintMissingError",

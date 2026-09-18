@@ -26,6 +26,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_ac_b
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_cascade_provenance import (
     ModelCascadeProvenance,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_check_result_row import (
+    ModelCheckResultRow,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_outcome import (
     ModelEvidenceAutocloseOutcome,
 )
@@ -48,6 +51,7 @@ __all__ = [
     "EnumLinearIdentityPath",
     "ModelAcBindingRow",
     "ModelCascadeProvenance",
+    "ModelCheckResultRow",
     "ModelEvidenceAutocloseOutcome",
     "ModelEvidenceAutocloseSweepRequest",
     "ModelEvidenceAutocloseSweepResult",

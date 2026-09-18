@@ -83,6 +83,23 @@
 #   therefore DECLARED-BUT-ABSENT by design and is marked `optional: true` until phase 2 brings
 #   it up under an operator consent row — see the entry's own comment for why that flag is
 #   temporary and what flips it.
+# verified: 2026-09-18T20:17Z via ssh jonah@192.168.86.201 — OMN-18691 PHASE 2 BROUGHT THE
+#   PROJECT UP, and this is the attestation for the `optional: true` -> `optional: false` flip
+#   below. The paragraph directly above is the PRE-BRING-UP state and is left standing because
+#   it is what the previous PR attested to; this line supersedes it. STATE AT THIS LINE:
+#   `docker compose -f docker/docker-compose.ci-bus.yml ps redpanda` -> `omninode-ci-bus-redpanda`
+#   `Up (healthy)`, container id e8e29f49ba70; `ss -ltn` now shows listeners on BOTH 21092 and
+#   21644 where it showed neither; the network `omninode-ci-bus-network` and the volume
+#   `omninode-ci-bus-redpanda-data` both exist; the three one-shots ran and each exited 0; and
+#   `bash scripts/lane-census-check.sh --json` reports `ci-bus` among `lanes_checked` with ZERO
+#   findings for that lane (the five findings in that run are pre-existing `dev` drift and are
+#   untouched by this change). The five CI topics were read back OFF-HOST from a Mac over the
+#   tailnet as the `ci-bus-publisher` principal, all six partitions / RF 1 / retention 604800000.
+#   The flip is therefore from DECLARED-BUT-ABSENT to DECLARED-AND-PRESENT. Note the flip is
+#   already behaviourally inert TODAY — `lane_census_plan.py:157` skips an optional lane only
+#   when it is ENTIRELY down, and this one is up — so what it actually buys is the future case:
+#   from here on, a ci-bus broker that has GONE down is drift instead of silence, which is the
+#   whole reason a CI bus is declared here at all.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -475,38 +492,63 @@ lanes:
   # `docker compose -p omnibase-infra …` cannot reach another project's
   # containers, volumes or network.
   #
-  # `optional: true`, DELIBERATELY AND TEMPORARILY. This entry is declared BEFORE
-  # the project is built, following the `lakshman` reservation precedent above.
-  # The project's bring-up needs a SCRAM principal, and minting a credential
-  # needs its own OPERATOR-CONSENT row under Operating Rule 22 — a wait this lane
-  # cannot bound. A non-optional entry would therefore fail the census hard on
-  # every tick, for an unknown number of days, on a project nobody has yet been
-  # authorised to build. That is noise, not signal, and it trains a reader to
-  # ignore the census.
+  # `optional: false` AS OF PHASE 2 (2026-09-18). The entry shipped `optional: true`
+  # deliberately and temporarily: it was declared BEFORE the project was built,
+  # following the `lakshman` reservation precedent above, because bring-up needed a
+  # SCRAM principal and minting a credential needs its own OPERATOR-CONSENT row
+  # under Operating Rule 22 — a wait that lane could not bound. A non-optional
+  # entry would have failed the census hard on every tick, for an unknown number
+  # of days, on a project nobody had yet been authorised to build. That is noise,
+  # not signal, and it trains a reader to ignore the census.
   #
-  # THE FLIP TO `optional: false` IS PART OF PHASE 2, in the same change that
-  # records the bring-up. Once this broker exists it must always be up: it is the
-  # durability the whole design rests on, and a CI bus that is down is a CI bus
-  # that is silently queueing nothing. Leaving it optional after bring-up would
-  # be the defect this file exists to catch, one level up.
+  # That wait is over. The consent row exists
+  # (`docs/tracking/ROLLING_WORK_LEDGER.md:4524`, approved_by=operator, naming the
+  # credential `ci-bus-publisher`), the project is up, and this change is the one
+  # that records the bring-up. Once this broker exists it must ALWAYS be up: it is
+  # the durability the whole design rests on, and a CI bus that is down is a CI bus
+  # that is silently queueing nothing. Leaving it optional after bring-up would be
+  # the defect this file exists to catch, one level up.
   #
-  # verified: 2026-09-18 via read-only `ssh jonah@192.168.86.201`:
-  #   `docker ps -a --filter label=com.docker.compose.project=omninode-ci-bus
-  #     --format '{{.Names}}' | wc -l`            -> 0
-  #   `docker network ls --filter name=ci-bus --format '{{.Name}}' | wc -l` -> 0
-  #   `ss -ltn` -> no listener on 21092 and none on 21644 (the full listener set
-  #     read in the same command holds 19092, 29644, 39092, 55092, 55644 and
-  #     59092/59644, so the X9092/X9644 convention has no free PAIR left; 29092  # cloud-bus-ok OMN-18691
-  #     is free but 29644 belongs to omnibase-infra-stability-test-redpanda).
-  # So: the project does not exist, its network does not exist, and both ports it
-  # claims are unheld at the moment this file claims them. Declared-but-absent is
-  # the loud direction and is intended.
+  # WHAT THE FLIP CHANGES, STATED PRECISELY RATHER THAN OVERSOLD. `optional` is
+  # read at `scripts/lane_census_plan.py:149`, and its only effect is at `:157`: an
+  # optional lane with NONE of its declared service containers running returns no
+  # findings at all. This lane has one declared service container and it is running,
+  # so the census already reconciles it fully today and reports zero findings either
+  # way — the flip is behaviourally inert at this instant. What it buys is the case
+  # this entry exists for: from here on, a ci-bus broker that has GONE AWAY is
+  # `container_absent` drift rather than a silently-skipped lane. The three one-shots
+  # are `kind: oneshot` and their absence after a clean exit is correct by
+  # construction, so the flip does not make them noisy.
+  #
+  # verified: 2026-09-18T20:17Z via `ssh jonah@192.168.86.201`, POST-BRING-UP:
+  #   `docker inspect -f '{{.Id}} {{.State.Status}} {{.State.Health.Status}}'
+  #     omninode-ci-bus-redpanda` -> e8e29f49ba70… running healthy
+  #   `ss -ltn` -> listeners now on BOTH 21092 and 21644 (neither had one before)
+  #   `docker network ls --filter name=omninode-ci-bus-network … | wc -l`  -> 1
+  #   `docker volume  ls --filter name=omninode-ci-bus-redpanda-data … | wc -l` -> 1
+  #   `docker inspect -f '{{.State.ExitCode}}'` on omninode-ci-bus-{topics,
+  #     scram-user,sasl-enable} -> 0, 0, 0
+  #   `bash scripts/lane-census-check.sh --json` -> `ci-bus` present in
+  #     `lanes_checked` with zero findings attributed to it
+  # And OFF-HOST, from a Mac over the tailnet as the `ci-bus-publisher` principal
+  # (which is how every client of this broker reaches it — they are all Actions
+  # runners, none of them on this host): `rpk topic list` returns all five CI topics
+  # at 6 partitions / RF 1, `rpk topic describe -c` returns retention.ms=604800000,
+  # cleanup.policy=delete, segment.bytes=134217728. Both halves of the control pair
+  # were taken and BOTH are load-bearing: an unauthenticated client is refused, and
+  # a WRONG-PASSWORD client is refused with SASL_AUTHENTICATION_FAILED — without
+  # that second refusal the successful read would not prove authentication happened
+  # rather than the listener being open. A query for a topic that must not exist
+  # returns UNKNOWN_TOPIC_OR_PARTITION, which is the positive control proving the
+  # topic query can return a negative at all.
+  # So: the project exists, its network exists, both ports it claims are now held by
+  # it, and the credential works from where it will actually be used.
   ci-bus:
     compose_file: docker/docker-compose.ci-bus.yml
     compose_project: omninode-ci-bus
     network: omninode-ci-bus-network
     image_tag_pattern: '.+'
-    optional: true
+    optional: false
     services:
       - name: omninode-ci-bus-redpanda
         kind: service

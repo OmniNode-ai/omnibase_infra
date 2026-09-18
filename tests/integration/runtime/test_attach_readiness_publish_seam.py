@@ -207,12 +207,23 @@ def _make_pool() -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
+_REAL_CONTRACT_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "omnibase_infra"
+    / "nodes"
+    / "node_runtime_manifest_reducer"
+    / "contract.yaml"
+)
+
+
 def _contract(name: str, topic: str) -> ModelDiscoveredContract:
     return ModelDiscoveredContract(
         name=name,
         node_type="ORCHESTRATOR_GENERIC",
         contract_version=ModelContractVersion(major=1, minor=0, patch=0),
-        contract_path=Path("/fake/contract.yaml"),
+        # OMN-18709: the builder hashes this file's bytes, so it must exist.
+        contract_path=_REAL_CONTRACT_PATH,
         entry_point_name=name,
         package_name="test-package",
         event_bus=ModelEventBusWiring(subscribe_topics=(topic,), publish_topics=()),

@@ -148,7 +148,8 @@ def _throwaway_contract() -> ModelDiscoveredContract:
         name="node_manifest_dispatch_probe",
         node_type="ORCHESTRATOR_GENERIC",
         contract_version=ModelContractVersion(major=1, minor=0, patch=0),
-        contract_path=Path("/fake/contract.yaml"),
+        # OMN-18709: the builder hashes this file's bytes, so it must exist.
+        contract_path=REDUCER_CONTRACT_PATH,
         entry_point_name="node_manifest_dispatch_probe",
         package_name="test-package",
         event_bus=ModelEventBusWiring(

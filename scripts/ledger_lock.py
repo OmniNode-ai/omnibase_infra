@@ -99,7 +99,7 @@ import sys
 import time
 from collections import Counter
 from contextlib import suppress
-from datetime import UTC, date, datetime, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1308,8 +1308,8 @@ def _omni_home_shared() -> Path:
 # Scope: the act-of-claiming row class (the rolling work ledger's
 # rule 1a claim rows). Status/TERMINAL/merge-sweep/ruling rows are a different
 # shape entirely and are never touched. Enforcement is scoped to whether the
-# dated milestone window declared in the rolling plan's front matter is
-# currently open (calendar-day scoped against that declared source) — not a
+# freshness window declared by the goal file's front matter is currently open
+# (calendar-day scoped against that declared source) — not a
 # permanent blanket check and not a hardcoded date literal in this script.
 #
 # RELAND (operator ruling R-0802-7, 2026-08-02): the first build (e1f0a3f49 +
@@ -1580,8 +1580,9 @@ GRACE_DEADLINE_UTC = datetime(2026, 8, 2, 0, 0, 0, tzinfo=UTC)
 #       PRICE_SUBJECT_PATTERNS binding positions, it must match the row's
 #       own ticket or AC-7 rejects it.
 #   (f) MEDIUM/LOW (test coverage) — no test drove the gate against the REAL
-#       docs/plans/ROLLING_SEVEN_DAY_PLAN.md; every existing full-ledger-
-#       replay test monkeypatched LEDGER_LOCK_PLAN_PATH to a synthetic
+#       rolling seven-day plan then under docs/plans/ (retired 2026-09-18,
+#       OMN-18751); every existing full-ledger-replay test monkeypatched the
+#       plan-path override to a synthetic
 #       no-chain fixture, so 65 tests passed while the live plan's declared
 #       chain section silently exempted 94.7% of live claim rows. A new test
 #       drives ledger_lock.main() against the unmodified DEFAULT_PLAN_PATH.
@@ -1595,8 +1596,9 @@ GRACE_DEADLINE_UTC = datetime(2026, 8, 2, 0, 0, 0, tzinfo=UTC)
 # --- OMN-18554: the window source moved, and an unresolvable window now
 # --- refuses instead of going silently inert -------------------------------
 #
-# Measured 2026-09-17: DEFAULT_PLAN_PATH used to be
-# OMNI_HOME/"docs"/"plans"/"ROLLING_SEVEN_DAY_PLAN.md. omni_home#341
+# Measured 2026-09-17: DEFAULT_PLAN_PATH used to be the rolling seven-day plan
+# under OMNI_HOME/"docs"/"plans"/ (that plan is itself retired as of
+# 2026-09-18, OMN-18751; see the block below). omni_home#341
 # (17bbbac6d67048fb1aa9b92d149518e8dd01cc55, 2026-09-16T23:46:23Z) deleted that
 # file when the plans corpus migrated to knowledge-base-internal under
 # OMN-16978, and no successor was written at that path. read_declared_window()
@@ -1634,8 +1636,8 @@ GRACE_DEADLINE_UTC = datetime(2026, 8, 2, 0, 0, 0, tzinfo=UTC)
 #                           and this is the state that keeps "outside an open
 #                           window" observably different from "unresolvable"
 #                           (OMN-18554 AC4).
-#         WINDOW_UNRESOLVED the plan could not be read, or carries no parseable
-#                           **Window:** line -> REFUSE claim rows, naming the
+#         WINDOW_UNRESOLVED the declared source could not be read, or carries no
+#                           parseable date line -> REFUSE claim rows, naming the
 #                           path and the cause. CLAUDE.md rule 16: a gate that
 #                           cannot read its own input has not passed, it has
 #                           not run. Non-claim rows (TERMINAL/NOTE/RULING/
@@ -1654,11 +1656,66 @@ GRACE_DEADLINE_UTC = datetime(2026, 8, 2, 0, 0, 0, tzinfo=UTC)
 # tests/test_ledger_lock_cost_sentence.py::test_unresolvable_and_out_of_window_
 # are_not_the_same_outcome. The divergence is stated on the ticket; AC4 is not
 # ticked on this build.
-PLAN_PATH_ENV = "LEDGER_LOCK_PLAN_PATH"
+# --- OMN-18751: the window source is the goal file, and the plan it replaced
+# --- is retired rather than re-cut ----------------------------------------
+#
+# Operator ruling, 2026-09-18T18:32:57Z, verbatim "retire it", recorded at
+# ROLLING_WORK_LEDGER.md:4469 in omni_home's tracking directory. That
+# directory is named here in prose rather than spelled as a path, because
+# tests/test_ledger_lock_path_parametrization.py greps this whole file for
+# the literal and a citation is not a hardcoded ledger location -- but a
+# grep cannot tell the two apart, and the check is right to be blunt about a
+# tool whose entire premise is that it is TOLD which ledger to protect.
+# OMN-18757 restored the green: the literal arrived in a comment with
+# OMN-18751 (43045ce9a) and left that test red on dev. The hand-maintained rolling
+# seven-day plan OMN-18554 pointed this gate at is retired. It was 43 days
+# stale when the ruling landed, and its staleness was load-bearing: this gate
+# reads it for the DENOMINATOR every rule-4 price is measured against, so
+# every append on the fleet carried a staleness banner for six weeks and,
+# before OMN-18554, the gate was inert entirely.
+#
+# Re-cutting it a second time was the alternative and was rejected on the
+# ruling. A hand-maintained week is a document somebody has to remember to
+# rewrite, and this gate is the proof of what happens when nobody does. The
+# standing surfaces are `beta/GOAL.md` -- rows, rungs, falsifiers and a
+# `state_as_of:` stamp, rewritten by the morning ground-state workflow rather
+# than by hand -- and the Program Board, which carries the day-by-day
+# sequencing view as a COLUMN rather than as prose in a third file.
+#
+# WHAT CHANGES HERE, precisely: the source moves and the parse moves with it.
+# Nothing else does. The five window states keep their meanings, the refusal
+# and announcement branches keep their shapes, and the enforcement behaviour of
+# every state is byte-for-byte what OMN-18554 shipped:
+#
+#   * SOURCE: `beta/GOAL.md` in the knowledge-base-internal clone, still via
+#     KNOWLEDGE_BASE_INTERNAL_PATH, still fail-fast on unset, still no default
+#     and no omni_home fallback (rule 8).
+#   * PARSE: a `state_as_of: YYYY-MM-DD` line, not a `**Window:** a → b` line.
+#     One date, not two.
+#   * HORIZON: the second date is SYNTHESIZED -- `state_as_of` plus
+#     FRESHNESS_HORIZON_DAYS. A goal file re-measured within the horizon is
+#     WINDOW_OPEN; past it, WINDOW_STALE, which still enforces and now says so
+#     in the vocabulary of a re-measurement rather than a re-cut. A stamp dated
+#     in the FUTURE is WINDOW_PENDING and lands unenforced, which is what keeps
+#     "not current" observably different from "unresolvable" (OMN-18554 AC4).
+#
+# Synthesizing the horizon rather than removing the window tuple is deliberate:
+# the states, their tests and their messages are all expressed over a (start,
+# end) pair, and re-expressing them over a single date would rewrite five
+# branches to change one input. The freshness question -- "was this measured
+# recently enough for a price read against it to mean anything" -- is exactly
+# the question the window asked.
+GOAL_PATH_ENV = "LEDGER_LOCK_GOAL_PATH"
 KB_INTERNAL_ROOT_ENV = "KNOWLEDGE_BASE_INTERNAL_PATH"
 ALLOW_INERT_ENV = "LEDGER_LOCK_ALLOW_INERT"
 NOW_OVERRIDE_ENV = "LEDGER_LOCK_NOW"
-PLAN_RELATIVE_PARTS = ("beta", "plans", "ROLLING_SEVEN_DAY_PLAN.md")
+GOAL_RELATIVE_PARTS = ("beta", "GOAL.md")
+
+# How recently the goal file must have been re-measured for the denominator it
+# supplies to mean anything. Seven days because that is the cadence the
+# retired plan declared and the ruling preserved; the number is named here and
+# pinned at its boundary by a test, so it cannot drift by one in a refactor.
+FRESHNESS_HORIZON_DAYS = 7
 
 WINDOW_OPEN = "open"
 WINDOW_STALE = "stale"
@@ -1681,18 +1738,21 @@ WINDOW_UNRESOLVED = "unresolved"
 WINDOW_NO_REGISTRY = "no_registry"
 
 
-class PlanSourceUnresolvedError(RuntimeError):
-    """The declared-window plan source cannot be located at all.
+class GoalSourceUnresolvedError(RuntimeError):
+    """The goal file this gate reads its freshness from cannot be located.
 
-    Raised only by plan_path_for_window(); every call site inside this module
-    converts it into a WINDOW_UNRESOLVED resolution carrying the reason, so a
-    missing clone is a named refusal rather than a traceback.
+    Raised only by goal_path_for_window(); every call site inside this module
+    converts it into a WINDOW_NO_REGISTRY resolution carrying the reason, so a
+    missing clone is a named announcement rather than a traceback.
     """
 
 
-WINDOW_LINE_PATTERN = re.compile(
-    r"\*\*Window:\*\*\s*(\d{4}-\d{2}-\d{2})\s*(?:→|->|to)\s*(\d{4}-\d{2}-\d{2})"
-)
+# The goal file's front-matter stamp, on its own line at the head of the file:
+#   state_as_of: 2026-09-18 (second measurement, lane ...)
+# Anchored to the line start so a `state_as_of` discussed in the body -- or
+# quoted inside a fenced block further down -- cannot be mistaken for the
+# declaration. The trailing parenthetical the live file carries is ignored.
+STATE_AS_OF_PATTERN = re.compile(r"^state_as_of:\s*(\d{4}-\d{2}-\d{2})", re.MULTILINE)
 
 # Row-class matchers (AC-3/AC-2). Each is grounded against a cited live
 # specimen in tests/test_ledger_lock_cost_sentence.py's full-ledger replay.
@@ -2175,80 +2235,81 @@ def write_text_atomic(path: Path, text: str) -> None:
     Path(tmp).replace(path)
 
 
-def plan_path_for_window() -> Path:
-    """Resolve the declared-window plan (OMN-18554 (a)).
+def goal_path_for_window() -> Path:
+    """Resolve the goal file this gate reads its freshness from (OMN-18751).
 
-    ``LEDGER_LOCK_PLAN_PATH`` wins when set. Otherwise the plan is read from
-    the knowledge-base-internal clone named by ``KNOWLEDGE_BASE_INTERNAL_PATH``
-    — rule 20's destination for plans, and the same variable the morning
-    workflows resolve. Unset raises: there is no default and no omni_home
-    fallback (rule 8), because the omni_home path is the one that evaporated.
+    ``LEDGER_LOCK_GOAL_PATH`` wins when set. Otherwise the goal file is read
+    from the knowledge-base-internal clone named by
+    ``KNOWLEDGE_BASE_INTERNAL_PATH`` — rule 20's destination, and the same
+    variable the morning workflows and the SessionStart goal hook resolve.
+    Unset raises: there is no default and no omni_home fallback (rule 8),
+    because an omni_home default is the one that evaporated under OMN-16978
+    and took this gate with it.
     """
-    override = os.environ.get(PLAN_PATH_ENV)
+    override = os.environ.get(GOAL_PATH_ENV)
     if override:
         return Path(override)
     root = os.environ.get(KB_INTERNAL_ROOT_ENV)
     if not root:
-        raise PlanSourceUnresolvedError(
-            f"{KB_INTERNAL_ROOT_ENV} is unset, so the rule-4 declared-window plan "
-            f"({'/'.join(PLAN_RELATIVE_PARTS)} in the knowledge-base-internal clone) "
+        raise GoalSourceUnresolvedError(
+            f"{KB_INTERNAL_ROOT_ENV} is unset, so the rule-4 freshness source "
+            f"({'/'.join(GOAL_RELATIVE_PARTS)} in the knowledge-base-internal clone) "
             "cannot be located. Export it to the absolute path of that clone, or set "
-            f"{PLAN_PATH_ENV} to a plan that declares a '**Window:**' line. There is no "
+            f"{GOAL_PATH_ENV} to a file that declares a 'state_as_of:' line. There is no "
             "default path and no fallback — a silent default is how this gate went inert."
         )
-    return Path(root).joinpath(*PLAN_RELATIVE_PARTS)
+    return Path(root).joinpath(*GOAL_RELATIVE_PARTS)
 
 
 def read_declared_window_detail(
-    plan_path: Path,
+    goal_path: Path,
 ) -> tuple[tuple[date, date] | None, str | None]:
     """``(window, cause)`` — exactly one is None.
 
-    ``cause`` distinguishes the four ways a window fails to resolve, which the
-    bare ``None`` this replaces could not: the refusal has to be able to say
-    which one it hit, or the operator cannot tell a missing clone from an
-    un-re-cut plan.
+    The window is ``(state_as_of, state_as_of + FRESHNESS_HORIZON_DAYS)``: the
+    goal file declares one date, and the horizon supplies the other. See the
+    OMN-18751 comment block above for why the pair is synthesized rather than
+    removed.
+
+    ``cause`` distinguishes the four ways the window fails to resolve, which
+    the bare ``None`` OMN-18554 replaced could not: the refusal has to be able
+    to say which one it hit, or a reader cannot tell a missing clone from an
+    un-re-measured goal file.
     """
     try:
-        text = plan_path.read_text(encoding="utf-8")
+        text = goal_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None, "file missing"
     except OSError as exc:
         return None, f"file unreadable: {exc.strerror or exc}"
-    match = WINDOW_LINE_PATTERN.search(text)
+    match = STATE_AS_OF_PATTERN.search(text)
     if not match:
-        return None, "no '**Window:**' line in the declared front matter"
+        return None, "no 'state_as_of:' line at the head of the goal file"
     try:
         start = datetime.strptime(match.group(1), "%Y-%m-%d").replace(tzinfo=UTC).date()
-        end = datetime.strptime(match.group(2), "%Y-%m-%d").replace(tzinfo=UTC).date()
     except ValueError:
-        return None, f"malformed date in the '**Window:**' line: {match.group(0)!r}"
-    if end < start:
-        return (
-            None,
-            f"malformed date range in the '**Window:**' line (end before start): {match.group(0)!r}",
-        )
-    return (start, end), None
+        return None, f"malformed date in the 'state_as_of:' line: {match.group(0)!r}"
+    return (start, start + timedelta(days=FRESHNESS_HORIZON_DAYS)), None
 
 
-def read_declared_window(plan_path: Path) -> tuple[date, date] | None:
-    """Read the dated milestone window from the plan's declared front matter.
+def read_declared_window(goal_path: Path) -> tuple[date, date] | None:
+    """Read the freshness window from the goal file's ``state_as_of:`` stamp.
 
     Returns None when no window resolves. Retained as the narrow accessor;
     callers that must act on WHY it failed use read_declared_window_detail.
-    Never hardcode window bounds in this script; they always come from the
-    declared source.
+    Never hardcode window bounds in this script; the start always comes from
+    the declared source and the end from FRESHNESS_HORIZON_DAYS.
     """
-    window, _cause = read_declared_window_detail(plan_path)
+    window, _cause = read_declared_window_detail(goal_path)
     return window
 
 
 class WindowResolution:
     """One of WINDOW_OPEN / WINDOW_STALE / WINDOW_PENDING / WINDOW_UNRESOLVED,
-    plus the facts a message needs: the plan path, the window if one parsed,
+    plus the facts a message needs: the goal path, the window if one parsed,
     and the cause if one did not."""
 
-    __slots__ = ("cause", "plan_path", "state", "window")
+    __slots__ = ("cause", "goal_path", "state", "window")
 
     def __init__(
         self,
@@ -2256,12 +2317,12 @@ class WindowResolution:
         *,
         window: tuple[date, date] | None = None,
         cause: str | None = None,
-        plan_path: Path | None = None,
+        goal_path: Path | None = None,
     ) -> None:
         self.state = state
         self.window = window
         self.cause = cause
-        self.plan_path = plan_path
+        self.goal_path = goal_path
 
     @property
     def enforces(self) -> bool:
@@ -2279,21 +2340,28 @@ class WindowResolution:
 
 
 def resolve_window_state(now: datetime) -> WindowResolution:
-    """Classify the declared window against ``now`` (OMN-18554 (b))."""
+    """Classify the goal file's freshness against ``now`` (OMN-18554 (b),
+    re-sourced by OMN-18751).
+
+    ``start`` is the declared ``state_as_of`` stamp and ``end`` is that stamp
+    plus the horizon, so "today > end" reads as "the goal file has not been
+    re-measured inside the horizon" and "today < start" as "the stamp is dated
+    in the future."
+    """
     try:
-        plan_path = plan_path_for_window()
-    except PlanSourceUnresolvedError as exc:
-        return WindowResolution(WINDOW_NO_REGISTRY, cause=str(exc), plan_path=None)
-    window, cause = read_declared_window_detail(plan_path)
+        goal_path = goal_path_for_window()
+    except GoalSourceUnresolvedError as exc:
+        return WindowResolution(WINDOW_NO_REGISTRY, cause=str(exc), goal_path=None)
+    window, cause = read_declared_window_detail(goal_path)
     if window is None:
-        return WindowResolution(WINDOW_UNRESOLVED, cause=cause, plan_path=plan_path)
+        return WindowResolution(WINDOW_UNRESOLVED, cause=cause, goal_path=goal_path)
     start, end = window
     today = now.date()
     if today < start:
-        return WindowResolution(WINDOW_PENDING, window=window, plan_path=plan_path)
+        return WindowResolution(WINDOW_PENDING, window=window, goal_path=goal_path)
     if today > end:
-        return WindowResolution(WINDOW_STALE, window=window, plan_path=plan_path)
-    return WindowResolution(WINDOW_OPEN, window=window, plan_path=plan_path)
+        return WindowResolution(WINDOW_STALE, window=window, goal_path=goal_path)
+    return WindowResolution(WINDOW_OPEN, window=window, goal_path=goal_path)
 
 
 def resolve_now() -> datetime:
@@ -2431,24 +2499,27 @@ def resolve_enforcement_window(now: datetime, *, announce_inert: bool) -> bool:
     have silently, correctly skipped. Both call sites now resolve enforcement
     through this one function.
 
-    AC-4: enforcement is calendar-window-only, read from the plan's declared
-    ``**Window:**`` front-matter line — never hardcoded to a date literal
-    (r2 (a): a prior per-claim "declared dated-chain ticket set" narrowing
-    was removed here; see the REMEDIATION r2 (a) comment block near the top
-    of this file for why). If the window itself cannot be determined (plan
-    file unreadable, or no declared ``**Window:**`` line at all), the check
-    goes inert the same as "outside an open window."
+    AC-4: enforcement is calendar-only, read from the goal file's declared
+    ``state_as_of:`` stamp — never hardcoded to a date literal (r2 (a): a
+    prior per-claim "declared dated-chain ticket set" narrowing was removed
+    here; see the REMEDIATION r2 (a) comment block near the top of this file
+    for why). If the freshness cannot be determined (goal file unreadable, or
+    no declared ``state_as_of:`` line at all), the row is REFUSED at an
+    earlier branch rather than landing unenforced.
     """
     resolution = resolve_window_state(now)
     if announce_inert and resolution.state == WINDOW_STALE:
         assert resolution.window is not None
-        start, end = resolution.window
+        start, _end = resolution.window
+        age = (now.date() - start).days
         print(
-            f"ledger_lock: rule-4 cost-sentence check: STALE WINDOW {start.isoformat()}"
-            f"→{end.isoformat()} — the declared window in {resolution.plan_path} ended "
-            f"{(now.date() - end).days} day(s) ago and needs a re-cut. The cost sentence is "
-            "STILL ENFORCED: the window supplies the denominator a price is read against, "
-            "not the reason to ask for one.",
+            f"ledger_lock: rule-4 cost-sentence check: STALE GOAL — {resolution.goal_path} "
+            f"declares state_as_of {start.isoformat()}, re-measured {age} day(s) ago, past "
+            f"the {FRESHNESS_HORIZON_DAYS}-day freshness horizon. The cost sentence is "
+            "STILL ENFORCED: the goal file supplies the denominator a price is read "
+            "against, not the reason to ask for one. Fix it by RE-MEASURING that file "
+            "(the morning ground-state workflow writes it) — there is no plan document to "
+            "re-cut; the rolling seven-day plan was retired 2026-09-18 (OMN-18751).",
             file=sys.stderr,
         )
     return resolution.enforces
@@ -2482,16 +2553,16 @@ def unresolved_window_refusal(resolution: WindowResolution) -> str | None:
         )
         return None
     where = (
-        str(resolution.plan_path)
-        if resolution.plan_path is not None
-        else "<unresolved plan path>"
+        str(resolution.goal_path)
+        if resolution.goal_path is not None
+        else "<unresolved goal path>"
     )
     return (
-        "rule-4 cost-sentence check cannot be enforced: no declared window resolves from "
+        "rule-4 cost-sentence check cannot be enforced: no freshness stamp resolves from "
         f"{where} ({resolution.cause}). A gate that cannot read its own input has not passed; "
         "it has not run (CLAUDE.md rule 16), so the claim row is REFUSED rather than landed "
-        "unpriced. Fix by declaring a '**Window:**' line in that plan, pointing "
-        f"{PLAN_PATH_ENV} at a plan that has one, or — only on a machine with no "
+        "unpriced. Fix by declaring a 'state_as_of:' line at the head of that goal file, "
+        f"pointing {GOAL_PATH_ENV} at a file that has one, or — only on a machine with no "
         f"knowledge-base-internal clone — setting {ALLOW_INERT_ENV}=1 to land unenforced. "
         "Non-claim rows (TERMINAL/NOTE/RULING/PROGRESS) are unaffected and still land."
     )
@@ -3218,7 +3289,13 @@ def validate_ruling_payload(payload: str, ledger: Path) -> str | None:
     if guard is None:
         return None
     existing = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
-    return guard.refusal_for_payload(payload, existing, ledger_display_name(ledger))
+    # Annotated rather than returned straight through: the guard is imported
+    # from a path at runtime, so mypy sees Any and a bare return silently
+    # widens this function's declared type at every call site.
+    refusal: str | None = guard.refusal_for_payload(
+        payload, existing, ledger_display_name(ledger)
+    )
+    return refusal
 
 
 # --- OMN-18274: friction recording is mechanical, not remembered ----------
@@ -3269,7 +3346,13 @@ def validate_friction_payload(payload: str, ledger: Path) -> str | None:
     if guard is None:
         return None
     existing = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
-    return guard.refusal_for_payload(payload, existing, ledger_display_name(ledger))
+    # Annotated rather than returned straight through: the guard is imported
+    # from a path at runtime, so mypy sees Any and a bare return silently
+    # widens this function's declared type at every call site.
+    refusal: str | None = guard.refusal_for_payload(
+        payload, existing, ledger_display_name(ledger)
+    )
+    return refusal
 
 
 # --- OMN-18433: the stranded-clone signal ---------------------------------
@@ -3431,6 +3514,117 @@ def signal_stranded_clone(ledger: Path, payload: str) -> int:
         return 0
 
 
+# --- OMN-18433 / OMN-18757: the verbatim replay path ---------------------
+#
+# WHAT IT IS FOR. A row that already existed on some copy of this ledger is
+# being restored, byte for byte, after being recovered from a tree that was
+# never committed. On 2026-09-16, replaying the 50 rows stranded on
+# `jonah/omn-16642-ledger-rows` landed 45 and left 5 refused by the OMN-18274
+# mandatory-friction guard. A historical row must not be rewritten to pass a
+# present-day guard -- a row edited to satisfy a later reader is no longer
+# evidence of anything -- so without this path the only choices were falsify
+# the row or lose it.
+#
+# WHAT IT IS NOT FOR. It is not a way to write a row a guard would refuse
+# today. Every refusal below is fail-closed, and the positive control for the
+# whole feature is that the same payload WITHOUT the flag is still refused.
+#
+# WHY THIS LIVES HERE AND THE DECIDING LOGIC DOES NOT. `replay_refusal` and
+# `replay_marker_row` are in the committed guard module, which is tracked and
+# therefore tested in CI; this file only wires them to argv. That split is
+# deliberate and it is the reason there is NO inline fallback for the waiver,
+# unlike `signal_stranded_clone` above. The two cases are opposites: there,
+# the danger is SILENCE, so a caller that cannot reach the module must still
+# fire; here, the danger is a WAIVER, so a caller that cannot reach the module
+# must refuse. A waiver granted by a caller that cannot read the rule it is
+# waiving is not a waiver, it is a bypass -- and an inline copy of the rule
+# would be a second implementation of it, free to drift towards permissive.
+#
+# WHY IT WAS REBUILT. OMN-18433 shipped these two flags on 2026-09-16 and used
+# them: five `| REPLAY |` marker rows stamped 2026-09-16T11:26:21Z are in the
+# live ledger, landed by omni_home#326. They existed only in the gitignored
+# omni_home copy of this script, so nothing carried them into a commit, and
+# the OMN-18554 port of that copy into this committed one (#3688, 80dc408ba)
+# carried the six guards and not the flags. Three tests in
+# `tests/test_ledger_stranded_clone.py` have been red ever since. The tests in
+# `tests/unit/scripts/test_ledger_lock_replay_omn18757.py` exist so that the
+# next port of this file cannot drop the flags silently a second time.
+
+
+def parse_replay_window(parser: argparse.ArgumentParser, raw: str) -> datetime:
+    """`--replay-before` as an aware UTC instant, or a usage error.
+
+    Deliberately strict about the form: this flag waives guards, so a value
+    the operator mistyped must stop the command rather than be coerced into
+    some nearby instant that silently widens the window.
+    """
+    try:
+        return datetime.strptime(raw.strip(), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        parser.error(
+            "--replay-before must be an ISO-8601 UTC instant of the exact form "
+            f"2026-09-16T10:41:37Z, not {raw!r}"
+        )
+        raise AssertionError("unreachable: parser.error exits")  # pragma: no cover
+
+
+def resolve_replay(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    payload: str | None,
+) -> tuple[str | None, str | None]:
+    """Decide whether this append is a sanctioned verbatim replay.
+
+    Returns ``(None, None)`` when no replay was requested, ``(marker, None)``
+    when one is sanctioned, and ``(None, reason)`` when one is refused.
+
+    Pairing and shape problems go through ``parser.error`` (exit 2) rather
+    than becoming refusals, because nothing about the payload or the ledger
+    was consulted to reach them -- they are the operator holding the tool
+    wrongly. A refusal (exit 65) is a judgement about the bytes.
+    """
+    if args.replay_before is None and args.replay_source is None:
+        return None, None
+    if args.replay_before is None:
+        parser.error(
+            "--replay-source requires --replay-before: naming a source does not by "
+            "itself declare anything to be a restore"
+        )
+    if args.replay_source is None or not args.replay_source.strip():
+        parser.error(
+            "--replay-before requires --replay-source: a restore carrying no named "
+            "provenance is indistinguishable from a bypass"
+        )
+    if payload is None:
+        parser.error(
+            "--replay-before applies to --append/--append-file only; there is no "
+            "payload to restore under -- COMMAND or --roll-section"
+        )
+    before = parse_replay_window(parser, args.replay_before)
+
+    if not _STRANDED_GUARD_PATH.is_file():
+        return None, (
+            "OMN-18433 replay REFUSED -- the committed deciding logic is not reachable "
+            f"at {_STRANDED_GUARD_PATH}, and this tool holds no inline copy of it on "
+            "purpose: a waiver granted by a caller that cannot read the rule it is "
+            "waiving is a bypass. Nothing was written. Restore the module, or replay "
+            "from a clone that has it"
+        )
+    guard = load_stranded_clone_guard()
+    if guard is None:
+        return None, (
+            "OMN-18433 replay REFUSED -- the committed deciding logic at "
+            f"{_STRANDED_GUARD_PATH} could not be imported, so no waiver can be "
+            "granted. Nothing was written"
+        )
+
+    now = resolve_now()
+    refusal = guard.replay_refusal(payload, before, now)
+    if refusal is not None:
+        return None, f"OMN-18433 replay REFUSED -- {refusal}. Nothing was written"
+    return guard.replay_marker_row(payload, now, args.replay_source.strip()), None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Acquire a per-ledger mutex before appending to or editing a shared ledger.",
@@ -3568,6 +3762,28 @@ def build_parser() -> argparse.ArgumentParser:
             "silently applies to more than the one row it is matched to). REASON is "
             "recorded verbatim in that row only, visible in the ledger -- this is not a "
             "silent bypass. Whitespace-only REASON is rejected."
+        ),
+    )
+    parser.add_argument(
+        "--replay-before",
+        metavar="ISO8601",
+        help=(
+            "restore a row RECOVERED from a tree that was never committed: waive the "
+            "append-time guards for this one payload, whose own leading UTC timestamp "
+            "must be strictly before ISO8601. The row is written byte for byte and a "
+            "REPLAY marker row recording its provenance lands immediately before it. "
+            "Requires --replay-source. Not a way to write a row a guard would refuse "
+            "today: a payload with no leading timestamp, one stamped at or after "
+            "ISO8601, and a future ISO8601 are each refused (exit 65, nothing written)"
+        ),
+    )
+    parser.add_argument(
+        "--replay-source",
+        metavar="NAME",
+        help=(
+            "where the recovered bytes came from, recorded verbatim in the REPLAY "
+            "marker row; required with --replay-before, because a restore carrying no "
+            "provenance is indistinguishable from a bypass"
         ),
     )
     return parser
@@ -3835,6 +4051,16 @@ def main(argv: list[str] | None = None) -> int:
             "--cost-unknown only applies to --append/--append-file, not -- COMMAND"
         )
 
+    # --- OMN-18433: is this a sanctioned verbatim replay? Resolved BEFORE the
+    # lint chain below, because a sanctioned replay is precisely the case in
+    # which that chain must not run: the chain judges a row being written now,
+    # and these bytes were written at their own timestamp on a copy of this
+    # ledger that was lost. A refusal here writes nothing at all.
+    replay_marker, replay_refusal_reason = resolve_replay(parser, args, payload)
+    if replay_refusal_reason is not None:
+        print(f"ledger_lock: {replay_refusal_reason}", file=sys.stderr)
+        return 65
+
     # --- OMN-18554: the pre-append lint chain, ported from the omni_home copy.
     # Order is load-bearing and is the order that copy used. The first three are
     # row-class-agnostic and are NOT window- or grace-scoped: a row that miscounts
@@ -3843,7 +4069,7 @@ def main(argv: list[str] | None = None) -> int:
     # cost-sentence gate (OMN-15649/OMN-18554) runs last because it is the only
     # one of the four that is scoped -- to claim rows, and to a declared window.
     payload_to_write: str | None = payload
-    if payload is not None:
+    if payload is not None and replay_marker is None:
         quant_reason = validate_quantitative_claims_payload(payload)
         if quant_reason is not None:
             print(
@@ -3883,13 +4109,25 @@ def main(argv: list[str] | None = None) -> int:
             if args.roll_section:
                 return run_roll_section(args)
             if payload is not None:
-                shape_rc = enforce_row_shape(args, payload)
+                # A replay writes TWO rows, so the shape and cap checks judge
+                # both: the marker is a row like any other and must not be
+                # able to overflow a capped section or extend the row above
+                # it just because it rides in beside a restored row.
+                projected = (
+                    payload if replay_marker is None else f"{replay_marker}\n{payload}"
+                )
+                shape_rc = enforce_row_shape(args, projected)
                 if shape_rc is not None:
                     return shape_rc
-                cap_rc = enforce_section_caps(args, payload)
+                cap_rc = enforce_section_caps(args, projected)
                 if cap_rc is not None:
                     return cap_rc
-                claim_shaped = is_claim_row(payload)
+                # A replayed row never mints a claim token. Its claim, if it
+                # made one, was made at its own timestamp and whatever it
+                # authorized is long settled; a fresh token minted now could
+                # be cited to authorize a mutation TODAY, which is exactly the
+                # bypass this path must not open.
+                claim_shaped = is_claim_row(payload) and replay_marker is None
                 # Dedup check runs inside the held lock, against whatever is
                 # actually on disk right now -- race-free against other
                 # writers, and against our own prior attempt if this is a
@@ -3914,14 +4152,26 @@ def main(argv: list[str] | None = None) -> int:
                 # OMN-18258 / OMN-18274: both are STATE-dependent (they read
                 # rows already in this ledger), so they run here inside the held
                 # lock rather than in the pre-lock chain above.
-                ruling_reason = validate_ruling_payload(payload, args.ledger)
-                if ruling_reason is not None:
-                    print(f"ledger_lock: {ruling_reason}", file=sys.stderr)
-                    return 65
-                friction_reason = validate_friction_payload(payload, args.ledger)
-                if friction_reason is not None:
-                    print(f"ledger_lock: {friction_reason}", file=sys.stderr)
-                    return 65
+                #
+                # Both are skipped for a sanctioned replay, for the same
+                # reason the pre-lock chain is: the OMN-18274 friction guard
+                # is the gate that refused five of the recovered rows in the
+                # first place, and a restore that has to satisfy it is a
+                # rewrite, not a restore.
+                if replay_marker is None:
+                    ruling_reason = validate_ruling_payload(payload, args.ledger)
+                    if ruling_reason is not None:
+                        print(f"ledger_lock: {ruling_reason}", file=sys.stderr)
+                        return 65
+                    friction_reason = validate_friction_payload(payload, args.ledger)
+                    if friction_reason is not None:
+                        print(f"ledger_lock: {friction_reason}", file=sys.stderr)
+                        return 65
+                else:
+                    # The marker lands FIRST, so the offset computed below is
+                    # the restored row's own, and a reader scanning upwards
+                    # from the row finds its provenance on the line above.
+                    append_text(args.ledger, replay_marker)
                 offset = _ledger_size(args.ledger)
                 line_no = len(_offsets_and_lines(args.ledger)) + 1
                 appended_at = utc_now()

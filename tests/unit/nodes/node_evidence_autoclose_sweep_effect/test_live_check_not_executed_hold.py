@@ -494,16 +494,29 @@ def test_the_hold_decision_is_a_skip_not_a_flip_or_a_gap() -> None:
 def test_both_holds_are_unreachable_from_any_write_path() -> None:
     """The placement invariant, extended to class (d).
 
-    Each classifier has exactly one call site in `_process_ticket` and both
+    Each classifier has exactly one call site in the adjudicator and both
     sit after every `FLIPPED` return. If a later edit moves either above one,
     this reddens — the invariant is placement, not the classifier.
+
+    OMN-18490 repointed this at `_adjudicate_candidate`. The adjudication —
+    every decision, every return, both classifier call sites — moved there
+    intact when `_process_ticket` became a thin wrapper that attaches the
+    per-check rows to whatever the adjudicator returns. The invariant is
+    unchanged; only the method holding the body moved. The wrapper is
+    asserted below to reach no terminal decision of its own, so reading the
+    adjudicator is still reading the whole write path rather than most of it.
     """
     from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers import (
         handler_evidence_autoclose_sweep as sweep_mod,
     )
 
+    wrapper = inspect.getsource(sweep_mod.HandlerEvidenceAutocloseSweep._process_ticket)
+    assert "EnumEvidenceAutocloseDecision" not in wrapper, (
+        "_process_ticket must stay a pure wrapper; a decision taken there "
+        "would sit outside the placement invariant this test reads"
+    )
     lines = inspect.getsource(
-        sweep_mod.HandlerEvidenceAutocloseSweep._process_ticket
+        sweep_mod.HandlerEvidenceAutocloseSweep._adjudicate_candidate
     ).splitlines()
     flip_returns = [
         index

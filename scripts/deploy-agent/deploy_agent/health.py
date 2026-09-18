@@ -18,6 +18,7 @@ from deploy_agent.accept_backlog import (
 from deploy_agent.job_state import JobStore
 from deploy_agent.lab_overlay import load_latest_record, load_record
 from deploy_agent.loaded_code import loaded_code_sha_if_recorded
+from deploy_agent.queue_depth import ModelControlTopicLag, compute_queue_snapshot
 
 _start_time = time.monotonic()
 
@@ -26,6 +27,7 @@ def create_health_app(
     job_store: JobStore,
     get_agent_state: Callable[[], str],
     get_accept_backlog: Callable[[], ModelAcceptBacklogVerdict | None] | None = None,
+    get_control_topic_lag: Callable[[], ModelControlTopicLag] | None = None,
 ) -> web.Application:
     """Build the agent's HTTP surface.
 
@@ -33,14 +35,30 @@ def create_health_app(
     is optional because the watchdog is a property of a running agent and this
     app is also built by tests that are not exercising it; where it is absent
     the payload says INDETERMINATE rather than claiming a healthy queue.
+
+    ``get_control_topic_lag`` is the consumer's latest lag sample (OMN-18144),
+    optional on the same terms and unknown rather than zero where it is absent.
     """
     app = web.Application()
     app["job_store"] = job_store
     app["get_agent_state"] = get_agent_state
     app["get_accept_backlog"] = get_accept_backlog
+    app["get_control_topic_lag"] = get_control_topic_lag
 
     app.router.add_get("/health", _health_handler)
     app.router.add_get("/job/{correlation_id}", _job_handler)
+    # OMN-18144. What is ahead of a command, and how fast this agent has been
+    # draining it. The post-merge lab-pass guard reads this to bound its wait
+    # by queue position instead of a clock: on 2026-09-18 a merge that was
+    # third in line receipted FAIL against a healthy lane because nothing
+    # reachable from CI could say it was third in line.
+    #
+    # READ-ONLY, and deliberately so. It exposes no command, no payload and no
+    # credential -- correlation ids, counts and durations only -- and nothing
+    # here can cancel, reorder or curtail a job. A reader that could shorten a
+    # rebuild to fit its own window would manufacture the false FAIL this
+    # endpoint exists to remove.
+    app.router.add_get("/queue", _queue_handler)
     # OMN-18200 AC5. The onex-lab overlay record for one merged sha.
     #
     # This endpoint exists because a GitHub Actions artifact can only be created
@@ -169,6 +187,29 @@ def _accept_backlog_block(request: web.Request) -> dict[str, object]:
         "observed_at": verdict.observed_at.isoformat(),
         "evidence": verdict.evidence,
     }
+
+
+async def _queue_handler(request: web.Request) -> web.Response:
+    """Serve the queue snapshot (OMN-18144).
+
+    Always 200 with a body, including when a half is unreadable: the
+    unreadability IS the answer the caller needs, and an error status would be
+    indistinguishable to a CI reader from an agent too old to serve this route
+    at all -- which is a distinction that decides whether it falls back or
+    retries.
+    """
+    store: JobStore = request.app["job_store"]
+    getter = request.app.get("get_control_topic_lag")
+    lag = (
+        getter()
+        if getter is not None
+        else ModelControlTopicLag.unknown(
+            "this agent was built with no control-topic lag sampler, so the "
+            "records queued beyond it are unknown -- not zero"
+        )
+    )
+    snapshot = compute_queue_snapshot(store, lag)
+    return web.json_response(snapshot.to_payload())
 
 
 async def _job_handler(request: web.Request) -> web.Response:

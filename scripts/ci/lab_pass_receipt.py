@@ -747,6 +747,26 @@ class ModelSettleBudget:
         return self.affordable_seconds >= self.declared_seconds
 
     @property
+    def shortfall_seconds(self) -> int:
+        """How far short of the declaration this job's affordance fell."""
+        return max(0, self.declared_seconds - self.affordable_seconds)
+
+    @property
+    def head(self) -> str:
+        """Both numbers and the arithmetic behind them, on every verdict.
+
+        Separate from :attr:`evidence` so a caller that reaches a different
+        verdict about the SAME numbers still reports them identically.
+        """
+        return (
+            f"declared {self.declared_seconds}s for lane {self.lane} "
+            f"({self.source}); this job could afford {self.affordable_seconds}s "
+            f"(ceiling {self.job_ceiling_seconds}s - elapsed "
+            f"{self.elapsed_seconds}s - reserved tail "
+            f"{self.reserved_tail_seconds}s); granted {self.granted_seconds}s"
+        )
+
+    @property
     def evidence(self) -> str:
         """The one line the ``settle_budget_sufficient`` check carries.
 
@@ -754,18 +774,11 @@ class ModelSettleBudget:
         "the lane was not ready" is indistinguishable from an unhealthy lane,
         which is the confusion this check exists to remove.
         """
-        head = (
-            f"declared {self.declared_seconds}s for lane {self.lane} "
-            f"({self.source}); this job could afford {self.affordable_seconds}s "
-            f"(ceiling {self.job_ceiling_seconds}s - elapsed "
-            f"{self.elapsed_seconds}s - reserved tail "
-            f"{self.reserved_tail_seconds}s); granted {self.granted_seconds}s"
-        )
         if self.sufficient:
-            return f"{head} -- the job could afford the declared budget"
+            return f"{self.head} -- the job could afford the declared budget"
         return (
-            f"{head} -- the job could NOT afford the declared budget, short by "
-            f"{self.declared_seconds - self.affordable_seconds}s, so a lane that "
+            f"{self.head} -- the job could NOT afford the declared budget, short by "
+            f"{self.shortfall_seconds}s, so a lane that "
             "does not answer inside the grant has run out of CLOCK and has not "
             "been shown to be unhealthy"
         )
@@ -1173,15 +1186,47 @@ def wait_for_lane_ready(
         time.sleep(min(SETTLE_POLL_SECONDS, remaining))
 
 
-def settle_budget_check(budget: ModelSettleBudget) -> ModelLabPassCheck:
+def settle_budget_check(
+    budget: ModelSettleBudget, outcome: ModelSettleOutcome | None = None
+) -> ModelLabPassCheck:
     """Record whether the job could afford the lane's declared settle budget.
 
     Emitted on BOTH verdicts. A check that appeared only when the budget was
     short would be indistinguishable from one that was never run, which is the
     shape this module's receipt contract refuses everywhere else.
+
+    A SHORTFALL THAT NEVER BIT IS NOT A FAILURE (OMN-18436). The reason a short
+    grant fails is stated in the evidence itself: a lane that does not answer
+    inside it has run out of CLOCK and has not been shown to be unhealthy. That
+    reason is conditional, and until this change the verdict was not. Receipt
+    ``63cea2aa`` FAILed on a grant 2 seconds short of the declaration while
+    every readiness endpoint had answered after 101 of the 898 granted seconds
+    -- a receipt failing on timing alone, on a lane it had just proven healthy,
+    which is the exact shape this ticket exists to remove, and rule 24(b) then
+    refuses that sha for staging.
+
+    So when ``outcome`` says the lane answered inside the grant, the shortfall
+    could not have changed the answer and the check passes, still naming both
+    numbers so the short ceiling stays diagnosable from the artifact alone.
+    ``outcome=None`` is a caller that knows nothing about the wait and gets the
+    bare affordability verdict: an absent outcome is not evidence that the lane
+    answered.
     """
+    if budget.sufficient or outcome is None or not outcome.ready:
+        return ModelLabPassCheck(
+            name=SETTLE_BUDGET_CHECK, ok=budget.sufficient, evidence=budget.evidence
+        )
     return ModelLabPassCheck(
-        name=SETTLE_BUDGET_CHECK, ok=budget.sufficient, evidence=budget.evidence
+        name=SETTLE_BUDGET_CHECK,
+        ok=True,
+        evidence=(
+            f"{budget.head} -- the job could NOT afford the declared budget, "
+            f"short by {budget.shortfall_seconds}s, but the lane answered every "
+            f"readiness endpoint after {outcome.waited_seconds:.0f}s, inside the "
+            "grant, so the shortfall could not have changed the answer and says "
+            "nothing about the lane. The ceiling is still short and this line is "
+            "the durable record of it."
+        ),
     )
 
 
@@ -1329,7 +1374,7 @@ def probe_compose_dev(
         for check in checks
     ]
     if budget is not None:
-        annotated.append(settle_budget_check(budget))
+        annotated.append(settle_budget_check(budget, outcome=outcome))
     if settle_timeout_seconds > 0:
         annotated.append(settle_timeout_check(outcome))
     if generation_container is not None:

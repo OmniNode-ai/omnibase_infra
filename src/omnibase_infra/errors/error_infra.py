@@ -19,6 +19,7 @@ Error Hierarchy:
         ├── InfraRequestRejectedError
         ├── InfraProtocolError
         ├── EventPayloadTooLargeError
+        ├── EventTopicAuthorizationError
         ├── EnvelopeValidationError
         ├── UnknownHandlerTypeError
         └── ProtocolDependencyResolutionError
@@ -835,6 +836,65 @@ class EventPayloadTooLargeError(RuntimeHostError):
         )
         self.payload_size_bytes = payload_size_bytes
         self.max_request_size_bytes = max_request_size_bytes
+        self.topic = topic
+
+
+class EventTopicAuthorizationError(RuntimeHostError):
+    """Raised when the broker refuses a publish on the topic's ACLs.
+
+    Distinct from ``InfraConnectionError`` / ``InfraTimeoutError`` for the same
+    two reasons ``EventPayloadTooLargeError`` is, and with a third that is
+    specific to it:
+
+    - The refusal is deterministic. An ACL does not appear between two attempts
+      milliseconds apart, so every retry re-earns the identical rejection.
+    - It must not count toward circuit-breaker failure thresholds: the broker
+      ANSWERED, with a verdict about permissions. That is not evidence the
+      connection is unavailable.
+    - Third, and the reason this class exists rather than a log line: without a
+      distinct type the denial is UNOBSERVABLE to the caller. The retry ladder
+      plus exponential backoff outlasts the publish timeout the caller set, so
+      what surfaced was ``TimeoutError`` -- indistinguishable from a slow broker.
+      A caller that wants to treat "this record can never be published" as
+      different from "try again shortly" had nothing to branch on.
+
+    Measured (OMN-18627): one ungranted topic at the head of a spool outbox held
+    126 records of four AUTHORIZED classes behind it, because the drain stops at
+    the first failure to preserve ordering and every record paid a full ladder
+    -- roughly nine seconds of wall clock each -- before the caller saw a
+    timeout it could only read as transient.
+
+    Carries ``topic`` so the caller can name the grant that is missing without
+    parsing the message string.
+
+    .. versionadded:: OMN-18627
+        Topic authorization failures fail fast with an attributable type
+        instead of burning the retry budget and surfacing as a timeout.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: ModelInfraErrorContext | None = None,
+        topic: str | None = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize EventTopicAuthorizationError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            topic: The target topic the publish was refused for
+            **extra_context: Additional context information
+        """
+        if topic is not None:
+            extra_context = {**extra_context, "topic": topic}
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.PERMISSION_DENIED,
+            context=context,
+            **extra_context,
+        )
         self.topic = topic
 
 

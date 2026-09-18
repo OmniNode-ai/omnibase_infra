@@ -82,7 +82,7 @@ _REQUIREMENT_NAME = re.compile(r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)")
 #: commit it came from; a PyPI wheel has none, which is why ``commit`` is null
 #: for one and a sha for the other (OMN-14064).
 _PROBE_SOURCE = """
-import json, sys
+import json, re, sys
 from importlib.metadata import PackageNotFoundError, distribution
 
 def _facts(name):
@@ -99,10 +99,36 @@ def _facts(name):
     return {
         "version": dist.version,
         "commit": commit if isinstance(commit, str) else None,
+        # OMN-18752: the pins the installer shipped INSIDE the artifact. They
+        # need no clone, no network and no resolver, which is what makes them
+        # assertable on a venv built with --no-deps.
+        "requires": list(dist.metadata.get_all("Requires-Dist") or ()),
     }
 
 names = json.loads(sys.argv[1])
-print(json.dumps({name: _facts(name) for name in names}))
+out = {name: _facts(name) for name in names}
+
+# OMN-18752: every installed omni-internal distribution, discovered rather
+# than named, so a floor declared by a package the caller did not ask about is
+# still asserted. Same single invocation and single JSON document.
+try:
+    from importlib.metadata import distributions
+    for dist in distributions():
+        raw_name = (dist.metadata["Name"] or "").strip()
+        if not raw_name:
+            continue
+        key = re.sub(r"[-_.]+", "-", raw_name).lower()
+        if key != "omnimarket" and not key.startswith(("omnibase-", "omninode-")):
+            continue
+        if key not in out:
+            out[key] = _facts(raw_name)
+except Exception:
+    # Discovery is additive. A failure here must not lose the named facts the
+    # caller depends on; the floors it would have added are simply absent, and
+    # an absent floor row set is INDETERMINATE upstream, never a pass.
+    pass
+
+print(json.dumps(out))
 """
 
 
@@ -214,6 +240,116 @@ def classify_sibling(requirement: str, installed: str | None) -> ReadbackRow:
     return ReadbackRow(subject, requirement, installed, ReadbackVerdict.MISMATCH)
 
 
+#: The layer this readback has authority over: compat -> core -> spi -> infra,
+#: with omnimarket above them and the other omni-internal distributions beside
+#: them. A venv is legitimately a SUPERSET with third-party versions resolved
+#: by other means, so asserting a third-party floor here would fire on
+#: conditions no reconciler on this path can fix.
+_OMNI_INTERNAL_PREFIXES: tuple[str, ...] = ("omnibase-", "omninode-", "omnimarket")
+
+
+def _is_omni_internal(name: str) -> bool:
+    normalized = normalize_name(name)
+    return normalized == "omnimarket" or normalized.startswith(
+        ("omnibase-", "omninode-")
+    )
+
+
+def packaged_floor_rows(
+    installed: dict[str, dict[str, object]],
+) -> list[ReadbackRow]:
+    """Assert the floors the INSTALLED packages declare about each other.
+
+    The gap this closes, measured on the operator Mac 2026-09-18: the shared
+    plugin CLI venv carried omnimarket 0.4.121, whose packaged requirements
+    declare ``omnibase-infra>=0.38.31``, against an installed omnibase-infra
+    0.38.30. The layer disagreed with itself and nothing saw it, because
+    ``install-node-skill-package.sh`` installs ``--no-deps`` on purpose (so no
+    resolver ever evaluates the floor) and the drift guard compares only
+    omnimarket's COMMIT against the canonical clone (which says nothing about
+    what omnimarket needs underneath it).
+
+    ``--no-deps`` is correct and stays: the composed layer is installed
+    deliberately, and letting a resolver loose on it is how a sibling gets
+    silently replaced. The floor is asserted AFTER the install instead, from
+    each artifact's own ``Requires-Dist``.
+
+    Every installed omni-internal distribution is a source of floors, not just
+    omnimarket. omnimarket is the top of the layer so its requirements are the
+    tightest, but a disagreement lower down is the same defect and is not less
+    serious for being lower.
+
+    Requirements carrying an environment marker that does not apply to this
+    install (an extras gate, a platform gate) are not floors the base install
+    must meet, and are skipped rather than failed.
+    """
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+    except ImportError:
+        return [
+            ReadbackRow(
+                "packaged floors",
+                "packaging installed",
+                None,
+                ReadbackVerdict.UNREADABLE,
+            )
+        ]
+
+    rows: list[ReadbackRow] = []
+    for declarer, facts in sorted(installed.items()):
+        if not _is_omni_internal(declarer):
+            continue
+        raw_requires = facts.get("requires") or []
+        if not isinstance(raw_requires, list):
+            continue
+        for raw in raw_requires:
+            if not isinstance(raw, str):
+                continue
+            try:
+                requirement = Requirement(raw)
+            except InvalidRequirement:
+                # Only an omni-internal-looking requirement is ours to fail on;
+                # an unparseable third-party line is not this readback's
+                # business. Fail closed on ours rather than skipping it.
+                if any(p in raw for p in _OMNI_INTERNAL_PREFIXES):
+                    rows.append(
+                        ReadbackRow(
+                            f"{normalize_name(declarer)} declares {raw!r}",
+                            raw,
+                            None,
+                            ReadbackVerdict.UNREADABLE,
+                        )
+                    )
+                continue
+            if not _is_omni_internal(requirement.name):
+                continue
+            # An extras- or platform-gated requirement is not a floor the base
+            # install must satisfy. `marker.evaluate()` with no extra supplied
+            # answers exactly that question.
+            if requirement.marker is not None and not requirement.marker.evaluate(
+                {"extra": ""}
+            ):
+                continue
+            dependency = normalize_name(requirement.name)
+            dep_facts = installed.get(dependency, {})
+            dep_version = dep_facts.get("version")
+            row = classify_sibling(
+                raw, dep_version if isinstance(dep_version, str) else None
+            )
+            # Re-subject the row so it names WHO declared the floor. Without
+            # that, a reader sees a version complaint and cannot tell which
+            # artifact disagrees with the venv.
+            rows.append(
+                ReadbackRow(
+                    f"{dependency} (floor from {normalize_name(declarer)})",
+                    row.expected,
+                    row.installed,
+                    row.verdict,
+                )
+            )
+    return rows
+
+
 def outcome_for(rows: list[ReadbackRow]) -> ReadbackOutcome:
     """Reduce the rows to one answer, fail-closed.
 
@@ -239,9 +375,7 @@ def exit_code_for(outcome: ReadbackOutcome) -> int:
     return EXIT_INDETERMINATE
 
 
-def probe_installed(
-    python_bin: str, names: list[str]
-) -> dict[str, dict[str, str | None]]:
+def probe_installed(python_bin: str, names: list[str]) -> dict[str, dict[str, object]]:
     """Ask the TARGET interpreter what it actually has installed.
 
     Raises ``RuntimeError`` when the interpreter cannot be probed — the caller
@@ -324,22 +458,30 @@ def declared_version(clone: Path, ref: str) -> str:
 
 
 def build_rows(
-    installed: dict[str, dict[str, str | None]],
+    installed: dict[str, dict[str, object]],
     *,
     expected_commit: str,
     expected_version: str,
     siblings: list[str],
 ) -> list[ReadbackRow]:
     """Turn probed facts plus expectations into the full row set."""
+
+    def _str_or_none(value: object) -> str | None:
+        return value if isinstance(value, str) else None
+
     market = installed.get("omnimarket", {})
     rows = [
-        classify_commit(market.get("commit"), expected_commit),
-        classify_version(market.get("version"), expected_version),
+        classify_commit(_str_or_none(market.get("commit")), expected_commit),
+        classify_version(_str_or_none(market.get("version")), expected_version),
     ]
     for requirement in siblings:
         name = requirement_name(requirement)
         facts = installed.get(name or "", {})
-        rows.append(classify_sibling(requirement, facts.get("version")))
+        rows.append(classify_sibling(requirement, _str_or_none(facts.get("version"))))
+    # OMN-18752: the floors the installed artifacts declare about each other.
+    # `--no-deps` means no resolver ever evaluated them, so this is the only
+    # place the layer is checked for agreeing with itself.
+    rows.extend(packaged_floor_rows(installed))
     return rows
 
 
@@ -416,7 +558,14 @@ def run(
     print(
         "  The install step reported success and this venv does not carry its\n"
         "  result (OMN-18663). Treat the repair as NOT done: re-run it and read\n"
-        "  the uv output, rather than dispatching from this interpreter.",
+        "  the uv output, rather than dispatching from this interpreter.\n"
+        "\n"
+        "  A row reading 'floor from <package>' is a different fault and has a\n"
+        "  different remedy (OMN-18752): the layer disagrees with itself. The\n"
+        "  named package's own packaged requirements are not satisfied by what\n"
+        "  this venv carries, which `--no-deps` installs cannot notice. Advance\n"
+        "  the unsatisfied sibling to a version inside the declared range --\n"
+        "  never downgrade the declarer to make the floor go away.",
         file=sys.stderr,
     )
     return exit_code_for(outcome)

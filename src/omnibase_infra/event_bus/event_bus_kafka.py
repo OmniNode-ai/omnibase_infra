@@ -208,6 +208,7 @@ from aiokafka.errors import (
     KafkaError,
     MessageSizeTooLargeError,
     OutOfOrderSequenceNumber,
+    TopicAuthorizationFailedError,
     UnknownProducerId,
     UnknownTopicOrPartitionError,
 )
@@ -220,6 +221,7 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import (
     EventPayloadTooLargeError,
+    EventTopicAuthorizationError,
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
@@ -1454,6 +1456,44 @@ class EventBusKafka(
                 )
                 break  # No retry benefit; fall through to error raise
 
+            except TopicAuthorizationFailedError as e:
+                # OMN-18627: the broker refused this send on the TOPIC'S ACLs.
+                # An ACL does not appear between two attempts milliseconds
+                # apart, so the three remaining attempts and their exponential
+                # backoff sleeps re-earn the identical rejection -- the same
+                # no-retry-benefit rationale the UnknownTopicOrPartitionError
+                # and MessageSizeTooLargeError branches above already carry.
+                #
+                # Do NOT record a circuit failure. The broker ANSWERED, with a
+                # verdict about permissions; that is not evidence the
+                # connection is unavailable, and letting a single ungranted
+                # topic open the shared breaker would take healthy topics down
+                # with it (the OMN-17497 failure mode, different cause).
+                #
+                # The cost of not having this was measured and was not the
+                # wasted latency. The ladder outlasted the caller's publish
+                # timeout, so ``asyncio.wait_for`` cancelled it and the caller
+                # saw ``TimeoutError`` -- a denial that can NEVER succeed,
+                # wearing the one exception shape that means "try again
+                # shortly". node_event_emit_effect's spool drain stops at the
+                # first failure to preserve ordering, so it retried the same
+                # unpublishable record every cycle for 20 hours and held 126
+                # records of four authorized classes behind it.
+                last_exception = e
+                logger.warning(
+                    "Publish refused by topic ACLs — skipping retry and "
+                    "circuit failure record (attempt %d, no retry benefit; an "
+                    "ACL will not appear between attempts): %s",
+                    attempt + 1,
+                    topic,
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(headers.correlation_id),
+                        "error_type": type(e).__name__,
+                    },
+                )
+                break  # No retry benefit; fall through to error raise
+
             except _IDEMPOTENT_PRODUCER_FATAL_ERRORS as e:
                 # OMN-17497: the broker rejected this send on the idempotent
                 # producer's OWN sequence/epoch state, not on connectivity.
@@ -1555,6 +1595,19 @@ class EventBusKafka(
                 context=timeout_ctx,
                 topic=topic,
                 retry_count=self._max_retry_attempts + 1,
+            ) from last_exception
+        if isinstance(last_exception, TopicAuthorizationFailedError):
+            # OMN-18627: attributable and distinct. Without its own type the
+            # caller could only see a timeout, and "this record can never be
+            # published" is a different decision from "try again shortly" --
+            # a spool drain must quarantine the first and re-queue the second.
+            raise EventTopicAuthorizationError(
+                f"Publish to topic '{topic}' refused by the broker's ACLs. The "
+                f"publishing principal has no WRITE grant on it, or the topic "
+                f"is not provisioned on a broker that reports an absent topic "
+                f"as unauthorized. Retrying cannot change either.",
+                context=context,
+                topic=topic,
             ) from last_exception
         if isinstance(last_exception, UnknownTopicOrPartitionError):
             # Topic does not exist — raise as a configuration error, not a connection error.

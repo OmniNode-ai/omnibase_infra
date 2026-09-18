@@ -15,6 +15,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_ac_binding_row import (
     ModelAcBindingRow,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_check_result_row import (
+    ModelCheckResultRow,
+)
 
 
 class ModelEvidenceAutocloseOutcome(BaseModel):
@@ -62,6 +65,35 @@ class ModelEvidenceAutocloseOutcome(BaseModel):
     # is auditable only from the free-text reason — the counts-without-detail
     # problem OMN-16788 already hit once.
     dod_verify_non_probative_count: int = Field(default=0, ge=0)
+    # OMN-18490. THE CHECKS BEHIND THE COUNTERS.
+    #
+    # The five fields above are a tally. Run 35299192253 recorded OMN-18426 as
+    # `30/94 ACs verified, 3 failed` and named none of the three, on the
+    # outcome, in the comment it posted to the ticket, and in the job log. A
+    # collaborator asked twice which three and the answer was not recoverable
+    # from any surface the run left behind — so a failure nobody could name was
+    # a failure nobody could fix, for two days, on a mechanism whose whole job
+    # is to say what is unproven.
+    #
+    # One row per check the verdict carried. Nothing is newly collected: the
+    # per-check records are already on the dod_verify terminal payload and this
+    # node already walks them for two classifiers and the gap fingerprint. What
+    # is new is that the walk is written down.
+    #
+    # Empty on every outcome that reached no verdict — an excluded candidate, a
+    # refusal taken ahead of the verifier, an unparseable receipt — because
+    # there is nothing to report, and empty on a verdict whose `checks` payload
+    # could not be read, which is the same silence every other consumer of that
+    # list already answers with. The two are told apart by `reason`.
+    check_results: tuple[ModelCheckResultRow, ...] = Field(
+        default=(),
+        description=(
+            "One row per check on this ticket's dod_verify verdict: id, "
+            "status, proof class, declared bindings and a bounded message "
+            "excerpt. Descriptive only — every counter the flip predicate "
+            "reads still comes from the verdict's own count fields."
+        ),
+    )
     uncovered_acceptance_criteria: tuple[str, ...] = Field(
         default=(),
         description=(

@@ -186,8 +186,16 @@ def test_the_hold_is_unreachable_from_any_write_path() -> None:
     """The safety argument, read off the source rather than asserted in prose.
 
     The classifier's only call site must appear AFTER every ``FLIPPED`` return
-    in `_process_ticket`. If a later edit moves it above one, this fails —
+    in the adjudicator. If a later edit moves it above one, this fails —
     which is the point: the invariant is placement, not the signal list.
+
+    OMN-18490 repointed this at `_adjudicate_candidate`. The adjudication —
+    every decision, every return, both classifier call sites — moved there
+    intact when `_process_ticket` became a thin wrapper that attaches the
+    per-check rows to whatever the adjudicator returns. The invariant is
+    unchanged; only the method holding the body moved. The wrapper is
+    asserted below to reach no terminal decision of its own, so reading the
+    adjudicator is still reading the whole write path rather than most of it.
     """
     import inspect
 
@@ -195,7 +203,14 @@ def test_the_hold_is_unreachable_from_any_write_path() -> None:
         handler_evidence_autoclose_sweep as sweep_mod,
     )
 
-    source = inspect.getsource(sweep_mod.HandlerEvidenceAutocloseSweep._process_ticket)
+    wrapper = inspect.getsource(sweep_mod.HandlerEvidenceAutocloseSweep._process_ticket)
+    assert "EnumEvidenceAutocloseDecision" not in wrapper, (
+        "_process_ticket must stay a pure wrapper; a decision taken there "
+        "would sit outside the placement invariant this test reads"
+    )
+    source = inspect.getsource(
+        sweep_mod.HandlerEvidenceAutocloseSweep._adjudicate_candidate
+    )
     call_sites = [
         index
         for index, line in enumerate(source.splitlines())
