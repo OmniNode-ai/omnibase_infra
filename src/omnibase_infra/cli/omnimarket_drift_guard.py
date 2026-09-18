@@ -35,12 +35,58 @@ the trigger moved from a human to the guard itself. Callers that want the old
 pure detect-and-refuse behaviour simply omit ``reconcile``, which remains the
 default.
 
-The check fails OPEN (no-op, never raises) **only** when the canonical local
-clone itself cannot be determined -- e.g. ``OMNI_HOME`` unset, or no
-``$OMNI_HOME/omnimarket`` clone present. That keeps the guard silent on CI
-runners and fresh machines where the ``$OMNI_HOME/omnimarket`` convention
-does not apply, and it never blocks in an environment it cannot reason
-about.
+## Off registry (OMN-17255)
+
+The canonical clone is a REGISTRY-machine convention. A customer has no
+``$OMNI_HOME`` and no clone, and until OMN-17255 that case returned
+**silently**: exit 0, no drift line, no skip line. Measured 2026-09-18 (row L2
+of the local-path ground truth): ``env -u OMNI_HOME onex delegate "say ok"``
+exited 0 with nothing at all on stderr. A silent pass is indistinguishable
+from a check that never ran, which is the wrong half of fail-open
+(``feedback_no_defensive_no_defaults``; omni_home/CLAUDE.md rule 8).
+
+So when no canonical clone resolves, the guard now runs OFF-REGISTRY instead
+of returning. It compares the installed omni-internal layer against the pins
+the installer PACKAGED INSIDE the installed artifacts -- a distribution's
+``Requires-Dist`` metadata is its ``[project].dependencies``, it travels in
+the wheel, and reading it needs no clone, no network and no ``OMNI_HOME``.
+
+Resolution order for "expected", in one place so it is not re-derived:
+
+1. the installed ``omnimarket`` distribution's own packaged requirements,
+   filtered to the omni-internal layer. omnimarket sits ABOVE infra and its
+   requirements are the tightest statement of what it needs underneath it;
+2. failing that (omnimarket absent, or declaring no omni-internal
+   requirement), the installed ``omnibase_infra`` distribution's own packaged
+   requirements. This guard ships inside omnibase_infra, so that anchor is
+   present by construction whenever this code runs;
+3. failing both, there is nothing to compare -- and that is reported as an
+   explicit SKIPPED line naming which fact was missing, never as silence.
+
+Exactly one structured line is written to stderr for EVERY off-registry
+verdict, IN_SYNC included::
+
+    drift_guard: mode=off-registry omnimarket=<v> anchor=<d>@<v> pin=<n> \
+        expected=<specifier> installed=<v> pins=<n> unsatisfied=<n> \
+        verdict=IN_SYNC|DRIFTED|SKIPPED reason=<token>
+
+It is written to ``sys.stderr`` directly rather than through ``logger``
+because a logger can be configured to nothing, and a check that logging
+config can silence is the silent pass this mode exists to remove.
+
+**Off registry the guard REPORTS and never refuses.** Operator ruling,
+2026-09-18 (the OMN-17255 re-scope under the local-path goal, row L2): the
+guard must not block dispatch on a machine with no clone. The two positions
+that look opposed are not about the same thing -- the goal needs the guard not
+to REFUSE off-registry, this ticket needs it not to be SILENTLY ABSENT, and a
+comparison against the packaged pins satisfies both. A refusal would also be a
+remedy nobody on that machine can apply: there is no clone to reconcile against
+and no repair command that is true there, so it would close a customer's only
+path with nothing to do about it. Every off-registry verdict therefore exits 0,
+and DRIFTED additionally logs the mismatch in prose. ``allow_drift`` is not
+consulted here because nothing is refused; it keeps its full meaning on the
+canonical-clone path. No ``reconcile`` is attempted either: the bound
+reconciler repairs a venv against the clone that does not exist here.
 
 On a machine that DOES have the canonical clone, "omnimarket is not
 installed from git" (absent entirely, or installed from PyPI/a non-VCS
@@ -70,16 +116,31 @@ from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
+
+from omnibase_infra.cli.enum_off_registry_reason import EnumOffRegistryReason
+from omnibase_infra.cli.enum_off_registry_verdict import EnumOffRegistryVerdict
+from omnibase_infra.cli.model_off_registry_check import ModelOffRegistryCheck
 from omnibase_infra.cli.workspace_reconcile import ReconcileFn
 
 __all__ = [
-    "DRIFT_OVERRIDE_ENV",
     "CanonicalCloneAttachment",
+    "DRIFT_OVERRIDE_ENV",
+    "EnumOffRegistryReason",
+    "EnumOffRegistryVerdict",
+    "ModelOffRegistryCheck",
+    "OMNI_INTERNAL_PIN_PREFIXES",
     "OmnimarketDriftError",
+    "PACKAGED_PIN_ANCHORS",
     "canonical_clone_attachment",
+    "canonical_distribution_name",
     "canonical_local_omnimarket_commit",
     "check_omnimarket_drift",
+    "installed_distribution_metadata",
     "installed_omnimarket_commit",
+    "resolve_off_registry_check",
 ]
 
 logger = logging.getLogger(__name__)
@@ -301,20 +362,277 @@ def canonical_clone_attachment(
     return CanonicalCloneAttachment.DETACHED
 
 
+# --------------------------------------------------------------------------- #
+# Off-registry mode (OMN-17255)
+# --------------------------------------------------------------------------- #
+# Everything below runs on a machine with no canonical clone. It reads only
+# installed-distribution metadata: no git, no network, no OMNI_HOME.
+
+#: The layer this guard can reason about. A distribution outside it (pydantic,
+#: click, anthropic) is resolved by the packaging tooling and is not what drifts
+#: when an omni artifact is installed piecemeal, so comparing it here would add
+#: noise and false refusals without adding evidence.
+OMNI_INTERNAL_PIN_PREFIXES: tuple[str, ...] = ("omnibase-", "omninode-", "omnimarket")
+
+#: Resolution order for the packaged pins, most specific first. omnimarket sits
+#: ABOVE infra, so its declared requirements are the tightest statement of what
+#: it needs beneath it; omnibase_infra's own are the fallback and are present by
+#: construction, because this module ships inside that distribution.
+PACKAGED_PIN_ANCHORS: tuple[str, ...] = ("omnimarket", "omnibase-infra")
+
+
+def canonical_distribution_name(name: str) -> str:
+    """PEP 503 name for a distribution, so ``omnibase_infra`` and
+    ``omnibase-infra`` are one key rather than two."""
+    return canonicalize_name(name)
+
+
+def installed_distribution_metadata(name: str) -> tuple[str, tuple[str, ...]] | None:
+    """Return ``(version, Requires-Dist)`` for an installed distribution.
+
+    The single seam through which this module reads the environment: both the
+    anchor's packaged pins and every pinned distribution's installed version
+    come through here, so a test binds one fake and a reader has one place to
+    look. ``None`` means absent or unreadable -- which is never treated as
+    satisfied.
+    """
+    try:
+        dist = distribution(name)
+    except (PackageNotFoundError, ValueError, OSError):
+        return None
+    try:
+        requires = tuple(dist.metadata.get_all("Requires-Dist") or ())
+        return dist.version, requires
+    except (ValueError, OSError):
+        return None
+
+
+def _omni_internal_pins(requires: tuple[str, ...]) -> tuple[Requirement, ...]:
+    """The omni-internal requirements of a packaged dependency list that APPLY
+    to this environment.
+
+    Requirements carrying an ``extra`` marker are excluded: they are optional
+    extras, not the base ``[project].dependencies``, and an extra nobody
+    installed is not drift. Any other marker is evaluated; one that cannot be
+    evaluated is excluded rather than guessed at, and the exclusion is visible
+    because the resulting pin COUNT is on the line.
+    """
+    pins: list[Requirement] = []
+    for raw in requires:
+        try:
+            requirement = Requirement(raw)
+        except InvalidRequirement:
+            continue
+        name = canonical_distribution_name(requirement.name)
+        if not name.startswith(OMNI_INTERNAL_PIN_PREFIXES):
+            continue
+        marker = requirement.marker
+        if marker is not None:
+            if "extra" in str(marker):
+                continue
+            try:
+                if not marker.evaluate():
+                    continue
+            except Exception:  # noqa: BLE001 - an unevaluable marker is not a pin
+                continue
+        pins.append(requirement)
+    return tuple(sorted(pins, key=lambda req: canonical_distribution_name(req.name)))
+
+
+def _pin_is_satisfied(requirement: Requirement, installed: str | None) -> bool:
+    """Whether an installed version satisfies a packaged requirement.
+
+    Fails CLOSED: absent, and unparseable, are both "not satisfied". An
+    unreadable fact has never been evidence that a fact is fine.
+    """
+    if installed is None:
+        return False
+    if not str(requirement.specifier):
+        # A requirement with no specifier says "must be present", and it is.
+        return True
+    try:
+        return requirement.specifier.contains(Version(installed), prereleases=True)
+    except InvalidVersion:
+        return False
+
+
+def resolve_off_registry_check() -> ModelOffRegistryCheck:
+    """Compare the installed omni-internal layer against its packaged pins.
+
+    Pure with respect to the process: reads installed metadata, mutates
+    nothing, raises nothing. The caller decides what a verdict means.
+    """
+    omnimarket_meta = installed_distribution_metadata("omnimarket")
+    infra_meta = installed_distribution_metadata("omnibase-infra")
+    omnimarket_version = omnimarket_meta[0] if omnimarket_meta else None
+    infra_version = infra_meta[0] if infra_meta else None
+
+    anchor_name: str | None = None
+    anchor_version: str | None = None
+    pins: tuple[Requirement, ...] = ()
+    any_anchor_found = False
+    for candidate in PACKAGED_PIN_ANCHORS:
+        meta = installed_distribution_metadata(candidate)
+        if meta is None:
+            continue
+        any_anchor_found = True
+        candidate_pins = _omni_internal_pins(meta[1])
+        if candidate_pins:
+            anchor_name = canonical_distribution_name(candidate)
+            anchor_version = meta[0]
+            pins = candidate_pins
+            break
+
+    if not pins:
+        return ModelOffRegistryCheck(
+            verdict=EnumOffRegistryVerdict.SKIPPED,
+            reason=(
+                EnumOffRegistryReason.NO_APPLICABLE_PACKAGED_PINS
+                if any_anchor_found
+                else EnumOffRegistryReason.NO_PACKAGED_PIN_ANCHOR
+            ),
+            omnibase_infra_version=infra_version,
+            omnimarket_version=omnimarket_version,
+        )
+
+    installed_by_pin: dict[str, str | None] = {}
+    unsatisfied: list[str] = []
+    for requirement in pins:
+        name = canonical_distribution_name(requirement.name)
+        meta = installed_distribution_metadata(name)
+        installed_by_pin[name] = meta[0] if meta else None
+        if not _pin_is_satisfied(requirement, installed_by_pin[name]):
+            unsatisfied.append(name)
+
+    if unsatisfied:
+        deciding = next(
+            req
+            for req in pins
+            if canonical_distribution_name(req.name) == unsatisfied[0]
+        )
+        verdict = EnumOffRegistryVerdict.DRIFTED
+        reason = EnumOffRegistryReason.PACKAGED_PIN_UNSATISFIED
+    else:
+        infra_pin = next(
+            (
+                req
+                for req in pins
+                if canonical_distribution_name(req.name) == "omnibase-infra"
+            ),
+            None,
+        )
+        deciding = infra_pin if infra_pin is not None else pins[0]
+        verdict = EnumOffRegistryVerdict.IN_SYNC
+        reason = EnumOffRegistryReason.PACKAGED_PINS_SATISFIED
+
+    deciding_name = canonical_distribution_name(deciding.name)
+    return ModelOffRegistryCheck(
+        verdict=verdict,
+        reason=reason,
+        omnibase_infra_version=infra_version,
+        omnimarket_version=omnimarket_version,
+        anchor=anchor_name,
+        anchor_version=anchor_version,
+        pin_name=deciding_name,
+        expected=str(deciding.specifier) or "ANY",
+        installed=installed_by_pin[deciding_name],
+        pins=len(pins),
+        unsatisfied=tuple(unsatisfied),
+    )
+
+
+def _emit_off_registry_line(check: ModelOffRegistryCheck) -> None:
+    """Write the verdict line to stderr, unconditionally.
+
+    Deliberately NOT ``logger``: a library logger with no handler, or one a host
+    application configured away, drops the line -- which reproduces exactly the
+    silence this mode exists to end. ``flush`` because the very next thing on a
+    DRIFTED verdict is a raised exception.
+    """
+    sys.stderr.write(f"{check.line}\n")
+    sys.stderr.flush()
+
+
+def _off_registry_detail(check: ModelOffRegistryCheck) -> str:
+    """The human half of a DRIFTED off-registry report.
+
+    Names no canonical clone and no clone-based repair command: on this machine
+    neither exists, and a report pointing at a path the reader does not have is
+    how a guard teaches people to ignore it.
+    """
+    installed = check.installed or "ABSENT"
+    others = [name for name in check.unsatisfied if name != check.pin_name]
+    also = f" Also unsatisfied: {', '.join(others)}." if others else ""
+    return (
+        f"omnimarket OFF-REGISTRY DRIFT (reported, not blocked): the installed "
+        f"omni-internal layer does not satisfy the pins packaged with "
+        f"{check.anchor}=={check.anchor_version}. {check.pin_name} is "
+        f"{installed}, and {check.anchor}=={check.anchor_version} requires "
+        f"{check.pin_name}{check.expected}.{also} No canonical clone was "
+        f"resolvable here, so this is judged entirely from installed package "
+        f"metadata -- there is no workspace to reconcile against and no repair "
+        f"command to hand you that would be true on this machine. Reinstall the "
+        f"omni packages as one set so the versions agree ({check.pin_name} first)."
+    )
+
+
+def _run_off_registry_check() -> ModelOffRegistryCheck:
+    """The off-registry branch of :func:`check_omnimarket_drift`.
+
+    **Reports; never refuses.** Operator ruling, 2026-09-18 (OMN-17255 re-scope
+    under the local-path goal, row L2): off registry the guard must not block
+    dispatch. The two positions that look opposed are not about the same thing
+    -- the goal needs the guard not to REFUSE on a machine with no clone, and
+    this ticket needs the guard not to be SILENTLY ABSENT. A comparison against
+    the packaged pins satisfies both: it asserts something, and what it asserts
+    is resolvable without a clone.
+
+    Blocking here would also be a remedy nobody on that machine can apply. The
+    guard has no clone to reconcile against and no repair command that is true
+    there, so a refusal would leave a customer with their only path closed and
+    nothing to do about it. That is how a gate gets routed around rather than
+    fixed. The line is the deliverable; the exit code never was.
+
+    ``allow_drift`` is not consulted: there is nothing to override, because
+    nothing is refused. It keeps its full meaning on the canonical-clone path.
+    """
+    check = resolve_off_registry_check()
+    # Emitted for EVERY verdict. A line that only appears when something is
+    # wrong cannot distinguish a clean run from an unrun check, which is the
+    # defect this whole mode addresses.
+    _emit_off_registry_line(check)
+
+    if check.verdict is EnumOffRegistryVerdict.DRIFTED:
+        # Prose detail is best-effort (a library logger can have no handler),
+        # which is exactly why it is not the only surface: the structured line
+        # above already names the pin, the requirement and the installed
+        # version, and it is written to stderr unconditionally.
+        logger.warning(
+            "%s Results from market-provided nodes come from an UNVERIFIED "
+            "omnimarket build and must not be treated as evidence.",
+            _off_registry_detail(check),
+        )
+    return check
+
+
 def check_omnimarket_drift(
     omni_home: str | None = None,
     *,
     allow_drift: bool = False,
     reconcile: ReconcileFn | None = None,
-) -> None:
+) -> ModelOffRegistryCheck | None:
     """Fail fast if the current venv's omnimarket is missing or has drifted
-    from the canonical local clone.
+    from its reference point.
 
     Refusal is the DEFAULT and is never silently skipped. Two ways past it,
     both deliberate:
 
-    * Fails OPEN (returns silently) when the canonical local clone cannot be
-      determined -- see the module docstring for why.
+    * Falls back to the OFF-REGISTRY comparison when the canonical local clone
+      cannot be determined (OMN-17255) -- against the pins packaged in the
+      installed artifacts, with an explicit verdict line for every outcome and
+      no refusal. Before that it returned in silence, which is where the guard
+      could not be told apart from a guard that had never run. See the module
+      docstring for why that branch reports rather than blocks.
     * Downgrades to a loud WARNING when ``allow_drift`` is True -- the
       operator's explicit opt-out, bound at the CLI boundary to
       ``ONEX_ALLOW_OMNIMARKET_DRIFT`` (:data:`DRIFT_OVERRIDE_ENV`,
@@ -328,10 +646,16 @@ def check_omnimarket_drift(
     installs packages); that is the caller's explicit choice, made by binding
     one, and it happens only after drift has already been detected locally.
 
+    Returns:
+        The :class:`ModelOffRegistryCheck` when the off-registry branch ran,
+        so a caller can record the verdict in a receipt; ``None`` when a
+        canonical clone resolved and the commit comparison was used instead.
+        Both are "the check passed"; the return value says WHICH check.
+
     Args:
         omni_home: Canonical workspace root to resolve the reference clone
-            from. ``None`` (no ``$OMNI_HOME``) means "cannot determine" and
-            fails open.
+            from. ``None`` (no ``$OMNI_HOME``) means no canonical clone, which
+            selects the off-registry comparison rather than a silent return.
         allow_drift: Explicit operator opt-out. Keyword-only and defaulting
             to False so refusal stays the default at EVERY call site,
             including ones added later -- a forgotten argument fails closed.
@@ -344,7 +668,9 @@ def check_omnimarket_drift(
             would be an astonishing default.
 
     Raises:
-        OmnimarketDriftError: a canonical clone IS present locally, no
+        OmnimarketDriftError: never on the off-registry branch, which reports
+            and does not refuse. On registry: a canonical clone IS
+            present locally, no
             ``reconcile`` repaired the drift, ``allow_drift`` is False, and
             either (a) omnimarket is not installed from git in the current
             interpreter at all (absent, or a non-VCS/PyPI install), or (b) its
@@ -355,7 +681,13 @@ def check_omnimarket_drift(
     """
     canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
     if canonical is None:
-        return
+        # OMN-17255. No canonical clone: this is a customer machine (or a CI
+        # runner, or a fresh one). That branch REPORTS and never refuses, per
+        # the 2026-09-18 operator ruling -- see :func:`_run_off_registry_check`.
+        # ``reconcile`` is deliberately not passed down: it repairs a venv
+        # AGAINST the clone that does not exist here, the same reasoning the
+        # detached-HEAD branch below records.
+        return _run_off_registry_check()
 
     # OMN-17313: a DETACHED canonical clone is drift in its own right, and it
     # has to be judged BEFORE the commit comparison below -- because that
@@ -412,7 +744,7 @@ def check_omnimarket_drift(
                 attachment_detail,
                 DRIFT_OVERRIDE_ENV,
             )
-            return
+            return None
         else:
             raise OmnimarketDriftError(
                 f"{attachment_detail} To dispatch anyway despite the drift "
@@ -421,7 +753,7 @@ def check_omnimarket_drift(
 
     installed = installed_omnimarket_commit()
     if installed == canonical:
-        return
+        return None
 
     # Name the exact repair command with its FULL path (not a cwd-relative
     # one) so the message is copy-pasteable from any working directory --
@@ -548,7 +880,7 @@ def check_omnimarket_drift(
             detail,
             DRIFT_OVERRIDE_ENV,
         )
-        return
+        return None
 
     # ------------------------------------------------------------------ #
     # Self-heal (OMN-17190)
@@ -602,7 +934,7 @@ def check_omnimarket_drift(
                 "omnimarket drift reconciled in-flight to %s; continuing.",
                 canonical[:12],
             )
-            return
+            return None
 
         # Reaching here means the reconcile outcome claimed a readback-proven
         # success and this guard, making the SAME comparison, disagrees

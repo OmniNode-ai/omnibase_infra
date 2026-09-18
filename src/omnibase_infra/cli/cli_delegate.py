@@ -157,6 +157,7 @@ from omnibase_infra.cli.model_delegate_timeout_refusal import (
 )
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
+    ModelOffRegistryCheck,
     OmnimarketDriftError,
     check_omnimarket_drift,
 )
@@ -442,6 +443,22 @@ def _unattributed_reason(result: ModelDelegateTerminal) -> str:
     )
 
 
+def _drift_guard_receipt_block(
+    drift_guard: ModelOffRegistryCheck | None,
+) -> dict[str, object]:
+    """The off-registry drift verdict, as a receipt fragment (OMN-17255).
+
+    Present exactly when the guard ran OFF-REGISTRY -- i.e. on a machine with
+    no canonical clone, where the stderr verdict line is the only other place
+    the fact appears and is gone the moment the terminal scrolls. On a registry
+    machine the guard returns ``None`` and this contributes no key at all, so
+    every receipt written today stays byte-identical.
+    """
+    if drift_guard is None:
+        return {}
+    return {"drift_guard": drift_guard.as_receipt_fields()}
+
+
 def _write_unattributed_run_files(
     *,
     envelope: dict[str, object],
@@ -450,6 +467,7 @@ def _write_unattributed_run_files(
     prompt: str,
     task_type: str,
     task_type_resolution: str,
+    drift_guard: ModelOffRegistryCheck | None = None,
 ) -> None:
     """Persist a terminally-failed delegation that attributed no route.
 
@@ -487,6 +505,7 @@ def _write_unattributed_run_files(
                 "cost_usd": cost_usd,
                 "attempts": _attempt_evidence(result),
                 "receipt": envelope,
+                **_drift_guard_receipt_block(drift_guard),
             },
             indent=2,
             sort_keys=True,
@@ -526,6 +545,7 @@ def _write_local_run_files(
     prompt: str,
     task_type: str,
     task_type_resolution: str | None = None,
+    drift_guard: ModelOffRegistryCheck | None = None,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -583,6 +603,7 @@ def _write_local_run_files(
             prompt=prompt,
             task_type=task_type,
             task_type_resolution=task_type_resolution,
+            drift_guard=drift_guard,
         )
         return
 
@@ -623,6 +644,7 @@ def _write_local_run_files(
                 "routing_tier": routing_tier,
                 "status": envelope.get("status"),
                 "receipt": envelope,
+                **_drift_guard_receipt_block(drift_guard),
             },
             indent=2,
             sort_keys=True,
@@ -1504,7 +1526,12 @@ def run_delegate(
     # Runs FIRST, before any bus probe or payload write, so a drifted venv
     # never produces a receipt that could be mistaken for evidence.
     try:
-        check_omnimarket_drift(
+        # OMN-17255: the return value is the OFF-REGISTRY verdict, present only
+        # on a machine with no canonical clone. It is carried into the receipt
+        # so a customer can read after the fact which check this run got, and
+        # is None on a registry machine -- where the commit comparison ran and
+        # the receipt is unchanged.
+        drift_guard_check = check_omnimarket_drift(
             omni_home=str(omni_home) if omni_home else None,
             allow_drift=allow_drift,
             # OMN-17190: heal in-flight instead of handing a human a command to
@@ -1723,6 +1750,7 @@ def run_delegate(
                         prompt=prompt,
                         task_type=resolved_task_type,
                         task_type_resolution=task_class.resolution.value,
+                        drift_guard=drift_guard_check,
                     ),
                 )
         except DelegateTimeoutExceededError as exc:
