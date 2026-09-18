@@ -13,6 +13,7 @@ ARG RUNNER_VERSION=2.336.0
 ARG GH_VERSION=2.67.0
 ARG KUBECTL_VERSION=1.32.1
 ARG AWSCLI_VERSION=2.36.29
+ARG TRIVY_VERSION=0.74.0
 # uv pinned to the shared CI env (canary) version so the image binding is truthful.
 ARG UV_VERSION=0.6.14
 # Bound runner image identity (binding, not a human label). Pass via:
@@ -30,6 +31,7 @@ ARG RUNNER_VERSION
 ARG GH_VERSION
 ARG KUBECTL_VERSION
 ARG AWSCLI_VERSION
+ARG TRIVY_VERSION
 ARG UV_VERSION
 ARG OMNI_RUNNER_IMAGE_IDENTITY
 ARG OMNI_RUNNER_IMAGE_VERSION
@@ -55,6 +57,10 @@ ARG UV_ARCH_amd64=x86_64-unknown-linux-gnu
 ARG UV_ARCH_arm64=aarch64-unknown-linux-gnu
 ARG AWS_ARCH_amd64=x86_64
 ARG AWS_ARCH_arm64=aarch64
+ARG TRIVY_ARCH_amd64=Linux-64bit
+ARG TRIVY_ARCH_arm64=Linux-ARM64
+ARG TRIVY_SHA256_amd64=2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+ARG TRIVY_SHA256_arm64=b94ce1976bbf3c15b514b605ee88be7c6d94a29be2302847ff01cb794d47aad5
 ARG RUNNER_ARCH_amd64=x64
 ARG RUNNER_ARCH_arm64=arm64
 
@@ -221,6 +227,42 @@ RUN tmp_dir="$(mktemp -d)" \
     && "${tmp_dir}/aws/install" --bin-dir /usr/local/bin \
     && rm -rf "${tmp_dir}" \
     && aws --version
+
+# Install Trivy (OMN-18476)
+#
+# WHY IN THE IMAGE, when install-yq, install-kustomize and
+# install-session-manager-plugin are all composite actions instead. Those four
+# siblings chose a job-time download because baking a tool in costs a fleet
+# recreate, measured at about three hours, for a download that takes a second.
+# That trade does not apply here. The only consumer is
+# omninode_infra deploy-onex-prod.yml::promote-to-prod, which runs on
+# `omnibase-prod-deploy` -- a class whose containers do not exist yet, so they
+# are built from this image rather than recreated onto it. Existing
+# `omninode-runner-N` containers keep the image they booted with and are
+# untouched until they are recreated for some other reason.
+#
+# WHY IT MATTERS AT ALL. That job installed Trivy with `sudo apt-get`, `wget`,
+# `sudo gpg` and `sudo tee`. This image ships no wget and grants the runner
+# user a sudoers entry covering exactly one `rm -rf`, so that single step was
+# the only thing in the job's forty-seven that the fleet refused
+# (OMN-18452 measured it: one test red out of 191). Installing here deletes the
+# step instead of rewriting it.
+#
+# The checksum is verified per architecture from the release's own
+# checksums.txt, not taken from `latest/`, and `trivy --version` fails the
+# BUILD rather than a production deploy if the binary does not execute.
+RUN tmp_dir="$(mktemp -d)" \
+    && trivy_arch_var="TRIVY_ARCH_${TARGETARCH}" && trivy_arch="${!trivy_arch_var}" \
+    && trivy_sha_var="TRIVY_SHA256_${TARGETARCH}" && trivy_sha="${!trivy_sha_var}" \
+    && [ -n "${trivy_arch}" ] && [ -n "${trivy_sha}" ] \
+        || { echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1; } \
+    && omni-curl -o "${tmp_dir}/trivy.tar.gz" \
+        "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_${trivy_arch}.tar.gz" \
+    && echo "${trivy_sha}  ${tmp_dir}/trivy.tar.gz" | sha256sum -c - \
+    && tar -xzf "${tmp_dir}/trivy.tar.gz" -C "${tmp_dir}" trivy \
+    && install -m 0755 "${tmp_dir}/trivy" /usr/local/bin/trivy \
+    && rm -rf "${tmp_dir}" \
+    && trivy --version
 
 # Create non-root runner user and add to docker group for socket access
 RUN groupadd --gid 1001 runner \

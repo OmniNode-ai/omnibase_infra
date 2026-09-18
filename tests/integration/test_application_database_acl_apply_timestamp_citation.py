@@ -57,3 +57,55 @@ def test_timestamp_consent_citation_resolves_after_ledger_roll(
     assert consent.lane == "omn15355-change-window"
     assert consent.ledger_path.endswith("LEDGER_2026-09-15-split.md")
     assert consent.line_number == 3
+
+
+def test_a_symlinked_archive_entry_is_refused_end_to_end(tmp_path: Path) -> None:
+    """A planted symlink must not authorise a live privilege change.
+
+    The archive glob restricts the NAME a candidate may have; it does not
+    restrict what that name points at, and ``read_text`` follows symlinks. This
+    exercises the whole resolution path the ACL apply uses, with a link that
+    matches the roll pattern exactly and points at a real consent row outside
+    the tree.
+    """
+    from omnibase_infra.validation.application_database_acl_apply import (
+        AclApplyRefusalError,
+    )
+
+    ledger = _ledger(tmp_path, "header", "2026-09-01T00:00:00Z | ROW | lane=x")
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    planted = tmp_path / "planted.md"
+    planted.write_text(_CONSENT_ROW + "\n", encoding="utf-8")
+    (archive_dir / f"{ledger.stem}_2026-09-15-split.md").symlink_to(planted)
+
+    with pytest.raises(AclApplyRefusalError, match="opens with the timestamp"):
+        resolve_consent_citation(
+            f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+        )
+
+
+def test_a_symlinked_archive_directory_is_refused_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """The directory can be the link, and an entry-only check passes on it.
+
+    Every entry inside a symlinked directory resolves consistently, so checking
+    entries alone reads a tree somewhere else entirely while looking correct.
+    """
+    from omnibase_infra.validation.application_database_acl_apply import (
+        AclApplyRefusalError,
+    )
+
+    ledger = _ledger(tmp_path, "header", "2026-09-01T00:00:00Z | ROW | lane=x")
+    planted_dir = tmp_path / "planted_archive"
+    planted_dir.mkdir()
+    (planted_dir / f"{ledger.stem}_2026-09-15-split.md").write_text(
+        _CONSENT_ROW + "\n", encoding="utf-8"
+    )
+    (tmp_path / "archive").symlink_to(planted_dir, target_is_directory=True)
+
+    with pytest.raises(AclApplyRefusalError, match="opens with the timestamp"):
+        resolve_consent_citation(
+            f"{ledger}@{_CONSENT_STAMP}", ticket="OMN-15355", ledger_root=tmp_path
+        )

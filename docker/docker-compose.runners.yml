@@ -1793,6 +1793,109 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  # ---------------------------------------------------------------------------
+  # omninode-prod-deploy-runner-1 -- OMN-18476: the production deploy vantage.
+  #
+  # Exists for one job: omninode_infra deploy-onex-prod.yml::promote-to-prod,
+  # the production promotion itself. Nothing else carries the
+  # `omnibase-prod-deploy` label, and this container does not carry
+  # `omnibase-ci`, so the set of things that ever execute here is that one
+  # workflow.
+  #
+  # WHY IT IS NOT ON THE GENERAL POOL. Operator ruling 2026-09-16, verbatim
+  # "OK" to the recommendation "the dedicated runner class, not the fleet
+  # move". The job holds the onex-prod cluster-admin kubeconfig and an ECR
+  # session for the length of a deploy, up to sixty minutes. All sixty
+  # `omninode-runner-N` containers bind-mount the lab credentials directory
+  # AND the host docker socket, so putting it there would park the production
+  # credential on a shared persistent container beside lab credentials,
+  # reachable through a socket that is effective root on this host. The
+  # blocker to moving it was small -- one `sudo apt-get` Trivy step, measured
+  # at one red test out of 191 (OMN-18452) -- and is now gone, because the
+  # image installs Trivy at build time. The co-residency is what this class
+  # avoids.
+  #
+  # WHY IT HAD TO MOVE AT ALL. It was pinned to `ubuntu-latest`, and no
+  # private-repository job pinned to a hosted label has started anywhere in
+  # the organisation since 2026-09-02 -- no runner, zero steps, three seconds.
+  # This workflow has not been dispatched since 2026-08-30, so nobody had
+  # found out. It could not start where it was.
+  #
+  # WHAT IS DELIBERATELY ABSENT, each line load-bearing:
+  #   - no ${RUNNER_LAB_CREDENTIALS_HOST_DIR} mount  (the k3s reader token)
+  #   - no KUBECONFIG                                (the job fetches its own
+  #     over SSM, scoped to the cluster it is deploying, for the run only)
+  #   - no /var/run/docker.sock                      (a container holding both
+  #     the socket and the prod kubeconfig is one object from which the whole
+  #     lab and production are reachable; the entrypoint's docker-GID fixup
+  #     no-ops when the socket is absent and the disk-admission self-pause
+  #     degrades to a logged skip)
+  #   - no group_add for the docker GID              (nothing to join)
+  # Pinned by tests/ci/test_prod_deploy_runner_credential_free_omn18476.py,
+  # which asserts each absence against the resolved compose config AND carries
+  # a positive control proving a fleet runner still has all of them.
+  #
+  # NOT ONE-SHOT, stated rather than implied. entrypoint.sh registers once and
+  # then supervises a long-lived run.sh; there is no `--ephemeral` path to
+  # pass. A genuinely ephemeral runner needs `config.sh --ephemeral`, a
+  # re-register-per-job cycle in place of that supervision loop, and a fresh
+  # registration token each cycle. The isolation here is about what the
+  # container HOLDS, not how long it lives. Recreating it between deploys is a
+  # one-line operator action against this service name.
+  #
+  # CAPACITY. One. Production deploys are serial by construction and the
+  # workflow carries its own concurrency; a second would be idle cost against
+  # the sixty-runner fleet's share of a 32-core host.
+  #
+  # CREATION IS ADDITIVE, and this is the part to get right. It joins the
+  # existing compose project by name:
+  #   docker compose -f docker/docker-compose.runners.yml \
+  #     up -d --no-deps omninode-prod-deploy-runner-1
+  # Never `--force-recreate` and never `--remove-orphans` against this file:
+  # either turns an additive create into the fleet-wide recreate that costs
+  # about three hours and cannot be parallelised.
+  #
+  # MONITORING. runner-monitor.sh scopes its detection loop and its
+  # remediation targets to `^omninode-runner-[0-9]+$`, so this name is
+  # invisible to both. That is deliberate for auto-bounce: an automated bounce
+  # of the container mid-deploy would kill a production rollout. Alert-only
+  # coverage for this name is a follow-up, not a silent omission.
+  omninode-prod-deploy-runner-1:
+    image: omninode-runner:latest
+    container_name: omninode-prod-deploy-runner-1
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    environment:
+      RUNNER_LABELS: self-hosted,omnibase-prod-deploy,linux,x64,arch-amd64
+      RUNNER_NAME: omninode-prod-deploy-runner-1
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      UV_CONCURRENT_DOWNLOADS: "1"
+      UV_CONCURRENT_BUILDS: "1"
+      UV_CONCURRENT_INSTALLS: "1"
+      UV_HTTP_TIMEOUT: "600"
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - prod-deploy-runner-1-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 volumes:
   deploy-runner-creds:
     name: omninode-deploy-runner-creds
@@ -1814,6 +1917,11 @@ volumes:
     name: omninode-customer-plane-runner-1-creds
   customer-plane-runner-2-creds:
     name: omninode-customer-plane-runner-2-creds
+  # OMN-18476 -- own creds volume for the production deploy runner. A shared
+  # volume would let it adopt another runner's registration and with it
+  # another runner's label set, which is the entire access boundary here.
+  prod-deploy-runner-1-creds:
+    name: omninode-prod-deploy-runner-1-creds
   runner-1-creds:
     name: omninode-runner-1-creds
   runner-2-creds:
