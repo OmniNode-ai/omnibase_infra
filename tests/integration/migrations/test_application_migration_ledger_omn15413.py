@@ -19,6 +19,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,20 @@ def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def _socket_dir() -> str:
+    """A short, writable directory for the cluster's socket and lock file.
+
+    Deliberately NOT ``tmp_path_factory``: a unix socket path is capped at 103
+    bytes, and pytest's own temp layout
+    (``/private/var/folders/<20>/<28>/T/pytest-of-<user>/pytest-<n>/<name>0/``)
+    already spends more than that before the ``.s.PGSQL.<port>`` filename is
+    appended, so a cluster started there dies with "Unix-domain socket path is
+    too long". ``mkdtemp`` with a short prefix keeps the whole path well under
+    the cap on both macOS and the Linux runner. The caller removes it.
+    """
+    return tempfile.mkdtemp(prefix="pg16-")
 
 
 @dataclass(frozen=True)
@@ -123,6 +138,7 @@ def pg16(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pg16Cluster]:
 
     cluster_dir = tmp_path_factory.mktemp("omn15413-pg16")
     data_dir = cluster_dir / "data"
+    socket_dir = _socket_dir()
     port = _free_port()
     init = subprocess.run(
         [
@@ -140,6 +156,7 @@ def pg16(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pg16Cluster]:
         check=False,
     )
     if init.returncode != 0:
+        shutil.rmtree(socket_dir, ignore_errors=True)
         pytest.fail(f"PostgreSQL 16 initdb failed: {init.stderr}")
 
     start = subprocess.run(
@@ -147,8 +164,16 @@ def pg16(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pg16Cluster]:
             str(bin_dir / "pg_ctl"),
             "-D",
             str(data_dir),
+            # OMN-18762: -k pins the unix-socket directory at the short,
+            # writable per-cluster dir above. Without it the server falls back to its
+            # packaged compile-time default (/var/run/postgresql on the pgdg
+            # Ubuntu build the fleet runner carries), which the runner user
+            # cannot write, so it dies with "could not create lock file ...
+            # Permission denied" before it ever binds TCP. Connections below
+            # are TCP on 127.0.0.1; this directory only ever names the socket
+            # and its lock file.
             "-o",
-            f"-F -h 127.0.0.1 -p {port}",
+            f"-F -h 127.0.0.1 -p {port} -k {socket_dir}",
             "-l",
             str(cluster_dir / "postgres.log"),
             "-w",
@@ -166,7 +191,8 @@ def pg16(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pg16Cluster]:
             if postgres_log.is_file()
             else ""
         )
-        pytest.skip(
+        shutil.rmtree(socket_dir, ignore_errors=True)
+        pytest.fail(
             "PostgreSQL 16 binaries are present but an ephemeral cluster could "
             f"not start; pg_ctl stderr={start.stderr!r}; postgres.log={log_text!r}"
         )
@@ -189,6 +215,7 @@ def pg16(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pg16Cluster]:
             timeout=30,
             check=False,
         )
+        shutil.rmtree(socket_dir, ignore_errors=True)
 
 
 def _declarations() -> list[list[str]]:
