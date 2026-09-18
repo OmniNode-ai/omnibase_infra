@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-worktree-prune.timer — triggers the .201 ledger-claim-aware worktree prune
+# (OMN-18688).
+#
+# Systemd USER timer, following the onex-disk-gc.timer pattern.
+#
+# WHY DAILY AND NOT HOURLY, AND WHY NOT EVERY TWO MINUTES
+# -------------------------------------------------------
+# The retired onex-worktree-reaper.timer fired every 2 minutes because it was
+# event-shaped: it polled a pr-merged projection and reaped what that projection
+# named, so a short period bounded the lag between a merge and its reap. This
+# pass is not event-shaped. It walks the whole registry and asks a question of
+# every worktree, which costs tens of minutes at registry scale, so a 2-minute
+# period would overlap itself continuously and an hourly one would spend most of
+# the host's day inside a maintenance scan for no benefit — a worktree that
+# became removable at 09:00 loses nothing by being removed at 04:30 tomorrow.
+#
+# 04:30 local matches the Mac's morning-worktree-prune slot, so the two hosts'
+# prune windows line up and a human reading either report is reading the same
+# kind of artifact from the same part of the day.
+#
+# Install on .201 (user scope, no sudo):
+#   bash deploy/disk-gc/install-worktree-prune.sh
+#
+# Check:
+#   systemctl --user list-timers onex-worktree-prune.timer
+
+[Unit]
+Description=ONEX .201 ledger-claim-aware worktree prune timer (OMN-18688)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+# Spread a little so it never lines up exactly with another scheduled job.
+RandomizedDelaySec=5min
+# Fire a missed run on resume (host sleep, reboots). A prune that was skipped is
+# a prune that did not happen; the pass is idempotent, so catching up is free.
+Persistent=true
+Unit=onex-worktree-prune.service
+
+[Install]
+WantedBy=timers.target

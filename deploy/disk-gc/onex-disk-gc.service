@@ -5,9 +5,13 @@
 #
 # A systemd USER unit (NOT a lane container). One-shot maintenance run, triggered
 # by onex-disk-gc.timer. Runs three conservative passes in order:
-#   1. worktree-gc.sh   — remove merged+clean worktrees (drives prune-worktrees.sh)
-#   2. disk-gc.sh       — conservative docker/builder/image GC honoring keep-list
+#   1. disk-gc.sh       — conservative docker/builder/image GC honoring keep-list
+#   2. docker-volume-gc.sh — unused anonymous + ephemeral boot volumes only
 #   3. disk-watermark-check.sh — emit bus alert if /data crosses the watermark
+#
+# Worktree GC is NO LONGER one of them: it moved to onex-worktree-prune.service
+# under OMN-18688, because it needed a ledger-CLAIM-aware predicate this unit's
+# hourly cadence and fire-and-forget shape were the wrong home for.
 #
 # Install (on .201, as the runtime user — NO sudo, user scope):
 #   bash deploy/disk-gc/install-disk-gc.sh
@@ -36,8 +40,24 @@ EnvironmentFile=-%h/.omnibase/.env
 
 ExecStartPre=/bin/mkdir -p %h/.local/log/onex
 
-# 1. Merged-worktree GC (drives the canonical prune-worktrees.sh safety logic).
-ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/worktree-gc.sh --execute --worktrees-root /data/omninode/omni_worktrees
+# 1. RETIRED, OMN-18688 — worktree GC moved to onex-worktree-prune.service.
+#
+# This line used to run worktree-gc.sh, which drives omniclaude's
+# prune-worktrees.sh: that predicate removes a clean, pushed, merged worktree
+# with `git worktree remove --force` and reads docs/tracking/ROLLING_WORK_LEDGER.md
+# nowhere. Clean-and-pushed-and-merged is exactly the state a LIVE lane occupies
+# between its push and its post-merge verification, which is the hazard OMN-15551
+# measured. The replacement additionally requires no open ledger CLAIM row and
+# drops --force so git re-checks cleanliness itself.
+#
+# It also passed --worktrees-root /data/omninode/omni_worktrees, which is missing
+# the omni_home path segment: that directory holds one stale entry while the real
+# root holds 163. This pass has therefore never removed a single real worktree on
+# this host, which is why retiring it reclaims nothing and regresses nothing.
+#
+# Deliberately deleted rather than commented out as a runnable line: a commented
+# ExecStart is one someone uncomments without reading why it was turned off.
+# Disposition and evidence: deploy/disk-gc/README-worktree-prune.md
 
 # 2. Conservative docker/disk GC honoring the versioned keep-list.
 ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/disk-gc.sh --execute
