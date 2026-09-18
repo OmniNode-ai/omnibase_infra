@@ -209,8 +209,19 @@ def test_canonical_none_when_git_invocation_fails(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_drift_check_fails_open_when_not_installed_and_no_canonical_clone() -> None:
-    # Neither side determinable (e.g. CI runner, no $OMNI_HOME) -- fails open.
+def test_no_canonical_clone_takes_the_off_registry_branch_and_says_so(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """OMN-17255 changed this case's PREMISE, so the test changed with it.
+
+    It used to assert "fails open": no canonical clone and no installed
+    omnimarket returned in silence. Silence is what the ticket removed -- it is
+    indistinguishable from a guard that never ran. The case still must not
+    raise on an environment it cannot fault, and it must now SAY which check it
+    made. The installed environment is bound here rather than read from
+    whatever venv happens to be running, so the assertion is about the branch
+    taken and not about this host's packages.
+    """
     with (
         patch(
             "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
@@ -220,8 +231,23 @@ def test_drift_check_fails_open_when_not_installed_and_no_canonical_clone() -> N
             "omnibase_infra.cli.omnimarket_drift_guard.canonical_local_omnimarket_commit",
             return_value=None,
         ),
+        patch(
+            "omnibase_infra.cli.omnimarket_drift_guard.installed_distribution_metadata",
+            return_value=None,
+        ),
     ):
-        check_omnimarket_drift()  # must not raise
+        check = check_omnimarket_drift()  # must not raise
+
+    assert check is not None
+    assert check.verdict is guard.EnumOffRegistryVerdict.SKIPPED
+    emitted = [
+        line
+        for line in capsys.readouterr().err.splitlines()
+        if line.startswith("drift_guard:")
+    ]
+    assert len(emitted) == 1, emitted
+    assert "mode=off-registry" in emitted[0]
+    assert "verdict=SKIPPED" in emitted[0]
 
 
 def test_drift_check_raises_when_not_installed_but_canonical_clone_present() -> None:
