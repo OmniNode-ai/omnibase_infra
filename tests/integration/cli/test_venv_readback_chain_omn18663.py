@@ -23,8 +23,10 @@ believing uv's exit status.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -119,6 +121,44 @@ def _make_omni_home(root: Path, *, version: str) -> tuple[Path, str]:
     return omni_home, _git(omni_home / "omnimarket", "rev-parse", "HEAD")
 
 
+def _seed_packaging(site_packages: Path) -> None:
+    """Give the synthetic venv the ``packaging`` that every real one carries.
+
+    ``venv --without-pip`` leaves site-packages EMPTY, and
+    ``scripts/venv_readback.py`` runs INSIDE the target interpreter and imports
+    ``packaging`` to evaluate the packaged floors each installed distribution
+    declares (OMN-18752). With it absent the floors row reads UNREADABLE, the
+    whole readback is INDETERMINATE, and the chain refuses a repair that did in
+    fact land.
+
+    That refusal is the readback being CORRECT about a venv no real co-install
+    produces: ``uv pip install`` puts ``packaging`` in every venv this chain
+    actually targets, so an empty one is unrepresentative of the thing under
+    test. The fixture is what is wrong, not the fail-closed readback -- do not
+    relax the assertion to make this pass.
+
+    Copied out of the running interpreter rather than installed from an index,
+    which keeps the fixture offline and hermetic like the rest of this file.
+    """
+    spec = importlib.util.find_spec("packaging")
+    if spec is None or spec.origin is None:
+        raise RuntimeError(
+            "the interpreter running these tests has no 'packaging'; it cannot "
+            "seed the synthetic venv with the distribution a real co-install "
+            "venv always carries"
+        )
+    package_dir = Path(spec.origin).parent
+    shutil.copytree(package_dir, site_packages / package_dir.name)
+
+    # The metadata too, so the seeded venv reads back the way a real install
+    # does rather than as an importable package no distribution claims.
+    dist_info = next(
+        iter(sorted(package_dir.parent.glob("packaging-*.dist-info"))), None
+    )
+    if dist_info is not None:
+        shutil.copytree(dist_info, site_packages / dist_info.name)
+
+
 def _make_real_venv(root: Path) -> tuple[Path, Path]:
     """A real venv. Returns (its python, its site-packages)."""
     venv = root / "target-venv"
@@ -129,6 +169,7 @@ def _make_real_venv(root: Path) -> tuple[Path, Path]:
     )
     python_bin = venv / "bin" / "python"
     site_packages = next((venv / "lib").glob("python3.*/site-packages"))
+    _seed_packaging(site_packages)
     return python_bin, site_packages
 
 
