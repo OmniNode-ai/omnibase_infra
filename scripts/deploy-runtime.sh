@@ -4132,12 +4132,15 @@ main() {
         # dev lane's containers name the clone's two compose files in their own
         # com.docker.compose.project.config_files label.
         local readback_target="${deploy_target}"
-        if [[ ! -f "${readback_target}/docker/docker-compose.infra.yml" ]]; then
+        local -a readback_compose_args
+        resolve_compose_file_args readback_compose_args "${readback_target}" "${compose_project}"
+        if [[ ! -f "${readback_compose_args[1]}" ]]; then
             log_warn "Readback-only: ${readback_target}/docker/ does not exist on this host."
             log_warn "  Reading the lane's compose topology from the clone instead: ${repo_root}/docker/"
             readback_target="${repo_root}"
+            resolve_compose_file_args readback_compose_args "${readback_target}" "${compose_project}"
         fi
-        if [[ ! -f "${readback_target}/docker/docker-compose.infra.yml" ]]; then
+        if [[ ! -f "${readback_compose_args[1]}" ]]; then
             log_error "Readback-only: no compose topology at ${readback_target}/docker/."
             log_error "  Cannot resolve the lane's services. Refusing to report a readback result."
             exit 1
