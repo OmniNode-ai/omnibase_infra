@@ -58,6 +58,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -163,27 +164,34 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_OK
 
+    # OMN-18769: `injected_broker` is REQUIRED by the resolver and passing it is
+    # not a formality -- it is the silent-drift guard from OMN-14800. When the
+    # environment carries a broker address AND the overlay declares one, the
+    # resolver refuses a mismatch rather than letting an out-of-band repoint
+    # publish to the wrong lane while the job stays green. An absent variable is
+    # the normal case here (the overlay is the authority), and "" is what the
+    # resolver reads as absent.
+    injected_broker = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "")
+
     try:
         trigger = _load_trigger_rebuild()
         overlay = trigger.load_ci_bus_overlay(args.bus_overlay)
-        broker = trigger.resolve_ci_bus_broker(overlay=overlay, lane=args.bus_lane)
+        broker = trigger.resolve_ci_bus_broker(
+            overlay=overlay, lane=args.bus_lane, injected_broker=injected_broker
+        )
         protocol, mechanism = trigger.resolve_ci_bus_security(
             overlay=overlay, lane=args.bus_lane
         )
     except Exception as exc:  # noqa: BLE001 — see the module docstring on exit 0
+        # This is also the in-memory-lane path, and deliberately so. An earlier
+        # revision carried its own `if not broker:` branch for that case; the
+        # resolver never returns an empty broker, it RAISES on an `inmemory`
+        # lane, so that branch was unreachable and the integration test proved
+        # it. One reporting path, reached by every unresolvable transport.
         _warn(
             f"cannot resolve the declared transport for lane {args.bus_lane!r}: {exc}"
         )
         return EXIT_OK
-
-    if not broker:
-        _warn(
-            f"CI bus lane {args.bus_lane!r} declares no cross-process broker "
-            "(in-memory lane) — the fact is NOT published"
-        )
-        return EXIT_OK
-
-    import os
 
     try:
         config = trigger.build_kafka_producer_config(
