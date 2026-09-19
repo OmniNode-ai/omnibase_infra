@@ -2126,6 +2126,11 @@ class DeployExecutor:
             }
 
         record.setdefault("recreated", False)
+        # A refusal JSON carries only ``result`` and ``reason``, so without this
+        # the pair this method's contract promises came back
+        # ``tag_advanced=None`` -- which reads as "not known" rather than "did
+        # not advance" in every log line and every consumer (OMN-18572).
+        record.setdefault("tag_advanced", False)
         if not record.get("tag_advanced"):
             # UNCHANGED and REFUSED both land here, and neither is a reason to
             # bounce a healthy container. Recreating on an unadvanced tag is the

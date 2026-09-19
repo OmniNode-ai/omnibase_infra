@@ -648,6 +648,20 @@ class LabOverlayApplier:
         #: ``_derive_pins`` and read by the readback. Empty until then, and the
         #: readback refuses an empty value rather than passing vacuously.
         self._runtime_digest: str = ""
+        #: The **omninode_infra** commit this apply archived its overlay from
+        #: (OMN-18572). ``None`` until ``archive_overlay`` resolves it, which
+        #: is what distinguishes "the apply never got to the source" from "the
+        #: apply ran".
+        #:
+        #: This is the lineage the four image tags carry, and it is NOT the
+        #: merged ``omnibase_infra`` sha the record is keyed by. Conflating the
+        #: two is why every pin delivery between 2026-09-17 and 2026-09-19
+        #: refused: the caller had only the record's key to hand and passed it
+        #: as an omninode_infra sha, so the search matched no image ever built.
+        #: Exposed as an attribute rather than returned by ``apply`` because
+        #: ``apply`` must keep returning a record path on every outcome --
+        #: including the ones where this never gets set.
+        self._manifest_sha: str | None = None
 
     # -- command plumbing ---------------------------------------------------
     def _run(
@@ -1069,6 +1083,18 @@ class LabOverlayApplier:
         )
 
     # -- the apply ----------------------------------------------------------
+    @property
+    def manifest_sha(self) -> str | None:
+        """The omninode_infra commit the last ``apply`` archived, or ``None``.
+
+        ``None`` means the apply did not reach its source resolution, so no
+        image was built from any lineage on this run and there is nothing to
+        deliver. A caller must treat that as a named non-delivery rather than
+        falling back to "the newest resident image, whatever its lineage" --
+        that fallback is the floating ref the pin path exists to remove.
+        """
+        return self._manifest_sha
+
     def apply(self, *, sha: str, stamp: str, correlation_id: str | None) -> Path:
         """Apply the overlay for one merged sha and write the record.
 
@@ -1089,10 +1115,16 @@ class LabOverlayApplier:
         binding = work / "store-binding.env"
         overlay_tree = work / "omninode_infra"
         pins: ModelLabOverlayPins | None = None
+        # OMN-18572: cleared per apply. A stale value carried from the previous
+        # apply would let a delivery pin the PREVIOUS merge's image and record
+        # it as this one's, which is the floating-ref failure the `--sha`
+        # restriction exists to remove.
+        self._manifest_sha = None
 
         try:
             self.materialise_kubeconfig(kubeconfig)
             manifest_sha = self.archive_overlay(overlay_tree)
+            self._manifest_sha = manifest_sha
             checks.append(
                 ModelLabOverlayCheck(
                     name="overlay_source_resolved",

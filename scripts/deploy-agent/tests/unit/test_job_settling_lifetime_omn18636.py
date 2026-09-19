@@ -177,8 +177,12 @@ class _BlockingApplier:
     def __init__(self, gate: threading.Event, running: threading.Event) -> None:
         self.gate = gate
         self.running = running
+        self.manifest_sha: str | None = None
 
     def apply(self, *, sha: str, stamp: str, correlation_id: str) -> str:
+        # OMN-18572: the real applier resolves this before anything that can
+        # block or fail, and the agent reads it after the apply returns.
+        self.manifest_sha = "b" * 40
         self.running.set()
         self.gate.wait(timeout=BLOCK_SECONDS * 4)
         self.running.clear()
