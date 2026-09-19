@@ -799,21 +799,28 @@ class HandlerGraph(
         from_is_element_id = isinstance(from_node_id, str) and ":" in from_node_id
         to_is_element_id = isinstance(to_node_id, str) and ":" in to_node_id
 
-        # Build appropriate match clauses
-        if from_is_element_id:
-            from_match = "MATCH (a) WHERE toString(id(a)) = $from_id"
-        else:
-            from_match = "MATCH (a) WHERE id(a) = $from_id"
-
-        if to_is_element_id:
-            to_match = "MATCH (b) WHERE toString(id(b)) = $to_id"
-        else:
-            to_match = "MATCH (b) WHERE id(b) = $to_id"
+        # Build the match conditions.
+        #
+        # OMN-18795: NOT two separate `MATCH (a) WHERE ... MATCH (b) WHERE ...`
+        # clauses. On Memgraph 2.18.1 that shape let `CREATE (a)-[r:TYPE
+        # $props]->(b)` silently create two brand-new, unlabeled, property-less
+        # nodes instead of reusing the matched `a`/`b` -- the relationship's own
+        # properties (e.g. `since`) came back correct because the CREATE clause
+        # itself is right, but the endpoints read back with none of the
+        # properties the matched nodes actually have, because they were never
+        # the matched nodes. A single `MATCH (a), (b) WHERE ... AND ...` binds
+        # both in one clause and CREATE reuses them, matching the shape already
+        # used successfully elsewhere in this file (e.g. delete_relationship's
+        # `MATCH ()-[r]->()`).
+        from_cond = (
+            "toString(id(a)) = $from_id" if from_is_element_id else "id(a) = $from_id"
+        )
+        to_cond = "toString(id(b)) = $to_id" if to_is_element_id else "id(b) = $to_id"
 
         props = dict(properties) if properties else {}
         query = f"""
-        {from_match}
-        {to_match}
+        MATCH (a), (b)
+        WHERE {from_cond} AND {to_cond}
         CREATE (a)-[r:{relationship_type} $props]->(b)
         RETURN r, toString(id(r)) as eid, id(r) as rid,
                toString(id(a)) as start_eid, toString(id(b)) as end_eid
