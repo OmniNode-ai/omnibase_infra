@@ -29,10 +29,31 @@ guard's narrow, per-ref door for exactly the refs it has cleared.
    (a branch a worktree still holds is not an orphan).
 2. It has NO OPEN pull request. A `gh` failure refuses the branch; an
    unanswerable question is not a pass.
-3. It is EITHER fully merged into the clone's upstream default branch, OR its
-   tip oid is recorded verbatim in the cited ledger, so the commit survives the
-   deletion as a resolvable reference.
+3. Its commit survives the deletion as a resolvable reference, on ANY of three
+   evidence paths: it is fully merged into the clone's upstream default branch;
+   or a MERGED pull request whose head ref is this branch has a head oid that
+   CONTAINS the tip; or the tip oid is recorded verbatim in the cited ledger.
 4. The consent citation resolves to an OPERATOR-CONSENT row.
+
+## Why the merged-pull-request path exists (OMN-18825)
+
+This org squash-merges. A squash merge writes a new commit onto the base and
+leaves the branch tip on a lineage the base never absorbs, so clause 3's first
+arm is false for almost every branch whose work has in fact landed. Measured
+2026-09-19 over 295 confirmed-merged branches: 274 were refused, and roughly
+7,227 local branches across 15 canonical clones had no path to clearance at all.
+
+The path is deliberately NOT a name match. A merged pull request named after a
+branch says the work landed; it says nothing about commits the branch carries
+that were never pushed. A name-only match deleted five unmerged branches once
+already (OMN-16564), so the bar is the pull request's own head oid containing
+the local tip -- equal to it, or a descendant of it in the clone's own object
+store. An oid the clone cannot resolve is an unanswerable question and refuses,
+on the same terms as a `gh` that errors.
+
+The lookup is LIVE, per branch, at the moment of deletion. A cached map is a
+statement about the past; between building one and acting on it a branch can
+acquire an open pull request or new local commits.
 
 Anything that cannot be established refuses the branch. Dry run is the default;
 `--execute` is required to delete.
@@ -169,6 +190,87 @@ def has_open_pr(slug: str, branch: str) -> bool:
     return bool(json.loads(result.stdout or "[]"))
 
 
+@dataclass(frozen=True)
+class MergedPullRequest:
+    """One MERGED pull request whose head ref name is exactly the branch."""
+
+    number: int
+    head_ref_name: str
+    head_ref_oid: str
+    merged_at: str | None
+
+
+def merged_pull_requests(slug: str, branch: str) -> list[MergedPullRequest]:
+    """Every MERGED pull request whose head ref IS this branch. Raises on failure.
+
+    `--head` is a server-side filter, and the head-ref name is re-checked here
+    rather than trusted: a filter that ever loosened would otherwise silently
+    widen the deletion set.
+    """
+    result = _run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            slug,
+            "--head",
+            branch,
+            "--state",
+            "merged",
+            "--limit",
+            "100",
+            "--json",
+            "number,headRefName,headRefOid,mergedAt",
+        ]
+    )
+    if result.returncode != 0:
+        raise RefusedError(
+            f"cannot determine merged pull requests for {slug} {branch}: "
+            f"{result.stderr.strip()}"
+        )
+    try:
+        rows = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise RefusedError(
+            f"merged pull request listing for {slug} {branch} is not JSON: {exc}"
+        ) from exc
+
+    found: list[MergedPullRequest] = []
+    for row in rows:
+        oid = str(row.get("headRefOid") or "")
+        if str(row.get("headRefName") or "") != branch:
+            continue
+        if not OID_RE.match(oid):
+            continue
+        found.append(
+            MergedPullRequest(
+                number=int(row.get("number") or 0),
+                head_ref_name=branch,
+                head_ref_oid=oid,
+                merged_at=row.get("mergedAt"),
+            )
+        )
+    return found
+
+
+def head_contains_tip(repo: Path, tip: str, head_oid: str) -> bool:
+    """True when `head_oid` IS the tip or has it as an ancestor.
+
+    False when the clone cannot resolve `head_oid` at all: reachability that
+    cannot be established is not reachability.
+    """
+    if head_oid == tip:
+        return True
+    present = _run(["git", "-C", str(repo), "cat-file", "-e", f"{head_oid}^{{commit}}"])
+    if present.returncode != 0:
+        return False
+    ancestor = _run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", tip, head_oid]
+    )
+    return ancestor.returncode == 0
+
+
 def tip_is_recorded(tip: str, ledger: Path) -> bool:
     """True when the full 40-hex tip appears verbatim in the ledger."""
     if not ledger.is_file():
@@ -221,9 +323,19 @@ def classify(
     if merged:
         return verdict(True, "merged_into_upstream_default", tip)
 
+    # The merged-pull-request path. Evaluated AFTER the open-pull-request
+    # refusal, so a branch carrying both an old merged pull request and a newer
+    # open one is still live work.
+    merged_prs = merged_pull_requests(slug, branch)
+    for pull_request in merged_prs:
+        if head_contains_tip(repo, tip, pull_request.head_ref_oid):
+            return verdict(True, "merged_pull_request", tip)
+
     if tip_is_recorded(tip, ledger):
         return verdict(True, "tip_recorded_in_ledger", tip)
 
+    if merged_prs:
+        return verdict(False, "merged_pr_head_does_not_contain_local_tip", tip)
     return verdict(False, "unmerged_and_tip_not_recorded", tip)
 
 

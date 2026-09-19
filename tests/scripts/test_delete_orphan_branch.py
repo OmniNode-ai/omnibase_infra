@@ -95,12 +95,40 @@ def _commit(repo: Path, env: dict[str, str], name: str) -> str:
     return _git("rev-parse", "HEAD", cwd=repo, env=env).stdout.strip()
 
 
-def _gh_shim(bin_dir: Path, *, prs: str = "[]", exit_code: int = 0) -> None:
-    """A `gh` on PATH that answers `pr list --json number` and nothing else."""
+def _gh_shim(
+    bin_dir: Path,
+    *,
+    prs: str = "[]",
+    exit_code: int = 0,
+    merged: str = "[]",
+    merged_exit_code: int = 0,
+) -> None:
+    """A `gh` on PATH that answers `pr list` and nothing else.
+
+    It reads `--state` out of its own argv and answers the OPEN and the MERGED
+    query differently, because the tool asks two distinct questions and a shim
+    that conflated them could not tell a merged pull request from an open one.
+    Each state carries its own exit code so a failure on one lookup is
+    distinguishable from a failure on the other.
+    """
     bin_dir.mkdir(parents=True, exist_ok=True)
     shim = bin_dir / "gh"
     shim.write_text(
         "#!/usr/bin/env bash\n"
+        "state=open\n"
+        "prev=\n"
+        'for arg in "$@"; do\n'
+        '  if [[ "$prev" == "--state" ]]; then state="$arg"; fi\n'
+        '  prev="$arg"\n'
+        "done\n"
+        'if [[ "$state" == "merged" ]]; then\n'
+        f"  if [[ {merged_exit_code} -ne 0 ]]; then\n"
+        '    echo "gh: simulated merged-lookup failure" >&2\n'
+        f"    exit {merged_exit_code}\n"
+        "  fi\n"
+        f"  printf '%s' '{merged}'\n"
+        "  exit 0\n"
+        "fi\n"
         f"if [[ {exit_code} -ne 0 ]]; then\n"
         '  echo "gh: simulated failure" >&2\n'
         f"  exit {exit_code}\n"
@@ -157,6 +185,8 @@ def world(tmp_path: Path) -> dict[str, object]:
     _gh_shim(bin_dir)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
 
+    dev_tip = _git("rev-parse", "origin/dev", cwd=clone, env=env).stdout.strip()
+
     return {
         "registry": registry,
         "clone": clone,
@@ -164,7 +194,50 @@ def world(tmp_path: Path) -> dict[str, object]:
         "bin": bin_dir,
         "ledger": ledger,
         "orphan_tip": orphan_tip,
+        "dev_tip": dev_tip,
     }
+
+
+def _descendant_commit(world: dict[str, object], parent: str) -> str:
+    """A commit object in the CLONE that has `parent` as its parent.
+
+    Built with plumbing so the working tree is never touched: it stands in for
+    the extra commits a pull request head can carry beyond what a local branch
+    holds, and it has to exist in the clone's object store for the reachability
+    check to be answerable at all.
+    """
+    tree = _git(
+        "rev-parse",
+        f"{parent}^{{tree}}",
+        cwd=world["clone"],  # type: ignore[arg-type]
+        env=world["env"],  # type: ignore[arg-type]
+    ).stdout.strip()
+    result = _git(
+        "commit-tree",
+        tree,
+        "-p",
+        parent,
+        "-m",
+        "pushed after the local tip",
+        cwd=world["clone"],  # type: ignore[arg-type]
+        env=world["env"],  # type: ignore[arg-type]
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def _merged_row(branch: str, oid: str, *, number: int = 4242) -> str:
+    """One row shaped like `gh pr list --state merged --json ...` returns."""
+    return json.dumps(
+        [
+            {
+                "number": number,
+                "headRefName": branch,
+                "headRefOid": oid,
+                "mergedAt": "2026-09-18T09:14:07Z",
+            }
+        ]
+    )
 
 
 def _run_tool(world: dict[str, object], *args: str) -> subprocess.CompletedProcess[str]:
@@ -344,6 +417,246 @@ def test_a_branch_a_live_worktree_still_holds_is_refused(
         report["branches"][0]["reason"] == "worktree_still_holds_branch"  # type: ignore[index]
     )
     assert _branch_exists(world, "merged")
+
+
+# ---------------------------------------------------------------------------
+# The merged pull request path (OMN-18825)
+# ---------------------------------------------------------------------------
+#
+# This org squash-merges. A squash merge writes a NEW commit onto the base and
+# leaves the branch tip on a lineage the base never absorbs, so `merged into the
+# upstream default` is false for almost every branch whose work has in fact
+# landed -- measured 2026-09-19, 274 of 295 confirmed-merged branches were
+# refused by the two original clauses. The merged pull request is the evidence
+# that actually exists for those.
+#
+# The reachability half is not decoration. A name-only merged-PR match deleted
+# five unmerged branches once already (OMN-16564): the branch NAME says the work
+# landed, and says nothing at all about commits that were never pushed. So the
+# bar is the pull request's own head oid CONTAINING the local tip.
+
+
+def test_a_merged_pull_request_whose_head_is_the_local_tip_admits_the_branch(
+    world: dict[str, object],
+) -> None:
+    """The ordinary squash-merge case: the branch was pushed, the pull request
+    merged, and the tip is exactly what the pull request carried."""
+    _gh_shim(
+        world["bin"],  # type: ignore[arg-type]
+        merged=_merged_row("orphan", world["orphan_tip"]),  # type: ignore[arg-type]
+    )
+
+    report = _report(_run_tool(world, "--branch", "orphan", "--execute"))
+
+    assert report["deleted"] == 1
+    row = report["branches"][0]  # type: ignore[index]
+    assert row["eligible"] is True
+    assert row["reason"] == "merged_pull_request"
+    assert not _branch_exists(world, "orphan")
+
+
+def test_a_merged_pull_request_head_ahead_of_the_local_tip_admits_the_branch(
+    world: dict[str, object],
+) -> None:
+    """The local tip need not EQUAL the pull request head, only be contained by
+    it: a branch left behind the ref that was actually merged has lost nothing
+    by being deleted."""
+    ahead = _descendant_commit(world, world["orphan_tip"])  # type: ignore[arg-type]
+    _gh_shim(world["bin"], merged=_merged_row("orphan", ahead))  # type: ignore[arg-type]
+
+    report = _report(_run_tool(world, "--branch", "orphan", "--execute"))
+
+    assert report["deleted"] == 1
+    assert report["branches"][0]["reason"] == "merged_pull_request"  # type: ignore[index]
+    assert not _branch_exists(world, "orphan")
+
+
+def test_a_merged_pull_request_not_containing_the_local_tip_refuses(
+    world: dict[str, object],
+) -> None:
+    """OMN-16564's defect, as a test. The pull request merged, and the local
+    branch still carries commits it never contained -- deleting it would destroy
+    them with no record anywhere."""
+    _gh_shim(
+        world["bin"],  # type: ignore[arg-type]
+        merged=_merged_row("orphan", world["dev_tip"]),  # type: ignore[arg-type]
+    )
+
+    report = _report(_run_tool(world, "--branch", "orphan", "--execute"))
+
+    assert report["deleted"] == 0
+    assert (
+        report["branches"][0]["reason"]  # type: ignore[index]
+        == "merged_pr_head_does_not_contain_local_tip"
+    )
+    assert _branch_exists(world, "orphan")
+
+
+def test_a_merged_pull_request_head_absent_from_the_clone_refuses(
+    world: dict[str, object],
+) -> None:
+    """An oid the clone has never seen cannot be shown to contain the tip. An
+    unanswerable reachability question refuses, exactly as an unanswerable
+    pull-request question does."""
+    _gh_shim(
+        world["bin"],  # type: ignore[arg-type]
+        merged=_merged_row("orphan", "0" * 40),
+    )
+
+    report = _report(_run_tool(world, "--branch", "orphan", "--execute"))
+
+    assert report["deleted"] == 0
+    assert (
+        report["branches"][0]["reason"]  # type: ignore[index]
+        == "merged_pr_head_does_not_contain_local_tip"
+    )
+    assert _branch_exists(world, "orphan")
+
+
+def test_a_merged_pull_request_for_a_different_head_ref_does_not_admit(
+    world: dict[str, object],
+) -> None:
+    """`--head` is a server-side filter the tool does not get to trust. A row
+    naming another ref is discarded even when its oid would have matched, so a
+    filter that ever loosened could not silently widen the deletion set."""
+    _gh_shim(
+        world["bin"],  # type: ignore[arg-type]
+        merged=_merged_row("some-other-branch", world["orphan_tip"]),  # type: ignore[arg-type]
+    )
+
+    report = _report(_run_tool(world, "--branch", "orphan", "--execute"))
+
+    assert report["deleted"] == 0
+    assert (
+        report["branches"][0]["reason"] == "unmerged_and_tip_not_recorded"  # type: ignore[index]
+    )
+    assert _branch_exists(world, "orphan")
+
+
+def test_an_open_pull_request_refuses_before_the_merged_lookup(
+    world: dict[str, object],
+) -> None:
+    """A branch can carry both a merged pull request and a newer open one. The
+    open one wins: the branch is live work whatever else happened to it."""
+    _gh_shim(
+        world["bin"],  # type: ignore[arg-type]
+        prs='[{"number":777}]',
+        merged=_merged_row("orphan", world["orphan_tip"]),  # type: ignore[arg-type]
+    )
+
+    report = _report(_run_tool(world, "--branch", "orphan", "--execute"))
+
+    assert report["deleted"] == 0
+    assert report["branches"][0]["reason"] == "open_pull_request"  # type: ignore[index]
+    assert _branch_exists(world, "orphan")
+
+
+def test_a_closed_unmerged_pull_request_does_not_admit_the_branch(
+    world: dict[str, object],
+) -> None:
+    """A closed-unmerged pull request answers the merged query with no rows.
+    Nothing landed, so nothing is evidence that the tip survives deletion."""
+    _gh_shim(world["bin"], merged="[]")  # type: ignore[arg-type]
+
+    report = _report(_run_tool(world, "--branch", "orphan", "--execute"))
+
+    assert report["deleted"] == 0
+    assert (
+        report["branches"][0]["reason"] == "unmerged_and_tip_not_recorded"  # type: ignore[index]
+    )
+    assert _branch_exists(world, "orphan")
+
+
+def test_a_gh_failure_on_the_merged_lookup_refuses(
+    world: dict[str, object],
+) -> None:
+    """Rule 16 again, on the new call. An errored merged lookup and a branch
+    with no merged pull request return the same empty list to a tool that
+    ignores the exit status."""
+    _gh_shim(world["bin"], merged_exit_code=1)  # type: ignore[arg-type]
+
+    report = _report(_run_tool(world, "--branch", "orphan", "--execute"))
+
+    assert report["deleted"] == 0
+    assert "refused" in report["branches"][0]["reason"]  # type: ignore[index]
+    assert "merged" in report["branches"][0]["reason"]  # type: ignore[index]
+    assert _branch_exists(world, "orphan")
+
+
+def test_the_merged_path_never_overrides_the_live_worktree_refusal(
+    world: dict[str, object],
+) -> None:
+    """The strongest evidence a branch has landed still does not make a branch
+    a live worktree is sitting on an orphan."""
+    linked = world["registry"] / "omni_worktrees" / "OMN-2" / "some_repo"  # type: ignore[operator]
+    assert (
+        _git(
+            "worktree",
+            "add",
+            str(linked),
+            "orphan",
+            cwd=world["clone"],  # type: ignore[arg-type]
+            env=world["env"],  # type: ignore[arg-type]
+        ).returncode
+        == 0
+    )
+    _gh_shim(
+        world["bin"],  # type: ignore[arg-type]
+        merged=_merged_row("orphan", world["orphan_tip"]),  # type: ignore[arg-type]
+    )
+
+    report = _report(_run_tool(world, "--branch", "orphan", "--execute"))
+
+    assert report["deleted"] == 0
+    assert (
+        report["branches"][0]["reason"] == "worktree_still_holds_branch"  # type: ignore[index]
+    )
+    assert _branch_exists(world, "orphan")
+
+
+def test_the_merged_path_still_requires_a_resolving_consent_citation(
+    world: dict[str, object],
+) -> None:
+    """A merged pull request is evidence the work landed. It is not
+    authorisation, and the tool does not let it stand in for one."""
+    _gh_shim(
+        world["bin"],  # type: ignore[arg-type]
+        merged=_merged_row("orphan", world["orphan_tip"]),  # type: ignore[arg-type]
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(TOOL),
+            "--repo",
+            str(world["clone"]),
+            "--consent",
+            "docs/tracking/LEDGER.md:1",
+            "--branch",
+            "orphan",
+            "--execute",
+        ],
+        env=scrub_git_location_env(world["env"]),  # type: ignore[arg-type]
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 3, result.stdout
+    assert _branch_exists(world, "orphan")
+
+
+def test_the_merged_path_is_dry_by_default(world: dict[str, object]) -> None:
+    _gh_shim(
+        world["bin"],  # type: ignore[arg-type]
+        merged=_merged_row("orphan", world["orphan_tip"]),  # type: ignore[arg-type]
+    )
+
+    report = _report(_run_tool(world, "--branch", "orphan"))
+
+    assert report["executed"] is False
+    assert report["eligible"] == 1
+    assert report["deleted"] == 0
+    assert _branch_exists(world, "orphan")
 
 
 # ---------------------------------------------------------------------------
