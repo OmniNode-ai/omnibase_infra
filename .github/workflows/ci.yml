@@ -1901,6 +1901,20 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_scheduled_run_failure_rate_omn18322.py -v --tb=short
 
+      - name: Check the alert's token source and no-fallback (OMN-18254)
+        run: |
+          echo "================================================================"
+          echo "Failure-Rate Alert Token Source (OMN-18254)"
+          echo "The alert authenticates with the minted onexbot App token -- the"
+          echo "only org App carrying administration:read, which its branch-"
+          echo "protection read requires -- scoped to exactly the repos it"
+          echo "sweeps, and its GH_TOKEN expression carries NO fallback."
+          echo "A fallback would not degrade: it would reproduce the 403 that"
+          echo "kept this alert from ever firing, one repository later and"
+          echo "invisibly. Read from parsed workflow structure, never text."
+          echo "================================================================"
+          uv run pytest tests/ci/test_alert_token_source_omn18254.py -v --tb=short
+
       - name: Check CI evidence-artifact policy (OMN-18247)
         run: |
           echo "================================================================"
