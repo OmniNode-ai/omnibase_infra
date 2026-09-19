@@ -670,7 +670,26 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # and rewrites no row; NOT NULL is deliberately kept, and the migration
     # RAISES rather than proceeding on a lane where that column is nullable, so
     # it can never trade a wrong tenant for a NULL one.
-    assert len(result.declarations) == 186
+    #
+    # 186 -> 188 for OMN-18774's pair,
+    # nodes/node_projection_delegation/0043_generation_events_drop_tenant_posture.sql
+    # and
+    # nodes/node_projection_registration/0007_node_service_registry_drop_tenant_posture.sql.
+    # Both relations are declared `schema: omninode_internal` by their owning
+    # contracts, so the runtime writes them through an operation class that
+    # refuses a tenant_id key and issues no set_config('app.tenant_id') at all --
+    # yet both carried a tenant_isolation policy predicated on exactly that GUC
+    # and a tenant_id column defaulting to the house tenant. The predicate was
+    # one no declared writer could satisfy, surviving only because the
+    # connection owns the table and relforcerowsecurity is off, and because it
+    # could not be satisfied the DDL authored the attribution instead. The
+    # operator ruled the end state on 2026-09-14
+    # (docs/tracking/ROLLING_WORK_LEDGER.md:654): an internal-classified
+    # relation receives no tenant stamping and no row-level security. Each
+    # migration drops the policy, disables RLS and drops the column inside ONE
+    # DO block, so the OMN-17288 window of "RLS enforcing, zero policies" cannot
+    # open between statements.
+    assert len(result.declarations) == 188
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
