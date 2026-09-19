@@ -85,6 +85,7 @@ _EXPECTED_PROFILE_INSTANCE_MAP = {
     # mutable; its DATA is its own (its own Postgres container and its own
     # namespaced volume), but the typed topology it renders is not lane-special.
     "lakshman": "local",
+    "dogfood": "local",
     "onex-dev": "onex-dev",
     "onex-prod": "onex-prod",
 }
@@ -100,6 +101,10 @@ _EXPECTED_PROFILE_INJECTION_SURFACES = {
     "lakshman": (
         "OmniNode-ai/omnibase_infra",
         "docker/docker-compose.lakshman.yml",
+    ),
+    "dogfood": (
+        "OmniNode-ai/omnibase_infra",
+        "docker/docker-compose.dogfood.yml",
     ),
     "onex-dev": (
         "OmniNode-ai/omninode_infra",
@@ -121,6 +126,7 @@ _EXPECTED_RUNTIME_POLICY_PROFILE_MAP = {
     # "runtime-policy profile coverage drift" rather than crashing a live
     # container at boot on an unresolvable ONEX_DATABASE_TOPOLOGY_PROFILE.
     "lakshman": "lakshman",
+    "dogfood": "dogfood",
 }
 SUPPORTED_TOPOLOGY_PROFILES = frozenset(_EXPECTED_PROFILE_INSTANCE_MAP)
 TOPOLOGY_PROFILE_INSTANCE_MAP = MappingProxyType(_EXPECTED_PROFILE_INSTANCE_MAP)

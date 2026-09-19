@@ -1,0 +1,35 @@
+# OMN-18693 repo-local deploy evidence for the isolated dogfood runtime lane.
+# The canonical receipt contract is onex_change_control/contracts/OMN-18693.yaml.
+schema_version: "1.0.0"
+ticket_id: "OMN-18693"
+title: "Create an isolated dogfood runtime lane"
+summary: >-
+  Adds the declared, private dogfood compose lane. It does not start or refresh the lane. The live probe remains pending until an operator-approved .201 deployment has captured the protected-lane baseline.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "The standalone compose render and lane-resolution checks pass."
+    command: >-
+      uv run pytest tests/ci/test_compose_required_env_coverage.py tests/integration/infra/test_dogfood_compose_render.py tests/scripts/test_deploy_runtime_lane_overlay.py -q
+  - kind: "manual"
+    description: >-
+      Before any dogfood deployment, record an immutable protected-lane snapshot using the command in the pending post-deploy DoD item. The post-deploy check compares that snapshot byte-for-byte after it proves dogfood health.
+    command: >-
+      ssh "${DOGFOOD_SSH_TARGET:?DOGFOOD_SSH_TARGET required}" 'set -euo pipefail; for project in omnibase-infra omnibase-infra-stability-test omnibase-infra-judge omnibase-infra-lakshman; do ids="$(docker ps -aq --filter "label=com.docker.compose.project=$project")"; test -n "$ids"; for id in $ids; do docker inspect --format "{{.Id}} {{.State.Status}} {{.State.Health.Status}} {{.State.StartedAt}}" "$id"; done; done | LC_ALL=C sort' > "${DOGFOOD_PROTECTED_LANE_BASELINE:?DOGFOOD_PROTECTED_LANE_BASELINE required}"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-dogfood-post-deploy-health-and-isolation"
+    description: >-
+      PENDING operator-approved deployment. On .201, verifies the dogfood runtime is healthy and its HTTP health endpoint responds, then compares every protected lane's container identity, state, health state, and start timestamp against the pre-action snapshot. This item makes no claim that the lane is running before this command is executed after deployment.
+    source: "manual"
+    execution_scope: "local_done_gate"
+    status: "pending"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          DOGFOOD_PROTECTED_LANE_BASELINE="${DOGFOOD_PROTECTED_LANE_BASELINE:?capture protected-lane baseline before deployment}"; ssh "${DOGFOOD_SSH_TARGET:?DOGFOOD_SSH_TARGET required}" 'set -euo pipefail; docker inspect omninode-dogfood-runtime --format "{{.State.Health.Status}}/{{.State.Health.FailingStreak}}" | grep -qx "healthy/0"; curl -fsS --max-time 5 http://127.0.0.1:49085/health >/dev/null; for project in omnibase-infra omnibase-infra-stability-test omnibase-infra-judge omnibase-infra-lakshman; do ids="$(docker ps -aq --filter "label=com.docker.compose.project=$project")"; test -n "$ids"; for id in $ids; do docker inspect --format "{{.Id}} {{.State.Status}} {{.State.Health.Status}} {{.State.StartedAt}}" "$id"; done; done | LC_ALL=C sort' | diff -u "$DOGFOOD_PROTECTED_LANE_BASELINE" -

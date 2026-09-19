@@ -117,6 +117,13 @@ RENDER_FIXTURES: tuple[RenderFixture, ...] = (
         path="tests/integration/infra/test_lakshman_compose_render.py",
         env_dicts=("RENDER_ONLY_SECRETS",),
     ),
+    # Dogfood is likewise a standalone lane file.  Keep it registered so a
+    # future change that layers the base compose file cannot silently miss
+    # required-environment coverage.
+    RenderFixture(
+        path="tests/integration/infra/test_dogfood_compose_render.py",
+        env_dicts=("RENDER_ONLY_SECRETS",),
+    ),
 )
 
 
