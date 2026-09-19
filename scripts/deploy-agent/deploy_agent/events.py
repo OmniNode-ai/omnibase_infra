@@ -582,6 +582,84 @@ class ModelRebuildRequested(BaseModel):
         return self
 
 
+class EnumRejectionReason(StrEnum):
+    """Why a command reached the rejection topic instead of running.
+
+    Every value was already a bare string literal at a ``_publish_rejected``
+    call site; naming them is what lets OMN-18143 AC6's requirement -- a
+    terminal event that says "superseded" distinguishably from a timeout and
+    from a rollback -- be a type rather than a convention about spelling.
+
+    ``SUPERSEDED`` is the only one that is not a refusal of the command: the
+    work it asked for IS being done, by the newer command named alongside it.
+    """
+
+    BUSY = "busy"
+    DUPLICATE = "duplicate"
+    IN_PROGRESS = "in_progress"
+    INVALID_PAYLOAD = "invalid_payload"
+    INVALID_SIGNATURE = "invalid_signature"
+    LANE_NOT_ALLOWED = "lane_not_allowed"
+    UNDECODABLE_PAYLOAD = "undecodable_payload"
+    SUPERSEDED = "superseded"
+
+
+class ModelRebuildRejected(BaseModel):
+    """The terminal event for a command this agent will not run (OMN-18143).
+
+    The wire shape is unchanged for every reason that predates this model: the
+    two supersession fields are written ONLY when set, so a rejection for
+    ``busy`` serialises byte-identically to the hand-built dict it replaces and
+    a consumer that predates this change parses it unchanged. The same
+    discipline ``ModelLabPassCheck.to_dict`` applies to its ``outcome`` key.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    correlation_id: UUID
+    reason: EnumRejectionReason
+    scope: Scope
+    #: Set on, and only on, a ``SUPERSEDED`` rejection. Both or neither: a
+    #: supersession that cannot name the commit that ran in its place is
+    #: indistinguishable from a command that was silently dropped, which is
+    #: the exact failure AC6 refuses.
+    superseded_by_sha: str | None = None
+    superseded_by_correlation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _supersession_fields_match_the_reason(self) -> ModelRebuildRejected:
+        named = self.superseded_by_sha is not None
+        if named != (self.superseded_by_correlation_id is not None):
+            msg = (
+                "superseded_by_sha and superseded_by_correlation_id stand or "
+                f"fall together; got sha={self.superseded_by_sha!r}, "
+                f"correlation_id={self.superseded_by_correlation_id!r}"
+            )
+            raise ValueError(msg)
+        if (self.reason is EnumRejectionReason.SUPERSEDED) != named:
+            msg = (
+                f"reason={self.reason.value!r} disagrees with the supersession "
+                f"fields (sha={self.superseded_by_sha!r}). Only a superseded "
+                "rejection may name a replacement, and every one must."
+            )
+            raise ValueError(msg)
+        return self
+
+    def to_wire(self) -> dict[str, object]:
+        """The JSON body published to :data:`TOPIC_REBUILD_REJECTED`."""
+        payload: dict[str, object] = {
+            "correlation_id": str(self.correlation_id),
+            "reason": self.reason.value,
+            "scope": self.scope.value,
+        }
+        if self.superseded_by_sha is not None:
+            payload["superseded_by_sha"] = self.superseded_by_sha
+            payload["superseded_by_correlation_id"] = str(
+                self.superseded_by_correlation_id
+            )
+        return payload
+
+
 class ModelRebuildCompleted(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID

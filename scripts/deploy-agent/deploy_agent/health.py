@@ -244,6 +244,23 @@ async def _job_handler(request: web.Request) -> web.Response:
             "settling_stage": (
                 job.settling_stage.value if job.settling_stage else None
             ),
+            # OMN-18143. The supersession, served where the post-merge lab
+            # guard already reads -- it polls this exact route for the
+            # acceptance timestamp (OMN-18573). A superseded command's own CI
+            # run has no other way to learn that the lane converged on a
+            # newer sha rather than on the one that run is about, and a
+            # receipt that cannot say so would read as a plain pass for a
+            # commit whose tree the lane never built.
+            "superseded_by_sha": job.superseded_by_sha,
+            "superseded_by_correlation_id": (
+                str(job.superseded_by_correlation_id)
+                if job.superseded_by_correlation_id
+                else None
+            ),
+            "superseded_count": job.superseded_count,
+            "superseded_correlation_ids": [
+                str(cid) for cid in job.superseded_correlation_ids
+            ],
         }
     )
 
