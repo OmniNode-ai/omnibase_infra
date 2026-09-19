@@ -1,8 +1,35 @@
 name: CI
 
 on:
+  # OMN-18835: `dev` is in this list so that a MERGE to `dev` proves the union
+  # it has just created. Until this landed, every job in this file ran only
+  # against a PR's own merge-base preview, never against `dev`'s own post-merge
+  # head -- so a break formed by the UNION of two individually-green PRs was
+  # structurally invisible here and surfaced only as collateral damage on some
+  # unrelated open PR that happened to pick the new head up as its base.
+  #
+  # Measured 2026-09-19, twice in two hours: #3818 + #3822 (12:58:39Z, fixed by
+  # #3833 at 14:14:13Z) and #3827 + #3829. Each PR was green alone, CI never saw
+  # the other's diff before merge, break-to-notice was 30m57s, and five of six
+  # open PRs were blocked meanwhile. Nothing notified anyone in either case.
+  #
+  # COST, STATED RATHER THAN HIDDEN. `dev` takes roughly 50 merges a day and a
+  # full run is ~20 minutes across ~48 jobs. The concurrency group below is what
+  # bounds this: a push run keys on `github.ref` (`refs/heads/dev`) with
+  # `cancel-in-progress: true`, so a burst of merges COALESCES onto the newest
+  # head instead of spending one full matrix per merge. That is also the right
+  # semantics for the question being asked -- "is dev's current head green?" --
+  # and it means a `cancelled` push run is a superseded non-verdict, never a
+  # green. The OMN-18836 monitor reads it that way on purpose.
+  #
+  # PR-evaluated semantics are untouched by this. Nothing below keys on
+  # `github.ref`, the `pull_request` trigger and its `types:` are unchanged, and
+  # `scripts/ci/ci_summary_gate.py` passes EXPECTED_EXTERNAL_CONTEXTS only when
+  # `--event-name` is `pull_request` -- so a push run asserts no PR-only
+  # external context and cannot acquire the OMN-17181 shape that made omniweb's
+  # push CI permanently red.
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
     branches: [main, dev]
     # OMN-16171: `edited` is NOT in this list, and must not be re-added. The
@@ -1997,7 +2024,25 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    if: needs.occ-preflight.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    # OMN-18835: NO EVENT GATE. This job used to read
+    # `&& (github.event_name == 'pull_request' || github.event_name ==
+    # 'merge_group')`, which made it report `skipped` on every push event -- and
+    # `detect-changes` below `needs:` it with no `if:` of its own, so that skip
+    # CASCADED: detect-changes skipped, `test-parallel` skipped, and the STRICT
+    # `CI Tests Gate` failed with "Test matrix skipped despite admitted PR /
+    # non-PR event". That is why all five of the most recent push runs on `main`
+    # (35330064052, 35283830211, 35229552408, 35206649514, 34918077396)
+    # concluded `failure` while every job that actually ran was green.
+    #
+    # The event gate was never load-bearing: the step below already resolves an
+    # empty PR number on a non-PR event and exits 0 by its own guard. Removing
+    # the gate converts a cascading skip into a two-second success and repairs
+    # push-to-`main` in the same change. Registering this job as skippable was
+    # always the intent -- `scripts/ci/ci_summary_gate.py` carries it in
+    # SKIPPABLE_GATE_JOBS with the comment "skips on push" -- but SKIPPABLE
+    # governs how the POLLER reads the job, and it cannot undo a `needs:`
+    # cascade, which GitHub evaluates before the poller ever sees the run.
+    if: needs.occ-preflight.result == 'success'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -2009,7 +2054,7 @@ jobs:
         run: |
           PR="${{ github.event.pull_request.number || github.event.merge_group.head_sha }}"
           if [[ -z "$PR" || "$PR" == "null" ]]; then
-            echo "No PR number available — skipping in merge_group context"
+            echo "No PR number available — nothing to sync on a push or merge_group event"
             exit 0
           fi
           bash scripts/validate-pr-contract-sync.sh "$PR"
@@ -3065,10 +3110,35 @@ jobs:
   # with flaky unit tests for signal. Self-hosted runners have Docker available;
   # public-fork runs fall back to ubuntu-latest which also has Docker.
   # ============================================================================
+  #
+  # OMN-18835: DELIBERATELY EXCLUDED FROM A PUSH TO `dev`, and the exclusion is
+  # the conservative choice rather than a judgement that boot health does not
+  # matter. This job has concluded `skipped` on every observable run of this
+  # workflow and has never once EXECUTED: on `pull_request` its own `if:`
+  # excludes it, on `push` it needs `tests-gate` which has failed on every run
+  # since the OMN-18835 cascade above was introduced, and there is no merge
+  # queue on `dev` for a `merge_group` event to arrive from. Repairing that
+  # cascade in this same change would therefore wake an unproven Docker-compose
+  # boot on ~50 merges a day, on the first day, with no evidence it can pass.
+  # A monitoring signal that is red for a reason unrelated to the break it
+  # exists to catch gets muted, and then the trigger gets reverted.
+  #
+  # So the scope here is exactly today's scope: `main` pushes, `merge_group`
+  # and `workflow_dispatch`, all three unchanged. `workflow_dispatch` is named
+  # explicitly because it is where the evidence for widening comes from: a
+  # deliberate manual run can now reach this job (the cascade repair makes
+  # `tests-gate` reachable), so someone can prove the boot green on demand.
+  # Enabling it on a `dev` push is a separate change that owes exactly that one
+  # green run, and it is a one-clause edit when someone has it.
   runtime-boot-smoke:
     name: Runtime Boot Smoke (compose)
     needs: [occ-preflight, tests-gate]
-    if: github.event_name != 'pull_request' && needs.occ-preflight.result == 'success' && needs.tests-gate.result == 'success'
+    if: >-
+      (github.event_name == 'merge_group'
+       || github.event_name == 'workflow_dispatch'
+       || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+      && needs.occ-preflight.result == 'success'
+      && needs.tests-gate.result == 'success'
     uses: ./.github/workflows/reusable-runtime-boot.yml
     with:
       mode: compose
