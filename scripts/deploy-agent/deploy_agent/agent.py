@@ -25,12 +25,17 @@ from deploy_agent.accept_backlog import (
     AcceptBacklogWatchdog,
     read_accept_queue,
 )
+from deploy_agent.coalesce import GitAncestryResolver, ModelSupersession
 from deploy_agent.consumer import DeployConsumer
 from deploy_agent.events import (
     TOPIC_REBUILD_REJECTED,
     DeployInProgressError,
+    EnumOnexApiDeliveryResult,
+    EnumRejectionReason,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
+    ModelOnexApiDelivery,
+    ModelRebuildRejected,
     ModelRebuildRequested,
     Phase,
     PhaseStatus,
@@ -47,7 +52,7 @@ from deploy_agent.executor import (
     resolve_prod_target_service,
 )
 from deploy_agent.health import create_health_app
-from deploy_agent.job_state import EnumJobSettlingStage, JobStore
+from deploy_agent.job_state import EnumJobSettlingStage, JobState, JobStore
 from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lab_overlay import (
     DEFAULT_APPLY_BUDGET_SECONDS,
@@ -156,6 +161,12 @@ LAB_OVERLAY_SOURCE_DIR = Path(
 #: it moves.
 JOB_POOL_MAX_WORKERS = 1
 
+#: Milliseconds a rejection publish may spend resolving broker metadata
+#: (OMN-18143). See the call site in ``_publish_rejection_event`` for the
+#: measurement this replaces and for why the cause is recorded rather than
+#: worked around here.
+REJECTION_PUBLISH_MAX_BLOCK_MS = 10_000
+
 
 class DeployAgent:
     def __init__(self, *, skip_self_update: bool = False):
@@ -164,6 +175,10 @@ class DeployAgent:
         self._state = "idle"
         self._shutdown = False
         self._current_git_sha = ""
+        #: OMN-18572: this job's onex-api pin delivery verdict, read by the
+        #: terminal payload. ``None`` means the delivery was never reached,
+        #: which is a different fact from one that ran and refused.
+        self._onex_api_delivery: ModelOnexApiDelivery | None = None
         self._skip_self_update = skip_self_update
         self._publish_cb = PublishCircuitBreaker()
         # Stamped at the top of the poll loop so the first idle check happens
@@ -346,6 +361,14 @@ class DeployAgent:
             allowed_lanes=self._allowed_lanes,
             self_update_hook=self._self_update_pre_accept,
             lag_sampler=self._lag_sampler,
+            # OMN-18143. Both halves of coalescing are injected rather than
+            # constructed inside the consumer: the ancestry fact comes from
+            # the deploy-source clone, which is the executor's concern, and
+            # the terminal event needs a producer, which is this class's. A
+            # consumer built without either -- every test that does not ask
+            # for coalescing -- folds nothing.
+            ancestry_resolver=GitAncestryResolver(REPO_DIR),
+            on_superseded=self._publish_superseded,
         )
 
         # Handle signals
@@ -562,7 +585,7 @@ class DeployAgent:
                 "Single-flight lock held — rejecting %s (in_progress)",
                 cmd.correlation_id,
             )
-            self._publish_rejected(cmd, reason="in_progress")
+            self._publish_rejected(cmd, reason=EnumRejectionReason.IN_PROGRESS)
             return
 
         # OMN-16442 job boundary: the job has a terminal status, its result has
@@ -589,6 +612,10 @@ class DeployAgent:
         # PREVIOUS job's commit, which this job never deployed. An unresolved sha
         # must read as unresolved.
         self._current_git_sha = ""
+        # OMN-18572: cleared per job for the same reason the sha is -- a
+        # verdict carried from the previous job would attach the previous
+        # merge's delivery to this merge's terminal event.
+        self._onex_api_delivery = None
 
         def on_phase_update(phase: Phase, status: PhaseStatus) -> None:
             self.job_store.update_phase(cid, phase, status)
@@ -741,7 +768,12 @@ class DeployAgent:
                 # Only the dev lane. A merge to `main` targets stability-test, which
                 # is a governed lane this agent's fence already refuses, and the lab
                 # overlay is not a stability surface.
-                self._apply_lab_overlay(cmd)
+                # OMN-18572: the apply is also where the DELIVERABLE LINEAGE
+                # comes from. The four lab image tags carry the overlay's own
+                # omninode_infra commit, never the merged omnibase_infra sha
+                # this job is keyed by, so the delivery below needs what the
+                # apply resolved rather than what the job is named after.
+                manifest_sha = self._apply_lab_overlay(cmd)
 
                 self.job_store.set_settling(cid, EnumJobSettlingStage.ONEX_API_PIN)
 
@@ -752,7 +784,7 @@ class DeployAgent:
                 # that has already failed would pin an image the lane was never
                 # proven able to run -- the same argument OMN-18545 made for the
                 # repair build taking a narrower path than the apply.
-                self._deliver_onex_api_pin(cmd)
+                self._deliver_onex_api_pin(cmd, manifest_sha=manifest_sha)
 
         except LaneLockContendedError as e:
             # Named separately from a build failure because the two lead to
@@ -844,19 +876,31 @@ class DeployAgent:
             payload = build_completion_payload(
                 job,
                 self._current_git_sha,
-                health_checks,
+                # OMN-18640 AC8: the local above is the target of the
+                # assignment that raises when verification refuses, so it is
+                # empty on precisely the job whose probe readings matter. The
+                # executor records them before it raises.
+                health_checks or self.executor.health_checks,
                 services_restarted=services_restarted,
                 container_residue=self.executor.container_residue,
                 # OMN-18692: what the deps-phase ceiling did -- the deferral it
                 # took before touching the lane, or the wait it held rather
                 # than cancelling a live recreate.
                 recreate_supervision=self.executor.recreate_supervision,
+                deps_convergence=self.executor.deps_convergence,
+                compose_invocations=self.executor.compose_invocations,
                 # OMN-18640 AC7: the runtime containers verification found dead
                 # and recreated, and whether that repaired them.
                 verify_recreate=self.executor.verify_recreate,
                 # OMN-17135: which sibling commits this build actually vendored.
                 # The command's git_ref pins omnibase_infra alone.
                 sibling_refs=self.executor.sibling_source_refs,
+                # OMN-18572: what the onex-api pin delivery did on this job's
+                # tail. It never affects `status` -- the compose verdict is
+                # already settled above -- but until it rode this event a
+                # reader had no way to tell a lane running the merged image
+                # from one running a two-day-old pin.
+                onex_api_delivery=self._onex_api_delivery,
             )
             if publish_result(payload, self._kafka_config):
                 job.phase_results[Phase.PUBLISH] = PhaseStatus.SUCCESS
@@ -879,7 +923,7 @@ class DeployAgent:
 
         self._state = "idle"
 
-    def _apply_lab_overlay(self, cmd: ModelRebuildRequested) -> None:
+    def _apply_lab_overlay(self, cmd: ModelRebuildRequested) -> str | None:
         """Re-apply the k3s onex-lab overlay for this merge (OMN-18200 AC5).
 
         Called on the SUCCESS path only. The failing path takes the narrower
@@ -903,7 +947,8 @@ class DeployAgent:
         """
         sha = self._resolve_lab_overlay_sha(cmd, action="re-apply")
         if sha is None:
-            return
+            return None
+        applier: LabOverlayApplier | None = None
         try:
             applier = self._lab_overlay_applier()
             path = applier.apply(
@@ -918,8 +963,34 @@ class DeployAgent:
                 "onex-lab-k3s receipt for this sha will report a missing record",
                 sha,
             )
+        # Read AFTER the try/except, deliberately: an apply that raised partway
+        # may still have resolved its source, and the image built from that
+        # lineage is on the host either way. Returning it is what lets the
+        # delivery say "refused for THIS lineage" instead of nothing.
+        #
+        # In a try of its own for the same reason the apply is: this method
+        # runs inside the deploy job's own `try`, with the terminal publish
+        # after it, so ANY escape from here costs a published result. An
+        # applier that cannot report the commit it resolved is a defect in the
+        # applier, reported as one -- never a reason to lose the deploy, and
+        # never a reason to deliver an image of unknown lineage.
+        if applier is None:
+            return None
+        try:
+            return applier.manifest_sha
+        except Exception:
+            logger.exception(
+                "the lab-overlay applier did not report the omninode_infra "
+                "commit it resolved for %s; the onex-api pin delivery will "
+                "record a named non-attempt rather than pin an image whose "
+                "lineage this job cannot name",
+                sha,
+            )
+            return None
 
-    def _deliver_onex_api_pin(self, cmd: ModelRebuildRequested) -> None:
+    def _deliver_onex_api_pin(
+        self, cmd: ModelRebuildRequested, *, manifest_sha: str | None
+    ) -> ModelOnexApiDelivery | None:
         """Advance ``ONEX_API_IMAGE`` to the image the apply just built (OMN-18572).
 
         The applier makes a correct onex-api image EXIST on this host. This is
@@ -928,39 +999,112 @@ class DeployAgent:
         what a fix merged at 09:00:53Z on 2026-09-17 waited until 11:20Z for,
         with tenant creation on the lab impossible throughout.
 
-        Reuses ``_resolve_lab_overlay_sha`` rather than re-deriving the fence.
-        The two paths must agree about which jobs touch the lab at all -- dev
-        lane, overlay enabled, an exact 40-character sha resolved by THIS job --
-        and a second copy of that rule is a second thing to drift.
+        ``manifest_sha`` IS THE OMNINODE_INFRA COMMIT, AND THAT IS THE WHOLE
+        CORRECTION HERE. ``_resolve_lab_overlay_sha`` answers a different
+        question -- may this job touch the lab at all -- and its answer is the
+        merged **omnibase_infra** sha the record is keyed by. The lab image tags
+        are ``<omninode_infra sha8>-<stamp>``, so passing the fence's sha as
+        ``--sha`` searched for a lineage no image has ever carried. Every
+        delivery between the merge on 2026-09-17 and 2026-09-19 refused on that,
+        thirty consecutive canary runs stayed red behind it, and the refusal
+        text read "none of them for omninode_infra sha <an omnibase_infra sha>"
+        -- which describes an applier that produced nothing, not a caller that
+        asked for the wrong repository. The fence is still consulted, for the
+        question it actually answers; the lineage now comes from the apply.
 
-        Swallows for the same reasons its two neighbours do. The delivery
-        verdict travels in the lab-pass receipt the workflow emits, keyed by
-        this sha; converting it into a failed compose deploy would report a lane
-        that converged as broken, and an escape here would skip the terminal
-        publish that sits after this method's caller.
+        A MISSING LINEAGE IS A NAMED NON-DELIVERY, NEVER A FALLBACK. The repoint
+        script will happily take the newest resident image of any lineage when
+        ``--sha`` is omitted, and reaching for that here would deliver some
+        other merge's image and record it as this one's. ``NOT_ATTEMPTED`` says
+        what happened instead.
+
+        STILL DOES NOT RAISE, AND NO LONGER STAYS QUIET. The delivery runs after
+        the compose lane's verdict is written; converting its failure into a
+        failed deploy would report a lane that converged as broken, and an
+        escape here would skip the terminal publish that sits after this
+        method's caller. Both of those remain true. What changes is that every
+        outcome is now a typed record on the job and on the terminal event, and
+        a failing one is logged at ``ERROR``: the refusal above was emitted at
+        ``INFO`` thirty times and read exactly like a successful no-op.
         """
-        sha = self._resolve_lab_overlay_sha(cmd, action="onex-api delivery")
-        if sha is None:
-            return
+        fence_sha = self._resolve_lab_overlay_sha(cmd, action="onex-api delivery")
+        if fence_sha is None:
+            return None
+
+        if manifest_sha is None:
+            return self._record_onex_api_delivery(
+                cmd,
+                ModelOnexApiDelivery(
+                    result=EnumOnexApiDeliveryResult.NOT_ATTEMPTED,
+                    raw_result=EnumOnexApiDeliveryResult.NOT_ATTEMPTED.value,
+                    reason=(
+                        "the lab-overlay apply for omnibase_infra "
+                        f"{fence_sha} resolved no omninode_infra overlay "
+                        "commit, so no image was built from any lineage this "
+                        "job can name. Delivering the newest resident image "
+                        "regardless of lineage would pin another merge's "
+                        "build; nothing was attempted."
+                    ),
+                    requested_sha=None,
+                ),
+            )
+
         try:
             record = self.executor.deliver_onex_api_pin(
-                sha=sha,
+                sha=manifest_sha,
                 omninode_clone=LAB_OVERLAY_SOURCE_DIR,
                 lane=cmd.runtime_lane,
             )
-            logger.info(
-                "onex-api delivery for %s: result=%s tag_advanced=%s recreated=%s",
-                sha,
-                record.get("result"),
-                record.get("tag_advanced"),
-                record.get("recreated"),
-            )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "onex-api delivery raised instead of returning a verdict for "
-                "%s; the lane may still be running the previous pin",
-                sha,
+                "omninode_infra %s; the lane may still be running the previous "
+                "pin",
+                manifest_sha,
             )
+            return self._record_onex_api_delivery(
+                cmd,
+                ModelOnexApiDelivery(
+                    result=EnumOnexApiDeliveryResult.RAISED,
+                    raw_result=EnumOnexApiDeliveryResult.RAISED.value,
+                    reason=f"{type(exc).__name__}: {exc}",
+                    requested_sha=manifest_sha,
+                ),
+            )
+
+        return self._record_onex_api_delivery(
+            cmd,
+            ModelOnexApiDelivery.from_record(record, requested_sha=manifest_sha),
+        )
+
+    def _record_onex_api_delivery(
+        self, cmd: ModelRebuildRequested, delivery: ModelOnexApiDelivery
+    ) -> ModelOnexApiDelivery:
+        """Log the verdict at a level that matches it, and make it durable.
+
+        Held on the agent as well as written to the job record because the
+        terminal payload is built after this runs and reads it from here; the
+        job record is what an operator reads on the host afterwards.
+
+        The log level is the point. A delivery that did not deliver is an
+        ``ERROR`` even though it does not fail the job, because the whole defect
+        this closes was legible only as thirty identical ``INFO`` lines.
+        """
+        self._onex_api_delivery = delivery
+        log = logger.error if delivery.is_failure else logger.info
+        log(
+            "onex-api delivery for omninode_infra %s: result=%s "
+            "tag_advanced=%s recreated=%s pin=%s -> %s reason=%s",
+            delivery.requested_sha,
+            delivery.raw_result,
+            delivery.tag_advanced,
+            delivery.recreated,
+            delivery.pin_before,
+            delivery.pin_after,
+            delivery.reason,
+        )
+        self.job_store.record_onex_api_delivery(cmd.correlation_id, delivery)
+        return delivery
 
     def _build_lab_repair_image(self, cmd: ModelRebuildRequested) -> None:
         """Build the cloud-migrate repair image after a FAILED deploy (OMN-18545).
@@ -1037,28 +1181,122 @@ class DeployAgent:
             budget_seconds=LAB_OVERLAY_BUDGET_SECONDS,
         )
 
-    def _publish_rejected(self, cmd: ModelRebuildRequested, *, reason: str) -> None:
+    def _publish_rejected(
+        self, cmd: ModelRebuildRequested, *, reason: EnumRejectionReason
+    ) -> None:
+        self._publish_rejection_event(
+            ModelRebuildRejected(
+                correlation_id=cmd.correlation_id,
+                reason=reason,
+                scope=cmd.scope,
+            )
+        )
+
+    def _publish_superseded(self, supersession: ModelSupersession) -> None:
+        """AC6's terminal event: this command will not run, and here is what did.
+
+        On the SAME topic as every other "will not run" outcome, with its own
+        reason token and the two fields that make it actionable. A new topic
+        was weighed and refused: it would need a consumer nobody has, while
+        the rejection topic already carries the class of outcome this belongs
+        to -- and ``ModelRebuildRejected`` is what keeps the three cases AC6
+        names apart, since a timeout and a rollback cannot carry
+        ``reason=superseded`` and a supersession cannot omit the sha.
+        """
+        cmd = supersession.superseded.command
+        published = self._publish_rejection_event(
+            ModelRebuildRejected(
+                correlation_id=cmd.correlation_id,
+                reason=EnumRejectionReason.SUPERSEDED,
+                scope=cmd.scope,
+                superseded_by_sha=supersession.superseded_by_sha,
+                superseded_by_correlation_id=supersession.superseded_by_correlation_id,
+            )
+        )
+        if published:
+            self.job_store.mark_published(cmd.correlation_id)
+
+    def _publish_superseded_for_job(self, job: JobState) -> bool:
+        """Re-publish a superseded record's terminal event from the record alone.
+
+        The retry loop must be able to pay this debt without the in-memory
+        ``ModelSupersession`` the scan built, because the process that built
+        it may be gone -- the job store outlives it, which is the reason the
+        record carries both fields rather than only the log line naming them.
+        """
+        if job.superseded_by_sha is None or job.superseded_by_correlation_id is None:
+            # Refused by JobState's own validator, so this is unreachable
+            # through any write path; it is here because an unreachable branch
+            # that silently publishes a malformed event is worse than one that
+            # says the record is unusable.
+            logger.error(
+                "Superseded job %s names no replacement, so no terminal event "
+                "can be built for it",
+                job.correlation_id,
+            )
+            return False
+        return self._publish_rejection_event(
+            ModelRebuildRejected(
+                correlation_id=job.correlation_id,
+                reason=EnumRejectionReason.SUPERSEDED,
+                scope=Scope(job.command["scope"]),
+                superseded_by_sha=job.superseded_by_sha,
+                superseded_by_correlation_id=job.superseded_by_correlation_id,
+            )
+        )
+
+    def _publish_rejection_event(self, event: ModelRebuildRejected) -> bool:
+        """Publish one rejection. Returns whether the broker took it.
+
+        The return value is new and the swallow is not: every existing caller
+        ignores it and behaves exactly as before, while the supersession path
+        needs to know, because a superseded record's publish debt is only
+        cleared when the event actually landed.
+        """
         from kafka import KafkaProducer
 
-        payload = json.dumps(
-            {
-                "correlation_id": str(cmd.correlation_id),
-                "reason": reason,
-                "scope": cmd.scope,
-            }
-        ).encode()
+        payload = json.dumps(event.to_wire()).encode()
         try:
             producer = KafkaProducer(
                 **self._kafka_config.producer_kwargs(),
                 value_serializer=lambda v: v,
+                # OMN-18143. Bound the metadata wait. `send()` blocks up to
+                # kafka-python's `max_block_ms` (default 60_000) resolving the
+                # topic, so a publish to a topic the broker does not have
+                # occupies this process's SINGLE job thread for a full minute
+                # before raising -- and the retry loop then does it again every
+                # 30 s until the circuit breaker trips at ten consecutive
+                # failures. That is ten minutes of job-thread time per record,
+                # spent on a send that cannot land.
+                #
+                # Measured on the .201 dev lane 2026-09-19: of 1714 topics,
+                # `onex.evt.deploy.rebuild-requested.v1` and
+                # `...rebuild-completed.v1` are present and
+                # `...rebuild-rejected.v1` is ABSENT, so every rejection this
+                # agent publishes takes exactly that path. Two attempts for
+                # correlation 63858212 each took 60 s, at 11:50:49Z and
+                # 11:51:49Z, while a completion publish to the present topic
+                # succeeded at 11:49:34Z on the same config.
+                #
+                # This bounds the COST, and deliberately does not pretend to
+                # fix the cause: the topic's absence, and the fact that nothing
+                # in any repository consumes it, are recorded on OMN-18143 and
+                # are not the agent's to resolve. Ten seconds is far above the
+                # sub-second publish this lane achieves when the topic exists,
+                # so a healthy publish is unaffected.
+                max_block_ms=REJECTION_PUBLISH_MAX_BLOCK_MS,
             )
             producer.send(TOPIC_REBUILD_REJECTED, payload)
             producer.flush(timeout=5)
             producer.close()
         except Exception:  # noqa: BLE001
             logger.warning(
-                "Failed to publish rebuild-rejected for %s", cmd.correlation_id
+                "Failed to publish rebuild-rejected (reason=%s) for %s",
+                event.reason.value,
+                event.correlation_id,
             )
+            return False
+        return True
 
     def _retry_pending_publishes(self) -> None:
         """Replay any result still owed to the bus. BLOCKING — see ``_offload``."""
@@ -1075,6 +1313,24 @@ class DeployAgent:
                 )
                 self.job_store.mark_published(job.correlation_id)
                 self._publish_cb.clear(cid_str)
+                continue
+
+            # OMN-18143. A superseded job owes a REJECTION event, not a
+            # completion one. Routing it through the completion builder below
+            # would publish a ModelRebuildCompleted whose phases are all
+            # SKIPPED onto the completed topic -- an event asserting that a
+            # rebuild finished for a command that never started, on the topic
+            # the redeploy effect waits on.
+            if job.status == "superseded":
+                if self._publish_superseded_for_job(job):
+                    self.job_store.mark_published(job.correlation_id)
+                    self._publish_cb.record_success(cid_str)
+                    logger.info("Retried superseded publish for %s: success", cid_str)
+                else:
+                    self._publish_cb.record_failure(cid_str)
+                    logger.warning(
+                        "Retried superseded publish for %s: still failing", cid_str
+                    )
                 continue
 
             payload = build_completion_payload(job, "")

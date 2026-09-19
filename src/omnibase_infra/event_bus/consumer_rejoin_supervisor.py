@@ -45,6 +45,9 @@ from omnibase_infra.event_bus.consumer_rejoin_policy import (
     ModelConsumerRejoinPolicy,
     evaluate_consumer_stall,
 )
+from omnibase_infra.models.health.enum_consumer_stall_reason import (
+    EnumConsumerStallReason,
+)
 from omnibase_infra.models.health.model_consumer_group_rejoin_event import (
     ModelConsumerGroupRejoinEvent,
 )
@@ -53,6 +56,9 @@ from omnibase_infra.models.health.model_consumer_poll_observation import (
 )
 from omnibase_infra.models.health.model_consumer_stall_verdict import (
     ModelConsumerStallVerdict,
+)
+from omnibase_infra.models.health.model_consumer_sync_status import (
+    ModelConsumerSyncStatus,
 )
 from omnibase_infra.protocols.protocol_rejoinable_consumer import (
     FetchedRecord,
@@ -65,6 +71,20 @@ logger = logging.getLogger(__name__)
 # surface to read. Small on purpose: a runtime that has wedged more times than
 # this in one lifetime has a problem the newest entries already describe.
 REJOIN_HISTORY_CAPACITY: Final[int] = 32
+
+# The reasons under which a group is BEHIND AND NOT ADVANCING, which is the
+# question readiness asks. ``NOT_STALLED_WITHIN_COOLDOWN`` is in this set on
+# purpose: it means the stall signature still holds and the rejoin path is
+# merely not allowed to act yet. The cooldown bounds the REMEDY; it is not a
+# statement about the group, and a readiness surface that took it as one would
+# read green through the whole of every cooldown (OMN-18640 AC1).
+_STALL_SIGNATURES: Final[frozenset[EnumConsumerStallReason]] = frozenset(
+    {
+        EnumConsumerStallReason.STALLED_BACKLOG_NOT_DRAINING,
+        EnumConsumerStallReason.STALLED_NO_ASSIGNMENT,
+        EnumConsumerStallReason.NOT_STALLED_WITHIN_COOLDOWN,
+    }
+)
 
 
 class ModelConsumerPollBatch:
@@ -141,6 +161,21 @@ class ConsumerRejoinSupervisor:
         self._consecutive_stalls: int = 0
         self._rejoin_events: list[ModelConsumerGroupRejoinEvent] = []
 
+        # --- readiness state (OMN-18640 AC1) ----------------------------
+        # Held separately from the rejoin state above because a rejoin RESETS
+        # ``_last_record_at``, so a readiness surface derived from it would go
+        # green the instant a rejoin was attempted -- whether or not the
+        # rejoin worked. ``_stall_started_at`` survives rejoins and survives
+        # the cooldown, and is cleared only by evidence of sync.
+        self._evaluated: bool = False
+        self._latest_reason: EnumConsumerStallReason = (
+            EnumConsumerStallReason.NOT_STALLED_PROGRESSING
+        )
+        self._latest_measurement: ModelConsumerPollObservation | None = None
+        self._stall_started_at: float | None = None
+        self._rejoin_count: int = 0
+        self._last_rejoin_failed: bool = False
+
     @property
     def rejoin_events(self) -> tuple[ModelConsumerGroupRejoinEvent, ...]:
         """Typed rejoin records, oldest first, for a readiness dimension.
@@ -151,6 +186,68 @@ class ConsumerRejoinSupervisor:
         failure mode this ticket is about, one layer up.
         """
         return tuple(self._rejoin_events)
+
+    def sync_status(self) -> ModelConsumerSyncStatus:
+        """Report whether this group is in sync, for the readiness dimension.
+
+        Cheap and synchronous on purpose: it reports what the poll loop has
+        already measured and issues no request of its own. A readiness probe
+        that put a ``ListOffsets`` on the wire for every wired topic would be
+        a second, differently-timed opinion about the same fact, and the two
+        would eventually disagree in front of an operator.
+        """
+        now = self._clock()
+        measurement = self._latest_measurement
+        return ModelConsumerSyncStatus(
+            topic=self._topic,
+            consumer_group=self._group_id,
+            evaluated=self._evaluated,
+            reason=self._latest_reason,
+            # From the last evaluation that actually PROBED the leaders. An
+            # evaluation inside the stall window short-circuits before the
+            # probe and reports a placeholder zero; carrying that forward
+            # would erase a real backlog every time the loop ticked.
+            backlog_records=measurement.backlog_records if measurement else 0,
+            seconds_since_last_record=max(0.0, now - self._last_record_at),
+            stalled_seconds=(
+                0.0
+                if self._stall_started_at is None
+                else max(0.0, now - self._stall_started_at)
+            ),
+            assigned_partitions=(measurement.assigned_partitions if measurement else 0),
+            broker_reachable=measurement.broker_reachable if measurement else True,
+            rejoin_count=self._rejoin_count,
+            last_rejoin_failed=self._last_rejoin_failed,
+            unready_after_seconds=self._policy.sync_unready_seconds,
+        )
+
+    def _note_evaluation(self, reason: EnumConsumerStallReason, now: float) -> None:
+        """Advance the readiness stall clock from one evaluation's reason.
+
+        Only two outcomes CLEAR a stall, and neither is merely the absence of
+        one. ``NOT_STALLED_IDLE`` is a measurement: the fetch position is at
+        the end of every assigned partition. A delivered record (handled in
+        :meth:`next_batch`) is the other. ``NOT_STALLED_PROGRESSING`` is
+        deliberately NOT one of them -- after a rejoin resets the clock it
+        means only "inside the window", which is the absence of a measurement,
+        and treating it as evidence is how a surface reports recovery from a
+        rejoin that did nothing. ``NOT_STALLED_BROKER_UNREACHABLE`` is a
+        failed measurement and likewise clears nothing.
+        """
+        self._evaluated = True
+        self._latest_reason = reason
+        if reason in _STALL_SIGNATURES:
+            if self._stall_started_at is None:
+                self._stall_started_at = now
+        elif reason is EnumConsumerStallReason.NOT_STALLED_IDLE:
+            self._stall_started_at = None
+
+    def _note_flow(self) -> None:
+        """Records moved. That is the only unambiguous proof of sync."""
+        self._stall_started_at = None
+        self._last_rejoin_failed = False
+        self._evaluated = True
+        self._latest_reason = EnumConsumerStallReason.NOT_STALLED_PROGRESSING
 
     async def next_batch(
         self, consumer: ProtocolRejoinableConsumer
@@ -168,6 +265,7 @@ class ConsumerRejoinSupervisor:
         if records:
             self._last_record_at = self._clock()
             self._consecutive_stalls = 0
+            self._note_flow()
             return ModelConsumerPollBatch(
                 records=records,
                 consumer=consumer,
@@ -215,6 +313,7 @@ class ConsumerRejoinSupervisor:
             )
         else:
             observation = await self._observe(consumer, silent_for, now)
+            self._latest_measurement = observation
 
         verdict = evaluate_consumer_stall(
             observation,
@@ -222,6 +321,7 @@ class ConsumerRejoinSupervisor:
             prior_consecutive_stalls=self._consecutive_stalls,
         )
         self._consecutive_stalls = verdict.consecutive_stalls
+        self._note_evaluation(verdict.reason, now)
         return verdict, observation
 
     async def _observe(
@@ -349,6 +449,13 @@ class ConsumerRejoinSupervisor:
                 self._group_id,
                 recreate_error,
             )
+
+        self._rejoin_count += 1
+        # A failed rejoin is held until flow RESUMES, not until the next
+        # evaluation looks calmer: the rejoin below resets _last_record_at on
+        # success, so without this the readiness surface would clear itself on
+        # the strength of a recovery that never happened (OMN-18640 AC1).
+        self._last_rejoin_failed = not succeeded
 
         if succeeded:
             self._last_record_at = self._clock()

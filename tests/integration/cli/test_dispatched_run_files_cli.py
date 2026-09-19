@@ -35,12 +35,27 @@ from omnibase_infra.cli.cli_delegate import _write_local_run_files
 from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
 )
+from omnibase_infra.cli.model_delegate_run_addressing import (
+    ModelDelegateRunAddressing,
+)
 from omnibase_infra.cli.model_receipt_runtime_summary import (
     ModelReceiptRuntimeSummary,
 )
+from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.runtime_identity import collect_runtime_identity
 
 pytestmark = pytest.mark.integration
+
+# OMN-18810: this suite replays a REAL dispatched run, so it addresses the
+# lane that run actually reached. An in-process value here would have the
+# fixture contradict its own subject.
+_ADDRESSING = ModelDelegateRunAddressing(
+    locus=EnumDelegateLocus.DEPLOYED_LANE,
+    bus="kafka",
+    lane="dev",
+    dispatch_target="onex.cmd.omnimarket.delegate-skill.v1 via REDACTED-LAB-BROKER",
+)
+
 
 _RECORDED_DISPATCHED_RECEIPT = (
     Path(__file__).resolve().parents[2]
@@ -67,6 +82,7 @@ def _write(state_root: Path) -> Path:
     _write_local_run_files(
         receipt=receipt,
         state_root=state_root,
+        addressing=_ADDRESSING,
         prompt=_PROMPT,
         task_type="summarization",
         task_type_resolution="explicit",
@@ -108,14 +124,24 @@ class TestTheFilesCarryWhatTheRunProduced:
         assert receipt["correlation_id"] == "83aa8b6c-8189-49f0-953d-80c8f015ed0a"
         assert receipt["status"] == EnumSkillResultStatus.SUCCESS.value
 
-    def test_the_run_metadata_carries_the_prompt_and_the_lane(
+    def test_the_run_metadata_separates_the_lane_from_the_rung(
         self, tmp_path: Path
     ) -> None:
+        """OMN-18810: this test used to be the defect, in test form.
+
+        It was named "carries the prompt and the lane" and asserted
+        ``lane == "local"`` about a run dispatched to the ``dev`` lane. The
+        two facts are now separate keys, and this fixture is the case that
+        makes the difference visible: the rung that answered was local, and
+        it answered on another machine.
+        """
         run_dir = _write(tmp_path)
         run_json = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
         assert run_json["prompt"] == _PROMPT
         assert run_json["task_type"] == "summarization"
-        assert run_json["lane"] == "local"
+        assert run_json["routing_tier"] == "local"
+        assert run_json["lane"] == "dev"
+        assert run_json["locus"] == "deployed-lane"
         assert run_json["correlation_id"] == "83aa8b6c-8189-49f0-953d-80c8f015ed0a"
 
 
@@ -165,6 +191,7 @@ class TestAnEmptyDirectoryIsNowLoud:
                     )
                 ),
                 state_root=tmp_path,
+                addressing=_ADDRESSING,
                 prompt=_PROMPT,
                 task_type="summarization",
                 task_type_resolution="explicit",
@@ -179,6 +206,7 @@ class TestAnEmptyDirectoryIsNowLoud:
                 workflow="/site-packages/omnimarket/nodes/node_gap_compute/contract.yaml"
             ),
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="proof",
             task_type="summarization",
             task_type_resolution="explicit",

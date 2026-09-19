@@ -208,6 +208,13 @@ SENTINEL_REVISIONS = frozenset({"", "unknown", "none", "null", "dev", "HEAD"})
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
+#: A FULL 40-character sha. Distinct from ``_SHA_RE`` above, which admits an
+#: abbreviation because a docker label may carry one. The supersession field
+#: comes from the agent's own job record and names a commit a receipt is keyed
+#: by, and rule 24(b) gates on the exact sha -- so an abbreviation there is a
+#: field this guard does not understand, not a shorter answer.
+_EXACT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
 # OMN-18388. What the OBSERVED lane revision is, relative to the expected merge
 # sha. ``compare/{base}...{head}`` describes the HEAD relative to the BASE, so
 # with base=expected and head=observed, "ahead" means the lane is ahead of the
@@ -944,6 +951,40 @@ class ModelQueueFacts:
         queue_wait = self.commands_ahead * self.mean_service_time_seconds
         return round(queue_wait + lane_budget_seconds + margin_seconds)
 
+    def reach_bound_seconds(self, *, margin_seconds: int) -> int | None:
+        """How long before the agent could REACH this command.
+
+        OMN-18144, 2026-09-19. This, and not
+        :meth:`derived_wait_bound_seconds`, is what decides whether a wait is
+        worth starting. The two differ by the lane's own post-acceptance grant,
+        and the difference is the whole defect: that grant is funded SEPARATELY
+        out of the job ceiling, for the probe step that runs after this one
+        (``2700 - 1500 - 900 - 120``, see
+        :data:`lane_settle_budget.STEP_OVERHEAD_SECONDS`), so charging the
+        convergence window for it compares a wait against a window the wait was
+        never meant to cover.
+
+        Measured cost of getting this wrong: on 2026-09-19 one command ahead
+        produced a 3003s worst case against a 1620s window, the guard declined,
+        and the lane carried the sha 554 seconds later. The release train then
+        read the unmeasured receipt as a lane failure and refused to cut
+        ``0.38.33``.
+
+        Reaching acceptance is the thing that makes a measurement possible, so
+        it is the thing the predicate asks about. A watch that reaches it
+        either sees convergence -- a real PASS, strictly better than an
+        estimate -- or stops at its wall clock and writes the same
+        INDETERMINATE the refusal would have written, having risked nothing.
+
+        ``None`` on an unreadable queue, exactly as above: a bound with no
+        measured service time behind it is a guess wearing a number's clothes.
+        """
+        if self.commands_ahead is None or self.mean_service_time_seconds is None:
+            return None
+        return round(
+            self.commands_ahead * self.mean_service_time_seconds + margin_seconds
+        )
+
     def evidence_clause(self, *, lane_budget_seconds: int, margin_seconds: int) -> str:
         """The named fields AC5 requires the receipt's check to carry."""
         if self.commands_ahead is None:
@@ -1070,23 +1111,44 @@ def queue_exceeds_bound(
     An unreadable queue is NOT a refusal. Falling back to the clock is exactly
     today's behaviour, which is the right fallback: the change may only ever
     make a verdict better informed, never harder to obtain.
+
+    WHICH BOUND DECIDES, AND WHY IT IS NOT THE ONE IN THE EVIDENCE
+    --------------------------------------------------------------
+    OMN-18144, corrected 2026-09-19. The question is "could the agent REACH
+    this command inside this window", so the predicate is
+    :meth:`ModelQueueFacts.reach_bound_seconds`. The worst case that AC5 puts
+    in the receipt -- reach plus the lane's whole post-acceptance grant -- is
+    the wrong question to refuse on, because the ceiling funds that grant
+    separately for the probe step; asking it charged a 1620s window for 3003s
+    of work it was never meant to do, and a lane that converged in 554s went
+    unmeasured while the release train reported it as failed. A worst case is
+    the right thing to REPORT and the wrong thing to REFUSE on: refusing on it
+    discards every run where reality beats it, which on the measured evidence
+    is the common case.
+
+    The refusal that remains is the one AC4 asked for, unchanged in intent: a
+    queue this window cannot reach at all is pure waste, and the runner is
+    better given to the next merge's guard.
     """
+    reach = facts.reach_bound_seconds(margin_seconds=margin_seconds)
+    if reach is None or reach <= wall_clock_seconds:
+        return ""
     bound = facts.derived_wait_bound_seconds(
         lane_budget_seconds=lane_budget_seconds, margin_seconds=margin_seconds
     )
-    if bound is None or bound <= wall_clock_seconds:
-        return ""
     assert facts.commands_ahead is not None
     assert facts.mean_service_time_seconds is not None
     return (
         f"the deploy agent has {facts.commands_ahead} command(s) ahead of this "
         f"one, so this merge is number {facts.queue_position_at_start} in line. "
         f"At the agent's observed {facts.mean_service_time_seconds:.0f}s mean "
-        f"service time that is {bound}s before the lane could be expected to "
-        f"carry this sha, against the {wall_clock_seconds}s this job can watch "
-        "for. The wait is not started: the lane is not late, this run cannot "
-        "afford the queue ahead of it, and holding the verify runner open for "
-        "the difference would delay the next merge's guard behind this one"
+        f"service time that is {reach}s before the agent could even reach this "
+        f"command, against the {wall_clock_seconds}s this job can watch for "
+        f"(and {bound}s before the lane could be expected to have settled on "
+        "this sha). The wait is not started: the lane is not late, this run "
+        "cannot afford the queue ahead of it, and holding the verify runner "
+        "open for the difference would delay the next merge's guard behind "
+        "this one"
     )
 
 
@@ -1756,6 +1818,175 @@ class _AncestryResolver:
         return resolved
 
 
+@dataclass(frozen=True)
+class ModelSupersessionProbe:
+    """Whether the agent folded THIS command into a newer one (OMN-18143).
+
+    WHY THIS IS READ AT ALL, AND WHY AFTER THE WAIT
+    ------------------------------------------------
+    The deploy agent now runs the NEWEST foldable rebuild command for a lane
+    and records the ones it replaced. Convergence is containment (OMN-18388),
+    so a superseded sha's guard sees the lane running a DESCENDANT and reports
+    ``ok`` -- correctly, as a statement about the lane. What it cannot say on
+    its own is that the sha this run is about never had its own tree built:
+    the compose content the lane is running was pinned to the newer commit.
+
+    Rule 24's receipt is a statement about ONE sha, so that distinction has to
+    reach it, and this is the field that carries it. It is read AFTER the wait
+    because the supersession happens when the agent dequeues, which is
+    typically after this guard started watching -- reading it up front would
+    ask the question before the answer existed.
+
+    Never raises, and an unreadable answer is never "not superseded": the
+    fields carry a reason instead, and the emitting step turns a reason into
+    an indeterminate check rather than into silence.
+    """
+
+    superseded_by_sha: str | None = None
+    superseded_by_correlation_id: str | None = None
+    reason: str = ""
+
+    @property
+    def superseded(self) -> bool:
+        return self.superseded_by_sha is not None
+
+    @property
+    def readable(self) -> bool:
+        return not self.reason
+
+
+def read_agent_supersession(
+    agent_url: str,
+    correlation_id: str,
+    *,
+    request_timeout_seconds: float = 10.0,
+    opener: Callable[[str, float], tuple[int, str]] | None = None,
+) -> ModelSupersessionProbe:
+    """Ask the agent whether it ran this command or folded it into a newer one.
+
+    A 404 is NOT a reason here, unlike in ``read_agent_acceptance``: a command
+    with no job record was never dequeued, so it was certainly not superseded,
+    and reporting that as unreadable would put an indeterminate check on every
+    receipt whose verify job outran the agent.
+
+    An agent too old to serve the fields answers 200 with them absent, which
+    reads as "not superseded" for the same reason -- an agent that cannot
+    coalesce has not coalesced.
+    """
+    if not correlation_id.strip():
+        return ModelSupersessionProbe(
+            reason=(
+                "the publishing job recorded no correlation id, so the agent's "
+                "job record for this merge cannot be located"
+            )
+        )
+    if not _CORRELATION_ID_RE.match(correlation_id.strip()):
+        return ModelSupersessionProbe(
+            reason=f"correlation id {correlation_id!r} is not a uuid"
+        )
+    if not agent_url.strip():
+        return ModelSupersessionProbe(
+            reason="no deploy-agent URL was supplied to this guard"
+        )
+
+    url = f"{agent_url.rstrip('/')}/job/{correlation_id.strip()}"
+    fetch = opener or _http_get_json
+    try:
+        status, body = fetch(url, request_timeout_seconds)
+    except Exception as exc:  # noqa: BLE001 - an unreachable agent is unreadable
+        return ModelSupersessionProbe(
+            reason=f"{url} could not be read: {type(exc).__name__}: {exc}"
+        )
+    if status == 404:
+        return ModelSupersessionProbe()
+    if status != 200:
+        return ModelSupersessionProbe(reason=f"{url} answered HTTP {status}")
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        return ModelSupersessionProbe(
+            reason=f"{url} returned an unreadable body ({exc})"
+        )
+    if not isinstance(payload, dict):
+        return ModelSupersessionProbe(reason=f"{url} returned a non-object body")
+    sha = payload.get("superseded_by_sha")
+    if sha is None:
+        return ModelSupersessionProbe()
+    if not isinstance(sha, str) or not _EXACT_SHA_RE.match(sha):
+        return ModelSupersessionProbe(
+            reason=(
+                f"{url} reported superseded_by_sha={sha!r}, which is not a "
+                "40-character lowercase commit sha"
+            )
+        )
+    runner = payload.get("superseded_by_correlation_id")
+    return ModelSupersessionProbe(
+        superseded_by_sha=sha,
+        superseded_by_correlation_id=str(runner) if runner is not None else None,
+    )
+
+
+def supersession_check_outcome(probe: ModelSupersessionProbe) -> str:
+    """The receipt verdict for the ``superseded_by_newer_rebuild`` check.
+
+    Three values, and which one a superseded sha gets is the decision this
+    whole change turns on.
+
+    ``fail`` when the command WAS folded. The fact is established and
+    negative: the agent's own durable record names the commit that ran
+    instead, so this is not a check that could not be resolved. A ``PASS``
+    here would let rule 24(b) deliver a commit on the strength of a lab pass
+    another commit earned -- ``deployed_revision`` is satisfied by CONTAINMENT
+    (OMN-18388) and is therefore ``ok`` on exactly these runs, which is what
+    makes a second check necessary rather than redundant.
+
+    ``indeterminate`` only when the agent could not be ASKED. That is a
+    question about the hop, not about the sha, and OMN-18573 put the
+    distinction in the vocabulary precisely so a refusal says which it is.
+
+    ``ok`` when the record exists and names no superseding command, or when
+    there is no record at all -- a command the agent never dequeued cannot
+    have been folded.
+    """
+    if probe.superseded:
+        return "fail"
+    if probe.readable:
+        return "ok"
+    return "indeterminate"
+
+
+def supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
+    """The receipt check's evidence line. Never empty -- the model refuses that.
+
+    Rendered through the same one-line sanitiser every other evidence string
+    here uses: ``GITHUB_OUTPUT`` is line-oriented, and the value is re-read as
+    one field of a receipt check and interpolated into a shell variable.
+    """
+    return " ".join(
+        _supersession_evidence(probe, sha).translate(_EVIDENCE_UNSAFE).split()
+    )
+
+
+def _supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
+    if probe.superseded:
+        runner = probe.superseded_by_correlation_id or "an unnamed correlation"
+        return (
+            f"the deploy agent did not build {sha}: it folded this rebuild "
+            f"command into {probe.superseded_by_sha}, run under {runner}, which "
+            "contains this sha. The lane is running that commit's tree, so no "
+            "compose content was ever generated from this one"
+        )
+    if not probe.readable:
+        return (
+            f"whether {sha} was superseded by a newer rebuild could not be "
+            f"established: {probe.reason}"
+        )
+    return (
+        f"the deploy agent's own job record for {sha} names no superseding "
+        "command, so this sha's rebuild ran on its own tree"
+    )
+
+
 def _write_output(name: str, value: str) -> None:
     """Publish one single-line value to the calling step's outputs."""
     path = os.environ.get("GITHUB_OUTPUT")
@@ -1857,6 +2088,20 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
     # values and this has three; the workflow still falls back to the status
     # when the step died before writing anything.
     _write_output("verdict", convergence_check_outcome(result.outcome).value)
+
+    # OMN-18143. Read AFTER the wait, because the agent folds a command when it
+    # DEQUEUES it, which is normally after this guard started watching. The
+    # emit step turns these two outputs into the receipt's
+    # `superseded_by_newer_rebuild` check; see ModelSupersessionProbe for why a
+    # lane that converged by containment is still not a statement that THIS
+    # sha's tree was built. Never fails this step: the supersession is a fact
+    # about the receipt, not about the lane.
+    supersession = read_agent_supersession(
+        agent_url=args.agent_url, correlation_id=args.correlation_id
+    )
+    _write_output("superseded_by", supersession.superseded_by_sha or "")
+    _write_output("superseded_outcome", supersession_check_outcome(supersession))
+    _write_output("superseded_evidence", supersession_evidence(supersession, expected))
 
     # OMN-18436: publish the identity of the container this guard actually read,
     # so the probe step that runs next can prove its HTTP reads came from the

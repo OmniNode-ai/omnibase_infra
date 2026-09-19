@@ -8,8 +8,9 @@ import json
 import subprocess
 from unittest.mock import patch
 
+import pytest
 from deploy_agent.events import Phase, PhaseStatus
-from deploy_agent.executor import DeployExecutor
+from deploy_agent.executor import DeployExecutor, VerificationFailedError
 
 
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
@@ -149,13 +150,21 @@ def test_verify_fails_postgres_check_when_node_service_registry_missing() -> Non
             return _completed(cmd, stdout=_health_payload())
         return _completed(cmd, returncode=1, stderr=f"unexpected command: {cmd}")
 
+    # OMN-18640 AC8. This used to RETURN the check list with a `fail` in it and
+    # report the phase SUCCESS, so a lane missing a projection table completed
+    # its deploy. The subject of the test is unchanged -- which check failed --
+    # and what changed is that the job now fails with it.
     with patch("deploy_agent.executor._run", side_effect=fake_run):
-        checks = executor.verify(on_phase_update=_noop_phase_update)
+        with pytest.raises(VerificationFailedError) as excinfo:
+            executor.verify(on_phase_update=_noop_phase_update)
 
-    status_by_endpoint = {check.endpoint: check.status for check in checks}
+    status_by_endpoint = {
+        check.endpoint: check.status for check in executor.health_checks
+    }
     assert (
         status_by_endpoint["omnidash_analytics.node_service_registry exists"] == "fail"
     )
+    assert "node_service_registry" in str(excinfo.value)
 
 
 def test_verify_fails_runtime_health_when_config_prefetch_degraded() -> None:
@@ -177,10 +186,15 @@ def test_verify_fails_runtime_health_when_config_prefetch_degraded() -> None:
             )
         return _completed(cmd, returncode=1, stderr=f"unexpected command: {cmd}")
 
+    # OMN-18640 AC8: a degraded config prefetch answers FAST, so before this
+    # change it was recorded as a failure and reported as a successful deploy.
     with patch("deploy_agent.executor._run", side_effect=fake_run):
-        checks = executor.verify(on_phase_update=_noop_phase_update)
+        with pytest.raises(VerificationFailedError):
+            executor.verify(on_phase_update=_noop_phase_update)
 
-    status_by_service = {check.service: check.status for check in checks}
+    status_by_service = {
+        check.service: check.status for check in executor.health_checks
+    }
     assert status_by_service["omninode-runtime"] == "pass"
     assert status_by_service["runtime-effects"] == "fail"
 
@@ -201,9 +215,14 @@ def test_verify_fails_runtime_health_when_process_not_running() -> None:
             return _completed(cmd, stdout=_health_payload())
         return _completed(cmd, returncode=1, stderr=f"unexpected command: {cmd}")
 
+    # OMN-18640 AC8: same again for a runtime that reports its process is not
+    # running -- an unambiguous statement that the deploy did not converge.
     with patch("deploy_agent.executor._run", side_effect=fake_run):
-        checks = executor.verify(on_phase_update=_noop_phase_update)
+        with pytest.raises(VerificationFailedError):
+            executor.verify(on_phase_update=_noop_phase_update)
 
-    status_by_service = {check.service: check.status for check in checks}
+    status_by_service = {
+        check.service: check.status for check in executor.health_checks
+    }
     assert status_by_service["omninode-runtime"] == "fail"
     assert status_by_service["runtime-effects"] == "pass"

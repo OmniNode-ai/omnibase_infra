@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable
+from datetime import datetime
 from uuid import UUID
 
 from aiohttp import web
@@ -15,7 +16,7 @@ from deploy_agent.accept_backlog import (
     EnumAcceptBacklogStatus,
     ModelAcceptBacklogVerdict,
 )
-from deploy_agent.job_state import JobStore
+from deploy_agent.job_state import JobState, JobStore
 from deploy_agent.lab_overlay import load_latest_record, load_record
 from deploy_agent.loaded_code import loaded_code_sha_if_recorded
 from deploy_agent.queue_depth import ModelControlTopicLag, compute_queue_snapshot
@@ -95,21 +96,27 @@ async def _health_handler(request: web.Request) -> web.Response:
             "started_at": active.accepted_at.isoformat(),
         }
 
-    # Find the most recent completed job for last_result
+    # Find the most recent completed job for last_result.
+    #
+    # OMN-18640: the completion timestamp is carried ALONGSIDE the job rather
+    # than read back out of it inside the sort key. ``completed_at`` is
+    # ``datetime | None`` on the model and the guard above is what makes it
+    # non-None here; a lambda reaching back into the model cannot express that,
+    # so the sort was typed as ordering by a possibly-``None`` key -- a real
+    # ``TypeError`` waiting for the day the guard is loosened, not a nuisance.
     last_result = None
-    completed_jobs = []
+    completed_jobs: list[tuple[datetime, JobState]] = []
     for path in store.state_dir.glob("*.json"):
         try:
-            from deploy_agent.job_state import JobState
-
             job = JobState.model_validate_json(path.read_text())
-            if job.status in ("success", "failed") and job.completed_at:
-                completed_jobs.append(job)
+            completed_at = job.completed_at
+            if job.status in ("success", "failed") and completed_at is not None:
+                completed_jobs.append((completed_at, job))
         except Exception:  # noqa: BLE001
             continue
     if completed_jobs:
-        completed_jobs.sort(key=lambda j: j.completed_at, reverse=True)
-        latest = completed_jobs[0]
+        completed_jobs.sort(key=lambda pair: pair[0], reverse=True)
+        latest = completed_jobs[0][1]
         last_result = {
             "correlation_id": str(latest.correlation_id),
             "status": latest.status,
@@ -244,6 +251,23 @@ async def _job_handler(request: web.Request) -> web.Response:
             "settling_stage": (
                 job.settling_stage.value if job.settling_stage else None
             ),
+            # OMN-18143. The supersession, served where the post-merge lab
+            # guard already reads -- it polls this exact route for the
+            # acceptance timestamp (OMN-18573). A superseded command's own CI
+            # run has no other way to learn that the lane converged on a
+            # newer sha rather than on the one that run is about, and a
+            # receipt that cannot say so would read as a plain pass for a
+            # commit whose tree the lane never built.
+            "superseded_by_sha": job.superseded_by_sha,
+            "superseded_by_correlation_id": (
+                str(job.superseded_by_correlation_id)
+                if job.superseded_by_correlation_id
+                else None
+            ),
+            "superseded_count": job.superseded_count,
+            "superseded_correlation_ids": [
+                str(cid) for cid in job.superseded_correlation_ids
+            ],
         }
     )
 

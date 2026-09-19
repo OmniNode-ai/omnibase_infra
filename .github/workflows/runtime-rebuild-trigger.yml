@@ -606,6 +606,18 @@ jobs:
           # into the run block: an expression-substituted value in a script body
           # is the workflow script-injection shape.
           CONVERGE_EVIDENCE: ${{ steps.converge.outputs.evidence }}
+          # OMN-18143. The deploy agent now runs the NEWEST foldable rebuild
+          # command for the lane and records the ones it replaced. Convergence
+          # is containment (OMN-18388), so a superseded sha's guard sees the
+          # lane running a descendant and reports `ok` -- a true statement
+          # about the LANE, and not a statement that THIS sha's tree was ever
+          # built. Without this check that difference reaches no receipt, and
+          # rule 24(b) would deliver a commit whose compose content the lane
+          # never generated on the strength of a pass earned by another
+          # commit. The guard writes all three outputs on every run; an empty
+          # outcome means it died before deciding.
+          SUPERSEDED_OUTCOME: ${{ steps.converge.outputs.superseded_outcome }}
+          SUPERSEDED_EVIDENCE: ${{ steps.converge.outputs.superseded_evidence }}
         run: |
           set -euo pipefail
           # The fallback covers the step dying before it could write its output
@@ -639,12 +651,25 @@ jobs:
             DEPLOYED_REVISION_VERDICT=ok
           fi
           EVIDENCE="${CONVERGE_EVIDENCE:-check_dev_lane_staleness.py --expect-revision ${SAFE_MERGE_SHA} against the omnibase-infra compose project (the guard wrote no evidence)}"
+          # The same fallback the deployed-revision check takes, and for the
+          # same reason: a guard that died before writing its verdict
+          # established nothing, which is INDETERMINATE rather than a pass.
+          # An empty evidence field is refused by ModelLabPassCheck, so the
+          # receipt would not be written at all.
+          case "$SUPERSEDED_OUTCOME" in
+            ok|fail|indeterminate) ;;
+            *)
+              SUPERSEDED_OUTCOME=indeterminate
+              SUPERSEDED_EVIDENCE="INDETERMINATE: the convergence guard ended ${CONVERGE_OUTCOME} without saying whether ${SAFE_MERGE_SHA} was superseded by a newer rebuild"
+              ;;
+          esac
           uv run python scripts/ci/lab_pass_receipt.py emit \
             --sha "$MERGE_SHA" \
             --lane compose-dev \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --check "deployed_revision:${DEPLOYED_REVISION_VERDICT}:${EVIDENCE}" \
+            --check "superseded_by_newer_rebuild:${SUPERSEDED_OUTCOME}:${SUPERSEDED_EVIDENCE}" \
             --checks-json "${LAB_PASS_CHECKS}" \
             --agent-command-id "${CORRELATION_ID}" \
             --out "${LAB_PASS_DIR}/receipt.json" \

@@ -38,6 +38,9 @@ from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.health.model_consumer_sync_status import (
+    ModelConsumerSyncStatus,
+)
 from omnibase_infra.models.health.model_runtime_health_check_event import (
     ModelRuntimeHealthCheckEvent,
 )
@@ -47,6 +50,9 @@ from omnibase_infra.models.health.model_runtime_health_dimension import (
 from omnibase_infra.protocols import ProtocolTopicRegistry
 from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
     ProtocolAutoWiringManifestLike,
+)
+from omnibase_infra.protocols.protocol_consumer_sync_source import (
+    ProtocolConsumerSyncSource,
 )
 from omnibase_infra.runtime.health.projection_liveness import (
     describe_dlq_saturation,
@@ -385,6 +391,104 @@ def _worst(statuses: list[_HealthStatus]) -> _HealthStatus:
     if "DEGRADED" in statuses:
         return "DEGRADED"
     return "HEALTHY"
+
+
+# --- consumer_sync dimension (OMN-18640 AC1) -------------------------------
+
+#: Groups named in the dimension detail before it is capped. The detail lands
+#: in container logs and in ``docker inspect`` output on every probe interval;
+#: a runtime with fifty wedged groups has one problem, and the first few name
+#: it.
+_MAX_NAMED_SYNC_GROUPS = 5
+
+#: What the dimension reports when the transport cannot answer the question --
+#: the in-memory bus, and any process that consumes nothing. Stated rather
+#: than omitted: a dimension that disappears is indistinguishable from one
+#: that was never added, and this whole ticket is about surfaces that were
+#: silent when they should have been speaking.
+CONSUMER_SYNC_UNAVAILABLE = (
+    "consumer-group sync reporting is not available on this transport"
+)
+
+
+def describe_consumer_sync(statuses: Sequence[ModelConsumerSyncStatus]) -> str:
+    """Render the evidence for the ``consumer_sync`` dimension.
+
+    Always carries the measured numbers, green or red. A detail that is only
+    informative when it is failing cannot distinguish "measured and fine" from
+    "not measured", which is the distinction the 2026-09-19T04:51Z wedge came
+    down to.
+    """
+    if not statuses:
+        return "no consumer groups attached yet"
+
+    out_of_sync = [status for status in statuses if not status.ready]
+    if not out_of_sync:
+        max_lag = max(status.backlog_records for status in statuses)
+        newest_advance = min(status.seconds_since_last_record for status in statuses)
+        return (
+            f"{len(statuses)} consumer group(s) in sync; "
+            f"max lag {max_lag} record(s), "
+            f"last advance {newest_advance:.0f}s ago"
+        )
+
+    named = [
+        _describe_one_group(status) for status in out_of_sync[:_MAX_NAMED_SYNC_GROUPS]
+    ]
+    remainder = len(out_of_sync) - len(named)
+    if remainder > 0:
+        named.append(f"+{remainder} more")
+    return (
+        f"{len(out_of_sync)} of {len(statuses)} consumer group(s) out of sync: "
+        + "; ".join(named)
+    )
+
+
+def _describe_one_group(status: ModelConsumerSyncStatus) -> str:
+    """One out-of-sync group, with the two facts that prove it."""
+    parts = [
+        status.consumer_group,
+        f"lag={status.backlog_records}",
+        f"stalled={status.stalled_seconds:.0f}s",
+        f"last_advance={status.seconds_since_last_record:.0f}s",
+        f"reason={status.reason.value}",
+    ]
+    if status.last_rejoin_failed:
+        # Named separately from the stall: the group being behind and the
+        # self-heal being unable to fix it are two findings, and only the
+        # second one says the container needs outside help.
+        parts.append(f"rejoin_failed(attempts={status.rejoin_count})")
+    return " ".join(parts)
+
+
+def evaluate_consumer_sync(
+    event_bus: object | None,
+) -> tuple[_HealthStatus, str]:
+    """Grade the consumer-sync dimension from whatever bus the kernel wired.
+
+    CRITICAL rather than DEGRADED when a group is out of sync, for two
+    reasons. A runtime holding a group it is not draining is not partially
+    doing that topic's work, it is doing none of it while every record
+    published meanwhile waits on a client that will not return unaided. And
+    CRITICAL is the only grade that fails the container healthcheck
+    irrespective of that lane's ``--degraded-policy``, which is what makes
+    this fail-closed rather than dependent on a flag.
+    """
+    if not isinstance(event_bus, ProtocolConsumerSyncSource):
+        return "HEALTHY", CONSUMER_SYNC_UNAVAILABLE
+    try:
+        statuses = tuple(event_bus.consumer_sync_statuses())
+    except Exception as read_error:  # noqa: BLE001 — boundary: a health service must not die reporting on something else
+        logger.warning(
+            "consumer_sync dimension could not read the event bus: %s",
+            read_error,
+            exc_info=True,
+        )
+        return "DEGRADED", f"consumer-group sync could not be read: {read_error}"
+    detail = describe_consumer_sync(statuses)
+    if any(not status.ready for status in statuses):
+        return "CRITICAL", detail
+    return "HEALTHY", detail
 
 
 class ServiceRuntimeHealthMonitor:
@@ -833,6 +937,34 @@ class ServiceRuntimeHealthMonitor:
                     else "HEALTHY"
                 ),
                 detail=describe_projection_write_path(liveness),
+            )
+        )
+
+        # --- Dimension 7: Consumer group sync (OMN-18640 AC1) ---------------
+        # Every dimension above reads BROKER-side or PROCESS-side state. None
+        # of them reads whether this runtime's own consumers are still
+        # fetching. On 2026-09-19T04:51:48Z the .201 dev-lane broker was
+        # recreated, the effects consumer wedged with its offsets frozen at
+        # 7540, and it stayed that way for about fifty minutes until the whole
+        # lane was recreated at 05:41:22Z -- while the group reported Stable
+        # with its partition assigned (so `empty_consumer_groups` and
+        # `consumer_coverage` were green), the contracts had all loaded, the
+        # projections were attached, and the container reported Up with
+        # RestartCount 0. The deploy agent's force-recreate backstop never
+        # fired because the only thing it probes is that container's health.
+        #
+        # This is deliberately NOT computed from the profile-filtered manifest
+        # like the coverage dimensions above. The supervisors exist one per
+        # (topic, group) this PROCESS actually polls, so the set is scoped by
+        # construction -- there is no ownership filter here to get wrong.
+        consumer_sync_status, consumer_sync_detail = evaluate_consumer_sync(
+            self._event_bus
+        )
+        dimensions.append(
+            ModelRuntimeHealthDimension(
+                name="consumer_sync",
+                status=consumer_sync_status,
+                detail=consumer_sync_detail,
             )
         )
 

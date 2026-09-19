@@ -46,19 +46,6 @@ MIRROR_REPOS=(
     knowledge-base
 )
 
-mkdir -p "${MIRROR_ROOT}"
-
-lock_file="${MIRROR_ROOT}/.refresh.lock"
-exec 9>"${lock_file}"
-if ! flock -n 9; then
-    echo "[git-mirror-refresh] another refresh holds the lock; exiting (this is the serialization guarantee, not an error)."
-    exit 0
-fi
-
-started_at="$(date -Is)"
-echo "[git-mirror-refresh] start ${started_at} root=${MIRROR_ROOT}"
-
-rc=0
 # OMN-16063 C2b -- serving settings every mirror must carry.
 #
 # allowFilter: the runner-side rewrite gate (wire_uv_git_mirror_rewrite in
@@ -77,7 +64,102 @@ rc=0
 apply_mirror_serving_config() {
     git -C "$1" config uploadpack.allowFilter true
     git -C "$1" config uploadpack.allowAnySHA1InWant true
+    # OMN-18802 -- write a pack, never loose objects.
+    #
+    # git's default `fetch.unpackLimit` is 100: a fetch bringing fewer than
+    # 100 objects is UNPACKED into individual loose object files instead of
+    # being kept as a pack. This timer fires every ~2 minutes and almost
+    # every pass brings a handful of objects, so the default meant this
+    # mirror grew loose objects forever and packed almost nothing.
+    #
+    # By 2026-09-19 the onex_change_control mirror held 153,451 loose objects
+    # / 4.52 GiB against 385 MiB of actual packed content, and serving a
+    # clone out of that took 47-264s where omnimarket took 5s -- which is
+    # what cancelled both OCC publisher jobs at their 5-minute budget
+    # (OMN-18802). Setting the limit to 1 makes every fetch write a pack.
+    git -C "$1" config fetch.unpackLimit 1
+    git -C "$1" config transfer.unpackLimit 1
 }
+
+# OMN-18802 -- consolidate packs when they have accumulated.
+#
+# WHY THIS IS HERE AND NOT IN A RUNBOOK. The clone branch below sets
+# `gc.auto 0` with the comment "`git gc` is run explicitly by the runbook",
+# and the runbook it defers to -- docs/runbooks/c2-git-mirror-egress-rollout.md,
+# also the `Documentation=` target of omninode-git-mirror-daemon.service --
+# has never existed in this repository. So nothing has ever repacked these
+# mirrors, and "the runbook does it" read as coverage for four months. A
+# mechanism that exists only as a reference to an absent document is not a
+# mechanism.
+#
+# `gc.auto 0` stays, and this is deliberately NOT `git gc`: the original
+# concern was real, that repacking 72 job-serving mirrors on an unpredictable
+# schedule would spike host IO mid-wave. What runs instead is bounded and
+# conditional:
+#
+#   * it runs INSIDE the flock this script already holds, so it can never
+#     overlap a refresh or another maintenance pass;
+#   * it runs only when the pack count crosses a threshold, so the steady
+#     state is a no-op;
+#   * `nice`/`ionice` keep it behind live CI for the host's IO;
+#   * `repack -a -d` plus `prune-packed` only MOVE reachable objects from
+#     loose files into a pack. Nothing unreachable is expired and no history
+#     is dropped, so a concurrent `upload-pack` reader cannot lose an object
+#     out from under it -- unlike `git gc --prune`, which is why that is not
+#     what this runs.
+MAINTENANCE_PACK_THRESHOLD="${OMNI_GIT_MIRROR_PACK_THRESHOLD:-12}"
+
+maintain_mirror_packs() {
+    local mirror_dir="$1" repo="$2"
+    local pack_count
+
+    pack_count="$(find "${mirror_dir}/objects/pack" -maxdepth 1 -name '*.pack' 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "${pack_count}" -lt "${MAINTENANCE_PACK_THRESHOLD}" ]]; then
+        return 0
+    fi
+
+    local loose_before loose_after
+    loose_before="$(git -C "${mirror_dir}" count-objects | awk '{print $1}')"
+    echo "[git-mirror-refresh] ${repo}: ${pack_count} packs >= ${MAINTENANCE_PACK_THRESHOLD}, ${loose_before} loose -- repacking"
+
+    # Resolved rather than assumed: a missing `ionice` would otherwise make
+    # every repack look like a repack FAILURE, which reads as a corrupt
+    # mirror rather than a missing binary.
+    local -a niced=()
+    command -v nice >/dev/null 2>&1 && niced+=(nice -n 19)
+    if command -v ionice >/dev/null 2>&1; then
+        niced+=(ionice -c3)
+    else
+        echo "[git-mirror-refresh] ${repo}: ionice absent -- repacking without IO nicing" >&2
+    fi
+
+    if ! "${niced[@]}" git -C "${mirror_dir}" repack -a -d -q; then
+        # A failed repack leaves the mirror exactly as it was -- repack writes
+        # the new pack before dropping the old ones -- so this degrades, it
+        # does not corrupt. Report and carry on rather than failing the timer.
+        echo "[git-mirror-refresh] ${repo}: REPACK FAILED (mirror unchanged and still serving)" >&2
+        return 1
+    fi
+    "${niced[@]}" git -C "${mirror_dir}" prune-packed -q || true
+
+    loose_after="$(git -C "${mirror_dir}" count-objects | awk '{print $1}')"
+    echo "[git-mirror-refresh] ${repo}: repacked -- loose ${loose_before} -> ${loose_after}, packs $(find "${mirror_dir}/objects/pack" -maxdepth 1 -name '*.pack' 2>/dev/null | wc -l | tr -d ' ')"
+    return 0
+}
+
+mkdir -p "${MIRROR_ROOT}"
+
+lock_file="${MIRROR_ROOT}/.refresh.lock"
+exec 9>"${lock_file}"
+if ! flock -n 9; then
+    echo "[git-mirror-refresh] another refresh holds the lock; exiting (this is the serialization guarantee, not an error)."
+    exit 0
+fi
+
+started_at="$(date -Is)"
+echo "[git-mirror-refresh] start ${started_at} root=${MIRROR_ROOT}"
+
+rc=0
 
 for repo in "${MIRROR_REPOS[@]}"; do
     mirror_dir="${MIRROR_ROOT}/${repo}.git"
@@ -106,6 +188,7 @@ for repo in "${MIRROR_REPOS[@]}"; do
     if timeout "${FETCH_TIMEOUT_SECONDS}" git -C "${mirror_dir}" fetch --quiet --prune origin '+refs/*:refs/*'; then
         head_sha="$(git -C "${mirror_dir}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
         echo "[git-mirror-refresh] ${repo}: ok head=${head_sha}"
+        maintain_mirror_packs "${mirror_dir}" "${repo}" || rc=1
     else
         # A failed refresh is NOT fatal to CI: the runner-side pre-seed is
         # fail-open and a stale mirror still supplies almost every object.

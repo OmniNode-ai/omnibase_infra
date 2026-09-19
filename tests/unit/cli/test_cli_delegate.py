@@ -68,6 +68,9 @@ from omnibase_infra.cli.cli_delegate import (
 from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
 )
+from omnibase_infra.cli.model_delegate_run_addressing import (
+    ModelDelegateRunAddressing,
+)
 from omnibase_infra.cli.model_receipt_runtime_summary import (
     ModelReceiptRuntimeSummary,
 )
@@ -82,6 +85,17 @@ from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 
 pytestmark = pytest.mark.unit
+
+# OMN-18810: the two writers now require the addressing facts the files
+# record. These suites are about route attribution and carrier shapes, not
+# about addressing, so they state one neutral in-process value; the
+# addressing keys themselves are pinned by
+# tests/unit/cli/test_omn18810_delegate_run_addressing.py.
+_ADDRESSING = ModelDelegateRunAddressing(
+    locus=EnumDelegateLocus.IN_PROCESS,
+    bus="inmemory",
+)
+
 
 KAFKA_BOOTSTRAP_ARG = "$KAFKA_BOOTSTRAP_SERVERS"
 _RECEIPT_ENV_SENTINEL = "OMN15569_DELEGATION_RECEIPT_TEST_SENTINEL"
@@ -1970,6 +1984,7 @@ class TestLocalRunArtifacts:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="research the route",
             task_type="research",
             task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -1988,7 +2003,14 @@ class TestLocalRunArtifacts:
         run_data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
         assert run_data == {
             "correlation_id": str(receipt.correlation_id),
-            "lane": "local",
+            # OMN-18810: the accepted rung's TIER, under a name that says so.
+            # This key was ``lane``, which is now the ``--lane`` value and is
+            # ``None`` here because this fixture addresses no lane.
+            "routing_tier": "local",
+            "locus": "in-process",
+            "bus": "inmemory",
+            "lane": None,
+            "dispatch_target": None,
             "prompt": "research the route",
             "run_id": str(receipt.run_id),
             "task_type": "research",
@@ -2011,6 +2033,7 @@ class TestLocalRunArtifacts:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="research the route",
             task_type="research",
             task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -2032,6 +2055,7 @@ class TestLocalRunArtifacts:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="proof",
             task_type="research",
             task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -2044,6 +2068,7 @@ class TestLocalRunArtifacts:
             _write_local_run_files(
                 receipt=receipt,
                 state_root=tmp_path,
+                addressing=_ADDRESSING,
                 prompt="research the route",
                 task_type="research",
             )
@@ -2147,6 +2172,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="Reply with exactly: OK",
             task_type="research",
             task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -2174,7 +2200,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
 
         run_data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
         assert run_data["prompt"] == "Reply with exactly: OK"
-        assert run_data["lane"] == "cheap_cloud"
+        assert run_data["routing_tier"] == "cheap_cloud"
         assert run_data["correlation_id"] == str(receipt.correlation_id)
 
     def test_attributes_no_route_after_the_summary_unwrap(self, tmp_path: Path) -> None:
@@ -2188,6 +2214,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="Reply with exactly: OK",
             task_type="research",
             task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -2216,6 +2243,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
                 workflow="/site-packages/omnimarket/nodes/node_gap_compute/contract.yaml"
             ),
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="proof",
             task_type="research",
             task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -2278,6 +2306,7 @@ class TestFailedDelegationIsRendered:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="summarise the coordination ledger",
             task_type="complex_reasoning",
             task_type_resolution=EnumTaskTypeResolution.CONTRACT.value,
@@ -2313,6 +2342,7 @@ class TestFailedDelegationIsRendered:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="summarise the coordination ledger",
             task_type="complex_reasoning",
             task_type_resolution=EnumTaskTypeResolution.CONTRACT.value,
@@ -2356,6 +2386,7 @@ class TestFailedDelegationIsRendered:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="summarise the coordination ledger",
             task_type="complex_reasoning",
             task_type_resolution=EnumTaskTypeResolution.CONTRACT.value,
@@ -2482,6 +2513,7 @@ class TestDispatchedDelegationWritesRunFiles:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt=(
                 "List the first five prime numbers in ascending order, "
                 "separated by commas, and nothing else."
@@ -2502,6 +2534,7 @@ class TestDispatchedDelegationWritesRunFiles:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="List the first five prime numbers",
             task_type="summarization",
             task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -2519,7 +2552,7 @@ class TestDispatchedDelegationWritesRunFiles:
             "83aa8b6c-8189-49f0-953d-80c8f015ed0a"
         )
         run_data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-        assert run_data["lane"] == "local"
+        assert run_data["routing_tier"] == "local"
         assert run_data["task_type"] == "summarization"
 
     def test_announces_the_paths_on_stderr(
@@ -2531,6 +2564,7 @@ class TestDispatchedDelegationWritesRunFiles:
         _write_local_run_files(
             receipt=receipt,
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="List the first five prime numbers",
             task_type="summarization",
             task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -2593,6 +2627,7 @@ class TestUnresolvableTerminalFailsLoudly:
             _write_local_run_files(
                 receipt=receipt,
                 state_root=tmp_path,
+                addressing=_ADDRESSING,
                 prompt="List the first five prime numbers",
                 task_type="summarization",
                 task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -2625,6 +2660,7 @@ class TestUnresolvableTerminalFailsLoudly:
             _write_local_run_files(
                 receipt=receipt,
                 state_root=tmp_path,
+                addressing=_ADDRESSING,
                 prompt="List the first five prime numbers",
                 task_type="summarization",
                 task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
@@ -2650,6 +2686,7 @@ class TestUnresolvableTerminalFailsLoudly:
                 workflow="/site-packages/omnimarket/nodes/node_gap_compute/contract.yaml"
             ),
             state_root=tmp_path,
+            addressing=_ADDRESSING,
             prompt="proof",
             task_type="summarization",
             task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,

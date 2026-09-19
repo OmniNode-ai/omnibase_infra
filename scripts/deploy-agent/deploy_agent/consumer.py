@@ -61,12 +61,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from kafka import KafkaConsumer, TopicPartition
 from kafka.errors import CorruptRecordError, UnsupportedCodecError
 from kafka.structs import OffsetAndMetadata
 
 from deploy_agent.auth import verify_command
+from deploy_agent.coalesce import (
+    AncestryResolver,
+    ModelCoalescePlan,
+    ModelQueuedCommand,
+    ModelSupersession,
+    plan_coalesce,
+)
 from deploy_agent.events import (
     TOPIC_DEPLOY_COMMAND_DLQ,
     TOPIC_REBUILD_REQUESTED,
@@ -89,6 +97,18 @@ logger = logging.getLogger(__name__)
 # image, and the rewound offset is what makes the replacement process re-read
 # the command instead of skipping it.
 SelfUpdateHook = Callable[[Callable[[], None]], None]
+
+# OMN-18143. Invoked once per command the coalescing scan folds into a newer
+# one, AFTER its durable ``superseded`` job record has been written and BEFORE
+# the runner is accepted. The agent supplies the publisher; this consumer holds
+# no producer of its own, and giving it one so it could emit its own terminal
+# events would put a second bus writer in the process for no gain.
+#
+# A hook that raises is logged and the scan continues: the durable record is
+# already written and carries ``result_publish_pending``, so the agent's own
+# retry loop owes the event either way. Losing the coalescing decision because
+# a broker was briefly away would be the worse trade.
+SupersededHook = Callable[[ModelSupersession], None]
 
 # Stamped on the rewound offset so `rpk group describe` shows WHY the group's
 # committed offset moved BACKWARDS onto a record it had already fetched.
@@ -164,6 +184,13 @@ class DeployConsumer:
     #: means nothing is sampled, which means the endpoint reports the lag
     #: unknown -- never zero.
     lag_sampler: LagSampler | None = None
+    #: OMN-18143. Declared on the CLASS for the same reason ``lag_sampler`` is:
+    #: this consumer is also built by tests and by paths that construct it
+    #: without going through ``__init__``, and a partially constructed
+    #: consumer must read as "coalesces nothing" rather than raising
+    #: ``AttributeError`` from the middle of the accept protocol.
+    ancestry_resolver: AncestryResolver | None = None
+    on_superseded: SupersededHook | None = None
 
     def __init__(
         self,
@@ -173,6 +200,8 @@ class DeployConsumer:
         self_update_hook: SelfUpdateHook,
         quarantine_dir: Path | None = None,
         lag_sampler: LagSampler | None = None,
+        ancestry_resolver: AncestryResolver | None = None,
+        on_superseded: SupersededHook | None = None,
     ) -> None:
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
@@ -196,6 +225,12 @@ class DeployConsumer:
         # and this is sampled once per poll, so the values this process itself
         # committed are both cheaper and exact.
         self.lag_sampler = lag_sampler
+        # OMN-18143. Absent by default: a consumer built without a resolver
+        # coalesces nothing and behaves exactly as it did before this change.
+        # That is the same fail-closed direction every refusal inside the scan
+        # takes -- run every command, in order.
+        self.ancestry_resolver = ancestry_resolver
+        self.on_superseded = on_superseded
         logger.info(
             "Deploy agent lane fence: %s",
             ",".join(sorted(lane.value for lane in self.allowed_lanes)),
@@ -235,15 +270,53 @@ class DeployConsumer:
         if not records:
             return None, None
 
-        # Process first message only
-        for topic_partition, messages in records.items():
-            for msg in messages:
-                return self._process_message(msg)
+        # OMN-18143. The batch this poll ALREADY fetched is the look-ahead, and
+        # nothing beyond it is polled for.
+        #
+        # That is a deliberate bound, not a shortcut. The fetch position is
+        # already past every record in this batch -- ``_commit_through``'s own
+        # docstring records what that costs -- so scanning records the client
+        # has in hand adds no exposure at all, while polling AGAIN to see
+        # further would advance the position over records this scan then
+        # declines to fold, widening exactly the window OMN-18613 measured a
+        # lost command in. A queue deeper than one fetch simply coalesces
+        # across successive polls instead of in one, which is slower and
+        # equally correct.
+        ordered, lookahead_usable = self._order_batch(records)
+        if not ordered:
+            return None, None
+        return self._process_message(
+            ordered[0], lookahead=ordered[1:] if lookahead_usable else []
+        )
 
-        return None, None
+    def _order_batch(self, records: dict[Any, list[Any]]) -> tuple[list[Any], bool]:
+        """The fetched batch in control-topic order, and whether it may be scanned.
+
+        Coalescing reorders nothing, so it may only reason about records whose
+        relative order Kafka actually guarantees -- which is per partition and
+        nowhere else. A poll that returned records on more than one partition
+        therefore yields ONE message and no look-ahead: the head is processed
+        exactly as it was before this change, and the rest are read on later
+        polls. The control topic has a single partition today; this refuses to
+        depend on that staying true.
+        """
+        populated = [(tp, msgs) for tp, msgs in records.items() if msgs]
+        if not populated:
+            return [], False
+        topic_partition, messages = populated[0]
+        ordered = sorted(messages, key=lambda m: m.offset)
+        if len(populated) > 1:
+            logger.info(
+                "coalesce: this poll returned records on %d partitions, so no "
+                "look-ahead is used and %s is processed alone",
+                len(populated),
+                topic_partition,
+            )
+            return ordered[:1], False
+        return ordered, True
 
     def _process_message(
-        self, msg: Any
+        self, msg: Any, lookahead: list[Any] | None = None
     ) -> tuple[ModelRebuildRequested | None, str | None]:
         payload = msg.value
 
@@ -317,6 +390,14 @@ class DeployConsumer:
             self._commit_through(msg)
             return None, "duplicate"
 
+        # Step 6b: Coalesce (OMN-18143). The newest foldable command in the
+        # batch runs; every one it replaces gets a durable terminal record and
+        # a terminal event naming it. Everything below this point -- the
+        # self-update boundary, the accept, the commit and the returned
+        # command -- is about the RUNNER, which is this message only when
+        # nothing was folded.
+        runner_cmd, runner_msg, superseded_ids = self._coalesce(cmd, msg, lookahead)
+
         # Step 7: Self-update boundary (OMN-16442). This is the last point at
         # which nothing is in flight: the command has passed every acceptance
         # check but is not yet marked started and its offset is not yet
@@ -331,28 +412,166 @@ class DeployConsumer:
         # the command is processed on the current image, exactly as the
         # method's own dirty-tree and fetch-failure rails already do.
         try:
-            self.self_update_hook(lambda: self._rewind_committed_offset_to(msg))
+            self.self_update_hook(lambda: self._rewind_committed_offset_to(runner_msg))
         except Exception as e:  # noqa: BLE001
             logger.error(  # noqa: TRY400
                 "Self-update at the pre-accept boundary failed for %s, "
                 "proceeding on the current image: %s "
                 "friction_type=self_update_boundary_failed",
-                cmd.correlation_id,
+                runner_cmd.correlation_id,
                 e,
             )
 
         # Step 8: Persist job state
         self.job_store.accept(
-            correlation_id=cmd.correlation_id,
-            command=command_payload,
+            correlation_id=runner_cmd.correlation_id,
+            command=self._command_payload(runner_msg),
+            superseded_correlation_ids=superseded_ids,
         )
 
-        # Step 9: Commit offset
-        self._commit_through(msg)
+        # Step 9: Commit offset. The runner's offset is at or past every
+        # superseded record's, so one commit covers the whole group.
+        self._commit_through(runner_msg)
 
         # Step 10: Return accepted command
-        logger.info("Accepted command %s (scope=%s)", cmd.correlation_id, cmd.scope)
-        return cmd, None
+        logger.info(
+            "Accepted command %s (scope=%s, superseded=%d)",
+            runner_cmd.correlation_id,
+            runner_cmd.scope,
+            len(superseded_ids),
+        )
+        return runner_cmd, None
+
+    @staticmethod
+    def _command_payload(msg: Any) -> dict[str, Any]:
+        """The command as the contract sees it: the record minus its signature.
+
+        The signature is transport metadata, not part of the command, and the
+        job record has never carried it. Factored out because the coalescing
+        scan needs the same projection for a message the head path never
+        decoded.
+        """
+        return {k: v for k, v in msg.value.items() if k != "_signature"}
+
+    # ── coalescing (OMN-18143) ───────────────────────────────────────────────
+    def _coalesce(
+        self,
+        cmd: ModelRebuildRequested,
+        msg: Any,
+        lookahead: list[Any] | None,
+    ) -> tuple[ModelRebuildRequested, Any, list[UUID]]:
+        """Decide which of the fetched batch runs; record the ones it replaces.
+
+        Returns the command to run, its Kafka record, and the correlation ids
+        it superseded. With no resolver, no look-ahead, or nothing foldable,
+        it returns the head unchanged and an empty list -- the pre-change
+        behaviour, reached by the same code path rather than by a branch
+        around it.
+        """
+        if self.ancestry_resolver is None or not lookahead:
+            return cmd, msg, []
+
+        queued = [
+            ModelQueuedCommand(command=cmd, partition=msg.partition, offset=msg.offset)
+        ]
+        messages_by_offset: dict[int, Any] = {msg.offset: msg}
+        for candidate in lookahead:
+            decoded = self._decode_for_lookahead(candidate)
+            if decoded is None:
+                # A record the scan cannot cleanly read is left completely
+                # alone -- not quarantined, not committed past, not counted.
+                # It will be polled again and handled by the head path, which
+                # is the one place that owns refusing a command. The group
+                # ends here because the scan may not reorder around it.
+                break
+            queued.append(
+                ModelQueuedCommand(
+                    command=decoded,
+                    partition=candidate.partition,
+                    offset=candidate.offset,
+                )
+            )
+            messages_by_offset[candidate.offset] = candidate
+
+        plan = plan_coalesce(queued, contains=self.ancestry_resolver)
+        logger.info("%s", plan.journal_line())
+        if not plan.superseded:
+            return cmd, msg, []
+
+        return (
+            plan.runner.command,
+            messages_by_offset[plan.runner.offset],
+            self._record_supersessions(plan, messages_by_offset),
+        )
+
+    def _record_supersessions(
+        self, plan: ModelCoalescePlan, messages_by_offset: dict[int, Any]
+    ) -> list[UUID]:
+        """Write each superseded command's terminal record, then announce it.
+
+        Record first, announce second, and never the reverse: the durable
+        record is what makes the supersession survive a broker outage or a
+        crash, and it carries ``result_publish_pending`` so the agent's own
+        retry loop owes the event even if the hook below never fires.
+        """
+        ids: list[UUID] = []
+        for supersession in plan.superseded:
+            superseded_cmd = supersession.superseded.command
+            record_msg = messages_by_offset[supersession.superseded.offset]
+            self.job_store.record_superseded(
+                correlation_id=superseded_cmd.correlation_id,
+                command=self._command_payload(record_msg),
+                superseded_by_sha=supersession.superseded_by_sha,
+                superseded_by_correlation_id=supersession.superseded_by_correlation_id,
+            )
+            logger.info(
+                "coalesce: %s (ref=%s) superseded by %s (ref=%s)",
+                superseded_cmd.correlation_id,
+                superseded_cmd.git_ref,
+                supersession.superseded_by_correlation_id,
+                supersession.superseded_by_sha,
+            )
+            if self.on_superseded is not None:
+                try:
+                    self.on_superseded(supersession)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "coalesce: publishing the superseded event for %s "
+                        "failed (%s: %s); the durable record is written and "
+                        "the publish is still owed",
+                        superseded_cmd.correlation_id,
+                        type(exc).__name__,
+                        exc,
+                    )
+            ids.append(superseded_cmd.correlation_id)
+        return ids
+
+    def _decode_for_lookahead(self, msg: Any) -> ModelRebuildRequested | None:
+        """Read a queued record without consuming it, or return ``None``.
+
+        Deliberately SILENT about every refusal and deliberately without side
+        effects. The head path owns quarantining, dead-lettering and
+        committing past a bad record, and doing any of that from here would
+        mean a record is refused by a scan that was only supposed to look at
+        it -- with its rejection event published before the agent had even
+        reached it in the queue.
+        """
+        payload = msg.value
+        if isinstance(payload, UndecodableValue) or not isinstance(payload, dict):
+            return None
+        if not verify_command(payload):
+            return None
+        try:
+            cmd = ModelRebuildRequested.model_validate(
+                {k: v for k, v in payload.items() if k != "_signature"}
+            )
+        except Exception:  # noqa: BLE001 - an unreadable candidate is not foldable
+            return None
+        try:
+            assert_lane_allowed(cmd.runtime_lane, self.allowed_lanes)
+        except LaneNotAllowedError:
+            return None
+        return cmd
 
     def _sample_lag(self) -> None:
         """Record how many control-topic records this agent has not dealt with.

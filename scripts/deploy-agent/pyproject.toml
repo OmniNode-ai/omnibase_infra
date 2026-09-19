@@ -25,6 +25,7 @@ markers = [
     "promotion_guard: test controls the prod promotion-lineage guard stub itself (OMN-12626)",
     "gateway_lane: test controls the gateway-lane deploy stub itself (OMN-18134)",
     "deps_recreate: test drives the real supervised deps recreate (OMN-18692)",
+    "deps_convergence: test drives the real deps-convergence observation (OMN-18640)",
 ]
 
 [tool.setuptools.packages.find]
