@@ -220,6 +220,7 @@ check_git_dirty() { :; }
 validate_build_source_config() { :; }
 guard_prod_promotion_lineage() { :; }
 resolve_compose_project() { printf '%s\\n' "${FAKE_COMPOSE_PROJECT}"; }
+guard_dogfood_deploy_root() { :; }
 guard_cold_bringup_lane_scope() { :; }
 guard_lane_deploy_attribution() { :; }
 guard_hotpatch_ledger() { :; }
@@ -268,6 +269,7 @@ readback_deployed_ref() {
 }
 show_summary() { :; }
 prune_old_deployments() { :; }
+reconcile_runtime_container_start_state() { :; }
 """
 
 

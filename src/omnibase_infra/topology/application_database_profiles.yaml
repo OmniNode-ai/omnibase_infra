@@ -39,6 +39,11 @@ profiles:
     deployment_repository: OmniNode-ai/omnibase_infra
     injection_path: docker/docker-compose.lakshman.yml
     runtime_policy_profile: lakshman
+  dogfood:
+    instance: local
+    deployment_repository: OmniNode-ai/omnibase_infra
+    injection_path: docker/docker-compose.dogfood.yml
+    runtime_policy_profile: dogfood
   onex-dev:
     instance: onex-dev
     deployment_repository: OmniNode-ai/omninode_infra

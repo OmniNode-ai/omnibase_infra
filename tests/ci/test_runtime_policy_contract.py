@@ -51,6 +51,7 @@ def test_runtime_policy_contract_declares_runtime_lanes() -> None:
         "judge",
         "prod",
         "lakshman",
+        "dogfood",
     }
     assert contract.profiles["dev"].main_port == 8085
     assert contract.profiles["dev"].effects_port == 8086
@@ -68,6 +69,8 @@ def test_runtime_policy_contract_declares_runtime_lanes() -> None:
     assert contract.profiles["lakshman"].main_port == 58085
     assert contract.profiles["lakshman"].effects_port == 58086
     assert contract.profiles["lakshman"].topic_provisioner_max_partitions == 1
+    assert contract.profiles["dogfood"].main_port == 49085
+    assert contract.profiles["dogfood"].effects_port == 49086
 
 
 def test_every_lane_effects_port_is_main_port_plus_one() -> None:
