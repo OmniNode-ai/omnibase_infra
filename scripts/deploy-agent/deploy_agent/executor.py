@@ -43,7 +43,9 @@ from deploy_agent.events import (
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
     EnumVerifyRecreateOutcome,
+    ModelComposeInvocation,
     ModelContainerResidue,
+    ModelDepsConvergenceFinding,
     ModelHealthCheck,
     ModelRebuildRequested,
     ModelRecreateSupervision,
@@ -107,6 +109,10 @@ COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
 # whole point.
 COMPOSE_GEN_OUTPUT_FILE = f"{REPO_DIR}/docker/docker-compose.generated.yml"
 COMPOSE_PROJECT = "omnibase-infra"
+# OMN-18640: the deps-convergence observation runs before the deps leg and
+# must never become the reason a deploy is slow. Three read-only commands,
+# each bounded well under the phase it precedes.
+CONFIG_HASH_TIMEOUT_SECONDS = 60
 RUNTIME_POLICY_ENV_FILE = Path(REPO_DIR) / "docker" / "runtime-policy.env"
 # OMN-18572. The operator-env keys THIS FLEET rewrites between agent restarts,
 # and therefore the only ones ``_compose_env`` re-reads from disk per job rather
@@ -644,14 +650,29 @@ def _decode_stream(stream: str | bytes | None) -> str:
     return str(stream)
 
 
-def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
+def _run(
+    cmd: list[str],
+    timeout: int,
+    *,
+    cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one command, capturing text output, never raising on a non-zero exit.
+
+    The two keyword arguments are ENUMERATED rather than taken as ``**kwargs``
+    (OMN-18640). They are the only two any call site in this package passes,
+    and the untyped catch-all made every ``result.stdout`` an ``Any``: three of
+    the ten type errors this package carried were functions declared to return
+    ``str`` that were silently returning ``Any`` read back out of here.
+    """
     return subprocess.run(
         cmd,
         timeout=timeout,
         capture_output=True,
         text=True,
         check=False,
-        **kwargs,
+        cwd=cwd,
+        env=env,
     )
 
 
@@ -910,24 +931,46 @@ def _runtime_version_from_pyproject(repo_dir: str = REPO_DIR) -> str:
     return version
 
 
-def _runtime_health_passed(result: subprocess.CompletedProcess) -> bool:
-    """Return whether a runtime /health response proves deploy readiness."""
+def _runtime_health_reason(result: subprocess.CompletedProcess[str]) -> str:
+    """Return why a runtime /health response is not a pass, or "" when it is.
+
+    OMN-18640 AC8. The predicate this replaced returned a bare bool, so the
+    executor knew a probe had failed and could not say ANYTHING about why. A
+    verdict that fails the job has to name its own reason -- the reason is what
+    reaches ``errors`` on the terminal event and what a reader of the job
+    record has instead of going to the host.
+
+    Every branch below is a distinct fact about the runtime and they take
+    different next steps: curl could not reach it at all, it answered something
+    that is not a health document, or it answered a health document that says
+    it is not ready.
+    """
     if result.returncode != 0:
-        return False
+        detail = (result.stderr or result.stdout).strip()[:200]
+        return f"curl exited {result.returncode}: {detail or 'no output'}"
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return False
+        return f"health response is not JSON: {result.stdout.strip()[:200]!r}"
     if not isinstance(payload, dict):
-        return False
+        return f"health response is not a JSON object: {type(payload).__name__}"
     details = payload.get("details")
     if not isinstance(details, dict):
-        return False
+        return "health response carries no details object"
+    status = payload.get("status")
+    is_running = details.get("is_running")
+    prefetch = details.get("config_prefetch_status")
+    if status == "healthy" and is_running is True and prefetch in {"ok", "skipped"}:
+        return ""
     return (
-        payload.get("status") == "healthy"
-        and details.get("is_running") is True
-        and details.get("config_prefetch_status") in {"ok", "skipped"}
+        f"health response is not ready: status={status!r} "
+        f"is_running={is_running!r} config_prefetch_status={prefetch!r}"
     )
+
+
+def _runtime_health_passed(result: subprocess.CompletedProcess[str]) -> bool:
+    """Return whether a runtime /health response proves deploy readiness."""
+    return not _runtime_health_reason(result)
 
 
 def _compose_service_states(
@@ -1445,6 +1488,36 @@ def gateway_deploy_budget() -> ModelGatewayDeployBudget:
     )
 
 
+class VerificationFailedError(RuntimeError):
+    """Post-deploy verification did not pass, so the job fails (OMN-18640 AC8).
+
+    WHAT THIS REPLACED. ``verify`` recorded a ``ModelHealthCheck`` with
+    ``status="fail"`` and then reported ``Phase.VERIFICATION SUCCESS`` unless
+    the probe had TIMED OUT. So the only unhealthy runtime that could fail a
+    deploy was one that stopped answering altogether for a full ten seconds. A
+    runtime answering ``{"status": "degraded"}`` in twelve milliseconds, a
+    ``/health`` port refusing the connection outright, and a lane missing a
+    required projection table were each written onto the terminal event as a
+    failure and reported as a SUCCESSFUL deploy.
+
+    The 2026-09-18 effects wedge was caught only because the dead container
+    stopped answering and the probe hit its ceiling. The same outage with a
+    fast unhealthy answer would have been a green deploy over it.
+
+    The message names every failing check WITH its own reason, because this is
+    the string the agent writes to ``errors`` on the terminal event, and a
+    reader who has only the event has only this.
+    """
+
+    def __init__(self, failures: list[ModelHealthCheck]) -> None:
+        self.failures = failures
+        rendered = "; ".join(
+            f"{check.endpoint} ({check.service}): {check.detail or 'no detail recorded'}"
+            for check in failures
+        )
+        super().__init__(f"post-deploy verification failed: {rendered}")
+
+
 class GatewayDeployScriptUnavailableError(RuntimeError):
     """Raised when the sanctioned gateway deploy script could not be executed.
 
@@ -1525,6 +1598,23 @@ class DeployExecutor:
         # whether that repaired them. Read by the agent when it builds the
         # terminal event, for the same reason residue and supervision are.
         self.verify_recreate: list[ModelVerifyRecreate] = []
+        # OMN-18640: what the deps leg found before it acted -- per core
+        # service, whether convergence was about to replace that container and
+        # why. Read by the agent when it builds the terminal event, for the
+        # same reason residue and supervision are: on 2026-09-19 the job that
+        # replaced the lane's broker differed from its neighbours by nothing an
+        # operator could read except a phase duration.
+        self.deps_convergence: list[ModelDepsConvergenceFinding] = []
+        # OMN-18640: the argv of every compose command this rebuild issued.
+        # Before this the only way to read a live deploy's flags was to sample
+        # the host's process table while the child was running.
+        self.compose_invocations: list[ModelComposeInvocation] = []
+        # OMN-18640 AC8: every post-deploy check this rebuild made, recorded
+        # before the verdict so a REFUSED verification still publishes what it
+        # probed. The agent's own local is the target of the assignment that
+        # raises, so on a failed verification it is empty -- which is how the
+        # deploy whose readings mattered most published none of them.
+        self.health_checks: list[ModelHealthCheck] = []
         # OMN-17135: repo -> the commit SHA RT-1 actually resolved and vendored
         # for that sibling. The requested ref pins omnibase_infra only, so
         # without this the terminal event named one repository's commit and left
@@ -1537,6 +1627,9 @@ class DeployExecutor:
         self.sibling_source_refs = {}
         self.recreate_supervision = []
         self.verify_recreate = []
+        self.deps_convergence = []
+        self.compose_invocations = []
+        self.health_checks = []
 
     def _record_container_residue(
         self, stuck: list[str], *, lane: EnumRuntimeLane
@@ -2107,6 +2200,11 @@ class DeployExecutor:
             }
 
         record.setdefault("recreated", False)
+        # A refusal JSON carries only ``result`` and ``reason``, so without this
+        # the pair this method's contract promises came back
+        # ``tag_advanced=None`` -- which reads as "not known" rather than "did
+        # not advance" in every log line and every consumer (OMN-18572).
+        record.setdefault("tag_advanced", False)
         if not record.get("tag_advanced"):
             # UNCHANGED and REFUSED both land here, and neither is a reason to
             # bounce a healthy container. Recreating on an unadvanced tag is the
@@ -3519,6 +3617,226 @@ class DeployExecutor:
                 f"{result.stderr}"
             )
 
+    def _record_compose_invocation(self, phase: Phase, cmd: Sequence[str]) -> None:
+        """Record one compose argv on the job (OMN-18640).
+
+        Called at the point the command is BUILT, not after it returns, so a
+        command that is killed mid-recreate still leaves its flags behind --
+        which is the case where knowing them matters most.
+        """
+        self.compose_invocations.append(
+            ModelComposeInvocation(phase=phase, argv=tuple(cmd))
+        )
+
+    def _rendered_config_hashes(
+        self, lane: EnumRuntimeLane, services: Sequence[str]
+    ) -> dict[str, str]:
+        """Ask compose for the config hash of each service, as it would render it.
+
+        ONE subprocess for the whole set: `--hash` takes a comma-separated
+        list and prints `<service> <hash>` per line. This is the same value
+        compose writes to the `com.docker.compose.config-hash` label when it
+        creates a container, so the two are directly comparable rather than
+        approximately so -- verified equal on all three core services of the
+        .201 dev lane on 2026-09-19.
+        """
+        config = lane_config_for(lane)
+        cmd = [
+            "docker",
+            "compose",
+            *_compose_file_args(lane),
+            "-p",
+            config.compose_project,
+            "config",
+            "--hash",
+            ",".join(services),
+        ]
+        result = _run(cmd, timeout=CONFIG_HASH_TIMEOUT_SECONDS, env=_compose_env())
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"`compose config --hash` exited {result.returncode}: "
+                f"{result.stderr.strip()[:300]}"
+            )
+        hashes: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) == 2:
+                hashes[parts[0]] = parts[1]
+        return hashes
+
+    def _rendered_service_configs(
+        self, lane: EnumRuntimeLane
+    ) -> dict[str, dict[str, Any]]:
+        """The rendered `core` profile, as compose's own canonical JSON."""
+        config = lane_config_for(lane)
+        cmd = [
+            "docker",
+            "compose",
+            *_compose_file_args(lane),
+            "-p",
+            config.compose_project,
+            "--profile",
+            "core",
+            "config",
+            "--format",
+            "json",
+        ]
+        result = _run(cmd, timeout=CONFIG_HASH_TIMEOUT_SECONDS, env=_compose_env())
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"`compose config --format json` exited {result.returncode}"
+            )
+        services = json.loads(result.stdout).get("services", {})
+        return services if isinstance(services, dict) else {}
+
+    def _changed_fields(
+        self, rendered: Mapping[str, Any], inspected: Mapping[str, Any]
+    ) -> tuple[str, ...]:
+        """Name which of a FIXED set of fields differ. An account, not a proof.
+
+        The hash decides whether a service changed. This says which of four
+        fields moved, because "redpanda differs" and "redpanda's healthcheck
+        and mounts changed" are a different amount of help at 4am. The set is
+        deliberately small and every member maps one-to-one between compose's
+        render and `docker inspect`, so none of these four can be reported
+        wrongly. Fields outside the set are covered by the hash and by this
+        function returning nothing for them -- which is why an empty result
+        never means "unchanged".
+
+        Environment is compared by KEY ONLY, and only key NAMES are returned.
+        The values are the lane's broker and database credentials.
+        """
+        cfg = inspected.get("Config") or {}
+        changed: list[str] = []
+
+        if (rendered.get("image") or "") != (cfg.get("Image") or ""):
+            changed.append("image")
+
+        r_test = list((rendered.get("healthcheck") or {}).get("test") or [])
+        i_test = list((cfg.get("Healthcheck") or {}).get("Test") or [])
+        if r_test != i_test:
+            changed.append("healthcheck")
+
+        r_mounts = {
+            v.get("target") for v in (rendered.get("volumes") or []) if v.get("target")
+        }
+        i_mounts = {
+            m.get("Destination")
+            for m in (inspected.get("Mounts") or [])
+            if m.get("Destination")
+        }
+        if r_mounts != i_mounts:
+            changed.append("mounts")
+
+        r_env = set((rendered.get("environment") or {}).keys())
+        i_env = {e.split("=", 1)[0] for e in (cfg.get("Env") or []) if "=" in e}
+        # The image contributes its own env, so the render is a SUBSET of what
+        # the container carries. Only keys the declaration names but the
+        # container lacks are evidence of a changed declaration.
+        if r_env - i_env:
+            changed.append("environment keys")
+
+        return tuple(changed)
+
+    def observe_deps_convergence(
+        self, lane: EnumRuntimeLane
+    ) -> list[ModelDepsConvergenceFinding]:
+        """Say which core dependencies convergence is about to replace, and why.
+
+        OMN-18640. Runs BEFORE the deps leg and changes nothing about what the
+        deps leg then does. It observes; it never gates. A refusal here would
+        strand a declared change, because nothing in the fleet emits a
+        deps-only scope for a deliberate refresh to route to -- the redeploy
+        orchestrator hardcodes `full` and `EnumRedeployScope.CORE` has no
+        emitter. So "refuse on warm" would mean "never apply", and the first
+        casualty would be a broker readiness probe that exists because the
+        healthcheck it replaces read healthy through a 97-minute outage.
+
+        Every failure mode resolves to a finding carrying its own
+        `unreadable_reason` rather than to an exception: this is an
+        observation, and an observation that can abort a deploy is a gate
+        nobody asked for.
+        """
+        config = lane_config_for(lane)
+        services = services_for_scope(Scope.CORE)
+
+        try:
+            rendered_hashes = self._rendered_config_hashes(lane, services)
+        except Exception as exc:  # noqa: BLE001 - observation never aborts a deploy
+            rendered_hashes = {}
+            render_error = f"rendered hash unreadable: {exc}"
+        else:
+            render_error = ""
+
+        try:
+            rendered_configs = self._rendered_service_configs(lane)
+        except Exception:  # noqa: BLE001 - the field account is best-effort
+            rendered_configs = {}
+
+        findings: list[ModelDepsConvergenceFinding] = []
+        for service in services:
+            container = f"{config.compose_project}-{service}"
+            running_hash = ""
+            inspected: dict[str, Any] = {}
+            reason = render_error
+            try:
+                result = _run(
+                    ["docker", "inspect", container],
+                    timeout=CONFIG_HASH_TIMEOUT_SECONDS,
+                )
+                if result.returncode != 0:
+                    reason = reason or f"{container} not inspectable (absent lane?)"
+                else:
+                    inspected = json.loads(result.stdout)[0]
+                    running_hash = (
+                        inspected.get("Config", {}).get("Labels") or {}
+                    ).get("com.docker.compose.config-hash", "")
+                    if not running_hash:
+                        reason = (
+                            reason
+                            or f"{container} carries no compose config-hash label"
+                        )
+            except Exception as exc:  # noqa: BLE001
+                reason = reason or f"{container} inspect failed: {exc}"
+
+            rendered_hash = rendered_hashes.get(service, "")
+            if not rendered_hash and not reason:
+                reason = f"compose rendered no hash for {service}"
+
+            differs = bool(
+                running_hash and rendered_hash and running_hash != rendered_hash
+            )
+            # Both sides are REQUIRED before naming a field. An empty rendered
+            # config compared against a real container reports every field as
+            # changed, which is a confident false statement -- the exact
+            # failure this account must not be capable of. When the render is
+            # unreadable the field list stays empty and `differs` carries the
+            # finding on its own.
+            rendered_config = rendered_configs.get(service) or {}
+            changed = (
+                self._changed_fields(rendered_config, inspected)
+                if differs and inspected and rendered_config
+                else ()
+            )
+            finding = ModelDepsConvergenceFinding(
+                service=service,
+                lane=lane,
+                compose_project=config.compose_project,
+                running_config_hash=running_hash,
+                rendered_config_hash=rendered_hash,
+                differs=differs,
+                changed_fields=changed,
+                unreadable_reason=reason,
+            )
+            findings.append(finding)
+            if finding.differs or finding.unreadable_reason:
+                logger.warning("deps convergence: %s", finding.describe())
+            else:
+                logger.info("deps convergence: %s", finding.describe())
+
+        self.deps_convergence.extend(findings)
+        return findings
+
     def _deps_compose_argv(
         self, lane: EnumRuntimeLane, services: Sequence[str]
     ) -> list[str]:
@@ -3808,7 +4126,12 @@ class DeployExecutor:
         # here and the verify + per-container recovery below -- the recovery a
         # non-zero exit already gets -- never ran at all, which is how command
         # 23edaf62 left three services in Created with :8086 down.
+        self._record_compose_invocation(phase, cmd)
         if deps_phase:
+            # OMN-18640: say what convergence is about to do BEFORE it does it.
+            # After the fact the only trace of a replaced dependency is a
+            # container timestamp and a longer phase duration.
+            self.observe_deps_convergence(lane)
             compose_up_error = self._supervised_deps_recreate(
                 cmd,
                 phase=phase,
@@ -3932,6 +4255,7 @@ class DeployExecutor:
         ]
         for service in RUNTIME_MIGRATION_SERVICES:
             cmd = [*base_cmd, service]
+            self._record_compose_invocation(Phase.RUNTIME, cmd)
             result = _run(cmd, timeout=timeout, env=_compose_env())
             if result.returncode != 0:
                 raise RuntimeError(
@@ -4010,57 +4334,47 @@ class DeployExecutor:
         timeout = PHASE_TIMEOUTS[Phase.VERIFICATION]
         checks: list[ModelHealthCheck] = []
 
-        # Check for unhealthy containers
-        result = _run(
-            ["docker", "ps", "--filter", "health=unhealthy", "--format", "{{.Names}}"],
-            timeout=timeout,
-        )
-        unhealthy = result.stdout.strip()
-        if unhealthy:
-            checks.append(
-                ModelHealthCheck(
-                    service="docker",
-                    endpoint="docker ps --filter health=unhealthy",
-                    status="fail",
-                    latency_ms=0,
-                )
+        # The two docker filters below are HOST-WIDE and are therefore
+        # ADVISORY: recorded on the terminal event, never in the verdict
+        # (OMN-18640 AC8). They name no lane, no compose project and no
+        # service, so `health=unhealthy` matches any container on the box.
+        # MEASURED on the lab host 2026-09-19T03:09Z, that filter returned
+        # `omninode-pypi-cache` -- an unrelated container, unhealthy right
+        # then, while both dev-lane runtimes were fine. In the verdict it would
+        # have failed every deploy on every lane at that moment, the dev lane's
+        # own recovery deploy included. Lane-scoping them is a separate change;
+        # until it lands, an advisory reading is the honest one.
+        for endpoint_filter in ("health=unhealthy", "status=restarting"):
+            result = _run(
+                ["docker", "ps", "--filter", endpoint_filter, "--format", "{{.Names}}"],
+                timeout=timeout,
             )
-        else:
+            matched = result.stdout.strip()
             checks.append(
                 ModelHealthCheck(
                     service="docker",
-                    endpoint="docker ps --filter health=unhealthy",
-                    status="pass",
+                    endpoint=f"docker ps --filter {endpoint_filter}",
+                    status="fail" if matched else "pass",
                     latency_ms=0,
-                )
-            )
-
-        # Check for restarting containers
-        result = _run(
-            ["docker", "ps", "--filter", "status=restarting", "--format", "{{.Names}}"],
-            timeout=timeout,
-        )
-        restarting = result.stdout.strip()
-        if restarting:
-            checks.append(
-                ModelHealthCheck(
-                    service="docker",
-                    endpoint="docker ps --filter status=restarting",
-                    status="fail",
-                    latency_ms=0,
-                )
-            )
-        else:
-            checks.append(
-                ModelHealthCheck(
-                    service="docker",
-                    endpoint="docker ps --filter status=restarting",
-                    status="pass",
-                    latency_ms=0,
+                    detail=(
+                        f"host-wide, advisory: {matched.replace(chr(10), ', ')}"
+                        if matched
+                        else ""
+                    ),
                 )
             )
 
         # Check projection tables in the database used by runtime DB injection.
+        #
+        # IN the verdict, unlike the two filters above: this execs into THIS
+        # lane's own postgres container, so it cannot fail because of another
+        # lane. Read on the lab host 2026-09-19T03:09Z, both required tables
+        # were present on the dev lane and on the stability-test lane, so the
+        # refusal is not armed against live state. The runtime-phase migration
+        # preflight already refuses the same condition earlier
+        # (``_ensure_runtime_migrations_ready``); verification agreeing with it
+        # is consistency, not a new bar.
+        verdict_failures: list[ModelHealthCheck] = []
         for table_name in REQUIRED_PROJECTION_TABLES:
             result = _run(
                 [
@@ -4077,14 +4391,24 @@ class DeployExecutor:
                 ],
                 timeout=timeout,
             )
-            checks.append(
-                ModelHealthCheck(
-                    service="postgres",
-                    endpoint=f"omnidash_analytics.{table_name} exists",
-                    status="pass" if result.stdout.strip() == "t" else "fail",
-                    latency_ms=0,
-                )
+            answer = result.stdout.strip()
+            table_check = ModelHealthCheck(
+                service="postgres",
+                endpoint=f"omnidash_analytics.{table_name} exists",
+                status="pass" if answer == "t" else "fail",
+                latency_ms=0,
+                detail=(
+                    ""
+                    if answer == "t"
+                    else (
+                        f"psql exited {result.returncode} and answered {answer!r} "
+                        f"for to_regclass('public.{table_name}')"
+                    )
+                ),
             )
+            checks.append(table_check)
+            if table_check.status == "fail":
+                verdict_failures.append(table_check)
 
         # Runtime health endpoint checks.
         #
@@ -4120,14 +4444,32 @@ class DeployExecutor:
                     timed_out=timed_out,
                 )
             settled.append(check)
+            if check.status == "fail":
+                verdict_failures.append(check)
             if timed_out is not None and pending_timeout is None:
                 pending_timeout = timed_out
         checks.extend(settled)
 
+        # The probings are over; record them on the executor BEFORE any
+        # refusal (OMN-18640 AC8). The agent's own ``health_checks`` local is
+        # the target of the assignment that raised, so it is ``[]`` on exactly
+        # this path -- a job that failed verification used to publish a
+        # terminal event carrying no probe readings at all.
+        self.health_checks = list(checks)
+
         if pending_timeout is not None:
             # Unchanged behaviour for a probe the remedy did not fix, and the
-            # behaviour AC7's falsifier pins: the job fails.
+            # behaviour AC7's falsifier pins: the job fails, with the timeout
+            # object itself, whose message is the string both 2026-09-18 job
+            # records carry.
             raise pending_timeout
+
+        if verdict_failures:
+            # OMN-18640 AC8. Any outcome that is not a pass fails the job, not
+            # only a timeout. A probe that answered unhealthy in milliseconds
+            # is the same outage as one that stopped answering; the only
+            # difference used to be that this one was reported as a success.
+            raise VerificationFailedError(verdict_failures)
 
         on_phase_update(Phase.VERIFICATION, PhaseStatus.SUCCESS)
         return checks
@@ -4145,7 +4487,7 @@ class DeployExecutor:
         endpoint = f"http://localhost:{port}/health"  # url-authority-ok: see loopback rationale above
         start = time.monotonic()
         timed_out: subprocess.TimeoutExpired | None = None
-        passed = False
+        reason = ""
         try:
             result = _run(
                 [
@@ -4159,15 +4501,20 @@ class DeployExecutor:
             )
         except subprocess.TimeoutExpired as exc:
             timed_out = exc
+            reason = (
+                f"the probe did not answer within "
+                f"{RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS}s"
+            )
         else:
-            passed = _runtime_health_passed(result)
+            reason = _runtime_health_reason(result)
         latency = int((time.monotonic() - start) * 1000)
         return (
             ModelHealthCheck(
                 service=service,
                 endpoint=endpoint,
-                status="pass" if passed else "fail",
+                status="fail" if reason else "pass",
                 latency_ms=latency,
+                detail=reason,
             ),
             timed_out,
         )

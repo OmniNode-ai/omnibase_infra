@@ -67,6 +67,27 @@
 # is still flagged stale (that combination is 6th-occurrence-class drift,
 # not preserved history).
 #
+# ORDERING TRAP, recorded where a lane meets it (OMN-18768). Because the test
+# above is "does application-migrations.tsv carry a row", it fires for EVERY
+# declared node migration, not only historical ones. Consequences for a NEW
+# migration:
+#
+#   * Vendor FIRST, declare SECOND. Declaring a file and then editing the
+#     omnimarket source leaves the vendored copy stale, and this script will
+#     not fix it: it reports "kept legacy-declared" and exits 0.
+#   * In --check mode that same branch prints "legacy-declared, not rewritten"
+#     and does NOT set DRIFT, so this gate reports IN SYNC while omnimarket's
+#     own node-migration-vendor-parity-gate -- which compares bytes with no
+#     legacy exemption -- reports OUT OF SYNC and tells you to land the vendor
+#     first. Two gates disagreeing, with no error on either side.
+#   * The recovery is: delete the ledger row, re-run this script, re-add the
+#     row with the new checksum.
+#
+# Widening the exemption to "declared AND checksum-bound by an APPLIED ledger
+# row" would remove the trap, and is deliberately not done here -- it would
+# re-open bytes this repo currently treats as frozen, which is its own change
+# with its own blast radius.
+#
 # USAGE
 #   scripts/sync-node-migrations.sh            # vendor (writes files)
 #   scripts/sync-node-migrations.sh --check    # CI mode: fail if drift exists

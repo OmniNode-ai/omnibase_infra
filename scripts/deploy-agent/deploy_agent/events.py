@@ -365,11 +365,22 @@ def services_for_scope(
 
 
 class ModelHealthCheck(BaseModel):
+    """One post-deploy check and, when it did not pass, why (OMN-18640 AC8).
+
+    ``detail`` is empty for a pass and is REQUIRED reading for a fail. Before
+    it existed, a terminal event could say that ``runtime-effects`` failed its
+    probe and nothing more -- not whether the port refused the connection,
+    answered something that was not a health document, or answered a health
+    document saying it was not ready. Those take three different next steps,
+    and the deploy that most needs them is the one that is now refused.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid")
     service: str
     endpoint: str
     status: Literal["pass", "fail"]
     latency_ms: int = 0
+    detail: str = ""
 
 
 class ModelContainerResidue(BaseModel):
@@ -498,6 +509,94 @@ class EnumVerifyRecreateOutcome(StrEnum):
     RECREATE_TIMED_OUT = "recreate_timed_out"
 
 
+class ModelComposeInvocation(BaseModel):
+    """One ``docker compose`` command this deploy issued, as argv (OMN-18640).
+
+    The agent logs a phase, a ceiling and an outcome; it has never logged the
+    COMMAND. On 2026-09-18/19 the only way to read the argv of a live deploy
+    was to sample the host's process table while the child was running, which
+    is how the core leg's unconditional ``--force-recreate`` was finally
+    observed rather than inferred from source. A flag is the difference
+    between converging a lane and replacing it, so the flags a deploy actually
+    used belong in its durable record and not in a process table that empties
+    when the command exits.
+
+    ``argv`` is the list handed to the kernel, verbatim. It is safe to record:
+    every compose call this agent issues passes secrets through the
+    environment, never on the command line, precisely because a command line
+    is readable by every process on the host.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    phase: Phase
+    argv: tuple[str, ...]
+
+
+class ModelDepsConvergenceFinding(BaseModel):
+    """One core dependency's declaration, compared against what is running.
+
+    OMN-18640. The deps leg converges rather than force-recreates, so it
+    replaces a dependency only when compose's own config hash says the
+    declaration changed. That is the correct behaviour and it is also
+    invisible: on 2026-09-19 the job that replaced the lane's broker differed
+    from its five neighbours by nothing an operator could read except a phase
+    duration, 77 seconds against 5 to 10. This record says WHICH service is
+    about to be replaced and WHY, before it happens.
+
+    ``running_config_hash`` and ``rendered_config_hash`` are the authority.
+    They are the same value compose itself compares: the label
+    ``com.docker.compose.config-hash`` on the live container, and the output
+    of ``docker compose config --hash <service>`` for the render this deploy
+    is about to apply. Verified equal on all three core services of the .201
+    dev lane on 2026-09-19.
+
+    ``changed_fields`` is an ACCOUNT, never the authority. It names which of a
+    fixed, declared set of fields differ -- image, healthcheck, mounts,
+    environment keys -- and it can be EMPTY while ``differs`` is true, because
+    the hash covers fields outside that set. A reader must not conclude from
+    an empty list that nothing changed; that is what ``differs`` is for.
+    Environment is compared by KEY ONLY and only key names are ever recorded,
+    because the values are the lane's broker and database credentials.
+
+    ``unreadable_reason`` is non-empty when either hash could not be read -- an
+    absent container, a render that failed. An unreadable comparison is
+    reported as unreadable and the deploy proceeds; this record observes, it
+    never gates. Refusing here would strand a declared change, because nothing
+    in the fleet emits a deps-only scope for a deliberate refresh to route to.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    service: str
+    lane: EnumRuntimeLane
+    compose_project: str
+    running_config_hash: str = ""
+    rendered_config_hash: str = ""
+    differs: bool
+    changed_fields: tuple[str, ...] = ()
+    unreadable_reason: str = ""
+
+    def describe(self) -> str:
+        """One line naming the service and what is about to happen to it."""
+        if self.unreadable_reason:
+            return (
+                f"{self.service}: convergence effect UNKNOWN "
+                f"({self.unreadable_reason}); proceeding"
+            )
+        if not self.differs:
+            return f"{self.service}: declaration unchanged, will be left running"
+        fields = (
+            ", ".join(self.changed_fields)
+            if self.changed_fields
+            else ("no field in the compared set; the hash covers more than that set")
+        )
+        return (
+            f"{self.service}: declaration CHANGED ({fields}) -- convergence "
+            f"will REPLACE this container; running "
+            f"{self.running_config_hash[:12]} -> rendered "
+            f"{self.rendered_config_hash[:12]}"
+        )
+
+
 class ModelVerifyRecreate(BaseModel):
     """One runtime container this deploy recreated because its health failed.
 
@@ -582,6 +681,279 @@ class ModelRebuildRequested(BaseModel):
         return self
 
 
+class EnumRejectionReason(StrEnum):
+    """Why a command reached the rejection topic instead of running.
+
+    Every value was already a bare string literal at a ``_publish_rejected``
+    call site; naming them is what lets OMN-18143 AC6's requirement -- a
+    terminal event that says "superseded" distinguishably from a timeout and
+    from a rollback -- be a type rather than a convention about spelling.
+
+    ``SUPERSEDED`` is the only one that is not a refusal of the command: the
+    work it asked for IS being done, by the newer command named alongside it.
+    """
+
+    BUSY = "busy"
+    DUPLICATE = "duplicate"
+    IN_PROGRESS = "in_progress"
+    INVALID_PAYLOAD = "invalid_payload"
+    INVALID_SIGNATURE = "invalid_signature"
+    LANE_NOT_ALLOWED = "lane_not_allowed"
+    UNDECODABLE_PAYLOAD = "undecodable_payload"
+    SUPERSEDED = "superseded"
+
+
+class ModelRejectionNotice(BaseModel):
+    """What the consumer resolved about a command it refused (OMN-17079).
+
+    The consumer decides SIX of the eight rejection reasons, and before this model it
+    expressed each of them as a bare string returned to a caller that only logged it --
+    so `busy`, `duplicate`, `lane_not_allowed`, `invalid_payload`, `invalid_signature`
+    and `undecodable_payload` never reached the rejection topic at all. This is the
+    typed hand-off that gives them a route to the agent's single publish helper, and it
+    mirrors the existing ``on_superseded`` injection rather than inventing a second
+    mechanism.
+
+    THE TWO OPTIONAL FIELDS ARE THE POINT, AND THEY ARE REQUIRED TO BE SUPPLIED.
+    Three of those six reasons are decided BEFORE a valid command exists: an undecodable
+    record, a bad signature and a payload the contract refuses all fail ahead of
+    ``ModelRebuildRequested`` validation, so there is no guaranteed correlation id and no
+    guaranteed scope to put on the wire. ``None`` here is a MEASURED ABSENCE, written by
+    the site that tried to resolve it and could not. It is not a default: every field is
+    required, so a caller must state what it found rather than let the model decide.
+
+    ``ModelRebuildRejected`` requires both identifiers, so a notice carrying ``None``
+    cannot become an event -- and that is the intended outcome. A rejection published
+    with a fabricated correlation id is worse than no rejection: it is a durable,
+    queryable record pointing at a command that never existed, indistinguishable to a
+    reader from a real one. The quarantine record already written on those paths is the
+    durable evidence instead.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: EnumRejectionReason
+    #: The refused command's correlation id, or ``None`` when the record was refused
+    #: before one could be parsed from it.
+    correlation_id: UUID | None
+    #: The refused command's scope, or ``None`` on the same terms.
+    scope: Scope | None
+
+
+class ModelRebuildRejected(BaseModel):
+    """The terminal event for a command this agent will not run (OMN-18143).
+
+    The wire shape is unchanged for every reason that predates this model: the
+    two supersession fields are written ONLY when set, so a rejection for
+    ``busy`` serialises byte-identically to the hand-built dict it replaces and
+    a consumer that predates this change parses it unchanged. The same
+    discipline ``ModelLabPassCheck.to_dict`` applies to its ``outcome`` key.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    correlation_id: UUID
+    reason: EnumRejectionReason
+    scope: Scope
+    #: Set on, and only on, a ``SUPERSEDED`` rejection. Both or neither: a
+    #: supersession that cannot name the commit that ran in its place is
+    #: indistinguishable from a command that was silently dropped, which is
+    #: the exact failure AC6 refuses.
+    superseded_by_sha: str | None = None
+    superseded_by_correlation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _supersession_fields_match_the_reason(self) -> ModelRebuildRejected:
+        named = self.superseded_by_sha is not None
+        if named != (self.superseded_by_correlation_id is not None):
+            msg = (
+                "superseded_by_sha and superseded_by_correlation_id stand or "
+                f"fall together; got sha={self.superseded_by_sha!r}, "
+                f"correlation_id={self.superseded_by_correlation_id!r}"
+            )
+            raise ValueError(msg)
+        if (self.reason is EnumRejectionReason.SUPERSEDED) != named:
+            msg = (
+                f"reason={self.reason.value!r} disagrees with the supersession "
+                f"fields (sha={self.superseded_by_sha!r}). Only a superseded "
+                "rejection may name a replacement, and every one must."
+            )
+            raise ValueError(msg)
+        return self
+
+    def to_wire(self) -> dict[str, object]:
+        """The JSON body published to :data:`TOPIC_REBUILD_REJECTED`."""
+        payload: dict[str, object] = {
+            "correlation_id": str(self.correlation_id),
+            "reason": self.reason.value,
+            "scope": self.scope.value,
+        }
+        if self.superseded_by_sha is not None:
+            payload["superseded_by_sha"] = self.superseded_by_sha
+            payload["superseded_by_correlation_id"] = str(
+                self.superseded_by_correlation_id
+            )
+        return payload
+
+
+class EnumOnexApiDeliveryResult(StrEnum):
+    """How the onex-api pin delivery ended (OMN-18572).
+
+    The pin delivery runs AFTER the compose lane's verdict is written and must
+    never change it -- a lane that converged on its own merits is not broken
+    because a k3s-built image failed to reach it. That isolation was already
+    correct. What was missing is that every outcome below was reported at
+    ``INFO`` with no distinction between the ones that mean "the lane now runs
+    this merge" and the ones that mean "it does not", so thirty consecutive
+    refusals read exactly like thirty successful no-ops.
+
+    ``UNRECOGNISED`` exists because the verdict is produced by a subprocess
+    (``scripts/runtime_build/repoint_dev_lane_onex_api.py``) whose result
+    vocabulary can move independently of this enum. A value this enum does not
+    know is a FAILURE and keeps its original spelling in ``raw_result`` -- it is
+    never silently read as a success.
+    """
+
+    #: The pin advanced and the service was recreated onto it.
+    WRITTEN = "WRITTEN"
+    #: The resident pin already named this image. A legitimate no-op.
+    UNCHANGED = "UNCHANGED"
+    #: ``--execute`` was not passed, so nothing was written. Not reachable from
+    #: the agent, which always executes; named so a dry run is not UNRECOGNISED.
+    PLANNED = "PLANNED"
+    #: A bounded refusal named by the repoint script; nothing was written.
+    REFUSED = "REFUSED"
+    #: Not this lane, or no operator env store is declared to write into.
+    SKIPPED = "SKIPPED"
+    #: The pin advanced in the file and the container was never recreated onto
+    #: it, so the file and the lane now disagree.
+    PIN_WRITTEN_NOT_RECREATED = "PIN_WRITTEN_NOT_RECREATED"
+    #: The delivery raised instead of returning a verdict.
+    RAISED = "RAISED"
+    #: The delivery was never attempted, because the lineage it would deliver
+    #: could not be resolved from this job's own lab-overlay apply.
+    NOT_ATTEMPTED = "NOT_ATTEMPTED"
+    #: A verdict string this enum does not know. Treated as a failure.
+    UNRECOGNISED = "UNRECOGNISED"
+
+    @classmethod
+    def coerce(cls, value: object) -> EnumOnexApiDeliveryResult:
+        """Map a source-produced verdict string onto this enum, never raising.
+
+        A raise here would convert an unknown verdict into a lost one: this is
+        called on the tail of a job whose compose verdict is already written,
+        so an exception would cost the terminal publish rather than surface the
+        oddity. ``UNRECOGNISED`` surfaces it instead.
+        """
+        try:
+            return cls(str(value))
+        except ValueError:
+            return cls.UNRECOGNISED
+
+
+class ModelOnexApiDelivery(BaseModel):
+    """What the onex-api pin delivery did for one job (OMN-18572).
+
+    ``onex-api`` on the compose dev lane is tag-referenced: the lane runs
+    whatever ``ONEX_API_IMAGE`` names. The lab-overlay apply BUILDS a correct
+    image on the host and this delivery is what makes the lane RUN it, so the
+    two facts diverge silently whenever it does not happen.
+
+    ``tag_advanced`` and ``recreated`` are reported separately and on purpose:
+    ``recreated`` without ``tag_advanced`` is a faithful restart onto a stale
+    tag, and ``tag_advanced`` without ``recreated`` is a pin in a file that
+    never reached a container. A single boolean hides both.
+
+    ``requested_sha`` is the **omninode_infra** commit whose image was asked
+    for, and it is a field rather than an inference because naming the wrong
+    repository's sha here is the exact defect this model was added alongside:
+    between 2026-09-17 and 2026-09-19 the caller passed the merged
+    ``omnibase_infra`` sha, every delivery refused, and the refusal text said
+    "none of them for omninode_infra sha <an omnibase_infra sha>" -- which reads
+    as the applier having produced nothing rather than as the caller having
+    asked for the wrong lineage.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    result: EnumOnexApiDeliveryResult
+    #: The verdict exactly as its source spelled it, so an ``UNRECOGNISED``
+    #: mapping loses nothing and a known one is checkable against the source.
+    raw_result: str
+    #: Why, in the words of whatever refused or skipped. ``None`` only when the
+    #: source gave no reason, which a success legitimately does not.
+    reason: str | None = None
+    #: The omninode_infra commit whose image this delivery asked for.
+    requested_sha: str | None = None
+    pin_before: str | None = None
+    pin_after: str | None = None
+    tag_advanced: bool = False
+    recreated: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_own_computed_fields(cls, data: object) -> object:
+        """Accept this model's own serialised form back (OMN-18572).
+
+        ``is_failure`` is a computed field, so it is present in every
+        ``model_dump`` of this model and absent from every hand-built mapping.
+        ``JobState`` persists this record to disk and re-validates it on load,
+        and under ``extra="forbid"`` that round trip fails on the model's own
+        output -- which would turn a durable verdict into a job record that
+        cannot be read back at all.
+
+        It is DROPPED rather than accepted: a derived value must be re-derived
+        from the fields it derives from, or a caller could hand back a
+        contradictory one and this model would carry it.
+        """
+        if isinstance(data, dict) and "is_failure" in data:
+            data = {k: v for k, v in data.items() if k != "is_failure"}
+        return data
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_failure(self) -> bool:
+        """True when the lane did not get what this job built, avoidably.
+
+        ``UNCHANGED`` and ``SKIPPED`` are NOT failures: the first says the lane
+        already runs this image, and the second says this lane is not one the
+        pin is delivered to. Everything else means a delivery that was supposed
+        to happen did not, and is reported as a failure so it is legible at a
+        glance in the terminal event and loud in the journal.
+        """
+        return self.result not in (
+            EnumOnexApiDeliveryResult.WRITTEN,
+            EnumOnexApiDeliveryResult.UNCHANGED,
+            EnumOnexApiDeliveryResult.PLANNED,
+            EnumOnexApiDeliveryResult.SKIPPED,
+        )
+
+    @classmethod
+    def from_record(
+        cls, record: dict[str, object], *, requested_sha: str | None
+    ) -> ModelOnexApiDelivery:
+        """Build the typed record from the executor's mapping.
+
+        ``tag_advanced`` is defaulted HERE as well as at the executor, because a
+        refusal JSON carries neither boolean and a ``None`` on this field read
+        as "not known" in the journal for every refusal in the window above.
+        """
+        raw = str(record.get("result", ""))
+        reason = record.get("reason")
+        return cls(
+            result=EnumOnexApiDeliveryResult.coerce(raw),
+            raw_result=raw,
+            reason=str(reason) if reason is not None else None,
+            requested_sha=requested_sha,
+            pin_before=(
+                str(record["pin_before"]) if record.get("pin_before") else None
+            ),
+            pin_after=(str(record["pin_after"]) if record.get("pin_after") else None),
+            tag_advanced=bool(record.get("tag_advanced") or False),
+            recreated=bool(record.get("recreated") or False),
+        )
+
+
 class ModelRebuildCompleted(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID
@@ -621,6 +993,25 @@ class ModelRebuildCompleted(BaseModel):
     # only that the job failed, which is why the same wedge recurred three
     # times across two nights with nothing to distinguish the occurrences.
     verify_recreate: list[ModelVerifyRecreate] = Field(default_factory=list)
+    # OMN-18640: what the deps leg found before it acted -- per core service,
+    # the running config hash, the rendered one, and whether convergence was
+    # therefore about to replace that container. Empty for a deploy whose deps
+    # leg was never reached. A non-empty list with every `differs` false is the
+    # normal reading and is a FACT: the deps were left alone on purpose.
+    deps_convergence: list[ModelDepsConvergenceFinding] = Field(default_factory=list)
+    # OMN-18640: the argv of every compose command this deploy issued. Until
+    # this field existed the flags a deploy used were observable only by
+    # sampling the host process table while the child ran.
+    compose_invocations: list[ModelComposeInvocation] = Field(default_factory=list)
+    # OMN-18572: what the onex-api pin delivery did on the tail of this job.
+    # ``None`` means the delivery was not reached at all -- a non-dev lane, a
+    # job that failed before the apply, or an agent older than this field --
+    # which is a DIFFERENT fact from a delivery that ran and refused, and the
+    # two were indistinguishable while this event carried nothing at all. The
+    # delivery never changes ``status``: the compose lane's verdict is settled
+    # before this runs and a lane that converged is not broken because an image
+    # failed to reach it.
+    onex_api_delivery: ModelOnexApiDelivery | None = None
 
     @model_validator(mode="after")
     def validate_phase_results_are_settled(self) -> ModelRebuildCompleted:
@@ -656,8 +1047,13 @@ class ModelRebuildCompleted(BaseModel):
             )
         return self
 
+    # OMN-18640: NO ``@property`` under ``@computed_field``. Pydantic wraps a
+    # plain method in one itself, so attribute access and serialization are
+    # unchanged, while mypy's ``prop-decorator`` rule -- which cannot see
+    # through a decorator stacked on a property -- has nothing to refuse. The
+    # alternative was a per-line suppression on the one field that states this
+    # event's verdict, which is the last place to stop type-checking.
     @computed_field
-    @property
     def status(self) -> Literal["success", "failed"]:
         non_skipped = {
             k: v for k, v in self.phase_results.items() if v != PhaseStatus.SKIPPED

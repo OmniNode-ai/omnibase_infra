@@ -156,7 +156,7 @@ def test_off_registry_drift_is_reported_and_does_NOT_block_dispatch(
     # It stays actionable off-registry: no canonical clone is named, because
     # there is none here, and a pointer to a path the reader does not have is
     # how a guard teaches people to ignore it.
-    assert "$OMNI_HOME/omnimarket" not in detail
+    assert "$OMNIBASE_PATH/omnimarket" not in detail
 
 
 @pytest.mark.parametrize(

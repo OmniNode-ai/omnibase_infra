@@ -55,8 +55,14 @@ def test_health_cron_sources_env_file() -> None:
 
 @pytest.mark.unit
 def test_health_cron_logs_to_tmp() -> None:
+    """The health cron log lives under the runner host's .onex_state tree (OMN-18819).
+
+    Renamed from a literal /tmp path once the health, monitor and repair
+    crons were moved under ``${...}/.onex_state/runner-fleet-logs/`` so the
+    fleet log survives a host reboot instead of being cleared with /tmp.
+    """
     content = _read_script()
-    assert "/tmp/runner-health.log" in content  # noqa: S108
+    assert ".onex_state/runner-fleet-logs/runner-health.log" in content
 
 
 @pytest.mark.unit

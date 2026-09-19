@@ -153,9 +153,7 @@ class TestPlacement:
         for service in DEV_LANE_ONLY_MIGRATION_SERVICES:
             assert service not in DEV_LANE_ONLY_RUNTIME_SERVICES
 
-    @pytest.mark.parametrize(
-        "scope", [Scope.CORE, Scope.RUNTIME, Scope.FULL], ids=lambda s: str(s)
-    )
+    @pytest.mark.parametrize("scope", [Scope.CORE, Scope.RUNTIME, Scope.FULL], ids=str)
     def test_services_for_scope_never_returns_a_one_shot(self, scope: Scope) -> None:
         resolved = services_for_scope(scope, lane=EnumRuntimeLane.DEV)
         for service in DEV_LANE_ONLY_MIGRATION_SERVICES:
@@ -257,7 +255,7 @@ class TestThePreflightRunsThem:
     @pytest.mark.parametrize(
         "lane",
         [EnumRuntimeLane.PROD, EnumRuntimeLane.STABILITY_TEST],
-        ids=lambda lane: str(lane),
+        ids=str,
     )
     def test_no_other_lane_is_handed_a_cloud_one_shot(
         self, lane: EnumRuntimeLane

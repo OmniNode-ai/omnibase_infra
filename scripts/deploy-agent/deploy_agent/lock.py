@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 from deploy_agent.events import DeployInProgressError
@@ -15,7 +16,7 @@ _LOCK_PATH = Path(os.environ.get("DEPLOY_AGENT_LOCK_PATH", "/tmp/deploy-agent.lo
 
 
 @contextlib.contextmanager
-def single_flight_lock():
+def single_flight_lock() -> Iterator[None]:
     """Advisory exclusive lock. Raises DeployInProgressError if already held."""
     _LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     fd = _LOCK_PATH.open("w")

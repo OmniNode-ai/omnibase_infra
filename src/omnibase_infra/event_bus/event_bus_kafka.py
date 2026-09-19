@@ -275,6 +275,9 @@ from omnibase_infra.models.health.enum_consumer_health_severity import (
 from omnibase_infra.models.health.model_consumer_group_rejoin_event import (
     ModelConsumerGroupRejoinEvent,
 )
+from omnibase_infra.models.health.model_consumer_sync_status import (
+    ModelConsumerSyncStatus,
+)
 from omnibase_infra.observability.wiring_health import (
     MixinEmissionCounter,
 )
@@ -2926,6 +2929,26 @@ class EventBusKafka(
         """
         return tuple(self._consumer_rejoin_events)
 
+    def consumer_sync_statuses(self) -> tuple[ModelConsumerSyncStatus, ...]:
+        """Sync state of every consumer group this bus currently owns (OMN-18640 AC1).
+
+        Implements ``ProtocolConsumerSyncSource``. This is the surface the
+        runtime's ``consumer_sync`` readiness dimension reads, and through it
+        the container healthcheck and the deploy agent's force-recreate.
+
+        One supervisor exists per ``(topic, group)`` from its first poll, so
+        the set answered here is exactly the set this PROCESS consumes --
+        already scoped to its runtime profile by construction, with no
+        manifest filter to get wrong. Before any consumer has started the
+        tuple is empty, which is a boot state and not a finding.
+
+        Returns:
+            One status per consumed ``(topic, consumer group)``, no I/O issued.
+        """
+        return tuple(
+            supervisor.sync_status() for supervisor in self._rejoin_supervisors.values()
+        )
+
     def _rejoin_supervisor_for(
         self, topic: str, group_id: str
     ) -> ConsumerRejoinSupervisor:
@@ -2950,6 +2973,7 @@ class EventBusKafka(
                     self._config.consumer_stall_required_confirmations
                 ),
                 rejoin_cooldown_seconds=self._config.consumer_rejoin_cooldown_seconds,
+                sync_unready_seconds=self._config.consumer_sync_unready_seconds,
             ),
             poll_timeout_ms=self._config.consumer_poll_timeout_ms,
             recreate_consumer=_recreate,

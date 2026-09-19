@@ -190,13 +190,14 @@ def _entry_point_module(value: str) -> str:
 @click.option(
     "--omni-home",
     type=click.Path(path_type=Path),
-    envvar="OMNI_HOME",
+    envvar="OMNIBASE_PATH",
     default=None,
     help=(
-        "Canonical omni_home workspace root for the local omnimarket drift "
-        "check. Defaults to the $OMNI_HOME environment variable (OMN-14560, "
-        "mirroring OMN-14531's 'onex skill' fix) -- without this binding the "
-        "drift guard silently receives omni_home=None and never fires."
+        "Canonical OmniNode workspace root for the local omnimarket drift "
+        "check. Bound to $OMNIBASE_PATH, the product name for that root "
+        "(OMN-16855/OMN-16852; the binding itself is OMN-14560, mirroring "
+        "OMN-14531's 'onex skill' fix) -- without it the drift guard "
+        "silently receives omni_home=None and never fires."
     ),
 )
 @click.option(

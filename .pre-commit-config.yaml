@@ -263,7 +263,10 @@ repos:
         entry: bash -c 'uv run --frozen mypy "$@" --show-error-codes --no-error-summary' --
         language: system
         types: [python]
-        files: ^src/omnibase_infra/.*\.py$
+        # OMN-18640 extends the scope to the deploy agent's package, the same
+        # way and in the same file the CI mypy job does. Its tests stay out,
+        # matching the exclusion of this repo's own tests/ above.
+        files: ^(src/omnibase_infra/|scripts/deploy-agent/deploy_agent/).*\.py$
         exclude: ^(tests/|archived/).*\.py$
         pass_filenames: true # Only check changed files, not entire codebase
         stages: [pre-push] # Moved to pre-push: ~1-5s for changed files only
@@ -355,6 +358,23 @@ repos:
         entry: uv run --frozen pytest tests/ci/test_boot_gate_rollout_deadline_check_omn18316.py -q
         language: system
         files: ^(\.github/workflows/deliver-dev-candidate-to-staging\.yml|tests/ci/test_boot_gate_rollout_deadline_check_omn18316\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-18272: the dependency-cascade generator may not silently stop
+      # emitting its machine-readable provenance block. Clause 1 of the
+      # OMN-18233 verified-supersession predicate resolves against that block,
+      # so a generator that drops it makes the predicate unresolvable and puts
+      # every release-cascading ticket back behind a pull request that can
+      # never merge. The same assertions run in CI as part of the test suite;
+      # this hook is the local half. The consumer is scoped in beside the
+      # generator because the test pins the two to one schema -- it imports
+      # `parse_cascade_provenance` rather than copying its regexes, so a change
+      # to EITHER side is a change to the pair.
+      - id: cascade-provenance-block
+        name: Cascade bumps carry machine-readable provenance (OMN-18272)
+        entry: uv run --frozen pytest tests/scripts/test_omn_18272_cascade_provenance_block.py -q
+        language: system
+        files: ^(\.github/workflows/dependency-cascade\.yml|src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/cascade_supersession\.py|tests/scripts/test_omn_18272_cascade_provenance_block\.py)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-18254: the non-required check failure-rate alerter. Pins the

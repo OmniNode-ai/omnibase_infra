@@ -86,15 +86,25 @@ false-negative surface (an unrelated scheduled run failing on the same sha)
 without adding a fact. This is the same reasoning ``decide_release_on_merge.py``
 records for its own trigger.
 
-WHY THE LAB PREMISE HAS FOUR FAILURE MODES AND NOT ONE
-------------------------------------------------------
+WHY THE LAB PREMISE HAS SEVERAL FAILURE MODES AND NOT ONE
+----------------------------------------------------------
 The rule-24(b) reader is a gate: it answers pass or refuse, which is correct for
 a gate. A train has to tell a reader WHICH way the premise failed, because the
-four cases belong to four different owners. A missing receipt is a question for
-the rebuild trigger; a FAIL receipt is a question for the lab lane; a name and
+cases belong to different owners. A missing receipt is a question for the
+rebuild trigger; a FAIL receipt is a question for the lab lane; a name and
 payload that disagree is a question for the emitter; an unreadable surface is a
-question for the credential. Collapsing them sends three of those four readers
-to the wrong place, which is the shape OMN-18573 removed one layer down.
+question for the credential. Collapsing them sends those readers to the wrong
+place, which is the shape OMN-18573 removed one layer down.
+
+An INDETERMINATE receipt is the fifth, added by OMN-18144 on 2026-09-19, and it
+is the one with no owner on the lane at all. The receipt was emitted, and every
+check it carries either passed or could not be established -- none failed. That
+is a statement about the RUN: a queue the lane did not cause, a window that
+expired, a surface that did not answer. The remedy is to measure again, not to
+investigate a lane. Reported as ``lab_receipt_fail`` it sent a reader to debug a
+lane that was carrying the sha and answering 200, and blocked the 0.38.33 cut on
+it. The verdict is unchanged in both cases -- SKIP, because an unproven premise
+is unproven either way -- so this names the refusal without widening it.
 
 Deliberately stdlib-plus-pyyaml. It runs before any project install.
 
@@ -244,6 +254,16 @@ class EnumTrainReason(StrEnum):
     # exercised the sha, and cost four hours investigating a working system.
     LAB_RECEIPT_PENDING = "lab_receipt_pending"
     LAB_RECEIPT_FAIL = "lab_receipt_fail"
+    # The lane was asked, answered, and the answer was "I could not establish
+    # this". Distinct from FAIL for the reason PENDING is distinct from ABSENT:
+    # the two belong to different owners. A FAIL is a statement about the LANE
+    # and is the lane owner's to fix; an INDETERMINATE is a statement about the
+    # RUN -- a queue, a window, a surface that did not answer -- and is nobody's
+    # to fix on the lane. Collapsing them on 2026-09-19 reported a healthy lane
+    # carrying the sha, answering 200, as a failure, and blocked the 0.38.33
+    # cut on it. OMN-18144 AC5: "a queue the lane did not cause is a statement
+    # about the RUN".
+    LAB_RECEIPT_INDETERMINATE = "lab_receipt_indeterminate"
     LAB_RECEIPT_NAME_PAYLOAD_DISAGREE = "lab_receipt_name_payload_disagree"
     LAB_RECEIPT_UNREADABLE = "lab_receipt_unreadable"
     VERSION_UNREADABLE = "version_unreadable"
@@ -1150,15 +1170,38 @@ def classify_lab_receipt(
             "the payload disagree",
         )
     if receipt.result is not lab_pass_receipt.EnumLabPassResult.PASS:
-        failing = ", ".join(
+        unestablished = [
             check.name
             for check in receipt.checks
-            if check.outcome is not lab_pass_receipt.EnumLabPassCheckOutcome.PASS
-        )
+            if check.outcome is lab_pass_receipt.EnumLabPassCheckOutcome.INDETERMINATE
+        ]
+        failed = [
+            check.name
+            for check in receipt.checks
+            if check.outcome is lab_pass_receipt.EnumLabPassCheckOutcome.FAIL
+        ]
+        # OMN-18144. The receipt's ``result`` is two-valued on purpose and is
+        # NOT weakened here -- an indeterminate check keeps it non-PASS, so the
+        # rule 24(b) delivery gate stays shut exactly as before, and this
+        # function still returns a reason, so the cut is still refused. What
+        # changes is only WHICH refusal, because "the lane failed" and "nothing
+        # measured the lane" are read by different people and imply opposite
+        # next actions.
+        if unestablished and not failed:
+            return (
+                EnumTrainReason.LAB_RECEIPT_INDETERMINATE,
+                "the compose dev lane was asked about this sha and could not "
+                f"establish an answer; checks not established: "
+                f"{', '.join(unestablished)}. This is a statement about the "
+                "RUN, not about the lane: no check FAILED. The premise is "
+                "unproven, so the cut is refused, but nothing here says the "
+                "lane is broken -- re-measure rather than investigate it",
+            )
+        not_passing = ", ".join(failed + unestablished)
         return (
             EnumTrainReason.LAB_RECEIPT_FAIL,
             f"the compose dev lane recorded {receipt.result.value} for this sha; "
-            f"checks not passing: {failing or '(none named)'}",
+            f"checks not passing: {not_passing or '(none named)'}",
         )
     return None, f"{name} records PASS on the compose dev lane"
 

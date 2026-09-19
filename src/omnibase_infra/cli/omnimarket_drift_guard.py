@@ -35,6 +35,17 @@ the trigger moved from a human to the guard itself. Callers that want the old
 pure detect-and-refuse behaviour simply omit ``reconcile``, which remains the
 default.
 
+## Which environment variable feeds ``omni_home`` (OMN-16852)
+
+This module takes a workspace root as a keyword argument and does not read the
+environment itself. The packaged CLI binds that argument to ``$OMNIBASE_PATH``
+-- the product name for the workspace root, shipped by OMN-16855 -- as of
+OMN-16852. The older ``OMNI_HOME`` spelling is retained throughout the rest of
+this repository for maintainer-registry surfaces (the workspace reconciler,
+dispatch-venv purity, the machine-registry export) by the 2026-08-28 boundary
+ruling under OMN-16849; it is no longer read by any packaged CLI option, so
+every message below names the variable a caller can actually set.
+
 ## Off registry (OMN-17255)
 
 The canonical clone is a REGISTRY-machine convention. A customer has no
@@ -112,6 +123,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
@@ -123,6 +135,10 @@ from packaging.version import InvalidVersion, Version
 from omnibase_infra.cli.enum_off_registry_reason import EnumOffRegistryReason
 from omnibase_infra.cli.enum_off_registry_verdict import EnumOffRegistryVerdict
 from omnibase_infra.cli.model_off_registry_check import ModelOffRegistryCheck
+from omnibase_infra.cli.model_omnimarket_lag_stamp import ModelOmnimarketLagStamp
+from omnibase_infra.cli.protocol_drift_guard_verdict import (
+    ProtocolDriftGuardVerdict,
+)
 from omnibase_infra.cli.workspace_reconcile import ReconcileFn
 
 __all__ = [
@@ -615,12 +631,99 @@ def _run_off_registry_check() -> ModelOffRegistryCheck:
     return check
 
 
+def resolve_ancestor_lag(
+    *,
+    installed: str,
+    clone_head: str,
+    omni_home: str,
+) -> ModelOmnimarketLagStamp | None:
+    """Return a stamp when ``installed`` is a strict ANCESTOR of ``clone_head``
+    in the canonical clone, else ``None``.
+
+    ``None`` means "not a known ancestor" and nothing more. It is returned for
+    a divergent commit, for a commit the clone has never heard of, and for any
+    probe that could not be completed -- and the caller treats all three the
+    same way, by refusing. That collapse is deliberate: ``git merge-base
+    --is-ancestor`` exits non-zero both for "no" and for "no such object", and
+    a reading that told them apart in order to be lenient about one would be
+    inventing provenance it does not have.
+
+    FAILS CLOSED on every error path. A timeout, a missing git, an unreadable
+    clone and a malformed count all return ``None``, because an ancestry
+    question that could not be ASKED has not been answered yes. This is the
+    single most important property in this module: the whole relaxation rests
+    on the claim that the installed bytes are reachable from the head, and a
+    probe error is exactly the case where nobody knows whether they are.
+
+    No network I/O. Ancestry is resolved against the objects the canonical
+    clone already has; keeping that clone current belongs to the reconcile
+    tick (OMN-18815), not to a dispatch.
+    """
+    clone = Path(omni_home) / "omnimarket"
+    if not (clone / ".git").exists():
+        return None
+    try:
+        ancestry = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(clone),
+                "merge-base",
+                "--is-ancestor",
+                installed,
+                clone_head,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if ancestry.returncode != 0:
+        return None
+
+    try:
+        counted = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(clone),
+                "rev-list",
+                "--count",
+                f"{installed}..{clone_head}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return None
+    try:
+        behind = int(counted.stdout.strip())
+    except ValueError:
+        return None
+    if behind <= 0:
+        # A zero count with a non-equal commit pair is incoherent -- the caller
+        # only reaches here when the two differ. Refuse rather than stamp a
+        # lag of nothing, which would read as "at the tip".
+        return None
+
+    return ModelOmnimarketLagStamp(
+        installed_commit=installed,
+        clone_head=clone_head,
+        commits_behind=behind,
+        stamped_at=datetime.now(UTC),
+    )
+
+
 def check_omnimarket_drift(
     omni_home: str | None = None,
     *,
     allow_drift: bool = False,
     reconcile: ReconcileFn | None = None,
-) -> ModelOffRegistryCheck | None:
+) -> ProtocolDriftGuardVerdict | None:
     """Fail fast if the current venv's omnimarket is missing or has drifted
     from its reference point.
 
@@ -639,7 +742,7 @@ def check_omnimarket_drift(
       OMN-13930). Every refusal message names that variable, so the escape
       hatch is discoverable from the failure itself rather than requiring a
       source read. Before it existed the only workaround was unsetting
-      ``$OMNI_HOME``, which disables the guard globally and SILENTLY --
+      ``$OMNIBASE_PATH``, which disables the guard globally and SILENTLY --
       strictly worse than a named, logged override.
 
     Performs no network I/O of its own. A supplied ``reconcile`` may (it
@@ -718,13 +821,13 @@ def check_omnimarket_drift(
         )
         if attachment is CanonicalCloneAttachment.DETACHED:
             clone_detail = (
-                f"canonical $OMNI_HOME/omnimarket clone is on a DETACHED HEAD "
+                f"canonical $OMNIBASE_PATH/omnimarket clone is on a DETACHED HEAD "
                 f"at {canonical[:12]} -- it tracks no branch, so it can no "
                 f"longer follow its upstream"
             )
         else:
             clone_detail = (
-                f"canonical $OMNI_HOME/omnimarket clone HEAD is {canonical[:12]}, "
+                f"canonical $OMNIBASE_PATH/omnimarket clone HEAD is {canonical[:12]}, "
                 "but the guard could not prove that HEAD is attached to a ref"
             )
         attachment_detail = (
@@ -755,6 +858,36 @@ def check_omnimarket_drift(
     if installed == canonical:
         return None
 
+    # OMN-18814. A strict ANCESTOR of the clone head is a staleness fact, not a
+    # provenance failure: those bytes are merged, reviewed and reachable from
+    # the head, they are simply not the tip. Proceed and STAMP the lag, so the
+    # receipt says how far behind the run was instead of the run not happening.
+    #
+    # Placed after the exact-match return and BEFORE every refusal branch
+    # below, and reached only when a canonical clone resolved and is attached
+    # -- the off-registry branch (OMN-17255) and the detached-clone branch both
+    # return or raise above this point, so neither changes behaviour.
+    #
+    # `allow_drift` is deliberately NOT consulted here. That flag is the
+    # operator's manual, unbounded opt-out and it is untouched by this change;
+    # an ancestor lag proceeds on its own merits, so consulting the flag would
+    # make an automatic, bounded decision look like it needed the manual one.
+    #
+    # `reconcile` is deliberately NOT invoked either. It installs packages, and
+    # spending that latency mid-dispatch to close a lag that is already safe to
+    # proceed on would charge a human for a run that was going to succeed. The
+    # reconciler that DOES close the lag is the tick (OMN-18815), off the hot
+    # path. The refusal branches below still reconcile exactly as before.
+    if installed is not None and omni_home:
+        ancestor_lag = resolve_ancestor_lag(
+            installed=installed,
+            clone_head=canonical,
+            omni_home=omni_home,
+        )
+        if ancestor_lag is not None:
+            logger.warning("%s", ancestor_lag.line)
+            return ancestor_lag
+
     # Name the exact repair command with its FULL path (not a cwd-relative
     # one) so the message is copy-pasteable from any working directory --
     # the refusal is what an operator sees mid-dispatch, not necessarily
@@ -763,10 +896,21 @@ def check_omnimarket_drift(
     # this branch in production -- canonical is non-None here only when a
     # real omni_home resolved it -- but keeps the message sane if a caller
     # ever reaches this branch without one, e.g. a direct unit test).
+    #
+    # ``install-node-skill-package.sh`` reads the workspace root from
+    # ``OMNI_HOME``, not from the CLI's ``OMNIBASE_PATH`` parameter: its only
+    # invokers are the workspace reconciler and the drift-check script, both
+    # maintainer-registry tooling that keeps the older spelling by the
+    # OMN-16849 boundary ruling. Since OMN-16852 moved this CLI's parameter,
+    # the two names can legitimately disagree on one machine, so the repair
+    # command carries the RESOLVED path as an explicit assignment rather than
+    # naming a variable and hoping the reader has the right one exported.
     if omni_home:
         infra_scripts = Path(omni_home) / "omnibase_infra" / "scripts"
         repair_cmd = str(infra_scripts / "check-omnimarket-venv-drift.sh")
-        install_cmd = str(infra_scripts / "install-node-skill-package.sh")
+        install_cmd = f"OMNI_HOME={omni_home} " + str(
+            infra_scripts / "install-node-skill-package.sh"
+        )
     else:
         repair_cmd = "scripts/check-omnimarket-venv-drift.sh"
         install_cmd = "scripts/install-node-skill-package.sh"
@@ -788,7 +932,7 @@ def check_omnimarket_drift(
         canonical_wrapper = (
             str(canonical_wrapper_path)
             if canonical_wrapper_path is not None
-            else "$OMNI_HOME/omnibase_infra/scripts/onex"
+            else "$OMNIBASE_PATH/omnibase_infra/scripts/onex"
         )
         path_onex_identity = _path_onex_identity()
         canonical_wrapper_resolution_error = None
@@ -822,7 +966,7 @@ def check_omnimarket_drift(
                 )
         elif canonical_wrapper_identity is None:
             if canonical_wrapper_path is None:
-                canonical_detail = "no OMNI_HOME was provided"
+                canonical_detail = "no OMNIBASE_PATH was provided"
             else:
                 canonical_detail = (
                     "canonical wrapper resolution failed: "
@@ -851,13 +995,13 @@ def check_omnimarket_drift(
             "omnimarket is NOT INSTALLED from git in this interpreter "
             f"({sys.executable}) (absent, or installed from PyPI/a non-VCS "
             "source), but a "
-            f"canonical clone exists at $OMNI_HOME/omnimarket (HEAD "
+            f"canonical clone exists at $OMNIBASE_PATH/omnimarket (HEAD "
             f"{canonical[:12]}). 'onex skill'/'onex node'/'onex delegate' "
             "dispatch for market-provided nodes (e.g. node_aislop_sweep) "
             f"will fail with 'Unknown node'. {path_diagnosis} If that interpreter "
             f"is not the dispatch venv's python "
-            f"($OMNI_HOME/.onex-dispatch-venv/bin/python by default; it was "
-            f"$OMNI_HOME/omnibase_infra/.venv/bin/python before the OMN-17819 "
+            f"($OMNIBASE_PATH/.onex-dispatch-venv/bin/python by default; it was "
+            f"$OMNIBASE_PATH/omnibase_infra/.venv/bin/python before the OMN-17819 "
             f"gate/dispatch split), invoke the "
             f"canonical wrapper directly: {canonical_wrapper} (see "
             f"knowledge-base-internal:runbooks/omnibase-infra-onex-cli-invocation.md). Otherwise repair with: "
@@ -866,7 +1010,7 @@ def check_omnimarket_drift(
     else:
         detail = (
             f"omnimarket venv is STALE: installed commit {installed[:12]} != "
-            f"canonical $OMNI_HOME/omnimarket HEAD {canonical[:12]}. Repair with: "
+            f"canonical $OMNIBASE_PATH/omnimarket HEAD {canonical[:12]}. Repair with: "
             f"{repair_cmd} --repair (or re-run {install_cmd} --execute directly)."
         )
 
@@ -947,7 +1091,7 @@ def check_omnimarket_drift(
             f"{detail} Reconcile run {outcome.run_id} reported a "
             f"readback-PROVEN success and this venv is STILL drifted: installed "
             f"{(installed or 'ABSENT')[:12]} != canonical "
-            f"$OMNI_HOME/omnimarket HEAD {canonical[:12]}. That is a "
+            f"$OMNIBASE_PATH/omnimarket HEAD {canonical[:12]}. That is a "
             f"contradiction between two readings of the same fact, not a stale "
             f"venv, and no retry will resolve it. Reproduce run "
             f"{outcome.run_id} with:\n"
