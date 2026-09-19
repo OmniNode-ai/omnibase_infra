@@ -48,6 +48,7 @@ a record that exists nowhere is worse than a stalled feed.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -86,14 +87,30 @@ class _FakeConsumer:
     def __init__(self, messages: list[Any]) -> None:
         self._messages = list(messages)
         self.seek_calls: list[tuple[TopicPartition, int]] = []
+        # OMN-18640: the loop now polls with a deadline instead of iterating,
+        # because an iterator over a wedged consumer never returns. A real
+        # ``getmany`` has no end-of-stream, so the driver supplies this hook to
+        # end the loop once the fixture's records are drained.
+        self.on_drained: Callable[[], None] | None = None
 
-    def __aiter__(self) -> _FakeConsumer:
-        return self
-
-    async def __anext__(self) -> Any:
+    async def getmany(
+        self,
+        *partitions: TopicPartition,
+        timeout_ms: int = 0,
+        max_records: int | None = None,
+    ) -> dict[TopicPartition, list[Any]]:
         if not self._messages:
-            raise StopAsyncIteration
-        return self._messages.pop(0)
+            if self.on_drained is not None:
+                self.on_drained()
+            return {}
+        # One record per fetch. A rewind drops the rest of its partition's
+        # batch, so a fixture that models redelivery as "the next record in
+        # the list" must deliver each one in its own fetch -- which is also
+        # what a real refetch after a seek does.
+        return {TopicPartition(TEST_TOPIC, TEST_PARTITION): [self._messages.pop(0)]}
+
+    def assignment(self) -> set[TopicPartition]:
+        return set()
 
     def seek(self, partition: TopicPartition, offset: int) -> None:
         self.seek_calls.append((partition, offset))
@@ -157,6 +174,7 @@ async def _redeliver(
 
         consumer = _FakeConsumer([_make_raw_msg(offset=o) for o in coords])
         event_bus._group_consumers[(TEST_TOPIC, TEST_GROUP)] = consumer  # type: ignore[assignment]
+        consumer.on_drained = lambda: setattr(event_bus, "_shutdown", True)
 
         message = MagicMock()
         message.headers.retry_count = retry_count

@@ -21,6 +21,8 @@ metadata-propagation retry loop -- must pass
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -35,6 +37,22 @@ TEST_BOOTSTRAP_SERVERS: str = "localhost:9092"
 # onex.snapshot.projection.live-events.v1. The default bound must exceed it so
 # the ordinary case still batches instead of degrading to one record per fetch.
 MEASURED_MAX_LIVE_PAYLOAD_BYTES: int = 240_027
+
+
+async def _idle_fetch(
+    *partitions: Any,
+    timeout_ms: int = 0,
+    max_records: int | None = None,
+) -> dict[Any, list[Any]]:
+    """Stand in for ``AIOKafkaConsumer.getmany`` on a topic with nothing on it.
+
+    OMN-18640: the consume loop fetches with a deadline instead of iterating,
+    so a mocked consumer needs a fetch that HONOURS that deadline. An
+    ``AsyncMock`` returns instantly and truthy, which both spins the loop and
+    makes it believe it is receiving records.
+    """
+    await asyncio.sleep(max(timeout_ms, 1) / 1000.0)
+    return {}
 
 
 @pytest.mark.unit
@@ -58,6 +76,10 @@ class TestConsumerMaxPartitionFetchBytes:
         mock_consumer = AsyncMock()
         mock_consumer.start = AsyncMock()
         mock_consumer.stop = AsyncMock()
+        # OMN-18640: the consume loop fetches with ``getmany``; an
+        # unconfigured AsyncMock returns a truthy mock and spins the loop.
+        mock_consumer.getmany = _idle_fetch
+        mock_consumer.assignment = lambda: set()
         consumer_cls = MagicMock(return_value=mock_consumer)
 
         with (
@@ -93,6 +115,10 @@ class TestConsumerMaxPartitionFetchBytes:
         mock_consumer = AsyncMock()
         mock_consumer.start = AsyncMock()
         mock_consumer.stop = AsyncMock()
+        # OMN-18640: the consume loop fetches with ``getmany``; an
+        # unconfigured AsyncMock returns a truthy mock and spins the loop.
+        mock_consumer.getmany = _idle_fetch
+        mock_consumer.assignment = lambda: set()
         consumer_cls = MagicMock(return_value=mock_consumer)
 
         with (
@@ -125,6 +151,10 @@ class TestConsumerMaxPartitionFetchBytes:
         mock_consumer = AsyncMock()
         mock_consumer.start = AsyncMock()
         mock_consumer.stop = AsyncMock()
+        # OMN-18640: the consume loop fetches with ``getmany``; an
+        # unconfigured AsyncMock returns a truthy mock and spins the loop.
+        mock_consumer.getmany = _idle_fetch
+        mock_consumer.assignment = lambda: set()
         consumer_cls = MagicMock(return_value=mock_consumer)
 
         with (
@@ -162,10 +192,18 @@ class TestConsumerMaxPartitionFetchBytes:
             side_effect=UnknownTopicOrPartitionError("topic metadata not ready")
         )
         failing_consumer.stop = AsyncMock()
+        # OMN-18640: the consume loop fetches with ``getmany``; an
+        # unconfigured AsyncMock returns a truthy mock and spins the loop.
+        failing_consumer.getmany = _idle_fetch
+        failing_consumer.assignment = lambda: set()
 
         succeeding_consumer = AsyncMock()
         succeeding_consumer.start = AsyncMock()
         succeeding_consumer.stop = AsyncMock()
+        # OMN-18640: the consume loop fetches with ``getmany``; an
+        # unconfigured AsyncMock returns a truthy mock and spins the loop.
+        succeeding_consumer.getmany = _idle_fetch
+        succeeding_consumer.assignment = lambda: set()
 
         consumer_cls = MagicMock(side_effect=[failing_consumer, succeeding_consumer])
 
