@@ -93,6 +93,13 @@ class _FakeExecutor:
         self.verify_recreate: list[object] = []
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
+        # OMN-18640 added `health_checks or self.executor.health_checks` at
+        # agent.py:883 and did not give this fake the attribute, so every test
+        # in this file that reaches the PUBLISH phase raised AttributeError.
+        # The real executor initialises it empty and fills it before it raises,
+        # which is the whole point of the fallback -- so empty is the correct
+        # default here, not a stub.
+        self.health_checks: list[object] = []
         self.raise_on_deliver: Exception | None = None
         self._delivery_record = delivery_record or {
             "result": "WRITTEN",
