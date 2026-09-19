@@ -44,6 +44,7 @@ EXPECTED_PROFILE_INSTANCE_MAP = {
     # its own namespaced volume); the typed topology it renders is not
     # lane-special, so nothing about the instance changes.
     "lakshman": "local",
+    "dogfood": "local",
     "onex-dev": "onex-dev",
     "onex-prod": "onex-prod",
 }

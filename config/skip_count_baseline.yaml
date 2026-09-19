@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 547
+    max_skips: 550
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -35,6 +35,7 @@ suites:
         - '35404351173'
         - '35400977169'
       notes: '35402899669 is a full-width run: 15 splits, 38874 collected, 547 unique skipped test ids (617 raw, because 5 module-level skips are re-reported by every split that collected the module). Mode is nodeids because this job sits behind the impacted-test selector and its raw count legitimately varies: the two corroborating runs collected 7719 and 4228 and skipped 45 and 95. Both of those sets are subsets of this baseline (0 ids outside it), which is why a narrowed run cannot false-fail. Positive control for that zero: injecting one synthetic id into the same comparison reports 1.'
+      omn18693_addendum: 'OMN-18693 adds 3 node ids and 547 -> 550: test_owner_lineage_grant_migration_fails_when_a_grant_is_mutated_away and the two test_owner_lineage_grants_complete_the_real_forward_runner[fresh|legacy] parametrizations in tests/integration/migrations/test_102_tenant_projection_writer_role_omn15425.py. All three are @pytest.mark.integration @pytest.mark.postgres live-cluster proofs (EphemeralPostgres fixture), deselected by design on this job the same way every other postgres-marked test in this file already is -- they are collected-but-skipped, not broken.'
     node_ids:
       - tests.ci.test_changed_file_attribution_range_omn18058::test_deploy_scope_gate_passes_when_only_a_peer_touched_deploy_scope
       - tests.ci.test_changed_file_attribution_range_omn18058::test_positive_control_the_gate_still_refuses_the_branchs_own_deploy_scope
@@ -267,6 +268,9 @@ suites:
       - tests.integration.migrations.test_102_tenant_projection_writer_role_omn15425::test_102_corrects_an_observed_escalation
       - tests.integration.migrations.test_102_tenant_projection_writer_role_omn15425::test_the_provisioned_role_is_denied_internal_and_catalog_schemas
       - tests.integration.migrations.test_102_tenant_projection_writer_role_omn15425::test_the_provisioned_role_reads_back_the_attested_identity_tuple
+      - tests.integration.migrations.test_102_tenant_projection_writer_role_omn15425::test_owner_lineage_grant_migration_fails_when_a_grant_is_mutated_away
+      - tests.integration.migrations.test_102_tenant_projection_writer_role_omn15425::test_owner_lineage_grants_complete_the_real_forward_runner[fresh]
+      - tests.integration.migrations.test_102_tenant_projection_writer_role_omn15425::test_owner_lineage_grants_complete_the_real_forward_runner[legacy]
       - tests.integration.migrations.test_node_migration_discovery_applies::test_node_076_does_not_collide_with_infra_flat_076
       - tests.integration.migrations.test_node_migration_discovery_applies::test_node_migration_discovery_applies_views
       - tests.integration.migrations.test_node_migration_shape_drift_omn15376::test_delegation_routing_overlay_reconciliation_enforces_declared_shape

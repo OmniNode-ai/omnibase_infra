@@ -1,0 +1,32 @@
+# Typed Bifrost overlay for the isolated dogfood lane.
+# Backend bindings are validated against the authorized binding model; local
+# inference endpoints are host services rather than resources of another lane.
+# onex-allow-internal-ip OMN-18693 reason="typed dogfood lane backend binding"
+schema_version: "bifrost_lane_overlay.v3"
+lane: dogfood
+locale: lab
+backends:
+  - backend_id: local-coder
+    endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
+    served_model_id: "Qwen3.8-27B"
+    parameter_count: "27B"
+    context_window: 131072
+    max_tokens: 65536
+    timeout_ms: 300000
+  - backend_id: local-heavy-reasoning
+    endpoint_url: "http://192.168.86.201:8000/v1/chat/completions"
+    served_model_id: "Qwen3.8-27B"
+    parameter_count: "27B"
+    context_window: 131072
+    max_tokens: 65536
+    timeout_ms: 300000
+  # Declared but disabled. The renderer omits endpoint_url while serving is
+  # false, so this lane does not route traffic to this backend.
+  - backend_id: local-ds-v4-flash
+    endpoint_url: "http://192.168.86.200:8101/v1/chat/completions"
+    served_model_id: "deepseek-v4-flash"
+    parameter_count: "284B"
+    context_window: 131072
+    max_tokens: 65536
+    timeout_ms: 300000
+    serving: false

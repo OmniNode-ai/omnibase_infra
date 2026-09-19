@@ -3,7 +3,7 @@ databases:
     bindings:
       app_dashboard:
         database_ref: application
-        dsn_env: DATABASE_URL
+        dsn_env: OMNIDASH_ANALYTICS_DB_URL
         principal: app_dashboard
       omninode_runtime_service:
         database_ref: application
@@ -354,12 +354,12 @@ databases:
       public:
         domain: OMNINODE_INTERNAL
         owner: owner_omniintelligence
-environment: onex-prod
+environment: dogfood
 schema_version: '1.0'
 source:
-  path: src/omnibase_infra/topology/instances/onex-prod.yaml
+  path: src/omnibase_infra/topology/instances/local.yaml
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: b57bfa83b466994a3bac70518048262abd466552ca47d223483e11cbe314baf9
-topology_instance: onex-prod
+  sha256: 24174aa89d2bb38194a11aacb22431b009a6376c72f0c4367d66e3abec5e847d
+topology_instance: local
