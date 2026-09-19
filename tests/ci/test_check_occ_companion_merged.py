@@ -18,6 +18,10 @@ These tests pin the fail-closed verdict table:
 * missing Evidence-Source     → PENDING (autobind mint may be in flight)
 * missing Evidence-Source AND the producer reported ERROR on this head
                               → FAIL immediately, naming the reason (OMN-18069)
+* missing Evidence-Source AND a permanent DECLINE on this head
+                              → FAIL immediately, naming the reason (OMN-18647)
+* missing Evidence-Source AND a dependency-pin-only DECLINE on this head
+                              → PASS; no companion is owed (OMN-18848)
 * malformed Evidence-Source   → FAIL
 * dependency-bot author       → PASS (mirrors occ-preflight OMN-13762)
 * non-PR event                → PASS (gate not applicable)
@@ -546,6 +550,110 @@ class TestAutobindOutcomeShortCircuit:
             check_runs={(PRODUCT_REPO, self.HEAD): [self._outcome_run("ERROR")]},
         )
         assert _evaluate(fetcher).code == EXIT_PASS
+
+
+class TestDependencyPinOnlyExemption:
+    """OMN-18848 — the one DECLINED reason that is a PASS, and its fences.
+
+    A dependency-pin-only PR (a post-release version bump: manifest +
+    lockfile, manifest edits confined to version/dependency-pin keys) makes
+    no behavioural claim, so no changed file can be RED-derivable and the
+    producer can never mint. The verdict is DERIVED: the producer classifies
+    the diff itself and records ``skip:DEPENDENCY_PIN_ONLY`` on the
+    ``occ-autobind / outcome`` check-run of the PR's CURRENT head SHA. Every
+    other test in this class is a fence proving the exemption cannot be
+    obtained any other way.
+    """
+
+    HEAD = "7c4d1a9b8e35f0c26ad71b4e9f3082cd5a6e1b74"
+    STALE = "1111111111111111111111111111111111111111"
+    PIN_ONLY_REASON = (
+        "skip:DEPENDENCY_PIN_ONLY dependency-pin-only diff "
+        "(pyproject.toml + uv.lock; pin keys only)"
+    )
+    HAND_AUTHORED_REASON = (
+        "skip:NO_RED_DERIVABLE_CHECK no changed-file candidate is RED-derivable"
+    )
+
+    def _outcome_run(
+        self,
+        outcome: str,
+        *,
+        reason: str,
+        completed_at: str = "2026-09-18T16:36:00Z",
+    ) -> dict[str, object]:
+        summary = (
+            f"{AUTOBIND_OUTCOME_MARKER_PREFIX} {outcome} "
+            f"repo={PRODUCT_REPO} pr=2500 "
+            f"correlation_id=4f0d5c2a-7b91-4a0e-9d33-2c8f61ae55b0 "
+            f"reason={reason}\n\nprose a human reads\n"
+        )
+        return {
+            "name": AUTOBIND_OUTCOME_CHECK_NAME,
+            "status": "completed",
+            "completed_at": completed_at,
+            "output": {"title": f"{outcome}: x", "summary": summary},
+        }
+
+    def _fetcher(
+        self,
+        *,
+        runs: list[dict[str, object]] | None,
+        runs_sha: str | None = None,
+        body: str = "chore: advance the omnimarket contract pin",
+    ) -> FakeFetcher:
+        return FakeFetcher(
+            prs={(PRODUCT_REPO, "2500"): _product_pr(body, head_sha=self.HEAD)},
+            check_runs={(PRODUCT_REPO, runs_sha or self.HEAD): runs},
+        )
+
+    def test_pin_only_decline_on_the_current_head_passes(self) -> None:
+        verdict = _evaluate(
+            self._fetcher(
+                runs=[self._outcome_run("DECLINED", reason=self.PIN_ONLY_REASON)]
+            )
+        )
+        assert verdict.code == EXIT_PASS
+
+    def test_the_same_outcome_under_another_sha_does_not_pass(self) -> None:
+        """Bound to the head SHA: an outcome recorded for a superseded commit
+        is not evidence about this one, and the gate falls back to PENDING."""
+        verdict = _evaluate(
+            self._fetcher(
+                runs=[self._outcome_run("DECLINED", reason=self.PIN_ONLY_REASON)],
+                runs_sha=self.STALE,
+            )
+        )
+        assert verdict.code != EXIT_PASS
+
+    def test_no_outcome_check_run_on_the_head_does_not_pass(self) -> None:
+        """No recorded verdict is not a pin-only verdict — fail closed."""
+        assert _evaluate(self._fetcher(runs=[])).code != EXIT_PASS
+
+    def test_the_token_in_the_pr_body_alone_does_not_pass(self) -> None:
+        """The exemption is derived from the diff, never asserted by prose:
+        the body is not read for it and cannot supply it."""
+        verdict = _evaluate(
+            self._fetcher(
+                runs=[],
+                body=(
+                    "This is a version bump only.\n\n"
+                    f"{self.PIN_ONLY_REASON}\n"
+                    "No OCC companion is required.\n"
+                ),
+            )
+        )
+        assert verdict.code != EXIT_PASS
+
+    def test_a_no_red_derivable_decline_still_fails(self) -> None:
+        """Regression: widening DECLINED recognition must not turn the
+        hand-authoring refusal into a pass (OMN-18647)."""
+        verdict = _evaluate(
+            self._fetcher(
+                runs=[self._outcome_run("DECLINED", reason=self.HAND_AUTHORED_REASON)]
+            )
+        )
+        assert verdict.code == EXIT_FAIL
 
 
 class TestReadAutobindOutcome:
