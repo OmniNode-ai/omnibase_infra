@@ -22,6 +22,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.enums.enum_policy_type import EnumPolicyType
 from omnibase_core.models.objective.model_score_vector import ModelScoreVector
 from omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder import (
     SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED,
@@ -45,26 +46,36 @@ from omnibase_infra.nodes.node_reward_binder_effect.models.model_reward_binder_o
     ModelRewardBinderOutput,
 )
 from omnibase_infra.protocols import ProtocolEventBusLike
+from tests.helpers.service_env import require_service_env
 
 # ==============================================================================
 # Skip conditions
 # ==============================================================================
 
-# KAFKA_BOOTSTRAP_SERVERS is set to a localhost default by tests/conftest.py (OMN-7227),
-# so we require an explicit KAFKA_INTEGRATION_TESTS=1 opt-in to avoid false positives
-# in CI environments where Kafka is not actually running.
+# OMN-18795: this suite is SELECTED BY MARKER, not gated by a silent skipif.
+#
+# Its opt-in was set by no workflow, so the reward-binder's real-broker proof
+# never executed anywhere and its envelope drifted three required fields behind
+# the handler without anything noticing. It is deselected from the PR test
+# splits by `not kafka` and EXECUTED by the service-integration-suites job in
+# ci.yml. Once a job has SELECTED it, a missing opt-in is a failure, not a skip.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = (
-    KAFKA_BOOTSTRAP_SERVERS is not None and os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
-)
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(
-        not KAFKA_AVAILABLE,
-        reason="Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)",
-    ),
+    pytest.mark.kafka,
 ]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _require_kafka() -> None:
+    """Refuse to skip this suite silently once CI has selected it."""
+    require_service_env(
+        opt_in="KAFKA_INTEGRATION_TESTS",
+        endpoint="KAFKA_BOOTSTRAP_SERVERS",
+        workflow=".github/workflows/ci.yml (service-integration-suites)",
+        service="Kafka/Redpanda",
+    )
 
 
 # ==============================================================================
@@ -135,6 +146,7 @@ class TestRewardBinderKafkaIntegration:
         result = _make_evaluation_result()
         spec = _make_objective_spec()
         corr_id = uuid4()
+        policy_id = uuid4()
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers=bootstrap,
@@ -159,10 +171,17 @@ class TestRewardBinderKafkaIntegration:
             )
             await handler.initialize({})
 
+            # OMN-18795: policy_id and policy_type are REQUIRED by
+            # HandlerRewardBinder.execute() and are documented as such in its
+            # own module docstring. This suite had never executed, so the
+            # envelope it builds was three fields behind the handler and
+            # raised RuntimeHostError before reaching a broker at all.
             envelope: dict[str, object] = {
                 "correlation_id": corr_id,
                 "evaluation_result": result,
                 "objective_spec": spec,
+                "policy_id": policy_id,
+                "policy_type": EnumPolicyType.TOOL_RELIABILITY,
             }
             handler_output = await handler.execute(envelope)
             output = handler_output.result
@@ -183,7 +202,10 @@ class TestRewardBinderKafkaIntegration:
             assert SUFFIX_OMNIMEMORY_REWARD_ASSIGNED in output.topics_published
             assert SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED in output.topics_published
         finally:
-            await bus.stop()
+            # OMN-18795: EventBusKafka exposes shutdown()/close(), never stop().
+            # The stale name turned every teardown into an AttributeError that
+            # masked the assertion failures above it.
+            await bus.shutdown()
 
     @pytest.mark.asyncio
     async def test_publish_failure_propagates(self) -> None:
@@ -206,5 +228,7 @@ class TestRewardBinderKafkaIntegration:
                     "correlation_id": uuid4(),
                     "evaluation_result": result,
                     "objective_spec": spec,
+                    "policy_id": uuid4(),
+                    "policy_type": EnumPolicyType.TOOL_RELIABILITY,
                 }
             )

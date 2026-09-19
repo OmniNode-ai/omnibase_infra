@@ -1,752 +1,710 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Heavy integration tests for correlation ID propagation with real infrastructure.
+"""Correlation ID propagation across real HTTP, PostgreSQL and Kafka boundaries.
 
-These tests require:
-- Real Kafka/Redpanda (via existing kafka fixtures if available)
-- Real PostgreSQL (via db_config fixture)
-- pytest-httpserver for HTTP testing
+Selection in CI (OMN-18795). This suite does NOT skip gracefully in CI, because
+a silent skip and a green run are indistinguishable in a junit summary:
 
-Run with: RUN_HEAVY_TESTS=1 pytest tests/integration/correlation/test_correlation_propagation_heavy.py -v
+    - the module carries ``pytest.mark.heavy``, which the PR test splits
+      deselect, so it is never collected-and-skipped on a pull request;
+    - a service-backed job in ``.github/workflows/ci.yml`` starts a real
+      Redpanda and a real PostgreSQL, exports ``RUN_HEAVY_TESTS=1`` alongside
+      the endpoint variables, and runs it;
+    - a CI job that selects it without that provisioning FAILS, naming the
+      variable, rather than skipping.
 
-Test Categories
+Outside CI it skips, so a laptop with neither a broker nor a database is not
+forced to stand them up.
 
-HTTP Boundary Tests:
-    Tests that verify correlation IDs propagate correctly through HTTP calls
-    using pytest-httpserver as a mock HTTP endpoint.
+Why this file was rewritten, not merely ungated
+-----------------------------------------------
+``RUN_HEAVY_TESTS`` was set by no workflow in this repository, so these tests
+had never executed once. Their first run against real services returned
+``2 failed, 5 passed, 3 errors``, entirely from APIs that had moved underneath
+a suite nothing was exercising:
 
-Error Context Tests:
-    Tests that verify correlation IDs are preserved in error context when
-    infrastructure operations fail.
+    - the database tests requested a fixture named ``initialized_db_handler``.
+      That fixture lives in ``tests/integration/handlers/conftest.py`` and has
+      never been visible from this directory; only its ``POSTGRES_AVAILABLE``
+      constant was imported, which made the dependency look satisfied. The
+      handler is now built here, the way live code builds it.
+    - ``ModelKafkaEventBusConfig(group=...)`` no longer validates. OMN-1602
+      removed the bus-level consumer group: the group is derived per
+      subscription from a ``ModelNodeIdentity`` passed to ``subscribe()``.
+    - ``InfraTimeoutError`` takes a ``ModelTimeoutErrorContext``, not a
+      ``ModelInfraErrorContext``. The old test passed the latter and the
+      constructor reached for ``context.timeout_seconds``, a field that model
+      does not have.
+    - ``tests.helpers.kafka_utils`` does not exist; the helper is
+      ``tests.helpers.util_kafka``. Nothing had ever imported it from here.
 
-Database Tests:
-    Tests that verify correlation IDs propagate correctly through PostgreSQL
-    database operations and are preserved in error contexts.
+That is the cost of a suite that skips: it keeps its shape while the thing it
+claims to cover moves out from under it, and nothing says so.
 
-Kafka Tests:
-    Tests that verify correlation IDs propagate correctly through Kafka/Redpanda
-    message flow and are preserved in error contexts.
+What every test here must do
+----------------------------
+A correlation-propagation test proves its claim by observing the value on the
+FAR SIDE -- the request the HTTP server actually received, the row PostgreSQL
+actually returned, the error context the failing infrastructure actually
+produced, the message Kafka actually delivered. Re-reading the variable the
+test itself set proves nothing, and five tests doing exactly that were deleted
+rather than weakened (see the deletion notes on each section below).
+
+Run with infrastructure::
+
+    $ RUN_HEAVY_TESTS=1 KAFKA_BOOTSTRAP_SERVERS=<host:port> \\
+        OMNIBASE_INFRA_DB_URL=postgresql://<user>:<pw>@<host>:<port>/<db> \\
+        uv run pytest tests/integration/correlation/test_correlation_propagation_heavy.py -v
+
+Related tickets: OMN-18781 (the precedent that introduced the fail-closed
+helper), OMN-18795 (this rewrite).
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
+import json
 import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from pytest_httpserver import HTTPServer
+from werkzeug import Request, Response
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.errors import (
     InfraConnectionError,
-    InfraTimeoutError,
     InfraUnavailableError,
-    ModelInfraErrorContext,
+    RuntimeHostError,
 )
-
-# Check if pytest-httpserver and httpx are available for HTTP boundary tests
-try:
-    import httpx
-    from pytest_httpserver import HTTPServer
-
-    HTTPSERVER_AVAILABLE = True
-except ImportError:
-    HTTPSERVER_AVAILABLE = False
-    # Assign None to module reference for conditional skip logic
-    httpx = None  # type: ignore[assignment]
-
-    # Placeholder class to avoid NameError when pytest-httpserver unavailable
-    class HTTPServer:  # type: ignore[no-redef]
-        """Placeholder class when pytest-httpserver is not available."""
-
+from omnibase_infra.models import ModelNodeIdentity
+from tests.helpers.service_env import require_service_env
+from tests.helpers.util_kafka import wait_for_consumer_ready
+from tests.helpers.util_postgres import PostgresConfig
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models import ModelEventMessage
-    from omnibase_infra.handlers import HandlerDb
-
-# Import database availability flag from handlers conftest
-from tests.integration.handlers.conftest import POSTGRES_AVAILABLE
+    from omnibase_infra.handlers import HandlerDb, HandlerHttpRest
 
 # =============================================================================
-# Kafka Availability Check
+# Module-level selection
 # =============================================================================
 
-# Check if Kafka is available based on environment variable
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = bool(KAFKA_BOOTSTRAP_SERVERS)  # False if None or empty string
-
-# =============================================================================
-# Module-Level Skip Configuration
-# =============================================================================
-
-# Skip entire module if RUN_HEAVY_TESTS is not set
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.heavy,
-    pytest.mark.skipif(
-        not os.getenv("RUN_HEAVY_TESTS"),
-        reason="Heavy tests require RUN_HEAVY_TESTS=1 environment variable",
-    ),
 ]
 
 
-# =============================================================================
-# HTTP Boundary Tests
-# =============================================================================
+@pytest.fixture(autouse=True, scope="module")
+def _require_services() -> None:
+    """Refuse to skip this suite silently once CI has selected it.
 
-
-@pytest.mark.skipif(
-    not HTTPSERVER_AVAILABLE,
-    reason="pytest-httpserver or httpx not installed - pip install pytest-httpserver httpx",
-)
-class TestCorrelationHttpBoundary:
-    """Tests for correlation ID propagation through HTTP boundaries."""
-
-    @pytest.mark.asyncio
-    async def test_correlation_through_http_boundary(
-        self,
-        httpserver: HTTPServer,
-        correlation_id: UUID,
-    ) -> None:
-        """Verify correlation ID propagates through HTTP calls.
-
-        This test uses pytest-httpserver to create a mock HTTP server that
-        expects to receive requests with correlation ID headers. The server
-        will fail the test if the expected header is not present.
-
-        Args:
-            httpserver: pytest-httpserver fixture providing mock HTTP server
-            correlation_id: Test correlation ID from conftest fixture
-        """
-        # Configure mock server to expect correlation ID header
-        httpserver.expect_request(
-            "/test-correlation",
-            headers={"X-Correlation-ID": str(correlation_id)},
-        ).respond_with_json(
-            {"status": "ok", "correlation_id": str(correlation_id)},
-        )
-
-        # Make HTTP call with correlation ID
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                httpserver.url_for("/test-correlation"),
-                headers={"X-Correlation-ID": str(correlation_id)},
-            )
-
-        assert response.status_code == 200
-        response_data = response.json()
-        # HTTP responses serialize correlation_id as string for wire transport (JSON body)
-        assert response_data["correlation_id"] == str(correlation_id)
-        # pytest-httpserver will fail the test if expected header wasn't present
-
-    @pytest.mark.asyncio
-    async def test_correlation_echoed_in_response_header(
-        self,
-        httpserver: HTTPServer,
-        correlation_id: UUID,
-    ) -> None:
-        """Verify correlation ID is echoed back in response headers.
-
-        Tests the common pattern where servers echo the correlation ID
-        back in the response headers for end-to-end tracing.
-
-        Args:
-            httpserver: pytest-httpserver fixture providing mock HTTP server
-            correlation_id: Test correlation ID from conftest fixture
-        """
-        # Configure mock server to echo correlation ID in response headers
-        httpserver.expect_request(
-            "/echo-correlation",
-        ).respond_with_json(
-            {"status": "ok"},
-            headers={"X-Correlation-ID": str(correlation_id)},
-        )
-
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                httpserver.url_for("/echo-correlation"),
-                headers={"X-Correlation-ID": str(correlation_id)},
-            )
-
-        assert response.status_code == 200
-        # HTTP headers are strings; correlation_id serialized for wire transport
-        assert response.headers.get("X-Correlation-ID") == str(correlation_id)
-
-
-# =============================================================================
-# Error Context Preservation Tests
-# =============================================================================
-
-
-class TestCorrelationErrorContext:
-    """Tests for correlation ID preservation in error contexts."""
-
-    @pytest.mark.asyncio
-    async def test_correlation_preserved_on_connection_error(
-        self,
-        correlation_id: UUID,
-    ) -> None:
-        """Verify correlation ID survives connection errors.
-
-        Tests that when infrastructure connection errors occur, the
-        correlation ID is properly preserved in the error context.
-
-        Args:
-            correlation_id: Test correlation ID from conftest fixture
-        """
-        # Create error context with correlation ID
-        context = ModelInfraErrorContext.with_correlation(
-            correlation_id=correlation_id,
-            operation="test_connection",
-            transport_type=EnumInfraTransportType.HTTP,
-            target_name="test-service",
-        )
-
-        # Simulate connection error with context
-        error = InfraConnectionError("Connection refused", context=context)
-
-        # Verify correlation ID is preserved in error
-        assert error.correlation_id == correlation_id
-        assert error.model.correlation_id == correlation_id
-
-        # Verify context fields are preserved
-        error_context = error.model.context
-        assert error_context is not None
-        assert error_context["operation"] == "test_connection"
-        assert error_context["transport_type"] == EnumInfraTransportType.HTTP
-        assert error_context["target_name"] == "test-service"
-
-    @pytest.mark.asyncio
-    async def test_correlation_preserved_on_timeout_error(
-        self,
-        correlation_id: UUID,
-    ) -> None:
-        """Verify correlation ID survives timeout errors.
-
-        Tests that when infrastructure timeout errors occur, the
-        correlation ID is properly preserved in the error context.
-
-        Args:
-            correlation_id: Test correlation ID from conftest fixture
-        """
-        context = ModelInfraErrorContext.with_correlation(
-            correlation_id=correlation_id,
-            operation="database_query",
-            transport_type=EnumInfraTransportType.DATABASE,
-            target_name="postgresql-primary",
-        )
-
-        error = InfraTimeoutError("Query timed out after 30s", context=context)
-
-        # Verify correlation ID is preserved
-        assert error.correlation_id == correlation_id
-        assert error.model.correlation_id == correlation_id
-
-        # Verify context fields
-        error_context = error.model.context
-        assert error_context is not None
-        assert error_context["operation"] == "database_query"
-        assert error_context["transport_type"] == EnumInfraTransportType.DATABASE
-
-    @pytest.mark.asyncio
-    async def test_correlation_preserved_on_unavailable_error(
-        self,
-        correlation_id: UUID,
-    ) -> None:
-        """Verify correlation ID survives unavailable errors.
-
-        Tests that when services are unavailable, the correlation ID
-        is properly preserved in the error context for tracing.
-
-        Args:
-            correlation_id: Test correlation ID from conftest fixture
-        """
-        context = ModelInfraErrorContext.with_correlation(
-            correlation_id=correlation_id,
-            operation="kafka_publish",
-            transport_type=EnumInfraTransportType.KAFKA,
-            target_name="kafka-broker-1",
-        )
-
-        error = InfraUnavailableError("Broker not available", context=context)
-
-        # Verify correlation ID is preserved
-        assert error.correlation_id == correlation_id
-        assert error.model.correlation_id == correlation_id
-
-        # Verify context fields
-        error_context = error.model.context
-        assert error_context is not None
-        assert error_context["operation"] == "kafka_publish"
-        assert error_context["transport_type"] == EnumInfraTransportType.KAFKA
-
-    @pytest.mark.asyncio
-    async def test_correlation_in_error_string_representation(
-        self,
-        correlation_id: UUID,
-    ) -> None:
-        """Verify correlation ID appears in error string representation.
-
-        Tests that the error's string representation includes the
-        correlation ID for debugging and logging purposes.
-
-        Args:
-            correlation_id: Test correlation ID from conftest fixture
-        """
-        context = ModelInfraErrorContext.with_correlation(
-            correlation_id=correlation_id,
-            operation="test_operation",
-            transport_type=EnumInfraTransportType.HTTP,
-        )
-
-        error = InfraConnectionError("Test error message", context=context)
-
-        # The error's model dump should contain the correlation ID
-        error_dump = error.model_dump()
-        assert str(correlation_id) in str(error_dump)
-        # model_dump() returns UUID objects; convert both sides to string for comparison
-        assert str(error_dump["correlation_id"]) == str(correlation_id)
-
-
-# =============================================================================
-# Database Tests
-# =============================================================================
-
-
-@pytest.mark.skipif(
-    not POSTGRES_AVAILABLE,
-    reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST/POSTGRES_PASSWORD)",
-)
-class TestCorrelationDatabase:
-    """Tests for correlation ID propagation through database operations.
-
-    These tests require real PostgreSQL infrastructure and use fixtures
-    from tests/integration/handlers/conftest.py.
-
-    Skip Conditions:
-        - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
-        - Uses class-level skip condition from POSTGRES_AVAILABLE flag
-
+    ``pytest-httpserver`` is deliberately imported at module scope above
+    rather than behind a try/except, and ``httpx`` reaches the wire through
+    ``HandlerHttpRest``. Both are hard dependencies of this project; the old
+    ``HTTPSERVER_AVAILABLE`` fallback turned a genuinely missing one into a
+    per-class skip, which is the exact class of false green OMN-18795 exists
+    to remove. A missing dependency is now a collection error.
     """
+    require_service_env(
+        opt_in="RUN_HEAVY_TESTS",
+        endpoint="KAFKA_BOOTSTRAP_SERVERS",
+        workflow=".github/workflows/ci.yml",
+        service="Kafka and Postgres",
+    )
+
+
+# Header name the HTTP boundary tests trace on. Defined once so the request
+# assertion and the response assertion cannot drift apart.
+CORRELATION_HEADER = "X-Correlation-ID"
+
+# Kafka operation bounds. The delivery wait is generous because a freshly
+# created topic's consumer has to join a group before the first record lands.
+MESSAGE_DELIVERY_WAIT_SECONDS = 20.0
+TEST_TIMEOUT_SECONDS = 30
+
+# A broker address that cannot resolve, ever. ``.invalid`` is reserved by
+# RFC 2606 precisely so a name is guaranteed NXDOMAIN, which makes the failure
+# tests deterministic and fast instead of dependent on whatever a resolver does
+# with an unqualified made-up hostname.
+UNREACHABLE_BROKER = "kafka-unreachable.invalid:9092"
+
+
+# =============================================================================
+# HTTP boundary
+# =============================================================================
+#
+# OMN-18795 deletion: ``test_correlation_through_http_boundary`` and
+# ``test_correlation_echoed_in_response_header`` drove a raw ``httpx`` client
+# against a mock server the test itself configured to return the correlation id
+# it had just written. They exercised httpx and pytest-httpserver; no line of
+# this repository was on the path, so neither could have caught a propagation
+# defect in it. The two tests below put ``HandlerHttpRest`` -- the repository's
+# own HTTP boundary -- in the middle, and read the far side back.
+
+
+@pytest.fixture
+async def http_handler(mock_container: MagicMock) -> AsyncGenerator[HandlerHttpRest]:
+    """An initialized HandlerHttpRest, shut down on every exit path."""
+    from omnibase_infra.handlers import HandlerHttpRest
+
+    handler = HandlerHttpRest(container=mock_container)
+    await handler.initialize(
+        {
+            "max_request_size": 1024 * 1024,
+            "max_response_size": 10 * 1024 * 1024,
+        }
+    )
+    try:
+        yield handler
+    finally:
+        await handler.shutdown()
+
+
+class TestCorrelationHttpBoundary:
+    """Correlation ids cross the handler's HTTP boundary in both directions."""
 
     @pytest.mark.asyncio
-    async def test_correlation_preserved_on_db_operation(
+    async def test_correlation_header_reaches_the_server_and_comes_back(
         self,
-        initialized_db_handler: HandlerDb,
+        httpserver: HTTPServer,
+        http_handler: HandlerHttpRest,
         correlation_id: UUID,
-        log_capture: list[logging.LogRecord],
     ) -> None:
-        """Verify correlation ID propagates through database operations.
+        """The server sees the id on the wire, echoes it, and the handler binds it.
 
-        Tests that:
-        1. Correlation ID from envelope is preserved in handler response
-        2. Correlation ID is consistently maintained through the handler chain
+        Three observations, none of which re-reads the value the test set:
 
-        Args:
-            initialized_db_handler: Initialized HandlerDb fixture with cleanup
-            correlation_id: Test correlation ID from conftest fixture
-            log_capture: Log capturing fixture from conftest
+        1. ``httpserver.log`` is the request the server actually received --
+           the id was on the wire, not merely in the envelope.
+        2. the response body carries what the SERVER read out of that request,
+           so the id survived serialization in both directions.
+        3. the handler's own response envelope carries the same id, which is
+           the property a downstream consumer of this handler depends on.
         """
-        # Execute a database operation with correlation_id in the envelope
+
+        def echo_correlation(request: Request) -> Response:
+            """Reflect the correlation header the server received into the body."""
+            return Response(
+                json.dumps({"seen": request.headers.get(CORRELATION_HEADER)}),
+                status=200,
+                content_type="application/json",
+            )
+
+        httpserver.expect_request("/trace").respond_with_handler(echo_correlation)
+
         envelope: dict[str, object] = {
-            "operation": "db.query",
-            "correlation_id": str(correlation_id),
+            "operation": "http.get",
+            "correlation_id": correlation_id,
             "payload": {
-                "sql": "SELECT 1 AS correlation_test_result",
-                "parameters": [],
+                "url": httpserver.url_for("/trace"),
+                "headers": {CORRELATION_HEADER: str(correlation_id)},
             },
         }
 
-        result = await initialized_db_handler.execute(envelope)
+        output = await http_handler.execute(envelope)
+        result = output.result
+        assert result is not None
+        assert result["status"] == "success"
 
-        # Verify the operation succeeded
-        assert result.result.status == "success"
-        assert result.result.payload.row_count == 1
-        assert result.result.payload.rows[0]["correlation_test_result"] == 1
+        # (1) what the server received
+        assert len(httpserver.log) == 1, (
+            f"expected exactly one request, got {len(httpserver.log)}"
+        )
+        received_request, _ = httpserver.log[0]
+        assert received_request.headers.get(CORRELATION_HEADER) == str(correlation_id)
 
-        # Verify correlation_id is preserved in response
-        assert result.correlation_id == correlation_id
-        assert result.result.correlation_id == correlation_id
+        # (2) what the server read back out and returned
+        payload = result["payload"]
+        assert isinstance(payload, dict)
+        assert payload["body"] == {"seen": str(correlation_id)}
 
-        # Verify correlation_id is preserved through the handler chain
-        # by checking the response chain maintains the same correlation context
-        response_correlation = result.correlation_id
-        inner_correlation = result.result.correlation_id
-        assert response_correlation == inner_correlation == correlation_id
+        # (3) what the handler bound to its own response envelope
+        assert result["correlation_id"] == str(correlation_id)
+        assert output.correlation_id == correlation_id
 
     @pytest.mark.asyncio
-    async def test_correlation_in_db_error_context(
+    async def test_a_server_set_correlation_header_is_surfaced_to_the_caller(
         self,
-        initialized_db_handler: HandlerDb,
+        httpserver: HTTPServer,
+        http_handler: HandlerHttpRest,
         correlation_id: UUID,
     ) -> None:
-        """Verify correlation ID is preserved when database operations fail.
+        """A correlation header the SERVER sets reaches the handler's caller.
 
-        Tests that database query errors properly preserve correlation IDs
-        for distributed tracing. The error should contain the original
-        correlation_id so that failed operations can be traced.
+        The inbound direction. The request carries no correlation header at
+        all, so the id in the assertion can only have come from the server's
+        response -- the handler has to have collected and returned it.
 
-        Args:
-            initialized_db_handler: Initialized HandlerDb fixture with cleanup
-            correlation_id: Test correlation ID from conftest fixture
+        Response header names are compared lower-cased: httpx normalizes them,
+        and the handler passes that mapping through unchanged.
         """
-        from omnibase_infra.errors import RuntimeHostError
+        server_issued_id = str(correlation_id)
+        httpserver.expect_request("/issues-correlation").respond_with_json(
+            {"status": "ok"},
+            headers={CORRELATION_HEADER: server_issued_id},
+        )
 
-        # Trigger a database error with a syntax error in the SQL
+        envelope: dict[str, object] = {
+            "operation": "http.get",
+            "payload": {"url": httpserver.url_for("/issues-correlation")},
+        }
+
+        output = await http_handler.execute(envelope)
+        result = output.result
+        assert result is not None
+        assert result["status"] == "success"
+
+        payload = result["payload"]
+        assert isinstance(payload, dict)
+        response_headers = payload["headers"]
+        assert isinstance(response_headers, dict)
+        assert response_headers[CORRELATION_HEADER.lower()] == server_issued_id
+
+        # The request really did go out without one, so the value above is the
+        # server's and not an echo of something this test put on the wire.
+        received_request, _ = httpserver.log[0]
+        assert received_request.headers.get(CORRELATION_HEADER) is None
+
+
+# =============================================================================
+# Error context, from failures that actually happened
+# =============================================================================
+#
+# OMN-18795 deletion: four tests here constructed a ModelInfraErrorContext,
+# constructed an error around it, and asserted the error carried the id they
+# had just put in -- with no infrastructure involved at any point
+# (``test_correlation_preserved_on_connection_error``,
+# ``..._on_timeout_error``, ``..._on_unavailable_error``, and
+# ``test_correlation_preserved_on_kafka_error``, which provoked a real
+# connection failure, discarded the error it got, built a second error by hand
+# and asserted on that one instead). Those are model round-trips, and
+# ``tests/unit/errors/test_infra_errors.py`` already covers every one of them
+# at unit level, including InfraTimeoutError with ModelTimeoutErrorContext.
+#
+# ``test_correlation_in_error_string_representation`` was deleted for a
+# different reason: its docstring claimed the correlation id appears in the
+# error's string representation, and it does not -- ``str(error)`` is
+# ``"[ONEX_CORE_090_NETWORK_ERROR] <message>"``. The test quietly asserted on
+# ``model_dump()`` instead, so the claim in the docstring had never been
+# checked by anything.
+#
+# The two tests below replace all five with failures that really occur.
+
+
+@pytest.fixture
+def unreachable_bus_config() -> object:
+    """Config for a bus pointed at a broker that cannot resolve.
+
+    ``circuit_breaker_threshold=1`` so the circuit opens on the first failure:
+    the second ``start()`` is then refused by the breaker rather than by DNS,
+    which is what the second test needs to observe.
+    """
+    from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+
+    return ModelKafkaEventBusConfig(
+        bootstrap_servers=UNREACHABLE_BROKER,
+        environment="correlation-test",
+        timeout_seconds=2,
+        max_retry_attempts=0,
+        retry_backoff_base=0.001,
+        circuit_breaker_threshold=1,
+        circuit_breaker_reset_timeout=60.0,
+    )
+
+
+@pytest.fixture
+async def unreachable_bus(
+    unreachable_bus_config: object,
+) -> AsyncGenerator[EventBusKafka]:
+    """A never-started bus aimed at an unresolvable broker, closed afterwards."""
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+
+    bus = EventBusKafka(config=unreachable_bus_config)  # type: ignore[arg-type]
+    try:
+        yield bus
+    finally:
+        await bus.close()
+
+
+class TestCorrelationErrorContextFromRealFailures:
+    """Real infrastructure failures arrive carrying a traceable context."""
+
+    @pytest.mark.asyncio
+    async def test_a_real_connection_failure_is_traceable_and_names_the_broker(
+        self,
+        unreachable_bus: EventBusKafka,
+    ) -> None:
+        """A failed ``start()`` reports a correlation id and what it could not reach.
+
+        The id is generated inside ``EventBusKafka.start()`` -- there is no
+        caller-supplied correlation at that boundary -- so the assertion is
+        that the error arrives traceable, and that its context identifies the
+        operation and the broker rather than being empty.
+        """
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await unreachable_bus.start()
+
+        error = exc_info.value
+
+        assert error.correlation_id is not None
+        assert error.model.correlation_id == error.correlation_id
+
+        context = error.model.context
+        assert context is not None
+        assert context["operation"] == "start"
+        assert context["target_name"] == "kafka.correlation-test"
+        assert context["servers"] == UNREACHABLE_BROKER
+
+    @pytest.mark.asyncio
+    async def test_a_circuit_open_refusal_is_traceable_and_distinct(
+        self,
+        unreachable_bus: EventBusKafka,
+    ) -> None:
+        """Once the breaker opens, the refusal is its own traceable error.
+
+        The first ``start()`` fails against DNS and trips the breaker
+        (threshold 1). The second never reaches the network: the breaker
+        refuses it with ``InfraUnavailableError``, carrying a correlation id of
+        its own and a ``circuit_state`` the connection error above does not
+        have. Two different failure modes, two distinguishable contexts -- the
+        property an operator reading a trace depends on.
+        """
+        with pytest.raises(InfraConnectionError) as first:
+            await unreachable_bus.start()
+
+        with pytest.raises(InfraUnavailableError) as second:
+            await unreachable_bus.start()
+
+        refusal = second.value
+        assert refusal.correlation_id is not None
+        assert refusal.correlation_id != first.value.correlation_id, (
+            "each failure needs its own correlation id, or two incidents "
+            "collapse into one in a trace"
+        )
+
+        context = refusal.model.context
+        assert context is not None
+        assert context["operation"] == "start"
+        assert context["circuit_state"] == "open"
+
+
+# =============================================================================
+# Database
+# =============================================================================
+
+
+@pytest.fixture
+async def db_handler(mock_container: MagicMock) -> AsyncGenerator[HandlerDb]:
+    """An initialized HandlerDb against the provisioned PostgreSQL.
+
+    OMN-18795: the suite used to ask for ``initialized_db_handler``, a fixture
+    defined in ``tests/integration/handlers/conftest.py`` and therefore never
+    in scope here -- every database test errored at setup. The handler is
+    constructed here the way live code constructs it: a container, then
+    ``initialize()`` with a DSN, then ``shutdown()``.
+    """
+    from omnibase_infra.handlers import HandlerDb
+
+    config = PostgresConfig.from_env()
+    handler = HandlerDb(mock_container)
+    await handler.initialize({"dsn": config.build_dsn(), "timeout": 30.0})
+    try:
+        yield handler
+    finally:
+        await handler.shutdown()
+
+
+@pytest.fixture
+def unique_table_name() -> str:
+    """A table name unique to this test.
+
+    Unique per test so a parallel run, or a leftover from a failed run, cannot
+    make one test's assertions depend on another's rows.
+    """
+    return f"test_correlation_{uuid4().hex[:12]}"
+
+
+class TestCorrelationDatabase:
+    """Correlation ids survive a round trip through real PostgreSQL."""
+
+    @pytest.mark.asyncio
+    async def test_correlation_id_round_trips_through_a_real_row(
+        self,
+        db_handler: HandlerDb,
+        correlation_id: UUID,
+        unique_table_name: str,
+    ) -> None:
+        """The id is written to PostgreSQL and read back out of it.
+
+        The assertion is on the value PostgreSQL returned, after a real INSERT
+        and a real SELECT against a real table -- not on the handler's echo of
+        its own input. The handler's response envelope is checked as well,
+        because both halves have to agree for a trace to be followable.
+
+        ``$1::uuid`` is used rather than string interpolation so the value is
+        bound as a UUID by the driver and compared as one by the server.
+        """
+        # Identifiers are generated by the fixture from a UUID, never from
+        # input, so they cannot carry an injection.
+        create: dict[str, object] = {
+            "operation": "db.execute",
+            "correlation_id": str(correlation_id),
+            "payload": {
+                "sql": f'CREATE TABLE "{unique_table_name}" (corr uuid NOT NULL)',
+                "parameters": [],
+            },
+        }
+        await db_handler.execute(create)
+
+        try:
+            insert: dict[str, object] = {
+                "operation": "db.execute",
+                "correlation_id": str(correlation_id),
+                "payload": {
+                    "sql": f'INSERT INTO "{unique_table_name}" (corr) VALUES ($1)',  # noqa: S608
+                    "parameters": [correlation_id],
+                },
+            }
+            insert_output = await db_handler.execute(insert)
+            insert_result = insert_output.result
+            assert insert_result is not None
+            assert insert_result.payload.row_count == 1
+
+            select: dict[str, object] = {
+                "operation": "db.query",
+                "correlation_id": str(correlation_id),
+                "payload": {
+                    "sql": f'SELECT corr FROM "{unique_table_name}" WHERE corr = $1',  # noqa: S608
+                    "parameters": [correlation_id],
+                },
+            }
+            output = await db_handler.execute(select)
+            selected = output.result
+            assert selected is not None
+
+            # The far side: the row PostgreSQL returned.
+            assert selected.payload.row_count == 1
+            assert UUID(str(selected.payload.rows[0]["corr"])) == correlation_id
+
+            # The near side has to agree with it.
+            assert selected.status == "success"
+            assert output.correlation_id == correlation_id
+            assert selected.correlation_id == correlation_id
+        finally:
+            drop: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": f'DROP TABLE IF EXISTS "{unique_table_name}"',
+                    "parameters": [],
+                },
+            }
+            await db_handler.execute(drop)
+
+    @pytest.mark.asyncio
+    async def test_a_real_sql_error_carries_the_callers_correlation_id(
+        self,
+        db_handler: HandlerDb,
+        correlation_id: UUID,
+    ) -> None:
+        """A statement PostgreSQL rejects comes back traceable to its caller.
+
+        The failure is the server's, not the test's: ``SELECTT`` is a syntax
+        error PostgreSQL raises (SQLSTATE 42601), which ``HandlerDb`` maps onto
+        ``RuntimeHostError``. What is asserted is that the error the server
+        produced arrived carrying the correlation id the CALLER supplied, so a
+        failed query can be joined to the request that issued it.
+        """
         envelope: dict[str, object] = {
             "operation": "db.query",
             "correlation_id": str(correlation_id),
             "payload": {
-                # Intentional syntax error: "SELECTT" instead of "SELECT"
+                # Deliberate typo: PostgreSQL, not the handler, rejects this.
                 "sql": "SELECTT * FROM nonexistent_correlation_test_table",
                 "parameters": [],
             },
         }
 
         with pytest.raises(RuntimeHostError) as exc_info:
-            await initialized_db_handler.execute(envelope)
+            await db_handler.execute(envelope)
 
-        # Verify the error was raised
         error = exc_info.value
 
-        # Verify the error message indicates a SQL syntax error
-        assert "SQL syntax error" in str(error) or "syntax" in str(error).lower()
+        # The message is the server's classification, carried through intact.
+        assert "SQL syntax error" in str(error)
 
-        # Verify correlation_id is preserved in the error model
-        # RuntimeHostError extends ModelOnexError which has correlation_id
+        assert error.correlation_id == correlation_id
         assert error.model.correlation_id == correlation_id
 
-        # Verify correlation_id is accessible via the convenience property
-        assert error.correlation_id == correlation_id
-
-        # Verify error context contains operation details when present
-        error_context = error.model.context
-        if error_context is not None:
-            # Context should contain operation information for debugging
-            # The exact fields depend on how HandlerDb wraps errors
-            assert isinstance(error_context, dict)
+        context = error.model.context
+        assert context is not None
+        assert context["operation"] == "db.query"
+        assert context["target_name"] == "db_handler"
 
 
 # =============================================================================
-# Kafka Tests
+# Kafka
 # =============================================================================
 
-# Test timeout for message delivery
-MESSAGE_DELIVERY_WAIT_SECONDS = 5.0
-TEST_TIMEOUT_SECONDS = 30
 
+@pytest.fixture
+async def kafka_bus(kafka_bootstrap_servers: str) -> AsyncGenerator[EventBusKafka]:
+    """A started EventBusKafka against the provisioned broker, closed afterwards.
 
-@pytest.mark.skipif(
-    not KAFKA_AVAILABLE,
-    reason="Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)",
-)
-class TestCorrelationKafka:
-    """Tests for correlation ID propagation through Kafka/Redpanda.
-
-    These tests verify that correlation IDs propagate correctly through
-    Kafka message flow and are preserved in error contexts.
-
-    Requirements:
-        - KAFKA_BOOTSTRAP_SERVERS environment variable must be set
-        - Real Kafka/Redpanda broker must be available
-
-    - test_correlation_header_encoding: Non-ASCII characters in correlation context
+    OMN-18795: the old fixture passed ``group=`` to ``ModelKafkaEventBusConfig``.
+    OMN-1602 removed that field -- the consumer group is no longer a property
+    of the bus, it is derived per subscription from the ``ModelNodeIdentity``
+    handed to ``subscribe()`` -- and the model forbids extra fields, so every
+    Kafka test in this file errored at setup.
     """
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+    from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
-    @pytest.fixture
-    def kafka_bootstrap_servers(self) -> str:
-        """Get Kafka bootstrap servers from environment."""
-        return os.getenv(
-            "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
-        )  # kafka-fallback-ok
-
-    @pytest.fixture
-    async def kafka_event_bus(
-        self,
-        kafka_bootstrap_servers: str,
-    ) -> AsyncGenerator[EventBusKafka, None]:
-        """Create and configure EventBusKafka for correlation testing.
-
-        Yields a configured EventBusKafka instance and ensures cleanup after test.
-        """
-        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-        from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-
-        config = ModelKafkaEventBusConfig(
-            bootstrap_servers=kafka_bootstrap_servers,
-            environment="correlation-test",
-            group="correlation-test-default",
-            timeout_seconds=TEST_TIMEOUT_SECONDS,
-            max_retry_attempts=2,
-            retry_backoff_base=0.5,
-            circuit_breaker_threshold=5,
-            circuit_breaker_reset_timeout=10.0,
-        )
-        bus = EventBusKafka(config=config)
-
+    config = ModelKafkaEventBusConfig(
+        bootstrap_servers=kafka_bootstrap_servers,
+        environment="correlation-test",
+        timeout_seconds=TEST_TIMEOUT_SECONDS,
+        max_retry_attempts=2,
+        retry_backoff_base=0.5,
+        circuit_breaker_threshold=5,
+        circuit_breaker_reset_timeout=10.0,
+        auto_offset_reset="earliest",
+    )
+    bus = EventBusKafka(config=config)
+    await bus.start()
+    try:
         yield bus
+    finally:
+        await bus.close()
 
-        # Cleanup: ensure bus is closed
-        # Use specific exception types and log cleanup failures for debugging
-        try:
-            await bus.close()
-        except (InfraConnectionError, InfraTimeoutError) as e:
-            # Expected infrastructure errors during cleanup - log for debugging
-            # These can occur if broker was already disconnected
-            logging.getLogger(__name__).debug(
-                "Kafka bus cleanup encountered expected infrastructure error: %s",
-                e,
-            )
-        except RuntimeError as e:
-            # Event loop closed or similar runtime issues during test teardown
-            logging.getLogger(__name__).debug(
-                "Kafka bus cleanup encountered runtime error (likely event loop closed): %s",
-                e,
-            )
 
-    @pytest.fixture
-    async def started_kafka_bus(
-        self,
-        kafka_event_bus: EventBusKafka,
-    ) -> EventBusKafka:
-        """Provide a started EventBusKafka instance."""
-        await kafka_event_bus.start()
-        return kafka_event_bus
+@pytest.fixture
+def kafka_bootstrap_servers() -> str:
+    """The broker address the provisioning job exported.
 
-    @pytest.fixture
-    async def created_unique_topic(
-        self,
-    ) -> AsyncGenerator[str, None]:
-        """Generate and pre-create a unique topic for test isolation.
+    Indexed, not ``.get()``-with-a-default: a missing variable here is a
+    misconfigured job, and a localhost fallback would quietly point the suite
+    at a port nothing is listening on. ``_require_services`` has already failed
+    the CI run by this point if the opt-in is absent.
+    """
+    return os.environ["KAFKA_BOOTSTRAP_SERVERS"]
 
-        Creates the topic via Kafka admin API and cleans up after test.
-        """
-        from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-        from aiokafka.errors import TopicAlreadyExistsError
 
-        bootstrap_servers = os.getenv(
-            "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
-        )  # kafka-fallback-ok
-        topic_name = f"test.correlation.{uuid4().hex[:12]}"
+@pytest.fixture
+async def correlation_topic(kafka_bootstrap_servers: str) -> AsyncGenerator[str]:
+    """A topic unique to this test, created up front and deleted afterwards.
 
-        admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
-        await admin.start()
+    Created explicitly because the provisioned broker has topic auto-creation
+    off; unique per test so a consumer cannot read another test's records.
+    """
+    from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+    from aiokafka.errors import TopicAlreadyExistsError
 
+    topic_name = f"test.correlation.{uuid4().hex[:12]}"
+    admin = AIOKafkaAdminClient(bootstrap_servers=kafka_bootstrap_servers)
+    await admin.start()
+    try:
         try:
             await admin.create_topics(
-                [
-                    NewTopic(
-                        name=topic_name,
-                        num_partitions=1,
-                        replication_factor=1,
-                    )
-                ]
+                [NewTopic(name=topic_name, num_partitions=1, replication_factor=1)]
             )
-            # Wait for topic metadata to propagate
-            await asyncio.sleep(0.5)
         except TopicAlreadyExistsError:
-            pass  # Topic already exists - acceptable
+            pass
+        # Metadata has to reach the broker's own view before a consumer can
+        # join a group on the topic.
+        await asyncio.sleep(0.5)
 
         yield topic_name
-
-        # Cleanup: delete the topic
-        # Use specific exception handling for cleanup operations
+    finally:
         try:
             await admin.delete_topics([topic_name])
-        except TimeoutError:
-            # Timeout during cleanup is acceptable - topic may be in use
-            logging.getLogger(__name__).debug(
-                "Timeout deleting test topic '%s' during cleanup (acceptable)",
-                topic_name,
-            )
-        except RuntimeError as e:
-            # Event loop or connection issues during teardown
-            logging.getLogger(__name__).debug(
-                "Runtime error deleting test topic '%s': %s",
-                topic_name,
-                e,
-            )
         finally:
-            try:
-                await admin.close()
-            except RuntimeError as e:
-                # Admin client may fail to close if event loop is closing
-                logging.getLogger(__name__).debug(
-                    "Runtime error closing Kafka admin client: %s",
-                    e,
-                )
+            await admin.close()
 
-    @pytest.fixture
-    def unique_group(self) -> str:
-        """Generate unique consumer group for test isolation."""
-        return f"correlation-test-group-{uuid4().hex[:8]}"
+
+@pytest.fixture
+def consumer_identity() -> ModelNodeIdentity:
+    """A node identity unique to this test, which the bus derives a group from."""
+    return ModelNodeIdentity(
+        env="correlation-test",
+        service="test-service",
+        node_name=f"correlation-node-{uuid4().hex[:8]}",
+        version="v1",
+    )
+
+
+class TestCorrelationKafka:
+    """Correlation ids survive a publish and consume through a real broker."""
 
     @pytest.mark.asyncio
-    async def test_correlation_end_to_end_with_real_kafka(
+    async def test_correlation_id_survives_a_real_publish_and_consume(
         self,
-        started_kafka_bus: EventBusKafka,
-        created_unique_topic: str,
-        unique_group: str,
+        kafka_bus: EventBusKafka,
+        correlation_topic: str,
+        consumer_identity: ModelNodeIdentity,
         correlation_id: UUID,
     ) -> None:
-        """Verify correlation ID propagates end-to-end through Kafka.
+        """The id on the delivered message is the id that was published.
 
-        This test validates that correlation IDs are preserved when messages
-        flow through real Kafka infrastructure:
-        1. Create message headers with specific correlation_id
-        2. Publish message to test topic via Kafka event bus
-        3. Consume message from topic
-        4. Verify consumed message has same correlation_id in headers
-
-        Args:
-            started_kafka_bus: Started EventBusKafka fixture
-            created_unique_topic: Pre-created unique topic for isolation
-            unique_group: Unique consumer group for isolation
-            correlation_id: Test correlation ID from conftest fixture
+        The assertion is on ``received.headers.correlation_id`` -- a value that
+        was serialized onto Kafka record headers, written to a partition, read
+        back off it by a consumer in its own group, and deserialized. Nothing
+        in the assertion path is the variable the test set; the only way it can
+        match is if the id made the round trip.
         """
         from omnibase_infra.event_bus.models import ModelEventHeaders
-        from tests.helpers.kafka_utils import wait_for_consumer_ready
 
-        received_messages: list[ModelEventMessage] = []
-        message_received = asyncio.Event()
+        received: list[ModelEventMessage] = []
+        delivered = asyncio.Event()
 
-        async def handler(msg: ModelEventMessage) -> None:
-            received_messages.append(msg)
-            message_received.set()
+        async def collect(message: ModelEventMessage) -> None:
+            received.append(message)
+            delivered.set()
 
-        # Subscribe to the topic
-        unsubscribe = await started_kafka_bus.subscribe(
-            created_unique_topic,
-            unique_group,
-            handler,
+        unsubscribe = await kafka_bus.subscribe(
+            correlation_topic,
+            consumer_identity,
+            collect,
         )
-
-        # Wait for consumer to be ready (uses polling with exponential backoff)
-        await wait_for_consumer_ready(started_kafka_bus, created_unique_topic)
-
-        # Create headers with specific correlation_id
-        headers = ModelEventHeaders(
-            source="correlation-test",
-            event_type="test.correlation.propagation",
-            correlation_id=correlation_id,
-            timestamp=datetime.now(UTC),
-        )
-
-        # Publish message with correlation ID in headers
-        test_value = b"correlation-test-payload"
-        await started_kafka_bus.publish(
-            created_unique_topic,
-            b"correlation-key",
-            test_value,
-            headers,
-        )
-
-        # Wait for message delivery with timeout
         try:
-            await asyncio.wait_for(
-                message_received.wait(),
-                timeout=MESSAGE_DELIVERY_WAIT_SECONDS * 2,
-            )
-        except TimeoutError:
-            pytest.fail(
-                f"Message not received within {MESSAGE_DELIVERY_WAIT_SECONDS * 2}s"
-            )
+            await wait_for_consumer_ready(kafka_bus, correlation_topic)
 
-        # Verify received message count
-        assert len(received_messages) >= 1, "Expected at least one message"
-        received = received_messages[0]
-
-        # Verify correlation_id is preserved in headers
-        # The correlation_id may be string or UUID after round-trip
-        received_corr_id = received.headers.correlation_id
-        if isinstance(received_corr_id, str):
-            received_corr_id = UUID(received_corr_id)
-        assert received_corr_id == correlation_id, (
-            f"Correlation ID mismatch: expected {correlation_id}, "
-            f"got {received_corr_id}"
-        )
-
-        # Verify the event_type was preserved
-        assert received.headers.event_type == "test.correlation.propagation"
-
-        # Verify message was received on correct topic
-        assert received.topic == created_unique_topic
-
-        # Cleanup
-        await unsubscribe()
-
-    @pytest.mark.asyncio
-    async def test_correlation_preserved_on_kafka_error(
-        self,
-        correlation_id: UUID,
-    ) -> None:
-        """Verify correlation ID is preserved when Kafka operations fail.
-
-        Tests that Kafka connection errors properly preserve correlation IDs
-        for distributed tracing. Uses invalid bootstrap servers to trigger
-        connection failure.
-
-        Args:
-            correlation_id: Test correlation ID from conftest fixture
-        """
-        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-        from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-
-        # Create bus with invalid bootstrap servers to simulate connection failure
-        config = ModelKafkaEventBusConfig(
-            bootstrap_servers="invalid-host-for-correlation-test:9092",
-            environment="test",
-            group="test",
-            timeout_seconds=2,  # Short timeout to fail fast
-            circuit_breaker_threshold=2,
-            circuit_breaker_reset_timeout=60.0,
-        )
-        bus = EventBusKafka(config=config)
-
-        try:
-            # Attempt to start should fail with connection error
-            with pytest.raises(
-                (InfraConnectionError, InfraTimeoutError, InfraUnavailableError)
-            ) as exc_info:
-                await bus.start()
-
-            error = exc_info.value
-
-            # Create error context with correlation ID for verification
-            # Note: The bus start() may not include correlation_id in the error
-            # So we verify that the error infrastructure supports correlation IDs
-            # by creating and verifying a context
-            context = ModelInfraErrorContext.with_correlation(
+            headers = ModelEventHeaders(
+                source="correlation-test",
+                event_type="test.correlation.propagation",
                 correlation_id=correlation_id,
-                operation="kafka_publish",
-                transport_type=EnumInfraTransportType.KAFKA,
-                target_name="invalid-host-for-correlation-test:9092",
+                timestamp=datetime.now(UTC),
+            )
+            await kafka_bus.publish(
+                correlation_topic,
+                b"correlation-key",
+                b"correlation-test-payload",
+                headers,
             )
 
-            # Create a new error with the correlation context
-            correlation_error = InfraConnectionError(
-                f"Simulated Kafka error wrapping: {error}",
-                context=context,
-            )
+            try:
+                await asyncio.wait_for(
+                    delivered.wait(), timeout=MESSAGE_DELIVERY_WAIT_SECONDS
+                )
+            except TimeoutError:
+                pytest.fail(
+                    f"no message on {correlation_topic} within "
+                    f"{MESSAGE_DELIVERY_WAIT_SECONDS}s"
+                )
 
-            # Verify correlation ID is preserved in error
-            assert correlation_error.correlation_id == correlation_id
-            assert correlation_error.model.correlation_id == correlation_id
+            message = received[0]
 
-            # Verify context fields are preserved
-            error_context = correlation_error.model.context
-            assert error_context is not None
-            assert error_context["operation"] == "kafka_publish"
-            assert error_context["transport_type"] == EnumInfraTransportType.KAFKA
-            assert (
-                error_context["target_name"] == "invalid-host-for-correlation-test:9092"
-            )
-
+            # The correlation id as the consumer read it off the wire.
+            assert UUID(str(message.headers.correlation_id)) == correlation_id
+            # Bound to the message this test published, not some other record.
+            assert message.headers.event_type == "test.correlation.propagation"
+            assert message.topic == correlation_topic
+            assert message.value == b"correlation-test-payload"
         finally:
-            # Cleanup
-            await bus.close()
+            await unsubscribe()

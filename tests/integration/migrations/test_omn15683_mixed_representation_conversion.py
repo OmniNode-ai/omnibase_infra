@@ -239,9 +239,33 @@ def _require_pg16(srv: Server) -> None:
         )
 
 
+def _role_env(srv: Server, role_password: str | None) -> dict[str, str]:
+    """The psql environment, with a lane role's own password when connecting as one."""
+    env = srv.env()
+    if role_password is not None:
+        env["PGPASSWORD"] = role_password
+    return env
+
+
 def _psql(
-    srv: Server, database: str, *args: str, user: str | None = None
+    srv: Server,
+    database: str,
+    *args: str,
+    user: str | None = None,
+    role_password: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    """Run psql, optionally as a throwaway lane role rather than the superuser.
+
+    OMN-18795: ``srv.env()`` exports the SUPERUSER's PGPASSWORD. Connecting as a
+    lane role with that password works only on a trust-authenticated cluster,
+    which is what the hermetic ``initdb`` fallback builds. Against any real
+    server -- the ``migration-integration`` Postgres service, or the lab -- scram
+    auth rejects it, and every test that applies a migration as the migrate
+    identity fails on ``password authentication failed`` before reaching the
+    behaviour it is about. ``role_password`` is the per-run secret minted for
+    that role in the ``lane`` fixture.
+    """
+    env = _role_env(srv, role_password)
     return subprocess.run(
         [
             PSQL,
@@ -257,7 +281,7 @@ def _psql(
             database,
             *args,
         ],
-        env=srv.env(),
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -318,8 +342,16 @@ def server() -> Iterator[Server]:
         shutil.rmtree(root, ignore_errors=True)
 
 
-def _scalar(srv: Server, database: str, sql: str, user: str | None = None) -> str:
-    result = _psql(srv, database, "-tA", "-c", sql, user=user)
+def _scalar(
+    srv: Server,
+    database: str,
+    sql: str,
+    user: str | None = None,
+    role_password: str | None = None,
+) -> str:
+    result = _psql(
+        srv, database, "-tA", "-c", sql, user=user, role_password=role_password
+    )
     assert result.returncode == 0, (
         f"psql did not run successfully (scalar {sql!r}): exit "
         f"{result.returncode}. This is a missing/failed prerequisite, NOT a "
@@ -329,7 +361,11 @@ def _scalar(srv: Server, database: str, sql: str, user: str | None = None) -> st
 
 
 def _apply_as(
-    srv: Server, database: str, migration: Path, user: str
+    srv: Server,
+    database: str,
+    migration: Path,
+    user: str,
+    role_password: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a migration exactly the way the deploy-time runner does.
 
@@ -355,7 +391,7 @@ def _apply_as(
             "-f",
             str(migration),
         ],
-        env=srv.env(),
+        env=_role_env(srv, role_password),
         capture_output=True,
         text=True,
         check=False,
@@ -371,6 +407,9 @@ class Lane:
     migrator: str
     mirror_owner: str
     mirror_reader_role: str
+    # OMN-18795: minted per run so the migrate identity can authenticate against
+    # a scram server, not only against the hermetic trust cluster.
+    migrator_password: str
 
 
 @pytest.fixture
@@ -417,7 +456,17 @@ def lane(server: Server) -> Iterator[Lane]:
     _psql(server, "postgres", "-c", f"CREATE ROLE {owner}")
     _psql(server, "postgres", "-c", f"CREATE ROLE {mirror_owner}")
     _psql(server, "postgres", "-c", f"CREATE ROLE {mirror_reader}")
-    _psql(server, "postgres", "-c", f"CREATE ROLE {migrator} LOGIN")
+    # OMN-18795: a LOGIN role with no password cannot authenticate to a server
+    # that requires one. The value is a fresh random per run and belongs to a
+    # role dropped in this fixture's own teardown.
+    # Hex only, so a bare single-quoted literal below is unambiguous.
+    migrator_password = f"pw_{uuid.uuid4().hex}"
+    _psql(
+        server,
+        "postgres",
+        "-c",
+        f"CREATE ROLE {migrator} LOGIN PASSWORD '{migrator_password}'",
+    )
     # PostgreSQL 16 default membership confers both INHERIT and SET, which is
     # what the carried-over OMN-17316 guard requires.
     _psql(server, "postgres", "-c", f"GRANT {owner} TO {migrator}")
@@ -497,6 +546,7 @@ def lane(server: Server) -> Iterator[Lane]:
             migrator=migrator,
             mirror_owner=mirror_owner,
             mirror_reader_role=mirror_reader,
+            migrator_password=migrator_password,
         )
     finally:
         _psql(server, "postgres", "-c", f"DROP DATABASE IF EXISTS {database}")
@@ -602,7 +652,13 @@ def test_red_control_0036_aborts_on_the_cross_owner_mirror_read(
     writes, because the point is that PostgreSQL refuses the read -- not that a
     guard noticed.
     """
-    result = _apply_as(server, lane.database, _SUPERSEDED_BY_PRIVILEGE, lane.migrator)
+    result = _apply_as(
+        server,
+        lane.database,
+        _SUPERSEDED_BY_PRIVILEGE,
+        lane.migrator,
+        lane.migrator_password,
+    )
     assert result.returncode != 0, (
         "0036 CONVERTED against a split-ownership topology. Either the fixture "
         "stopped reproducing the ACL split or the privilege axis was closed "
@@ -646,7 +702,9 @@ def test_successor_refuses_by_name_when_the_migrate_identity_cannot_read_the_mir
         ).returncode
         == 0
     )
-    result = _apply_as(server, lane.database, _SUCCESSOR, lane.migrator)
+    result = _apply_as(
+        server, lane.database, _SUCCESSOR, lane.migrator, lane.migrator_password
+    )
     assert result.returncode != 0, "0037 converted without being able to resolve"
     assert "holds no SELECT on tenant_registry_mirror" in result.stderr, (
         f"0037 aborted opaquely instead of refusing by name: {result.stderr!r}"
@@ -678,7 +736,12 @@ def test_successor_creates_no_relation_and_leaves_no_privilege(
     neither a relation nor a privilege object, so there is nothing for either
     concern to attach to; this test is what keeps that true.
     """
-    assert _apply_as(server, lane.database, _SUCCESSOR, lane.migrator).returncode == 0
+    assert (
+        _apply_as(
+            server, lane.database, _SUCCESSOR, lane.migrator, lane.migrator_password
+        ).returncode
+        == 0
+    )
     assert (
         _scalar(
             server,
@@ -714,7 +777,9 @@ def test_red_control_predecessor_aborts_on_the_mixed_column(
     privilege defect survived it. Naming it here keeps it a deliberate control
     rather than a fixture that quietly reverted.
     """
-    privilege_first = _apply_as(server, lane.database, _PREDECESSOR, lane.migrator)
+    privilege_first = _apply_as(
+        server, lane.database, _PREDECESSOR, lane.migrator, lane.migrator_password
+    )
     assert privilege_first.returncode != 0
     assert (
         "permission denied for table tenant_registry_mirror" in privilege_first.stderr
@@ -732,7 +797,9 @@ def test_red_control_predecessor_aborts_on_the_mixed_column(
         ).returncode
         == 0
     )
-    result = _apply_as(server, lane.database, _PREDECESSOR, lane.migrator)
+    result = _apply_as(
+        server, lane.database, _PREDECESSOR, lane.migrator, lane.migrator_password
+    )
     assert result.returncode != 0, (
         "0034 CONVERTED a mixed-representation column. That would mean the "
         "defect this file exists to prove has been fixed elsewhere, or the "
@@ -758,7 +825,9 @@ def test_red_control_predecessor_aborts_on_the_mixed_column(
 
 def test_successor_converts_the_mixed_column(server: Server, lane: Lane) -> None:
     """GREEN. Both representations collapse onto one canonical identity."""
-    result = _apply_as(server, lane.database, _SUCCESSOR, lane.migrator)
+    result = _apply_as(
+        server, lane.database, _SUCCESSOR, lane.migrator, lane.migrator_password
+    )
     assert result.returncode == 0, f"0037 failed on the mixed column: {result.stderr!r}"
     assert _column_type(server, lane) == "uuid"
     assert _scalar(
@@ -793,7 +862,12 @@ def test_already_canonical_rows_pass_through_unchanged(
     By resolution against the registry, not by an unchecked bypass -- which is
     why it is asserted per row rather than inferred from the column type.
     """
-    assert _apply_as(server, lane.database, _SUCCESSOR, lane.migrator).returncode == 0
+    assert (
+        _apply_as(
+            server, lane.database, _SUCCESSOR, lane.migrator, lane.migrator_password
+        ).returncode
+        == 0
+    )
     for slug, (canonical, _, uuid_rows) in _STAMPED.items():
         if not uuid_rows:
             continue
@@ -812,7 +886,12 @@ def test_already_canonical_rows_pass_through_unchanged(
 def test_slug_rows_resolve_to_their_mirror_uuid(server: Server, lane: Lane) -> None:
     """And a slug row equals the mirror's uuid for that slug -- the SAME uuid a
     stamped row of the same tenant already carried."""
-    assert _apply_as(server, lane.database, _SUCCESSOR, lane.migrator).returncode == 0
+    assert (
+        _apply_as(
+            server, lane.database, _SUCCESSOR, lane.migrator, lane.migrator_password
+        ).returncode
+        == 0
+    )
     for slug, (canonical, slug_rows, _) in _STAMPED.items():
         if not slug_rows:
             continue
@@ -852,7 +931,12 @@ def test_policy_and_force_rls_are_restored_as_uuid(server: Server, lane: Lane) -
     Asserted because the type change requires DROPping the policy, and the
     OMN-17288 class is a table that commits with RLS on and no policy at all.
     """
-    assert _apply_as(server, lane.database, _SUCCESSOR, lane.migrator).returncode == 0
+    assert (
+        _apply_as(
+            server, lane.database, _SUCCESSOR, lane.migrator, lane.migrator_password
+        ).returncode
+        == 0
+    )
     assert (
         _scalar(
             server,
@@ -904,7 +988,9 @@ def test_a_value_in_neither_form_still_fails_closed(server: Server, lane: Lane) 
         ).returncode
         == 0
     )
-    result = _apply_as(server, lane.database, _SUCCESSOR, lane.migrator)
+    result = _apply_as(
+        server, lane.database, _SUCCESSOR, lane.migrator, lane.migrator_password
+    )
     assert result.returncode != 0, "0037 converted a value it cannot resolve"
     assert foreign in result.stderr, "the refusal does not name the value"
     assert "2 row(s)" in result.stderr, "the refusal does not name the row count"
@@ -945,12 +1031,14 @@ def test_readiness_script_reconciles_under_force_rls(
         "LEFT JOIN tenant_registry_mirror m ON m.tenant_slug = d.tenant_id "
         "WHERE m.tenant_slug IS NULL",
         user=lane.migrator,
+        role_password=lane.migrator_password,
     )
     visible = _scalar(
         server,
         lane.database,
         "SELECT count(*) FROM delegation_events",
         user=lane.migrator,
+        role_password=lane.migrator_password,
     )
     assert naive == "ALL RESOLVE" and visible == "0", (
         "the FORCE-RLS blindness this script exists to defeat is not "
@@ -967,7 +1055,7 @@ def test_readiness_script_reconciles_under_force_rls(
             "--psql-exec",
             _psql_exec_json(server, lane.migrator),
         ],
-        env=server.env(),
+        env=_role_env(server, lane.migrator_password),
         capture_output=True,
         text=True,
         check=False,

@@ -14,11 +14,12 @@ Infrastructure Requirements:
     - OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
     - KAFKA_BOOTSTRAP_SERVERS (for Kafka)
 
-CI/CD Graceful Skip Behavior:
-    These tests skip gracefully when infrastructure is unavailable:
-    - All tests in this directory require full infrastructure
-    - Module-level pytestmark applies skipif to all tests
-    - Clear skip messages indicate which infrastructure is missing
+CI Gate Behavior (OMN-18795):
+    A CI job that selects this directory must have provisioned the services.
+    The autouse package fixture below calls ``require_service_env``, which
+    FAILS in CI when ``KAFKA_INTEGRATION_TESTS`` is absent and only skips
+    outside CI. The PR test splits deselect the family by the ``e2e`` marker,
+    so the CI arm fires only when a job selects it and forgets the env.
 
 Container Wiring Pattern:
     This module uses the declarative orchestrator pattern:
@@ -61,7 +62,7 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.utils import sanitize_error_message
-from tests.conftest import check_service_registry_available
+from tests.helpers.service_env import require_service_env
 
 # Load environment configuration with layered priority:
 # 1. .env in project root (base configuration - credentials, shared settings)
@@ -191,53 +192,53 @@ def wrap_event_in_envelope(
 
 
 # =============================================================================
-# Infrastructure Availability Checks
+# Infrastructure Gate (OMN-18795)
 # =============================================================================
 
-# PostgreSQL availability - delegates to shared PostgresConfig utility
+# PostgreSQL configuration - delegates to shared PostgresConfig utility
 # See tests/helpers/util_postgres.py for canonical DSN parsing logic
-from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
+from tests.helpers.util_postgres import PostgresConfig
 
 _postgres_config = PostgresConfig.from_env()
-POSTGRES_AVAILABLE = _postgres_config.is_configured and check_postgres_reachable(
-    _postgres_config,
-    timeout=1.0,
-)
 
-# Kafka availability — requires both KAFKA_BOOTSTRAP_SERVERS AND KAFKA_INTEGRATION_TESTS=1.
-# KAFKA_BOOTSTRAP_SERVERS is set globally in conftest for model instantiation, so we gate
-# real-broker E2E tests on KAFKA_INTEGRATION_TESTS=1 to prevent false connects in CI.
+# KAFKA_BOOTSTRAP_SERVERS is set globally in tests/conftest.py for model
+# instantiation, so its presence is NOT evidence that a broker exists. The
+# opt-in variable is what a provisioning job asserts.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = (
-    bool(KAFKA_BOOTSTRAP_SERVERS) and os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
-)
-
-SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
-
-# Combined availability check
-ALL_INFRA_AVAILABLE = (
-    KAFKA_AVAILABLE and POSTGRES_AVAILABLE and SERVICE_REGISTRY_AVAILABLE
-)
 
 
 # =============================================================================
 # Module-Level Markers
 # =============================================================================
-# All tests in this module require full infrastructure availability.
+# The e2e marker is what the PR test splits deselect this family by. Keep it:
+# the gate below must never fire on the ordinary PR path, only on a job that
+# deliberately selects this directory.
 # Note: integration marker is auto-applied by tests/integration/conftest.py
 
 pytestmark = [
     pytest.mark.e2e,
-    pytest.mark.skipif(
-        not ALL_INFRA_AVAILABLE,
-        reason=(
-            "Full infrastructure required for E2E tests. "
-            f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS and KAFKA_INTEGRATION_TESTS=1)'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
-            f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
-        ),
-    ),
 ]
+
+
+@pytest.fixture(autouse=True, scope="package")
+def _require_registration_e2e_services() -> None:
+    """Refuse to skip this family silently once CI has selected it.
+
+    This replaces a module-level ``skipif(not ALL_INFRA_AVAILABLE)`` whose
+    Kafka half was gated on ``KAFKA_INTEGRATION_TESTS``, a variable no workflow
+    that selects this directory ever set. The family was collected, skipped in
+    full, and counted toward a green Tests job — it had never executed in CI.
+
+    In CI a missing opt-in is now a red failure naming the variable and the
+    workflow that owns it. Outside CI it is still a skip, so a developer running
+    the whole tree with no broker is not forced to stand one up.
+    """
+    require_service_env(
+        opt_in="KAFKA_INTEGRATION_TESTS",
+        endpoint="KAFKA_BOOTSTRAP_SERVERS",
+        workflow=".github/workflows/ci.yml",
+        service="Kafka and Postgres",
+    )
 
 
 # =============================================================================
@@ -285,10 +286,15 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
     """
     import asyncpg
 
-    if not POSTGRES_AVAILABLE:
-        pytest.skip(
-            "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or "
-            "POSTGRES_HOST/POSTGRES_PASSWORD)"
+    if not _postgres_config.is_configured:
+        # The package gate above already proved the opt-in is set, so a job
+        # reached here having declared that Postgres is provisioned. An absent
+        # DSN at this point is a provisioning defect, never a reason to skip.
+        pytest.fail(
+            "PostgreSQL is not configured but KAFKA_INTEGRATION_TESTS=1 declared "
+            "that this job provisions it. Set OMNIBASE_INFRA_DB_URL, or "
+            "POSTGRES_HOST plus POSTGRES_PASSWORD. See OMN-18795.",
+            pytrace=False,
         )
 
     dsn = _build_postgres_dsn()
@@ -421,8 +427,13 @@ async def real_kafka_event_bus() -> AsyncGenerator[EventBusKafka, None]:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
-    if not KAFKA_AVAILABLE:
-        pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
+    if not KAFKA_BOOTSTRAP_SERVERS:
+        # Same reasoning as postgres_pool: the opt-in has already been proved.
+        pytest.fail(
+            "KAFKA_BOOTSTRAP_SERVERS is unset but KAFKA_INTEGRATION_TESTS=1 "
+            "declared that this job provisions a broker. See OMN-18795.",
+            pytrace=False,
+        )
 
     # NOTE: enable_auto_commit=False is intentional for test isolation.
     # With auto_commit=True (default), offsets are committed periodically,
@@ -1111,11 +1122,8 @@ def configure_e2e_logging() -> None:
 # =============================================================================
 
 __all__ = [
-    # Availability flags
-    "ALL_INFRA_AVAILABLE",
-    "KAFKA_AVAILABLE",
-    "POSTGRES_AVAILABLE",
-    "SERVICE_REGISTRY_AVAILABLE",
+    # Endpoint constants
+    "KAFKA_BOOTSTRAP_SERVERS",
     # Helper functions
     "make_e2e_test_identity",
     "wait_for_consumer_ready",

@@ -9,6 +9,7 @@ to validate HandlerGraph behavior without requiring actual graph database infras
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -798,16 +799,34 @@ class TestHandlerGraphTraverse:
             mock_rel.start_node = MagicMock(element_id="4:abc:123")
             mock_rel.end_node = MagicMock(element_id="4:abc:124")
 
+            # OMN-18795: the handler now reads path_nodes -- the raw `nodes(p)`
+            # list of driver-hydrated Node objects -- and derives each id from
+            # `.element_id` in Python rather than a Cypher-side computation
+            # (see handler_graph.py's traverse() query comment).
+            mock_path_node_1 = MagicMock(element_id="4:abc:123")
+            mock_path_node_2 = MagicMock(element_id="4:abc:124")
+
             records_data = [
                 {
                     "n": mock_node,
                     "eid": "4:abc:124",
                     "nid": 124,
                     "rels": [mock_rel],
-                    "path_ids": ["4:abc:123", "4:abc:124"],
+                    "path_nodes": [mock_path_node_1, mock_path_node_2],
                 }
             ]
-            mock_result.data = AsyncMock(return_value=records_data)
+
+            # OMN-18795: traverse() no longer calls `result.data()` -- it
+            # iterates the result directly (`async for record in result`), so
+            # the mock must support async iteration rather than mocking
+            # `.data()`. Each yielded "record" is a plain dict here, which
+            # satisfies the handler's `record["n"]` / `record.get("rels")`
+            # dict-style access.
+            async def _record_iter() -> AsyncIterator[dict[str, object]]:
+                for rec in records_data:
+                    yield rec
+
+            mock_result.__aiter__ = MagicMock(return_value=_record_iter())
             mock_result.consume = AsyncMock()
 
             mock_session.run = AsyncMock(return_value=mock_result)
@@ -1334,16 +1353,26 @@ class TestHandlerGraphExecuteDispatcher:
         mock_node.labels = frozenset(["Person"])
         mock_node.items = MagicMock(return_value=[("name", "Bob")])
 
+        mock_path_node_1 = MagicMock(element_id="4:abc:123")
+        mock_path_node_2 = MagicMock(element_id="4:abc:124")
+
         records_data = [
             {
                 "n": mock_node,
                 "eid": "4:abc:124",
                 "nid": 124,
                 "rels": [],
-                "path_ids": ["4:abc:123", "4:abc:124"],
+                "path_nodes": [mock_path_node_1, mock_path_node_2],
             }
         ]
-        mock_result.data = AsyncMock(return_value=records_data)
+
+        # OMN-18795: see test_traverse_success -- traverse() now iterates the
+        # result directly instead of calling `.data()`.
+        async def _record_iter() -> AsyncIterator[dict[str, object]]:
+            for rec in records_data:
+                yield rec
+
+        mock_result.__aiter__ = MagicMock(return_value=_record_iter())
         mock_result.consume = AsyncMock()
 
         mock_session.run = AsyncMock(return_value=mock_result)

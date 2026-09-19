@@ -688,9 +688,19 @@ class HandlerGraph(
         self._validate_cypher_labels(labels, "create_node", correlation_id)
 
         # Build Cypher query with labels
+        #
+        # OMN-18795: `elementId()` is a Neo4j 5.x function; Memgraph 2.18.1 (the
+        # version this handler's own default database targets -- self._database
+        # defaults to "memgraph") does not implement it and raises
+        # `Function 'ELEMENTID' doesn't exist`. This handler's integration suite
+        # had no execution path against a real Memgraph until OMN-18795 wired it
+        # into ci.yml's service-integration-suites job, so the incompatibility
+        # was collected and skipped (or simply never run) on every prior PR.
+        # `toString(id(x))` is standard openCypher and produces the same
+        # string-typed identifier shape every caller already reads.
         labels_str = ":".join(labels) if labels else ""
         label_clause = f":{labels_str}" if labels_str else ""
-        query = f"CREATE (n{label_clause} $props) RETURN n, elementId(n) as eid, id(n) as nid"
+        query = f"CREATE (n{label_clause} $props) RETURN n, toString(id(n)) as eid, id(n) as nid"
 
         try:
             async with driver.session(database=self._database) as session:
@@ -789,24 +799,32 @@ class HandlerGraph(
         from_is_element_id = isinstance(from_node_id, str) and ":" in from_node_id
         to_is_element_id = isinstance(to_node_id, str) and ":" in to_node_id
 
-        # Build appropriate match clauses
-        if from_is_element_id:
-            from_match = "MATCH (a) WHERE elementId(a) = $from_id"
-        else:
-            from_match = "MATCH (a) WHERE id(a) = $from_id"
-
-        if to_is_element_id:
-            to_match = "MATCH (b) WHERE elementId(b) = $to_id"
-        else:
-            to_match = "MATCH (b) WHERE id(b) = $to_id"
+        # Build the match conditions.
+        #
+        # OMN-18795: NOT two separate `MATCH (a) WHERE ... MATCH (b) WHERE ...`
+        # clauses. On Memgraph 2.18.1 that shape let `CREATE (a)-[r:TYPE
+        # $props]->(b)` silently create two brand-new, unlabeled, property-less
+        # nodes instead of reusing the matched `a`/`b` -- the relationship's own
+        # properties (e.g. `since`) came back correct because the CREATE clause
+        # itself is right, but the endpoints read back with none of the
+        # properties the matched nodes actually have, because they were never
+        # the matched nodes. A single `MATCH (a), (b) WHERE ... AND ...` binds
+        # both in one clause and CREATE reuses them, matching the shape already
+        # used successfully elsewhere in this file (e.g. delete_relationship's
+        # `MATCH ()-[r]->()`).
+        from_cond = (
+            "toString(id(a)) = $from_id" if from_is_element_id else "id(a) = $from_id"
+        )
+        to_cond = "toString(id(b)) = $to_id" if to_is_element_id else "id(b) = $to_id"
 
         props = dict(properties) if properties else {}
         query = f"""
-        {from_match}
-        {to_match}
+        MATCH (a), (b)
+        WHERE {from_cond} AND {to_cond}
+        WITH a, b
         CREATE (a)-[r:{relationship_type} $props]->(b)
-        RETURN r, elementId(r) as eid, id(r) as rid,
-               elementId(a) as start_eid, elementId(b) as end_eid
+        RETURN r, toString(id(r)) as eid, id(r) as rid,
+               toString(id(a)) as start_eid, toString(id(b)) as end_eid
         """
 
         params: dict[str, object] = {
@@ -888,7 +906,7 @@ class HandlerGraph(
         start_time = time.perf_counter()
 
         if is_element_id:
-            match_clause = "MATCH (n) WHERE elementId(n) = $node_id"
+            match_clause = "MATCH (n) WHERE toString(id(n)) = $node_id"
         else:
             match_clause = "MATCH (n) WHERE id(n) = $node_id"
 
@@ -981,16 +999,21 @@ class HandlerGraph(
         is_element_id = isinstance(relationship_id, str) and ":" in str(relationship_id)
         start_time = time.perf_counter()
 
+        # OMN-18795: the pattern is DIRECTED. `()-[r]-()` is undirected and
+        # matches every relationship once per direction, so `count(r)` reported
+        # 2 for a single deleted edge and ModelGraphDeleteResult.relationships_deleted
+        # over-reported by exactly 2x. The deletion itself was always correct;
+        # only the count a caller reads back was wrong.
         if is_element_id:
             query = """
-            MATCH ()-[r]-()
-            WHERE elementId(r) = $rel_id
+            MATCH ()-[r]->()
+            WHERE toString(id(r)) = $rel_id
             DELETE r
             RETURN count(r) as deleted
             """
         else:
             query = """
-            MATCH ()-[r]-()
+            MATCH ()-[r]->()
             WHERE id(r) = $rel_id
             DELETE r
             RETURN count(r) as deleted
@@ -1090,7 +1113,7 @@ class HandlerGraph(
 
         # Build match clause for start node
         if is_element_id:
-            start_match = "MATCH (start) WHERE elementId(start) = $start_id"
+            start_match = "MATCH (start) WHERE toString(id(start)) = $start_id"
         else:
             start_match = "MATCH (start) WHERE id(start) = $start_id"
 
@@ -1123,12 +1146,20 @@ class HandlerGraph(
         if filter_conditions:
             where_clause = "WHERE " + " AND ".join(filter_conditions)
 
+        # OMN-18795: NOT a Cypher list comprehension with a function call in the
+        # map expression -- `[node in nodes(p) | toString(id(node))]` reads as
+        # valid openCypher but Memgraph 2.18.1 refuses it at runtime with
+        # `neo4j.exceptions.TransientError: Not yet implemented: atom expression
+        # '[nodeinnodes(p)|toString(id(node))]'`. Returning the raw `nodes(p)`
+        # list and deriving each id in Python (mirroring how `rel.element_id` is
+        # already read off driver-hydrated Relationship objects below) sidesteps
+        # the unsupported construct entirely.
         query = f"""
         {start_match}
         MATCH p = (start){rel_pattern}(n)
         {where_clause}
-        WITH DISTINCT n, relationships(p) as rels, [node in nodes(p) | elementId(node)] as path_ids
-        RETURN n, elementId(n) as eid, id(n) as nid, rels, path_ids
+        WITH DISTINCT n, relationships(p) as rels, nodes(p) as path_nodes
+        RETURN n, toString(id(n)) as eid, id(n) as nid, rels, path_nodes
         LIMIT 1000
         """
 
@@ -1141,7 +1172,16 @@ class HandlerGraph(
         try:
             async with driver.session(database=self._database) as session:
                 result = await session.run(query, params)
-                records = await result.data()
+                # OMN-18795: NOT `await result.data()`. That helper flattens every
+                # Node and Relationship into a plain dict of its properties, and
+                # the loop below reads `node.labels`, `dict(node.items())`,
+                # `rel.element_id`, `rel.type` and `rel.start_node` off them. Any
+                # traversal that REACHED a node therefore died on
+                # `AttributeError: 'dict' object has no attribute 'labels'`, which
+                # the `except Neo4jError` arm does not catch — so only the
+                # zero-row path had ever worked. Iterating the result yields
+                # Record objects whose values are still graph entities.
+                records = [record async for record in result]
                 await result.consume()
 
             nodes: list[ModelGraphDatabaseNode] = []
@@ -1183,9 +1223,13 @@ class HandlerGraph(
                             )
                         )
 
-                # Process path
-                path_ids = record.get("path_ids", [])
-                if path_ids:
+                # Process path -- path_nodes is the raw `nodes(p)` list of
+                # driver-hydrated Node objects (see the query comment above);
+                # each one's element_id is read the same way rel.element_id is
+                # read above, never via a Cypher-side id() call.
+                path_nodes = record.get("path_nodes", [])
+                if path_nodes:
+                    path_ids = [str(pn.element_id) for pn in path_nodes]
                     paths.append(path_ids)
                     max_depth_reached = max(max_depth_reached, len(path_ids) - 1)
 
