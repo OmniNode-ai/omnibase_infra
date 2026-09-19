@@ -68,12 +68,13 @@ from scripts.ci.ci_summary_gate import (
     EXTERNAL_FAILURE_SUPERSESSION_GRACE_S,
     SKIPPABLE_GATE_JOBS,
     STRICT_GATE_JOBS,
+    SUPERSEDABLE_CONCLUSIONS,
     JobState,
     evaluate,
     evaluate_external_contexts,
-    failure_is_provisional,
     latest_check_run_by_name,
     provisional_external_verdicts,
+    supersedable_verdict_is_provisional,
 )
 
 pytestmark = pytest.mark.unit
@@ -291,10 +292,14 @@ class TestTheGraceIsFailClosedInEveryUncertainCase:
         assert failures == [RECEIPT_GATE]
 
     @pytest.mark.parametrize("conclusion", ["timed_out", "action_required"])
-    def test_the_grace_is_scoped_to_failure_and_cancelled_only(
+    def test_the_grace_is_scoped_to_the_supersedable_conclusions_only(
         self, conclusion: str
     ) -> None:
-        """Nothing else gets a window: the measured mechanism is a re-run."""
+        """Nothing else gets a window: the measured mechanism is a re-run.
+
+        ``failure``, ``skipped`` (OMN-17864) and ``cancelled`` (OMN-18355) each
+        have one. These two do not, and a test keeps it that way.
+        """
         now = datetime(2026, 9, 18, 21, 0, 0, tzinfo=UTC)
         rows = [
             _external_row(
@@ -393,13 +398,13 @@ class TestTheHelperIsDirectlyPinned:
     def test_only_a_failure_conclusion_is_eligible(self) -> None:
         now = datetime(2026, 9, 18, 21, 0, 0, tzinfo=UTC)
         recent = (now - timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        assert failure_is_provisional(
+        assert supersedable_verdict_is_provisional(
             JobState(RECEIPT_GATE, "completed", "failure", 1, recent), now
         )
-        assert not failure_is_provisional(
+        assert not supersedable_verdict_is_provisional(
             JobState(RECEIPT_GATE, "completed", "success", 1, recent), now
         )
-        assert not failure_is_provisional(
+        assert not supersedable_verdict_is_provisional(
             JobState(RECEIPT_GATE, "completed", "timed_out", 1, recent), now
         )
 
@@ -594,3 +599,95 @@ class TestTheNewestAttemptIsTheOneEvaluated:
         )
         assert inside == []
         assert unresolved == [RECEIPT_GATE]
+
+
+class TestAStaleDependencySkipIsNotAVerdict:
+    """The third live flavour, measured on omnibase_infra#3793 (2026-09-19).
+
+    THE INSTANCE. #3793's companion collided with a same-ticket companion and
+    merged late. Until it did, ``occ-preflight / eligibility`` failed at its
+    Resolve-Evidence-Source step, and ``call-reject-skip-token / scan /
+    reject-skip-gate-token`` — whose job ``needs:`` that gate — was therefore
+    SKIPPED rather than run. Two skipped rows, no other row for that name.
+
+    Once the companion merged, a rerun produced ``success`` for both. But
+    ``CI Summary`` had already recorded FAILURE on the stale ``skipped`` row
+    **38 seconds earlier**:
+
+    | 03:05:21Z | CI Summary starts (rerun)                              |
+    | 03:05:36Z | FAILURE, naming the skip-token context                 |
+    | 03:06:14Z | the skip-token context concludes ``success``           |
+
+    WHY IT IS THE SAME DEFECT. A dependency skip is a statement about the
+    producer's DEPENDENCY, never about this head. It is the same "no verdict
+    yet, a replacement is due" situation as a red awaiting its companion, in a
+    different conclusion token, and it raced the umbrella the same way.
+
+    WHY IT DOES NOT REOPEN THE SKIP-AS-PASS VECTOR. OMN-15057 / OMN-14854 are
+    about ``skipped`` read as SUCCESS. Nothing here reads it as success: it is
+    held PENDING, a real verdict may supersede it, and if none arrives it
+    FAILS at the grace exactly as before. Only ``success`` ever passes, and
+    :meth:`test_a_lone_skip_still_fails_once_the_grace_expires` is the control.
+    """
+
+    NOW = datetime(2026, 9, 19, 3, 5, 36, tzinfo=UTC)
+    SKIP_TOKEN = "call-reject-skip-token / scan / reject-skip-gate-token"
+
+    def _skipped(self, completed_at: str) -> dict[str, object]:
+        return {
+            "name": self.SKIP_TOKEN,
+            "status": "completed",
+            "conclusion": "skipped",
+            "started_at": completed_at,
+            "completed_at": completed_at,
+            "id": 1,
+        }
+
+    def test_the_umbrella_does_not_fail_on_a_fresh_dependency_skip(self) -> None:
+        """REGRESSION: the exact row #3793's umbrella failed on."""
+        rows = [self._skipped("2026-09-19T03:01:00Z")]
+        failures, unresolved = evaluate_external_contexts(
+            rows, (self.SKIP_TOKEN,), now=self.NOW
+        )
+        assert failures == []
+        assert unresolved == [self.SKIP_TOKEN]
+
+    def test_the_replacement_success_then_resolves_it(self) -> None:
+        rows = [
+            self._skipped("2026-09-19T03:01:00Z"),
+            {
+                "name": self.SKIP_TOKEN,
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-09-19T03:06:14Z",
+                "completed_at": "2026-09-19T03:06:20Z",
+                "id": 2,
+            },
+        ]
+        later = datetime(2026, 9, 19, 3, 7, 0, tzinfo=UTC)
+        failures, unresolved = evaluate_external_contexts(
+            rows, (self.SKIP_TOKEN,), now=later
+        )
+        assert failures == []
+        assert unresolved == []
+
+    def test_a_lone_skip_still_fails_once_the_grace_expires(self) -> None:
+        """THE CONTROL: skipped is deferred, never admitted."""
+        rows = [self._skipped("2026-09-19T03:01:00Z")]
+        expired = datetime(2026, 9, 19, 3, 30, 0, tzinfo=UTC)
+        failures, _ = evaluate_external_contexts(rows, (self.SKIP_TOKEN,), now=expired)
+        assert failures == [self.SKIP_TOKEN]
+
+    def test_a_skip_is_never_read_as_success(self) -> None:
+        """No clock, expired, or inside the grace — never SUCCESS."""
+        rows = [self._skipped("2026-09-19T03:01:00Z")]
+        for clock in (None, self.NOW, datetime(2026, 9, 19, 4, 0, 0, tzinfo=UTC)):
+            failures, unresolved = evaluate_external_contexts(
+                rows, (self.SKIP_TOKEN,), now=clock
+            )
+            assert failures or unresolved, "a skipped row resolved the context green"
+
+    def test_the_supersedable_set_is_exactly_what_the_docstring_claims(self) -> None:
+        assert frozenset({"failure", "skipped"}) == SUPERSEDABLE_CONCLUSIONS
+        assert "cancelled" not in SUPERSEDABLE_CONCLUSIONS, "it has its own grace"
+        assert "success" not in SUPERSEDABLE_CONCLUSIONS

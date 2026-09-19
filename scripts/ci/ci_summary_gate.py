@@ -1105,8 +1105,30 @@ def cancellation_is_provisional(state: JobState, now: datetime | None) -> bool:
     return -CANCELLED_SUPERSESSION_GRACE_S <= age_s <= CANCELLED_SUPERSESSION_GRACE_S
 
 
-def failure_is_provisional(state: JobState, now: datetime | None) -> bool:
-    """True while a ``failure`` external context is inside its re-run window.
+#: Conclusions a re-run of the same producer can replace, and which therefore
+#: get the OMN-17864 grace. ``failure`` is the measured companion race. ``skipped``
+#: joined it on 2026-09-19 after a THIRD live instance on omnibase_infra#3793:
+#: `call-reject-skip-token / scan / reject-skip-gate-token` reported ``skipped``
+#: because its job ``needs:`` occ-preflight, which had failed while the evidence
+#: companion was unmerged. Once the companion merged, the rerun produced
+#: ``success`` 38 SECONDS after `CI Summary` had already recorded FAILURE on the
+#: stale ``skipped`` row. A dependency skip is not a verdict about this head.
+#:
+#: THIS DOES NOT REOPEN THE SKIP-AS-PASS VECTOR (OMN-15057 / OMN-14854). That
+#: vector is ``skipped`` read as SUCCESS. Here ``skipped`` is read as NO VERDICT
+#: YET: the context is held PENDING, a real verdict may supersede it, and if none
+#: arrives it still FAILS at the grace. The strict external bar is unchanged --
+#: only ``success`` ever passes.
+#:
+#: ``cancelled`` is absent deliberately: it has its own, shorter grace
+#: (:data:`CANCELLED_SUPERSESSION_GRACE_S`) from OMN-18355. ``timed_out`` and
+#: ``action_required`` are absent because neither is produced by a producer that
+#: an automatic re-run replaces.
+SUPERSEDABLE_CONCLUSIONS: frozenset[str] = frozenset({"failure", "skipped"})
+
+
+def supersedable_verdict_is_provisional(state: JobState, now: datetime | None) -> bool:
+    """True while a supersedable external context is inside its re-run window.
 
     OMN-17864, the residual OMN-18355 named and left open. A red produced
     before the OCC evidence companion exists is a verdict about the PR's
@@ -1117,9 +1139,17 @@ def failure_is_provisional(state: JobState, now: datetime | None) -> bool:
     answer is "a replacement is due, poll again" — not a terminal FAILURE the
     only cure for which is a human rerun that changes nothing.
 
-    Scoped to ``failure`` DELIBERATELY. ``timed_out`` and ``action_required``
-    are left terminal: the measured mechanism is an automatic re-run of a
-    producer that decided, and neither of those is that shape.
+    A ``skipped`` row reaches the same conclusion by a different route: a
+    producer whose job ``needs:`` a gate that failed for the same unmerged
+    companion is skipped, not run, so its row is a statement about its
+    DEPENDENCY, never about this head. See
+    :data:`SUPERSEDABLE_CONCLUSIONS` for the live instance and for why this
+    does not reopen the skip-as-pass vector.
+
+    Scoped to :data:`SUPERSEDABLE_CONCLUSIONS` DELIBERATELY. ``timed_out`` and
+    ``action_required`` are left terminal: the measured mechanism is an
+    automatic re-run of a producer that decided or was prevented from
+    deciding, and neither of those is that shape.
 
     FAIL-CLOSED IN EVERY UNCERTAIN CASE, on exactly the terms
     :func:`cancellation_is_provisional` already sets:
@@ -1136,7 +1166,7 @@ def failure_is_provisional(state: JobState, now: datetime | None) -> bool:
     FAILURE, so nothing here can make the required context green or absent.
     """
 
-    if state.conclusion != "failure" or now is None:
+    if state.conclusion not in SUPERSEDABLE_CONCLUSIONS or now is None:
         return False
     completed = _parse_timestamp(state.completed_at)
     if completed is None:
@@ -1156,7 +1186,9 @@ def verdict_is_provisional(state: JobState, now: datetime | None) -> bool:
     "keep waiting" decision is made, so the two cannot drift apart.
     """
 
-    return cancellation_is_provisional(state, now) or failure_is_provisional(state, now)
+    return cancellation_is_provisional(
+        state, now
+    ) or supersedable_verdict_is_provisional(state, now)
 
 
 def applicable_external_contexts(
