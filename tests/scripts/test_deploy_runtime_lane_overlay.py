@@ -216,6 +216,25 @@ def test_non_dev_project_layers_matching_overlay(
 
 
 @pytest.mark.unit
+def test_dogfood_project_uses_its_complete_standalone_overlay() -> None:
+    result = _run_overlay_resolver("omnibase-infra-dogfood")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "-f /DEPLOY/docker/docker-compose.dogfood.yml"
+
+
+@pytest.mark.unit
+def test_dogfood_restart_set_matches_its_standalone_services() -> None:
+    text = _script_text()
+    assert 'compose_project}" == "omnibase-infra-dogfood"' in text
+    assert (
+        "(omninode-runtime runtime-effects projection-api tenant-projection-writer "
+        "projection-tenant-registry-writer projection-delegation-writer "
+        "projection-registration-writer projection-savings-writer "
+        "projection-tenant-credentials-writer projection-live-events-writer)"
+    ) in text
+
+
+@pytest.mark.unit
 def test_unknown_non_dev_project_fails_closed() -> None:
     """An unrecognized non-dev project must abort, not silently run on dev config.
 
@@ -229,6 +248,17 @@ def test_unknown_non_dev_project_fails_closed() -> None:
         f"stdout={result.stdout!r} rc={result.returncode}"
     )
     assert "mystery-lane" in result.stderr or "Unknown lane" in result.stderr
+
+
+@pytest.mark.unit
+def test_deploy_root_can_be_explicitly_isolated_per_lane() -> None:
+    """Dogfood refuses the shared deploy root and requires an absolute override."""
+    text = _script_text()
+    assert (
+        'DEPLOY_ROOT="${OMNIBASE_INFRA_DEPLOY_ROOT:-${HOME}/.omnibase/infra}"' in text
+    )
+    assert 'guard_dogfood_deploy_root "${compose_project}"' in text
+    assert "OMNIBASE_INFRA_DEPLOY_ROOT must be absolute for dogfood" in text
 
 
 @pytest.mark.unit

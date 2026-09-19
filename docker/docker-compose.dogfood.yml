@@ -1,0 +1,1001 @@
+# OMN-18693 isolated dogfood lane.
+#
+# This is a complete standalone compose definition. compose_files.sh selects it
+# without docker-compose.infra.yml so this lane cannot inherit development
+# services, ports, volumes, or networks. It has private stateful services and
+# a lane-specific compose project. This file defines configuration only; it is
+# not evidence of a running deployment.
+#
+# The operator must supply an absolute OMNICLAUDE_SKILLS_DIR and the existing
+# operator credential references required by the compose interpolation guards.
+# DOGFOOD_REDPANDA_ADVERTISED_HOST must be the reachable host address for
+# external clients, never localhost.
+name: omnibase-infra-dogfood
+x-omninode-contract-overlay:
+  dogfood-redpanda:
+    advertised_kafka_addr: &dogfood_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://${DOGFOOD_REDPANDA_ADVERTISED_HOST:?DOGFOOD_REDPANDA_ADVERTISED_HOST required}:47092"
+    kafka_port_publish: &dogfood_redpanda_kafka_port_publish "47092:19092"
+    admin_port_publish: &dogfood_redpanda_admin_port_publish "47644:9644"
+  dogfood-model-secrets:
+    # Correction (b): no required_secret_refs. Every cloud LLM ref below is
+    # optional so the lane boots without any of them.
+    optional_secret_refs:
+      - GEMINI_API_KEY
+      - GOOGLE_API_KEY
+      - OPENROUTER_API_KEY
+      - LLM_GLM_API_KEY
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+x-logging-defaults: &logging-defaults
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+x-runtime-base: &runtime-base
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.runtime
+    args:
+      BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+      EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+  profiles: ["dogfood"]
+  networks: !override
+    - omnibase-infra-dogfood-network
+  logging: *logging-defaults
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 1536M
+      reservations:
+        cpus: "0.25"
+        memory: 256M
+x-dogfood-runtime-env: &dogfood-runtime-env
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+  POSTGRES_HOST: postgres
+  OMNIBASE_INFRA_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
+  OMNIINTELLIGENCE_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence"
+  OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+  # OMN-16843: this lane defines its own runtime env block rather than merging
+  # docker-compose.infra.yml's x-runtime-env anchor, so it inherits NOTHING and
+  # must carry this key itself. Same fail-closed form and same reasoning as the
+  # base file's block: the internal projections connect as the non-BYPASSRLS
+  # omninode_runtime principal, never as the postgres superuser.
+  OMNINODE_INTERNAL_DB_URL: &dogfood_internal_db_url "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set — the internal projections connect to omnidash_analytics as the non-BYPASSRLS omninode_runtime principal (OMN-16843), never as the postgres superuser}@postgres:5432/omnidash_analytics"
+  # OMN-15425: the TENANT-domain counterpart, carried here for the same reason.
+  ONEX_TENANT_DB_URL: &dogfood_tenant_db_url "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set — the tenant projections connect to omnidash_analytics as the non-BYPASSRLS tenant_projection_writer principal (OMN-15425), never as the postgres superuser and never as the dashboard-facing analytics role}@postgres:5432/omnidash_analytics"
+  KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+  KAFKA_BROKER_ALLOWLIST: "redpanda:"
+  BUS_ID: "dogfood"
+  VALKEY_HOST: "valkey"
+  VALKEY_PORT: "6379"
+  VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD required}
+  ONEX_CONTRACTS_DIR: /app/contracts
+  ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
+  ONEX_MARKETPLACE_SKILLS_ROOT: /app/skills
+  ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
+  ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+  ONEX_ENVIRONMENT: dogfood
+  KAFKA_ENVIRONMENT: dogfood
+  ONEX_DATABASE_TOPOLOGY_PROFILE: dogfood
+  ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${DOGFOOD_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set DOGFOOD_TOPIC_PROVISIONER_MAX_PARTITIONS}
+  ONEX_STATE_ROOT: /app/data/.onex_state_dogfood
+  ONEX_STATE_DIR: /app/data/.onex_state_dogfood
+  ONEX_BOX_ID: omninode-pc
+  BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
+  # OMN-18693 defect 3: THIS lane's typed Bifrost overlay, resolved from the
+  # lane pin — never from a hardcoded default that names another lane's file.
+  # The runtime services mount ./lane-overlays/dogfood.bifrost.yaml at exactly
+  # this container path; the renderer fails fast, naming this lane, if the pin
+  # or the file is ever absent.
+  BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dogfood.bifrost.yaml
+  # OMN-15628/OMN-15645: this lane owns a separate x-runtime-env anchor, so the
+  # routing-tiers pin must be carried explicitly. Same in-image path as the base
+  # infra anchor; docker/Dockerfile.runtime bakes it from the installed
+  # omnimarket package.
+  DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
+  BIFROST_SOURCE_CONTRACT_PATH: ${BIFROST_SOURCE_CONTRACT_PATH:-}
+  LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: ${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}
+  LLM_CODER_URL: ${LLM_CODER_URL:-https://generativelanguage.googleapis.com}
+  LLM_CODER_FAST_URL: ${LLM_CODER_FAST_URL:-https://generativelanguage.googleapis.com}
+  LLM_EMBEDDING_URL: ${LLM_EMBEDDING_URL:-https://generativelanguage.googleapis.com}
+  LLM_DEEPSEEK_R1_URL: ${LLM_DEEPSEEK_R1_URL:-https://generativelanguage.googleapis.com}
+  BIFROST_LOCAL_CODER_ENDPOINT_URL: ${BIFROST_LOCAL_CODER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  BIFROST_LOCAL_REASONER_ENDPOINT_URL: ${BIFROST_LOCAL_REASONER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL: ${BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL: ${BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+  # OMN-6790: the z.ai GLM CODING PLAN surface. We hold a Coding Plan, not a
+  # pay-as-you-go balance; the bare /api/paas/v4 surface answers a Coding-Plan
+  # key with HTTP 429 code 1113, which is a WRONG-ENDPOINT signal and never a
+  # billing fact. Authority for this URL is omnimarket's routing contract; this
+  # default only keeps the lane off the wrong product. Guarded by
+  # tests/test_glm_endpoint_surface_omn6790.py.
+  LLM_GLM_URL: ${LLM_GLM_URL:-https://api.z.ai/api/coding/paas/v4}
+  LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-glm-4.5}
+  # Correction (b): every cloud model credential below is OPTIONAL. The lane
+  # must reach a healthy /health with none of them set; wiring a model backend
+  # is a later, separate step for the lane owner.
+  LLM_GLM_API_KEY: ${LLM_GLM_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:-}
+  LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:-}
+  LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+  GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+  GH_TOKEN: ${GITHUB_TOKEN:-}
+  ONEX_REGISTRATION_AUTO_ACK: "false"
+  USE_EVENT_ROUTING: "true"
+  # This lane runs neither Infisical nor Keycloak (see the disabled stubs at the
+  # end of the services block). Every address is blanked so no service on this
+  # lane can resolve a credential broker or an issuer belonging to another lane
+  # — the OMN-12966 / OMN-13037 dangling-credential class.
+  INFISICAL_ADDR: ""
+  INFISICAL_CLIENT_ID: ""
+  INFISICAL_CLIENT_SECRET: ""
+  INFISICAL_PROJECT_ID: ""
+  INFISICAL_ENVIRONMENT: ""
+  KEYCLOAK_ADMIN_URL: ""
+  KEYCLOAK_REALM: ""
+  KEYCLOAK_ADMIN_CLIENT_ID: ""
+  KEYCLOAK_ADMIN_CLIENT_SECRET: ""
+  KEYCLOAK_ISSUER: ""
+  ONEX_SERVICE_CLIENT_ID: ""
+  ONEX_SERVICE_CLIENT_SECRET: ""
+  OMNIMEMORY_ENABLED: ${DOGFOOD_RUNTIME_MAIN_OMNIMEMORY_ENABLED:?runtime policy contract must set DOGFOOD_RUNTIME_MAIN_OMNIMEMORY_ENABLED}
+  OMNIMEMORY_MEMGRAPH_HOST: ${DOGFOOD_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set DOGFOOD_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
+  OMNIMEMORY_MEMGRAPH_PORT: ${OMNIMEMORY_MEMGRAPH_PORT:?runtime policy contract must set OMNIMEMORY_MEMGRAPH_PORT}
+  OMNIMEMORY_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnimemory"
+  QDRANT_HOST: ""
+  QDRANT_PORT: "6333"
+  QDRANT_API_KEY: ""
+  KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
+# =============================================================================
+# STRICT AUTO-WIRING (OMN-17531)
+# =============================================================================
+# `ONEX_WIRING_STRICT_MODE` is `${ONEX_WIRING_STRICT_MODE:-0}` in
+# docker-compose.infra.yml, and until OMN-17531 NO lane overlay bound it. This
+# lane is standalone (it does not merge that base), so before this block it had
+# no binding for the key at all and the runtime read it as absent, i.e. the
+# quarantining semantics. At `0`/absent a handler the resolver cannot construct
+# is quarantined and the runtime still reports healthy; at `1` it re-raises and
+# kills boot. onex-dev (staging) binds `"1"` on all three runtime Deployments.
+#
+# Three defects of exactly one class reached staging before anyone saw them for
+# that reason -- OMN-15623, OMN-17502, OMN-17510 -- each then diagnosed from pod
+# logs over an SSM port-forward, serialized on the one staging cluster.
+#
+# Literal `"1"`, NOT `${ONEX_WIRING_STRICT_MODE:-1}`: an interpolated form lets
+# an exported shell variable silently return the lane to the quarantining
+# semantics, which is the failure mode this binding exists to remove.
+#
+# Bound on the two runtime services (main/effects), mirroring onex-dev. This
+# lane runs no runtime-worker. It is NOT merged into the shared
+# `x-dogfood-runtime-env` anchor because projection-api merges that anchor too
+# and is a uvicorn read-model server that never runs the auto-wiring kernel.
+#
+# LANE OWNERSHIP: this lane is reserved for delegation dogfooding.
+# (OMN-18693 / OMN-18693). This commit changes the committed source only; the
+# lane is NOT restarted by whoever lands this. The apply recipe is handed to
+# its owner on OMN-18693.
+x-dogfood-strict-wiring-env: &dogfood-strict-wiring-env
+  ONEX_WIRING_STRICT_MODE: "1"
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-dogfood-postgres
+    profiles: ["dogfood"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: omnibase_infra
+      OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
+      TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
+    ports: !override
+      - "${DOGFOOD_POSTGRES_EXTERNAL_PORT:-49436}:5432"
+    volumes:
+      - dogfood_postgres_data:/var/lib/postgresql/data
+      - ./migrations/forward:/docker-entrypoint-initdb.d:ro
+    networks: !override
+      - omnibase-infra-dogfood-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      # OMN-18693 defect 1: probe over TCP, not the local unix socket. On a
+      # fresh volume the postgres image runs a TEMPORARY server for its
+      # initdb / init-script phase with `listen_addresses=''` — unix socket
+      # only, no TCP listener. A socket-based `pg_isready` therefore answers
+      # HEALTHY against that temporary server, releases every
+      # `condition: service_healthy` dependent, and those dependents are then
+      # refused while the temporary server is stopped and the real one starts.
+      # Probing the compose SERVICE NAME (not a literal address) forces a real
+      # TCP connection over the lane network — the same path every dependent
+      # uses — so this check answers TRUE only for the server they can actually
+      # reach, which is the property `service_healthy` is supposed to carry. A
+      # loopback literal would work equally well and is deliberately not used:
+      # test_self_contained_infrastructure rejects hardcoded addresses in
+      # compose, and it is right to — the service name is the portable form. Measured on omnibase-infra-dogfood 2026-08-31:
+      # intelligence-migration was released 5.7s after postgres started and
+      # ~29s before postgres was really serving, and died on the refusal.
+      #
+      # start_period is sized for a genuine cold initdb — on this image the
+      # whole /docker-entrypoint-initdb.d forward-migration tree runs inside
+      # that window — so a still-initialising server stays `health: starting`
+      # instead of flipping UNHEALTHY and failing the dependents outright.
+      # Same right-sizing rationale as the OMN-12973 migration-gate floor. The
+      # shorter interval keeps a warm volume reporting healthy quickly.
+      test: ["CMD-SHELL", "pg_isready -h postgres -p 5432 -U ${POSTGRES_USER:-postgres} -d omnibase_infra"]
+      interval: 10s
+      start_period: 180s
+      retries: 5
+    logging: *logging-defaults
+    restart: unless-stopped
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-dogfood-redpanda
+    profiles: ["dogfood"]
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - *dogfood_redpanda_advertised_kafka_addr
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      # Correction (c): 2G, not the judge lane's 8G. This is the fifth broker on
+      # a shared host and this lane is a sandbox, not a proof surface.
+      - --memory
+      - ${DOGFOOD_REDPANDA_MEMORY:-2G}
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
+      - --default-log-level=warn
+      - --set
+      - topic_partitions_per_shard=7000
+    ports: !override
+      - *dogfood_redpanda_kafka_port_publish
+      - *dogfood_redpanda_admin_port_publish
+    volumes:
+      - dogfood_redpanda_data:/var/lib/redpanda/data
+    networks: !override
+      - omnibase-infra-dogfood-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
+      start_period: 30s
+    logging: *logging-defaults
+    restart: unless-stopped
+  redpanda-partition-cap:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-dogfood-redpanda-partition-cap
+    profiles: ["dogfood"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks: !override
+      - omnibase-infra-dogfood-network
+    restart: "no"
+  valkey:
+    image: valkey/valkey:8.0-alpine
+    container_name: omnibase-infra-dogfood-valkey
+    profiles: ["dogfood"]
+    command: >-
+      sh -c 'valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass "$$VALKEY_PASSWORD"'
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD required}
+    ports: !override
+      - "${DOGFOOD_VALKEY_EXTERNAL_PORT:-49379}:6379"
+    volumes:
+      - dogfood_valkey_data:/data
+    networks: !override
+      - omnibase-infra-dogfood-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "valkey-cli -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+    logging: *logging-defaults
+    restart: unless-stopped
+  forward-migration:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-dogfood-forward-migration
+    profiles: ["dogfood"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
+      MIGRATIONS_DIR: /migrations/forward
+      # OMN-16993 / OMN-15425: warm-volume re-assert of the two non-superuser
+      # LOGIN credentials. This service redeclares the base definition wholesale,
+      # so the base file's copies of these lines do not reach this lane.
+      OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
+      TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
+    volumes:
+      - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
+      - ../docker/migrations/forward:/migrations/forward:ro
+    entrypoint: ["sh", "/run-forward-migrations.sh"]
+    networks: !override
+      - omnibase-infra-dogfood-network
+    restart: "no"
+    logging: *logging-defaults
+  migration-gate:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-dogfood-migration-gate
+    profiles: ["dogfood"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: omnibase_infra
+      NODE_POSTGRES_DB: omnidash_analytics
+      REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"
+    entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
+    volumes:
+      - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
+    networks: !override
+      - omnibase-infra-dogfood-network
+    healthcheck:
+      test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *logging-defaults
+    restart: unless-stopped
+  intelligence-migration:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-dogfood-intelligence-migration
+    profiles: ["dogfood"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MIGRATIONS_DIR: /migrations/intelligence
+    volumes:
+      - ../scripts/run-intelligence-migrations.sh:/run-intelligence-migrations.sh:ro
+      - ../docker/migrations/intelligence:/migrations/intelligence:ro
+    entrypoint: ["sh", "/run-intelligence-migrations.sh"]
+    networks: !override
+      - omnibase-infra-dogfood-network
+    restart: "no"
+    logging: *logging-defaults
+  omninode-runtime:
+    !!merge <<: *runtime-base
+    container_name: omninode-dogfood-runtime
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      intelligence-migration:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+      redpanda-partition-cap:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
+      RUNTIME_PROFILE: main
+      OTEL_SERVICE_NAME: omninode-dogfood-runtime-main
+      ONEX_RUNTIME_ID: dogfood-main
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/main
+      ONEX_RUNTIME_CAPABILITIES: ${DOGFOOD_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set DOGFOOD_RUNTIME_MAIN_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${DOGFOOD_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set DOGFOOD_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DOGFOOD_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DOGFOOD_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DOGFOOD_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DOGFOOD_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
+      ONEX_GROUP_ID: onex-dogfood-runtime-main
+      KAFKA_INSTANCE_ID: dogfood-main
+      OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${DOGFOOD_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set DOGFOOD_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
+    ports: !override
+      - "${DOGFOOD_RUNTIME_MAIN_PORT:?runtime policy contract must set DOGFOOD_RUNTIME_MAIN_PORT}:8085"
+    stop_grace_period: 90s
+    volumes:
+      - dogfood_runtime_logs:/app/logs
+      - dogfood_runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    tmpfs:
+      - /run/onex-runtime:uid=1000,gid=1000,mode=0770
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.runtime.address=runtime://omninode-pc/dogfood/main"
+      - "com.omninode.runtime.id=dogfood-main"
+  runtime-effects:
+    !!merge <<: *runtime-base
+    container_name: omninode-dogfood-runtime-effects
+    depends_on:
+      omninode-runtime:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
+      RUNTIME_PROFILE: effects
+      OTEL_SERVICE_NAME: omninode-dogfood-runtime-effects
+      ONEX_RUNTIME_ID: dogfood-effects
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/effects
+      ONEX_RUNTIME_CAPABILITIES: ${DOGFOOD_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DOGFOOD_RUNTIME_EFFECTS_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${DOGFOOD_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set DOGFOOD_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DOGFOOD_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DOGFOOD_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DOGFOOD_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DOGFOOD_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${DOGFOOD_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set DOGFOOD_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${DOGFOOD_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set DOGFOOD_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_GROUP_ID: onex-dogfood-runtime-effects
+      KAFKA_INSTANCE_ID: dogfood-effects
+      OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+    ports: !override
+      - "${DOGFOOD_RUNTIME_EFFECTS_PORT:?runtime policy contract must set DOGFOOD_RUNTIME_EFFECTS_PORT}:8085"
+    stop_grace_period: 90s
+    volumes:
+      - dogfood_effects_logs:/app/logs
+      - dogfood_effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1800s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.runtime.address=runtime://omninode-pc/dogfood/effects"
+      - "com.omninode.runtime.id=dogfood-effects"
+  # OMN-18693: carrier for the eight tenant-projection profile contracts. This
+  # standalone lane must opt in explicitly; it cannot inherit the base/dev
+  # compose carrier or its analytics/SASL anchors.
+  tenant-projection-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-dogfood-tenant-projection-writer
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
+      # The carrier resolves the tenant binding; never let it use the shared
+      # analytics compatibility connection inherited by main/effects.
+      OMNIDASH_ANALYTICS_DB_URL: ""
+      RUNTIME_PROFILE: tenant-projection
+      RUNTIME_INSTANCE_ID: dogfood-tenant-projection
+      OTEL_SERVICE_NAME: omnimarket-dogfood-tenant-projection-writer
+      ONEX_RUNTIME_ID: dogfood-tenant-projection
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/tenant-projection
+      ONEX_RUNTIME_CAPABILITIES: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_GROUP_ID: onex-dogfood-runtime-tenant-projection
+      KAFKA_INSTANCE_ID: dogfood-tenant-projection
+      ONEX_BOUNDARY_DLQ_ENABLED: ${DOGFOOD_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DOGFOOD_BOUNDARY_DLQ_ENABLED}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1024M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
+    stop_grace_period: 90s
+    volumes:
+      - dogfood_tenant_projection_logs:/app/logs
+      - dogfood_tenant_projection_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.service=tenant-projection-writer"
+      - "com.omninode.runtime.address=runtime://omninode-pc/dogfood/tenant-projection"
+      - "com.omninode.runtime.id=dogfood-tenant-projection"
+  projection-api:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-dogfood-projection-api
+    command: ["omnimarket-projection-api"]
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: *dogfood-runtime-env
+      RUNTIME_PROFILE: projection-api
+      OTEL_SERVICE_NAME: omnimarket-dogfood-projection-api
+      BIFROST_CONTRACT_PATH: ""
+      # Mirrors the BIFROST_CONTRACT_PATH opt-out: no render, no overlay pin.
+      BIFROST_LANE_OVERLAY_PATH: ""
+      # The projection API serves materialized read models and never invokes the
+      # delegation routing reducer. Kept explicit so a layered render cannot
+      # inherit the runtime anchor's routing-tiers path.
+      DELEGATION_ROUTING_TIERS_PATH: ""
+    ports: !override
+      - "${DOGFOOD_PROJECTION_API_PORT:-49302}:3002"
+    volumes:
+      - ../contracts:/app/contracts:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.service=projection-api"
+  # OMN-18693: current contracts own these nodes through dedicated runtime
+  # profiles. Every service boots the runtime image entrypoint (no legacy
+  # `python -m` override), so strict kernel wiring resolves the typed internal
+  # and tenant bindings rather than a single analytics DSN.
+  projection-tenant-registry-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-dogfood-projection-tenant-registry-writer
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
+      # Explicitly suppress the dashboard/superuser compatibility DSN. Typed
+      # runtime wiring receives both private domain bindings from the anchor.
+      OMNIDASH_ANALYTICS_DB_URL: ""
+      RUNTIME_PROFILE: projection-writer-tenant-registry
+      RUNTIME_INSTANCE_ID: dogfood-projection-writer-tenant-registry
+      ONEX_RUNTIME_ID: dogfood-projection-writer-tenant-registry
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/projection-writer-tenant-registry
+      ONEX_GROUP_ID: onex-dogfood-runtime-projection-writer-tenant-registry
+      KAFKA_INSTANCE_ID: dogfood-projection-writer-tenant-registry
+      OTEL_SERVICE_NAME: omnimarket-dogfood-projection-tenant-registry-writer
+      ONEX_RUNTIME_CAPABILITIES: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_BOUNDARY_DLQ_ENABLED: ${DOGFOOD_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DOGFOOD_BOUNDARY_DLQ_ENABLED}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1024M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
+    stop_grace_period: 90s
+    volumes:
+      - dogfood_tenant_registry_writer_logs:/app/logs
+      - dogfood_tenant_registry_writer_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.service=projection-tenant-registry-writer"
+      - "com.omninode.runtime.address=runtime://omninode-pc/dogfood/projection-writer-tenant-registry"
+      - "com.omninode.runtime.id=dogfood-projection-writer-tenant-registry"
+  projection-delegation-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-dogfood-projection-delegation-writer
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
+      # Explicitly suppress the dashboard/superuser compatibility DSN. Typed
+      # runtime wiring receives both private domain bindings from the anchor.
+      OMNIDASH_ANALYTICS_DB_URL: ""
+      RUNTIME_PROFILE: projection-writer-delegation
+      RUNTIME_INSTANCE_ID: dogfood-projection-writer-delegation
+      ONEX_RUNTIME_ID: dogfood-projection-writer-delegation
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/projection-writer-delegation
+      ONEX_GROUP_ID: onex-dogfood-runtime-projection-writer-delegation
+      KAFKA_INSTANCE_ID: dogfood-projection-writer-delegation
+      OTEL_SERVICE_NAME: omnimarket-dogfood-projection-delegation-writer
+      ONEX_RUNTIME_CAPABILITIES: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_BOUNDARY_DLQ_ENABLED: ${DOGFOOD_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DOGFOOD_BOUNDARY_DLQ_ENABLED}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1024M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
+    stop_grace_period: 90s
+    volumes:
+      - dogfood_delegation_writer_logs:/app/logs
+      - dogfood_delegation_writer_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.service=projection-delegation-writer"
+      - "com.omninode.runtime.address=runtime://omninode-pc/dogfood/projection-writer-delegation"
+      - "com.omninode.runtime.id=dogfood-projection-writer-delegation"
+  projection-registration-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-dogfood-projection-registration-writer
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
+      # Explicitly suppress the dashboard/superuser compatibility DSN. Typed
+      # runtime wiring receives both private domain bindings from the anchor.
+      OMNIDASH_ANALYTICS_DB_URL: ""
+      RUNTIME_PROFILE: projection-writer-registration
+      RUNTIME_INSTANCE_ID: dogfood-projection-writer-registration
+      ONEX_RUNTIME_ID: dogfood-projection-writer-registration
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/projection-writer-registration
+      ONEX_GROUP_ID: onex-dogfood-runtime-projection-writer-registration
+      KAFKA_INSTANCE_ID: dogfood-projection-writer-registration
+      OTEL_SERVICE_NAME: omnimarket-dogfood-projection-registration-writer
+      ONEX_RUNTIME_CAPABILITIES: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_BOUNDARY_DLQ_ENABLED: ${DOGFOOD_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DOGFOOD_BOUNDARY_DLQ_ENABLED}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1024M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
+    stop_grace_period: 90s
+    volumes:
+      - dogfood_registration_writer_logs:/app/logs
+      - dogfood_registration_writer_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.service=projection-registration-writer"
+      - "com.omninode.runtime.address=runtime://omninode-pc/dogfood/projection-writer-registration"
+      - "com.omninode.runtime.id=dogfood-projection-writer-registration"
+  projection-savings-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-dogfood-projection-savings-writer
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
+      # Explicitly suppress the dashboard/superuser compatibility DSN. Typed
+      # runtime wiring receives both private domain bindings from the anchor.
+      OMNIDASH_ANALYTICS_DB_URL: ""
+      RUNTIME_PROFILE: projection-writer-savings
+      RUNTIME_INSTANCE_ID: dogfood-projection-writer-savings
+      ONEX_RUNTIME_ID: dogfood-projection-writer-savings
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/projection-writer-savings
+      ONEX_GROUP_ID: onex-dogfood-runtime-projection-writer-savings
+      KAFKA_INSTANCE_ID: dogfood-projection-writer-savings
+      OTEL_SERVICE_NAME: omnimarket-dogfood-projection-savings-writer
+      ONEX_RUNTIME_CAPABILITIES: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_BOUNDARY_DLQ_ENABLED: ${DOGFOOD_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DOGFOOD_BOUNDARY_DLQ_ENABLED}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1024M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
+    stop_grace_period: 90s
+    volumes:
+      - dogfood_savings_writer_logs:/app/logs
+      - dogfood_savings_writer_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.service=projection-savings-writer"
+      - "com.omninode.runtime.address=runtime://omninode-pc/dogfood/projection-writer-savings"
+      - "com.omninode.runtime.id=dogfood-projection-writer-savings"
+  projection-tenant-credentials-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-dogfood-projection-tenant-credentials-writer
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
+      # Explicitly suppress the dashboard/superuser compatibility DSN. Typed
+      # runtime wiring receives both private domain bindings from the anchor.
+      OMNIDASH_ANALYTICS_DB_URL: ""
+      RUNTIME_PROFILE: projection-writer-tenant-credentials
+      RUNTIME_INSTANCE_ID: dogfood-projection-writer-tenant-credentials
+      ONEX_RUNTIME_ID: dogfood-projection-writer-tenant-credentials
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/projection-writer-tenant-credentials
+      ONEX_GROUP_ID: onex-dogfood-runtime-projection-writer-tenant-credentials
+      KAFKA_INSTANCE_ID: dogfood-projection-writer-tenant-credentials
+      OTEL_SERVICE_NAME: omnimarket-dogfood-projection-tenant-credentials-writer
+      ONEX_RUNTIME_CAPABILITIES: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_BOUNDARY_DLQ_ENABLED: ${DOGFOOD_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DOGFOOD_BOUNDARY_DLQ_ENABLED}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1024M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
+    stop_grace_period: 90s
+    volumes:
+      - dogfood_tenant_credentials_writer_logs:/app/logs
+      - dogfood_tenant_credentials_writer_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.service=projection-tenant-credentials-writer"
+      - "com.omninode.runtime.address=runtime://omninode-pc/dogfood/projection-writer-tenant-credentials"
+      - "com.omninode.runtime.id=dogfood-projection-writer-tenant-credentials"
+  projection-live-events-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-dogfood-projection-live-events-writer
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
+      # Explicitly suppress the dashboard/superuser compatibility DSN. Typed
+      # runtime wiring receives both private domain bindings from the anchor.
+      OMNIDASH_ANALYTICS_DB_URL: ""
+      RUNTIME_PROFILE: projection-writer-live-events
+      RUNTIME_INSTANCE_ID: dogfood-projection-writer-live-events
+      ONEX_RUNTIME_ID: dogfood-projection-writer-live-events
+      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/projection-writer-live-events
+      ONEX_GROUP_ID: onex-dogfood-runtime-projection-writer-live-events
+      KAFKA_INSTANCE_ID: dogfood-projection-writer-live-events
+      OTEL_SERVICE_NAME: omnimarket-dogfood-projection-live-events-writer
+      ONEX_RUNTIME_CAPABILITIES: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
+      BIFROST_VERIFY_ENDPOINTS: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_BIFROST_VERIFY_ENDPOINTS}
+      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_PATH}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_SECRET_RESOLVER_CONFIG_JSON}
+      OMNIMEMORY_ENABLED: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED:?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_ENABLED}
+      OMNIMEMORY_MEMGRAPH_HOST: ${DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set DOGFOOD_RUNTIME_TENANT_PROJECTION_OMNIMEMORY_MEMGRAPH_HOST}
+      ONEX_BOUNDARY_DLQ_ENABLED: ${DOGFOOD_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DOGFOOD_BOUNDARY_DLQ_ENABLED}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1024M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
+    stop_grace_period: 90s
+    volumes:
+      - dogfood_live_events_writer_logs:/app/logs
+      - dogfood_live_events_writer_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1200s
+    labels:
+      - "com.omninode.lane=dogfood"
+      - "com.omninode.ticket=OMN-18693"
+      - "com.omninode.lane.class=dogfood"
+      - "com.omninode.service=projection-live-events-writer"
+      - "com.omninode.runtime.address=runtime://omninode-pc/dogfood/projection-writer-live-events"
+      - "com.omninode.runtime.id=dogfood-projection-writer-live-events"
+  # OMN-13772 / OMN-13581 defence-in-depth. This file is designed to be run
+  # STANDALONE (`-f docker/docker-compose.dogfood.yml`), and no sanctioned tool
+  # layers it — `scripts/deploy-runtime.sh` does not know this lane, deliberately
+  # (see the governance note in this file's header). But the base infra compose
+  # defines keycloak and infisical with NO compose profile, so if anyone ever
+  # renders `-f docker-compose.infra.yml -f docker-compose.dogfood.yml` the two
+  # would activate under THIS project name, attached to the DEV network with DEV
+  # container names — the cross-lane displacement class OMN-13581 is named for.
+  # Forcing them behind a never-enabled profile costs nothing (inactive-profile
+  # stubs are dropped from a standalone render) and removes the foot-gun.
+  keycloak:
+    profiles: !override ["dogfood-disabled"]
+  infisical:
+    profiles: !override ["dogfood-disabled"]
+networks:
+  omnibase-infra-dogfood-network:
+    name: omnibase-infra-dogfood-network
+    driver: bridge
+volumes:
+  # Correction (a): every volume is namespaced to this lane, so a
+  # profile-scoped teardown with volume removal wipes this lane's state and
+  # nothing else on the host.
+  dogfood_postgres_data:
+    name: omnibase-infra-dogfood-postgres-data
+  dogfood_redpanda_data:
+    name: omnibase-infra-dogfood-redpanda-data
+  dogfood_valkey_data:
+    name: omnibase-infra-dogfood-valkey-data
+  dogfood_runtime_logs:
+    name: omninode-dogfood-runtime-logs
+  dogfood_runtime_data:
+    name: omninode-dogfood-runtime-data
+  dogfood_effects_logs:
+    name: omninode-dogfood-effects-logs
+  dogfood_effects_data:
+    name: omninode-dogfood-effects-data
+  dogfood_tenant_projection_logs:
+    name: omnimarket-dogfood-tenant-projection-logs
+  dogfood_tenant_projection_data:
+    name: omnimarket-dogfood-tenant-projection-data
+  dogfood_tenant_registry_writer_logs:
+    name: omnimarket-dogfood-projection-tenant-registry-writer-logs
+  dogfood_tenant_registry_writer_data:
+    name: omnimarket-dogfood-projection-tenant-registry-writer-data
+  dogfood_delegation_writer_logs:
+    name: omnimarket-dogfood-projection-delegation-writer-logs
+  dogfood_delegation_writer_data:
+    name: omnimarket-dogfood-projection-delegation-writer-data
+  dogfood_registration_writer_logs:
+    name: omnimarket-dogfood-projection-registration-writer-logs
+  dogfood_registration_writer_data:
+    name: omnimarket-dogfood-projection-registration-writer-data
+  dogfood_savings_writer_logs:
+    name: omnimarket-dogfood-projection-savings-writer-logs
+  dogfood_savings_writer_data:
+    name: omnimarket-dogfood-projection-savings-writer-data
+  dogfood_tenant_credentials_writer_logs:
+    name: omnimarket-dogfood-projection-tenant-credentials-writer-logs
+  dogfood_tenant_credentials_writer_data:
+    name: omnimarket-dogfood-projection-tenant-credentials-writer-data
+  dogfood_live_events_writer_logs:
+    name: omnimarket-dogfood-projection-live-events-writer-logs
+  dogfood_live_events_writer_data:
+    name: omnimarket-dogfood-projection-live-events-writer-data

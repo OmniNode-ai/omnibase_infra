@@ -24,6 +24,7 @@ import pytest
 from scripts.validation.check_topology_grant_delivery import (
     _IDENTITY_COLUMN_RE,
     _SERIAL_COLUMN_RE,
+    MAX_UNDECLARED,
     MAX_UNDELIVERED,
     MAX_UNDELIVERED_SEQUENCES,
     GrantKey,
@@ -32,6 +33,7 @@ from scripts.validation.check_topology_grant_delivery import (
     delivered_grants,
     delivered_sequences,
     sequence_backed_columns,
+    undeclared,
     undelivered,
     undelivered_sequences,
 )
@@ -799,3 +801,155 @@ def test_omn_18353_consumer_flow_sequence_is_delivered_by_a_migration() -> None:
         "writable, and the lane proved it: the projection froze on "
         "2026-09-10."
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18768 -- the REVERSE arm: delivered by the corpus, declared by nobody.
+# ---------------------------------------------------------------------------
+
+# On 2026-09-19 the main ONEX runtime on the .201 dev lane crash-looped on every
+# boot -- 16 restarts, reproduced across a container recreate -- on:
+#
+#   Auto-wiring contract 'projection_runner_fleet' failed:
+#   handler=FleetLivenessProjectionWriter: ValueError: Projection binding
+#   'omninode_runtime_service' principal 'omninode_runtime' lacks declared read
+#
+# The DATABASE was fine. This corpus's own
+# node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql
+# had issued SELECT/INSERT/UPDATE/DELETE plus the sequence USAGE, and it landed
+# here at 17:33Z in omnibase_infra#3819. What was missing was the DECLARATION
+# the runtime actually reads.
+#
+# It was missing because the declaration is DERIVED from omnimarket contracts at
+# a pinned ref, and the pin refresh snapshotted omnimarket dev at 18:30Z while
+# the contract declaring this relation merged at 18:41Z -- eleven minutes later.
+# So `application_database_domain_enforcement` was green by construction, and
+# the lane, which builds omnimarket from source rather than from the pin, was
+# down. This arm reads only files already in this repository, so it does not
+# depend on the pin and cannot be green for that reason.
+OMN_18768_INCIDENT = GrantKey(
+    "omninode_runtime", "omninode_internal", "runner_fleet_liveness"
+)
+
+# The residual this arm's bound admits, named pair by pair rather than merely
+# counted. A bare count of 4 would stay green if the incident pair regressed
+# while one of these was closed in the same change, which is the exact
+# substitution a ratchet cannot see on its own.
+#
+# None of the four is the crash class. The three savings relations are granted
+# by node_savings_estimation_compute's own migrations, and that node lives in
+# omnibase_infra and declares NO db_io block at all -- so no contract anywhere
+# declares them, the contract-driven derivation has nothing to derive from, and
+# nothing resolves a projection binding for them. Real drift, different shape.
+OMN_18768_UNDECLARED_RESIDUAL = frozenset(
+    {
+        GrantKey(
+            "omninode_runtime", "omninode_internal", "savings_correlation_finalizations"
+        ),
+        GrantKey("omninode_runtime", "omninode_internal", "savings_injection_signals"),
+        GrantKey(
+            "omninode_runtime", "omninode_internal", "savings_validator_catch_signals"
+        ),
+        GrantKey("tenant_projection_writer", "public", "projection_delegation_savings"),
+    }
+)
+
+
+@pytest.mark.unit
+def test_omn_18768_incident_relation_is_delivered_by_a_migration() -> None:
+    """The corpus grants the relation -- this half was never the defect."""
+    delivered = delivered_grants(REPO_ROOT / "docker/migrations/forward")
+    assert OMN_18768_INCIDENT in delivered, (
+        f"{OMN_18768_INCIDENT} has no delivering GRANT in the corpus. The "
+        "incident's whole point is that the grant WAS delivered and only the "
+        "declaration was missing; if this fails, the migration was reverted."
+    )
+
+
+@pytest.mark.unit
+def test_omn_18768_incident_relation_is_declared_by_the_topology() -> None:
+    """The declaration half -- the one that crash-looped the runtime.
+
+    Named explicitly rather than left to the count below, because the runtime
+    reads the DECLARATION and refuses the whole process without it. A relation
+    the database already grants is still a boot failure here.
+    """
+    declared = declared_grants(
+        REPO_ROOT / "src/omnibase_infra/topology/instances/local.yaml"
+    )
+    assert OMN_18768_INCIDENT in declared, (
+        f"{OMN_18768_INCIDENT} is granted by a migration in this repo and "
+        "declared by no topology principal. The runtime resolves projection "
+        "bindings against the declaration, so this refuses auto-wiring at boot "
+        "with 'lacks declared read' and takes the whole process down. Advance "
+        ".github/omnimarket-contract-pin.yaml and regenerate -- never hand-edit "
+        "the generated grant block."
+    )
+
+
+@pytest.mark.unit
+def test_undeclared_count_is_exactly_the_ratchet_bound() -> None:
+    """The bound bites in both directions, as both older arms do.
+
+    Above it: a relation this repo grants that nothing declares, which is the
+    OMN-18768 crash waiting for the runtime to auto-wire it.
+
+    Below it: somebody closed part of the residual and left the bound stale, so
+    a regression back up to the old number would pass unnoticed.
+    """
+    extra = undeclared(REPO_ROOT)
+    rendered = "\n".join(f"  {key}" for key in extra)
+    assert len(extra) == MAX_UNDECLARED, (
+        f"{len(extra)} delivered-but-undeclared grants, bound is "
+        f"{MAX_UNDECLARED}. Update MAX_UNDECLARED in the same change that moves "
+        f"the count.\n{rendered}"
+    )
+
+
+@pytest.mark.unit
+def test_the_undeclared_residual_is_exactly_the_known_set() -> None:
+    """A count alone would tolerate a substitution; the names do not.
+
+    Closing one residual pair while the incident pair regresses keeps the count
+    at the bound and would pass the ratchet. Pinning the SET is what makes that
+    swap a failure.
+    """
+    assert set(undeclared(REPO_ROOT)) == set(OMN_18768_UNDECLARED_RESIDUAL)
+
+
+@pytest.mark.unit
+def test_checker_fails_when_the_undeclared_residual_grows() -> None:
+    """RED control for the reverse arm, against the real corpus and topology.
+
+    Proves the arm can fail without editing either input -- the OMN-15547
+    requirement that a gate be shown to bite rather than assumed to.
+    """
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/validation/check_topology_grant_delivery.py"),
+            "--max-undeclared",
+            str(MAX_UNDECLARED - 1),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 1
+    assert "UNDECLARED" in completed.stdout
+    assert "grant declaration" in completed.stdout
+
+
+@pytest.mark.unit
+def test_alter_default_privileges_is_not_read_as_a_named_delivery() -> None:
+    """``ALTER DEFAULT PRIVILEGES ... GRANT ... ON TABLES`` names no relation.
+
+    099_create_omninode_internal_live_events.sql carries one. The grant regex
+    read its ``TABLES`` keyword as a relation and put a phantom
+    ``public.TABLES`` pair in the delivered set, which showed up in this arm's
+    output as a fifth undeclared entry that no migration could ever close.
+    """
+    delivered = delivered_grants(REPO_ROOT / "docker/migrations/forward")
+    for key in delivered:
+        assert key.table.upper() != "TABLES"

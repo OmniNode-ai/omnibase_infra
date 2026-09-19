@@ -115,15 +115,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # rather than a default that leaks.
 INERT_COMPOSE_PROFILE = "profile-carrier-optin"
 
-# Compose profiles that a lane's runtime bring-up actually requests. Taken from
-# the base file's own runtime services, which every lane starts with
-# `--profile runtime`.
-STARTED_COMPOSE_PROFILES: frozenset[str] = frozenset({"runtime", "full"})
+# Compose profiles that each lane's runtime bring-up requests. Dogfood is a
+# standalone compose file, so its services opt into `dogfood` rather than the
+# base file's `runtime`/`full` profile pair.
+STARTED_COMPOSE_PROFILES_BY_LANE: dict[str, frozenset[str]] = {
+    "dogfood": frozenset({"dogfood"}),
+}
+DEFAULT_STARTED_COMPOSE_PROFILES: frozenset[str] = frozenset({"runtime", "full"})
 
 # Lanes this repo both measures AND deploys. `lakshman` is in GOVERNED_LANES and
 # is measured below, but its ratchet moves when its owner deploys, not here
 # (OMN-17150).
-MUTABLE_LAB_LANES: tuple[str, ...] = ("dev", "stability-test")
+MUTABLE_LAB_LANES: tuple[str, ...] = ("dev", "stability-test", "dogfood")
 
 
 class CarrierProfile(NamedTuple):
@@ -177,6 +180,7 @@ LANE_UNCARRIED_PROFILE_RATCHET: dict[str, int] = {
     "dev": 0,
     "stability-test": 0,
     "lakshman": 1,
+    "dogfood": 0,
 }
 
 _OMNIMARKET_ABSENT_REASON = (
@@ -224,7 +228,7 @@ def _compose_profiles(body: dict[str, Any]) -> frozenset[str]:
     return frozenset(str(item) for item in raw)
 
 
-def _is_started(body: dict[str, Any]) -> bool:
+def _is_started(lane: str, body: dict[str, Any]) -> bool:
     """Whether a lane's runtime bring-up starts this service.
 
     A service with no `profiles:` key at all is started unconditionally by
@@ -234,7 +238,10 @@ def _is_started(body: dict[str, Any]) -> bool:
     profiles = _compose_profiles(body)
     if not profiles:
         return True
-    return bool(profiles & STARTED_COMPOSE_PROFILES)
+    started_profiles = STARTED_COMPOSE_PROFILES_BY_LANE.get(
+        lane, DEFAULT_STARTED_COMPOSE_PROFILES
+    )
+    return bool(profiles & started_profiles)
 
 
 def _literal_runtime_profile(body: dict[str, Any]) -> str | None:
@@ -255,7 +262,7 @@ def _carried_profiles_on_lane(lane: str) -> dict[str, str]:
     """Map ``runtime profile -> service name`` for the services a lane STARTS."""
     carried: dict[str, str] = {}
     for service, body in _merged_services(lane).items():
-        if not _is_started(body):
+        if not _is_started(lane, body):
             continue
         profile = _literal_runtime_profile(body)
         if profile is not None:
@@ -356,7 +363,7 @@ def test_no_governed_lane_starts_a_service_naming_an_unregistered_profile() -> N
     unregistered: list[str] = []
     for lane in sorted(GOVERNED_LANES):
         for service, body in sorted(_merged_services(lane).items()):
-            if not _is_started(body):
+            if not _is_started(lane, body):
                 continue
             profile = _literal_runtime_profile(body)
             if profile is None:

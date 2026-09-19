@@ -108,7 +108,7 @@ resolve_lane_overlay_filename() {
             # resolve_compose_file_args' else-branch, not named here.
             return 0
             ;;
-        stability-test|prod|judge)
+        stability-test|prod|judge|dogfood)
             echo "docker-compose.${lane}.yml"
             return 0
             ;;
@@ -125,9 +125,9 @@ resolve_lane_overlay_filename() {
 
 resolve_compose_file_args() {
     # Populate a caller-provided array (passed by name) with the full
-    # `-f <file>` token sequence for a lane: always docker-compose.infra.yml,
-    # plus that lane's overlay -- docker-compose.<lane>.yml for a non-dev
-    # project, docker-compose.dev-lane.yml for the bare dev project.
+    # `-f <file>` token sequence for a lane. Standard lanes layer
+    # docker-compose.infra.yml with their overlay; the complete dogfood
+    # definition is deliberately standalone to prevent inherited dev resources.
     #
     # EVERY compose invocation against a lane goes through this, including the
     # read-only ones and especially the rollback recreate. A lane's overlay is
@@ -148,6 +148,10 @@ resolve_compose_file_args() {
     local compose_project="$3"
 
     local docker_dir="${deploy_target}/docker"
+    if [[ "${compose_project}" == "omnibase-infra-dogfood" ]]; then
+        eval "${_out_args_name}=(-f $(printf '%q' "${docker_dir}/docker-compose.dogfood.yml"))"
+        return 0
+    fi
     eval "${_out_args_name}=(-f $(printf '%q' "${docker_dir}/docker-compose.infra.yml"))"
 
     local overlay_filename

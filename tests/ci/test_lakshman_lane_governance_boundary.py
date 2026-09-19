@@ -203,7 +203,7 @@ def test_sanctioned_deploy_script_refuses_the_collaborator_lane() -> None:
     agent's attribution + grant machinery.
     """
     text = DEPLOY_RUNTIME_PATH.read_text(encoding="utf-8")
-    assert "stability-test|prod|judge)" in text, (
+    assert "stability-test|prod|judge|dogfood)" in text, (
         "the sanctioned deploy script's lane allowlist changed shape; re-derive "
         "whether the collaborator lane is still excluded"
     )
