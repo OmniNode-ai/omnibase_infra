@@ -91,6 +91,31 @@ def _failing_repair(ws: _Workspace) -> Path:
     return log
 
 
+def _lock_at_clone_head(ws: _Workspace) -> Path:
+    """Give omniclaude a lock naming the clone head.
+
+    ADDED by the OMN-18815 follow-up, and it is a precondition rather than
+    fixture noise. The marker-writing rebuild installs the rev the omniclaude
+    LOCK names, so it can only reach the clone head when the lock already
+    carries it. Before that gate existed these tests asserted "drifted means
+    repair" without establishing it, which is exactly the assumption the
+    change's first live run falsified: the repair ran and could not converge.
+
+    Tests that expect a repair therefore have to set it up. Tests that expect
+    NO repair deliberately do not, because declining is correct there too.
+    """
+    lock = ws.root / "omniclaude" / "uv.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(
+        "[[package]]\n"
+        'name = "omnimarket"\n'
+        f'source = {{ git = "https://github.com/OmniNode-ai/omnimarket.git'
+        f'?rev={ws.market_head}#{ws.market_head}" }}\n',
+        encoding="utf-8",
+    )
+    return lock
+
+
 def _run(
     ws: _Workspace, *args: str, home: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -134,6 +159,7 @@ def test_a_drifted_cli_venv_is_repaired_rather_than_only_reported(
 ) -> None:
     """AC1. The defect is that the remedy was a sentence."""
     _cli_venv(ws.root, commit="c" * 40, version="0.4.120")
+    _lock_at_clone_head(ws)
     log = _repair_recorder(ws)
 
     _run(ws, home=ws.root)
@@ -149,6 +175,7 @@ def test_the_repair_targets_the_drifted_interpreter(ws: _Workspace) -> None:
     """AC1. A repair that does not name the venv it found is a repair of
     whatever happened to be default, which on this host is a different venv."""
     venv = _cli_venv(ws.root, commit="c" * 40, version="0.4.120")
+    _lock_at_clone_head(ws)
     log = _repair_recorder(ws)
 
     _run(ws, home=ws.root)
@@ -176,6 +203,7 @@ def test_the_repair_goes_through_the_marker_writing_path(ws: _Workspace) -> None
     """AC2, positively. Only ``ensure-plugin-venv.sh``, reached through
     ``repair-plugin-venv.sh``, writes ``.built-from``."""
     _cli_venv(ws.root, commit="c" * 40, version="0.4.120")
+    _lock_at_clone_head(ws)
     log = _repair_recorder(ws)
 
     result = _run(ws, home=ws.root)
@@ -255,6 +283,7 @@ def test_a_failed_repair_is_reported_and_does_not_abort_the_run(
     cannot reach the index must leave a line naming the venv, not take the
     whole reconcile down with it."""
     _cli_venv(ws.root, commit="c" * 40, version="0.4.120")
+    _lock_at_clone_head(ws)
     log = _failing_repair(ws)
 
     result = _run(ws, home=ws.root)
