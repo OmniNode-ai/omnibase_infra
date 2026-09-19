@@ -8,7 +8,10 @@ import argparse
 import fnmatch
 import math
 import sys
+from collections import Counter
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from scripts.ci.test_selection_loader import (
     ModelAdjacencyMap,
@@ -30,7 +33,26 @@ TESTS_PREFIX = "tests/"
 SCRIPTS_PREFIX = "scripts/"
 # The two directories that actually exercise `scripts/`: the hermetic script
 # tests (tests/scripts/) and the unit-tree mirror (tests/unit/scripts/).
+#
+# OMN-18833: these two are a FLOOR, not the population. They are a convention
+# about where script tests are *supposed* to live, and the tree does not obey
+# it: 51 modules outside these two prefixes read a `scripts/**` path off disk
+# and assert its contents. omnibase_infra#3829 changed
+# `scripts/deploy-runners.sh`; the three tests it broke live in
+# `tests/unit/observability/runner_health/`; PR CI selected the five paths
+# these prefixes produce, all green, and dev went red. The prefixes are kept
+# (a script test that does live here is still selected without a reference),
+# and `script_reference_test_paths` below adds the tests that reference the
+# changed script, derived from the tree at selection time rather than from a
+# map that would go stale the next time a test is written somewhere new.
 SCRIPTS_TEST_PREFIXES = ("tests/scripts/", "tests/unit/scripts/")
+
+# Directories the reference scan and the population walk never descend into.
+# Neither can hold a test module the suite would collect from source, and both
+# can carry stale copies that would corrupt the basename-uniqueness denominator.
+_SCAN_SKIP_DIR_NAMES = frozenset(
+    {"__pycache__", ".pytest_cache", ".git", ".venv", "node_modules"}
+)
 CI_PROCESS_TEST_PATHS = (
     ".github/workflows/",
     "scripts/ci/",
@@ -302,6 +324,165 @@ def _full_suite_roots() -> tuple[str, ...]:
     return (TESTS_PREFIX, *sorted(set(COLLOCATED_TEST_ROOTS.values())))
 
 
+class ScriptReferenceEscalationError(RuntimeError):
+    """The scripts/-reference scan cannot produce a narrowed selection.
+
+    Carries the `EnumFullSuiteReason` the caller must escalate under, so the
+    two conditions that raise it (an unusable scan, a non-collectable module in
+    the tests/ root) report themselves honestly instead of sharing one reason
+    whose name would misdescribe half of its occurrences.
+    """
+
+    def __init__(self, reason: EnumFullSuiteReason, detail: str) -> None:
+        super().__init__(f"{reason.value}: {detail}")
+        self.reason = reason
+
+
+class ModelScriptReferenceScan(BaseModel):
+    """What the reference scan found: selectable paths, and what it could not narrow."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    selected_paths: frozenset[str] = Field(default_factory=frozenset)
+    unnarrowable_paths: frozenset[str] = Field(default_factory=frozenset)
+
+
+def _repo_unique_basenames(repo_root: Path) -> frozenset[str]:
+    """Basenames that occur exactly ONCE in the whole repository.
+
+    A basename is only usable as a search needle when nothing else in the tree
+    answers to it. `deploy-runners.sh` is unique, so a test that builds the path
+    segment-wise (`REPO_ROOT / "scripts" / "deploy-runners.sh"` -- the form every
+    one of the three tests #3829 broke uses, and the form a search for the joined
+    repo-relative path misses entirely) is still found. `__init__.py`, `cli.py`
+    and `models.py` are not unique, so they never become needles and cannot drag
+    the entire tree into a selection.
+
+    Derived from the working tree at selection time. A hand-maintained denylist
+    of "generic" names is the stale-map failure this whole change exists to
+    remove, one level down.
+    """
+    counts: Counter[str] = Counter()
+    for dirpath, dirnames, filenames in repo_root.walk():
+        dirnames[:] = [d for d in dirnames if d not in _SCAN_SKIP_DIR_NAMES]
+        del dirpath
+        counts.update(filenames)
+    return frozenset(name for name, count in counts.items() if count == 1)
+
+
+def _script_reference_needles(
+    script_path: str, unique_basenames: frozenset[str]
+) -> set[str]:
+    """Literals a test would contain if it exercises `script_path`.
+
+    Three forms, each observed in the tree:
+      * the repo-relative path -- `subprocess.run(["bash", "scripts/x.sh"])`;
+      * the bare basename, only when repo-unique and carrying an extension --
+        `REPO_ROOT / "scripts" / "deploy-runners.sh"`, where the joined path
+        never appears as a literal. An extensionless name (`scripts/onex`) is
+        excluded whatever its uniqueness: it reads as an ordinary English word
+        and would match on prose;
+      * for a `.py` script, the dotted import form -- `from scripts.ci.foo
+        import bar`, where neither of the other two appears.
+    """
+    needles = {script_path}
+    name = script_path.rsplit("/", 1)[-1]
+    if "." in name and name in unique_basenames:
+        needles.add(name)
+    if script_path.endswith(".py"):
+        needles.add(script_path[: -len(".py")].replace("/", "."))
+    return needles
+
+
+def script_reference_test_paths(
+    changed_files: list[str],
+    repo_root: Path = REPO_ROOT,
+) -> ModelScriptReferenceScan:
+    """Test paths that reference a changed `scripts/` file, derived by scanning.
+
+    Fails CLOSED. Any failure to complete the walk -- no `tests/` tree, an
+    unreadable directory or module, a file that is not valid UTF-8 -- raises
+    `ScriptReferenceEscalationError` rather than returning the partial result. A
+    half-finished scan and a scan that found nothing are indistinguishable in
+    the return value, and the difference is the whole point of the scan, so it
+    is carried in the control flow instead.
+
+    Measured cost on the 2026-09-19 tree: 2,715 modules / 36.5 MB read in
+    0.13 s, plus 0.04 s for the 7,948-entry uniqueness walk.
+    """
+    changed_scripts = [
+        path
+        for path in changed_files
+        if path.startswith(SCRIPTS_PREFIX) and not _is_docs_only_path(path)
+    ]
+    if not changed_scripts:
+        return ModelScriptReferenceScan()
+
+    tests_root = repo_root / TESTS_PREFIX
+    if not tests_root.is_dir():
+        raise ScriptReferenceEscalationError(
+            EnumFullSuiteReason.SCRIPT_REFERENCE_SCAN_FAILED,
+            f"no tests tree at {tests_root}",
+        )
+
+    selected: set[str] = set()
+    unnarrowable: set[str] = set()
+    try:
+        unique_basenames = _repo_unique_basenames(repo_root)
+        needles = set[str]()
+        for script in changed_scripts:
+            needles |= _script_reference_needles(script, unique_basenames)
+
+        for dirpath, dirnames, filenames in tests_root.walk(on_error=_raise_scan_error):
+            dirnames[:] = [d for d in dirnames if d not in _SCAN_SKIP_DIR_NAMES]
+            for name in filenames:
+                if not name.endswith(".py"):
+                    continue
+                text = (dirpath / name).read_text(encoding="utf-8")
+                if not any(needle in text for needle in needles):
+                    continue
+                rel = (dirpath / name).relative_to(repo_root).as_posix()
+                if rel.startswith(UNRUNNABLE_TEST_PREFIXES):
+                    # Selecting one of these can never make it run -- both
+                    # pytest steps ignore or deselect them identically -- so
+                    # emitting it would only risk exit 5, never add proof.
+                    continue
+                if is_collectable_test_file_name(name):
+                    # FILE grain. A module that names a script is the module
+                    # the script can break; its siblings are not, and at
+                    # directory grain one reference inside `tests/ci/` costs
+                    # that whole 241-module tree. Measured over the last 20
+                    # merged pull requests, directory grain costs +12.3%
+                    # collectable modules against this arm's +0.3%.
+                    selected.add(rel)
+                elif rel.rsplit("/", 1)[0] + "/" != TESTS_PREFIX:
+                    # A helper, `conftest.py` or `__init__.py` that names the
+                    # script. Pytest collects nothing from it, and anything in
+                    # its package may import it, so the honest unit is the
+                    # directory.
+                    selected.add(rel.rsplit("/", 1)[0] + "/")
+                else:
+                    # The same shape in the `tests/` ROOT, where the directory
+                    # is the whole tree. Reported, not selected -- `_resolve`
+                    # escalates rather than emit `tests/` as a narrowed path.
+                    unnarrowable.add(rel)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ScriptReferenceEscalationError(
+            EnumFullSuiteReason.SCRIPT_REFERENCE_SCAN_FAILED,
+            f"scan of {tests_root} failed: {exc}",
+        ) from exc
+
+    return ModelScriptReferenceScan(
+        selected_paths=frozenset(selected),
+        unnarrowable_paths=frozenset(unnarrowable),
+    )
+
+
+def _raise_scan_error(exc: OSError) -> None:
+    """`Path.walk`'s default swallows an unreadable directory. This one does not."""
+    raise exc
+
+
 def resolve_test_paths(
     changed_files: list[str],
     adjacency_path: Path,
@@ -423,6 +604,29 @@ def _resolve(
         if is_collectable_test_file_name(path.rsplit("/", 1)[1]):
             selected.add(path)
 
+    # OMN-18833: every test that REFERENCES a changed `scripts/` file, derived
+    # by scanning the tree rather than read off a prefix convention the tree
+    # does not obey. Additive to SCRIPTS_TEST_PREFIXES above, never a swap: a
+    # script test living in one of the two prefixes without naming the script
+    # keeps its selection. Raises rather than returning short when the scan
+    # cannot be completed -- `compute_selection` turns that into a full suite.
+    scan = script_reference_test_paths(changed_files, repo_root)
+    if scan.unnarrowable_paths:
+        raise ScriptReferenceEscalationError(
+            EnumFullSuiteReason.SCRIPT_REFERENCE_UNNARROWABLE,
+            "non-collectable tests/ root modules reference a changed script: "
+            + ", ".join(sorted(scan.unnarrowable_paths)),
+        )
+    # Sorted so a shorter prefix is considered before anything nested under
+    # it: `tests/unit/scripts/ci/` adds nothing once `tests/unit/scripts/` is
+    # selected, and emitting both only makes the selection look wider than the
+    # work behind it. Cost is unchanged either way -- `split_count_for_selection`
+    # unions the modules -- but a selection nobody can read is how a real
+    # widening goes unnoticed in review.
+    for scanned in sorted(scan.selected_paths):
+        if not _is_covered_by(selected, scanned):
+            selected.add(scanned)
+
     # OMN-15245 fail-closed invariant, applied LAST so it sees everything the
     # mappings above already cover: every CHANGED path under tests/ must be
     # collected by the emitted selection.
@@ -510,7 +714,16 @@ def compute_selection(
         )
 
     # 6. Smart selection.
-    selected = _resolve(changed_files, config)
+    #
+    # OMN-18833: the scripts/-reference scan inside `_resolve` fails CLOSED by
+    # raising. A scripts/ diff whose referencing tests could not be enumerated
+    # is a diff the selector cannot narrow honestly, so it escalates under the
+    # reason the scan names rather than shipping a selection built from a walk
+    # that did not finish.
+    try:
+        selected = _resolve(changed_files, config)
+    except ScriptReferenceEscalationError as exc:
+        return _full_suite(exc.reason)
     if not selected:
         # Conservative one-shard fallback over the full tests/unit/ tree. This
         # is NOT a no-op — it runs ~3-5 min of unit tests. It fires for changes

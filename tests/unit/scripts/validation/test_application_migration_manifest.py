@@ -695,8 +695,16 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # asserted rather than derived on purpose -- it is what makes a vendored
     # migration that arrives WITHOUT its declaration a red test here instead of
     # a fail-closed surprise at bootstrap deploy time.
+    # 190 -> 195 for OMN-18693: five new GRANT-only migrations ordering the
+    # dogfood lane's tenant_projection_writer role onto five house-tenant
+    # relations ahead of the writer's own DDL --
+    # nodes/node_projection_dep_health/004_grant_tenant_projection_writer_dep_health_findings.sql,
+    # nodes/node_projection_pattern_learning/002_grant_tenant_projection_writer_pattern_learning_artifacts.sql,
+    # nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql,
+    # nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql,
+    # nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql.
     #
-    # 190 -> 192 for OMN-18769 (C2 of epic OMN-18767), which adds TWO
+    # 195 -> 197 for OMN-18769 (C2 of epic OMN-18767), which adds TWO
     # node-owned migrations: 0000_create_lab_lane_health.sql, the projection
     # table folding the lane census, runtime health and lab-pass receipt facts
     # the lab observability tab reads, and 0001_grant_omninode_runtime_lab_
@@ -704,7 +712,7 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # The grant rides in the owning node's own lineage rather than a shared
     # file, so it is a second declaration here rather than an edit to the
     # first -- the same shape as node_projection_runner_fleet's pair above.
-    assert len(result.declarations) == 192
+    assert len(result.declarations) == 197
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
