@@ -197,6 +197,19 @@
 #    and its provider layer read back against the canonical clone. A surface
 #    this script cannot repair is a surface it must still be honest about.
 #
+# A THIRD SURFACE, AND IT IS NOT A VENV (OMN-18260). The lane-identity
+# `prepare-commit-msg` hook is host state that lives inside each clone's git
+# directory, and until now nothing converged it: it was armed on the operator's
+# Mac because somebody ran `lane_identity reconcile --execute` by hand, and
+# unarmed and unmentioned everywhere else. Measured over 2026-09-11..09-18, 39
+# of 4,105 commits across six repositories carried the lane trailer (0.95%),
+# which is the ceiling on every downstream gate that reads a lane out of a
+# commit. This script now arms it and READS IT BACK per clone, in both modes.
+# Unlike the CLI venv above, this surface IS written here, so an unarmed clone
+# is verdict-bearing rather than merely reported. What is never written is a
+# worktree file, a ref or the index -- the rule that this script never advances
+# a clone is untouched.
+#
 # ============================================================================
 # INTERIM BY DESIGN -- the node-based successor
 # ============================================================================
@@ -267,14 +280,23 @@
 #                                    the provider layer again.
 #   CLAUDE_PLUGIN_DATA               optional; when its .venv exists it is a
 #                                    hook-venv surface too
+#   ONEX_LANE_IDENTITY_SCRIPT        override the lane-identity module armed on
+#                                    each clone (tests only; defaults to
+#                                    $OMNI_HOME/omniclaude/scripts/lane_identity.py).
+#                                    Not a bypass: a path that does not resolve
+#                                    reports the surface as unasked, it never
+#                                    reports it as armed.
 #
 # Exit codes:
 #   0  IN_SYNC (--check) / reconciled successfully (default)
-#   1  DRIFT detected (--check only -- never returned by the repair path).
-#      Two classes, and the message says which: a venv layer that does not
-#      match its target, which THIS script repairs; or a canonical clone behind
-#      origin/<branch> (OMN-17295), which reconcile-host.sh repairs and this
-#      script only reports.
+#   1  DRIFT detected. Three classes, and the message says which: a venv layer
+#      that does not match its target, which THIS script repairs; a canonical
+#      clone behind origin/<branch> (OMN-17295), which reconcile-host.sh
+#      repairs and this script only reports; or a clone carrying no
+#      lane-identity stamping hook (OMN-18260), which this script arms and
+#      then reads back. The first two are --check only. The third is returned
+#      by the REPAIR path as well, because the repair path writes that surface
+#      and its exit code has to answer for what it wrote.
 #   2  reconcile FAILED; the message names the exact command to run by hand
 #   3  INDETERMINATE configuration (no OMNI_HOME, no canonical clone, no uv,
 #      or a surface this process must not write)
@@ -319,7 +341,11 @@ while [[ $# -gt 0 ]]; do
       BRANCH="$1"
       ;;
     --branch=*) BRANCH="${1#--branch=}" ;;
-    -h|--help) sed -n '1,191p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
+    # Through the end of the usage block, not a hand-counted line number: the
+    # previous literal stopped inside the header and cut the options, the env
+    # table and the exit codes out of `--help` entirely, and it went stale
+    # again the moment anything above it grew.
+    -h|--help) sed -n '1,/^set -uo pipefail$/p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
     *) echo "reconcile-workspace-venvs.sh: unknown argument: $1" >&2; exit "$EXIT_INDETERMINATE" ;;
   esac
   shift
@@ -1116,6 +1142,124 @@ report_unowned_cli_venvs() {
 }
 
 # --------------------------------------------------------------------------- #
+# The lane-identity hook surface (OMN-18260)
+# --------------------------------------------------------------------------- #
+# WHY A VENV RECONCILER ARMS A GIT HOOK. It is the same surface, asked about a
+# different file. This script already exists because a host's convergence must
+# not depend on somebody remembering to run a command, and the lane-identity
+# stamping hook was in exactly that state: armed on this Mac because a lane ran
+# `lane_identity reconcile --execute` by hand, unarmed and unmentioned anywhere
+# else. Measured 2026-09-18 over 2026-09-11..09-18, 39 of 4,105 commits across
+# six repositories carried the `Onex-Lane` trailer -- 0.95% -- which is the
+# ceiling on the OMN-18262 pre-push refusal and the OMN-18263 check, both of
+# which read the lane out of the trailer and can never see an unstamped commit.
+#
+# WHAT IS WRITTEN, AND WHY IT IS NOT THE CLONE MUTATION THIS SCRIPT FORBIDS.
+# The arming verb writes `<git-common-dir>/hooks/prepare-commit-msg` in each
+# clone and a dispatch entry in the shared `core.hooksPath` guard directory. It
+# never touches a worktree file, a ref, or the index, so the header's rule --
+# this script never advances a clone, there is exactly one clone reconciler --
+# is untouched. What it converges is HOST state that lives inside the clone's
+# git directory, which is the same class of thing as a venv.
+#
+# ONE INSTALL PER CLONE COVERS EVERY WORKTREE. Git worktrees share the main
+# clone's hooks directory, so the 400-odd worktrees under `omni_worktrees/`
+# need no install of their own. Stating it here because the obvious reading of
+# "arm every clone" is that the worktrees are a second, uncovered surface, and
+# they are not.
+#
+# THE RESOLUTION IS NOT REIMPLEMENTED HERE. Which clones exist, whether a hook
+# is installed, and whether git will actually dispatch it are all answered by
+# `lane_identity.py status`, the same module the arming verb and the hook
+# itself use. A second reader of that question in bash would be a second place
+# for it to drift, with the drifting half being the one nobody watches.
+LANE_IDENTITY_SCRIPT="${ONEX_LANE_IDENTITY_SCRIPT:-$OMNI_HOME/omniclaude/scripts/lane_identity.py}"
+
+# Run the module on the DISPATCH interpreter, for the reason
+# `report_unowned_cli_venvs` runs the readback there: it is the interpreter this
+# workspace already proves, and it is not the thing under inspection.
+lane_identity_runnable() {
+  [[ -f "$LANE_IDENTITY_SCRIPT" ]] && [[ -x "$DISPATCH_PYTHON" ]]
+}
+
+# NOT ASKABLE is not the same as ARMED, and neither is silence. A host whose
+# clone set does not include omniclaude -- a deploy runner, whose set is
+# `sibling_clone_manifest.sh` and does not name it -- cannot be asked this
+# question at all, so manufacturing a failure there would fire on every host
+# where the question does not arise. It still prints a line naming the path it
+# looked for, because the failure this whole leg exists to end is a surface
+# nobody mentions.
+lane_hook_not_askable() {
+  if [[ ! -f "$LANE_IDENTITY_SCRIPT" ]]; then
+    say "lane-identity hooks: NOT ASKABLE -- no $LANE_IDENTITY_SCRIPT in this workspace"
+    say "  The stamping hook ships in omniclaude, which is not in this host's"
+    say "  clone manifest. Nothing is armed here and nothing is claimed to be."
+    return 0
+  fi
+  return 1
+}
+
+# Print the per-clone hook state and return non-zero when any clone is unarmed.
+#
+# The exit status is the module's own: 1 when at least one clone is not armed,
+# 2 when it checked NO clone at all. The second matters as much as the first --
+# a sweep that inspected nothing reads exactly like a clean bill of health, and
+# `lane_identity status` refuses to report a pass on an empty sweep for that
+# reason (CLAUDE.md rule 16). Both are findings here.
+#
+# stderr is merged into the output rather than discarded: the module prints the
+# unarmed count and the remedy there, and a verification sweep that throws away
+# its own stderr is the shape of the false zero rule 16 is about.
+lane_hook_report() {
+  local out rc=0 line
+  lane_hook_not_askable && return 0
+  if [[ ! -x "$DISPATCH_PYTHON" ]]; then
+    say "lane-identity hooks: UNREADABLE -- no dispatch interpreter at $DISPATCH_PYTHON"
+    say "  The hook state cannot be read without one, and an unreadable surface"
+    say "  is reported as unproven rather than as armed."
+    return 1
+  fi
+  out="$(env -u PYTHONPATH "$DISPATCH_PYTHON" "$LANE_IDENTITY_SCRIPT" status 2>&1)" || rc=$?
+  say "lane-identity hooks (prepare-commit-msg, one install per clone):"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    say "  $line"
+  done <<<"$out"
+  return "$rc"
+}
+
+say_lane_hook_remedy() {
+  say "  A clone with no stamping hook produces commits carrying no lane, and a"
+  say "  commit carrying no lane is one the branch-claim resolution can never"
+  say "  compare against a claim holder. Arm every clone with:"
+  say "    OMNI_HOME=$OMNI_HOME $DISPATCH_PYTHON $LANE_IDENTITY_SCRIPT reconcile --execute"
+}
+
+# The repair half: arm, then READ BACK. The arming verb exiting 0 is not
+# evidence that the surface is armed (OMN-17307, a repair reporting its own exit
+# status as proof), so the verdict below comes from a fresh status read and
+# never from the install's return code.
+arm_lane_hooks() {
+  lane_hook_not_askable && return 0
+  if [[ ! -x "$DISPATCH_PYTHON" ]]; then
+    say "lane-identity hooks: UNREADABLE -- no dispatch interpreter at $DISPATCH_PYTHON"
+    return 1
+  fi
+  say "lane-identity hooks: arming every canonical clone"
+  # `as_owner`, and `cd` into a directory the dropped user can read: the hook
+  # files land inside clones owned by the surface owner, and a root-owned hook
+  # in a user-owned clone is the OMN-17335 hazard in a different directory.
+  if ! (cd "$OMNI_HOME" && as_owner env -u PYTHONPATH "$DISPATCH_PYTHON" \
+      "$LANE_IDENTITY_SCRIPT" reconcile --execute); then
+    # Reported, never fatal on its own: the readback below is what answers, and
+    # a non-zero here can be the ledger-backfill half failing while every hook
+    # installed correctly.
+    say "lane-identity hooks: the arming pass reported a failure; the readback decides"
+  fi
+  lane_hook_report
+}
+
+# --------------------------------------------------------------------------- #
 # --check : verdict only, zero mutation
 # --------------------------------------------------------------------------- #
 run_check() {
@@ -1232,6 +1376,16 @@ run_check() {
   # is verdict-bearing: the reader is asking about the workspace, not about the
   # subset of it this script happens to write.
   if ! report_unowned_cli_venvs "$head"; then
+    drift=1
+  fi
+
+  # ---- the lane-identity hook surface (OMN-18260) ------------------------- #
+  # Verdict-bearing, because after this change the repair path WRITES it. An
+  # unarmed clone is named by the report above; this is the line that stops the
+  # verdict reading IN_SYNC over it.
+  if ! lane_hook_report; then
+    say "DRIFT: a canonical clone carries no lane-identity stamping hook"
+    say_lane_hook_remedy
     drift=1
   fi
 
@@ -1622,6 +1776,16 @@ run_repair() {
   # now named, with its remedy, instead of leaving a reader to infer from
   # "reconciled" that every venv on the host was covered.
   report_unowned_cli_venvs "$(market_head)" || true
+
+  # ---- surface 4: the lane-identity hook on every clone (OMN-18260) ------- #
+  # Unlike the CLI-venv census above, this one is NOT report-only: this script
+  # writes it, so its exit code answers for it. A repair that armed nothing and
+  # exited 0 would be the state this ticket was reopened over.
+  if ! arm_lane_hooks; then
+    say "DRIFT: the lane-identity hook readback still names an unarmed clone"
+    say_lane_hook_remedy
+    exit "$EXIT_DRIFT"
+  fi
 
   exit "$EXIT_OK"
 }
