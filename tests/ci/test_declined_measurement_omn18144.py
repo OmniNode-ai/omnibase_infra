@@ -31,13 +31,23 @@ TWO DEFECTS, BOTH PINNED HERE.
    for the lane's entire post-acceptance grant (1500s), which this window was
    never sized to cover: the job ceiling allocates the settle budget
    SEPARATELY, to the probe step that follows (``2700 - 1500 - 900 - 120``, see
-   ``lane_settle_budget.STEP_OVERHEAD_SECONDS``). The window's job is to reach
-   ACCEPTANCE. Once the agent reaches this command the watch is doing real
-   work -- it either sees convergence, which is a measurement and can be a
-   PASS, or it stops at its wall clock and writes the same INDETERMINATE the
-   refusal would have written anyway, having cost nothing extra and taken the
-   chance. So the predicate is the time to REACH this command, and the
-   worst-case bound stays exactly where it belongs, in the evidence.
+   ``lane_settle_budget.STEP_OVERHEAD_SECONDS``). Removing that grant term was
+   right and it stays removed.
+
+   **SUPERSEDED IN PART, same day.** This file originally went on to argue that
+   the predicate is therefore the time to REACH this command, and two tests
+   here asserted it. That was wrong, and lane
+   ``post-merge-lab-verify-reds-diag-1230`` measured why within the hour: the
+   mean service time is ACCEPT-TO-COMPLETION, so reaching acceptance still
+   leaves this command's own full service before the lane carries the sha. At
+   ``commands_ahead = 1`` the reach predicate starts a watch that cannot
+   converge and holds the single verify runner for the whole window to reach
+   the same INDETERMINATE. The predicate is now the CONVERGENCE horizon, one
+   measured service per place in line, and an empty queue never refuses --
+   see ``tests/ci/test_convergence_horizon_omn18144.py``, which carries the
+   measured table and owns this half. The two tests below were rewritten to
+   assert the corrected behaviour rather than deleted, so the refuted claim
+   stays visible next to what replaced it.
 
 2. THE TRAIN COLLAPSED "THE LANE FAILED" INTO "NOTHING MEASURED THE LANE".
    AC5's fourth bullet requires that a queue the lane did not cause is a
@@ -215,30 +225,45 @@ def _wait(
 class TestTheMeasurementThatWasDeclined:
     """Run 35439999118, replayed with the lane converging when it really did."""
 
-    def test_one_command_ahead_does_not_refuse_a_window_that_can_reach_it(
+    def test_the_incident_is_refused_and_is_not_this_predicates_to_fix(
         self,
     ) -> None:
-        """The whole incident, in one assertion.
+        """REWRITTEN. This asserted the opposite until the correction.
 
-        1443s to reach this command against a 1620s window. The guard declined,
-        and the lane carried the sha 554s later.
+        The incident converged 554 seconds after the probe at
+        ``commands_ahead = 1`` -- far too fast for a queue drain plus a full
+        service at a 1443s mean. Read with the supersession finding on the same
+        lane, the in-flight command was building a DESCENDANT, so the lane
+        picked up this sha when that job completed. A queue-depth predicate
+        cannot see that and should not pretend to: the resolution is the
+        agent's supersession signal reaching CI (OMN-18816), not a wider
+        window. So this case is refused, and refused for the honest reason.
         """
-        clock = _Clock(T0)
-        result = _wait(
-            clock=clock,
-            queue=_queue(1),
-            converges_after=ACTUAL_CONVERGENCE_SECONDS,
-            accepted_after=int(SERVICE_SECONDS) - 900,
-        )
-        assert result.outcome is EnumConvergenceOutcome.OK
-
-    def test_the_predicate_is_the_time_to_reach_this_command(self) -> None:
-        """1443 + 60 fits in 1620; 1443 + 1500 + 60 does not, and is not asked."""
-        assert not queue_exceeds_bound(
+        assert queue_exceeds_bound(
             _queue(1),
             lane_budget_seconds=int(DECLARED.total_seconds()),
             wall_clock_seconds=int(WALL_CLOCK.total_seconds()),
             margin_seconds=int(POLL.total_seconds()),
+        )
+
+    def test_the_predicate_is_the_convergence_horizon_not_the_reach(self) -> None:
+        """REWRITTEN. 1443 + 60 fits in 1620; 1443 + 1443 + 60 does not.
+
+        The reach fits and the horizon does not, so a predicate reading the
+        reach would start this watch. It is the horizon that decides.
+        """
+        facts = _queue(1)
+        margin = int(POLL.total_seconds())
+        window = int(WALL_CLOCK.total_seconds())
+        reach = facts.reach_bound_seconds(margin_seconds=margin)
+        horizon = facts.convergence_horizon_seconds(margin_seconds=margin)
+        assert reach is not None and horizon is not None
+        assert reach <= window < horizon
+        assert queue_exceeds_bound(
+            facts,
+            lane_budget_seconds=int(DECLARED.total_seconds()),
+            wall_clock_seconds=window,
+            margin_seconds=margin,
         )
 
     def test_a_queue_the_window_cannot_reach_is_still_refused(self) -> None:
