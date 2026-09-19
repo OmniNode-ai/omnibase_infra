@@ -1227,7 +1227,7 @@ jq -n \
 # fleet or host topic. "What runners are running" had no producer at all.
 #
 # This emits ONE typed event per observation cycle — a ~69-runner fleet is one
-# message, not 69 — on onex.evt.infra.runner-fleet.v1, carrying per-runner name,
+# message, not 69 — on onex.evt.omnibase-infra.runner-fleet.v1, carrying per-runner name,
 # label class, host, online/offline/busy status, job id when resolvable, and
 # observed_at. The schema is built in Python (runner_fleet_event.py, beside this
 # script and rsynced with it) so it is deterministic and unit-testable; this
@@ -1237,7 +1237,7 @@ jq -n \
 # written and BEFORE the alert logic, it is wrapped so a publish failure cannot
 # abort the run under `set -e`, and it dispatches no remediation. A broken bus
 # must never suppress a runner alert or a bounce.
-RUNNER_FLEET_TOPIC="${RUNNER_FLEET_TOPIC:-onex.evt.infra.runner-fleet.v1}"
+RUNNER_FLEET_TOPIC="${RUNNER_FLEET_TOPIC:-onex.evt.omnibase-infra.runner-fleet.v1}"
 # The fleet observation is scoped BROADER than the detection loop, deliberately.
 # RUNNER_NAME_PREFIX is `omninode-runner`, which scopes the crash-loop/wedge
 # checks to the interchangeable general pool. The FLEET question is "what

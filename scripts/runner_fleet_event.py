@@ -15,7 +15,7 @@ WHY THIS EXISTS
     This module is the producer half. It is a PURE BUILDER so the wire schema is
     deterministic and unit-testable: the shell measures (it already holds the org
     runners JSON), this builds, and the shell publishes the single JSON object on
-    stdout to onex.evt.infra.runner-fleet.v1 — the same split as
+    stdout to onex.evt.omnibase-infra.runner-fleet.v1 — the same split as
     scripts/disk_watermark_event.py (OMN-13008).
 
 ONE EVENT PER CYCLE, NOT PER RUNNER

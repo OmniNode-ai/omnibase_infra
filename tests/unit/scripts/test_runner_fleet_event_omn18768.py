@@ -45,7 +45,7 @@ mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mod)
 
 NOW = datetime(2026, 9, 18, 23, 30, 0, tzinfo=UTC)
-TOPIC = "onex.evt.infra.runner-fleet.v1"
+TOPIC = "onex.evt.omnibase-infra.runner-fleet.v1"
 HOST = "omni-201"
 GROUP = "omnibase-ci"
 

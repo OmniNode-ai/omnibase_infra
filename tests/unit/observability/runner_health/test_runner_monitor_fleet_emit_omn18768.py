@@ -42,7 +42,7 @@ from tests.unit.observability.runner_health.test_runner_monitor_wedge_detection 
 REPO_ROOT = Path(__file__).parents[4]
 MONITOR_SCRIPT = REPO_ROOT / "docker" / "runners" / "runner-monitor.sh"
 BUILDER = REPO_ROOT / "scripts" / "runner_fleet_event.py"
-TOPIC = "onex.evt.infra.runner-fleet.v1"
+TOPIC = "onex.evt.omnibase-infra.runner-fleet.v1"
 
 # The general pool the detection loop watches, PLUS the classes that sit
 # outside its `omninode-runner` prefix: two customer-plane runners and three
