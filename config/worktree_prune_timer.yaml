@@ -1,0 +1,30 @@
+# Standing authorization for the unattended worktree prune (OMN-18832).
+#
+# This file is the operator's revoke switch. The runner
+# (scripts/worktree_prune_timer.py) reads it on every run and REFUSES the whole
+# run — before anything is removed — when the file is absent, when `enabled` is
+# not true, or when `consent_citation` does not resolve to an OPERATOR-CONSENT
+# row in the ledger.
+#
+# To revoke: set `enabled: false`, or delete this file. Either stops the timer
+# at its next fire. Nothing else needs to be touched, and no code change is
+# involved, which is the entire point of the citation living here rather than
+# in the source.
+#
+# The citation is a <path>:<line> into docs/tracking/ROLLING_WORK_LEDGER.md.
+# A relative path resolves against $OMNI_HOME. The cited line must carry the
+# OPERATOR-CONSENT marker; a NOTE, CLAIM or RULING row is refused.
+enabled: true
+# Operator, 2026-09-19 ~12:35Z: "the clones should not have any stale branch
+# wraps at all". That row's APPROVED SCOPE covers removal of worktrees whose
+# pull request is merged and deletion of the matching local branch refs through
+# the sanctioned tool; its OUT OF SCOPE covers dirty trees, unpushed commits,
+# branches with an open pull request or no pull request, the shared omni_home
+# tree's own branches, the .201 clones and any remote branch.
+consent_citation: "docs/tracking/ROLLING_WORK_LEDGER.md:2717"
+# Hand the deterministic pass's REFUSALS to a local model for a proposed
+# disposition. Operator ruling 2026-09-19 ~13:36Z, recorded at
+# docs/tracking/ROLLING_WORK_LEDGER.md:2914: "if we need an LLM in the loop for
+# triage it should go to local models". Nothing acts on a proposal; they are
+# written into the run report for a human or the orchestrator to read.
+delegate_refusal_review: true
