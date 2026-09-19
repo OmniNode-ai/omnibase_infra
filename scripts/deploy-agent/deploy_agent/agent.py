@@ -851,6 +851,8 @@ class DeployAgent:
                 # took before touching the lane, or the wait it held rather
                 # than cancelling a live recreate.
                 recreate_supervision=self.executor.recreate_supervision,
+                deps_convergence=self.executor.deps_convergence,
+                compose_invocations=self.executor.compose_invocations,
                 # OMN-18640 AC7: the runtime containers verification found dead
                 # and recreated, and whether that repaired them.
                 verify_recreate=self.executor.verify_recreate,

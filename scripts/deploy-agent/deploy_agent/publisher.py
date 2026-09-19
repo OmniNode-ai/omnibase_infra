@@ -15,7 +15,9 @@ from kafka import KafkaProducer
 
 from deploy_agent.events import (
     TOPIC_REBUILD_COMPLETED,
+    ModelComposeInvocation,
     ModelContainerResidue,
+    ModelDepsConvergenceFinding,
     ModelHealthCheck,
     ModelRebuildCompleted,
     ModelRecreateSupervision,
@@ -82,6 +84,8 @@ def build_completion_payload(
     container_residue: list[ModelContainerResidue] | None = None,
     sibling_refs: dict[str, str] | None = None,
     recreate_supervision: list[ModelRecreateSupervision] | None = None,
+    deps_convergence: list[ModelDepsConvergenceFinding] | None = None,
+    compose_invocations: list[ModelComposeInvocation] | None = None,
     verify_recreate: list[ModelVerifyRecreate] | None = None,
 ) -> dict[str, Any]:
     """Build the completion event payload from job state.
@@ -108,6 +112,13 @@ def build_completion_payload(
     of this event could not previously say which omnibase_core or omnimarket
     commit the image carried without going to the host and opening
     ``/app/build-provenance.json``.
+
+    OMN-18640 adds ``deps_convergence`` and ``compose_invocations``. The first
+    says, per core dependency, whether the deps leg was about to replace that
+    container and why; the second records the argv of every compose command
+    the deploy issued. Both existed nowhere durable before: a replaced
+    dependency left only a container timestamp, and a deploy's flags were
+    readable only by sampling the host process table while the child ran.
 
     OMN-18692 adds ``recreate_supervision``: what the deps-phase ceiling did.
     A deferral taken before the lane was touched, and a wait held past the
@@ -161,6 +172,8 @@ def build_completion_payload(
         health_checks=list(health_checks or []),
         container_residue=list(container_residue or []),
         recreate_supervision=list(recreate_supervision or []),
+        deps_convergence=list(deps_convergence or []),
+        compose_invocations=list(compose_invocations or []),
         verify_recreate=list(verify_recreate or []),
     )
     return completed.model_dump(mode="json")

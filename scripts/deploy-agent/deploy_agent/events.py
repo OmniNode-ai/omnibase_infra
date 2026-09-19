@@ -498,6 +498,94 @@ class EnumVerifyRecreateOutcome(StrEnum):
     RECREATE_TIMED_OUT = "recreate_timed_out"
 
 
+class ModelComposeInvocation(BaseModel):
+    """One ``docker compose`` command this deploy issued, as argv (OMN-18640).
+
+    The agent logs a phase, a ceiling and an outcome; it has never logged the
+    COMMAND. On 2026-09-18/19 the only way to read the argv of a live deploy
+    was to sample the host's process table while the child was running, which
+    is how the core leg's unconditional ``--force-recreate`` was finally
+    observed rather than inferred from source. A flag is the difference
+    between converging a lane and replacing it, so the flags a deploy actually
+    used belong in its durable record and not in a process table that empties
+    when the command exits.
+
+    ``argv`` is the list handed to the kernel, verbatim. It is safe to record:
+    every compose call this agent issues passes secrets through the
+    environment, never on the command line, precisely because a command line
+    is readable by every process on the host.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    phase: Phase
+    argv: tuple[str, ...]
+
+
+class ModelDepsConvergenceFinding(BaseModel):
+    """One core dependency's declaration, compared against what is running.
+
+    OMN-18640. The deps leg converges rather than force-recreates, so it
+    replaces a dependency only when compose's own config hash says the
+    declaration changed. That is the correct behaviour and it is also
+    invisible: on 2026-09-19 the job that replaced the lane's broker differed
+    from its five neighbours by nothing an operator could read except a phase
+    duration, 77 seconds against 5 to 10. This record says WHICH service is
+    about to be replaced and WHY, before it happens.
+
+    ``running_config_hash`` and ``rendered_config_hash`` are the authority.
+    They are the same value compose itself compares: the label
+    ``com.docker.compose.config-hash`` on the live container, and the output
+    of ``docker compose config --hash <service>`` for the render this deploy
+    is about to apply. Verified equal on all three core services of the .201
+    dev lane on 2026-09-19.
+
+    ``changed_fields`` is an ACCOUNT, never the authority. It names which of a
+    fixed, declared set of fields differ -- image, healthcheck, mounts,
+    environment keys -- and it can be EMPTY while ``differs`` is true, because
+    the hash covers fields outside that set. A reader must not conclude from
+    an empty list that nothing changed; that is what ``differs`` is for.
+    Environment is compared by KEY ONLY and only key names are ever recorded,
+    because the values are the lane's broker and database credentials.
+
+    ``unreadable_reason`` is non-empty when either hash could not be read -- an
+    absent container, a render that failed. An unreadable comparison is
+    reported as unreadable and the deploy proceeds; this record observes, it
+    never gates. Refusing here would strand a declared change, because nothing
+    in the fleet emits a deps-only scope for a deliberate refresh to route to.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    service: str
+    lane: EnumRuntimeLane
+    compose_project: str
+    running_config_hash: str = ""
+    rendered_config_hash: str = ""
+    differs: bool
+    changed_fields: tuple[str, ...] = ()
+    unreadable_reason: str = ""
+
+    def describe(self) -> str:
+        """One line naming the service and what is about to happen to it."""
+        if self.unreadable_reason:
+            return (
+                f"{self.service}: convergence effect UNKNOWN "
+                f"({self.unreadable_reason}); proceeding"
+            )
+        if not self.differs:
+            return f"{self.service}: declaration unchanged, will be left running"
+        fields = (
+            ", ".join(self.changed_fields)
+            if self.changed_fields
+            else ("no field in the compared set; the hash covers more than that set")
+        )
+        return (
+            f"{self.service}: declaration CHANGED ({fields}) -- convergence "
+            f"will REPLACE this container; running "
+            f"{self.running_config_hash[:12]} -> rendered "
+            f"{self.rendered_config_hash[:12]}"
+        )
+
+
 class ModelVerifyRecreate(BaseModel):
     """One runtime container this deploy recreated because its health failed.
 
@@ -621,6 +709,16 @@ class ModelRebuildCompleted(BaseModel):
     # only that the job failed, which is why the same wedge recurred three
     # times across two nights with nothing to distinguish the occurrences.
     verify_recreate: list[ModelVerifyRecreate] = Field(default_factory=list)
+    # OMN-18640: what the deps leg found before it acted -- per core service,
+    # the running config hash, the rendered one, and whether convergence was
+    # therefore about to replace that container. Empty for a deploy whose deps
+    # leg was never reached. A non-empty list with every `differs` false is the
+    # normal reading and is a FACT: the deps were left alone on purpose.
+    deps_convergence: list[ModelDepsConvergenceFinding] = Field(default_factory=list)
+    # OMN-18640: the argv of every compose command this deploy issued. Until
+    # this field existed the flags a deploy used were observable only by
+    # sampling the host process table while the child ran.
+    compose_invocations: list[ModelComposeInvocation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_phase_results_are_settled(self) -> ModelRebuildCompleted:
