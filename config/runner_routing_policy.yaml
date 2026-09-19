@@ -951,6 +951,10 @@ route:
       # constants live and fails when the two disagree, so drift is a red test
       # rather than a silent false positive.
       omnibase_infra:
+        # OMN-18796: the no-new-advisory-job gate. Enforced by the CI Summary
+        # poller via EXPECTED_EXTERNAL_CONTEXTS and absent from branch
+        # protection, which is exactly the shape this list records.
+        - advisory-job-gate / advisory-job-gate
         - Application Database Domain Enforcement (OMN-15361)
         - Arch Invariants (OMN-3343)
         - call-reject-skip-token / scan / reject-skip-gate-token
