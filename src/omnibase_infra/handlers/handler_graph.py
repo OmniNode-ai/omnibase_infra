@@ -981,16 +981,21 @@ class HandlerGraph(
         is_element_id = isinstance(relationship_id, str) and ":" in str(relationship_id)
         start_time = time.perf_counter()
 
+        # OMN-18795: the pattern is DIRECTED. `()-[r]-()` is undirected and
+        # matches every relationship once per direction, so `count(r)` reported
+        # 2 for a single deleted edge and ModelGraphDeleteResult.relationships_deleted
+        # over-reported by exactly 2x. The deletion itself was always correct;
+        # only the count a caller reads back was wrong.
         if is_element_id:
             query = """
-            MATCH ()-[r]-()
+            MATCH ()-[r]->()
             WHERE elementId(r) = $rel_id
             DELETE r
             RETURN count(r) as deleted
             """
         else:
             query = """
-            MATCH ()-[r]-()
+            MATCH ()-[r]->()
             WHERE id(r) = $rel_id
             DELETE r
             RETURN count(r) as deleted
@@ -1141,7 +1146,16 @@ class HandlerGraph(
         try:
             async with driver.session(database=self._database) as session:
                 result = await session.run(query, params)
-                records = await result.data()
+                # OMN-18795: NOT `await result.data()`. That helper flattens every
+                # Node and Relationship into a plain dict of its properties, and
+                # the loop below reads `node.labels`, `dict(node.items())`,
+                # `rel.element_id`, `rel.type` and `rel.start_node` off them. Any
+                # traversal that REACHED a node therefore died on
+                # `AttributeError: 'dict' object has no attribute 'labels'`, which
+                # the `except Neo4jError` arm does not catch — so only the
+                # zero-row path had ever worked. Iterating the result yields
+                # Record objects whose values are still graph entities.
+                records = [record async for record in result]
                 await result.consume()
 
             nodes: list[ModelGraphDatabaseNode] = []

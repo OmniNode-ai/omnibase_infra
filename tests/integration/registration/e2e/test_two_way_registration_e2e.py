@@ -4,11 +4,13 @@
 
 This module contains end-to-end integration tests for the node registration
 workflow, validating the complete registration flow against real infrastructure
-(Kafka, Consul, PostgreSQL).
+(Kafka and PostgreSQL). OMN-3540 removed the Consul backend; six tests that
+could only ever exercise it were deleted under OMN-18795 rather than left as
+permanent skips.
 
 Test Suites:
     - Suite 1: Node Startup and Introspection Broadcasting
-    - Suite 2: Registry Receives and Dual-Registers
+    - Suite 2: Registry Receives and Registers
     - Suite 3: Registry Startup Requests Re-Introspection
     - Suite 4: Heartbeat Periodic Publishing
     - Suite 5: Registry Recovery Scenario
@@ -19,13 +21,11 @@ Test Suites:
 Infrastructure Requirements:
     Tests require ALL infrastructure services to be available:
     - PostgreSQL: OMNIBASE_INFRA_DB_URL (database: omnibase_infra)
-    - Consul: CONSUL_HOST:28500
     - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS
 
     Environment variables required:
     - OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
-    - CONSUL_HOST (for Consul)
-    - KAFKA_BOOTSTRAP_SERVERS (for Kafka)
+    - KAFKA_BOOTSTRAP_SERVERS (for Kafka), plus KAFKA_INTEGRATION_TESTS=1
 
 Related Tickets:
     - OMN-892: E2E Registration Tests
@@ -72,10 +72,7 @@ from .verification_helpers import (
     assert_heartbeat_event_valid,
     assert_heartbeat_updated,
     assert_introspection_event_complete,
-    verify_consul_registration,
-    verify_dual_registration,
     verify_postgres_registration,
-    wait_for_consul_registration,
     wait_for_postgres_registration,
     wait_for_postgres_write,
 )
@@ -85,7 +82,6 @@ if TYPE_CHECKING:
 
     from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.models.projection import ModelRegistrationProjection
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
@@ -381,17 +377,16 @@ class TestSuite1NodeStartupIntrospection:
 
 
 class TestSuite2RegistryDualRegistration:
-    """Suite 2: Registry Receives and Dual-Registers.
+    """Suite 2: Registry Receives and Registers.
 
     These tests verify the second half of the 2-way registration pattern:
-    the registry receives introspection events and performs dual registration
-    to both Consul (service discovery) and PostgreSQL (persistence).
+    the registry receives introspection events and persists the registration
+    to PostgreSQL. OMN-3540 removed the Consul half, so there is one backend.
 
     Test Coverage:
-        - Registry receives introspection events from Kafka
-        - Consul registration succeeds
-        - PostgreSQL registration succeeds
-        - Dual registration performance (<300ms)
+        - Registry receives introspection events and emits the ACTIVE intent
+        - PostgreSQL registration succeeds and reads back
+        - Idempotency: blocking and retriable states
     """
 
     @pytest.mark.asyncio
@@ -452,31 +447,49 @@ class TestSuite2RegistryDualRegistration:
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events
 
-        # For a new node, handler should emit NodeRegistrationInitiated + Accepted
-        from omnibase_infra.models.registration.events.model_node_registration_accepted import (
-            ModelNodeRegistrationAccepted,
+        # OMN-5132 removed the ack round-trip: a new node goes straight to
+        # ACTIVE, so the second event is BecameActive, not Accepted. The
+        # previous revision of this test still expected the pre-OMN-5132 pair
+        # and had never run in CI to notice.
+        from omnibase_infra.models.registration.events.model_node_became_active import (
+            ModelNodeBecameActive,
         )
         from omnibase_infra.models.registration.events.model_node_registration_initiated import (
             ModelNodeRegistrationInitiated,
         )
 
         assert len(result_events) == 2, (
-            f"Expected 2 events (Initiated + Accepted), got {len(result_events)}"
+            f"Expected 2 events (Initiated + BecameActive), got {len(result_events)}"
         )
 
         assert isinstance(result_events[0], ModelNodeRegistrationInitiated), (
             f"Expected ModelNodeRegistrationInitiated, "
             f"got {type(result_events[0]).__name__}"
         )
-        assert isinstance(result_events[1], ModelNodeRegistrationAccepted), (
-            f"Expected ModelNodeRegistrationAccepted, "
-            f"got {type(result_events[1]).__name__}"
+        assert isinstance(result_events[1], ModelNodeBecameActive), (
+            f"Expected ModelNodeBecameActive, got {type(result_events[1]).__name__}"
         )
 
         # Verify event properties
         initiated_event: ModelNodeRegistrationInitiated = result_events[0]
         assert initiated_event.node_id == unique_node_id
         assert initiated_event.correlation_id == unique_correlation_id
+        became_active: ModelNodeBecameActive = result_events[1]
+        assert became_active.node_id == unique_node_id
+        assert became_active.correlation_id == unique_correlation_id
+
+        # The direct-to-ACTIVE contract is carried by the emitted upsert intent,
+        # not by the event pair alone: assert the state the intent would write.
+        intents = handler_output.intents
+        assert len(intents) == 1, (
+            f"Expected exactly one postgres upsert intent, got {len(intents)}"
+        )
+        record = intents[0].payload.record
+        assert record.entity_id == unique_node_id
+        assert record.current_state == EnumRegistrationState.ACTIVE.value, (
+            f"OMN-5132 requires direct-to-ACTIVE, intent writes "
+            f"{record.current_state!r}"
+        )
 
     @pytest.mark.asyncio
     async def test_postgres_registration_succeeds(
@@ -853,9 +866,15 @@ class TestSuite3ReIntrospection:
                 if hasattr(message, "value") and message.value:
                     try:
                         data = json.loads(message.value.decode("utf-8"))
+                        # MixinNodeIntrospection publishes through
+                        # publish_envelope, so the event is nested under
+                        # "payload". Reading node_id off the envelope root
+                        # always yielded None, which is why this test could
+                        # only ever reach its timeout branch.
+                        payload = data.get("payload", data)
                         node_id_str = str(introspectable_test_node.node_id)
-                        if data.get("node_id") == node_id_str:
-                            received_introspection.append(data)
+                        if payload.get("node_id") == node_id_str:
+                            received_introspection.append(payload)
                             event_received.set()
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         pass
@@ -883,28 +902,46 @@ class TestSuite3ReIntrospection:
                     value=json.dumps(request_event).encode("utf-8"),
                 )
 
-                # Wait for introspection response
+                # Wait for introspection response. A timeout is a FAILURE:
+                # the node's registry listener was confirmed subscribed above,
+                # so no response means the re-introspection path is broken.
                 try:
-                    await asyncio.wait_for(event_received.wait(), timeout=15.0)
-                    assert len(received_introspection) > 0, (
-                        "Expected at least one introspection event from node"
-                    )
-
-                    # Verify introspection event has expected fields
-                    introspection_event = received_introspection[-1]
-                    assert introspection_event.get("node_id") == str(
-                        introspectable_test_node.node_id
-                    )
-                    assert introspection_event.get("node_type") is not None
-                    assert introspection_event.get("capabilities") is not None
-
+                    await asyncio.wait_for(event_received.wait(), timeout=30.0)
                 except TimeoutError:
-                    warnings.warn(
-                        "Registry listener may not have been ready; "
-                        "introspection event not received in E2E environment",
-                        UserWarning,
-                        stacklevel=1,
+                    pytest.fail(
+                        f"Node {introspectable_test_node.node_id} did not publish "
+                        f"a fresh introspection event on "
+                        f"{DEFAULT_INTROSPECTION_TOPIC} within 30s of a "
+                        f"REQUEST_INTROSPECTION on "
+                        f"{DEFAULT_REQUEST_INTROSPECTION_TOPIC}."
                     )
+
+                assert len(received_introspection) > 0, (
+                    "Expected at least one introspection event from node"
+                )
+
+                # Verify introspection event has expected fields.
+                # The flat "capabilities" field was split into
+                # declared_/discovered_/contract_capabilities; the old
+                # assertion read a key that no longer exists.
+                introspection_event = received_introspection[-1]
+                assert introspection_event.get("node_id") == str(
+                    introspectable_test_node.node_id
+                )
+                assert (
+                    introspection_event.get("node_type")
+                    == introspectable_test_node.node_type.value
+                )
+                assert introspection_event.get("declared_capabilities") is not None
+                # The response must be attributed to the REQUEST that triggered
+                # it, not to a coincidental startup or heartbeat broadcast.
+                assert (
+                    introspection_event.get("reason")
+                    == EnumIntrospectionReason.REQUEST.value
+                ), (
+                    f"Expected a request-triggered introspection, got reason="
+                    f"{introspection_event.get('reason')!r}"
+                )
 
             finally:
                 await unsub_introspection()
@@ -953,12 +990,15 @@ class TestSuite3ReIntrospection:
                 if hasattr(message, "value") and message.value:
                     try:
                         data = json.loads(message.value.decode("utf-8"))
+                        # Same envelope unwrap as above: the published event is
+                        # the envelope's "payload", not its root.
+                        payload = data.get("payload", data)
                         node_id_str = str(introspectable_test_node.node_id)
-                        if data.get("node_id") == node_id_str:
+                        if payload.get("node_id") == node_id_str:
                             # Check if correlation_id matches
-                            response_corr_id = data.get("correlation_id")
+                            response_corr_id = payload.get("correlation_id")
                             if response_corr_id == str(request_correlation_id):
-                                matching_responses.append(data)
+                                matching_responses.append(payload)
                                 event_received.set()
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         pass
@@ -986,29 +1026,28 @@ class TestSuite3ReIntrospection:
                     value=json.dumps(request_event).encode("utf-8"),
                 )
 
-                # Wait for matching response
+                # Wait for matching response. A timeout is a FAILURE: it means
+                # the request's correlation_id was NOT carried onto the node's
+                # introspection response, which is the whole claim of this test.
                 try:
-                    await asyncio.wait_for(event_received.wait(), timeout=15.0)
-                    assert len(matching_responses) > 0, (
-                        "Expected response with matching correlation_id"
-                    )
-
-                    # Verify correlation_id was preserved
-                    response = matching_responses[-1]
-                    assert response.get("correlation_id") == str(
-                        request_correlation_id
-                    ), (
-                        f"Correlation ID mismatch: expected {request_correlation_id}, "
-                        f"got {response.get('correlation_id')}"
-                    )
-
+                    await asyncio.wait_for(event_received.wait(), timeout=30.0)
                 except TimeoutError:
-                    warnings.warn(
-                        "Registry listener may not have propagated correlation_id; "
-                        "response not received in E2E environment",
-                        UserWarning,
-                        stacklevel=1,
+                    pytest.fail(
+                        f"No introspection response from "
+                        f"{introspectable_test_node.node_id} carried "
+                        f"correlation_id {request_correlation_id} within 30s."
                     )
+
+                assert len(matching_responses) > 0, (
+                    "Expected response with matching correlation_id"
+                )
+
+                # Verify correlation_id was preserved
+                response = matching_responses[-1]
+                assert response.get("correlation_id") == str(request_correlation_id), (
+                    f"Correlation ID mismatch: expected {request_correlation_id}, "
+                    f"got {response.get('correlation_id')}"
+                )
 
             finally:
                 await unsub()
@@ -1777,7 +1816,6 @@ class TestSuite6MultipleNodes:
         - Verification that all registered nodes appear in both registries
     """
 
-    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
     @pytest.mark.asyncio
     @pytest.mark.slow
     async def test_multiple_nodes_register_simultaneously(
@@ -1785,8 +1823,6 @@ class TestSuite6MultipleNodes:
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
         real_projector: ProjectorShell,
-        real_consul_handler: HandlerConsul,
-        cleanup_consul_services: list[str],
         cleanup_node_ids: list[UUID],
         introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
@@ -1931,127 +1967,6 @@ class TestSuite6MultipleNodes:
             f"concurrent operations (0-{concurrent_count - 1})"
         )
 
-    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
-    @pytest.mark.asyncio
-    async def test_all_nodes_appear_in_registry(
-        self,
-        wired_container: ModelONEXContainer,
-        projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorShell,
-        real_consul_handler: HandlerConsul,
-        cleanup_consul_services: list[str],
-        cleanup_node_ids: list[UUID],
-        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
-    ) -> None:
-        """Test all registered nodes appear in both Consul and PostgreSQL.
-
-        Verifies that when multiple nodes are registered, all of them
-        correctly appear in both registry backends.
-
-        Steps:
-            1. Register 3 nodes sequentially
-            2. Verify all 3 in Consul
-            3. Verify all 3 in PostgreSQL
-
-        Assertions:
-            - All 3 nodes are registered in Consul
-            - All 3 nodes are registered in PostgreSQL
-            - Data is consistent across both backends
-        """
-        import json
-
-        from omnibase_infra.models.projection.model_registration_projection import (
-            ModelRegistrationProjection,
-        )
-
-        # Create 3 nodes
-        node_count = 3
-        node_ids = [uuid4() for _ in range(node_count)]
-        service_ids = [f"multi-node-{nid.hex[:8]}" for nid in node_ids]
-
-        # Track for cleanup
-        cleanup_consul_services.extend(service_ids)
-        cleanup_node_ids.extend(node_ids)
-
-        now = datetime.now(UTC)
-
-        # Step 1: Register all 3 nodes sequentially in both backends
-        for i, (node_id, service_id) in enumerate(
-            zip(node_ids, service_ids, strict=True)
-        ):
-            # Register in PostgreSQL
-            projection = ModelRegistrationProjection(
-                entity_id=node_id,
-                domain="registration",
-                current_state=EnumRegistrationState.ACTIVE,
-                registered_at=now,
-                updated_at=now,
-                node_type=EnumNodeKind.EFFECT if i % 2 == 0 else EnumNodeKind.COMPUTE,
-                node_version=f"1.{i}.0",
-                last_applied_event_id=node_id,
-            )
-            await persist_projection_via_shell(real_projector, projection)
-
-            # Register in Consul
-            consul_data = {
-                "node_id": str(node_id),
-                "node_type": "effect" if i % 2 == 0 else "compute",
-                "version": f"1.{i}.0",
-                "endpoints": {"health": f"http://localhost:808{i}/health"},
-                "registered_at": now.isoformat(),
-            }
-            consul_envelope: dict[str, object] = {
-                "operation": "consul.kv_put",
-                "payload": {
-                    "key": f"onex/services/{service_id}",
-                    "value": json.dumps(consul_data),
-                },
-            }
-            await real_consul_handler.execute(consul_envelope)
-
-        # Step 2: Verify all 3 in Consul (polling already handles retry)
-        consul_results = []
-        for service_id in service_ids:
-            result = await verify_consul_registration(
-                consul_handler=real_consul_handler,
-                service_id=service_id,
-                timeout_seconds=5.0,
-            )
-            consul_results.append(result)
-            assert result is not None, f"Service {service_id} should be found in Consul"
-
-        assert len([r for r in consul_results if r is not None]) == node_count, (
-            f"Expected {node_count} services in Consul, "
-            f"found {len([r for r in consul_results if r is not None])}"
-        )
-
-        # Step 3: Verify all 3 in PostgreSQL
-        postgres_results: list[ModelRegistrationProjection | None] = []
-        for node_id in node_ids:
-            pg_result = await verify_postgres_registration(
-                projection_reader=projection_reader, node_id=node_id
-            )
-            postgres_results.append(pg_result)
-            assert pg_result is not None, (
-                f"Node {node_id} should be found in PostgreSQL"
-            )
-            assert pg_result.current_state == EnumRegistrationState.ACTIVE
-
-        assert len([r for r in postgres_results if r is not None]) == node_count, (
-            f"Expected {node_count} registrations in PostgreSQL, "
-            f"found {len([r for r in postgres_results if r is not None])}"
-        )
-
-        # Verify data consistency across backends
-        for i, (_node_id, _service_id) in enumerate(
-            zip(node_ids, service_ids, strict=True)
-        ):
-            pg_result = postgres_results[i]
-            assert pg_result is not None
-            assert str(pg_result.node_version) == f"1.{i}.0", (
-                f"PostgreSQL version mismatch for node {i}"
-            )
-
 
 # =============================================================================
 # Suite 7: Graceful Degradation
@@ -2066,9 +1981,11 @@ class TestSuite7GracefulDegradation:
 
     Test Coverage:
         - Node resilience when Kafka is unavailable
-        - Registry works with Consul unavailable (PostgreSQL only)
-        - Registry works with PostgreSQL unavailable (Consul only)
-        - Partial success reporting for dual-backend operations
+        - A contract-loaded projector persists and reads back
+
+    Three tests were deleted here under OMN-18795: PostgreSQL-unavailable
+    degradation and the two partial-success cases were all statements about a
+    two-backend registry, and OMN-3540 left exactly one backend.
     """
 
     @pytest.mark.asyncio
@@ -2140,7 +2057,7 @@ class TestSuite7GracefulDegradation:
         assert result["result"] == "processed"
 
     @pytest.mark.asyncio
-    async def test_registry_works_when_consul_unavailable(
+    async def test_contract_loaded_projector_persists_and_reads_back(
         self,
         wired_container: ModelONEXContainer,
         postgres_pool: asyncpg.Pool,
@@ -2150,15 +2067,18 @@ class TestSuite7GracefulDegradation:
         unique_correlation_id: UUID,
         cleanup_projections: None,
     ) -> None:
-        """Test registry can still register in PostgreSQL when Consul is unavailable.
+        """A projector loaded from its contract persists and reads back.
 
         Verifies:
-        - PostgreSQL registration succeeds independently
-        - Consul failure doesn't block PostgreSQL registration
-        - The system can operate in degraded mode
+        - ``ProjectorPluginLoader.load_from_contract`` yields a real
+          ``ProjectorShell`` against the live pool
+        - ``upsert_partial`` writes a registration row
+        - the row is readable back through ``ProjectionReaderRegistration``
 
-        Note: This test directly tests the projection persistence path,
-        bypassing Consul to simulate unavailability.
+        Renamed under OMN-18795: this was
+        ``test_registry_works_when_consul_unavailable``, a degraded-mode claim
+        it stopped being able to make when OMN-3540 removed the Consul backend.
+        What it actually exercises is the contract-loaded projector path.
         """
         from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
         from omnibase_infra.runtime import ProjectorPluginLoader, ProjectorShell
@@ -2211,227 +2131,6 @@ class TestSuite7GracefulDegradation:
         assert pg_result.current_state == EnumRegistrationState.PENDING_REGISTRATION
         assert pg_result.node_type == EnumNodeKind.EFFECT
 
-    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
-    @pytest.mark.asyncio
-    async def test_registry_works_when_postgres_unavailable(
-        self,
-        real_consul_handler: HandlerConsul,
-        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
-        unique_node_id: UUID,
-        cleanup_consul_services: list[str],
-    ) -> None:
-        """Test registry can still register in Consul when PostgreSQL is unavailable.
-
-        Verifies:
-        - Consul registration succeeds independently
-        - PostgreSQL failure doesn't block Consul registration
-        - The system can operate in degraded mode
-
-        Note: This test directly tests the Consul registration path,
-        without PostgreSQL to simulate unavailability.
-        """
-        service_id = f"degradation-test-{unique_node_id.hex[:8]}"
-
-        # Track service for cleanup
-        cleanup_consul_services.append(service_id)
-
-        # Build registration payload
-        now = datetime.now(UTC)
-        registration_data = {
-            "node_id": str(unique_node_id),
-            "node_type": "effect",
-            "version": "1.0.0",
-            "endpoints": {"health": "http://localhost:8080/health"},
-            "registered_at": now.isoformat(),
-            "degraded_mode": True,  # Indicate this is a degraded registration
-        }
-
-        # Register in Consul via KV store
-        envelope: dict[str, object] = {
-            "operation": "consul.kv_put",
-            "payload": {
-                "key": f"onex/services/{service_id}",
-                "value": json.dumps(registration_data),
-            },
-        }
-
-        result = await real_consul_handler.execute(envelope)
-
-        # Verify write succeeded
-        assert result.result is not None, "Consul KV write should return result"
-
-        # Wait for and verify registration
-        consul_result = await wait_for_consul_registration(
-            consul_handler=real_consul_handler,
-            service_id=service_id,
-            timeout_seconds=10.0,
-        )
-
-        assert consul_result is not None, (
-            f"Service {service_id} should be found in Consul"
-        )
-        assert consul_result["service_id"] == service_id
-
-    @pytest.mark.asyncio
-    @pytest.mark.skip(
-        reason="Consul removed in OMN-3540; partial success between consul+postgres no longer applies"
-    )
-    async def test_partial_success_reporting(
-        self, unique_node_id: UUID, unique_correlation_id: UUID
-    ) -> None:
-        """Test partial success is correctly reported.
-
-        Verifies:
-        - ModelRegistryResponse shows which backends succeeded
-        - ModelRegistryResponse shows which backends failed
-        - Overall status is 'partial' if any backend fails
-        - Error summary correctly aggregates failure messages
-
-        Note: This tests the ModelRegistryResponse.from_backend_results() logic
-        without actually calling infrastructure services.
-        """
-        from omnibase_infra.models.model_backend_result import (
-            ModelBackendResult,
-        )
-        from omnibase_infra.nodes.node_registry_effect.models.model_registry_response import (
-            ModelRegistryResponse,
-        )
-
-        now = datetime.now(UTC)
-
-        # Scenario 1: Consul success, PostgreSQL failure
-        consul_success = ModelBackendResult(
-            success=True, duration_ms=45.0, backend_id="consul"
-        )
-        postgres_failure = ModelBackendResult(
-            success=False,
-            error="Connection refused",
-            error_code="DATABASE_CONNECTION_ERROR",
-            duration_ms=5000.0,
-            backend_id="postgres",
-        )
-
-        response = ModelRegistryResponse.from_backend_results(
-            node_id=unique_node_id,
-            correlation_id=unique_correlation_id,
-            consul_result=consul_success,
-            postgres_result=postgres_failure,
-            timestamp=now,
-        )
-
-        # Verify partial success status
-        assert response.status == "partial", (
-            f"Expected status 'partial', got '{response.status}'"
-        )
-        assert response.is_partial_failure() is True
-        assert response.is_complete_success() is False
-        assert response.is_complete_failure() is False
-
-        # Verify backend results
-        assert response.consul_result.success is True
-        assert response.postgres_result.success is False
-
-        # Verify failed/successful backends
-        assert response.get_failed_backends() == ["postgres"]
-        assert response.get_successful_backends() == ["consul"]
-
-        # Verify error summary
-        assert response.error_summary is not None
-        assert "PostgreSQL" in response.error_summary
-        assert "Connection refused" in response.error_summary
-
-        # Scenario 2: Consul failure, PostgreSQL success
-        consul_failure = ModelBackendResult(
-            success=False,
-            error="Service unavailable",
-            error_code="SERVICE_UNAVAILABLE",
-            duration_ms=3000.0,
-            backend_id="consul",
-        )
-        postgres_success = ModelBackendResult(
-            success=True, duration_ms=30.0, backend_id="postgres"
-        )
-
-        response2 = ModelRegistryResponse.from_backend_results(
-            node_id=unique_node_id,
-            correlation_id=unique_correlation_id,
-            consul_result=consul_failure,
-            postgres_result=postgres_success,
-            timestamp=now,
-        )
-
-        assert response2.status == "partial"
-        assert response2.get_failed_backends() == ["consul"]
-        assert response2.get_successful_backends() == ["postgres"]
-        assert "Consul" in (response2.error_summary or "")
-
-        # Scenario 3: Both backends fail
-        response3 = ModelRegistryResponse.from_backend_results(
-            node_id=unique_node_id,
-            correlation_id=unique_correlation_id,
-            consul_result=consul_failure,
-            postgres_result=postgres_failure,
-            timestamp=now,
-        )
-
-        assert response3.status == "failed"
-        assert response3.is_complete_failure() is True
-        assert len(response3.get_failed_backends()) == 2
-        assert len(response3.get_successful_backends()) == 0
-
-        # Scenario 4: Both backends succeed
-        response4 = ModelRegistryResponse.from_backend_results(
-            node_id=unique_node_id,
-            correlation_id=unique_correlation_id,
-            consul_result=consul_success,
-            postgres_result=postgres_success,
-            timestamp=now,
-        )
-
-        assert response4.status == "success"
-        assert response4.is_complete_success() is True
-        assert response4.error_summary is None
-
-    @pytest.mark.asyncio
-    @pytest.mark.skip(
-        reason="Consul removed in OMN-3540; dual-backend processing time no longer applies"
-    )
-    async def test_partial_success_processing_time_calculation(
-        self, unique_node_id: UUID, unique_correlation_id: UUID
-    ) -> None:
-        """Test processing time is correctly calculated from backend results.
-
-        Verifies:
-        - Processing time is sum of backend durations
-        - Processing time is correctly reported even for partial failures
-        """
-        from omnibase_infra.models.model_backend_result import (
-            ModelBackendResult,
-        )
-        from omnibase_infra.nodes.node_registry_effect.models.model_registry_response import (
-            ModelRegistryResponse,
-        )
-
-        now = datetime.now(UTC)
-
-        consul_result = ModelBackendResult(success=True, duration_ms=45.5)
-        postgres_result = ModelBackendResult(success=True, duration_ms=30.2)
-
-        response = ModelRegistryResponse.from_backend_results(
-            node_id=unique_node_id,
-            correlation_id=unique_correlation_id,
-            consul_result=consul_result,
-            postgres_result=postgres_result,
-            timestamp=now,
-        )
-
-        # Verify processing time is sum of backend durations
-        expected_total = 45.5 + 30.2
-        assert abs(response.processing_time_ms - expected_total) < 0.1, (
-            f"Expected processing_time_ms ~{expected_total}, "
-            f"got {response.processing_time_ms}"
-        )
-
 
 # =============================================================================
 # Suite 8: Registry Self-Registration
@@ -2446,106 +2145,11 @@ class TestSuite8RegistrySelfRegistration:
 
     Test Coverage:
         - Registry can create its own introspection event
-        - Registry appears in Consul after self-registration
         - Registry appears in PostgreSQL after self-registration
         - Registry introspection data is complete and valid
+
+    Two Consul-discovery tests were deleted here under OMN-18795.
     """
-
-    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
-    @pytest.mark.asyncio
-    async def test_registry_registers_itself(
-        self,
-        real_consul_handler: HandlerConsul,
-        projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorShell,
-        wired_container: ModelONEXContainer,
-        cleanup_consul_services: list[str],
-        cleanup_projections: None,
-        unique_node_id: UUID,
-    ) -> None:
-        """Test registry can register itself as a service.
-
-        Verifies:
-        - Registry can create its own introspection event
-        - Registry appears in Consul
-        - Registry appears in PostgreSQL
-
-        Note: Uses a unique_node_id to represent the registry for test isolation.
-        """
-        from omnibase_infra.models.projection.model_registration_projection import (
-            ModelRegistrationProjection,
-        )
-
-        registry_node_id = unique_node_id  # Use unique ID for test isolation
-        service_id = f"registry-{registry_node_id.hex[:8]}"
-
-        # Track service for cleanup
-        cleanup_consul_services.append(service_id)
-
-        now = datetime.now(UTC)
-
-        # Step 1: Register registry in Consul
-        registration_data = {
-            "node_id": str(registry_node_id),
-            "node_type": "orchestrator",  # Registry is an orchestrator
-            "version": "1.0.0",
-            "endpoints": {
-                "health": "http://localhost:8085/health",
-                "api": "http://localhost:8085/api/v1/registry",
-            },
-            "capabilities": {
-                "handlers": [
-                    "HandlerNodeIntrospected",
-                    "HandlerRuntimeTick",
-                    "HandlerNodeHeartbeat",
-                ],
-                "timeout_coordination": True,
-            },
-            "registered_at": now.isoformat(),
-            "service_type": "registry",
-        }
-
-        consul_envelope: dict[str, object] = {
-            "operation": "consul.kv_put",
-            "payload": {
-                "key": f"onex/services/{service_id}",
-                "value": json.dumps(registration_data),
-            },
-        }
-
-        await real_consul_handler.execute(consul_envelope)
-
-        # Step 2: Register registry in PostgreSQL
-        projection = ModelRegistrationProjection(
-            entity_id=registry_node_id,
-            domain="registration",
-            current_state=EnumRegistrationState.ACTIVE,
-            registered_at=now,
-            updated_at=now,
-            node_type=EnumNodeKind.ORCHESTRATOR,
-            node_version=ModelSemVer.parse("1.0.0"),
-            last_applied_event_id=registry_node_id,
-        )
-
-        await persist_projection_via_shell(real_projector, projection)
-
-        # Step 3: Verify dual registration
-        consul_result, postgres_result = await verify_dual_registration(
-            consul_handler=real_consul_handler,
-            projection_reader=projection_reader,
-            node_id=registry_node_id,
-            service_id=service_id,
-            timeout_seconds=10.0,
-        )
-
-        # Assertions
-        assert consul_result is not None, "Registry should be found in Consul"
-        assert consul_result["service_id"] == service_id
-
-        assert postgres_result is not None, "Registry should be found in PostgreSQL"
-        assert postgres_result.entity_id == registry_node_id
-        assert postgres_result.node_type == EnumNodeKind.ORCHESTRATOR
-        assert postgres_result.current_state == EnumRegistrationState.ACTIVE
 
     @pytest.mark.asyncio
     async def test_self_registration_in_database(
@@ -2683,74 +2287,3 @@ class TestSuite8RegistrySelfRegistration:
         assert "HandlerNodeHeartbeat" in registry_capabilities.supported_types
         assert registry_capabilities.processing is True
         assert registry_capabilities.routing is True
-
-    @pytest.mark.skip(reason="Requires consul removed in OMN-3540")
-    @pytest.mark.asyncio
-    async def test_registry_discoverable_by_other_nodes(
-        self,
-        real_consul_handler: HandlerConsul,
-        unique_node_id: UUID,
-        cleanup_consul_services: list[str],
-    ) -> None:
-        """Test registry is discoverable by other nodes via Consul.
-
-        Verifies:
-        - Registry service can be listed in Consul
-        - Service metadata includes necessary discovery information
-
-        Note: This tests the discovery path that other nodes would use
-        to find the registry for registration.
-        """
-        registry_node_id = unique_node_id
-        service_id = f"registry-discoverable-{registry_node_id.hex[:8]}"
-
-        # Track service for cleanup
-        cleanup_consul_services.append(service_id)
-
-        now = datetime.now(UTC)
-
-        # Register the registry service
-        registration_data = {
-            "node_id": str(registry_node_id),
-            "node_type": "orchestrator",
-            "version": "1.0.0",
-            "service_type": "registry",
-            "endpoints": {
-                "health": "http://localhost:8085/health",
-                "registration": "http://localhost:8085/api/v1/register",
-            },
-            "registered_at": now.isoformat(),
-        }
-
-        envelope: dict[str, object] = {
-            "operation": "consul.kv_put",
-            "payload": {
-                "key": f"onex/services/{service_id}",
-                "value": json.dumps(registration_data),
-            },
-        }
-
-        await real_consul_handler.execute(envelope)
-
-        # Discover the registry
-        consul_result = await wait_for_consul_registration(
-            consul_handler=real_consul_handler,
-            service_id=service_id,
-            timeout_seconds=10.0,
-        )
-
-        assert consul_result is not None, "Registry should be discoverable"
-        assert consul_result["service_id"] == service_id
-
-        # Parse the stored value to verify discovery info
-        value = consul_result.get("value")
-        if value:
-            import json as json_mod
-
-            if isinstance(value, bytes):
-                value = value.decode("utf-8")
-            if isinstance(value, str):
-                stored_data = json_mod.loads(value)
-                assert stored_data.get("service_type") == "registry"
-                assert stored_data.get("node_type") == "orchestrator"
-                assert "registration" in stored_data.get("endpoints", {})

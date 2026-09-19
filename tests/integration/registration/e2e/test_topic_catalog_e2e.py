@@ -3,25 +3,26 @@
 """E2E tests for Topic Catalog multi-client routing and change notification flows.
 
 Proves Option B routing: multiple clients on a shared response topic with no
-cross-talk via correlation_id filtering. All tests use component-level E2E
-(handlers called in-process with real Consul, no runtime container required).
+cross-talk via correlation_id filtering. Suite 1 runs against the real broker;
+the remaining suites call the handler in-process against the contract-derived
+``ServiceTopicCatalog``.
 
 Test Suites:
     - Suite 1: Multi-client no cross-talk (2 clients, different consumer groups,
-      correlation_id filtering)
+      correlation_id filtering) — requires Kafka/Redpanda
     - Suite 2: Response determinism (identical results on repeated query)
-    - Suite 3: Version-gap recovery simulation
     - Suite 4: Change notification golden path (register node → receive delta)
     - Suite 5: Integration golden path (lightweight handler-level)
 
+    Suite 3 (version-gap recovery) was DELETED under OMN-18795. Its premise was
+    a mutable Consul KV version counter. ``ServiceTopicCatalog.increment_version``
+    now returns ``-1`` unconditionally because the catalog version is derived
+    from contract files, so the suite could only ever take its own skip branch.
+
 Infrastructure Requirements:
-    All suites require ALL_INFRA_AVAILABLE (Consul + Kafka/Redpanda). The
-    directory-level conftest applies a pytestmark skipif(not ALL_INFRA_AVAILABLE)
-    to every test in this directory, so no suite can run independently of the
-    shared infrastructure guard even if it does not use Kafka directly. Note:
-    this skipif propagation affects all tests in the directory, including
-    ``test_golden_path_published_to_changed_topic_suffix_exists`` which requires
-    no live infrastructure.
+    The directory-level conftest fails closed when a CI job selects this family
+    without provisioning Kafka and Postgres (OMN-18795). This module itself
+    needs Kafka for Suite 1; the rest read tracked ``contract.yaml`` files.
 
 Related Tickets:
     - OMN-2317: Topic Catalog multi-client no-cross-talk E2E test
@@ -46,6 +47,10 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.models.catalog.catalog_warning_codes import (
+    INTERNAL_ERROR,
+    INVALID_QUERY_PAYLOAD,
+)
 from omnibase_infra.models.catalog.model_topic_catalog_changed import (
     ModelTopicCatalogChanged,
 )
@@ -74,7 +79,6 @@ from .conftest import (
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-    from omnibase_infra.handlers import HandlerConsul
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +119,17 @@ def mock_container_for_catalog() -> MagicMock:
 def catalog_service(
     mock_container_for_catalog: MagicMock,
 ) -> ServiceTopicCatalog:
-    """ServiceTopicCatalog stub (Consul removed in OMN-3540).
+    """ServiceTopicCatalog built from the tracked contract.yaml corpus.
+
+    OMN-3540 removed the Consul KV source; the catalog is now derived by
+    scanning ``omnibase_infra/nodes/**/contract.yaml``, so this is a real
+    service over real inputs, not a stub.
 
     Args:
         mock_container_for_catalog: Minimal mock container for DI.
 
     Returns:
-        ServiceTopicCatalog stub that returns empty results.
+        ServiceTopicCatalog reading the in-repo contract corpus.
     """
     return ServiceTopicCatalog(
         container=mock_container_for_catalog,
@@ -135,7 +143,7 @@ def catalog_handler(
     """HandlerTopicCatalogQuery wired to real ServiceTopicCatalog.
 
     Args:
-        catalog_service: Service backed by real Consul.
+        catalog_service: Service backed by the in-repo contract corpus.
 
     Returns:
         HandlerTopicCatalogQuery ready to process queries.
@@ -158,7 +166,14 @@ async def second_kafka_bus() -> AsyncGenerator[EventBusKafka, None]:
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
     if not KAFKA_BOOTSTRAP_SERVERS:
-        pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
+        # The package gate has already proved KAFKA_INTEGRATION_TESTS=1, i.e.
+        # this job declared it provisions a broker. An absent endpoint here is
+        # a provisioning defect, not a reason to skip (OMN-18795).
+        pytest.fail(
+            "KAFKA_BOOTSTRAP_SERVERS is unset but KAFKA_INTEGRATION_TESTS=1 "
+            "declared that this job provisions a broker.",
+            pytrace=False,
+        )
 
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
@@ -257,97 +272,6 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
             exc_info=True,
         )
     return None
-
-
-async def _write_node_topics_to_consul(
-    consul_handler: HandlerConsul,
-    node_id: str,
-    subscribe_topics: list[str],
-    publish_topics: list[str],
-    correlation_id: UUID,
-) -> None:
-    """Write node event bus topics to Consul KV for catalog scan.
-
-    Populates the ``onex/nodes/{node_id}/event_bus/subscribe_topics`` and
-    ``onex/nodes/{node_id}/event_bus/publish_topics`` keys used by
-    ServiceTopicCatalog to build the catalog.
-
-    Args:
-        consul_handler: Connected HandlerConsul instance.
-        node_id: Node identifier (used as KV path segment).
-        subscribe_topics: Topic suffixes this node subscribes to.
-        publish_topics: Topic suffixes this node publishes to.
-        correlation_id: Correlation ID for tracing.
-    """
-    base = f"onex/nodes/{node_id}/event_bus"
-
-    # DELIBERATE TEST COUPLING: _kv_put_raw is private, but HandlerConsul exposes no public
-    # KV-write API for test setup. Tracked for future public API: OMN-2317.
-    await consul_handler._kv_put_raw(  # type: ignore[attr-defined]
-        f"{base}/subscribe_topics",
-        json.dumps(subscribe_topics),
-        correlation_id,
-    )
-    # DELIBERATE TEST COUPLING: _kv_put_raw is private, but HandlerConsul exposes no public
-    # KV-write API for test setup. Tracked for future public API: OMN-2317.
-    await consul_handler._kv_put_raw(  # type: ignore[attr-defined]
-        f"{base}/publish_topics",
-        json.dumps(publish_topics),
-        correlation_id,
-    )
-
-
-async def _delete_node_from_consul(
-    consul_handler: HandlerConsul,
-    node_id: str,
-    correlation_id: UUID,
-) -> None:
-    """Best-effort deletion of node KV keys from Consul.
-
-    Uses ``consul.kv.delete(prefix, recurse=True)`` to remove all keys under
-    ``onex/nodes/{node_id}/event_bus/`` in a single call.  This avoids
-    leaving stale entries (empty arrays) that would pollute subsequent test
-    runs — the original approach of writing ``"[]"`` kept the keys present,
-    which caused test pollution.
-
-    Args:
-        consul_handler: Connected HandlerConsul instance.
-        node_id: Node identifier whose keys should be removed.
-        correlation_id: Correlation ID for tracing.
-    """
-    prefix = f"onex/nodes/{node_id}/event_bus/"
-    # DELIBERATE TEST COUPLING: _client is private, but HandlerConsul exposes no public
-    # KV-delete API for test cleanup (including write-API gap). Tracked for future public API: OMN-2317.
-    client = consul_handler._client  # type: ignore[attr-defined]
-    if client is None:
-        logger.warning(
-            "_delete_node_from_consul: consul client is None, skipping cleanup "
-            "(node_id=%r, correlation_id=%s)",
-            node_id,
-            correlation_id,
-        )
-        return
-
-    try:
-        # consul.kv.delete is synchronous; wrap in a thread so we don't
-        # block the event loop.  recurse=True deletes all keys under the
-        # prefix in one round-trip, matching the behaviour of the Consul API
-        # DELETE ?recurse endpoint.
-        await asyncio.to_thread(client.kv.delete, prefix, recurse=True)
-        logger.debug(
-            "_delete_node_from_consul: deleted prefix %r (correlation_id=%s)",
-            prefix,
-            correlation_id,
-        )
-    # consul.Consul raises consul.Timeout or OSError on network failure
-    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-        logger.warning(
-            "_delete_node_from_consul: failed to delete prefix %r — "
-            "test cleanup incomplete (correlation_id=%s)",
-            prefix,
-            correlation_id,
-            exc_info=True,
-        )
 
 
 # =============================================================================
@@ -469,7 +393,7 @@ class TestMultiClientNoCrossTalk:
                 ),
             )
 
-            # Build two catalog responses via the handler (in-process, real Consul)
+            # Build two catalog responses via the handler (in-process)
             envelope_a = _make_query_envelope(correlation_a, client_id="client-a")
             envelope_b = _make_query_envelope(correlation_b, client_id="client-b")
 
@@ -566,7 +490,7 @@ class TestResponseDeterminism:
     """Two consecutive queries with no registry changes must return identical results.
 
     Response determinism is a contract of ServiceTopicCatalog: given the same
-    catalog state in Consul, the topics tuple must be identical (same order,
+    catalog state, the topics tuple must be identical (same order,
     same entries, same count).
     """
 
@@ -665,127 +589,20 @@ class TestResponseDeterminism:
         response = output.events[0]
         assert isinstance(response, ModelTopicCatalogResponse)
 
-        if len(response.topics) >= 2:
-            suffixes = [t.topic_suffix for t in response.topics]
-            assert suffixes == sorted(suffixes), (
-                f"Topics must be sorted alphabetically by topic_suffix. Got: {suffixes}"
-            )
-            logger.info(
-                "Topic ordering test passed: %d topics in alphabetical order",
-                len(response.topics),
-            )
-        else:
-            pytest.skip("fewer than 2 topics available; cannot verify ordering")
-
-
-# =============================================================================
-# Suite 3: Version-gap recovery simulation
-# =============================================================================
-
-
-class TestVersionGapRecovery:
-    """Simulate a dashboard detecting a version gap and triggering re-query.
-
-    Option B's catalog_version enables clients to detect when they may have
-    missed a change notification (version gap). This suite proves the pattern
-    works end-to-end.
-    """
-
-    @pytest.mark.serial
-    async def test_version_gap_detection_and_recovery(
-        self,
-        catalog_service: ServiceTopicCatalog,
-        catalog_handler: HandlerTopicCatalogQuery,
-    ) -> None:
-        """Simulate version gap: bump twice, detect gap, re-query gets current state.
-
-        Steps:
-        1. Record initial catalog_version via get_catalog_version()
-        2. Bump version twice via increment_version() (without emitting changed events)
-        3. Check new_version >= initial_version + 2 (gap exists)
-        4. Re-query via handler
-        5. Assert: response catalog_version matches new_version (or higher)
-        6. Assert: no error warnings in response (healthy state)
-        """
-        correlation_id = uuid4()
-
-        # Step 1: record initial version
-        initial_version = await catalog_service.get_catalog_version(correlation_id)
-        # -1 means key absent; treat as 0 for gap arithmetic
-        if initial_version == -1:
-            initial_version = 0
-
-        logger.info("Version gap test: initial catalog_version=%d", initial_version)
-
-        # Step 2: bump version twice (simulating two registry changes without
-        # emitting ModelTopicCatalogChanged events — i.e., a gap scenario)
-        version_after_first = await catalog_service.increment_version(correlation_id)
-        version_after_second = await catalog_service.increment_version(correlation_id)
-
-        # increment_version returns -1 on CAS exhaustion; skip if Consul KV not writable
-        if version_after_first == -1 or version_after_second == -1:
-            pytest.skip(
-                "increment_version returned -1 (Consul KV not writable or CAS failure). "
-                "This test requires writable Consul KV."
-            )
-
+        # The catalog is derived from tracked contract.yaml files, so a corpus
+        # too small to order is a defect in the scan, not an environment gap.
+        assert len(response.topics) >= 2, (
+            f"Contract-derived catalog returned {len(response.topics)} topics; "
+            "at least 2 are required to verify ordering and the tracked "
+            "contract corpus declares far more. The contract scan is broken."
+        )
+        suffixes = [t.topic_suffix for t in response.topics]
+        assert suffixes == sorted(suffixes), (
+            f"Topics must be sorted alphabetically by topic_suffix. Got: {suffixes}"
+        )
         logger.info(
-            "Version gap test: bumped to %d then %d",
-            version_after_first,
-            version_after_second,
-        )
-
-        # Step 3: verify gap exists via delta-based checks.
-        # Using per-increment assertions instead of a single
-        # version_after_second >= initial_version + 2 check, which is
-        # susceptible to false failures under parallel test execution: a
-        # concurrent test could increment the shared Consul KV version between
-        # reading initial_version and the first bump, making the absolute bound
-        # incorrect.  Delta checks validate that each call actually advanced
-        # the counter regardless of what concurrent tests do to the shared key.
-        assert version_after_first >= initial_version + 1, (
-            "first increment should advance version"
-        )
-        assert version_after_second >= version_after_first + 1, (
-            "second increment should advance version"
-        )
-
-        # Step 4: dashboard detects gap, triggers re-query
-        recovery_correlation_id = uuid4()
-        recovery_envelope = _make_query_envelope(
-            recovery_correlation_id,
-            client_id="dashboard-recovery",
-            include_inactive=True,
-        )
-        recovery_output = await catalog_handler.handle(recovery_envelope)
-
-        assert len(recovery_output.events) == 1
-        recovery_response = recovery_output.events[0]
-        assert isinstance(recovery_response, ModelTopicCatalogResponse)
-
-        # Step 5: response must reflect current version (>= what we bumped to)
-        assert recovery_response.catalog_version >= version_after_second, (
-            f"Recovery response catalog_version ({recovery_response.catalog_version}) "
-            f"must be >= bumped version ({version_after_second})"
-        )
-
-        # Step 6: no error warnings (gap recovery is healthy)
-        error_warnings = [
-            w
-            for w in recovery_response.warnings
-            if w in ("internal_error", "invalid_query_payload", "no_consul_handler")
-        ]
-        assert error_warnings == [], (
-            f"Recovery response must not contain error warnings: {error_warnings}"
-        )
-
-        logger.info(
-            "Version gap recovery test passed: initial=%d, after_bumps=%d, "
-            "recovery_version=%d, gap=%d",
-            initial_version,
-            version_after_second,
-            recovery_response.catalog_version,
-            version_after_second - initial_version,
+            "Topic ordering test passed: %d topics in alphabetical order",
+            len(response.topics),
         )
 
 
@@ -868,7 +685,7 @@ class TestIntegrationGoldenPath:
     """Golden path: query → response → verify expected properties.
 
     This suite exercises the complete query-response flow using in-process
-    handlers against real Consul. It validates the core contracts that
+    handlers against the contract-derived catalog. It validates the core contracts that
     downstream clients depend on, including topic pattern filtering via
     fnmatch and the structural invariants of ModelTopicCatalogResponse
     (correlation_id pairing, catalog_version, topic suffix format).
@@ -912,10 +729,11 @@ class TestIntegrationGoldenPath:
         )
 
         # No error-class warnings (infra-level errors would indicate unhealthy state)
+        # Match against the constants the handler actually emits. The previous
+        # revision hard-coded "no_consul_handler", a code that exists nowhere in
+        # the product, so one third of this filter could never match anything.
         error_warnings = [
-            w
-            for w in response.warnings
-            if w in ("internal_error", "invalid_query_payload", "no_consul_handler")
+            w for w in response.warnings if w in (INTERNAL_ERROR, INVALID_QUERY_PAYLOAD)
         ]
         assert error_warnings == [], (
             f"Response must not contain error-class warnings: {error_warnings}"
@@ -967,12 +785,14 @@ class TestIntegrationGoldenPath:
         assert isinstance(response, ModelTopicCatalogResponse)
         assert response.correlation_id == correlation_id
 
-        # Requires Consul catalog to be pre-populated with topics matching 'onex.evt.platform.*'
-        if len(response.topics) == 0:
-            pytest.skip(
-                "Consul catalog has no topics matching 'onex.evt.platform.*'; "
-                "ensure integration environment is seeded"
-            )
+        # The catalog is contract-derived and the tracked corpus declares many
+        # onex.evt.platform.* topics, so an empty filtered result means the
+        # filter or the scan is broken — never an unseeded environment.
+        assert len(response.topics) > 0, (
+            f"No topics matched {pattern!r}. The tracked contract corpus "
+            "declares platform event topics, so either the contract scan or "
+            "ServiceTopicCatalog._filter_response() is broken."
+        )
         for entry in response.topics:
             assert fnmatch(entry.topic_suffix, pattern), (
                 f"Topic {entry.topic_suffix!r} does not match pattern {pattern!r}. "

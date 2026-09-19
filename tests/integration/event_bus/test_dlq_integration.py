@@ -36,6 +36,7 @@ import pytest
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models import ModelNodeIdentity
+from tests.helpers.service_env import require_service_env
 
 from .conftest import wait_for_consumer_ready
 
@@ -50,19 +51,35 @@ from omnibase_infra.event_bus.models import ModelEventMessage
 # Test Configuration and Skip Conditions
 # =============================================================================
 
-# Check if Kafka is available AND integration tests are explicitly opted in.
-# KAFKA_BOOTSTRAP_SERVERS may be set in a developer's local environment, so we
-# require KAFKA_INTEGRATION_TESTS=1 to prevent false connects in CI without a live broker.
+# OMN-18795: this suite is SELECTED BY MARKER, not gated by a silent skipif.
+#
+# It carried a module-level opt-in that no workflow in this repository set, so
+# the dead-letter-queue path -- the bus's own failure path -- was collected on
+# every pull request, skipped in full, and counted toward a green Tests job. It
+# is deselected from the PR test splits by `not kafka` and EXECUTED by the
+# service-integration-suites job in ci.yml, which provisions a real Redpanda.
+# Once a job has SELECTED it, a missing opt-in is a red failure, not a skip.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = (
-    KAFKA_BOOTSTRAP_SERVERS is not None and os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
-)
 
-# Skip marker for tests that require Kafka
-requires_kafka = pytest.mark.skipif(
-    not KAFKA_AVAILABLE,
-    reason="Kafka not available (set KAFKA_BOOTSTRAP_SERVERS and KAFKA_INTEGRATION_TESTS=1)",
-)
+pytestmark = [
+    pytest.mark.kafka,
+]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _require_kafka() -> None:
+    """Refuse to skip this suite silently once CI has selected it."""
+    require_service_env(
+        opt_in="KAFKA_INTEGRATION_TESTS",
+        endpoint="KAFKA_BOOTSTRAP_SERVERS",
+        workflow=".github/workflows/ci.yml (service-integration-suites)",
+        service="Kafka/Redpanda",
+    )
+
+
+# `requires_kafka` is retained as a no-op alias so the per-class decorators below
+# keep reading naturally; the module fixture above is now the single gate.
+requires_kafka = pytest.mark.kafka
 
 # Test configuration constants
 TEST_TIMEOUT_SECONDS = 30

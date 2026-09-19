@@ -291,9 +291,29 @@ def test_scanner_detects_the_shape_it_exists_to_catch() -> None:
         "<module-level skip>": {"OTHER_REQUIRE_FLAG"}
     }
 
-    # And the live tree is not silently empty: the registry describes real
-    # modules, so a scan that returned nothing would mean the scanner broke.
-    assert len(scan_tests_tree()) >= 10
+    # And the live tree is not silently empty. This used to be a bare count
+    # floor (`>= 10`). OMN-18795 replaced it, because that floor falls every
+    # time a suite is repaired out of the registry — which is the DESIRED
+    # direction — so it has to be edited downward on exactly the changes that
+    # improve things, and an edit downward is indistinguishable from the
+    # scanner quietly breaking. Anchoring on named modules instead cannot go
+    # vacuous and needs no edit when an unrelated suite is repaired.
+    live = scan_tests_tree()
+    assert live, (
+        "the scanner found no env-gated module skip anywhere in the tree. The "
+        "REQUIRE_PG migration family below is deliberately gated this way, so "
+        "an empty scan means the scanner broke, not that the tree is clean."
+    )
+    for anchor in (
+        "tests/integration/migrations/test_node_migration_shape_drift_omn15376.py",
+        "tests/integration/migrations/test_omn17316_role_set_membership_guard.py",
+        "tests/integration/migrations/test_omn15683_mixed_representation_conversion.py",
+    ):
+        assert anchor in live, (
+            f"{anchor} keeps its module-level REQUIRE_PG skip deliberately (skip "
+            f"without a database, hard-fail when the owning job supplies one). "
+            f"The scanner not finding it means the scanner is broken."
+        )
 
 
 def test_workflow_setter_detection_rejects_a_var_the_workflow_does_not_set() -> None:
@@ -321,20 +341,35 @@ def test_workflow_setter_detection_rejects_a_var_the_workflow_does_not_set() -> 
 
 
 def test_the_two_repaired_suites_no_longer_skip_on_an_env_var() -> None:
-    """The suites this ticket repaired must not reappear in the scan.
+    """The suites OMN-18781 and OMN-18795 repaired must not reappear in the scan.
 
-    They are selected by marker now — ``kafka`` and ``qdrant``, both deselected
-    by the PR splits — and their CI disposition is a FAILURE, not a skip. If a
-    later change reintroduces a module-level env skipif on either, it belongs in
-    the registry with a workflow behind it, and this names them first.
+    They are selected by marker now — ``kafka``, ``qdrant``, ``graph``, ``e2e``,
+    ``heavy``, all deselected by the PR splits — and their CI disposition is a
+    FAILURE, not a skip. If a later change reintroduces a module-level env
+    skipif on any of them, it belongs in the registry with a workflow behind it,
+    and this names them first.
+
+    Reintroducing a skip is the specific regression this guards: each of these
+    suites reached a state where it could not silently skip, and the cheapest
+    way to make a newly-red suite quiet again is to put the skipif back.
     """
     scanned = scan_tests_tree()
     for repaired in (
+        # OMN-18781
         "tests/integration/event_bus/test_kafka_event_bus_integration.py",
         "tests/integration/handlers/test_handler_qdrant_integration.py",
+        # OMN-18795 — the nine that had no execution path at all
+        "tests/integration/event_bus/test_dlq_integration.py",
+        "tests/integration/nodes/test_node_reward_binder_effect.py",
+        "tests/integration/registration/e2e/conftest.py",
+        "tests/integration/registration/e2e/test_runtime_e2e.py",
+        "tests/integration/test_runtime_consumes_build_loop_terminal_event.py",
+        "tests/integration/handlers/test_handler_graph_integration.py",
+        "tests/integration/scripts/test_register_repo_omnimarket.py",
+        "tests/integration/correlation/test_correlation_propagation_heavy.py",
     ):
         assert repaired not in scanned, (
-            f"{repaired} has a module-level env-gated skip again. OMN-18781 "
-            f"replaced it with marker selection plus a fail-closed CI check "
-            f"precisely so this suite cannot silently skip."
+            f"{repaired} has a module-level env-gated skip again. OMN-18781 and "
+            f"OMN-18795 replaced these with marker selection plus a fail-closed "
+            f"CI check precisely so they cannot silently skip."
         )

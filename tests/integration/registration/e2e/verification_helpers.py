@@ -3,8 +3,14 @@
 """Verification helpers for E2E registration tests.
 
 Provides async helpers to verify registration data persistence across
-infrastructure services (Consul, PostgreSQL, Kafka) and validate state
-transitions in the registration workflow.
+infrastructure services (PostgreSQL, Kafka) and validate state transitions in
+the registration workflow.
+
+The Consul helpers (``verify_consul_registration``, ``wait_for_consul_registration``,
+``verify_dual_registration``) were DELETED under OMN-18795: they typed against
+``omnibase_infra.handlers.HandlerConsul``, which OMN-3540 removed, so every one
+of them raised ImportError the moment it was called at runtime rather than
+under TYPE_CHECKING.
 
 Architecture:
     Uses the declarative orchestrator pattern with:
@@ -51,163 +57,9 @@ if TYPE_CHECKING:
 
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-    from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Consul Verification Helpers
-# =============================================================================
-
-
-async def verify_consul_registration(
-    consul_handler: HandlerConsul,
-    service_id: str,
-    timeout_seconds: float = 5.0,
-    *,
-    correlation_id: UUID | None = None,
-) -> dict[str, object] | None:
-    """Verify a service is registered in Consul.
-
-    Queries Consul for a service registration by service_id. Returns
-    the registration dict if found, None otherwise. Retries until
-    timeout to handle async registration propagation.
-
-    Args:
-        consul_handler: Initialized HandlerConsul instance.
-        service_id: The service ID to verify.
-        timeout_seconds: Maximum time to wait for registration.
-        correlation_id: Optional correlation ID for tracing.
-
-    Returns:
-        Service registration dict if found, None otherwise.
-
-    Note:
-        This helper queries Consul's KV store where service metadata
-        is stored, not the agent service catalog directly.
-    """
-    # Build envelope for KV get operation
-    envelope: dict[str, object] = {
-        "operation": "consul.kv_get",
-        "payload": {
-            "key": f"onex/services/{service_id}",
-        },
-    }
-
-    start_time = asyncio.get_running_loop().time()
-    while asyncio.get_running_loop().time() - start_time < timeout_seconds:
-        try:
-            result = await consul_handler.execute(envelope)
-            if result.result and result.result.payload:
-                payload_data = result.result.payload.data
-                # Check if we got a found response (not NotFound)
-                if hasattr(payload_data, "value") and payload_data.value is not None:
-                    return {"service_id": service_id, "value": payload_data.value}
-        except (TimeoutError, ConnectionError, OSError) as e:
-            # Network/connection errors - log and retry
-            logger.debug(
-                "Consul KV lookup failed (retrying): %s",
-                type(e).__name__,
-                extra={
-                    "service_id": service_id,
-                    "correlation_id": str(correlation_id) if correlation_id else None,
-                },
-            )
-        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-            # Unexpected errors - log with more detail but still retry
-            logger.warning(
-                "Unexpected error during Consul lookup (retrying): %s: %s "
-                "(correlation_id=%s)",
-                type(e).__name__,
-                str(e),
-                correlation_id,
-                extra={
-                    "service_id": service_id,
-                    "correlation_id": str(correlation_id) if correlation_id else None,
-                },
-            )
-
-        # Polling interval - retry Consul KV lookup every 0.2s until timeout
-        await asyncio.sleep(0.2)
-
-    return None
-
-
-async def wait_for_consul_registration(
-    consul_handler: HandlerConsul,
-    service_id: str,
-    timeout_seconds: float = 10.0,
-    poll_interval: float = 0.5,
-    *,
-    correlation_id: UUID | None = None,
-) -> dict[str, object]:
-    """Wait for a service to appear in Consul.
-
-    Polls Consul until the service is registered or timeout is reached.
-
-    Args:
-        consul_handler: Initialized HandlerConsul instance.
-        service_id: The service ID to wait for.
-        timeout_seconds: Maximum time to wait.
-        poll_interval: Time between poll attempts.
-        correlation_id: Optional correlation ID for tracing.
-
-    Returns:
-        Service registration dict when found.
-
-    Raises:
-        TimeoutError: If service not found within timeout.
-    """
-    start_time = asyncio.get_running_loop().time()
-    last_error: Exception | None = None
-
-    while asyncio.get_running_loop().time() - start_time < timeout_seconds:
-        try:
-            result = await verify_consul_registration(
-                consul_handler,
-                service_id,
-                timeout_seconds=poll_interval,
-                correlation_id=correlation_id,
-            )
-            if result is not None:
-                return result
-        except (TimeoutError, ConnectionError, OSError) as e:
-            # Expected network/connection errors - log at debug and retry
-            last_error = e
-            logger.debug(
-                "Consul wait poll failed: %s",
-                type(e).__name__,
-                extra={
-                    "service_id": service_id,
-                    "correlation_id": str(correlation_id) if correlation_id else None,
-                },
-            )
-        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-            # Unexpected errors - log with more detail
-            last_error = e
-            logger.warning(
-                "Unexpected error during Consul poll: %s: %s (correlation_id=%s)",
-                type(e).__name__,
-                str(e),
-                correlation_id,
-                extra={
-                    "service_id": service_id,
-                    "correlation_id": str(correlation_id) if correlation_id else None,
-                },
-            )
-
-        # Polling interval - check Consul registration status periodically
-        await asyncio.sleep(poll_interval)
-
-    error_msg = (
-        f"Service '{service_id}' not found in Consul within {timeout_seconds}s "
-        f"(correlation_id={correlation_id})"
-    )
-    if last_error:
-        error_msg += f" (last error: {last_error})"
-    raise TimeoutError(error_msg)
 
 
 # =============================================================================
@@ -648,74 +500,6 @@ async def collect_registration_events(
 # =============================================================================
 
 
-async def verify_dual_registration(
-    consul_handler: HandlerConsul,
-    projection_reader: ProjectionReaderRegistration,
-    node_id: UUID,
-    service_id: str,
-    timeout_seconds: float = 10.0,
-    *,
-    correlation_id: UUID | None = None,
-) -> tuple[dict[str, object], ModelRegistrationProjection]:
-    """Verify node is registered in BOTH Consul and PostgreSQL.
-
-    Waits for registration to appear in both services, ensuring the
-    dual registration pattern completed successfully.
-
-    Args:
-        consul_handler: Initialized HandlerConsul instance.
-        projection_reader: Initialized ProjectionReaderRegistration instance.
-        node_id: UUID of the node.
-        service_id: Consul service ID.
-        timeout_seconds: Maximum time to wait for both registrations.
-        correlation_id: Optional correlation ID for tracing.
-
-    Returns:
-        Tuple of (Consul registration dict, PostgreSQL projection).
-
-    Raises:
-        TimeoutError: If either registration not found within timeout.
-    """
-    start_time = asyncio.get_running_loop().time()
-    consul_result: dict[str, object] | None = None
-    postgres_result: ModelRegistrationProjection | None = None
-
-    while asyncio.get_running_loop().time() - start_time < timeout_seconds:
-        # Check Consul
-        if consul_result is None:
-            consul_result = await verify_consul_registration(
-                consul_handler,
-                service_id,
-                timeout_seconds=1.0,
-                correlation_id=correlation_id,
-            )
-
-        # Check PostgreSQL
-        if postgres_result is None:
-            postgres_result = await verify_postgres_registration(
-                projection_reader, node_id, correlation_id=correlation_id
-            )
-
-        # Both found
-        if consul_result is not None and postgres_result is not None:
-            return consul_result, postgres_result
-
-        # Polling interval - check both Consul and PostgreSQL every 0.5s
-        await asyncio.sleep(0.5)
-
-    missing = []
-    if consul_result is None:
-        missing.append("Consul")
-    if postgres_result is None:
-        missing.append("PostgreSQL")
-
-    raise TimeoutError(
-        f"Dual registration incomplete - missing in: {', '.join(missing)} "
-        f"(node_id={node_id}, service_id={service_id}, timeout={timeout_seconds}s, "
-        f"correlation_id={correlation_id})"
-    )
-
-
 # =============================================================================
 # State Transition Verification
 # =============================================================================
@@ -1098,9 +882,6 @@ def assert_heartbeat_event_valid(event: ModelNodeHeartbeatEvent) -> None:
 
 
 __all__: list[str] = [
-    # Consul verification
-    "verify_consul_registration",
-    "wait_for_consul_registration",
     # PostgreSQL verification
     "verify_postgres_registration",
     "wait_for_postgres_registration",
@@ -1108,8 +889,6 @@ __all__: list[str] = [
     # Kafka verification
     "wait_for_kafka_event",
     "collect_registration_events",
-    # Dual registration
-    "verify_dual_registration",
     # State transitions
     "verify_state_transition",
     "assert_registration_state",

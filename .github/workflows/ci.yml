@@ -2227,7 +2227,7 @@ jobs:
           fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -2258,7 +2258,7 @@ jobs:
         run: |
           uv run pytest \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -4598,6 +4598,36 @@ jobs:
             tests/integration/migrations/test_omn17316_role_set_membership_guard.py \
             -v --tb=short -p no:randomly
 
+      # OMN-18795: the THIRD member of the REQUIRE_PG migration-proof family.
+      # Its two siblings above have run in this job since they were written;
+      # this one was registered in config/env_gated_test_skips.yaml as having
+      # no execution path, because the flag name carries the ticket number and
+      # nobody set the third. That is the idiom failing silently in exactly the
+      # way OMN-18781 is about, and it is the cheapest of the nine to close:
+      # the service it needs is already running in this job.
+      #
+      # It also needed a real fix to get here. The suite creates throwaway
+      # LOGIN roles and applies migrations AS them; those roles were created
+      # with no password and dialled with the superuser's, which authenticates
+      # only against the hermetic trust cluster the fallback path builds. Every
+      # test failed on `password authentication failed` against a real server.
+      # The roles now carry a per-run password.
+      - name: Mixed-representation conversion proof (OMN-15683)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.postgres.ports['5432'] }}/omnibase_infra
+          # With a Postgres in hand a SKIP is a vacuous green, so every skip
+          # path in the suite becomes a hard failure instead.
+          OMN15683_REQUIRE_PG: "1"
+          # Same OMN-16412 opt-in as the two steps above, for the same reason:
+          # the resolved service host is this job's OWN provisioned Postgres,
+          # reached over the Docker bridge rather than 127.0.0.1.
+          OMN15683_ALLOW_REMOTE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_omn15683_mixed_representation_conversion.py \
+            -v --tb=short -p no:randomly
+
       - name: Assert manifest tables exist
         env:
           POSTGRES_HOST: ${{ steps.postgres_host.outputs.host }}
@@ -4977,7 +5007,10 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    timeout-minutes: 25
+    # OMN-18795: was 25, for two suites against two services. It now runs nine
+    # suites against four; the registration E2E family alone measured ~4 minutes
+    # against real services on the lab.
+    timeout-minutes: 45
     # OMN-15249 precedent: the images are pulled by an EXPLICIT step, not a
     # GitHub-managed `services:` block, so a registry timeout fails AT the pull
     # with the image named, rather than several steps later as `exit 127`.
@@ -4990,17 +5023,25 @@ jobs:
     env:
       SVC_REDPANDA_IMAGE: redpandadata/redpanda:v24.2.7
       SVC_QDRANT_IMAGE: qdrant/qdrant:v1.12.4
+      # OMN-18795: Memgraph and Postgres join the job so the six further suites
+      # registered with no execution path can execute here too.
+      SVC_MEMGRAPH_IMAGE: memgraph/memgraph:2.18.1
+      SVC_POSTGRES_IMAGE: postgres:16-alpine
       SVC_PULL_ATTEMPTS: "3"
       SVC_PULL_TIMEOUT_SECONDS: "180"
       SVC_READY_TIMEOUT_SECONDS: "120"
       SVC_REDPANDA_CONTAINER: omn18781-redpanda-${{ github.run_id }}-${{ github.run_attempt }}
       SVC_QDRANT_CONTAINER: omn18781-qdrant-${{ github.run_id }}-${{ github.run_attempt }}
       SVC_PORTPROBE_CONTAINER: omn18781-portprobe-${{ github.run_id }}-${{ github.run_attempt }}
+      SVC_MEMGRAPH_CONTAINER: omn18795-memgraph-${{ github.run_id }}-${{ github.run_attempt }}
+      SVC_POSTGRES_CONTAINER: omn18795-postgres-${{ github.run_id }}-${{ github.run_attempt }}
+      # Throwaway container on a run-scoped name, torn down unconditionally below.
+      SVC_POSTGRES_PASSWORD: omn18795-ci-local
     steps:
       - name: Pull service images (own the pull, fail at the pull)
         run: |
           set -euo pipefail
-          for image in "${SVC_REDPANDA_IMAGE}" "${SVC_QDRANT_IMAGE}"; do
+          for image in "${SVC_REDPANDA_IMAGE}" "${SVC_QDRANT_IMAGE}" "${SVC_MEMGRAPH_IMAGE}" "${SVC_POSTGRES_IMAGE}"; do
             attempt=1
             until timeout "${SVC_PULL_TIMEOUT_SECONDS}" docker pull "${image}"; do
               if [ "${attempt}" -ge "${SVC_PULL_ATTEMPTS}" ]; then
@@ -5029,6 +5070,64 @@ jobs:
           fi
           echo "port=${port}" >> "$GITHUB_OUTPUT"
           echo "Qdrant published on host port ${port}."
+
+      - name: Start Memgraph
+        id: start_memgraph
+        # OMN-18795: the graph handler's integration proof was gated on
+        # MEMGRAPH_BOLT_URL, which no workflow set, so it had never executed.
+        # Same explicit pull/run shape as the two services above: a failure
+        # here is loud and names the service, never a downstream silent skip.
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name "${SVC_MEMGRAPH_CONTAINER}" \
+            --publish 7687 \
+            "${SVC_MEMGRAPH_IMAGE}" >/dev/null
+
+          published="$(docker port "${SVC_MEMGRAPH_CONTAINER}" 7687/tcp | head -n 1)"
+          port="${published##*:}"
+          if [ -z "${port}" ]; then
+            echo "::error title=Memgraph port unresolved (OMN-18795)::docker port ${SVC_MEMGRAPH_CONTAINER} 7687/tcp returned '${published}'."
+            exit 1
+          fi
+          echo "port=${port}" >> "$GITHUB_OUTPUT"
+          echo "Memgraph published on host port ${port}."
+
+      - name: Start Postgres
+        id: start_postgres
+        # OMN-18795: three of the newly-wired suites need a real database as
+        # well as a real broker -- the correlation propagation proofs and the
+        # whole registration E2E family. Started the same explicit way rather
+        # than as a `services:` block, for the OMN-15249 reason the job header
+        # already gives: a failure must happen AT the service, with it named.
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name "${SVC_POSTGRES_CONTAINER}" \
+            --publish 5432 \
+            --env "POSTGRES_PASSWORD=${SVC_POSTGRES_PASSWORD}" \
+            --env POSTGRES_USER=postgres \
+            --env POSTGRES_DB=omnibase_infra \
+            "${SVC_POSTGRES_IMAGE}" >/dev/null
+
+          published="$(docker port "${SVC_POSTGRES_CONTAINER}" 5432/tcp | head -n 1)"
+          port="${published##*:}"
+          if [ -z "${port}" ]; then
+            echo "::error title=Postgres port unresolved (OMN-18795)::docker port ${SVC_POSTGRES_CONTAINER} 5432/tcp returned '${published}'."
+            exit 1
+          fi
+          echo "port=${port}" >> "$GITHUB_OUTPUT"
+
+          deadline=$(( $(date +%s) + SVC_READY_TIMEOUT_SECONDS ))
+          until docker exec "${SVC_POSTGRES_CONTAINER}" pg_isready -U postgres -d omnibase_infra >/dev/null 2>&1; do
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::error title=Postgres never became ready (OMN-18795)::${SVC_POSTGRES_CONTAINER} (${SVC_POSTGRES_IMAGE}) was still not accepting connections after ${SVC_READY_TIMEOUT_SECONDS}s. Failing closed: the database-backed suites are not skipped when their database is missing."
+              docker logs "${SVC_POSTGRES_CONTAINER}" 2>&1 | tail -n 50 || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "Postgres ready on host port ${port}."
 
       - name: Resolve the interface this runner reaches published ports on
         id: service_host
@@ -5154,6 +5253,17 @@ jobs:
           cache-enabled: "false"
           install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
 
+      - name: Apply migrations to the provisioned Postgres
+        # OMN-18795: the registration E2E family and the correlation database
+        # proofs read and write real projection tables. An empty database would
+        # turn those suites red for a reason that has nothing to do with the
+        # behaviour under test, so the schema is applied by the same runner
+        # script the migration-integration job uses.
+        env:
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:${{ env.SVC_POSTGRES_PASSWORD }}@${{ steps.service_host.outputs.host }}:${{ steps.start_postgres.outputs.port }}/omnibase_infra
+        run: |
+          uv run python scripts/run-migrations.py
+
       - name: Run the service-backed suites
         id: run_suites
         env:
@@ -5161,15 +5271,44 @@ jobs:
           # FAILS, rather than skips, when CI selects a suite and one of these is absent.
           KAFKA_INTEGRATION_TESTS: "1"
           QDRANT_INTEGRATION_TESTS: "1"
+          # OMN-18795 opt-ins for the suites joining this job.
+          GRAPH_INTEGRATION_TESTS: "1"
+          RUN_HEAVY_TESTS: "1"
           KAFKA_BOOTSTRAP_SERVERS: ${{ steps.service_host.outputs.host }}:${{ steps.kafka_port.outputs.port }}
           KAFKA_BROKER_ALLOWLIST: ${{ steps.service_host.outputs.host }}:${{ steps.kafka_port.outputs.port }}
           QDRANT_URL: http://${{ steps.service_host.outputs.host }}:${{ steps.start_qdrant.outputs.port }}
+          MEMGRAPH_BOLT_URL: bolt://${{ steps.service_host.outputs.host }}:${{ steps.start_memgraph.outputs.port }}
+          # Both spellings: the registration conftest resolves Postgres through
+          # PostgresConfig.from_env(), the correlation suite through the same,
+          # and the migration runner above through OMNIBASE_INFRA_DB_URL.
+          OMNIBASE_INFRA_DB_URL: postgresql://postgres:${{ env.SVC_POSTGRES_PASSWORD }}@${{ steps.service_host.outputs.host }}:${{ steps.start_postgres.outputs.port }}/omnibase_infra
+          POSTGRES_HOST: ${{ steps.service_host.outputs.host }}
+          POSTGRES_PORT: ${{ steps.start_postgres.outputs.port }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ${{ env.SVC_POSTGRES_PASSWORD }}
+          POSTGRES_DATABASE: omnibase_infra
         run: |
+          # OMN-18795: six suites registered as having NO execution path join the
+          # two OMN-18781 wired. Every one of them is named BY PATH, deliberately:
+          # a marker selection here would silently pick up the next suite that
+          # acquires the marker without anyone deciding this job can serve it.
+          #
+          # tests/integration/registration/e2e/test_runtime_e2e.py is the one file
+          # in that directory NOT listed. It needs a booted ONEX runtime process,
+          # which this job does not start -- see config/env_gated_test_skips.yaml
+          # for where that one stands.
           uv run pytest \
             tests/integration/event_bus/test_kafka_event_bus_integration.py \
             tests/integration/handlers/test_handler_qdrant_integration.py \
+            tests/integration/event_bus/test_dlq_integration.py \
+            tests/integration/nodes/test_node_reward_binder_effect.py \
+            tests/integration/handlers/test_handler_graph_integration.py \
+            tests/integration/correlation/test_correlation_propagation_heavy.py \
+            tests/integration/registration/e2e/test_topic_catalog_e2e.py \
+            tests/integration/registration/e2e/test_full_orchestrator_flow.py \
+            tests/integration/registration/e2e/test_two_way_registration_e2e.py \
             -v -rs --tb=short \
-            --timeout=120 \
+            --timeout=300 \
             --timeout-method=signal \
             --junitxml=service-integration-suites.xml
 
@@ -5206,6 +5345,8 @@ jobs:
           docker rm --force "${SVC_REDPANDA_CONTAINER}" >/dev/null 2>&1 || true
           docker rm --force "${SVC_QDRANT_CONTAINER}" >/dev/null 2>&1 || true
           docker rm --force "${SVC_PORTPROBE_CONTAINER}" >/dev/null 2>&1 || true
+          docker rm --force "${SVC_MEMGRAPH_CONTAINER}" >/dev/null 2>&1 || true
+          docker rm --force "${SVC_POSTGRES_CONTAINER}" >/dev/null 2>&1 || true
 
   ai-slop-check:
     needs: occ-preflight
