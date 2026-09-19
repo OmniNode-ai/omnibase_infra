@@ -29,8 +29,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from omnibase_infra.models import ModelNodeIdentity
+from tests.helpers.service_env import require_service_env
 
-from .conftest import wait_for_consumer_ready
+from .conftest import BUS_TEST_ENVIRONMENT, wait_for_consumer_ready
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -40,21 +41,33 @@ if TYPE_CHECKING:
 # Test Configuration and Skip Conditions
 # =============================================================================
 
-# Check if Kafka is available based on environment variable.
-# Requires KAFKA_BOOTSTRAP_SERVERS to be set AND KAFKA_INTEGRATION_TESTS=1 opt-in
-# to avoid false positives in CI environments where Kafka is not actually running.
+# OMN-18781: this suite is SELECTED BY MARKER, not gated by a silent skipif.
+#
+# It used to carry a module-level ``skipif`` on KAFKA_INTEGRATION_TESTS, a
+# variable no workflow in this repository set. The PR test splits collected all
+# 19 cases, skipped every one, and reported green — the bus's own integration
+# proof had never executed in CI. The ``kafka`` marker is what the splits
+# deselect (``-m "... and not kafka ..."``); the suite is executed by the
+# service-backed job in ci.yml, which starts a real Redpanda and sets the
+# opt-in. ``_require_kafka`` below turns a CI selection with no broker into a
+# red failure instead of a skip.
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-KAFKA_AVAILABLE = (
-    KAFKA_BOOTSTRAP_SERVERS is not None and os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
-)
 
-# Module-level markers - skip all tests if Kafka is not available
 pytestmark = [
-    pytest.mark.skipif(
-        not KAFKA_AVAILABLE,
-        reason="Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)",
-    ),
+    pytest.mark.kafka,
 ]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _require_kafka() -> None:
+    """Refuse to skip this suite silently once CI has selected it."""
+    require_service_env(
+        opt_in="KAFKA_INTEGRATION_TESTS",
+        endpoint="KAFKA_BOOTSTRAP_SERVERS",
+        workflow=".github/workflows/ci.yml (service-integration-suites)",
+        service="Kafka/Redpanda",
+    )
+
 
 # Test configuration constants
 TEST_TIMEOUT_SECONDS = 30
@@ -102,7 +115,7 @@ async def kafka_event_bus(
 
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=kafka_bootstrap_servers,
-        environment="local",
+        environment=BUS_TEST_ENVIRONMENT,
         timeout_seconds=TEST_TIMEOUT_SECONDS,
         max_retry_attempts=2,
         retry_backoff_base=0.5,
@@ -807,8 +820,10 @@ class TestKafkaEventBusBroadcast:
             received_messages.append(msg)
             message_received.set()
 
-        # Subscribe to broadcast topic for this environment
-        # Note: created_broadcast_topic is "integration-test.broadcast"
+        # Subscribe to the topic broadcast_to_environment will publish to.
+        # created_broadcast_topic derives it from BUS_TEST_ENVIRONMENT, the same
+        # constant this suite configures the bus with, so the two cannot drift
+        # apart again (OMN-18781).
         unsubscribe = await started_kafka_bus.subscribe(
             created_broadcast_topic,
             unique_group,
@@ -857,10 +872,12 @@ class TestKafkaEventBusBroadcast:
             received_messages.append(msg)
             message_received.set()
 
-        # Subscribe to group topic (pre-create it first)
+        # Subscribe to group topic (pre-create it first). MixinKafkaBroadcast
+        # derives it as `{environment}.{group}`, so the prefix is the bus's
+        # configured environment and not a literal (OMN-18781).
         target_group = f"target-{uuid.uuid4().hex[:8]}"
-        group_topic = f"integration-test.{target_group}"
-        await ensure_test_topic(group_topic)
+        group_topic = f"{BUS_TEST_ENVIRONMENT}.{target_group}"
+        await ensure_test_topic(group_topic, 1)
         unsubscribe = await started_kafka_bus.subscribe(
             group_topic,
             unique_group,

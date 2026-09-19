@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-18781 — silent-skip guard config for the `service-integration-suites` job.
+#
+# WHY A SECOND CONFIG
+# -------------------
+# `integration_skip_guard.yaml` is keyed to what the `integration-guard` job
+# provisions: Postgres, and nothing else. It therefore classifies Kafka and
+# Qdrant absence skips as legitimately optional, which is correct THERE and
+# wrong HERE — the `service-integration-suites` job starts a real Redpanda and a
+# real Qdrant before it runs anything. The set of provisioned services is a
+# property of the JOB, so each provisioning job brings its own config rather
+# than one file trying to describe both.
+#
+# What this guards, concretely: the two suites this config covers were collected
+# on every pull request, skipped in full on opt-in variables no workflow set, and
+# reported green for months. A pytest exit code of 0 cannot tell "19 cases
+# passed" from "19 cases skipped". This config makes the second one red.
+silent_skip_allowed: false
+# The suites the `service-integration-suites` job runs. INFORMATIONAL — the gate
+# keys on junit skip reasons, not on this list — kept in sync with the ci.yml
+# "Run the service-backed suites" step.
+curated_test_paths:
+  - "tests/integration/event_bus/test_kafka_event_bus_integration.py"
+  - "tests/integration/handlers/test_handler_qdrant_integration.py"
+# The two suites carry 19 and 8 cases respectively at the time of writing. The
+# floor is deliberately below that total and above zero: it must catch a
+# collection that silently selects nothing or nearly nothing (the original
+# defect), without going red every time a case is legitimately added or removed.
+require_executed_min: 20
+# Services this job PROVISIONS. A skip whose reason names one of these as absent
+# is a false green: the service is right there.
+required_services:
+  kafka:
+    provisioned_by: "ci.yml `service-integration-suites` job (explicit fail-closed `docker pull`/`docker run` of redpandadata/redpanda, plaintext external listener, advertised on the resolved runner-reachable host, KAFKA_BOOTSTRAP_SERVERS + KAFKA_INTEGRATION_TESTS=1 exported)"
+    missing_skip_patterns:
+      # tests/helpers/service_env.py local-skip text, should it ever reach CI
+      - "Kafka/Redpanda integration suite not opted in"
+      # the pre-OMN-18781 module-level skipif vocabulary, in case it returns
+      - "Kafka not available"
+      - "Kafka not reachable"
+      - "Redpanda broker not reachable"
+      - "KAFKA_INTEGRATION_TESTS"
+  qdrant:
+    provisioned_by: "ci.yml `service-integration-suites` job (explicit fail-closed `docker pull`/`docker run` of qdrant/qdrant, QDRANT_URL + QDRANT_INTEGRATION_TESTS=1 exported)"
+    missing_skip_patterns:
+      - "Qdrant integration suite not opted in"
+      - "Qdrant not available"
+      - "QDRANT_URL not set"
+      - "QDRANT_INTEGRATION_TESTS"
+# Nothing is legitimately optional on this job: it provisions every service its
+# two suites need. The list is present and empty so that `--strict` reports an
+# unrecognised skip reason for a human to classify rather than passing it.
+allowed_optional_skip_patterns: []

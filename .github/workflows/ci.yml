@@ -2227,7 +2227,7 @@ jobs:
           fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not performance and not live_github_api and not cross_repo_consumer" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -2258,7 +2258,7 @@ jobs:
         run: |
           uv run pytest \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not performance and not live_github_api and not cross_repo_consumer" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -4952,6 +4952,260 @@ jobs:
         if: always()
         run: |
           docker rm --force "${GUARD_PG_CONTAINER}" >/dev/null 2>&1 || true
+
+  service-integration-suites:
+    name: Service-Backed Integration Suites (OMN-18781)
+    needs: [occ-preflight, zone-filter]
+    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
+    # OMN-18781: this job exists because two integration suites were collected on
+    # every pull request, skipped in full on an opt-in env var NO workflow set,
+    # and reported green. One of them is the event bus's own integration proof.
+    #
+    # They are now deselected from the sharded splits by marker (`not kafka`,
+    # `not qdrant`) and EXECUTED here against real services. Nothing about this
+    # job is advisory: CI Summary is default-deny over the run's job conclusions
+    # (scripts/ci/ci_summary_gate.py), so a failure here fails the required
+    # context without being added to any list.
+    #
+    # OMN-18205: this job executes docker, so its placement is governed by
+    # OMNI_DOCKER_CI_RUNS_ON_JSON ahead of the general trusted seam, exactly as
+    # integration-guard is.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 25
+    # OMN-15249 precedent: the images are pulled by an EXPLICIT step, not a
+    # GitHub-managed `services:` block, so a registry timeout fails AT the pull
+    # with the image named, rather than several steps later as `exit 127`.
+    #
+    # The broker is a DEDICATED plaintext Redpanda, not the lab dev lane. That
+    # lane runs with `enable_sasl=true` (verified 2026-09-18: `rpk cluster info`
+    # against it returns "broker closed the connection ... is SASL missing?"),
+    # and this suite builds a plaintext ModelKafkaEventBusConfig. Pointing it at
+    # the lane would prove the auth path, not the bus path.
+    env:
+      SVC_REDPANDA_IMAGE: redpandadata/redpanda:v24.2.7
+      SVC_QDRANT_IMAGE: qdrant/qdrant:v1.12.4
+      SVC_PULL_ATTEMPTS: "3"
+      SVC_PULL_TIMEOUT_SECONDS: "180"
+      SVC_READY_TIMEOUT_SECONDS: "120"
+      SVC_REDPANDA_CONTAINER: omn18781-redpanda-${{ github.run_id }}-${{ github.run_attempt }}
+      SVC_QDRANT_CONTAINER: omn18781-qdrant-${{ github.run_id }}-${{ github.run_attempt }}
+      SVC_PORTPROBE_CONTAINER: omn18781-portprobe-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Pull service images (own the pull, fail at the pull)
+        run: |
+          set -euo pipefail
+          for image in "${SVC_REDPANDA_IMAGE}" "${SVC_QDRANT_IMAGE}"; do
+            attempt=1
+            until timeout "${SVC_PULL_TIMEOUT_SECONDS}" docker pull "${image}"; do
+              if [ "${attempt}" -ge "${SVC_PULL_ATTEMPTS}" ]; then
+                echo "::error title=Service image pull failed (OMN-18781)::${image} did not pull in ${SVC_PULL_ATTEMPTS} attempts of ${SVC_PULL_TIMEOUT_SECONDS}s. Failing closed: no suite verdict is emitted without its service."
+                exit 1
+              fi
+              attempt=$((attempt + 1))
+              sleep 5
+            done
+          done
+
+      - name: Start Qdrant
+        id: start_qdrant
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name "${SVC_QDRANT_CONTAINER}" \
+            --publish 6333 \
+            "${SVC_QDRANT_IMAGE}" >/dev/null
+
+          published="$(docker port "${SVC_QDRANT_CONTAINER}" 6333/tcp | head -n 1)"
+          port="${published##*:}"
+          if [ -z "${port}" ]; then
+            echo "::error title=Qdrant port unresolved (OMN-18781)::docker port ${SVC_QDRANT_CONTAINER} 6333/tcp returned '${published}'."
+            exit 1
+          fi
+          echo "port=${port}" >> "$GITHUB_OUTPUT"
+          echo "Qdrant published on host port ${port}."
+
+      - name: Resolve the interface this runner reaches published ports on
+        id: service_host
+        # Same two-candidate resolution integration-guard uses: a runner that IS
+        # the docker host reaches 127.0.0.1; a runner executing inside a
+        # container that shares the host daemon reaches the default gateway.
+        # Qdrant is the probe because it listens immediately, and the answer is
+        # then reused for Redpanda's ADVERTISED address, which must be decided
+        # before the broker boots.
+        env:
+          QDRANT_PORT: ${{ steps.start_qdrant.outputs.port }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import socket
+          import time
+
+          port = int(os.environ["QDRANT_PORT"])
+
+          def can_connect(host: str) -> bool:
+              try:
+                  with socket.create_connection((host, port), timeout=1.0):
+                      return True
+              except OSError:
+                  return False
+
+          def gateway() -> str | None:
+              try:
+                  with open("/proc/net/route", encoding="utf-8") as routes:
+                      for line in routes.readlines()[1:]:
+                          fields = line.split()
+                          if len(fields) >= 3 and fields[1] == "00000000":
+                              raw = fields[2]
+                              return ".".join(
+                                  str(int(raw[i : i + 2], 16)) for i in (6, 4, 2, 0)
+                              )
+              except OSError:
+                  return None
+              return None
+
+          deadline = time.time() + 60
+          while time.time() < deadline:
+              for candidate in ("127.0.0.1", gateway()):
+                  if candidate and can_connect(candidate):
+                      print(f"host={candidate}")
+                      raise SystemExit(0)
+              time.sleep(2)
+
+          raise SystemExit(
+              f"could not reach the Qdrant container on 127.0.0.1 or the default "
+              f"gateway at published port {port}; refusing to guess a host"
+          )
+          PY
+
+      - name: Reserve a free host port for the Kafka listener
+        id: kafka_port
+        # Redpanda's advertised address is fixed at boot, and a client that
+        # bootstraps on a published port is redirected to whatever was
+        # advertised -- so the port must be known BEFORE the broker starts.
+        # A throwaway container asks the docker daemon for a free host port in
+        # the namespace that actually matters (the daemon's, which is not the
+        # runner's when the runner is itself a container). If the port is taken
+        # in the gap, the real `docker run` below fails loudly on
+        # "port is already allocated"; it never degrades to a silent skip.
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name "${SVC_PORTPROBE_CONTAINER}" \
+            --publish 19092 \
+            --entrypoint sleep \
+            "${SVC_REDPANDA_IMAGE}" 120 >/dev/null
+          published="$(docker port "${SVC_PORTPROBE_CONTAINER}" 19092/tcp | head -n 1)"
+          docker rm --force "${SVC_PORTPROBE_CONTAINER}" >/dev/null 2>&1 || true
+          port="${published##*:}"
+          if [ -z "${port}" ]; then
+            echo "::error title=Kafka host port unresolved (OMN-18781)::docker port returned '${published}'."
+            exit 1
+          fi
+          echo "port=${port}" >> "$GITHUB_OUTPUT"
+          echo "Reserved host port ${port} for the Kafka external listener."
+
+      - name: Start Redpanda
+        id: start_redpanda
+        env:
+          RESOLVED_HOST: ${{ steps.service_host.outputs.host }}
+          KAFKA_HOST_PORT: ${{ steps.kafka_port.outputs.port }}
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name "${SVC_REDPANDA_CONTAINER}" \
+            --publish "${KAFKA_HOST_PORT}:19092" \
+            "${SVC_REDPANDA_IMAGE}" \
+            redpanda start \
+              --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092 \
+              --advertise-kafka-addr "internal://127.0.0.1:9092,external://${RESOLVED_HOST}:${KAFKA_HOST_PORT}" \
+              --mode dev-container \
+              --smp 1 \
+              --memory 1G \
+              --reserve-memory 0M \
+              --reactor-backend=epoll \
+              --default-log-level=warn \
+              --set redpanda.auto_create_topics_enabled=true >/dev/null
+
+          deadline=$(( $(date +%s) + SVC_READY_TIMEOUT_SECONDS ))
+          until docker exec "${SVC_REDPANDA_CONTAINER}" rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true'; do
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::error title=Redpanda never became healthy (OMN-18781)::${SVC_REDPANDA_CONTAINER} (${SVC_REDPANDA_IMAGE}) was still unhealthy after ${SVC_READY_TIMEOUT_SECONDS}s. Failing closed: the event-bus suite is not skipped when its broker is missing."
+              docker logs "${SVC_REDPANDA_CONTAINER}" 2>&1 | tail -n 50 || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "Redpanda healthy, advertising ${RESOLVED_HOST}:${KAFKA_HOST_PORT}."
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+          install-args: '--reinstall-package omnibase-core --reinstall-package omnibase-spi --frozen'
+
+      - name: Run the service-backed suites
+        id: run_suites
+        env:
+          # The opt-ins these suites refuse to skip without. tests/helpers/service_env.py
+          # FAILS, rather than skips, when CI selects a suite and one of these is absent.
+          KAFKA_INTEGRATION_TESTS: "1"
+          QDRANT_INTEGRATION_TESTS: "1"
+          KAFKA_BOOTSTRAP_SERVERS: ${{ steps.service_host.outputs.host }}:${{ steps.kafka_port.outputs.port }}
+          KAFKA_BROKER_ALLOWLIST: ${{ steps.service_host.outputs.host }}:${{ steps.kafka_port.outputs.port }}
+          QDRANT_URL: http://${{ steps.service_host.outputs.host }}:${{ steps.start_qdrant.outputs.port }}
+        run: |
+          uv run pytest \
+            tests/integration/event_bus/test_kafka_event_bus_integration.py \
+            tests/integration/handlers/test_handler_qdrant_integration.py \
+            -v -rs --tb=short \
+            --timeout=120 \
+            --timeout-method=signal \
+            --junitxml=service-integration-suites.xml
+
+      - name: Enforce no missing-service silent-skips (OMN-14172 guard, OMN-18781 config)
+        id: enforce_no_silent_skips
+        if: always() && steps.run_suites.conclusion != 'skipped'
+        # The whole defect this job closes is a suite that reports green by
+        # running nothing: a pytest exit code of 0 cannot tell 27 passes from 27
+        # skips. This is the SAME guard the integration-guard job runs, with the
+        # config that names THIS job's provisioned services -- so a Kafka or
+        # Qdrant absence skip, legitimately optional over there, is a false
+        # green here. --strict additionally refuses a skip reason nobody has
+        # classified, because an unrecognised skip is how the original defect
+        # stayed invisible.
+        run: |
+          uv run python scripts/ci/check_integration_skips.py \
+            --junit service-integration-suites.xml \
+            --config scripts/ci/service_suites_skip_guard.yaml \
+            --strict
+
+      - name: Upload service-integration junit
+        if: always() && steps.run_suites.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-integration-suites-results
+          path: service-integration-suites.xml
+          retention-days: 7
+
+      # Unconditional: a container started before a later step failed must never
+      # be leaked onto a self-hosted runner.
+      - name: Stop service containers
+        if: always()
+        run: |
+          docker rm --force "${SVC_REDPANDA_CONTAINER}" >/dev/null 2>&1 || true
+          docker rm --force "${SVC_QDRANT_CONTAINER}" >/dev/null 2>&1 || true
+          docker rm --force "${SVC_PORTPROBE_CONTAINER}" >/dev/null 2>&1 || true
 
   ai-slop-check:
     needs: occ-preflight
