@@ -40,6 +40,11 @@ fails here. The first is the fix; the rest are the positive control, because
 the cheapest wrong ways to make this test pass -- narrowing the condition to
 ``success()``, dropping the event guard, or deleting the evaluating step --
 each trade a false green for a vacuous one.
+
+The sibling job's equivalent test is
+``tests/ci/test_hostile_review_gate_cancelled_run_omn18793.py``. The two jobs
+share one workflow and one cause, so a change to the cancellation posture of
+either should be read against both.
 """
 
 from __future__ import annotations
