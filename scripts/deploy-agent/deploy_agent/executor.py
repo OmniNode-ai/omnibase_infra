@@ -42,10 +42,12 @@ from deploy_agent.events import (
     EnumRecreateOutcome,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
+    EnumVerifyRecreateOutcome,
     ModelContainerResidue,
     ModelHealthCheck,
     ModelRebuildRequested,
     ModelRecreateSupervision,
+    ModelVerifyRecreate,
     Phase,
     PhaseStatus,
     Scope,
@@ -198,6 +200,47 @@ RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS = 20
 RUNTIME_IMAGE_BUILD_FLOOR_SECONDS = 600
 
 PhaseCallback = Callable[[Phase, PhaseStatus], None]
+
+# OMN-18640 AC7: the lanes on which a failed post-deploy health probe may
+# force-recreate the container behind it. DEV ONLY, and the fence is an
+# allowlist rather than a denylist so a lane added to ``EnumRuntimeLane``
+# arrives OUTSIDE it.
+#
+# TWO INDEPENDENT REASONS, either sufficient. The stability-test, judge and
+# lakshman projects are governed surfaces this remedy is not authorised to
+# bounce -- stability is the lane a compose-path prod grant's `stability-proven`
+# premise is resolved from, and judge is declared read-only. And on every lane
+# but this one the entries in ``runtime_health_targets`` are CONTAINER names
+# (``omninode-stability-test-runtime``), not compose SERVICE names, so the argv
+# this path builds would abort on `no such service` there in any case.
+VERIFY_RECREATE_LANES: frozenset[EnumRuntimeLane] = frozenset({EnumRuntimeLane.DEV})
+
+# The ceiling on the recreate command itself. The same number
+# ``deliver_onex_api_pin`` uses for the same shape of command: one service,
+# ``--no-deps``, nothing to build.
+VERIFY_RECREATE_TIMEOUT_SECONDS = 300
+
+# How often the readiness poll re-probes after the recreate. The wait it is
+# bounded by is DERIVED from the compose model (``runtime_compose_up_budget``),
+# never a constant -- a recreated runtime on this lane was measured binding
+# :8085 at t+321s, so a single immediate re-probe would be a vacuous control
+# that always reported the remedy had failed.
+VERIFY_RECREATE_POLL_SECONDS = 10
+
+# The bound on one runtime /health probe. ``curl --max-time`` carries the same
+# number, so the subprocess ceiling and the client's own ceiling cannot drift.
+RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS = 10
+
+
+def _verify_recreate_sleep(seconds: float) -> None:
+    """Sleep between readiness probes (OMN-18640).
+
+    A module-level seam so a test can drive the real poll loop without waiting
+    out a real boot. It takes no argument from any command, so nothing on the
+    wire can shorten or lengthen the wait.
+    """
+    time.sleep(seconds)
+
 
 RUNTIME_HEALTH_TARGETS: tuple[tuple[str, int], ...] = (
     ("omninode-runtime", 8085),
@@ -1477,6 +1520,11 @@ class DeployExecutor:
         # reader has to reconstruct from the dockerd log, which is what this
         # incident cost three lanes.
         self.recreate_supervision: list[ModelRecreateSupervision] = []
+        # OMN-18640 AC7: the runtime containers this rebuild force-recreated
+        # because their own health endpoint failed after the deploy, and
+        # whether that repaired them. Read by the agent when it builds the
+        # terminal event, for the same reason residue and supervision are.
+        self.verify_recreate: list[ModelVerifyRecreate] = []
         # OMN-17135: repo -> the commit SHA RT-1 actually resolved and vendored
         # for that sibling. The requested ref pins omnibase_infra only, so
         # without this the terminal event named one repository's commit and left
@@ -1488,6 +1536,7 @@ class DeployExecutor:
         self.container_residue = []
         self.sibling_source_refs = {}
         self.recreate_supervision = []
+        self.verify_recreate = []
 
     def _record_container_residue(
         self, stuck: list[str], *, lane: EnumRuntimeLane
@@ -3072,9 +3121,19 @@ class DeployExecutor:
         verification phase with all other phases SUCCESS would otherwise let
         ``ModelRebuildCompleted.status`` compute "success" for a deploy that
         actually failed verification (job.errors also carries the real error,
-        but phase_results must not contradict it). No rollback/recreate is
-        attempted here or anywhere in this module on a verify failure — the
-        job is reported failed, never silently retried or half-recreated.
+        but phase_results must not contradict it). No ROLLBACK is attempted
+        here or anywhere in this module on a verify failure — the job is
+        reported failed, never silently reverted to a previous artifact.
+
+        OMN-18640 AC7 qualifies the rest of what this paragraph used to claim.
+        A failed runtime HEALTH probe on the dev lane now force-recreates that
+        one service once and re-probes it (see ``verify``), which is neither
+        silent nor a half-recreate: one service, one attempt, recorded on the
+        terminal event as ``verify_recreate``, and a probe still failing after
+        it fails the job exactly as before. The DIGEST check above is
+        untouched and still aborts before any health check — recreating a
+        container that is serving the wrong artifact would only serve the
+        wrong artifact again.
         """
         on_phase_update(Phase.VERIFICATION, PhaseStatus.IN_PROGRESS)
         try:
@@ -3975,27 +4034,255 @@ class DeployExecutor:
         # Ports 8000/8001/8002 are LLM endpoints and cannot prove that the
         # runtime or runtime-effects processes are healthy. The host ports vary
         # per lane (dev 8085/8086, stability-test 18085/18086, prod 28085/28086).
+        #
+        # OMN-18640 AC7: EVERY target is probed before any verdict, where a
+        # timeout on the first used to propagate and leave the second unprobed.
+        # A probe that fails is now a recorded outcome carried to the remedy
+        # below rather than an exception thrown from the middle of the loop, so
+        # the phase ends up with a reading for both ports whatever happens to
+        # either. A timeout still fails the job -- it is re-raised below, after
+        # the remedy has had its single attempt -- so nothing that failed
+        # before this change passes because of it.
+        probes: list[
+            tuple[str, int, ModelHealthCheck, subprocess.TimeoutExpired | None]
+        ] = []
         for service, port in lane_config_for(lane).runtime_health_targets:
-            start = time.monotonic()
+            check, timed_out = self._probe_runtime_health(service=service, port=port)
+            probes.append((service, port, check, timed_out))
+
+        settled: list[ModelHealthCheck] = []
+        pending_timeout: subprocess.TimeoutExpired | None = None
+        for service, port, check, timed_out in probes:
+            if check.status == "fail" and lane in VERIFY_RECREATE_LANES:
+                check, timed_out = self._force_recreate_and_reverify(
+                    lane=lane,
+                    service=service,
+                    port=port,
+                    failed=check,
+                    timed_out=timed_out,
+                )
+            settled.append(check)
+            if timed_out is not None and pending_timeout is None:
+                pending_timeout = timed_out
+        checks.extend(settled)
+
+        if pending_timeout is not None:
+            # Unchanged behaviour for a probe the remedy did not fix, and the
+            # behaviour AC7's falsifier pins: the job fails.
+            raise pending_timeout
+
+        on_phase_update(Phase.VERIFICATION, PhaseStatus.SUCCESS)
+        return checks
+
+    def _probe_runtime_health(
+        self, *, service: str, port: int
+    ) -> tuple[ModelHealthCheck, subprocess.TimeoutExpired | None]:
+        """Probe one runtime health endpoint, returning the check and any timeout.
+
+        The timeout is RETURNED rather than raised so the caller can decide
+        whether it is terminal. It is the exact exception object, so re-raising
+        it preserves the message the agent already logs
+        (``Command '[...]' timed out after 10 seconds``).
+        """
+        endpoint = f"http://localhost:{port}/health"  # url-authority-ok: see loopback rationale above
+        start = time.monotonic()
+        timed_out: subprocess.TimeoutExpired | None = None
+        passed = False
+        try:
             result = _run(
                 [
                     "curl",
                     "-sS",
                     "--max-time",
-                    "10",
-                    f"http://localhost:{port}/health",  # url-authority-ok: pre-existing host-loopback health check, deploy-agent curls its own host's lane-scoped port already resolved from lane_config_for; out of scope for OMN-15181 round-2 digest fix
+                    str(RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS),
+                    endpoint,  # url-authority-ok: pre-existing host-loopback health check, deploy-agent curls its own host's lane-scoped port already resolved from lane_config_for; out of scope for OMN-15181 round-2 digest fix
                 ],
-                timeout=10,
+                timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
             )
-            latency = int((time.monotonic() - start) * 1000)
-            checks.append(
-                ModelHealthCheck(
-                    service=service,
-                    endpoint=f"http://localhost:{port}/health",  # url-authority-ok: see loopback rationale above
-                    status="pass" if _runtime_health_passed(result) else "fail",
-                    latency_ms=latency,
-                )
-            )
+        except subprocess.TimeoutExpired as exc:
+            timed_out = exc
+        else:
+            passed = _runtime_health_passed(result)
+        latency = int((time.monotonic() - start) * 1000)
+        return (
+            ModelHealthCheck(
+                service=service,
+                endpoint=endpoint,
+                status="pass" if passed else "fail",
+                latency_ms=latency,
+            ),
+            timed_out,
+        )
 
-        on_phase_update(Phase.VERIFICATION, PhaseStatus.SUCCESS)
-        return checks
+    def _force_recreate_and_reverify(
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        service: str,
+        port: int,
+        failed: ModelHealthCheck,
+        timed_out: subprocess.TimeoutExpired | None,
+    ) -> tuple[ModelHealthCheck, subprocess.TimeoutExpired | None]:
+        """Recreate ONE runtime service whose health failed, then re-probe once.
+
+        OMN-18640 AC7. MEASURED on the ``.201`` dev lane 2026-09-18T23:16Z: the
+        deploy agent recreated the lane's broker, ``omninode-runtime-effects``
+        was not recreated with it, lost its group coordinator and logged 21,200
+        ``GroupCoordinatorNotAvailableError`` lines without ever fetching
+        again. Its consumer groups stayed ``Stable`` with assigned partitions
+        and frozen lag, so every liveness surface read green while no OCC
+        evidence companion was minted anywhere in the fleet.
+
+        The agent DETECTED it and could not repair it. Jobs ``a8d7acbb-d142-
+        4d64-8c57-256682e5463c`` and ``f0789d4a`` each recorded ``runtime:
+        success`` and then failed on this port, because the remedy reachable
+        from the runtime phase is an ``up -d`` that is a no-op for a container
+        whose image and config hash have not changed: a container that is GONE
+        is recreated, a container that is RUNNING AND USELESS is left as
+        found. Autoheal cannot cover it either -- the dev-lane overlay strips
+        ``autoheal=true`` from these containers under the OMN-17562 operator
+        ruling, which has a render test behind it.
+
+        FOUR BOUNDS, each of which is the whole point:
+
+        * ONE SERVICE. ``--no-deps`` and exactly one service name, so a dead
+          effects container can never become a lane-wide bounce and can never
+          walk into the core infra this agent reads its own commands from.
+        * ONE ATTEMPT. A remedy that did not work the first time is a
+          diagnosis, not something to repeat; the job then fails exactly as it
+          did before this remedy existed.
+        * DEV ONLY (``VERIFY_RECREATE_LANES``). See that constant.
+        * THE RE-PROBE WAITS ON A DERIVED BUDGET. A recreated runtime on this
+          lane was measured binding :8085 at t+321s, so an immediate re-probe
+          would report failure every time -- a vacuous control that would make
+          the ``recovered`` outcome unreachable. The wait comes from the
+          compose model via ``runtime_compose_up_budget``, never a constant.
+
+        ``timed_out`` is the exception the failing probe raised, or ``None``
+        for a probe that answered unhealthy. It is threaded in and handed back
+        unchanged whenever the remedy could not run, so a verification that
+        failed the job before this change cannot start passing because the
+        recreate itself broke.
+        """
+        config = lane_config_for(lane)
+        argv = [
+            "docker",
+            "compose",
+            *_compose_file_args(lane),
+            "-p",
+            config.compose_project,
+            "--profile",
+            "runtime",
+            "up",
+            "-d",
+            "--no-deps",
+            "--force-recreate",
+            service,
+        ]
+        logger.warning(
+            "%s failed post-deploy verification; force-recreating %s on %s once",
+            failed.endpoint,
+            service,
+            config.compose_project,
+        )
+        try:
+            result = _run(
+                argv, timeout=VERIFY_RECREATE_TIMEOUT_SECONDS, env=_compose_env()
+            )
+        except subprocess.TimeoutExpired:
+            self._record_verify_recreate(
+                lane=lane,
+                service=service,
+                endpoint=failed.endpoint,
+                outcome=EnumVerifyRecreateOutcome.RECREATE_TIMED_OUT,
+                returncode=None,
+                waited=0.0,
+                budget=0,
+                detail=(
+                    f"the recreate exceeded its {VERIFY_RECREATE_TIMEOUT_SECONDS}s "
+                    f"ceiling; the container was left mid-recreate and the probe "
+                    f"was not re-run"
+                ),
+            )
+            return failed, timed_out
+        if result.returncode != 0:
+            self._record_verify_recreate(
+                lane=lane,
+                service=service,
+                endpoint=failed.endpoint,
+                outcome=EnumVerifyRecreateOutcome.RECREATE_FAILED,
+                returncode=result.returncode,
+                waited=0.0,
+                budget=0,
+                detail=(result.stderr or result.stdout).strip()[:400],
+            )
+            return failed, timed_out
+
+        budget = runtime_compose_up_budget(lane, [service]).timeout_seconds
+        logger.info(
+            "%s recreated; re-probing %s for up to %ss",
+            service,
+            failed.endpoint,
+            budget,
+        )
+        # The poll is bounded by a COUNT derived from the budget, not by a
+        # wall-clock deadline. The two say the same thing about a real boot,
+        # and the count is the one a test can drive to its end without waiting
+        # out the budget -- a deadline loop with the sleep removed spins for
+        # the whole ten minutes instead.
+        attempts = max(1, budget // VERIFY_RECREATE_POLL_SECONDS)
+        started = time.monotonic()
+        check = failed
+        for attempt in range(attempts):
+            check, timed_out = self._probe_runtime_health(service=service, port=port)
+            if check.status == "pass":
+                break
+            if attempt + 1 < attempts:
+                _verify_recreate_sleep(VERIFY_RECREATE_POLL_SECONDS)
+        waited = time.monotonic() - started
+        recovered = check.status == "pass"
+        self._record_verify_recreate(
+            lane=lane,
+            service=service,
+            endpoint=failed.endpoint,
+            outcome=(
+                EnumVerifyRecreateOutcome.RECOVERED
+                if recovered
+                else EnumVerifyRecreateOutcome.STILL_FAILING
+            ),
+            returncode=result.returncode,
+            waited=waited,
+            budget=budget,
+            detail=(
+                ""
+                if recovered
+                else "the single recreate did not restore the health endpoint"
+            ),
+        )
+        return check, (None if recovered else timed_out)
+
+    def _record_verify_recreate(
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        service: str,
+        endpoint: str,
+        outcome: EnumVerifyRecreateOutcome,
+        returncode: int | None,
+        waited: float,
+        budget: int,
+        detail: str,
+    ) -> None:
+        record = ModelVerifyRecreate(
+            service=service,
+            lane=lane,
+            compose_project=lane_config_for(lane).compose_project,
+            endpoint=endpoint,
+            outcome=outcome,
+            recreate_returncode=returncode,
+            readiness_wait_seconds=round(waited, 1),
+            readiness_budget_seconds=budget,
+            detail=detail,
+        )
+        self.verify_recreate.append(record)
+        logger.info("verify recreate: %s", record.describe())

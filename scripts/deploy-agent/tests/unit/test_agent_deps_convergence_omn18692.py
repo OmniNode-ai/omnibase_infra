@@ -60,6 +60,9 @@ class _RecordingExecutor:
         self.container_residue: list[object] = []
         self.sibling_source_refs: dict[str, str] = {}
         self.recreate_supervision: list[object] = []
+        # OMN-18640: the terminal event now also carries what verification
+        # recreated, so a fake executor has to declare it.
+        self.verify_recreate: list[object] = []
         self.converge_calls: list[EnumRuntimeLane] = []
 
     def converge_deps(
