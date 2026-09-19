@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Models for merge-sweep classify compute node."""
 
+from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.enum_classify_skip_reason import (
+    EnumClassifySkipReason,
+)
 from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_input import (
     ModelClassifyInput,
 )
@@ -12,4 +15,9 @@ from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_pr_clas
     ModelPRClassification,
 )
 
-__all__ = ["ModelClassifyInput", "ModelClassifyResult", "ModelPRClassification"]
+__all__ = [
+    "EnumClassifySkipReason",
+    "ModelClassifyInput",
+    "ModelClassifyResult",
+    "ModelPRClassification",
+]

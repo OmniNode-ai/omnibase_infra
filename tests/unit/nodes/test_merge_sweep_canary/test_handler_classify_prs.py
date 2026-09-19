@@ -34,6 +34,8 @@ def _make_pr(**overrides) -> ModelPRInfo:
         "ci_status": "SUCCESS",
         "is_draft": False,
         "has_auto_merge": False,
+        "assignees": (),
+        "requested_reviewers": (),
     }
     defaults.update(overrides)
     return ModelPRInfo(**defaults)
@@ -52,7 +54,9 @@ class TestHandlerClassifyPRs:
         """PR with green CI, approved, mergeable goes to Track A."""
         pr = _make_pr()
         result = await handler.handle(
-            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+            ModelClassifyInput(
+                prs=(pr,), correlation_id=uuid4(), collaborator_logins=()
+            )
         )
 
         assert len(result.track_a) == 1
@@ -64,7 +68,9 @@ class TestHandlerClassifyPRs:
         """PR with CI failure goes to Track B."""
         pr = _make_pr(ci_status="FAILURE")
         result = await handler.handle(
-            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+            ModelClassifyInput(
+                prs=(pr,), correlation_id=uuid4(), collaborator_logins=()
+            )
         )
 
         assert len(result.track_a) == 0
@@ -76,7 +82,9 @@ class TestHandlerClassifyPRs:
         """PR with changes requested goes to Track B."""
         pr = _make_pr(review_decision="CHANGES_REQUESTED")
         result = await handler.handle(
-            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+            ModelClassifyInput(
+                prs=(pr,), correlation_id=uuid4(), collaborator_logins=()
+            )
         )
 
         assert len(result.track_b) == 1
@@ -87,7 +95,9 @@ class TestHandlerClassifyPRs:
         """PR with merge conflicts goes to Track B."""
         pr = _make_pr(mergeable="CONFLICTING")
         result = await handler.handle(
-            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+            ModelClassifyInput(
+                prs=(pr,), correlation_id=uuid4(), collaborator_logins=()
+            )
         )
 
         assert len(result.track_b) == 1
@@ -97,7 +107,9 @@ class TestHandlerClassifyPRs:
         """Draft PR is skipped."""
         pr = _make_pr(is_draft=True)
         result = await handler.handle(
-            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+            ModelClassifyInput(
+                prs=(pr,), correlation_id=uuid4(), collaborator_logins=()
+            )
         )
 
         assert len(result.skipped) == 1
@@ -109,7 +121,9 @@ class TestHandlerClassifyPRs:
         """PR with auto-merge already enabled is skipped."""
         pr = _make_pr(has_auto_merge=True)
         result = await handler.handle(
-            ModelClassifyInput(prs=(pr,), correlation_id=uuid4())
+            ModelClassifyInput(
+                prs=(pr,), correlation_id=uuid4(), collaborator_logins=()
+            )
         )
 
         assert len(result.skipped) == 1
@@ -121,7 +135,10 @@ class TestHandlerClassifyPRs:
         pr = _make_pr(review_decision="")
         result = await handler.handle(
             ModelClassifyInput(
-                prs=(pr,), correlation_id=uuid4(), require_approval=False
+                prs=(pr,),
+                correlation_id=uuid4(),
+                require_approval=False,
+                collaborator_logins=(),
             )
         )
 
@@ -138,7 +155,7 @@ class TestHandlerClassifyPRs:
             _make_pr(number=5, has_auto_merge=True),  # SKIP
         )
         result = await handler.handle(
-            ModelClassifyInput(prs=prs, correlation_id=uuid4())
+            ModelClassifyInput(prs=prs, correlation_id=uuid4(), collaborator_logins=())
         )
 
         assert result.total_classified == 5
@@ -150,7 +167,7 @@ class TestHandlerClassifyPRs:
     async def test_empty_input(self, handler: HandlerClassifyPRs):
         """Empty PR list produces empty result."""
         result = await handler.handle(
-            ModelClassifyInput(prs=(), correlation_id=uuid4())
+            ModelClassifyInput(prs=(), correlation_id=uuid4(), collaborator_logins=())
         )
 
         assert result.total_classified == 0
@@ -160,5 +177,7 @@ class TestHandlerClassifyPRs:
     async def test_correlation_id_preserved(self, handler: HandlerClassifyPRs):
         """Correlation ID is preserved in result."""
         cid = uuid4()
-        result = await handler.handle(ModelClassifyInput(prs=(), correlation_id=cid))
+        result = await handler.handle(
+            ModelClassifyInput(prs=(), correlation_id=cid, collaborator_logins=())
+        )
         assert result.correlation_id == cid
