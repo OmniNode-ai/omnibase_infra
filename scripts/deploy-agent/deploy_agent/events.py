@@ -843,8 +843,13 @@ class ModelRebuildCompleted(BaseModel):
             )
         return self
 
+    # OMN-18640: NO ``@property`` under ``@computed_field``. Pydantic wraps a
+    # plain method in one itself, so attribute access and serialization are
+    # unchanged, while mypy's ``prop-decorator`` rule -- which cannot see
+    # through a decorator stacked on a property -- has nothing to refuse. The
+    # alternative was a per-line suppression on the one field that states this
+    # event's verdict, which is the last place to stop type-checking.
     @computed_field
-    @property
     def status(self) -> Literal["success", "failed"]:
         non_skipped = {
             k: v for k, v in self.phase_results.items() if v != PhaseStatus.SKIPPED
