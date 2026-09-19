@@ -242,7 +242,7 @@ def test_runtime_worker_declared_in_every_runtime_lane() -> None:
         assert worker_spec.get("replicas", 1) >= 1, (
             f"lane {lane!r} runtime-worker must require at least one replica"
         )
-    assert no_worker_lanes == {"dev", "judge", "lakshman"}, (
+    assert no_worker_lanes == {"dev", "dogfood", "judge", "lakshman"}, (
         "a runtime lane without a runtime-worker must be explicitly accounted "
         f"for; got {sorted(no_worker_lanes)}"
     )

@@ -18,7 +18,9 @@ from omnibase_infra.runtime.models.model_runtime_profile_policy import (
 # GOVERNED_LANES and GRANT_INTERLOCK_LANES, and from omni_home's
 # no-raw-prod-bypass matcher. No promotion grant may resolve against it.
 # tests/ci/test_lakshman_lane_governance_boundary.py pins that, both ways.
-RuntimeProfileName = Literal["dev", "stability-test", "judge", "prod", "lakshman"]
+RuntimeProfileName = Literal[
+    "dev", "stability-test", "judge", "prod", "lakshman", "dogfood"
+]
 
 
 class ModelRuntimePolicyContract(BaseModel):
@@ -73,7 +75,7 @@ class ModelRuntimePolicyContract(BaseModel):
 
     @model_validator(mode="after")
     def _requires_runtime_profiles(self) -> ModelRuntimePolicyContract:
-        required = {"dev", "stability-test", "judge", "prod", "lakshman"}
+        required = {"dev", "stability-test", "judge", "prod", "lakshman", "dogfood"}
         observed = set(self.profiles)
         if observed != required:
             msg = f"runtime policy profiles must be {sorted(required)}, got {sorted(observed)}"

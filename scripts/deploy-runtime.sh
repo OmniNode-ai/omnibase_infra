@@ -128,7 +128,7 @@ readonly SCRIPT_NAME
 readonly SCRIPT_VERSION="1.0.0"
 
 # Deployment root -- all versioned deployments live under this tree
-readonly DEPLOY_ROOT="${HOME}/.omnibase/infra"
+readonly DEPLOY_ROOT="${OMNIBASE_INFRA_DEPLOY_ROOT:-${HOME}/.omnibase/infra}"
 
 # OMN-16729: the deploy record is PER LANE.
 #
@@ -343,6 +343,11 @@ resolve_lane_runtime_services() {
     # up` fails the WHOLE invocation on one undefined service.
     local _out_args_name="$1"
     local compose_project="$2"
+
+    if [[ "${compose_project}" == "omnibase-infra-dogfood" ]]; then
+        eval "${_out_args_name}=(omninode-runtime runtime-effects projection-api)"
+        return 0
+    fi
 
     eval "${_out_args_name}=()"
     local svc
@@ -852,6 +857,24 @@ resolve_compose_project() {
     echo "${compose_project}"
 }
 
+guard_dogfood_deploy_root() {
+    # The dogfood lane is standalone specifically to isolate both compose
+    # resources and deployed state. Falling back to the shared default root
+    # would retain the latter collision even with a private compose project.
+    local compose_project="$1"
+    if [[ "${compose_project}" != "omnibase-infra-dogfood" ]]; then
+        return 0
+    fi
+    if [[ -z "${OMNIBASE_INFRA_DEPLOY_ROOT:-}" ]]; then
+        log_error "Dogfood requires OMNIBASE_INFRA_DEPLOY_ROOT to be an absolute private deployment root."
+        exit 64
+    fi
+    if [[ "${OMNIBASE_INFRA_DEPLOY_ROOT}" != /* ]]; then
+        log_error "OMNIBASE_INFRA_DEPLOY_ROOT must be absolute for dogfood: ${OMNIBASE_INFRA_DEPLOY_ROOT}"
+        exit 64
+    fi
+}
+
 # Compose project -> lane (overlay) mapping lives in
 # scripts/runtime_build/compose_files.sh, sourced at the top of this file:
 # resolve_lane_name(), resolve_lane_overlay_filename() and
@@ -888,7 +911,7 @@ resolve_lane_runtime_container_name() {
         "")
             echo "omninode-runtime"
             ;;
-        stability-test|prod|judge)
+        stability-test|prod|judge|dogfood)
             echo "omninode-${lane}-runtime"
             ;;
         *)
@@ -4142,6 +4165,7 @@ main() {
     local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
     local compose_project
     compose_project="$(resolve_compose_project)"
+    guard_dogfood_deploy_root "${compose_project}"
     # OMN-15352: mirror into the global cleanup_on_exit() (a no-argument EXIT
     # trap handler) reads to resolve :latest image names on a failed deploy.
     DEPLOY_COMPOSE_PROJECT="${compose_project}"
