@@ -192,6 +192,11 @@ class _FakeApplier:
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
+        #: OMN-18572: the omninode_infra overlay commit the apply resolved.
+        #: The lab image tags carry THIS sha, never the merged omnibase_infra
+        #: one, and the agent reads it to decide which lineage to deliver -- so
+        #: a double that omits it no longer models the object it replaces.
+        self.manifest_sha: str | None = None
         _FakeApplier.instances.append(self)
 
     def _record(self, entry: str, sha: str, correlation_id: str) -> Path:

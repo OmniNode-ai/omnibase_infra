@@ -748,6 +748,164 @@ class ModelRebuildRejected(BaseModel):
         return payload
 
 
+class EnumOnexApiDeliveryResult(StrEnum):
+    """How the onex-api pin delivery ended (OMN-18572).
+
+    The pin delivery runs AFTER the compose lane's verdict is written and must
+    never change it -- a lane that converged on its own merits is not broken
+    because a k3s-built image failed to reach it. That isolation was already
+    correct. What was missing is that every outcome below was reported at
+    ``INFO`` with no distinction between the ones that mean "the lane now runs
+    this merge" and the ones that mean "it does not", so thirty consecutive
+    refusals read exactly like thirty successful no-ops.
+
+    ``UNRECOGNISED`` exists because the verdict is produced by a subprocess
+    (``scripts/runtime_build/repoint_dev_lane_onex_api.py``) whose result
+    vocabulary can move independently of this enum. A value this enum does not
+    know is a FAILURE and keeps its original spelling in ``raw_result`` -- it is
+    never silently read as a success.
+    """
+
+    #: The pin advanced and the service was recreated onto it.
+    WRITTEN = "WRITTEN"
+    #: The resident pin already named this image. A legitimate no-op.
+    UNCHANGED = "UNCHANGED"
+    #: ``--execute`` was not passed, so nothing was written. Not reachable from
+    #: the agent, which always executes; named so a dry run is not UNRECOGNISED.
+    PLANNED = "PLANNED"
+    #: A bounded refusal named by the repoint script; nothing was written.
+    REFUSED = "REFUSED"
+    #: Not this lane, or no operator env store is declared to write into.
+    SKIPPED = "SKIPPED"
+    #: The pin advanced in the file and the container was never recreated onto
+    #: it, so the file and the lane now disagree.
+    PIN_WRITTEN_NOT_RECREATED = "PIN_WRITTEN_NOT_RECREATED"
+    #: The delivery raised instead of returning a verdict.
+    RAISED = "RAISED"
+    #: The delivery was never attempted, because the lineage it would deliver
+    #: could not be resolved from this job's own lab-overlay apply.
+    NOT_ATTEMPTED = "NOT_ATTEMPTED"
+    #: A verdict string this enum does not know. Treated as a failure.
+    UNRECOGNISED = "UNRECOGNISED"
+
+    @classmethod
+    def coerce(cls, value: object) -> EnumOnexApiDeliveryResult:
+        """Map a source-produced verdict string onto this enum, never raising.
+
+        A raise here would convert an unknown verdict into a lost one: this is
+        called on the tail of a job whose compose verdict is already written,
+        so an exception would cost the terminal publish rather than surface the
+        oddity. ``UNRECOGNISED`` surfaces it instead.
+        """
+        try:
+            return cls(str(value))
+        except ValueError:
+            return cls.UNRECOGNISED
+
+
+class ModelOnexApiDelivery(BaseModel):
+    """What the onex-api pin delivery did for one job (OMN-18572).
+
+    ``onex-api`` on the compose dev lane is tag-referenced: the lane runs
+    whatever ``ONEX_API_IMAGE`` names. The lab-overlay apply BUILDS a correct
+    image on the host and this delivery is what makes the lane RUN it, so the
+    two facts diverge silently whenever it does not happen.
+
+    ``tag_advanced`` and ``recreated`` are reported separately and on purpose:
+    ``recreated`` without ``tag_advanced`` is a faithful restart onto a stale
+    tag, and ``tag_advanced`` without ``recreated`` is a pin in a file that
+    never reached a container. A single boolean hides both.
+
+    ``requested_sha`` is the **omninode_infra** commit whose image was asked
+    for, and it is a field rather than an inference because naming the wrong
+    repository's sha here is the exact defect this model was added alongside:
+    between 2026-09-17 and 2026-09-19 the caller passed the merged
+    ``omnibase_infra`` sha, every delivery refused, and the refusal text said
+    "none of them for omninode_infra sha <an omnibase_infra sha>" -- which reads
+    as the applier having produced nothing rather than as the caller having
+    asked for the wrong lineage.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    result: EnumOnexApiDeliveryResult
+    #: The verdict exactly as its source spelled it, so an ``UNRECOGNISED``
+    #: mapping loses nothing and a known one is checkable against the source.
+    raw_result: str
+    #: Why, in the words of whatever refused or skipped. ``None`` only when the
+    #: source gave no reason, which a success legitimately does not.
+    reason: str | None = None
+    #: The omninode_infra commit whose image this delivery asked for.
+    requested_sha: str | None = None
+    pin_before: str | None = None
+    pin_after: str | None = None
+    tag_advanced: bool = False
+    recreated: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_own_computed_fields(cls, data: object) -> object:
+        """Accept this model's own serialised form back (OMN-18572).
+
+        ``is_failure`` is a computed field, so it is present in every
+        ``model_dump`` of this model and absent from every hand-built mapping.
+        ``JobState`` persists this record to disk and re-validates it on load,
+        and under ``extra="forbid"`` that round trip fails on the model's own
+        output -- which would turn a durable verdict into a job record that
+        cannot be read back at all.
+
+        It is DROPPED rather than accepted: a derived value must be re-derived
+        from the fields it derives from, or a caller could hand back a
+        contradictory one and this model would carry it.
+        """
+        if isinstance(data, dict) and "is_failure" in data:
+            data = {k: v for k, v in data.items() if k != "is_failure"}
+        return data
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_failure(self) -> bool:
+        """True when the lane did not get what this job built, avoidably.
+
+        ``UNCHANGED`` and ``SKIPPED`` are NOT failures: the first says the lane
+        already runs this image, and the second says this lane is not one the
+        pin is delivered to. Everything else means a delivery that was supposed
+        to happen did not, and is reported as a failure so it is legible at a
+        glance in the terminal event and loud in the journal.
+        """
+        return self.result not in (
+            EnumOnexApiDeliveryResult.WRITTEN,
+            EnumOnexApiDeliveryResult.UNCHANGED,
+            EnumOnexApiDeliveryResult.PLANNED,
+            EnumOnexApiDeliveryResult.SKIPPED,
+        )
+
+    @classmethod
+    def from_record(
+        cls, record: dict[str, object], *, requested_sha: str | None
+    ) -> ModelOnexApiDelivery:
+        """Build the typed record from the executor's mapping.
+
+        ``tag_advanced`` is defaulted HERE as well as at the executor, because a
+        refusal JSON carries neither boolean and a ``None`` on this field read
+        as "not known" in the journal for every refusal in the window above.
+        """
+        raw = str(record.get("result", ""))
+        reason = record.get("reason")
+        return cls(
+            result=EnumOnexApiDeliveryResult.coerce(raw),
+            raw_result=raw,
+            reason=str(reason) if reason is not None else None,
+            requested_sha=requested_sha,
+            pin_before=(
+                str(record["pin_before"]) if record.get("pin_before") else None
+            ),
+            pin_after=(str(record["pin_after"]) if record.get("pin_after") else None),
+            tag_advanced=bool(record.get("tag_advanced") or False),
+            recreated=bool(record.get("recreated") or False),
+        )
+
+
 class ModelRebuildCompleted(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID
@@ -797,6 +955,15 @@ class ModelRebuildCompleted(BaseModel):
     # this field existed the flags a deploy used were observable only by
     # sampling the host process table while the child ran.
     compose_invocations: list[ModelComposeInvocation] = Field(default_factory=list)
+    # OMN-18572: what the onex-api pin delivery did on the tail of this job.
+    # ``None`` means the delivery was not reached at all -- a non-dev lane, a
+    # job that failed before the apply, or an agent older than this field --
+    # which is a DIFFERENT fact from a delivery that ran and refused, and the
+    # two were indistinguishable while this event carried nothing at all. The
+    # delivery never changes ``status``: the compose lane's verdict is settled
+    # before this runs and a lane that converged is not broken because an image
+    # failed to reach it.
+    onex_api_delivery: ModelOnexApiDelivery | None = None
 
     @model_validator(mode="after")
     def validate_phase_results_are_settled(self) -> ModelRebuildCompleted:

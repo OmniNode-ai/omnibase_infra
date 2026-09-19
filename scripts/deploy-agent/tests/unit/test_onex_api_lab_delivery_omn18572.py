@@ -61,6 +61,11 @@ from deploy_agent.lane_lock_client import lane_lock_path
 pytestmark = pytest.mark.unit
 
 SHA = "a" * 40
+#: The omninode_infra overlay commit the apply resolves -- the lineage the
+#: lab image tags carry, and the one the pin delivery must ask for. See
+#: ``test_onex_api_pin_lineage_omn18572`` for the defect this distinction
+#: exists to make visible.
+OVERLAY_SHA = "b" * 40
 STALE_PIN = "onex-lab/omnicloud-core:f37261c2-20260917T050425Z"
 FRESH_PIN = "onex-lab/omnicloud-core:99fdbd37-20260917T110254Z"
 
@@ -168,9 +173,14 @@ class _FakeApplier:
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
+        self.manifest_sha: str | None = None
 
     def apply(self, *, sha: str, stamp: str, correlation_id: str) -> Path:
         _FakeApplier.calls.append({"entry": "apply", "sha": sha})
+        # OMN-18572: the overlay's OWN lineage, which is what the four image
+        # tags carry. Deliberately different from `sha` (the merged
+        # omnibase_infra commit) so a test cannot pass by conflating them.
+        self.manifest_sha = OVERLAY_SHA
         return Path(f"/state/lab-overlay/{sha}.json")
 
     def build_repair_migrate_image(
@@ -392,7 +402,13 @@ async def test_successful_dev_deploy_delivers_the_onex_api_pin(
         "the lab-overlay apply built a fresh onex-api image and nothing "
         "advanced ONEX_API_IMAGE, so the lane keeps running the old pin"
     )
-    assert executor.delivered[0]["sha"] == SHA
+    # CORRECTED BY THE SAME TICKET THAT WROTE IT. This asserted ``== SHA``, the
+    # merged omnibase_infra sha, which is the value the shipped code passed and
+    # is not a lineage any lab image has ever carried -- so the test agreed with
+    # the defect and stayed green through thirty red canary runs. The lineage
+    # belongs to the overlay; ``test_onex_api_pin_lineage_omn18572`` carries the
+    # measurement.
+    assert executor.delivered[0]["sha"] == OVERLAY_SHA
 
 
 async def test_delivery_runs_after_the_apply_that_builds_the_image(
