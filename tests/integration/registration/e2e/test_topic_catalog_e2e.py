@@ -82,6 +82,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Module-level markers (OMN-18795)
+# conftest.py's own `pytestmark` is package-scoped documentation only -- pytest
+# does not propagate a conftest.py-level `pytestmark` to sibling test modules.
+# Each file in this directory must carry its own e2e marker for the PR splits'
+# `-m "... and not e2e ..."` selection to deselect it; the sibling e2e suites in
+# this same directory already do this. Without it this suite was collected by
+# the PR splits and hit conftest's fail-closed require_service_env gate with no
+# Kafka/Postgres provisioned.
+pytestmark = [
+    pytest.mark.e2e,
+]
+
 # =============================================================================
 # Timeout constants
 # =============================================================================

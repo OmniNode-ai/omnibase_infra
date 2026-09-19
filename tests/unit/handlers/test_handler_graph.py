@@ -9,6 +9,7 @@ to validate HandlerGraph behavior without requiring actual graph database infras
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -807,7 +808,18 @@ class TestHandlerGraphTraverse:
                     "path_ids": ["4:abc:123", "4:abc:124"],
                 }
             ]
-            mock_result.data = AsyncMock(return_value=records_data)
+
+            # OMN-18795: traverse() no longer calls `result.data()` -- it
+            # iterates the result directly (`async for record in result`), so
+            # the mock must support async iteration rather than mocking
+            # `.data()`. Each yielded "record" is a plain dict here, which
+            # satisfies the handler's `record["n"]` / `record.get("rels")`
+            # dict-style access.
+            async def _record_iter() -> AsyncIterator[dict[str, object]]:
+                for rec in records_data:
+                    yield rec
+
+            mock_result.__aiter__ = MagicMock(return_value=_record_iter())
             mock_result.consume = AsyncMock()
 
             mock_session.run = AsyncMock(return_value=mock_result)

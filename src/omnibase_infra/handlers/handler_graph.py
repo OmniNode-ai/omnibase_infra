@@ -688,9 +688,19 @@ class HandlerGraph(
         self._validate_cypher_labels(labels, "create_node", correlation_id)
 
         # Build Cypher query with labels
+        #
+        # OMN-18795: `elementId()` is a Neo4j 5.x function; Memgraph 2.18.1 (the
+        # version this handler's own default database targets -- self._database
+        # defaults to "memgraph") does not implement it and raises
+        # `Function 'ELEMENTID' doesn't exist`. This handler's integration suite
+        # had no execution path against a real Memgraph until OMN-18795 wired it
+        # into ci.yml's service-integration-suites job, so the incompatibility
+        # was collected and skipped (or simply never run) on every prior PR.
+        # `toString(id(x))` is standard openCypher and produces the same
+        # string-typed identifier shape every caller already reads.
         labels_str = ":".join(labels) if labels else ""
         label_clause = f":{labels_str}" if labels_str else ""
-        query = f"CREATE (n{label_clause} $props) RETURN n, elementId(n) as eid, id(n) as nid"
+        query = f"CREATE (n{label_clause} $props) RETURN n, toString(id(n)) as eid, id(n) as nid"
 
         try:
             async with driver.session(database=self._database) as session:
@@ -791,12 +801,12 @@ class HandlerGraph(
 
         # Build appropriate match clauses
         if from_is_element_id:
-            from_match = "MATCH (a) WHERE elementId(a) = $from_id"
+            from_match = "MATCH (a) WHERE toString(id(a)) = $from_id"
         else:
             from_match = "MATCH (a) WHERE id(a) = $from_id"
 
         if to_is_element_id:
-            to_match = "MATCH (b) WHERE elementId(b) = $to_id"
+            to_match = "MATCH (b) WHERE toString(id(b)) = $to_id"
         else:
             to_match = "MATCH (b) WHERE id(b) = $to_id"
 
@@ -805,8 +815,8 @@ class HandlerGraph(
         {from_match}
         {to_match}
         CREATE (a)-[r:{relationship_type} $props]->(b)
-        RETURN r, elementId(r) as eid, id(r) as rid,
-               elementId(a) as start_eid, elementId(b) as end_eid
+        RETURN r, toString(id(r)) as eid, id(r) as rid,
+               toString(id(a)) as start_eid, toString(id(b)) as end_eid
         """
 
         params: dict[str, object] = {
@@ -888,7 +898,7 @@ class HandlerGraph(
         start_time = time.perf_counter()
 
         if is_element_id:
-            match_clause = "MATCH (n) WHERE elementId(n) = $node_id"
+            match_clause = "MATCH (n) WHERE toString(id(n)) = $node_id"
         else:
             match_clause = "MATCH (n) WHERE id(n) = $node_id"
 
@@ -989,7 +999,7 @@ class HandlerGraph(
         if is_element_id:
             query = """
             MATCH ()-[r]->()
-            WHERE elementId(r) = $rel_id
+            WHERE toString(id(r)) = $rel_id
             DELETE r
             RETURN count(r) as deleted
             """
@@ -1095,7 +1105,7 @@ class HandlerGraph(
 
         # Build match clause for start node
         if is_element_id:
-            start_match = "MATCH (start) WHERE elementId(start) = $start_id"
+            start_match = "MATCH (start) WHERE toString(id(start)) = $start_id"
         else:
             start_match = "MATCH (start) WHERE id(start) = $start_id"
 
@@ -1132,8 +1142,8 @@ class HandlerGraph(
         {start_match}
         MATCH p = (start){rel_pattern}(n)
         {where_clause}
-        WITH DISTINCT n, relationships(p) as rels, [node in nodes(p) | elementId(node)] as path_ids
-        RETURN n, elementId(n) as eid, id(n) as nid, rels, path_ids
+        WITH DISTINCT n, relationships(p) as rels, [node in nodes(p) | toString(id(node))] as path_ids
+        RETURN n, toString(id(n)) as eid, id(n) as nid, rels, path_ids
         LIMIT 1000
         """
 
