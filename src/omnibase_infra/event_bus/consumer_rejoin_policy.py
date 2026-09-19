@@ -66,6 +66,17 @@ class ModelConsumerRejoinPolicy(BaseModel):
         description="Minimum seconds between forced rejoins of the same group.",
         ge=0.0,
     )
+    sync_unready_seconds: float = Field(
+        ...,
+        description=(
+            "Seconds a stall must persist before the readiness dimension "
+            "reports the group out of sync (OMN-18640 AC1). Deliberately "
+            "longer than one full self-heal attempt and its cooldown: "
+            "readiness reports the wedge the rejoin path did NOT fix, so the "
+            "two remedies do not race over the same one."
+        ),
+        gt=0.0,
+    )
 
 
 def evaluate_consumer_stall(

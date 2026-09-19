@@ -61,6 +61,11 @@ POLICY = ModelConsumerRejoinPolicy(
     stall_seconds=120.0,
     required_consecutive_stalls=3,
     rejoin_cooldown_seconds=300.0,
+    # OMN-18640 AC1 added the readiness window to this policy. Its value is
+    # irrelevant to every test in this file -- they are about the rejoin
+    # decision, which does not read it -- but it is required rather than
+    # defaulted so no construction site can silently disagree with the config.
+    sync_unready_seconds=600.0,
 )
 
 
