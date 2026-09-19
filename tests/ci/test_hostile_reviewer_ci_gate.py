@@ -72,10 +72,23 @@ def test_hostile_reviewer_gate_job_requires_both_predecessors() -> None:
     assert gate_job["name"] == "Hostile Review Gate"
     needs = gate_job["needs"]
     assert set(needs) == {"occ-preflight", "hostile-review"}
-    # `if: always()` is required -- otherwise a failed predecessor would skip
-    # this job entirely, and a *skipped* required check does not block merge
-    # the way a *failed* one does.
-    assert gate_job["if"] == "always()"
+    # The property this pins: a FAILED or SKIPPED predecessor must still
+    # evaluate the gate, because a *skipped* check does not block merge the
+    # way a *failed* one does.
+    #
+    # OMN-18793 supersedes the literal `always()` this line used to demand,
+    # and keeps the property. `always()` is also true on a CANCELLED run, so
+    # with this workflow's `concurrency.cancel-in-progress: true` the gate
+    # posted a hard failure on every superseded push -- 9 of the 10 most
+    # recent heads when the OMN-18254 failure-rate alert first fired.
+    # `!cancelled()` still runs on a failed or skipped predecessor and is
+    # silent only when the run itself was cancelled, which is the correct
+    # verdict for a run that was never allowed to produce one. The
+    # cancelled-run behaviour has its own dedicated test:
+    # tests/ci/test_hostile_review_gate_cancelled_run_omn18793.py.
+    condition = str(gate_job["if"]).replace(" ", "")
+    assert "!cancelled()" in condition
+    assert "always()" not in condition
 
 
 def test_hostile_reviewer_gate_blocks_on_failed_review_or_missing_preflight() -> None:

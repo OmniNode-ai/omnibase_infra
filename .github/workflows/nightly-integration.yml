@@ -480,8 +480,18 @@ jobs:
           # neither AWS credentials nor tailnet reach to it, so they could
           # only ever be permanent red noise here. They are selected
           # deliberately by msk-bastion-canary.yml on omnibase-deploy.
+          # OMN-18781: the event-bus and Qdrant suites are owned by the
+          # service-integration-suites job in ci.yml, which provisions a
+          # plaintext Redpanda and a Qdrant and sets their opt-ins. They refuse
+          # to skip in CI, so selecting them HERE -- where this stack provides a
+          # SASL-less broker but no Qdrant, and neither opt-in is exported --
+          # would fail them for the absence of an env this workflow does not
+          # own. Deselected by path, not by marker, so the rest of the
+          # kafka-marked family keeps its nightly selection unchanged.
           uv run pytest tests/integration/ \
             -m "integration and not bastion" \
+            --deselect tests/integration/event_bus/test_kafka_event_bus_integration.py \
+            --deselect tests/integration/handlers/test_handler_qdrant_integration.py \
             -v \
             --tb=short \
             --junitxml=nightly-integration-junit.xml \

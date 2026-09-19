@@ -62,6 +62,7 @@ evaluate_all = _lib.evaluate_all
 evaluate_deploy_target = _lib.evaluate_deploy_target
 evaluate_deploy_targets = _lib.evaluate_deploy_targets
 exit_code_for = _lib.exit_code_for
+blind_verdicts_for_deploy_target = _lib.blind_verdicts_for_deploy_target
 
 
 def _codes(facts: Any, thresholds: DriftThresholds | None = None) -> set[str]:
@@ -508,3 +509,236 @@ def test_evaluate_all_includes_deploy_targets_in_exit_code() -> None:
     assert report.repos_checked == 2  # 1 RepoFacts + 1 DeployFacts
     assert exit_code_for(report) == 1
     assert any(f.code == "DEPLOY_STALE_VS_DEV" for f in report.findings)
+
+
+# --------------------------------------------------------------------------- #
+# OMN-18348: a monitor that cannot READ a surface must say so as its own       #
+# verdict, never as a finding ABOUT that surface.                              #
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_unreadable_deploy_probe_is_not_a_surface_finding() -> None:
+    """Reproduces the live 2026-09-18 report (run 35380688946).
+
+    The minted App token carried ``contents`` only, so reading
+    ``deploy-onex-dev.yml`` runs on the PRIVATE omninode_infra repo returned
+    ``HTTP 403 Resource not accessible by integration``. The monitor turned
+    that unreadable probe into a P1 ``MISSING_SUCCESSFUL_DEPLOY`` -- a claim
+    about the deploy target that the monitor had no facts to support.
+    """
+    facts = _deploy_target(
+        last_success=None,
+        last_success_readable=False,
+        probe_errors=(
+            "deploy-onex-dev.yml successful runs: gh: Resource not accessible "
+            "by integration (HTTP 403)",
+        ),
+    )
+    assert _deploy_codes(facts) == set()
+
+    verdicts = blind_verdicts_for_deploy_target(facts)
+    assert [v.code for v in verdicts] == ["PROBE_UNREADABLE"]
+    assert "403" in verdicts[0].detail
+
+
+@pytest.mark.unit
+def test_readable_probe_with_zero_successful_runs_still_fires_missing() -> None:
+    """AC1 falsifier: a genuinely absent successful deploy, on a surface the
+    monitor CAN read, must still be reported as MISSING_SUCCESSFUL_DEPLOY.
+
+    The read succeeded and returned no successful run at all (the workflow
+    exists, has runs, none of them green) -- there is no head_sha to compare
+    the branch against. That is a fact about the target, not a visibility gap.
+    """
+    facts = _deploy_target(
+        last_success=WorkflowRun(
+            name="deploy-onex-dev.yml", exists=True, conclusion=None, head_sha=None
+        ),
+        last_success_readable=True,
+    )
+    assert _deploy_codes(facts) == {"MISSING_SUCCESSFUL_DEPLOY"}
+    assert blind_verdicts_for_deploy_target(facts) == []
+
+
+@pytest.mark.unit
+def test_blind_verdict_makes_the_report_blind_and_exits_2() -> None:
+    """A blind verdict is never a silent green: the report reports BLIND and
+    the process exits 2 even though no surface finding fired.
+    """
+    facts = _deploy_target(
+        last_success=None,
+        last_success_readable=False,
+        probe_errors=("successful runs: HTTP 403",),
+    )
+    report = evaluate_all([], DriftThresholds(), now=_NOW, deploy_facts=[facts])
+    assert report.findings == ()
+    assert report.diverged is False
+    assert [v.code for v in report.blind_verdicts] == ["PROBE_UNREADABLE"]
+    assert report.blind is True
+    assert exit_code_for(report) == 2
+
+
+# --------------------------------------------------------------------------- #
+# OMN-18348: a failed release RUN is not the same fact as a failed PUBLISH.    #
+# --------------------------------------------------------------------------- #
+_INFRA_0_38_32 = {
+    "repo": "omnibase_infra",
+    "pypi_package": "omnibase-infra",
+    "pypi_version": "0.38.32",
+    "latest_tag": "v0.38.32",
+    "main_version": "0.38.32",
+    "dev_version": "0.38.32",
+    "dev_ahead_commits": 0,
+}
+
+
+@pytest.mark.unit
+def test_failed_release_run_whose_publish_landed_is_a_cascade_failure() -> None:
+    """Reproduces the live 2026-09-18 omnibase_infra finding.
+
+    Release run 35329990280 (v0.38.32) concluded ``failure``, so the monitor
+    fired P1 ``RELEASE_WORKFLOW_FAILED`` claiming "The release chain is broken;
+    no publish has succeeded since". The publish HAD succeeded: the ``release``
+    job was green and PyPI serves 0.38.32, matching tag v0.38.32 -- facts this
+    same monitor collects. Only the downstream ``Dependency Cascade / Bump
+    omniintelligence`` job failed (OMN-18634 / OMN-18673).
+    """
+    facts = RepoFacts(
+        **_INFRA_0_38_32,
+        release_run=WorkflowRun(
+            name="release.yml",
+            exists=True,
+            conclusion="failure",
+            created_at="2026-09-18T09:31:39Z",
+            failed_jobs=("Dependency Cascade / Bump omniintelligence",),
+        ),
+    )
+    findings = evaluate_repo(facts, DriftThresholds(), now=_NOW)
+    codes = {f.code for f in findings}
+    assert codes == {"RELEASE_CASCADE_FAILED"}
+    (finding,) = findings
+    assert finding.severity == "P2"
+    assert "Dependency Cascade / Bump omniintelligence" in finding.detail
+    # The false claim must be gone.
+    assert "no publish has succeeded" not in finding.detail
+
+
+@pytest.mark.unit
+def test_failed_release_run_with_pypi_behind_tag_is_still_p1() -> None:
+    """Falsifier: when the publish genuinely did NOT land (PyPI behind the
+    tag), the P1 RELEASE_WORKFLOW_FAILED verdict must survive unchanged.
+    """
+    facts = RepoFacts(
+        repo="omnibase_infra",
+        pypi_package="omnibase-infra",
+        pypi_version="0.38.31",
+        latest_tag="v0.38.32",
+        main_version="0.38.32",
+        dev_version="0.38.32",
+        dev_ahead_commits=0,
+        release_run=WorkflowRun(
+            name="release.yml",
+            exists=True,
+            conclusion="failure",
+            created_at="2026-09-18T09:31:39Z",
+            failed_jobs=("release",),
+        ),
+    )
+    codes = {f.code for f in evaluate_repo(facts, DriftThresholds(), now=_NOW)}
+    assert "RELEASE_WORKFLOW_FAILED" in codes
+    assert "RELEASE_CASCADE_FAILED" not in codes
+
+
+@pytest.mark.unit
+def test_failed_release_run_without_pypi_facts_is_still_p1() -> None:
+    """Fail-loud default: with no published-artifact fact to derive from, the
+    monitor cannot conclude the publish landed, so the P1 verdict stands.
+    """
+    facts = RepoFacts(
+        repo="onex_change_control",
+        pypi_package=None,
+        latest_tag="v0.5.3",
+        main_version="0.5.3",
+        dev_version="0.5.3",
+        dev_ahead_commits=0,
+        release_run=WorkflowRun(
+            name="release.yml",
+            exists=True,
+            conclusion="failure",
+            created_at="2026-09-18T09:31:39Z",
+        ),
+    )
+    codes = {f.code for f in evaluate_repo(facts, DriftThresholds(), now=_NOW)}
+    assert "RELEASE_WORKFLOW_FAILED" in codes
+
+
+# --------------------------------------------------------------------------- #
+# OMN-18348: release-lineage checks presume main tracks what shipped.          #
+# --------------------------------------------------------------------------- #
+_OCC_LIVE = {
+    "repo": "onex_change_control",
+    "pypi_package": None,
+    "pypi_version": None,
+    "latest_tag": "v0.5.3",
+    "main_version": "0.5.1",
+    "dev_version": "0.5.4",
+    "dev_ahead_commits": 7019,
+}
+
+
+@pytest.mark.unit
+def test_repo_that_is_not_release_synced_skips_lineage_checks() -> None:
+    """onex_change_control carries no release.yml on either branch and its
+    ``main`` is a deliberately separate lineage (the CODEOWNERS-gated grants
+    anchor), so "main is behind what shipped" and "dev is ahead of main" are
+    not drift there -- they are the repo's design. Live on 2026-09-18:
+    main 0.5.1, tag v0.5.3, dev 7019 commits ahead.
+    """
+    facts = RepoFacts(
+        **_OCC_LIVE,
+        release_synced=False,
+        release_synced_note="no release.yml on dev or main; main is a separate lineage",
+    )
+    codes = {f.code for f in evaluate_repo(facts, DriftThresholds(), now=_NOW)}
+    assert "MAIN_BEHIND_RELEASED" not in codes
+    assert "DEV_AHEAD_OF_MAIN" not in codes
+
+
+@pytest.mark.unit
+def test_release_synced_repo_with_the_same_facts_still_fires() -> None:
+    """Falsifier for the test above: the identical facts on a release-synced
+    repo must still fire both lineage findings. The skip is scoped to the
+    repo's release model, not a severity floor.
+    """
+    facts = RepoFacts(**{**_OCC_LIVE, "repo": "omnibase_core"}, release_synced=True)
+    codes = {f.code for f in evaluate_repo(facts, DriftThresholds(), now=_NOW)}
+    assert "MAIN_BEHIND_RELEASED" in codes
+    assert "DEV_AHEAD_OF_MAIN" in codes
+
+
+@pytest.mark.unit
+def test_not_release_synced_repo_still_fires_non_lineage_checks() -> None:
+    """The skip is narrow: a stale [tool.uv.sources] override on main is not a
+    lineage claim and must still fire on a non-release-synced repo.
+    """
+    facts = RepoFacts(
+        **_OCC_LIVE,
+        release_synced=False,
+        main_git_overrides=("omnibase-core",),
+        dev_git_overrides=(),
+    )
+    codes = {f.code for f in evaluate_repo(facts, DriftThresholds(), now=_NOW)}
+    assert "MAIN_STALE_UV_OVERRIDE" in codes
+
+
+@pytest.mark.unit
+def test_report_records_which_repos_skipped_lineage_and_why() -> None:
+    """The skip must be VISIBLE in the report, never silent."""
+    facts = RepoFacts(
+        **_OCC_LIVE,
+        release_synced=False,
+        release_synced_note="no release.yml on dev or main",
+    )
+    report = evaluate_all([facts], DriftThresholds(), now=_NOW)
+    assert report.lineage_skipped == (
+        "onex_change_control: no release.yml on dev or main",
+    )

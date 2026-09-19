@@ -105,7 +105,7 @@ def claim_row(*, priced: bool, lane: str = "omn18554-test") -> str:
     vacuous.
     """
     head = (
-        f"- {_stamp(datetime.now(UTC))} [{lane}] CLAIM OMN-18554 — "
+        f"- {_stamp(datetime.now(UTC))} [{lane}] CLAIM OMN-18554 actor=claude:opus5 — "
         "exercise the rule-4 window gate"
     )
     if not priced:
@@ -696,7 +696,10 @@ def test_the_pipe_lead_cutover_date_exists_and_is_a_date_not_a_flag() -> None:
 
 
 def _pipe_row(moment: datetime, *, priced: bool, lane: str = "grace-lane") -> str:
-    head = f"{_stamp(moment)} | CLAIM | lane={lane} | ticket=OMN-18554 | scope=x"
+    head = (
+        f"{_stamp(moment)} | CLAIM | lane={lane} | ticket=OMN-18554 | "
+        "actor=claude:opus5 | scope=x"
+    )
     return head + (
         "; est ~2 lane-hours; displaces nothing; (OMN-18554)" if priced else ""
     )

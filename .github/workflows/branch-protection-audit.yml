@@ -64,8 +64,22 @@ on:
 # that main, so leaving this pin there would false-FAIL the audit. Verified at
 # the new revision before the bump: 0 failures across 102 checks, all repos
 # compliant.
+#
+# OMN-18288: bumped from 8b3576c260 to e153557639, which is
+# `feat(OMN-18288): assert the Lane Identity Gate on omniclaude dev in the
+# branch-protection audit (onex_change_control#10301)`. That revision adds one
+# check: omniclaude dev must directly require the `Lane Identity Gate` context.
+# The gate had reported on that branch since 2026-09-13 while absent from
+# required_status_checks, so it could not block a merge; the context was added
+# to live branch protection additively (61 contexts to 62, `strict` unchanged)
+# before this pin moved, and the omniclaude manifest reconcile agrees.
+#
+# Without this bump the new assertion is inert here, which is the advisory-
+# detection failure the ticket exists to close, one layer up. Verified at the
+# new revision before the bump: 0 failures across 103 checks, all repos
+# compliant -- 102 before, plus the one check this revision adds.
 env:
-  ONEX_CHANGE_CONTROL_REF: 8b3576c260bb9f520617579c1d5def48432d474e
+  ONEX_CHANGE_CONTROL_REF: e1535576395c6448d7bbd39cc5222648d7c475f3
 
 jobs:
   audit:

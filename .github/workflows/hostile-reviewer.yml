@@ -563,7 +563,20 @@ jobs:
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     needs: [occ-preflight, hostile-review]
-    if: always()
+    # OMN-18793: `!cancelled()`, never bare `always()`. This workflow declares
+    # `concurrency.cancel-in-progress: true`, so every re-push cancels the run
+    # already in flight. `always()` is TRUE on a cancelled run, so the gate
+    # executed there too, read `needs.occ-preflight.result == 'cancelled'`, and
+    # posted a hard `failure` against the pull-request head for a run that was
+    # never allowed to produce a verdict -- 9 of the 10 most recent heads when
+    # the OMN-18254 failure-rate alert first fired (run 35412814968).
+    #
+    # `!cancelled()` changes WHEN this job runs, never WHAT it refuses: a
+    # skipped or failed upstream still evaluates here (a draft/bot-skipped
+    # reviewer must not needs-cascade the gate into a vacuous skip), and both
+    # fail-closed branches below are unchanged. Only a cancelled run is silent,
+    # which is correct -- a superseded run has no verdict to report.
+    if: ${{ !cancelled() }}
     steps:
       - name: Evaluate gate
         working-directory: ${{ github.workspace }}
@@ -597,10 +610,26 @@ jobs:
   # recorded follow-up on OMN-17492).
   hostile-review-thread-gate:
     name: Hostile Review Thread Gate
-    # always() so a skipped (draft/bot) or failed reviewer job does not
-    # needs-cascade this into a skip — existing unresolved threads outlive
-    # any single run and still deserve the deterministic check.
-    if: always() && github.event_name == 'pull_request'
+    # OMN-18799: `!cancelled()`, never bare `always()`. The workflow declares
+    # `concurrency.cancel-in-progress: true`, so every re-push cancels the run
+    # already in flight, and `always()` is TRUE on a cancelled run. This job
+    # then started, and — unlike its sibling gate, which reads a `cancelled`
+    # predecessor and goes red — it has no needs-result triage at all: the step
+    # below shells the thread checker, which finds no threads from a reviewer
+    # that was cancelled before it could post any, exits 0, and publishes a
+    # GREEN verdict for a run that evaluated nothing. Four consecutive sampled
+    # cancelled runs (35415401505, 35414662126, 35413698388, 35412846604) all
+    # concluded `success` here. A false green is the worse direction: a false
+    # red is loud, a success that established nothing is indistinguishable
+    # from a real one.
+    #
+    # `!cancelled()` changes WHEN this job runs, never WHAT it checks: a
+    # skipped (draft/bot) or failed reviewer job still evaluates here, because
+    # existing unresolved threads outlive any single run and a skipped check
+    # does not block a merge the way a failed one does. The event guard stays
+    # for the same reason it was written: off a pull request there is no
+    # PR_NUMBER for the checker to read.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
@@ -609,9 +638,11 @@ jobs:
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     needs: [hostile-review]
-    # always(): a skipped/degraded reviewer must not vacuously skip the
-    # thread check (OMN-15315 lineage: the absence of a verdict is not a
-    # passing one — and existing unresolved threads outlive any single run).
+    # The property the condition above preserves: a skipped/degraded reviewer
+    # must not vacuously skip the thread check (OMN-15315 lineage: the absence
+    # of a verdict is not a passing one — and existing unresolved threads
+    # outlive any single run). OMN-18799 adds the converse for a CANCELLED
+    # run, where the absence of a verdict must not be a passing one either.
     timeout-minutes: 10
     steps:
       - name: Checkout (gate script)

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import SecretStr
+from qdrant_client.http import models as qdrant_models
 
 from omnibase_core.models.common.model_schema_value import ModelSchemaValue
 from omnibase_core.models.vector import (
@@ -688,33 +689,71 @@ class TestHandlerQdrantDeleteIndex:
     """Test HandlerQdrant delete_index operation."""
 
     @pytest.mark.asyncio
-    async def test_delete_index_calls_client(
+    async def test_delete_index_reports_the_geometry_it_removed(
         self,
         handler: HandlerQdrant,
         connection_config: ModelVectorConnectionConfig,
         mock_qdrant_client: MagicMock,
     ) -> None:
-        """Test delete_index calls Qdrant client delete_collection.
+        """delete_index reads the collection's geometry, then deletes it.
 
-        Note: The handler currently returns dimension=0 which violates the
-        ModelVectorIndexResult constraint (dimension >= 1). This causes an
-        InfraConnectionError wrapping the ValidationError. This test verifies
-        the client is called correctly.
+        This test previously asserted the OPPOSITE, and said so in its own
+        docstring: the handler returned ``dimension=0``, ModelVectorIndexResult
+        constrains dimension to >= 1, and the test pinned the resulting
+        InfraConnectionError as expected behaviour. The method could not succeed
+        for any input. A mock cannot tell you that a method never works, because
+        the mock agrees with whatever the code does — only the real-server suite
+        could, and it had been skipping (OMN-18781).
         """
+        described = MagicMock()
+        described.config.params.vectors.size = 384
+        described.config.params.vectors.distance = qdrant_models.Distance.COSINE
+        mock_qdrant_client.get_collection.return_value = described
+
         with patch("omnibase_infra.handlers.handler_qdrant.QdrantClient") as MockClient:
             MockClient.return_value = mock_qdrant_client
             await handler.initialize(connection_config)
 
-            # Handler returns dimension=0 which fails model validation
-            # This raises InfraConnectionError wrapping the ValidationError
-            with pytest.raises(InfraConnectionError) as exc_info:
-                await handler.delete_index(index_name="old_collection")
+            result = await handler.delete_index(index_name="old_collection")
 
-            # Verify delete_collection was called despite the error
+            mock_qdrant_client.get_collection.assert_called_once_with(
+                collection_name="old_collection"
+            )
             mock_qdrant_client.delete_collection.assert_called_once_with(
                 collection_name="old_collection"
             )
-            assert "ValidationError" in str(exc_info.value)
+            assert result.success is True
+            assert result.index_name == "old_collection"
+            assert result.dimension == 384
+            assert result.metric is EnumVectorDistanceMetric.COSINE
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_delete_index_refuses_when_the_geometry_is_unreadable(
+        self,
+        handler: HandlerQdrant,
+        connection_config: ModelVectorConnectionConfig,
+        mock_qdrant_client: MagicMock,
+    ) -> None:
+        """An unreadable geometry is an error, not a placeholder dimension.
+
+        Substituting a made-up value is what broke this path before. The
+        collection is left alone: the read happens first, so a failure here
+        cannot destroy anything.
+        """
+        described = MagicMock()
+        described.config.params.vectors = None
+        mock_qdrant_client.get_collection.return_value = described
+
+        with patch("omnibase_infra.handlers.handler_qdrant.QdrantClient") as MockClient:
+            MockClient.return_value = mock_qdrant_client
+            await handler.initialize(connection_config)
+
+            with pytest.raises(InfraConnectionError):
+                await handler.delete_index(index_name="opaque_collection")
+
+            mock_qdrant_client.delete_collection.assert_not_called()
 
             await handler.shutdown()
 

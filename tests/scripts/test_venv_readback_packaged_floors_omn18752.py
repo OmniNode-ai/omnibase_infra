@@ -219,3 +219,150 @@ def test_a_specifier_with_no_lower_bound_is_not_a_floor() -> None:
         }
     )
     assert rows == []
+
+
+# --------------------------------------------------------------------------
+# the capability is required only when there is something to read
+# --------------------------------------------------------------------------
+
+
+def test_no_omni_internal_requirements_needs_no_packaging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A venv with no declared omni-internal floors yields no rows, and asks
+    nothing of ``packaging``.
+
+    This shipped wrong and turned a passing integration test red on `dev`
+    within the hour. The first version imported ``packaging`` at the top of
+    the function and returned an UNREADABLE row when the import failed —
+    before looking at whether any floor existed to evaluate. A target venv
+    built ``--without-pip`` has no ``packaging``, so a correct repair with
+    nothing to assert was reported INDETERMINATE and the readback exited
+    non-zero.
+
+    Failing closed is right when the answer matters and cannot be computed.
+    It is wrong when there is no question: a capability this function never
+    needed must not decide the verdict. The import is attempted only once a
+    candidate omni-internal requirement has actually been found.
+    """
+    import builtins
+
+    from venv_readback import packaged_floor_rows as rows_fn
+
+    real_import = builtins.__import__
+
+    def _refuse_packaging(name: str, *args: object, **kwargs: object) -> object:
+        if name.startswith("packaging"):
+            raise ImportError("packaging is not installed in this interpreter")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", _refuse_packaging)
+
+    assert (
+        rows_fn(
+            {
+                "omnimarket": _facts("0.4.119", ()),
+                "omnibase-core": _facts("0.47.17", ("pydantic>=2.12.5",)),
+            }
+        )
+        == []
+    )
+
+
+def test_missing_packaging_with_a_real_floor_still_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a floor DOES exist and cannot be evaluated, that is UNREADABLE.
+
+    The narrowing above must not become a silent pass: an omni-internal
+    requirement the interpreter cannot parse is exactly the case this
+    readback has to refuse.
+    """
+    import builtins
+
+    from venv_readback import ReadbackOutcome as Outcome
+    from venv_readback import outcome_for as outcome_fn
+    from venv_readback import packaged_floor_rows as rows_fn
+
+    real_import = builtins.__import__
+
+    def _refuse_packaging(name: str, *args: object, **kwargs: object) -> object:
+        if name.startswith("packaging"):
+            raise ImportError("packaging is not installed in this interpreter")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", _refuse_packaging)
+
+    rows = rows_fn(
+        {
+            "omnimarket": _facts("0.4.123", ("omnibase-infra>=0.38.31",)),
+            "omnibase-infra": _facts("0.38.30"),
+        }
+    )
+    assert rows, "a declared omni-internal floor must still produce a row"
+    assert outcome_fn(rows) is not Outcome.IN_SYNC
+
+
+# --------------------------------------------------------------------------
+# the pre-filter decides WHETHER to load a parser; it must not decide the answer
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "omnibase_core>=0.47.17",
+        "Omnibase-Core>=0.47.17",
+        "omnibase.core>=0.47.17",
+        "OMNIBASE_CORE>=0.47.17",
+    ],
+)
+def test_a_floor_is_asserted_whatever_the_name_is_spelled_like(raw: str) -> None:
+    """PEP 503 says these are all the same distribution, so all are floors.
+
+    The narrowing above skips a requirement before parsing it, to avoid asking
+    for ``packaging`` when there is nothing to evaluate. Deciding that with a
+    raw substring test would be fail-OPEN: none of these spellings contains
+    the literal ``omnibase-``, every one of them is omni-internal after
+    normalization, and a skipped line is a floor that silently stops being
+    asserted. That is the failure this readback exists to remove, so the
+    pre-filter resolves the normalized name instead.
+    """
+    rows = packaged_floor_rows(
+        {
+            "omnimarket": _facts("0.4.123", (raw,)),
+            "omnibase-core": _facts("0.47.16"),
+        }
+    )
+    assert [row.verdict for row in rows] == [ReadbackVerdict.MISMATCH], (
+        f"the floor declared as {raw!r} was not asserted; a spelling the "
+        "pre-filter did not recognise dropped a real finding"
+    )
+    assert outcome_for(rows) is ReadbackOutcome.DRIFTED
+
+
+def test_an_unparseable_line_that_looks_like_ours_still_fails_closed() -> None:
+    """A name the regex cannot locate is refused, not dropped by the pre-filter.
+
+    The pre-filter's fallback exists for exactly this: a line whose name
+    cannot be read cannot be judged either, so if it looks omni-internal it
+    has to reach the UNREADABLE row rather than be skipped on the way there.
+    """
+    rows = packaged_floor_rows(
+        {
+            "omnimarket": _facts("0.4.123", ("!!!omnibase_core>=0.47.17",)),
+            "omnibase-core": _facts("0.47.16"),
+        }
+    )
+    assert rows, "an unparseable omni-internal-looking line produced no row"
+    assert outcome_for(rows) is not ReadbackOutcome.IN_SYNC
+
+
+def test_a_third_party_name_sharing_a_prefix_substring_is_still_not_ours() -> None:
+    """Normalizing the name must not widen what this readback claims authority over."""
+    rows = packaged_floor_rows(
+        {
+            "omnimarket": _facts("0.4.123", ("not-omnibase-core-really>=9.0.0",)),
+        }
+    )
+    assert rows == []

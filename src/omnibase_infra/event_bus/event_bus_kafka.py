@@ -197,7 +197,7 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -232,6 +232,15 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
+from omnibase_infra.event_bus.consumer_rejoin_policy import (
+    ModelConsumerRejoinPolicy,
+)
+from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
+    REJOIN_HISTORY_CAPACITY as CONSUMER_REJOIN_HISTORY_CAPACITY,
+)
+from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
+    ConsumerRejoinSupervisor,
+)
 from omnibase_infra.event_bus.kafka_auth import (
     MSKTokenProvider,
     OAuthBearerTokenProvider,
@@ -263,8 +272,14 @@ from omnibase_infra.models.health.enum_consumer_health_event_type import (
 from omnibase_infra.models.health.enum_consumer_health_severity import (
     EnumConsumerHealthSeverity,
 )
+from omnibase_infra.models.health.model_consumer_group_rejoin_event import (
+    ModelConsumerGroupRejoinEvent,
+)
 from omnibase_infra.observability.wiring_health import (
     MixinEmissionCounter,
+)
+from omnibase_infra.protocols.protocol_rejoinable_consumer import (
+    ProtocolRejoinableConsumer,
 )
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
@@ -486,6 +501,15 @@ class EventBusKafka(
         self._producer: AIOKafkaProducer | None = None
         self._consumers: dict[str, AIOKafkaConsumer] = {}
         self._group_consumers: dict[tuple[str, str], AIOKafkaConsumer] = {}
+        # OMN-18640: one rejoin supervisor per (topic, group). Holds the
+        # per-consumer stall state and the typed rejoin history a readiness
+        # probe reads.
+        self._rejoin_supervisors: dict[tuple[str, str], ConsumerRejoinSupervisor] = {}
+        # Bus-level rejoin history. Held here rather than only on the
+        # supervisors because a supervisor is discarded when its topic is
+        # unsubscribed, and the evidence that this runtime wedged and
+        # recovered must outlive the consumer it happened to.
+        self._consumer_rejoin_events: list[ModelConsumerGroupRejoinEvent] = []
         # Keys currently being started (reserved under lock before await consumer.start())
         self._pending_consumer_keys: set[tuple[str, str]] = set()
 
@@ -959,6 +983,9 @@ class EventBusKafka(
             )
             self._consumers.clear()
             self._group_consumers.clear()
+            # OMN-18640: the supervisors hold per-group stall state that is
+            # meaningless once the consumers are gone.
+            self._rejoin_supervisors.clear()
 
         for consumer in consumers_to_close:
             try:
@@ -2021,6 +2048,52 @@ class EventBusKafka(
         prefix_budget = KAFKA_CONSUMER_GROUP_MAX_LENGTH - len(host_hash) - 1
         return f"{effective_group_id[:prefix_budget]}-{host_hash}"
 
+    def _build_consumer(
+        self,
+        topic: str,
+        effective_group_id: str,
+        group_instance_id: str,
+        auto_offset_reset: str,
+    ) -> AIOKafkaConsumer:
+        """Construct (but do not start) a consumer for one topic and group.
+
+        The single place these kwargs are spelled. Before OMN-18640 they
+        appeared twice; the forced-rejoin path would have made three, and a
+        rejoin that quietly differed from the original construction in one
+        setting would be a very hard defect to see.
+
+        Args:
+            topic: Topic to subscribe to.
+            effective_group_id: Group id after instance/topic discrimination.
+            group_instance_id: Static membership id (KIP-345).
+            auto_offset_reset: Offset reset policy for this consumer.
+
+        Returns:
+            An unstarted ``AIOKafkaConsumer``.
+        """
+        return AIOKafkaConsumer(
+            topic,
+            bootstrap_servers=self._bootstrap_servers,
+            group_id=effective_group_id,
+            group_instance_id=group_instance_id,
+            auto_offset_reset=auto_offset_reset,
+            enable_auto_commit=self._config.enable_auto_commit,
+            session_timeout_ms=self._config.session_timeout_ms,
+            heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+            max_poll_interval_ms=self._config.max_poll_interval_ms,
+            retry_backoff_ms=self._config.reconnect_backoff_ms,
+            # OMN-15837: a per-consumer buffer ceiling, deliberately decoupled
+            # from the producer's max_request_size. An auto-wired runtime holds
+            # one consumer per wired topic, so this value is multiplied by the
+            # consumer count against a fixed container memory limit -- see the
+            # field docstring on ModelKafkaEventBusConfig for the measurements
+            # and for why the OMN-16267 ">= max_request_size" coupling is not
+            # required against a KIP-74 broker.
+            max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
+            **self._build_client_version_kwargs(AIOKafkaConsumer),
+            **self._build_auth_kwargs(),
+        )
+
     async def _start_consumer_for_topic_unlocked(
         self,
         topic: str,
@@ -2080,27 +2153,11 @@ class EventBusKafka(
         )
 
         # Apply consumer configuration from config model
-        consumer = AIOKafkaConsumer(
+        consumer = self._build_consumer(
             topic,
-            bootstrap_servers=self._bootstrap_servers,
-            group_id=effective_group_id,
-            group_instance_id=resolved_group_instance_id,
-            auto_offset_reset=resolved_auto_offset_reset,
-            enable_auto_commit=self._config.enable_auto_commit,
-            session_timeout_ms=self._config.session_timeout_ms,
-            heartbeat_interval_ms=self._config.heartbeat_interval_ms,
-            max_poll_interval_ms=self._config.max_poll_interval_ms,
-            retry_backoff_ms=self._config.reconnect_backoff_ms,
-            # OMN-15837: a per-consumer buffer ceiling, deliberately decoupled
-            # from the producer's max_request_size. An auto-wired runtime holds
-            # one consumer per wired topic, so this value is multiplied by the
-            # consumer count against a fixed container memory limit -- see the
-            # field docstring on ModelKafkaEventBusConfig for the measurements
-            # and for why the OMN-16267 ">= max_request_size" coupling is not
-            # required against a KIP-74 broker.
-            max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
-            **self._build_client_version_kwargs(AIOKafkaConsumer),
-            **self._build_auth_kwargs(),
+            effective_group_id,
+            resolved_group_instance_id,
+            resolved_auto_offset_reset,
         )
 
         # Redpanda (and Kafka) can return UnknownTopicOrPartitionError,
@@ -2215,21 +2272,11 @@ class EventBusKafka(
 
                 # Recreate consumer for the next attempt — a consumer that failed
                 # start() cannot be restarted.
-                consumer = AIOKafkaConsumer(
+                consumer = self._build_consumer(
                     topic,
-                    bootstrap_servers=self._bootstrap_servers,
-                    group_id=effective_group_id,
-                    group_instance_id=resolved_group_instance_id,
-                    auto_offset_reset=resolved_auto_offset_reset,
-                    enable_auto_commit=self._config.enable_auto_commit,
-                    session_timeout_ms=self._config.session_timeout_ms,
-                    heartbeat_interval_ms=self._config.heartbeat_interval_ms,
-                    max_poll_interval_ms=self._config.max_poll_interval_ms,
-                    retry_backoff_ms=self._config.reconnect_backoff_ms,
-                    # OMN-15837: see rationale on the initial construction above.
-                    max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
-                    **self._build_client_version_kwargs(AIOKafkaConsumer),
-                    **self._build_auth_kwargs(),
+                    effective_group_id,
+                    resolved_group_instance_id,
+                    resolved_auto_offset_reset,
                 )
 
             except TimeoutError as e:
@@ -2396,6 +2443,7 @@ class EventBusKafka(
                     pass
 
             consumer = self._group_consumers.pop(consumer_key, None)
+            self._rejoin_supervisors.pop(consumer_key, None)  # OMN-18640
             if consumer is not None:
                 try:
                     await consumer.stop()
@@ -2862,6 +2910,283 @@ class EventBusKafka(
                 exc_info=True,
             )
 
+    def consumer_rejoin_events(
+        self,
+    ) -> tuple[ModelConsumerGroupRejoinEvent, ...]:
+        """Every forced consumer-group rejoin this bus has performed (OMN-18640).
+
+        Typed records, in-process, with no feature flag between the fact and
+        the reader. A readiness dimension answers "did this runtime wedge and
+        recover itself?" from this, which is the surface that did not exist
+        during the 2026-09-17 and 2026-09-18 outages -- where the only evidence
+        was twenty thousand log lines and a lag that did not move.
+
+        Returns:
+            Rejoin events across all consumers, oldest first.
+        """
+        return tuple(self._consumer_rejoin_events)
+
+    def _rejoin_supervisor_for(
+        self, topic: str, group_id: str
+    ) -> ConsumerRejoinSupervisor:
+        """Return (creating on first use) the rejoin supervisor for one group."""
+        key = (topic, group_id)
+        existing = self._rejoin_supervisors.get(key)
+        if existing is not None:
+            return existing
+
+        async def _recreate() -> ProtocolRejoinableConsumer:
+            return cast(
+                "ProtocolRejoinableConsumer",
+                await self._rebuild_consumer_for_rejoin(topic, group_id),
+            )
+
+        supervisor = ConsumerRejoinSupervisor(
+            topic=topic,
+            group_id=group_id,
+            policy=ModelConsumerRejoinPolicy(
+                stall_seconds=self._config.consumer_stall_seconds,
+                required_consecutive_stalls=(
+                    self._config.consumer_stall_required_confirmations
+                ),
+                rejoin_cooldown_seconds=self._config.consumer_rejoin_cooldown_seconds,
+            ),
+            poll_timeout_ms=self._config.consumer_poll_timeout_ms,
+            recreate_consumer=_recreate,
+            emit_event=self._record_consumer_rejoin_event,
+        )
+        self._rejoin_supervisors[key] = supervisor
+        return supervisor
+
+    async def _rebuild_consumer_for_rejoin(
+        self, topic: str, group_id: str
+    ) -> AIOKafkaConsumer:
+        """Build and start a replacement consumer for a wedged group.
+
+        The replacement carries the same group id, the same static membership
+        id and the same offset-reset policy as the original, so it rejoins the
+        SAME group and resumes from the SAME committed offsets. Nothing is
+        replayed from the beginning and nothing is skipped; the only thing that
+        changes is that the client, its connections and its coordinator state
+        are new -- which is precisely what recreating the container did by hand
+        on both recorded outages.
+
+        Args:
+            topic: Topic the wedged consumer was subscribed to.
+            group_id: The SUBSCRIPTION group id -- the key ``_group_consumers``
+                is indexed by, not the effective group id sent to Kafka. The
+                two differ: the effective id carries the per-topic ``.__t.``
+                suffix and the instance discriminator. Resolving it here rather
+                than accepting it is what keeps the replacement in the same
+                Kafka group as the consumer it replaces; joining a different
+                group would resume from a different committed offset and
+                silently replay or skip.
+
+        Returns:
+            A started replacement consumer, already published into
+            ``_group_consumers`` so shutdown addresses the live handle.
+
+        Raises:
+            Exception: Propagated to the supervisor, which records a failed
+                rejoin and retries after the cooldown.
+        """
+        effective_group_id = self._resolve_effective_group_id(
+            group_id, topic, uuid4(), (topic, group_id)
+        )
+        resolved_group_instance_id = self._resolve_group_instance_id(effective_group_id)
+        consumer = self._build_consumer(
+            topic,
+            effective_group_id,
+            resolved_group_instance_id,
+            self._config.auto_offset_reset,
+        )
+        await asyncio.wait_for(consumer.start(), timeout=self._timeout_seconds)
+        self._group_consumers[(topic, group_id)] = consumer
+        logger.warning(
+            "consumer_group_rejoined topic=%s group=%s -- replacement consumer "
+            "started and rejoined from committed offsets (OMN-18640)",
+            topic,
+            effective_group_id,
+            extra={"topic": topic, "group_id": effective_group_id},
+        )
+        return consumer
+
+    async def _record_consumer_rejoin_event(
+        self, event: ModelConsumerGroupRejoinEvent
+    ) -> None:
+        """Record a rejoin on the bus, and mirror it onto the health topic.
+
+        The bus-level record is the load-bearing surface: in-process, typed
+        and ungated, so a readiness dimension can read it whatever the health
+        pipeline's feature flag says. The emission below is the fleet-visible
+        mirror and is best-effort, because that pipeline is flagged off by
+        default and a recovery record that only exists when an optional flag
+        is on is the failure this ticket is about, one layer up.
+        """
+        self._consumer_rejoin_events.append(event)
+        if len(self._consumer_rejoin_events) > CONSUMER_REJOIN_HISTORY_CAPACITY:
+            del self._consumer_rejoin_events[
+                0 : len(self._consumer_rejoin_events) - CONSUMER_REJOIN_HISTORY_CAPACITY
+            ]
+
+        if self._health_emitter is None:
+            return
+        await self._health_emitter.emit_event(
+            consumer_identity=f"eventbus.{event.topic}",
+            consumer_group=event.consumer_group,
+            topic=event.topic,
+            event_type=(
+                EnumConsumerHealthEventType.CONSUMER_GROUP_REJOINED
+                if event.rejoin_succeeded
+                else EnumConsumerHealthEventType.CONSUMER_GROUP_STALLED
+            ),
+            severity=EnumConsumerHealthSeverity.CRITICAL,
+            correlation_id=event.event_id,
+            error_message=(
+                f"reason={event.reason.value} "
+                f"stalled_seconds={event.stalled_seconds:.0f} "
+                f"backlog={event.backlog_records} "
+                f"{event.failure_detail}"
+            ).strip()[:500],
+            error_type=event.reason.value,
+            hostname=os.environ.get("HOSTNAME", ""),  # ONEX_EXCLUDE: env
+            service_label="EventBusKafka",
+        )
+
+    async def _process_consumed_record(
+        self,
+        msg: object,
+        topic: str,
+        group_id: str,
+        correlation_id: UUID,
+        consumer: AIOKafkaConsumer,
+    ) -> bool:
+        """Dispatch one fetched record to its subscribers.
+
+        Extracted verbatim from the body of ``_consume_loop`` by OMN-18640 so
+        the loop above it can poll with a deadline instead of iterating the
+        consumer forever. The dispatch, DLQ and offset-withhold behaviour is
+        unchanged.
+
+        Returns:
+            True when the fetch position was rewound for this record's
+            partition, in which case the caller MUST discard the rest of that
+            partition's batch: those records sit past the rewind point and
+            Kafka will redeliver them.
+        """
+        # Get subscribers snapshot early - needed for consumer group in DLQ
+        async with self._lock:
+            subscribers = [
+                subscriber
+                for subscriber in self._subscribers.get(topic, [])
+                if subscriber[0] == group_id
+            ]
+
+        effective_consumer_group = group_id if subscribers else "unknown"
+
+        # Warn when a message arrives but no subscribers are registered.
+        # The message will be silently dropped (no DLQ entry) since there
+        # is no handler to fail. This typically indicates a race between
+        # unsubscribe and the consumer loop, or a misconfigured topic.
+        if not subscribers:
+            event_type = self._extract_event_type_from_msg(msg)
+            logger.warning(
+                "Message received on topic '%s' with event_type='%s' "
+                "for consumer_group='%s' but no subscribers are registered; "
+                "message will be dropped",
+                topic,
+                event_type,
+                group_id,
+                extra={
+                    "topic": topic,
+                    "group_id": group_id,
+                    "event_type": event_type,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        # Convert Kafka message to ModelEventMessage - handle conversion errors
+        try:
+            event_message = self._kafka_msg_to_model(msg, topic)
+        except Exception as e:
+            logger.exception(
+                f"Failed to convert Kafka message to event model for topic {topic}",
+                extra={
+                    "topic": topic,
+                    "correlation_id": str(correlation_id),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+            # Deserialization errors are permanent failures - route to DLQ
+            # Create minimal message from raw Kafka data for DLQ context
+            dlq_result = await self._publish_raw_to_dlq(
+                original_topic=topic,
+                raw_msg=msg,
+                error=e,
+                correlation_id=correlation_id,
+                failure_type="deserialization_error",
+                consumer_group=effective_consumer_group,
+            )
+            # OMN-15232: an undeserializable message that did NOT reach
+            # the DLQ exists nowhere durable. Skipping it here while the
+            # client auto-commits the position is a silent, committed,
+            # unrecoverable drop -- the OMN-14936 failure mode at a call
+            # site that fix did not cover. Rewind instead so Kafka
+            # redelivers and the DLQ write is retried. Only an explicit
+            # ``False`` counts as a confirmed non-persist (duck-typed
+            # hosts returning ``None`` keep prior behavior).
+            if dlq_result is False:
+                await self._rewind_after_unpersisted_dlq(
+                    consumer,
+                    msg,
+                    topic,
+                    group_id,
+                    correlation_id,
+                    "deserialization_error",
+                )
+                # OMN-18640: the fetch position was just moved back to this
+                # record. Every later record already buffered for this
+                # partition is now stale, so the caller must drop the rest
+                # of the batch rather than process past the rewind point.
+                return True
+            return False
+
+        # Dispatch to all subscribers
+        offset_may_advance = True
+        for _sub_group_id, subscription_id, callback in subscribers:
+            dispatch_offset_safe = await self._dispatch_to_subscriber(
+                callback,
+                subscription_id,
+                event_message,
+                topic,
+                group_id,
+                correlation_id,
+                record_coordinate=_record_coordinate(msg),
+            )
+            # OMN-15232: same gate on the dispatch path. Every subscriber
+            # still gets the message (one failing subscriber must not
+            # starve the others), but if ANY of them exhausted retries
+            # without a confirmed DLQ record, the offset must not move.
+            # Redelivery may duplicate for the subscribers that
+            # succeeded -- at-least-once, which is the delivery contract
+            # here, and strictly preferable to losing the record.
+            if dispatch_offset_safe is False:
+                offset_may_advance = False
+
+        if not offset_may_advance:
+            await self._rewind_after_unpersisted_dlq(
+                consumer,
+                msg,
+                topic,
+                group_id,
+                correlation_id,
+                "handler_retries_exhausted",
+            )
+            return True
+
+        return False
+
     async def _consume_loop(
         self,
         topic: str,
@@ -2899,122 +3224,42 @@ class EventBusKafka(
             },
         )
 
+        supervisor = self._rejoin_supervisor_for(topic, group_id)
+
         try:
-            async for msg in consumer:
-                if self._shutdown:
-                    logger.debug(
-                        f"Consumer loop shutdown signal received for topic {topic}",
-                        extra={
-                            "topic": topic,
-                            "correlation_id": str(correlation_id),
-                        },
-                    )
-                    break
+            # OMN-18640: poll with a deadline rather than iterating the
+            # consumer. ``async for msg in consumer`` never returns and never
+            # raises while aiokafka retries a dead group coordinator in its own
+            # background task, so a client that lost its coordinator across a
+            # broker restart waited here indefinitely -- 30 minutes on
+            # 2026-09-17 and 97 on 2026-09-18, both cleared only by recreating
+            # the container. Every bounded poll that comes back empty is an
+            # opportunity for the supervisor to ask whether the silence is
+            # idleness or a wedge, and to rebuild the consumer if it is a wedge.
+            while not self._shutdown:
+                batch = await supervisor.next_batch(consumer)
+                consumer = cast("AIOKafkaConsumer", batch.consumer)
 
-                # Get subscribers snapshot early - needed for consumer group in DLQ
-                async with self._lock:
-                    subscribers = [
-                        subscriber
-                        for subscriber in self._subscribers.get(topic, [])
-                        if subscriber[0] == group_id
-                    ]
-
-                effective_consumer_group = group_id if subscribers else "unknown"
-
-                # Warn when a message arrives but no subscribers are registered.
-                # The message will be silently dropped (no DLQ entry) since there
-                # is no handler to fail. This typically indicates a race between
-                # unsubscribe and the consumer loop, or a misconfigured topic.
-                if not subscribers:
-                    event_type = self._extract_event_type_from_msg(msg)
-                    logger.warning(
-                        "Message received on topic '%s' with event_type='%s' "
-                        "for consumer_group='%s' but no subscribers are registered; "
-                        "message will be dropped",
-                        topic,
-                        event_type,
-                        group_id,
-                        extra={
-                            "topic": topic,
-                            "group_id": group_id,
-                            "event_type": event_type,
-                            "correlation_id": str(correlation_id),
-                        },
-                    )
-
-                # Convert Kafka message to ModelEventMessage - handle conversion errors
-                try:
-                    event_message = self._kafka_msg_to_model(msg, topic)
-                except Exception as e:
-                    logger.exception(
-                        f"Failed to convert Kafka message to event model for topic {topic}",
-                        extra={
-                            "topic": topic,
-                            "correlation_id": str(correlation_id),
-                            "error": str(e),
-                            "error_type": type(e).__name__,
-                        },
-                    )
-                    # Deserialization errors are permanent failures - route to DLQ
-                    # Create minimal message from raw Kafka data for DLQ context
-                    dlq_result = await self._publish_raw_to_dlq(
-                        original_topic=topic,
-                        raw_msg=msg,
-                        error=e,
-                        correlation_id=correlation_id,
-                        failure_type="deserialization_error",
-                        consumer_group=effective_consumer_group,
-                    )
-                    # OMN-15232: an undeserializable message that did NOT reach
-                    # the DLQ exists nowhere durable. Skipping it here while the
-                    # client auto-commits the position is a silent, committed,
-                    # unrecoverable drop -- the OMN-14936 failure mode at a call
-                    # site that fix did not cover. Rewind instead so Kafka
-                    # redelivers and the DLQ write is retried. Only an explicit
-                    # ``False`` counts as a confirmed non-persist (duck-typed
-                    # hosts returning ``None`` keep prior behavior).
-                    if dlq_result is False:
-                        await self._rewind_after_unpersisted_dlq(
-                            consumer,
-                            msg,
-                            topic,
-                            group_id,
-                            correlation_id,
-                            "deserialization_error",
+                for records in batch.records.values():
+                    if self._shutdown:
+                        break
+                    for msg in records:
+                        if self._shutdown:
+                            logger.debug(
+                                f"Consumer loop shutdown signal received for topic {topic}",
+                                extra={
+                                    "topic": topic,
+                                    "correlation_id": str(correlation_id),
+                                },
+                            )
+                            break
+                        rewound = await self._process_consumed_record(
+                            msg, topic, group_id, correlation_id, consumer
                         )
-                    continue  # Skip this message but continue consuming
-
-                # Dispatch to all subscribers
-                offset_may_advance = True
-                for _sub_group_id, subscription_id, callback in subscribers:
-                    dispatch_offset_safe = await self._dispatch_to_subscriber(
-                        callback,
-                        subscription_id,
-                        event_message,
-                        topic,
-                        group_id,
-                        correlation_id,
-                        record_coordinate=_record_coordinate(msg),
-                    )
-                    # OMN-15232: same gate on the dispatch path. Every subscriber
-                    # still gets the message (one failing subscriber must not
-                    # starve the others), but if ANY of them exhausted retries
-                    # without a confirmed DLQ record, the offset must not move.
-                    # Redelivery may duplicate for the subscribers that
-                    # succeeded -- at-least-once, which is the delivery contract
-                    # here, and strictly preferable to losing the record.
-                    if dispatch_offset_safe is False:
-                        offset_may_advance = False
-
-                if not offset_may_advance:
-                    await self._rewind_after_unpersisted_dlq(
-                        consumer,
-                        msg,
-                        topic,
-                        group_id,
-                        correlation_id,
-                        "handler_retries_exhausted",
-                    )
+                        if rewound:
+                            # Fetch position moved back; the remainder of this
+                            # partition's batch is stale.
+                            break
 
         except asyncio.CancelledError:
             # Graceful cancellation - this is expected during shutdown

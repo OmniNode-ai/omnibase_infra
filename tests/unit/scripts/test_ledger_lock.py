@@ -380,8 +380,12 @@ def test_cli_requires_exactly_one_action(tmp_path: Path) -> None:
 # sentence. That is not a workaround: these tests assert that a CLAIM row mints a
 # claim token, and a claim row that the gate refuses never reaches the minting
 # path at all, so an unpriced fixture would be testing the refusal instead.
+# OMN-18766: a claim row must also NAME ITS EXECUTOR (actor=/model=), so the
+# fixtures below carry actor=. Same reasoning the OMN-18554 note above gives for
+# the cost sentence: a row the attribution gate refuses never reaches the
+# behaviour under test, so an unattributed fixture would be testing that refusal.
 _PIPE_CLAIM = (
-    "| {ts} | build-OMN-16400 | OMN-16400 | CLAIM | "
+    "| {ts} | build-OMN-16400 | OMN-16400 | CLAIM | actor=claude:opus5 | "
     "Claiming the ledger hardening work; est ~2 lane-hours; displaces nothing; (OMN-16400). |"
 )
 
@@ -632,7 +636,7 @@ def test_claim_tokens_order_by_lock_protected_offset(tmp_path: Path) -> None:
             # preserved exactly: the row appended FIRST carries the LATER self-stamp
             # (shift 0 here, -60s below), which is the ghost-collision shape.
             _live_stamp(
-                "| 2026-08-22T14:45:00Z | lane-a | OMN-16385 | CLAIM | first appended; "
+                "| 2026-08-22T14:45:00Z | lane-a | OMN-16385 | CLAIM | actor=claude:opus5 | first appended; "
                 "est ~2 lane-hours; displaces nothing; (OMN-16385) |"
             ),
         ]
@@ -642,7 +646,7 @@ def test_claim_tokens_order_by_lock_protected_offset(tmp_path: Path) -> None:
             str(ledger),
             "--append",
             _live_stamp(
-                "| 2026-08-22T14:20:00Z | lane-b | OMN-16386 | CLAIM | second appended; "
+                "| 2026-08-22T14:20:00Z | lane-b | OMN-16386 | CLAIM | actor=claude:opus5 | second appended; "
                 "est ~2 lane-hours; displaces nothing; (OMN-16386) |",
                 shift_seconds=-60,
             ),

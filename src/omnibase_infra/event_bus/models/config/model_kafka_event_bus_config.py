@@ -363,6 +363,69 @@ class ModelKafkaEventBusConfig(BaseModel):
         le=1_000_000,
     )
 
+    # Consumer coordinator-loss recovery (OMN-18640). The consume loop used to
+    # iterate the consumer with no deadline. When the .201 dev-lane broker was
+    # recreated on 2026-09-18T23:16:46Z the client marked its coordinator dead
+    # and logged 21,200 GroupCoordinatorNotAvailableError lines over 97 minutes
+    # without ever rejoining; aiokafka retries the coordinator inside its own
+    # background task, so not one of those errors reached the loop and the loop
+    # had nothing to react to. The same shape had run for 30 minutes 25 hours
+    # earlier from an unrelated trigger. Both cleared only when the CONTAINER
+    # was recreated. These four bounds let the consumer do that for itself.
+    #
+    # Contract-config only, like the other consumer bounds above -- deliberately
+    # NOT env overrides, so a lane cannot quietly disarm the recovery.
+    consumer_poll_timeout_ms: int = Field(
+        default=5_000,
+        description=(
+            "Deadline for one consumer fetch, in milliseconds. This is what "
+            "turns an unbounded wait into a loop that can ask whether silence "
+            "means caught-up or wedged. Low enough that a wedge is noticed "
+            "promptly, high enough that an idle runtime with many wired topics "
+            "is not spinning: at the default, each consumer wakes 12 times a "
+            "minute and does nothing but check a clock unless the stall window "
+            "below has already elapsed."
+        ),
+        ge=100,
+        le=60_000,
+    )
+    consumer_stall_seconds: float = Field(
+        default=120.0,
+        description=(
+            "Seconds a consumer may deliver no record before its silence is "
+            "investigated. Not a stall on its own: a caught-up consumer is "
+            "silent forever and must never be recreated. Sized above any "
+            "plausible rebalance or leader election so ordinary churn never "
+            "reaches the detector, and far below the 30 and 97 minute outages "
+            "it exists to end."
+        ),
+        gt=0.0,
+        le=3_600.0,
+    )
+    consumer_stall_required_confirmations: int = Field(
+        default=3,
+        description=(
+            "Consecutive stall evaluations required before a rejoin is "
+            "ordered. One reading of a frozen offset can be a slow handler or "
+            "a probe that raced a fetch; three cannot. Any evaluation that "
+            "finds progress, idleness or an unreachable broker resets the "
+            "count to zero."
+        ),
+        ge=1,
+        le=100,
+    )
+    consumer_rejoin_cooldown_seconds: float = Field(
+        default=300.0,
+        description=(
+            "Minimum seconds between forced rejoins of the same group. A fault "
+            "that survives being recreated must degrade to periodic retries, "
+            "never to a recreate loop -- a consumer rebuilding itself every "
+            "poll would be a worse outage than the wedge."
+        ),
+        ge=0.0,
+        le=86_400.0,
+    )
+
     # Kafka producer settings
     acks: EnumKafkaAcks = Field(
         default=EnumKafkaAcks.ALL,
