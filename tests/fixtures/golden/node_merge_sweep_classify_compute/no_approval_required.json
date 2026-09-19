@@ -1,9 +1,11 @@
 {
   "golden_version": "compute_golden.v1",
   "input": {
+    "collaborator_logins": [],
     "correlation_id": "22222222-2222-4222-8222-222222222222",
     "prs": [
       {
+        "assignees": [],
         "author": "",
         "base_ref": "main",
         "ci_status": "SUCCESS",
@@ -14,6 +16,7 @@
         "mergeable": "MERGEABLE",
         "number": 7,
         "repo": "OmniNode-ai/test",
+        "requested_reviewers": [],
         "review_decision": "",
         "title": "test PR",
         "updated_at": ""
@@ -28,7 +31,9 @@
     "total_classified": 1,
     "track_a": [
       {
+        "excluded_account": "",
         "pr": {
+          "assignees": [],
           "author": "",
           "base_ref": "main",
           "ci_status": "SUCCESS",
@@ -39,11 +44,13 @@
           "mergeable": "MERGEABLE",
           "number": 7,
           "repo": "OmniNode-ai/test",
+          "requested_reviewers": [],
           "review_decision": "",
           "title": "test PR",
           "updated_at": ""
         },
         "reason": "CI green, approved, mergeable",
+        "skip_reason": "not_skipped",
         "track": "A"
       }
     ],

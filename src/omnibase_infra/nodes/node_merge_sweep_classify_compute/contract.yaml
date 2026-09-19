@@ -8,15 +8,18 @@
 # Related Tickets:
 #   - OMN-14824: HandlerClassifyPRs exposes the canonical def-B handle()
 #     dispatch entrypoint while preserving Track A/B/SKIP classification.
+#   - OMN-18823: collaborator exclusion. A PR assigned to, or awaiting review
+#     from, a declared collaborator account is SKIP before any track is
+#     determined. Occurrence OMN-18794.
 #
 name: "node_merge_sweep_classify_compute"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 1
-node_version: "1.0.1"
-description: "Classifies PRs into Track A (auto-merge ready), Track B (needs polish), and SKIP buckets. Contract patch 1 records the OMN-14824 canonical def-B handler entrypoint flip while preserving classification semantics."
+  patch: 2
+node_version: "1.0.2"
+description: "Classifies PRs into Track A (auto-merge ready), Track B (needs polish), and SKIP buckets. Contract patch 2 adds the OMN-18823 collaborator exclusion, evaluated before any track determination; patch 1 recorded the OMN-14824 canonical def-B handler entrypoint flip."
 input_model:
   name: "ModelClassifyInput"
   module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_input"
@@ -32,6 +35,46 @@ handler_routing:
       handler:
         name: "HandlerClassifyPRs"
         module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.handlers.handler_classify_prs"
+# ---------------------------------------------------------------------------
+# admission_policy — the rules that withhold a PR from BOTH merge tracks.
+#
+# Evaluated in the order listed. Each is checked before any track is
+# determined, because Track B is a POLISH track that mutates the branch: a PR
+# that must not be merged must not be polished either.
+# ---------------------------------------------------------------------------
+admission_policy:
+  skip_rules:
+    - name: "draft"
+      field: "is_draft"
+      skip_reason: "draft"
+    - name: "auto_merge_enabled"
+      field: "has_auto_merge"
+      skip_reason: "auto_merge_enabled"
+    - name: "collaborator_exclusion"
+      fields: ["assignees", "requested_reviewers"]
+      skip_reason: "collaborator_excluded"
+      description: >-
+        A PR assigned to, or awaiting review from, a declared collaborator account has been handed to a person. The sweep skips it and names the matched account in excluded_account. Matching is case-insensitive.
+      roster:
+        # WHERE THE ACCOUNTS LIVE, AND WHY NOT HERE.
+        #
+        # This repository is PUBLIC. Writing collaborator GitHub logins into
+        # this file would publish four people's accounts together with an
+        # internal operating posture about them — the disclosure class the
+        # public-repo hygiene gate exists to refuse. So this contract declares
+        # the POLICY and the SOURCE; it never declares the accounts.
+        #
+        # The roster values are supplied by the caller on
+        # ModelClassifyInput.collaborator_logins, which is REQUIRED with no
+        # default: an unstated roster must not be indistinguishable from an
+        # empty one. The same four accounts are read by the manual merge
+        # drain, so the two surfaces agree.
+        declared_here: false
+        input_field: "collaborator_logins"
+        source_repo: "omni_home (private)"
+        source_path: "docs/workflows/_shared/merge_sweep_collaborator_roster.yaml"
+        source_note: >-
+          Beside the public-repo hygiene denylist vocabulary and the shared person-name wordlist. One private vocabulary home, not three.
 metadata:
   description: "PR classification compute for merge-sweep workflow"
   author: "OmniNode Team"

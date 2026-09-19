@@ -23,3 +23,14 @@ class ModelClassifyInput(BaseModel):
     require_approval: bool = Field(
         default=True, description="Whether to require review approval for Track A."
     )
+    collaborator_logins: tuple[str, ...] = Field(
+        ...,
+        description=(
+            "GitHub accounts whose PRs the sweep must never admit. A PR "
+            "assigned to one of these, or awaiting review from one, has been "
+            "handed to a person. REQUIRED with no default: an unstated roster "
+            "must not look like an empty one. The values are supplied by the "
+            "caller from the roster the node contract names; this repository "
+            "is public and declares the policy, never the accounts (OMN-18823)."
+        ),
+    )

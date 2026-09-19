@@ -35,20 +35,30 @@ class TestPRInfoModel:
     """Tests for ModelPRInfo."""
 
     def test_create_minimal(self):
-        pr = ModelPRInfo(number=1, repo="OmniNode-ai/test")
+        pr = ModelPRInfo(
+            number=1, repo="OmniNode-ai/test", assignees=(), requested_reviewers=()
+        )
         assert pr.number == 1
         assert pr.repo == "OmniNode-ai/test"
         assert pr.is_draft is False
         assert pr.ci_status == "UNKNOWN"
 
     def test_frozen(self):
-        pr = ModelPRInfo(number=1, repo="OmniNode-ai/test")
+        pr = ModelPRInfo(
+            number=1, repo="OmniNode-ai/test", assignees=(), requested_reviewers=()
+        )
         with pytest.raises(ValidationError):
             pr.number = 2  # type: ignore[misc]
 
     def test_extra_forbid(self):
         with pytest.raises(ValidationError):
-            ModelPRInfo(number=1, repo="test", bogus="field")  # type: ignore[call-arg]
+            ModelPRInfo(
+                number=1,
+                repo="test",
+                assignees=(),
+                requested_reviewers=(),
+                bogus="field",  # type: ignore[call-arg]
+            )
 
     def test_full_fields(self):
         pr = ModelPRInfo(
@@ -58,6 +68,8 @@ class TestPRInfoModel:
             head_ref="feature-branch",
             base_ref="main",
             author="jonahgabriel",
+            assignees=("assignee-login",),
+            requested_reviewers=("reviewer-login",),
             is_draft=False,
             mergeable="MERGEABLE",
             review_decision="APPROVED",
@@ -85,7 +97,9 @@ class TestPRListModels:
 
     def test_result_with_prs(self):
         cid = uuid4()
-        pr = ModelPRInfo(number=1, repo="OmniNode-ai/test")
+        pr = ModelPRInfo(
+            number=1, repo="OmniNode-ai/test", assignees=(), requested_reviewers=()
+        )
         result = ModelPRListResult(
             correlation_id=cid,
             prs=(pr,),
@@ -100,19 +114,25 @@ class TestClassificationModels:
     """Tests for classification models."""
 
     def test_classification_track_a(self):
-        pr = ModelPRInfo(number=1, repo="OmniNode-ai/test")
+        pr = ModelPRInfo(
+            number=1, repo="OmniNode-ai/test", assignees=(), requested_reviewers=()
+        )
         c = ModelPRClassification(pr=pr, track="A", reason="CI green")
         assert c.track == "A"
 
     def test_classification_invalid_track(self):
-        pr = ModelPRInfo(number=1, repo="OmniNode-ai/test")
+        pr = ModelPRInfo(
+            number=1, repo="OmniNode-ai/test", assignees=(), requested_reviewers=()
+        )
         with pytest.raises(ValidationError):
             ModelPRClassification(pr=pr, track="C")  # type: ignore[arg-type]
 
     def test_classify_input(self):
         cid = uuid4()
-        pr = ModelPRInfo(number=1, repo="OmniNode-ai/test")
-        inp = ModelClassifyInput(correlation_id=cid, prs=(pr,))
+        pr = ModelPRInfo(
+            number=1, repo="OmniNode-ai/test", assignees=(), requested_reviewers=()
+        )
+        inp = ModelClassifyInput(correlation_id=cid, prs=(pr,), collaborator_logins=())
         assert inp.require_approval is True
 
     def test_classify_result(self):
