@@ -805,7 +805,13 @@ class TestIntegrationGoldenPath:
             len(response.topics),
         )
 
-    # TODO(OMN-2317): move to unit tests to avoid infra-gated skip
+    # OMN-18795: a TODO here asked for this case to be moved to unit tests
+    # "to avoid infra-gated skip". That premise is gone -- this file is no
+    # longer infra-gated-skip. It is selected by marker and executed by
+    # ci.yml's service-integration-suites job against a real Redpanda and a
+    # migrated Postgres, where a missing service is a failure rather than a
+    # skip. The case costs nothing to run alongside its neighbours and
+    # reads the same catalog they do, so it stays. OMN-2317 is Done.
     def test_golden_path_published_to_changed_topic_suffix_exists(
         self,
     ) -> None:
