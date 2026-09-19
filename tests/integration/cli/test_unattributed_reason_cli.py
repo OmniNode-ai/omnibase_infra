@@ -30,9 +30,24 @@ from pathlib import Path
 import pytest
 
 from omnibase_infra.cli.cli_delegate import _write_unattributed_run_files
+from omnibase_infra.cli.model_delegate_run_addressing import (
+    ModelDelegateRunAddressing,
+)
 from omnibase_infra.cli.model_delegate_terminal import ModelDelegateTerminal
+from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 
 pytestmark = pytest.mark.integration
+
+# OMN-18810: the two writers now require the addressing facts the files
+# record. These suites are about route attribution and carrier shapes, not
+# about addressing, so they state one neutral in-process value; the
+# addressing keys themselves are pinned by
+# tests/unit/cli/test_omn18810_delegate_run_addressing.py.
+_ADDRESSING = ModelDelegateRunAddressing(
+    locus=EnumDelegateLocus.IN_PROCESS,
+    bus="inmemory",
+)
+
 
 REACHED_A_BACKEND: dict[str, object] = {
     "response": "a partial answer nobody accepted",
@@ -73,6 +88,7 @@ def _write(
         # dict this used to hand over, not a weaker one.
         result=ModelDelegateTerminal.model_validate(result),
         state_root=state_root,
+        addressing=_ADDRESSING,
         prompt="draft two paragraphs of rationale prose",
         task_type="document",
         task_type_resolution="fallback",
