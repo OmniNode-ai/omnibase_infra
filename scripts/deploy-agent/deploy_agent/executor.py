@@ -2550,7 +2550,17 @@ class DeployExecutor:
                 )
             self._pull_pinned_image(image_digest, lane)
             if scope == Scope.FULL:
-                self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
+                # OMN-18640: the deps leg of a FULL rebuild CONVERGES. A prod
+                # promotion advances a pinned runtime image; it is not a
+                # request to replace the data plane underneath it.
+                self._compose_up(
+                    Phase.CORE,
+                    Scope.CORE,
+                    [],
+                    on_phase_update,
+                    lane=lane,
+                    force_recreate=False,
+                )
                 runtime_services = services_for_scope(Scope.RUNTIME)
                 self._compose_up(
                     Phase.RUNTIME,
@@ -2620,7 +2630,22 @@ class DeployExecutor:
                 lane=lane,
                 git_ref=git_ref,
             )
-            self._compose_up(Phase.CORE, Scope.CORE, [], on_phase_update, lane=lane)
+            # OMN-18640: the deps leg of a FULL rebuild CONVERGES rather than
+            # recreates. A FULL rebuild is a request to rebuild and replace the
+            # RUNTIME images; the broker, the database and the cache are
+            # dependencies it needs present, not things it was asked to
+            # replace. Recreating them here is what dropped every CI consumer's
+            # group coordinator nine times on 2026-09-18. A direct
+            # `scope=core` command still force-recreates -- see the branch
+            # below -- because that one IS a request to act on the deps.
+            self._compose_up(
+                Phase.CORE,
+                Scope.CORE,
+                [],
+                on_phase_update,
+                lane=lane,
+                force_recreate=False,
+            )
             self._compose_up(
                 Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
             )
@@ -3685,6 +3710,7 @@ class DeployExecutor:
         *,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         extra_env: Mapping[str, str] | None = None,
+        force_recreate: bool = True,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
 
@@ -3733,7 +3759,39 @@ class DeployExecutor:
             profile,
             "up",
             "-d",
-            "--force-recreate",
+        ]
+        # OMN-18640: `--force-recreate` is a CALL-SITE decision, not a constant
+        # of this function. It was a constant from 505c6e78d (OMN-7409,
+        # 2026-04-03) with no recorded reason, and the CORE leg of a FULL
+        # rebuild therefore destroyed and rebuilt the lane's broker on every
+        # single runtime rebuild. Measured on the .201 dev lane 2026-09-18:
+        # nine `scope=full` commands were accepted between 16:14 and 21:04 EDT
+        # and every one of them recreated `omnibase-infra-redpanda`. Each
+        # recreate drops every CI consumer's group coordinator -- it wedged
+        # `omninode-runtime-effects` for 97 minutes that night -- and leaves
+        # partition leadership reconciling for roughly 18 minutes behind it.
+        #
+        # Nothing was bought for that. No service in the `core` profile
+        # declares a `build:` section (this agent logs exactly that sentence
+        # when it derives the core image-build ceiling), so a rebuild never
+        # produces a new postgres/redpanda/valkey image for the recreate to
+        # adopt. And plain convergence already covers every real reason to
+        # replace a dep: `up -d` starts what is absent and recreates whatever
+        # compose's own config hash says has changed -- a new image from
+        # `--pull always`, a changed environment value, a changed mount. Proven
+        # on the live lane: `docker compose --profile core up -d --dry-run`
+        # with the agent's own environment reports `omnibase-infra-redpanda
+        # Running`, and the same dry-run with `--force-recreate --pull always`
+        # reports it `Recreated`. The flag was the whole cause; there was no
+        # config drift to respond to.
+        #
+        # This is the same conclusion `converge_deps` already reached for the
+        # recovery path below ("--force-recreate is deliberately ABSENT,
+        # because convergence must start what is missing and leave what is
+        # already running alone"). The two now agree.
+        if force_recreate:
+            cmd.append("--force-recreate")
+        cmd += [
             "--pull",
             "never" if scope == Scope.RUNTIME else "always",
         ]
