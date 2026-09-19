@@ -951,6 +951,40 @@ class ModelQueueFacts:
         queue_wait = self.commands_ahead * self.mean_service_time_seconds
         return round(queue_wait + lane_budget_seconds + margin_seconds)
 
+    def reach_bound_seconds(self, *, margin_seconds: int) -> int | None:
+        """How long before the agent could REACH this command.
+
+        OMN-18144, 2026-09-19. This, and not
+        :meth:`derived_wait_bound_seconds`, is what decides whether a wait is
+        worth starting. The two differ by the lane's own post-acceptance grant,
+        and the difference is the whole defect: that grant is funded SEPARATELY
+        out of the job ceiling, for the probe step that runs after this one
+        (``2700 - 1500 - 900 - 120``, see
+        :data:`lane_settle_budget.STEP_OVERHEAD_SECONDS`), so charging the
+        convergence window for it compares a wait against a window the wait was
+        never meant to cover.
+
+        Measured cost of getting this wrong: on 2026-09-19 one command ahead
+        produced a 3003s worst case against a 1620s window, the guard declined,
+        and the lane carried the sha 554 seconds later. The release train then
+        read the unmeasured receipt as a lane failure and refused to cut
+        ``0.38.33``.
+
+        Reaching acceptance is the thing that makes a measurement possible, so
+        it is the thing the predicate asks about. A watch that reaches it
+        either sees convergence -- a real PASS, strictly better than an
+        estimate -- or stops at its wall clock and writes the same
+        INDETERMINATE the refusal would have written, having risked nothing.
+
+        ``None`` on an unreadable queue, exactly as above: a bound with no
+        measured service time behind it is a guess wearing a number's clothes.
+        """
+        if self.commands_ahead is None or self.mean_service_time_seconds is None:
+            return None
+        return round(
+            self.commands_ahead * self.mean_service_time_seconds + margin_seconds
+        )
+
     def evidence_clause(self, *, lane_budget_seconds: int, margin_seconds: int) -> str:
         """The named fields AC5 requires the receipt's check to carry."""
         if self.commands_ahead is None:
@@ -1077,23 +1111,44 @@ def queue_exceeds_bound(
     An unreadable queue is NOT a refusal. Falling back to the clock is exactly
     today's behaviour, which is the right fallback: the change may only ever
     make a verdict better informed, never harder to obtain.
+
+    WHICH BOUND DECIDES, AND WHY IT IS NOT THE ONE IN THE EVIDENCE
+    --------------------------------------------------------------
+    OMN-18144, corrected 2026-09-19. The question is "could the agent REACH
+    this command inside this window", so the predicate is
+    :meth:`ModelQueueFacts.reach_bound_seconds`. The worst case that AC5 puts
+    in the receipt -- reach plus the lane's whole post-acceptance grant -- is
+    the wrong question to refuse on, because the ceiling funds that grant
+    separately for the probe step; asking it charged a 1620s window for 3003s
+    of work it was never meant to do, and a lane that converged in 554s went
+    unmeasured while the release train reported it as failed. A worst case is
+    the right thing to REPORT and the wrong thing to REFUSE on: refusing on it
+    discards every run where reality beats it, which on the measured evidence
+    is the common case.
+
+    The refusal that remains is the one AC4 asked for, unchanged in intent: a
+    queue this window cannot reach at all is pure waste, and the runner is
+    better given to the next merge's guard.
     """
+    reach = facts.reach_bound_seconds(margin_seconds=margin_seconds)
+    if reach is None or reach <= wall_clock_seconds:
+        return ""
     bound = facts.derived_wait_bound_seconds(
         lane_budget_seconds=lane_budget_seconds, margin_seconds=margin_seconds
     )
-    if bound is None or bound <= wall_clock_seconds:
-        return ""
     assert facts.commands_ahead is not None
     assert facts.mean_service_time_seconds is not None
     return (
         f"the deploy agent has {facts.commands_ahead} command(s) ahead of this "
         f"one, so this merge is number {facts.queue_position_at_start} in line. "
         f"At the agent's observed {facts.mean_service_time_seconds:.0f}s mean "
-        f"service time that is {bound}s before the lane could be expected to "
-        f"carry this sha, against the {wall_clock_seconds}s this job can watch "
-        "for. The wait is not started: the lane is not late, this run cannot "
-        "afford the queue ahead of it, and holding the verify runner open for "
-        "the difference would delay the next merge's guard behind this one"
+        f"service time that is {reach}s before the agent could even reach this "
+        f"command, against the {wall_clock_seconds}s this job can watch for "
+        f"(and {bound}s before the lane could be expected to have settled on "
+        "this sha). The wait is not started: the lane is not late, this run "
+        "cannot afford the queue ahead of it, and holding the verify runner "
+        "open for the difference would delay the next merge's guard behind "
+        "this one"
     )
 
 
