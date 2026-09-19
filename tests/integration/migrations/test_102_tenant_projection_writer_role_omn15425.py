@@ -66,6 +66,15 @@ GRANT_FILE = (
     / "node_projection_delegation_inference_response"
     / "0004_grant_tenant_projection_writer.sql"
 )
+REASSERT_GRANT_FILE = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "nodes"
+    / "node_projection_delegation_inference_response"
+    / "0005_reassert_tenant_projection_writer_projection_grants.sql"
+)
 AGGREGATE_VIEWS_FILE = (
     REPO_ROOT
     / "docker"
@@ -428,6 +437,86 @@ def test_grant_migration_proves_the_role_exists_before_granting() -> None:
 
     assert f"'{PRINCIPAL}'::regrole" in sql
     assert f"CREATE ROLE {PRINCIPAL} WITH" in sql
+
+
+@pytest.mark.integration
+def test_reassert_grant_migration_repairs_only_the_missing_carrier_acls() -> None:
+    """Warm volumes need a new append-only grant, never a rewrite of 0004.
+
+    The topology maps these tenant-domain relations to their current physical
+    ``public`` schema. The carrier needs the three additional contracts it owns;
+    savings upserts ``savings_estimates`` and credentials inserts/updates
+    ``tenant_inference_credentials``. None of their handlers deletes. The
+    routing-overlay write is already in 0004, so this repair must not widen it
+    or grant a schema/default privilege.
+    """
+    executable = _executable_text(REASSERT_GRANT_FILE).upper()
+
+    expected = {
+        "PUBLIC.SAVINGS_ESTIMATES",
+        "PUBLIC.TENANT_INFERENCE_CREDENTIALS",
+        "PUBLIC.AGENT_ROUTING_DECISIONS",
+        "PUBLIC.DEP_HEALTH_FINDINGS",
+        "PUBLIC.PATTERN_LEARNING_ARTIFACTS",
+    }
+    granted = set(
+        re.findall(
+            r"GRANT SELECT, INSERT, UPDATE ON (PUBLIC\.[A-Z0-9_]+) "
+            rf"TO {PRINCIPAL.upper()}",
+            executable,
+        )
+    )
+    assert granted == expected
+    assert "TO_REGCLASS('PUBLIC.SAVINGS_ESTIMATES')" in executable
+    assert "TO_REGCLASS('PUBLIC.TENANT_INFERENCE_CREDENTIALS')" in executable
+    assert "TO_REGCLASS('PUBLIC.AGENT_ROUTING_DECISIONS')" in executable
+    assert "TO_REGCLASS('PUBLIC.DEP_HEALTH_FINDINGS')" in executable
+    assert "TO_REGCLASS('PUBLIC.PATTERN_LEARNING_ARTIFACTS')" in executable
+    assert "RAISE EXCEPTION" in executable
+    assert "DELETE" not in executable
+    assert "ALL TABLES" not in executable
+    assert "DEFAULT PRIVILEGES" not in executable
+    assert "1 / COUNT" not in executable
+    for relation in expected:
+        for privilege in ("SELECT", "INSERT", "UPDATE"):
+            assert (
+                f"HAS_TABLE_PRIVILEGE('{PRINCIPAL.upper()}', '{relation}', "
+                f"'{privilege}')"
+            ) in executable
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+def test_reassert_grant_migration_fails_when_a_grant_is_mutated_away(
+    ephemeral_postgres: EphemeralPostgres, tmp_path: Path
+) -> None:
+    """The postcondition must reject a partial SIU grant, not merely return rows."""
+    relations = (
+        "agent_routing_decisions",
+        "dep_health_findings",
+        "pattern_learning_artifacts",
+        "savings_estimates",
+        "tenant_inference_credentials",
+    )
+    with ephemeral_postgres.connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(f"CREATE ROLE {PRINCIPAL}")
+            for relation in relations:
+                cursor.execute(f"CREATE TABLE public.{relation} (id bigint)")
+
+    mutated = tmp_path / "0005_mutated_partial_grant.sql"
+    mutated.write_text(
+        REASSERT_GRANT_FILE.read_text().replace(
+            "GRANT SELECT, INSERT, UPDATE ON public.agent_routing_decisions",
+            "GRANT SELECT ON public.agent_routing_decisions",
+            1,
+        )
+    )
+
+    result = ephemeral_postgres.psql("-v", "ON_ERROR_STOP=1", "-f", str(mutated))
+
+    assert result.returncode != 0
+    assert "missing required tenant_projection_writer privilege" in result.stderr
 
 
 # =============================================================================

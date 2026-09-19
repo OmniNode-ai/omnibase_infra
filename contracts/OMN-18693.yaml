@@ -27,7 +27,6 @@ dod_evidence:
     description: >-
       PENDING operator-approved deployment. On .201, verifies the dogfood runtime is healthy and its HTTP health endpoint responds, then compares every protected lane's container identity, state, health state, and start timestamp against the pre-action snapshot. This item makes no claim that the lane is running before this command is executed after deployment.
     source: "manual"
-    execution_scope: "local_done_gate"
     status: "pending"
     checks:
       - check_type: "command"

@@ -45,7 +45,7 @@ _MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
 # so the scrape below would still find container_name values — but there is no manifest
 # lane to diff them against, and re-adding one would re-declare a lane that does not
 # exist. This is the lab compose lane only; production is the AWS `onex-prod` namespace.
-_COMPOSE_LANES = ("stability-test", "judge", "lakshman")
+_COMPOSE_LANES = ("stability-test", "judge", "lakshman", "dogfood")
 
 
 def _load_manifest() -> dict:

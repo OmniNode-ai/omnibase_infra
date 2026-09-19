@@ -331,8 +331,14 @@ RUNTIME_LANE_SPECS=(
 # which is exactly the alert-fatigue failure the lakshman entry above
 # describes -- measured live: every /15 sample from 2026-09-13 onward paged
 # HTTP 000 for runtime-prod-28085 with no incident behind it.
+#
+# dogfood (:49085, OMN-18693) is an isolated private sandbox on .105. This
+# reporter runs only on .201, so a loopback probe would not observe that lane;
+# inventing a cross-host target here would turn a local host-health check into a
+# new network dependency. Its owner validates the lane directly.
 # shellcheck disable=SC2034  # declaration-only: read by the parity test, not by this script
 RUNTIME_LANE_UNPROBED=(
+  "dogfood|DOGFOOD_RUNTIME_MAIN_PORT"
   "lakshman|LAKSHMAN_RUNTIME_MAIN_PORT"
   "prod|PROD_RUNTIME_MAIN_PORT"
 )

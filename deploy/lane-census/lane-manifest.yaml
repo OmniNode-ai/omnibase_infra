@@ -506,7 +506,28 @@ lanes:
       - name: omninode-dogfood-runtime-effects
         kind: service
         replicas: 1
+      - name: omnimarket-dogfood-tenant-projection-writer
+        kind: service
+        replicas: 1
       - name: omnimarket-dogfood-projection-api
+        kind: service
+        replicas: 1
+      - name: omnimarket-dogfood-projection-tenant-registry-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dogfood-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dogfood-projection-registration-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dogfood-projection-savings-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dogfood-projection-tenant-credentials-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dogfood-projection-live-events-writer
         kind: service
         replicas: 1
   # ci-bus — the fleet's DEDICATED CI bus broker (OMN-18691)

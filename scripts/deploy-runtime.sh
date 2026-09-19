@@ -345,7 +345,7 @@ resolve_lane_runtime_services() {
     local compose_project="$2"
 
     if [[ "${compose_project}" == "omnibase-infra-dogfood" ]]; then
-        eval "${_out_args_name}=(omninode-runtime runtime-effects projection-api)"
+        eval "${_out_args_name}=(omninode-runtime runtime-effects projection-api tenant-projection-writer projection-tenant-registry-writer projection-delegation-writer projection-registration-writer projection-savings-writer projection-tenant-credentials-writer projection-live-events-writer)"
         return 0
     fi
 
@@ -2938,18 +2938,44 @@ build_images() {
 resolve_built_runtime_image() {
     # Print the image reference compose assigns to the first service in scope.
     #
-    # Read from `compose config --images` rather than reconstructed as
-    # "<project>-<service>": the naming rule is compose's, not ours, and a
-    # reconstruction that silently drifts from it would resolve to an image
-    # that does not exist -- or worse, to a stale one with the same name.
+    # Read from Compose's rendered service model or build plan rather than
+    # reconstructing "<project>-<service>": the naming rule is compose's, not
+    # ours, and a reconstruction that silently drifts could resolve a stale
+    # image with the same name.
     local -n _rbri_compose_args="$1"
     local -n _rbri_build_scope="$2"
     local compose_project="$3"
+    local service="${_rbri_build_scope[0]}"
+    local rendered_config
+    rendered_config="$(docker compose \
+        -p "${compose_project}" \
+        "${_rbri_compose_args[@]}" \
+        --profile "${COMPOSE_PROFILE}" \
+        config --format json 2>/dev/null)" || return 1
+
+    # Services with an explicit image are represented directly in the rendered
+    # compose model. Do not use `config --images SERVICE`: Compose emits every
+    # resolved image (including dependencies) there, so `head -1` can select
+    # postgres instead of the requested runtime service.
+    local image_ref
+    image_ref="$(printf '%s' "${rendered_config}" | jq -er \
+        --arg service "${service}" \
+        '.services[$service].image // empty' 2>/dev/null)" || image_ref=""
+    if [[ -n "${image_ref}" ]]; then
+        printf '%s\n' "${image_ref}"
+        return 0
+    fi
+
+    # Compose omits `image` for a build-only service. Its generated tag is
+    # compose-owned too, so ask the machine-readable build plan for this exact
+    # service instead of reconstructing a project-service name ourselves.
     docker compose \
         -p "${compose_project}" \
         "${_rbri_compose_args[@]}" \
         --profile "${COMPOSE_PROFILE}" \
-        config --images "${_rbri_build_scope[0]}" 2>/dev/null | head -1
+        build --print "${service}" 2>/dev/null | jq -er \
+        --arg service "${service}" \
+        '.target[$service].tags[0] // empty'
 }
 
 stamp_node_inventory() {

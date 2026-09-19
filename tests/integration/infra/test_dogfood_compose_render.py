@@ -55,7 +55,14 @@ EXPECTED_RENDERED_SERVICES = {
     "intelligence-migration",
     "omninode-runtime",
     "runtime-effects",
+    "tenant-projection-writer",
     "projection-api",
+    "projection-tenant-registry-writer",
+    "projection-delegation-writer",
+    "projection-registration-writer",
+    "projection-savings-writer",
+    "projection-tenant-credentials-writer",
+    "projection-live-events-writer",
 }
 #: Services that must never appear on this lane. ``keycloak`` and ``infisical``
 #: are the OMN-13581 cross-lane displacement risk (they carry no profile in the
@@ -84,7 +91,23 @@ EXPECTED_PUBLISHED_PORTS = {
     "intelligence-migration": set(),
     "omninode-runtime": {"49085"},
     "runtime-effects": {"49086"},
+    "tenant-projection-writer": set(),
     "projection-api": {"49302"},
+    "projection-tenant-registry-writer": set(),
+    "projection-delegation-writer": set(),
+    "projection-registration-writer": set(),
+    "projection-savings-writer": set(),
+    "projection-tenant-credentials-writer": set(),
+    "projection-live-events-writer": set(),
+}
+
+KERNEL_WRITER_PROFILES = {
+    "projection-tenant-registry-writer": "projection-writer-tenant-registry",
+    "projection-delegation-writer": "projection-writer-delegation",
+    "projection-registration-writer": "projection-writer-registration",
+    "projection-savings-writer": "projection-writer-savings",
+    "projection-tenant-credentials-writer": "projection-writer-tenant-credentials",
+    "projection-live-events-writer": "projection-writer-live-events",
 }
 #: Ports belonging to the four lanes that predate this one. Publishing any of
 #: them here would displace a live lane on the shared .201 host (OMN-13581).
@@ -281,6 +304,28 @@ def test_dogfood_lane_render_carries_its_own_runtime_identity() -> None:
     assert services["projection-api"]["container_name"] == (
         "omnimarket-dogfood-projection-api"
     )
+    carrier = services["tenant-projection-writer"]
+    carrier_env = carrier["environment"]
+    assert carrier["container_name"] == "omnimarket-dogfood-tenant-projection-writer"
+    assert carrier_env["RUNTIME_PROFILE"] == "tenant-projection"
+    assert carrier_env["RUNTIME_INSTANCE_ID"] == "dogfood-tenant-projection"
+    assert carrier_env["ONEX_RUNTIME_ID"] == "dogfood-tenant-projection"
+    assert carrier_env["ONEX_RUNTIME_ADDRESS"] == (
+        "runtime://omninode-pc/dogfood/tenant-projection"
+    )
+    assert carrier_env["ONEX_GROUP_ID"] == "onex-dogfood-runtime-tenant-projection"
+    assert carrier_env["KAFKA_INSTANCE_ID"] == "dogfood-tenant-projection"
+    assert carrier_env["OMNIDASH_ANALYTICS_DB_URL"] == ""
+    assert carrier_env["ONEX_TENANT_DB_URL"].startswith(
+        "postgresql://tenant_projection_writer:"
+    )
+    assert _published_ports(carrier) == set()
+    assert carrier["healthcheck"]["test"] == [
+        "CMD",
+        "curl",
+        "-sf",
+        "http://localhost:8085/health",
+    ]
 
     for service_name in ("omninode-runtime", "runtime-effects"):
         environment = services[service_name]["environment"]
@@ -295,6 +340,9 @@ def test_dogfood_lane_render_carries_its_own_runtime_identity() -> None:
             "runtime://omninode-pc/dogfood/"
         )
         assert environment["ONEX_RUNTIME_ID"].startswith("dogfood-")
+        assert environment["OMNIDASH_ANALYTICS_DB_URL"].startswith(
+            "postgresql://postgres:"
+        )
         assert environment["ONEX_SECRET_RESOLVER_CONFIG_PATH"] == (
             "/app/data/delegation/secret_resolver.yaml"
         )
@@ -307,6 +355,51 @@ def test_dogfood_lane_render_carries_its_own_runtime_identity() -> None:
     assert services["runtime-effects"]["environment"]["ONEX_GROUP_ID"] == (
         "onex-dogfood-runtime-effects"
     )
+
+
+@pytest.mark.integration
+def test_dogfood_projection_writers_are_private_and_non_superuser() -> None:
+    """Kernel writers use typed private bindings and unique lane identities."""
+    services = _compose_config_json()["services"]
+    writers = {name: services[name] for name in KERNEL_WRITER_PROFILES}
+
+    groups = {
+        str(service["environment"]["ONEX_GROUP_ID"]) for service in writers.values()
+    }
+    assert len(groups) == len(writers)
+    assert all(
+        group.startswith("onex-dogfood-runtime-projection-writer-") for group in groups
+    )
+
+    for name, expected_profile in KERNEL_WRITER_PROFILES.items():
+        service = writers[name]
+        environment = service["environment"]
+        assert service["container_name"] == f"omnimarket-dogfood-{name}"
+        assert environment["KAFKA_BOOTSTRAP_SERVERS"] == "redpanda:9092"
+        assert service.get("command") is None
+        assert environment["RUNTIME_PROFILE"] == expected_profile
+        assert environment["RUNTIME_INSTANCE_ID"] == f"dogfood-{expected_profile}"
+        assert environment["ONEX_RUNTIME_ID"] == f"dogfood-{expected_profile}"
+        assert environment["KAFKA_INSTANCE_ID"] == f"dogfood-{expected_profile}"
+        assert environment["ONEX_WIRING_STRICT_MODE"] == "1"
+        assert environment["OMNIDASH_ANALYTICS_DB_URL"] == ""
+        assert environment["OMNINODE_INTERNAL_DB_URL"].startswith(
+            "postgresql://omninode_runtime:"
+        )
+        assert environment["ONEX_TENANT_DB_URL"].startswith(
+            "postgresql://tenant_projection_writer:"
+        )
+        assert service["healthcheck"]["test"] == [
+            "CMD",
+            "curl",
+            "-sf",
+            "http://localhost:8085/health",
+        ]
+        assert _published_ports(service) == set()
+        assert service["deploy"]["resources"]["limits"]["memory"] == str(1024**3)
+        assert service["deploy"]["resources"]["reservations"]["memory"] == str(
+            256 * 1024**2
+        )
 
 
 @pytest.mark.integration
