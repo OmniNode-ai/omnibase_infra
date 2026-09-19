@@ -93,6 +93,15 @@ class _FakeExecutor:
         self.verify_recreate: list[object] = []
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
+        # OMN-18640: #3818 made the agent read `executor.health_checks` when it
+        # builds the terminal event (agent.py), and #3822 added this fake three
+        # hours later without it. Neither PR could see the other, and dev went
+        # red on every test in this module with
+        # `AttributeError: '_FakeExecutor' object has no attribute
+        # 'health_checks'` -- reproduced on a clean origin/dev checkout at
+        # f51e807e1, so it is not this branch. Same declaration the other ten
+        # fakes carry.
+        self.health_checks: list[object] = []
         self.raise_on_deliver: Exception | None = None
         self._delivery_record = delivery_record or {
             "result": "WRITTEN",
