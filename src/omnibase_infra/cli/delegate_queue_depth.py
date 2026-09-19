@@ -21,6 +21,15 @@ against broker-reported log-end offsets, through the same
 topic-migration drain gate uses. Nothing here accepts a depth from the caller,
 and nothing here guesses one.
 
+**This module owns no transport.** The broker clients are built by
+:func:`omnibase_infra.backends.backend_probe.consumer_group_topic_backlog`,
+beside the liveness probe that resolved the ``consumer_groups`` argument this
+function is handed, and they authenticate through the same
+``build_aiokafka_auth_kwargs_for`` seam -- so the depth question works on a
+SASL lane rather than only on the unauthenticated dev lane. What stays here is
+the refusal logic: which conditions make a depth unaskable, and what each one
+is called.
+
 **What it is NOT, stated rather than implied.** It is not this record's own
 queue position. The publish path discards its ``ModelPublishReceipt``
 (``RuntimeLocal._run_event_driven`` calls ``await bus.publish(...)`` and keeps
@@ -43,14 +52,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from aiokafka import AIOKafkaConsumer
-from aiokafka.admin import AIOKafkaAdminClient
-
+from omnibase_infra.backends.backend_probe import consumer_group_topic_backlog
 from omnibase_infra.cli.model_delegate_queue_depth import ModelDelegateQueueDepth
-from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag
-from omnibase_infra.migration.service_consumer_lag_observer import (
-    ServiceConsumerLagObserver,
-)
 
 __all__ = ["QUEUE_DEPTH_PROBE_SECONDS", "observe_delegate_queue_depth"]
 
@@ -61,37 +64,6 @@ logger = logging.getLogger(__name__)
 #: failure, never a second wait. Exceeding it is an unresolved depth with a
 #: reason, not a longer hang.
 QUEUE_DEPTH_PROBE_SECONDS = 8.0
-
-
-async def _observe_async(
-    *,
-    broker: str,
-    command_topic: str,
-    consumer_group: str,
-) -> int:
-    """Total uncommitted backlog for ``consumer_group`` on ``command_topic``."""
-    admin = AIOKafkaAdminClient(bootstrap_servers=broker)
-    consumer = AIOKafkaConsumer(bootstrap_servers=broker, enable_auto_commit=False)
-    await admin.start()
-    try:
-        await consumer.start()
-        try:
-            # ``AIOKafkaAdminClient`` satisfies the committed-offset half of
-            # ``ProtocolKafkaAdminLike`` structurally; the adapter supplies the
-            # ``list_offsets`` half the pinned 0.13.0 client omits (OMN-12632),
-            # and is itself the full protocol surface the observer needs.
-            observer = ServiceConsumerLagObserver(AdapterKafkaAdminLag(admin, consumer))
-            lag = await observer.observe(consumer_group)
-            if not lag.has_partitions_for_topic(command_topic):
-                raise ValueError(
-                    f"group {consumer_group!r} has no observed partitions on "
-                    f"{command_topic!r}"
-                )
-            return lag.lag_for_topic(command_topic)
-        finally:
-            await consumer.stop()
-    finally:
-        await admin.close()
 
 
 def observe_delegate_queue_depth(
@@ -151,10 +123,10 @@ def observe_delegate_queue_depth(
     try:
         backlog = asyncio.run(
             asyncio.wait_for(
-                _observe_async(
-                    broker=broker,
-                    command_topic=command_topic,
+                consumer_group_topic_backlog(
+                    topic=command_topic,
                     consumer_group=consumer_group,
+                    bootstrap_servers=broker,
                 ),
                 timeout=probe_seconds,
             )
