@@ -345,7 +345,7 @@ resolve_lane_runtime_services() {
     local compose_project="$2"
 
     if [[ "${compose_project}" == "omnibase-infra-dogfood" ]]; then
-        eval "${_out_args_name}=(omninode-runtime runtime-effects projection-api tenant-projection-writer projection-tenant-registry-writer projection-delegation-writer projection-registration-writer projection-savings-writer projection-tenant-credentials-writer projection-live-events-writer)"
+        eval "${_out_args_name}=(omninode-runtime runtime-effects projection-api)"
         return 0
     fi
 
