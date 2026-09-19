@@ -456,6 +456,17 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # tests/ci/fixtures/omn15979_merge_time_external_check_runs.json.
     "Integration Test Removal Gate",
     "Dep Provenance Gate",  # OMN-15737: 16/16 present, 16/16 green (#2546-#2567 AND #2646-#2669)
+    # OMN-18796 (epic OMN-18775): the no-new-advisory-job gate, called from
+    # .github/workflows/advisory-job-gate.yml against the omniclaude reusable
+    # pinned by commit. On THIS repository `dev` requires exactly one context
+    # ("CI Summary", the OMN-4497 single-umbrella design), so this tuple is the
+    # whole external enforcement surface and an entry here is the only thing
+    # that gives the gate merge-blocking force. The caller carries no `paths:`
+    # and no `branches:` filter, so it reports on every pull-request shape and
+    # cannot be legitimately absent -- the admission condition this tuple takes.
+    # The census counted 28 advisory settings and 43 pull-request-reachable
+    # verification jobs in this repository, the largest share on the fleet.
+    "advisory-job-gate / advisory-job-gate",
     # OMN-16878 (OMN-16876 census items 1-2). Both ran on every infra PR and
     # could not block a merge. That is a sharper failure here than elsewhere:
     # `dev` requires exactly ONE context ("CI Summary", the OMN-4497
@@ -658,6 +669,32 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         #     the stale lane-census baseline entries after #3717 landed -- so
         #     its ability to refuse is not a claim, it is in this PR's history.
         "Governed helper primitive gate",
+        # OMN-18796: the advisory-job gate's caller lands in this same PR on
+        # 2026-09-19, so no merged PR in either fixture window could have
+        # produced this check-run. Comes out at the next fixture re-capture.
+        #
+        # ADMISSION IS BY CONSTRUCTION, on the argument recorded for
+        # `exposure-reader-coverage` above. What stands in for the measured
+        # N-of-16 record:
+        #   * The producer (.github/workflows/advisory-job-gate.yml) declares
+        #     `pull_request` with no `types:`, no `branches:` filter, no
+        #     `paths:` filter, a single `uses:` job with no `needs:` and no
+        #     job-level `if:` -- so it reports on every pull-request shape and
+        #     cannot be skipped-as-passed.
+        #   * The reusable it calls declares NO inputs, so no caller can soften
+        #     a refusal, and it fails CLOSED on an unreadable workflow, an
+        #     unresolvable enforcement surface, an unparseable baseline and a
+        #     malformed annotation alike.
+        #   * It is proven able to FAIL on real input: that is what its own
+        #     repository's suite pins (omniclaude
+        #     tests/scripts/test_advisory_job_gate.py), and the census it reads
+        #     rediscovered all three named findings of the OMN-18775 inventory
+        #     independently.
+        #   * It is proven able to PASS here: run against this repository's
+        #     committed baseline at this branch it exits 0 with 28 advisory
+        #     settings and 43 verification jobs grandfathered and zero findings.
+        #     No baseline was edited to obtain that.
+        "advisory-job-gate / advisory-job-gate",
     }
 )
 
