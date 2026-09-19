@@ -78,8 +78,11 @@ from deploy_agent.coalesce import (
 from deploy_agent.events import (
     TOPIC_DEPLOY_COMMAND_DLQ,
     TOPIC_REBUILD_REQUESTED,
+    EnumRejectionReason,
     EnumRuntimeLane,
     ModelRebuildRequested,
+    ModelRejectionNotice,
+    Scope,
 )
 from deploy_agent.job_state import JobStore
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
@@ -109,6 +112,13 @@ SelfUpdateHook = Callable[[Callable[[], None]], None]
 # retry loop owes the event either way. Losing the coalescing decision because
 # a broker was briefly away would be the worse trade.
 SupersededHook = Callable[[ModelSupersession], None]
+
+# OMN-17079. The consumer decides six of the eight rejection reasons and, before this
+# hook, expressed each as a bare string returned to a caller that only logged it -- so
+# six of eight refusals never reached the rejection topic at all. This is their route to
+# the agent's single publish helper, and it deliberately mirrors ``SupersededHook``
+# rather than inventing a second mechanism.
+RejectedHook = Callable[[ModelRejectionNotice], None]
 
 # Stamped on the rewound offset so `rpk group describe` shows WHY the group's
 # committed offset moved BACKWARDS onto a record it had already fetched.
@@ -191,6 +201,11 @@ class DeployConsumer:
     #: ``AttributeError`` from the middle of the accept protocol.
     ancestry_resolver: AncestryResolver | None = None
     on_superseded: SupersededHook | None = None
+    #: OMN-17079, on the same terms as the two above: a consumer built without
+    #: ``__init__`` must read as "notifies nobody" rather than raising
+    #: AttributeError from the middle of a refusal, which would turn a handled
+    #: rejection into an unhandled exception on the poll loop.
+    on_rejected: RejectedHook | None = None
 
     def __init__(
         self,
@@ -202,6 +217,7 @@ class DeployConsumer:
         lag_sampler: LagSampler | None = None,
         ancestry_resolver: AncestryResolver | None = None,
         on_superseded: SupersededHook | None = None,
+        on_rejected: RejectedHook | None = None,
     ) -> None:
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
@@ -231,6 +247,7 @@ class DeployConsumer:
         # takes -- run every command, in order.
         self.ancestry_resolver = ancestry_resolver
         self.on_superseded = on_superseded
+        self.on_rejected = on_rejected
         logger.info(
             "Deploy agent lane fence: %s",
             ",".join(sorted(lane.value for lane in self.allowed_lanes)),
@@ -315,6 +332,63 @@ class DeployConsumer:
             return ordered[:1], False
         return ordered, True
 
+    def _reject(
+        self,
+        reason: EnumRejectionReason,
+        *,
+        raw: object = None,
+        cmd: ModelRebuildRequested | None = None,
+    ) -> str:
+        """Fire the rejection hook and return the reason token the caller returns.
+
+        OMN-17079. Returning the token keeps every call site a one-liner
+        (``return None, self._reject(...)``), so a future refusal cannot be added as a
+        bare ``return None, "reason"`` without visibly departing from the shape its six
+        neighbours use.
+
+        THE IDENTIFIERS ARE RESOLVED, NEVER INVENTED. With a validated ``cmd`` both come
+        straight off it. Without one -- an undecodable record, a bad signature, a payload
+        the contract refuses -- this parses what the raw record still offers and records
+        ``None`` for whatever will not parse. A notice carrying ``None`` cannot become an
+        event, which is the intended outcome: a rejection published under a fabricated
+        correlation id is a durable record pointing at a command that never existed.
+
+        Never raises. A refusal whose notification fails is still a refusal, and the
+        offset is already committed by the caller; losing the hook must not convert that
+        into an unhandled exception on the poll loop.
+        """
+        correlation_id = cmd.correlation_id if cmd is not None else None
+        scope: Scope | None = cmd.scope if cmd is not None else None
+
+        if cmd is None and isinstance(raw, dict):
+            try:
+                correlation_id = UUID(str(raw["correlation_id"]))
+            except (KeyError, ValueError, TypeError):
+                correlation_id = None
+            try:
+                scope = Scope(str(raw["scope"]))
+            except (KeyError, ValueError, TypeError):
+                scope = None
+
+        if self.on_rejected is not None:
+            try:
+                self.on_rejected(
+                    ModelRejectionNotice(
+                        reason=reason,
+                        correlation_id=correlation_id,
+                        scope=scope,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 — boundary: refusal still stands
+                logger.warning(
+                    "Publishing the %s rejection failed (%s: %s); the refusal itself "
+                    "stands and its offset is committed",
+                    reason.value,
+                    type(exc).__name__,
+                    exc,
+                )
+        return reason.value
+
     def _process_message(
         self, msg: Any, lookahead: list[Any] | None = None
     ) -> tuple[ModelRebuildRequested | None, str | None]:
@@ -330,7 +404,9 @@ class DeployConsumer:
                 raw_preview=payload.raw_preview,
             )
             self._commit_through(msg)
-            return None, "undecodable_payload"
+            return None, self._reject(
+                EnumRejectionReason.UNDECODABLE_PAYLOAD, raw=payload.raw_preview
+            )
 
         correlation_id_str = payload.get("correlation_id", "unknown")
 
@@ -341,7 +417,9 @@ class DeployConsumer:
                 correlation_id_str,
             )
             self._commit_through(msg)
-            return None, "invalid_signature"
+            return None, self._reject(
+                EnumRejectionReason.INVALID_SIGNATURE, raw=payload
+            )
 
         # Step 3: Validate payload. The signature is transport metadata, not
         # part of the command contract itself.
@@ -362,7 +440,7 @@ class DeployConsumer:
                 raw_preview=None,
             )
             self._commit_through(msg)
-            return None, "invalid_payload"
+            return None, self._reject(EnumRejectionReason.INVALID_PAYLOAD, raw=payload)
 
         # Step 4: Lane fence (OMN-16939). The dev control bus carries both dev
         # and stability-test rebuild commands, so "which bus am I on" does not
@@ -376,19 +454,19 @@ class DeployConsumer:
                 "Rejecting command %s: lane_not_allowed (%s)", cmd.correlation_id, e
             )
             self._commit_through(msg)
-            return None, "lane_not_allowed"
+            return None, self._reject(EnumRejectionReason.LANE_NOT_ALLOWED, cmd=cmd)
 
         # Step 5: Check busy
         if self.job_store.has_active_job():
             logger.info("Rejecting command %s: agent busy", cmd.correlation_id)
             self._commit_through(msg)
-            return None, "busy"
+            return None, self._reject(EnumRejectionReason.BUSY, cmd=cmd)
 
         # Step 6: Check dedup
         if self.job_store.is_duplicate(cmd.correlation_id):
             logger.info("Rejecting command %s: duplicate", cmd.correlation_id)
             self._commit_through(msg)
-            return None, "duplicate"
+            return None, self._reject(EnumRejectionReason.DUPLICATE, cmd=cmd)
 
         # Step 6b: Coalesce (OMN-18143). The newest foldable command in the
         # batch runs; every one it replaces gets a durable terminal record and
