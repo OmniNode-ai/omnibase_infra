@@ -22,5 +22,13 @@ class EnumConsumerHealthEventType(StrEnum):
     POLL_TIMEOUT = "poll_timeout"
     CONNECTION_LOST = "connection_lost"
 
+    # OMN-18640. A consumer that holds Stable group membership with an assigned
+    # partition and stops fetching reads as healthy on every other surface --
+    # the broker, the container, the group state and the publisher all said
+    # green through two multi-hour outages. These two are the classifications
+    # that disagree with them.
+    CONSUMER_GROUP_STALLED = "consumer_group_stalled"
+    CONSUMER_GROUP_REJOINED = "consumer_group_rejoined"
+
 
 __all__ = ["EnumConsumerHealthEventType"]

@@ -12,6 +12,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -21,6 +22,7 @@ from aiokafka.errors import (
     MessageSizeTooLargeError,
     UnknownTopicOrPartitionError,
 )
+from aiokafka.structs import TopicPartition
 from pydantic import BaseModel
 
 from omnibase_infra.errors import (
@@ -60,6 +62,22 @@ TEST_ENVIRONMENT: str = "dev"
 # TestKafkaEventBusLifecycle, TestKafkaEventBusSubscribe, and any other
 # class that does NOT need a custom send side-effect.
 # ---------------------------------------------------------------------------
+
+
+async def _idle_fetch(
+    *partitions: Any,
+    timeout_ms: int = 0,
+    max_records: int | None = None,
+) -> dict[Any, list[Any]]:
+    """Stand in for ``AIOKafkaConsumer.getmany`` on a topic with nothing on it.
+
+    OMN-18640: the consume loop fetches with a deadline instead of iterating,
+    so a mocked consumer needs a fetch that HONOURS that deadline. An
+    ``AsyncMock`` returns instantly and truthy, which both spins the loop and
+    makes it believe it is receiving records.
+    """
+    await asyncio.sleep(max(timeout_ms, 1) / 1000.0)
+    return {}
 
 
 @pytest.fixture
@@ -1636,6 +1654,10 @@ class TestKafkaEventBusConsumerManagement:
         consumer = AsyncMock()
         consumer.start = AsyncMock()
         consumer.stop = AsyncMock()
+        # OMN-18640: the consume loop fetches with ``getmany``; an
+        # unconfigured AsyncMock returns a truthy mock and spins the loop.
+        consumer.getmany = _idle_fetch
+        consumer.assignment = lambda: set()
         return consumer
 
     @pytest.mark.asyncio
@@ -1718,6 +1740,10 @@ class TestKafkaEventBusConsumerGroupId:
         consumer = AsyncMock()
         consumer.start = AsyncMock()
         consumer.stop = AsyncMock()
+        # OMN-18640: the consume loop fetches with ``getmany``; an
+        # unconfigured AsyncMock returns a truthy mock and spins the loop.
+        consumer.getmany = _idle_fetch
+        consumer.assignment = lambda: set()
         return consumer
 
     @pytest.mark.asyncio
@@ -1926,6 +1952,10 @@ class TestKafkaEventBusInstanceDiscriminator:
         consumer = AsyncMock()
         consumer.start = AsyncMock()
         consumer.stop = AsyncMock()
+        # OMN-18640: the consume loop fetches with ``getmany``; an
+        # unconfigured AsyncMock returns a truthy mock and spins the loop.
+        consumer.getmany = _idle_fetch
+        consumer.assignment = lambda: set()
         return consumer
 
     @pytest.mark.asyncio
@@ -2773,6 +2803,10 @@ class TestKafkaEventBusDLQRouting:
             mock_consumer = AsyncMock()
             mock_consumer.start = AsyncMock()
             mock_consumer.stop = AsyncMock()
+            # OMN-18640: the consume loop fetches with ``getmany``; an
+            # unconfigured AsyncMock returns a truthy mock and spins the loop.
+            mock_consumer.getmany = _idle_fetch
+            mock_consumer.assignment = lambda: set()
 
             # Create a mock message with remaining retries
             mock_msg = MagicMock()
@@ -2787,15 +2821,26 @@ class TestKafkaEventBusDLQRouting:
                 ("max_retries", b"3"),
             ]
 
-            async def mock_consumer_iter() -> (
-                AsyncMock
-            ):  # Type hint doesn't matter for mock
-                yield mock_msg
-                # After first message, stop yielding
-                while True:
-                    await asyncio.sleep(10)  # Block forever
+            # OMN-18640: the consume loop polls with a deadline rather than
+            # iterating the consumer, so the fetch surface is ``getmany``.
+            # First fetch delivers the record; later fetches block, standing in
+            # for a topic with nothing more on it.
+            delivered = False
 
-            mock_consumer.__aiter__ = lambda self: mock_consumer_iter()
+            async def mock_getmany(
+                *partitions: Any,
+                timeout_ms: int = 0,
+                max_records: int | None = None,
+            ) -> dict[TopicPartition, list[Any]]:
+                nonlocal delivered
+                if not delivered:
+                    delivered = True
+                    return {TopicPartition("test-topic", 0): [mock_msg]}
+                await asyncio.sleep(10)  # Block forever
+                return {}
+
+            mock_consumer.getmany = mock_getmany
+            mock_consumer.assignment = lambda: set()
             mock_consumer_class.return_value = mock_consumer
 
             event_bus = EventBusKafka(config=dlq_config)
