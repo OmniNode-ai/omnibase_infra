@@ -666,11 +666,25 @@ class ServiceGatewayForwarder:
             # for that one.
             tenant_id=identity.tenant_slug,
         )
+        # OMN-18691: named explicitly rather than left to StopIteration. The
+        # runtime config already refuses a cloud deployment with no heartbeat
+        # topic, and a mirror-only forwarder never reaches this method at all,
+        # so arriving here with nothing to send means one of those two
+        # invariants broke -- which is worth a message that says so.
         canonical_topic = next(
-            topic
-            for topic in self._config.mirror_topics.outbound
-            if topic.endswith(".gateway-heartbeat.v1")
+            (
+                topic
+                for topic in self._config.declared_outbound_topics
+                if topic.endswith(".gateway-heartbeat.v1")
+            ),
+            None,
         )
+        if canonical_topic is None:
+            raise GatewayRecordRefusedError(
+                "the gateway heartbeat requires an outbound heartbeat topic, but "
+                "this forwarder declares no outbound mirror set; a mirror-only "
+                "forwarder has no cloud leg to heartbeat over"
+            )
         return envelope, canonical_topic
 
     async def publish_heartbeat(self) -> None:
@@ -811,7 +825,7 @@ class ServiceGatewayForwarder:
         """
         identity = self._config.tenant_identity
         canonical_topic = strip_topic_prefix(identity.tenant_slug, wire_topic)
-        if canonical_topic not in self._config.mirror_topics.inbound:
+        if canonical_topic not in self._config.declared_inbound_topics:
             raise GatewayRecordRefusedError(
                 "canonical_topic is not declared for inbound mirroring"
             )
@@ -870,7 +884,7 @@ class ServiceGatewayForwarder:
         COMPUTE handler (OMN-15740).
         """
         identity = self._config.tenant_identity
-        if canonical_topic not in self._config.mirror_topics.outbound:
+        if canonical_topic not in self._config.declared_outbound_topics:
             raise GatewayRecordRefusedError(
                 "canonical_topic is not declared for outbound mirroring"
             )
