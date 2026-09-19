@@ -365,11 +365,22 @@ def services_for_scope(
 
 
 class ModelHealthCheck(BaseModel):
+    """One post-deploy check and, when it did not pass, why (OMN-18640 AC8).
+
+    ``detail`` is empty for a pass and is REQUIRED reading for a fail. Before
+    it existed, a terminal event could say that ``runtime-effects`` failed its
+    probe and nothing more -- not whether the port refused the connection,
+    answered something that was not a health document, or answered a health
+    document saying it was not ready. Those take three different next steps,
+    and the deploy that most needs them is the one that is now refused.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid")
     service: str
     endpoint: str
     status: Literal["pass", "fail"]
     latency_ms: int = 0
+    detail: str = ""
 
 
 class ModelContainerResidue(BaseModel):

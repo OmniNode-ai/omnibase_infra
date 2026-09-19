@@ -650,14 +650,29 @@ def _decode_stream(stream: str | bytes | None) -> str:
     return str(stream)
 
 
-def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
+def _run(
+    cmd: list[str],
+    timeout: int,
+    *,
+    cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one command, capturing text output, never raising on a non-zero exit.
+
+    The two keyword arguments are ENUMERATED rather than taken as ``**kwargs``
+    (OMN-18640). They are the only two any call site in this package passes,
+    and the untyped catch-all made every ``result.stdout`` an ``Any``: three of
+    the ten type errors this package carried were functions declared to return
+    ``str`` that were silently returning ``Any`` read back out of here.
+    """
     return subprocess.run(
         cmd,
         timeout=timeout,
         capture_output=True,
         text=True,
         check=False,
-        **kwargs,
+        cwd=cwd,
+        env=env,
     )
 
 
@@ -916,24 +931,46 @@ def _runtime_version_from_pyproject(repo_dir: str = REPO_DIR) -> str:
     return version
 
 
-def _runtime_health_passed(result: subprocess.CompletedProcess) -> bool:
-    """Return whether a runtime /health response proves deploy readiness."""
+def _runtime_health_reason(result: subprocess.CompletedProcess[str]) -> str:
+    """Return why a runtime /health response is not a pass, or "" when it is.
+
+    OMN-18640 AC8. The predicate this replaced returned a bare bool, so the
+    executor knew a probe had failed and could not say ANYTHING about why. A
+    verdict that fails the job has to name its own reason -- the reason is what
+    reaches ``errors`` on the terminal event and what a reader of the job
+    record has instead of going to the host.
+
+    Every branch below is a distinct fact about the runtime and they take
+    different next steps: curl could not reach it at all, it answered something
+    that is not a health document, or it answered a health document that says
+    it is not ready.
+    """
     if result.returncode != 0:
-        return False
+        detail = (result.stderr or result.stdout).strip()[:200]
+        return f"curl exited {result.returncode}: {detail or 'no output'}"
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return False
+        return f"health response is not JSON: {result.stdout.strip()[:200]!r}"
     if not isinstance(payload, dict):
-        return False
+        return f"health response is not a JSON object: {type(payload).__name__}"
     details = payload.get("details")
     if not isinstance(details, dict):
-        return False
+        return "health response carries no details object"
+    status = payload.get("status")
+    is_running = details.get("is_running")
+    prefetch = details.get("config_prefetch_status")
+    if status == "healthy" and is_running is True and prefetch in {"ok", "skipped"}:
+        return ""
     return (
-        payload.get("status") == "healthy"
-        and details.get("is_running") is True
-        and details.get("config_prefetch_status") in {"ok", "skipped"}
+        f"health response is not ready: status={status!r} "
+        f"is_running={is_running!r} config_prefetch_status={prefetch!r}"
     )
+
+
+def _runtime_health_passed(result: subprocess.CompletedProcess[str]) -> bool:
+    """Return whether a runtime /health response proves deploy readiness."""
+    return not _runtime_health_reason(result)
 
 
 def _compose_service_states(
@@ -1451,6 +1488,36 @@ def gateway_deploy_budget() -> ModelGatewayDeployBudget:
     )
 
 
+class VerificationFailedError(RuntimeError):
+    """Post-deploy verification did not pass, so the job fails (OMN-18640 AC8).
+
+    WHAT THIS REPLACED. ``verify`` recorded a ``ModelHealthCheck`` with
+    ``status="fail"`` and then reported ``Phase.VERIFICATION SUCCESS`` unless
+    the probe had TIMED OUT. So the only unhealthy runtime that could fail a
+    deploy was one that stopped answering altogether for a full ten seconds. A
+    runtime answering ``{"status": "degraded"}`` in twelve milliseconds, a
+    ``/health`` port refusing the connection outright, and a lane missing a
+    required projection table were each written onto the terminal event as a
+    failure and reported as a SUCCESSFUL deploy.
+
+    The 2026-09-18 effects wedge was caught only because the dead container
+    stopped answering and the probe hit its ceiling. The same outage with a
+    fast unhealthy answer would have been a green deploy over it.
+
+    The message names every failing check WITH its own reason, because this is
+    the string the agent writes to ``errors`` on the terminal event, and a
+    reader who has only the event has only this.
+    """
+
+    def __init__(self, failures: list[ModelHealthCheck]) -> None:
+        self.failures = failures
+        rendered = "; ".join(
+            f"{check.endpoint} ({check.service}): {check.detail or 'no detail recorded'}"
+            for check in failures
+        )
+        super().__init__(f"post-deploy verification failed: {rendered}")
+
+
 class GatewayDeployScriptUnavailableError(RuntimeError):
     """Raised when the sanctioned gateway deploy script could not be executed.
 
@@ -1542,6 +1609,12 @@ class DeployExecutor:
         # Before this the only way to read a live deploy's flags was to sample
         # the host's process table while the child was running.
         self.compose_invocations: list[ModelComposeInvocation] = []
+        # OMN-18640 AC8: every post-deploy check this rebuild made, recorded
+        # before the verdict so a REFUSED verification still publishes what it
+        # probed. The agent's own local is the target of the assignment that
+        # raises, so on a failed verification it is empty -- which is how the
+        # deploy whose readings mattered most published none of them.
+        self.health_checks: list[ModelHealthCheck] = []
         # OMN-17135: repo -> the commit SHA RT-1 actually resolved and vendored
         # for that sibling. The requested ref pins omnibase_infra only, so
         # without this the terminal event named one repository's commit and left
@@ -1556,6 +1629,7 @@ class DeployExecutor:
         self.verify_recreate = []
         self.deps_convergence = []
         self.compose_invocations = []
+        self.health_checks = []
 
     def _record_container_residue(
         self, stuck: list[str], *, lane: EnumRuntimeLane
@@ -4255,57 +4329,47 @@ class DeployExecutor:
         timeout = PHASE_TIMEOUTS[Phase.VERIFICATION]
         checks: list[ModelHealthCheck] = []
 
-        # Check for unhealthy containers
-        result = _run(
-            ["docker", "ps", "--filter", "health=unhealthy", "--format", "{{.Names}}"],
-            timeout=timeout,
-        )
-        unhealthy = result.stdout.strip()
-        if unhealthy:
-            checks.append(
-                ModelHealthCheck(
-                    service="docker",
-                    endpoint="docker ps --filter health=unhealthy",
-                    status="fail",
-                    latency_ms=0,
-                )
+        # The two docker filters below are HOST-WIDE and are therefore
+        # ADVISORY: recorded on the terminal event, never in the verdict
+        # (OMN-18640 AC8). They name no lane, no compose project and no
+        # service, so `health=unhealthy` matches any container on the box.
+        # MEASURED on the lab host 2026-09-19T03:09Z, that filter returned
+        # `omninode-pypi-cache` -- an unrelated container, unhealthy right
+        # then, while both dev-lane runtimes were fine. In the verdict it would
+        # have failed every deploy on every lane at that moment, the dev lane's
+        # own recovery deploy included. Lane-scoping them is a separate change;
+        # until it lands, an advisory reading is the honest one.
+        for endpoint_filter in ("health=unhealthy", "status=restarting"):
+            result = _run(
+                ["docker", "ps", "--filter", endpoint_filter, "--format", "{{.Names}}"],
+                timeout=timeout,
             )
-        else:
+            matched = result.stdout.strip()
             checks.append(
                 ModelHealthCheck(
                     service="docker",
-                    endpoint="docker ps --filter health=unhealthy",
-                    status="pass",
+                    endpoint=f"docker ps --filter {endpoint_filter}",
+                    status="fail" if matched else "pass",
                     latency_ms=0,
-                )
-            )
-
-        # Check for restarting containers
-        result = _run(
-            ["docker", "ps", "--filter", "status=restarting", "--format", "{{.Names}}"],
-            timeout=timeout,
-        )
-        restarting = result.stdout.strip()
-        if restarting:
-            checks.append(
-                ModelHealthCheck(
-                    service="docker",
-                    endpoint="docker ps --filter status=restarting",
-                    status="fail",
-                    latency_ms=0,
-                )
-            )
-        else:
-            checks.append(
-                ModelHealthCheck(
-                    service="docker",
-                    endpoint="docker ps --filter status=restarting",
-                    status="pass",
-                    latency_ms=0,
+                    detail=(
+                        f"host-wide, advisory: {matched.replace(chr(10), ', ')}"
+                        if matched
+                        else ""
+                    ),
                 )
             )
 
         # Check projection tables in the database used by runtime DB injection.
+        #
+        # IN the verdict, unlike the two filters above: this execs into THIS
+        # lane's own postgres container, so it cannot fail because of another
+        # lane. Read on the lab host 2026-09-19T03:09Z, both required tables
+        # were present on the dev lane and on the stability-test lane, so the
+        # refusal is not armed against live state. The runtime-phase migration
+        # preflight already refuses the same condition earlier
+        # (``_ensure_runtime_migrations_ready``); verification agreeing with it
+        # is consistency, not a new bar.
+        verdict_failures: list[ModelHealthCheck] = []
         for table_name in REQUIRED_PROJECTION_TABLES:
             result = _run(
                 [
@@ -4322,14 +4386,24 @@ class DeployExecutor:
                 ],
                 timeout=timeout,
             )
-            checks.append(
-                ModelHealthCheck(
-                    service="postgres",
-                    endpoint=f"omnidash_analytics.{table_name} exists",
-                    status="pass" if result.stdout.strip() == "t" else "fail",
-                    latency_ms=0,
-                )
+            answer = result.stdout.strip()
+            table_check = ModelHealthCheck(
+                service="postgres",
+                endpoint=f"omnidash_analytics.{table_name} exists",
+                status="pass" if answer == "t" else "fail",
+                latency_ms=0,
+                detail=(
+                    ""
+                    if answer == "t"
+                    else (
+                        f"psql exited {result.returncode} and answered {answer!r} "
+                        f"for to_regclass('public.{table_name}')"
+                    )
+                ),
             )
+            checks.append(table_check)
+            if table_check.status == "fail":
+                verdict_failures.append(table_check)
 
         # Runtime health endpoint checks.
         #
@@ -4365,14 +4439,32 @@ class DeployExecutor:
                     timed_out=timed_out,
                 )
             settled.append(check)
+            if check.status == "fail":
+                verdict_failures.append(check)
             if timed_out is not None and pending_timeout is None:
                 pending_timeout = timed_out
         checks.extend(settled)
 
+        # The probings are over; record them on the executor BEFORE any
+        # refusal (OMN-18640 AC8). The agent's own ``health_checks`` local is
+        # the target of the assignment that raised, so it is ``[]`` on exactly
+        # this path -- a job that failed verification used to publish a
+        # terminal event carrying no probe readings at all.
+        self.health_checks = list(checks)
+
         if pending_timeout is not None:
             # Unchanged behaviour for a probe the remedy did not fix, and the
-            # behaviour AC7's falsifier pins: the job fails.
+            # behaviour AC7's falsifier pins: the job fails, with the timeout
+            # object itself, whose message is the string both 2026-09-18 job
+            # records carry.
             raise pending_timeout
+
+        if verdict_failures:
+            # OMN-18640 AC8. Any outcome that is not a pass fails the job, not
+            # only a timeout. A probe that answered unhealthy in milliseconds
+            # is the same outage as one that stopped answering; the only
+            # difference used to be that this one was reported as a success.
+            raise VerificationFailedError(verdict_failures)
 
         on_phase_update(Phase.VERIFICATION, PhaseStatus.SUCCESS)
         return checks
@@ -4390,7 +4482,7 @@ class DeployExecutor:
         endpoint = f"http://localhost:{port}/health"  # url-authority-ok: see loopback rationale above
         start = time.monotonic()
         timed_out: subprocess.TimeoutExpired | None = None
-        passed = False
+        reason = ""
         try:
             result = _run(
                 [
@@ -4404,15 +4496,20 @@ class DeployExecutor:
             )
         except subprocess.TimeoutExpired as exc:
             timed_out = exc
+            reason = (
+                f"the probe did not answer within "
+                f"{RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS}s"
+            )
         else:
-            passed = _runtime_health_passed(result)
+            reason = _runtime_health_reason(result)
         latency = int((time.monotonic() - start) * 1000)
         return (
             ModelHealthCheck(
                 service=service,
                 endpoint=endpoint,
-                status="pass" if passed else "fail",
+                status="fail" if reason else "pass",
                 latency_ms=latency,
+                detail=reason,
             ),
             timed_out,
         )
