@@ -703,6 +703,43 @@ class EnumRejectionReason(StrEnum):
     SUPERSEDED = "superseded"
 
 
+class ModelRejectionNotice(BaseModel):
+    """What the consumer resolved about a command it refused (OMN-17079).
+
+    The consumer decides SIX of the eight rejection reasons, and before this model it
+    expressed each of them as a bare string returned to a caller that only logged it --
+    so `busy`, `duplicate`, `lane_not_allowed`, `invalid_payload`, `invalid_signature`
+    and `undecodable_payload` never reached the rejection topic at all. This is the
+    typed hand-off that gives them a route to the agent's single publish helper, and it
+    mirrors the existing ``on_superseded`` injection rather than inventing a second
+    mechanism.
+
+    THE TWO OPTIONAL FIELDS ARE THE POINT, AND THEY ARE REQUIRED TO BE SUPPLIED.
+    Three of those six reasons are decided BEFORE a valid command exists: an undecodable
+    record, a bad signature and a payload the contract refuses all fail ahead of
+    ``ModelRebuildRequested`` validation, so there is no guaranteed correlation id and no
+    guaranteed scope to put on the wire. ``None`` here is a MEASURED ABSENCE, written by
+    the site that tried to resolve it and could not. It is not a default: every field is
+    required, so a caller must state what it found rather than let the model decide.
+
+    ``ModelRebuildRejected`` requires both identifiers, so a notice carrying ``None``
+    cannot become an event -- and that is the intended outcome. A rejection published
+    with a fabricated correlation id is worse than no rejection: it is a durable,
+    queryable record pointing at a command that never existed, indistinguishable to a
+    reader from a real one. The quarantine record already written on those paths is the
+    durable evidence instead.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: EnumRejectionReason
+    #: The refused command's correlation id, or ``None`` when the record was refused
+    #: before one could be parsed from it.
+    correlation_id: UUID | None
+    #: The refused command's scope, or ``None`` on the same terms.
+    scope: Scope | None
+
+
 class ModelRebuildRejected(BaseModel):
     """The terminal event for a command this agent will not run (OMN-18143).
 

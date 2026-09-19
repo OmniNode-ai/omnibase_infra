@@ -37,6 +37,7 @@ from deploy_agent.events import (
     ModelOnexApiDelivery,
     ModelRebuildRejected,
     ModelRebuildRequested,
+    ModelRejectionNotice,
     Phase,
     PhaseStatus,
     Scope,
@@ -369,6 +370,7 @@ class DeployAgent:
             # for coalescing -- folds nothing.
             ancestry_resolver=GitAncestryResolver(REPO_DIR),
             on_superseded=self._publish_superseded,
+            on_rejected=self._publish_rejection_notice,
         )
 
         # Handle signals
@@ -1191,6 +1193,73 @@ class DeployAgent:
                 scope=cmd.scope,
             )
         )
+
+    @staticmethod
+    def publish_rejection_notice(
+        notice: ModelRejectionNotice,
+        *,
+        publish: Callable[[ModelRebuildRejected], bool],
+    ) -> bool:
+        """Route one consumer-resolved refusal to the single publish helper (OMN-17079).
+
+        THE DEFECT THIS CLOSES. ``EnumRejectionReason`` has eight members and exactly
+        two of them ever reached the topic: ``IN_PROGRESS`` from this module and
+        ``SUPERSEDED`` from OMN-18143 AC7. The other six are decided inside
+        ``consumer._process_message``, which committed the offset, logged a line and
+        returned a bare reason string that the agent loop only logged again. LD-11,
+        filed 2026-08-30, still true twenty days later.
+
+        It matters now because the topic is about to have a reader. A widget wired to a
+        topic carrying two of eight refusal reasons looks quiet while six kinds of
+        refusal happen, and a quiet errors widget is read as "nothing was refused" --
+        the exact invisibility the observability work exists to remove.
+
+        WHY THIS IS A STATICMETHOD TAKING ITS PUBLISHER. The decision it makes -- publish
+        or withhold -- is the part worth testing, and it is pure. Threading the publisher
+        in keeps that decision exercisable without a broker, a job store or an agent
+        instance, and keeps the one publish helper the only thing that talks to Kafka.
+
+        WHY AN UNATTRIBUTABLE NOTICE PUBLISHES NOTHING. Three of the six reasons are
+        decided before ``ModelRebuildRequested`` validation, so the correlation id and
+        scope may be unresolvable. A rejection published with a fabricated id is worse
+        than no rejection: it is a durable record pointing at a command that never
+        existed, and a reader cannot tell it from a real one. The quarantine record
+        already written on those paths stays the durable evidence.
+
+        Returns whether an event was published. ``SUPERSEDED`` is REFUSED here rather
+        than silently mishandled: it carries two further required fields and keeps its
+        own builder, and routing it through this path would drop them.
+        """
+        if notice.reason is EnumRejectionReason.SUPERSEDED:
+            msg = (
+                "a superseded rejection names the commit and job that replaced it and "
+                "must be built by _publish_superseded; routing it through the notice "
+                "path would drop superseded_by_sha and superseded_by_correlation_id"
+            )
+            raise ValueError(msg)
+
+        if notice.correlation_id is None or notice.scope is None:
+            logger.warning(
+                "Rejection %s is unattributable and will NOT be published "
+                "(correlation_id=%s scope=%s); the quarantine record is the durable "
+                "evidence for this refusal",
+                notice.reason.value,
+                notice.correlation_id,
+                notice.scope,
+            )
+            return False
+
+        return publish(
+            ModelRebuildRejected(
+                correlation_id=notice.correlation_id,
+                reason=notice.reason,
+                scope=notice.scope,
+            )
+        )
+
+    def _publish_rejection_notice(self, notice: ModelRejectionNotice) -> None:
+        """Instance seam the consumer's ``on_rejected`` hook is wired to."""
+        self.publish_rejection_notice(notice, publish=self._publish_rejection_event)
 
     def _publish_superseded(self, supersession: ModelSupersession) -> None:
         """AC6's terminal event: this command will not run, and here is what did.
