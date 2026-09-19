@@ -838,3 +838,89 @@ def test_the_base_file_probe_and_autoheal_are_unchanged_for_every_other_lane() -
             "prod inherits that label; dropping it here disarms prod's "
             "self-recovery. Disarm it in the dev-lane overlay instead."
         )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18789: the broker's own probe reads a partition, not `leaderless_count`
+# ---------------------------------------------------------------------------
+
+#: The broker healthcheck this change replaces, verbatim from the base file.
+_LEADERLESS_BROKER_PROBE: list[str] = [
+    "CMD-SHELL",
+    "rpk cluster health | grep -q 'Healthy:.*true' || exit 1",
+]
+
+#: What the dev lane runs instead.
+_PARTITION_READ_BROKER_PROBE: list[str] = [
+    "CMD",
+    "/usr/bin/bash",
+    "/usr/local/bin/onex-broker-readiness-probe",
+]
+
+
+@pytest.mark.integration
+def test_dev_lane_broker_probe_reads_a_partition_not_leaderless_count() -> None:
+    """OMN-18789 AC3/AC4: the rendered dev lane runs the new probe.
+
+    The static half of this claim is in
+    tests/unit/docker/test_omn18789_broker_readiness_lane_scope.py. This is the
+    half that proves compose actually MERGES the override into the lane -- a
+    service key in an overlay that compose silently drops would satisfy the
+    YAML assertion and change nothing on the host.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    redpanda = yaml.safe_load(result.stdout)["services"]["redpanda"]
+
+    assert redpanda["healthcheck"]["test"] == _PARTITION_READ_BROKER_PROBE, (
+        "the dev lane's broker is back on an admin-API liveness check. That "
+        "surface read `healthy` through a 97-minute total data-plane outage on "
+        "2026-09-18 (5921 not_leader_for_partition errors, "
+        "`leaderless_count: 0` throughout)."
+    )
+
+    mount_targets = {
+        entry["target"]
+        for entry in redpanda["volumes"]
+        if isinstance(entry, dict) and "target" in entry
+    }
+    assert "/usr/local/bin/onex-broker-readiness-probe" in mount_targets
+    assert "/etc/onex/broker_readiness_declaration.conf" in mount_targets, (
+        "the probe fails closed without its declaration (Operating Rule 8: no "
+        "environment fallback for the window), so an unmounted declaration is "
+        "a lane that never reports healthy"
+    )
+    assert "redpanda_data" in {
+        entry.get("source") for entry in redpanda["volumes"] if isinstance(entry, dict)
+    }, "the override appended its mounts instead of replacing the data volume"
+
+
+@pytest.mark.integration
+def test_the_base_broker_probe_is_unchanged_for_every_other_lane() -> None:
+    """OMN-18789 AC4 RED-guard: stability-test and prod are provably untouched.
+
+    Both merge `docker-compose.infra.yml` and declare no broker healthcheck of
+    their own, so the base render IS their probe. Moving the check here rather
+    than in the overlay would have changed the STABILITY lane -- the surface
+    the compose path's `stability-proven` premise is resolved from.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=False)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    redpanda = yaml.safe_load(result.stdout)["services"]["redpanda"]
+
+    assert redpanda["healthcheck"]["test"] == _LEADERLESS_BROKER_PROBE, (
+        "the BASE broker probe changed. stability-test and prod inherit it and "
+        "declare no override, so this edit moved their probe too. Put the "
+        "change in docker/docker-compose.dev-lane.yml instead."
+    )
+    for entry in redpanda["volumes"]:
+        target = entry.get("target") if isinstance(entry, dict) else str(entry)
+        assert "onex-broker-readiness-probe" not in str(target), (
+            "the OMN-18789 probe leaked into the base every other lane merges"
+        )
