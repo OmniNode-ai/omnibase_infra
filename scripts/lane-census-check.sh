@@ -60,7 +60,7 @@ DRIFT_TOPIC="onex.evt.infra.lane-census-drift.v1"
 # ALERT authority (a consumer opens a ticket from it); this one is the FACT
 # a lane-health projection reads, and without a clean-run message that
 # projection cannot tell a matching fleet from a census that stopped running.
-OBSERVED_TOPIC="onex.evt.infra.lane-census-observed.v1"
+OBSERVED_TOPIC="onex.evt.omnibase-infra.lane-census-observed.v1"
 # Inventory unobservable — NOT drift. See the exit-code table above (OMN-15466).
 EXIT_INVENTORY_UNAVAILABLE=4
 

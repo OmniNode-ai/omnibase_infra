@@ -41,7 +41,12 @@ DRIFT_TOPIC = "onex.evt.infra.lane-census-drift.v1"
 #: run for two days". A lane-health panel needs both answers, and a reducer
 #: fed only the drift topic renders a silent fleet identically to a healthy
 #: one -- which is the false-green this whole surface exists to remove.
-OBSERVED_TOPIC = "onex.evt.infra.lane-census-observed.v1"
+#: The producer segment is ``omnibase-infra``, not ``infra``: the topic-naming
+#: lint in the consuming repository admits only real repository names, and the
+#: older ``onex.evt.infra.lane-census-drift.v1`` above predates that rule and
+#: sits in its baseline. A new topic does not get to inherit a baselined
+#: spelling.
+OBSERVED_TOPIC = "onex.evt.omnibase-infra.lane-census-observed.v1"
 
 # A drift finding is a flat string mapping (lane, kind, container, detail, severity)
 # as emitted by lane_census_plan.py. The plan envelope is loosely typed (str/Any)

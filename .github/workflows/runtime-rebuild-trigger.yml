@@ -685,7 +685,7 @@ jobs:
             echo "::warning::rpk not found — lab-pass verdict NOT published"
             exit 0
           fi
-          rpk topic produce onex.evt.infra.lab-pass-receipt.v1 \
+          rpk topic produce onex.evt.omnibase-infra.lab-pass-receipt.v1 \
             --brokers "${KAFKA_BOOTSTRAP_SERVERS}" \
             < "${LAB_PASS_DIR}/event.json"
 

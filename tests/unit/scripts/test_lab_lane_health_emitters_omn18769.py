@@ -75,7 +75,7 @@ def test_ac1_a_clean_run_still_produces_an_observed_event() -> None:
     )
 
     assert event["event_type"] == "lane-census-observed"
-    assert event["topic"] == "onex.evt.infra.lane-census-observed.v1"
+    assert event["topic"] == "onex.evt.omnibase-infra.lane-census-observed.v1"
     assert event["drift_count"] == 0
     assert event["findings"] == []
     assert event["lanes_checked"] == ["dev", "stability-test"]
@@ -267,7 +267,7 @@ def _receipt(*, ok: bool) -> Any:
 def test_ac3_a_fail_receipt_produces_a_bus_event_naming_the_failing_checks() -> None:
     event = lab_pass_receipt.build_bus_event(_receipt(ok=False))
 
-    assert event["topic"] == "onex.evt.infra.lab-pass-receipt.v1"
+    assert event["topic"] == "onex.evt.omnibase-infra.lab-pass-receipt.v1"
     assert event["result"] == "FAIL"
     assert event["failing_checks"] == ["ready_effects"]
     assert event["lane"] == "compose-dev"

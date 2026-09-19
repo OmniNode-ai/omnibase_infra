@@ -748,7 +748,7 @@ class ModelLabPassReceipt:
 #: artifact is written under ``always()``: a record that exists only on success
 #: cannot distinguish a failed lab pass from one nobody ran, and telling those
 #: apart is the whole job.
-LAB_PASS_EVENT_TOPIC = "onex.evt.infra.lab-pass-receipt.v1"
+LAB_PASS_EVENT_TOPIC = "onex.evt.omnibase-infra.lab-pass-receipt.v1"
 
 
 def build_bus_event(receipt: ModelLabPassReceipt) -> dict[str, Any]:
