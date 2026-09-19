@@ -183,8 +183,9 @@ jobs:
       # record either way.
       - name: Fetch the CI bus lane overlay
         if: always() && steps.collect.outputs.observed != ''
-        # advisory-ok: OMN-18769 the census file is the durable record; a failed
-        # overlay fetch must not stop the committed census from being refreshed
+        # The census file is the durable record; a failed overlay fetch must not
+        # stop the committed census from being refreshed.
+        # advisory-ok: OMN-18769 overlay fetch for an observability publish
         continue-on-error: true
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -198,8 +199,9 @@ jobs:
 
       - name: Publish the census-observed fact to the bus
         if: always() && steps.collect.outputs.observed != ''
-        # advisory-ok: OMN-18769 an unreachable broker is not a lane that drifted;
-        # this publish is renderability, and the committed census is the authority
+        # An unreachable broker is not a lane that drifted; this publish is
+        # renderability, and the committed census is the authority.
+        # advisory-ok: OMN-18769 census-observed publish is not the census verdict
         continue-on-error: true
         env:
           # OMN-18012 — the dev control-bus lane declares SASL_PLAINTEXT /

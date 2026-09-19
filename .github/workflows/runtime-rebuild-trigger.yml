@@ -674,8 +674,9 @@ jobs:
       # separate job with a separate checkout, so it takes its own copy.
       - name: Fetch the CI bus lane overlay
         if: always()
-        # advisory-ok: OMN-18769 the lab-pass ARTIFACT is the durable evidence the
-        # rule-24(b) gate reads; a failed overlay fetch must not fail the lab pass
+        # The lab-pass ARTIFACT is the durable evidence the rule-24(b) delivery
+        # gate reads; a failed overlay fetch must not fail the lab pass.
+        # advisory-ok: OMN-18769 overlay fetch for an observability publish
         continue-on-error: true
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -689,9 +690,10 @@ jobs:
 
       - name: Publish the compose-dev lab-pass verdict to the bus
         if: always()
-        # advisory-ok: OMN-18769 a broker that is down is not a lab pass that
-        # failed; failing here would turn an observability publish into a
-        # delivery outage while the artifact already carries the verdict
+        # A broker that is down is not a lab pass that failed; failing here would
+        # turn an observability publish into a delivery outage while the artifact
+        # already carries the verdict.
+        # advisory-ok: OMN-18769 lab-pass verdict publish is not the lab-pass verdict
         continue-on-error: true
         env:
           # OMN-18012 — the dev control-bus lane declares
