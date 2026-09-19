@@ -157,6 +157,23 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn18781-two-integration-suites-collected-and-never-executed
+    guard: scripts/ci/skip_count_ratchet.py
+    incident: OMN-18781
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn18776.py::test_the_same_ratchet_accepts_the_same_bytes_against_the_shipped_baseline
+    artifact:
+      fixture: tests/fixtures/omn18776/run-35402899669-split-2-junit.xml.captured
+      sha256: 381ab4f1e089784e3bdf184fbdf7b47ce0a1727e3270742320ae8c669f393728
+    capture:
+      method: ci-artifact
+      source: ci-artifact:35402899669/test-results-attempt-1-2
+      captured_at: '2026-09-18T23:37:00Z'
+      captured_by: lane replay (OMN-18776)
+    test: tests/ci/test_incident_replay_omn18776.py::test_the_real_ratchet_refuses_the_report_that_grew_the_never_run_set
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is a SUITE THAT CANNOT RUN CONTRIBUTING TO A GREEN JOB. Two integration modules in this repo carry a module-level pytestmark gated on an environment variable no workflow here sets -- KAFKA_INTEGRATION_TESTS for tests/integration/event_bus/test_kafka_event_bus_integration.py and QDRANT_URL for tests/integration/handlers/test_handler_qdrant_integration.py -- and neither carries a marker the Tests job deselects nor sits in its --ignore list, so both are collected on every pull request, skip in full, and the split reports success. The event-bus one is the load-bearing case: the bus is the transport the whole platform rests on and its integration proof has never executed in CI. NOT A HYPOTHESIS AND NOT A RECONSTRUCTION -- the artifact is the byte-for-byte JUnit report GitHub Actions served for split 2 of run 35402899669, re-fetchable at the recorded locator, and it carries all 27 of those cases, 19 kafka and 8 qdrant, every one of them with a skipped element. THE MEASURED REASON NOTHING CAUGHT THIS is that no surface on the fleet reads a skip count at all: the OMN-14172 silent-skip guard reads only the curated integration-guard junit and never the test-parallel splits, which is the same blindness that let 91 PostgreSQL-16 cutover cases skip on every full-matrix run for 49 days (omnibase_infra#2547 through OMN-18762) with zero guard fires. Driving the REAL ratchet over the captured bytes against the baseline as it stood before those two suites existed returns exit 1 naming both modules and a delta of +27, which is the refusal that never happened. THE DISCRIMINATOR IS LOAD-BEARING, not a formality: a gate that refused every report would replay this incident perfectly and block every pull request in the repository forever, and the failure would look like strictness rather than breakage. The same function is therefore driven over the SAME bytes against the shipped baseline and required to accept, and required to say NARROWED SELECTION while doing so, because one split of a fifteen-split run is a partial view and a gate that read its lower count as progress would ratchet the baseline down to whatever the selector happened to pick that day. A third assertion pins the fixture itself -- 27 ids from the two named modules, present in the committed bytes -- so neither verdict can be vacuous. NO MODIFICATIONS: the fixture is the artifact as downloaded, 465686 bytes, and it carries test identifiers only; the words secret, token and password appear in it exclusively as parts of test function names, never as values.
   - id: omn18595-release-train-cut-on-its-own-bookkeeping
     guard: scripts/ci/release_train.py
     incident: OMN-13912

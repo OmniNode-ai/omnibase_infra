@@ -1537,6 +1537,19 @@ repos:
       # integration_skip_guard.yaml parses. No DB needed locally — the CI job
       # 'integration-guard' is the full runtime gate. SYNC with ci.yml job
       # 'integration-guard' (Operating Rule #5).
+      # OMN-18776: the skip-count ratchet's own logic, driven over synthetic
+      # reports locally. The case that matters is the RED one: a reintroduced
+      # environmentally-skipped test must turn the gate red. The shipped
+      # baseline's provenance is validated in the same pass, because a baseline
+      # number with no recorded measurement is a claim, not a measurement.
+      - id: skip-count-ratchet
+        name: Skip-count baseline ratchet selftest (OMN-18776)
+        language: system
+        entry: uv run python scripts/ci/skip_count_ratchet.py --selftest
+        files: >-
+          ^(scripts/ci/skip_count_ratchet\.py|config/skip_count_baseline\.yaml|tests/ci/test_skip_count_ratchet_omn18776\.py|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: integration-skip-guard
         name: Integration silent-skip guard selftest (OMN-14172)
         language: system

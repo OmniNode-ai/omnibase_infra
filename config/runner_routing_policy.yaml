@@ -1003,6 +1003,7 @@ route:
         - receipt-honesty
         - required-check-skip-guard / check-skip-vectors
         - Runner Route (OMN-18031) / route
+        - Skip Count Ratchet (OMN-18776)
         - Stale TODO Gate
         - Subscribe Wiring Health
         - Topic Drift Check
