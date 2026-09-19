@@ -93,6 +93,13 @@ class _FakeExecutor:
         self.verify_recreate: list[object] = []
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
+        # OMN-18640 AC8: the agent reads the executor's OWN recording of the
+        # probe readings when its local is empty, which is precisely the job
+        # whose readings matter -- the one where verification refused and the
+        # assignment never happened. The real executor declares this in its
+        # __init__ (executor.py) and records into it before it raises, so a
+        # fake that omits it is not a smaller executor, it is a different one.
+        self.health_checks: list[object] = []
         self.raise_on_deliver: Exception | None = None
         self._delivery_record = delivery_record or {
             "result": "WRITTEN",
