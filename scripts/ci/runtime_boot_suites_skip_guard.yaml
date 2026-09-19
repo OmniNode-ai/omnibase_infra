@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-18795 — silent-skip guard config for the runtime-backed suites run by
+# `.github/workflows/reusable-runtime-boot.yml`.
+#
+# WHY A THIRD CONFIG
+# ------------------
+# `integration_skip_guard.yaml` describes a job that provisions Postgres alone;
+# `service_suites_skip_guard.yaml` describes one that provisions Kafka, Qdrant,
+# Memgraph and Postgres. Neither describes a BOOTED RUNTIME, and the two suites
+# here need one: they publish an event and then assert that something consumed
+# it and wrote a projection. The set of provisioned dependencies is a property
+# of the JOB, so each provisioning job brings its own config.
+#
+# What this guards: both suites were registered in config/env_gated_test_skips.yaml
+# as having NO execution path. One skipped on three env vars nothing set; the
+# other on an import-time health probe that could never succeed because nothing
+# in CI booted a runtime for it. A pytest exit code of 0 cannot tell "the
+# projection arrived" from "the suite never ran".
+silent_skip_allowed: false
+# INFORMATIONAL — the gate keys on junit skip reasons, not on this list. Kept in
+# sync with the "Run the runtime-backed suites" step in reusable-runtime-boot.yml.
+curated_test_paths:
+  - "tests/integration/test_runtime_consumes_build_loop_terminal_event.py"
+  - "tests/integration/registration/e2e/test_runtime_e2e.py"
+# The floor is 1, not 0, and deliberately low: this is the first run these two
+# suites have ever had in CI, so the honest floor is "something executed".
+# Raise it once the executed count is known from a real run.
+require_executed_min: 1
+required_services:
+  runtime:
+    provisioned_by: "reusable-runtime-boot.yml (compose mode: postgres + redpanda via docker compose, migrations applied, `onex-runtime` and its effects profile launched as background processes, both /health asserted and held stable for 60s before these suites are selected)"
+    missing_skip_patterns:
+      # tests/helpers/service_env.py local-skip text, should it ever reach CI
+      - "booted ONEX runtime"
+      # the pre-OMN-18795 module-level skip vocabulary, in case it returns
+      - "Runtime E2E tests require the runtime container to be running"
+      - "RUNTIME_INTEGRATION_TESTS"
+      - "Runtime: MISSING"
+  kafka:
+    provisioned_by: "reusable-runtime-boot.yml (compose redpanda; KAFKA_BOOTSTRAP_SERVERS resolved to whichever of Docker DNS, container name or host-published port this runner can reach, and exported to $GITHUB_ENV)"
+    missing_skip_patterns:
+      - "Kafka/Redpanda integration suite not opted in"
+      - "Kafka not available"
+      - "KAFKA_INTEGRATION_TESTS"
+  postgres:
+    provisioned_by: "reusable-runtime-boot.yml (compose postgres, migrations applied by the `Run database migrations` step)"
+    missing_skip_patterns:
+      - "INTEGRATION_POSTGRES_HOST"
+      - "PostgreSQL: MISSING"
+      - "Postgres not reachable"
+# The per-test RUNTIME_E2E_* feature flags are the one legitimately optional
+# class here. Consul is gone from the product (OMN-3540 removed the backend),
+# so the Consul-registration tests cannot pass and are not enabled; that skip is
+# recognised rather than silently tolerated, and it is the only one.
+allowed_optional_skip_patterns:
+  - "Runtime Consul registration tests require explicit opt-in"

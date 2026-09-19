@@ -329,7 +329,7 @@ class OrchestratorPipeline:
         Pipeline Stages:
             1. DESERIALIZE - Parse Kafka message to ModelNodeIntrospectionEvent
             2. HANDLER - Check if registration is needed via HandlerNodeIntrospected
-            3. REDUCER - Generate intents (Consul + PostgreSQL) via RegistrationReducer
+            3. REDUCER - Generate the PostgreSQL upsert intent via RegistrationReducer
             4. EFFECT - Execute dual registration via NodeRegistryEffect
             5. PROJECTION - Persist registration state to PostgreSQL
 
@@ -690,18 +690,6 @@ class OrchestratorTestContext:
 
 
 @pytest.fixture
-async def mock_consul_client() -> AsyncMock:
-    """Create a mock Consul client for effect testing.
-
-    Returns:
-        AsyncMock: Mock Consul client with register_service method.
-    """
-    mock = AsyncMock()
-    mock.register_service = AsyncMock(return_value=MagicMock(success=True, error=None))
-    return mock
-
-
-@pytest.fixture
 async def mock_postgres_adapter() -> AsyncMock:
     """Create a mock PostgreSQL adapter for effect testing.
 
@@ -715,12 +703,14 @@ async def mock_postgres_adapter() -> AsyncMock:
 
 @pytest.fixture
 async def registry_effect_node(
-    mock_consul_client: AsyncMock, mock_postgres_adapter: AsyncMock
+    mock_postgres_adapter: AsyncMock,
 ) -> NodeRegistryEffect:
-    """Create NodeRegistryEffect with mock backends.
+    """Create NodeRegistryEffect with its single backend.
+
+    OMN-3540 removed the Consul backend; ``NodeRegistryEffect`` takes a
+    PostgreSQL adapter and nothing else.
 
     Args:
-        mock_consul_client: Mock Consul client.
         mock_postgres_adapter: Mock PostgreSQL adapter.
 
     Returns:
@@ -728,9 +718,7 @@ async def registry_effect_node(
     """
     from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
 
-    return NodeRegistryEffect(
-        consul_client=mock_consul_client, postgres_adapter=mock_postgres_adapter
-    )
+    return NodeRegistryEffect(postgres_adapter=mock_postgres_adapter)
 
 
 @pytest.fixture
@@ -738,7 +726,6 @@ async def orchestrator_pipeline(
     projection_reader: ProjectionReaderRegistration,
     real_projector: ProjectorShell,
     registry_effect_node: NodeRegistryEffect,
-    mock_consul_client: AsyncMock,
     mock_postgres_adapter: AsyncMock,
 ) -> OrchestratorTestContext:
     """Create the full orchestrator pipeline with its mock dependencies.
@@ -750,8 +737,7 @@ async def orchestrator_pipeline(
     Args:
         projection_reader: Projection reader fixture.
         real_projector: Projector fixture.
-        registry_effect_node: Registry effect fixture (contains the mocks).
-        mock_consul_client: Mock Consul client injected into registry_effect_node.
+        registry_effect_node: Registry effect fixture (contains the mock).
         mock_postgres_adapter: Mock PostgreSQL adapter injected into registry_effect_node.
 
     Returns:
@@ -774,7 +760,6 @@ async def orchestrator_pipeline(
     # Return context with pipeline and its connected mocks for test assertions
     return OrchestratorTestContext(
         pipeline=pipeline,
-        mock_consul_client=mock_consul_client,
         mock_postgres_adapter=mock_postgres_adapter,
     )
 
@@ -1094,7 +1079,6 @@ async def running_orchestrator_consumer(
     # Create a new context with the unsubscribe function included
     context = OrchestratorTestContext(
         pipeline=orchestrator_pipeline.pipeline,
-        mock_consul_client=orchestrator_pipeline.mock_consul_client,
         mock_postgres_adapter=orchestrator_pipeline.mock_postgres_adapter,
         unsubscribe=unsubscribe,
     )
@@ -1117,7 +1101,7 @@ class TestFullOrchestratorFlow:
     These tests verify that:
     1. Events published to Kafka are consumed by the orchestrator
     2. The full pipeline executes: handler -> reducer -> effect
-    3. Both Consul and PostgreSQL registrations complete
+    3. The PostgreSQL registration completes (Consul removed in OMN-3540)
     """
 
     async def test_introspection_triggers_full_pipeline_processing(
@@ -1193,20 +1177,22 @@ class TestFullOrchestratorFlow:
         self,
         real_kafka_event_bus: EventBusKafka,
         running_orchestrator_consumer: OrchestratorTestContext,
+        projection_reader: ProjectionReaderRegistration,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
+        cleanup_projections: None,
     ) -> None:
         """Test that the handler -> reducer -> effect chain executes.
 
         Verifies:
         - Handler processes the event
         - Reducer generates intents
-        - Effect executes Consul and PostgreSQL registration
+        - The projection is readable back out of the real PostgreSQL server
+        - The effect invokes the PostgreSQL backend (Consul removed in OMN-3540)
         """
-        # Use context to access pipeline and its connected mocks
+        # Use context to access pipeline and its connected mock
         ctx = running_orchestrator_consumer
         pipeline = ctx.pipeline
-        mock_consul_client = ctx.mock_consul_client
         mock_postgres_adapter = ctx.mock_postgres_adapter
 
         # Create introspection event
@@ -1260,9 +1246,25 @@ class TestFullOrchestratorFlow:
             f"Pipeline had errors: {pipeline.processing_errors}"
         )
 
-        # Verify effect was called (mocks were invoked)
-        mock_consul_client.register_service.assert_called()
+        # Verify effect was called (mock was invoked)
         mock_postgres_adapter.upsert.assert_called()
+
+        # Prove the chain against the real server, not only against the mock:
+        # the pipeline's projection step writes through ProjectorShell to the
+        # live PostgreSQL instance, so read the row back out of it.
+        projection = await wait_for_postgres_registration(
+            projection_reader=projection_reader,
+            node_id=unique_node_id,
+            timeout_seconds=10.0,
+        )
+        assert projection is not None, (
+            f"Pipeline processed node {unique_node_id} but no registration "
+            f"projection is readable from PostgreSQL"
+        )
+        assert projection.entity_id == unique_node_id
+        assert projection.node_type == EnumNodeKind.COMPUTE, (
+            f"Projection must carry the published node_type, got {projection.node_type}"
+        )
 
     async def test_multiple_events_processed_in_order(
         self,
@@ -1414,7 +1416,7 @@ class TestFullOrchestratorFlow:
 
 @pytest.mark.asyncio
 class TestFullPipelineWithRealInfrastructure:
-    """E2E tests that verify registration in REAL Consul and PostgreSQL.
+    """E2E tests that verify registration in the REAL PostgreSQL server.
 
     These tests require all infrastructure services to be available.
     They create real registrations and verify data persistence.
@@ -1501,7 +1503,7 @@ class TestFullPipelineWithRealInfrastructure:
     async def test_reducer_generates_correct_intents(
         self, unique_node_id: UUID, unique_correlation_id: UUID
     ) -> None:
-        """Test that reducer generates Consul and PostgreSQL intents.
+        """Test that the reducer generates the PostgreSQL upsert intent.
 
         Verifies the reducer emits the expected intent types.
         """

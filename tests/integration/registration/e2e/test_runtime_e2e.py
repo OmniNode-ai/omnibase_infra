@@ -64,6 +64,7 @@ from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+from tests.helpers.service_env import require_service_env
 from tests.integration.registration.e2e.conftest import (
     make_e2e_test_identity,
     wait_for_consumer_ready,
@@ -222,18 +223,39 @@ SKIP_CONSUL_REASON = (
 # to all tests in this directory. We only add runtime-specific markers here:
 # - pytest.mark.runtime for categorization
 # - skipif(not RUNTIME_AVAILABLE) for the unique runtime container check
+# OMN-18795: this suite is SELECTED BY MARKER, not gated by a silent skipif on
+# a health probe. It was registered in config/env_gated_test_skips.yaml as
+# having no execution path: nothing in CI booted a runtime for it, so the probe
+# below always failed and the whole suite skipped, on every run, forever.
+#
+# Its home is reusable-runtime-boot.yml, which boots the runtime and
+# runtime-effects processes and proves both healthy before selecting this file.
+# It is deselected from the PR test splits by `not e2e`. Once a job has
+# SELECTED it, an absent runtime is a provisioning failure, not a skip.
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.runtime,
-    pytest.mark.skipif(
-        not RUNTIME_AVAILABLE,
-        reason=(
-            "Runtime E2E tests require the runtime container to be running. "
-            f"Runtime: MISSING at {RUNTIME_HEALTH_URL}. "
-            "Start with: docker compose -f docker/docker-compose.e2e.yml --profile runtime up -d"
-        ),
-    ),
 ]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _require_booted_runtime() -> None:
+    """Refuse to skip silently once CI has selected this suite."""
+    require_service_env(
+        opt_in="RUNTIME_INTEGRATION_TESTS",
+        endpoint="RUNTIME_HOST",
+        workflow=".github/workflows/reusable-runtime-boot.yml",
+        service="a booted ONEX runtime",
+    )
+    if not RUNTIME_AVAILABLE:
+        pytest.fail(
+            f"the runtime is not answering at {RUNTIME_HEALTH_URL}, so this "
+            "suite would have skipped silently after its opt-in was asserted. "
+            "The job that owns it boots the runtime and asserts /health before "
+            "selecting this file, so an absent runtime here is a provisioning "
+            "failure -- see OMN-18795.",
+            pytrace=False,
+        )
 
 
 # =============================================================================

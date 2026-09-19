@@ -693,6 +693,70 @@ jobs:
             exit 1
           fi
 
+      # OMN-18795: two suites in config/env_gated_test_skips.yaml were registered
+      # as having NO execution path because each needs something no CI job
+      # provided -- a RUNNING runtime that consumes an event and writes a
+      # projection. This workflow is the only one that boots one, and by this
+      # point it has proved both processes healthy and held them stable for 60s,
+      # so the dependency is real here and nowhere else.
+      #
+      # Compose mode only: `real` mode probes the live .201 stack, and these
+      # suites publish synthetic events and poll for projection rows, which is
+      # not something to do to a shared lane.
+      - name: Run the runtime-backed suites (OMN-18795)
+        id: run_runtime_suites
+        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
+        env:
+          # KAFKA_BOOTSTRAP_SERVERS / KAFKA_BROKER_ALLOWLIST / OMNIBASE_INFRA_DB_URL
+          # are already in $GITHUB_ENV, resolved by the connectivity step above to
+          # whichever of Docker DNS, container name or host-published port THIS
+          # runner can actually reach. They are deliberately not restated here.
+          KAFKA_INTEGRATION_TESTS: "1"
+          RUNTIME_INTEGRATION_TESTS: "1"
+          RUNTIME_PORT: "8085"
+          # The build-loop suite reads Postgres through the INTEGRATION_* names.
+          INTEGRATION_POSTGRES_HOST: ${{ env.RUNTIME_HOST }}
+          INTEGRATION_POSTGRES_PORT: ${{ env.POSTGRES_PORT }}
+          INTEGRATION_POSTGRES_USER: postgres
+          INTEGRATION_POSTGRES_DB: omnibase_infra
+          # Event processing and output events are asserted rather than opted
+          # out of: the steps above have already proved the runtime is consuming
+          # and writing registration projections, so a timeout here is a real
+          # regression. Consul stays off -- OMN-3540 removed that backend, so
+          # those tests cannot pass and their skip is the one this job's guard
+          # config recognises as legitimately optional.
+          RUNTIME_E2E_PROCESSING_ENABLED: "true"
+          RUNTIME_E2E_OUTPUT_EVENTS_ENABLED: "true"
+          RUNTIME_E2E_CONSUL_ENABLED: "false"
+        run: |
+          uv run pytest \
+            tests/integration/test_runtime_consumes_build_loop_terminal_event.py \
+            tests/integration/registration/e2e/test_runtime_e2e.py \
+            -v -rs --tb=short \
+            --timeout=300 \
+            --timeout-method=signal \
+            --junitxml=runtime-boot-suites.xml
+
+      - name: Enforce no missing-runtime silent-skips (OMN-14172 guard, OMN-18795 config)
+        if: always() && steps.run_runtime_suites.conclusion != 'skipped'
+        # Same guard the two other provisioning jobs run, with the config that
+        # names THIS job's dependency. A runtime-absence skip is legitimately
+        # possible elsewhere and is a false green here: the runtime is running,
+        # and this job proved it.
+        run: |
+          uv run python scripts/ci/check_integration_skips.py \
+            --junit runtime-boot-suites.xml \
+            --config scripts/ci/runtime_boot_suites_skip_guard.yaml \
+            --strict
+
+      - name: Upload runtime-backed suite junit
+        if: always() && steps.run_runtime_suites.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-boot-suites-results-${{ inputs.mode }}
+          path: runtime-boot-suites.xml
+          retention-days: 7
+
       - name: Query registration_projections for active/fresh rows
         if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: pg_liveness

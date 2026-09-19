@@ -29,8 +29,20 @@ from uuid import uuid4
 
 import pytest
 
-# Module-level skip gate — both env vars required.
-KAFKA_INTEGRATION_TESTS = os.getenv("KAFKA_INTEGRATION_TESTS") == "1"
+from tests.helpers.service_env import require_service_env
+
+# OMN-18795: this suite is SELECTED BY MARKER, not gated by three silent skipifs.
+#
+# It was registered in config/env_gated_test_skips.yaml as having no execution
+# path, and the reason recorded there UNDERSTATED the dependency: it said a
+# broker, a Postgres and the opt-in. In fact this test publishes a synthetic
+# terminal event and then polls for a projection row, so it also needs a
+# RUNNING ONEX RUNTIME to consume the event and write that row -- as its own
+# failure message says. Kafka and Postgres alone cannot make it pass.
+#
+# Its home is therefore reusable-runtime-boot.yml, the one workflow that boots
+# a runtime. It is deselected from the PR test splits by `not kafka`. Once a
+# job has SELECTED it, a missing opt-in is a red failure, not a skip.
 INTEGRATION_POSTGRES_HOST = os.getenv("INTEGRATION_POSTGRES_HOST")
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 
@@ -38,22 +50,26 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.kafka,
     pytest.mark.postgres,
-    pytest.mark.skipif(
-        not KAFKA_INTEGRATION_TESTS,
-        reason=(
-            "Set KAFKA_INTEGRATION_TESTS=1 to opt in to real-broker E2E "
-            "(prevents false connects in CI without a live Redpanda)."
-        ),
-    ),
-    pytest.mark.skipif(
-        not INTEGRATION_POSTGRES_HOST,
-        reason="Set INTEGRATION_POSTGRES_HOST to a reachable Postgres host.",
-    ),
-    pytest.mark.skipif(
-        not KAFKA_BOOTSTRAP_SERVERS,
-        reason="Set KAFKA_BOOTSTRAP_SERVERS to a reachable Redpanda broker.",
-    ),
 ]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _require_runtime_stack() -> None:
+    """Refuse to skip silently once CI has selected this suite."""
+    require_service_env(
+        opt_in="KAFKA_INTEGRATION_TESTS",
+        endpoint="KAFKA_BOOTSTRAP_SERVERS",
+        workflow=".github/workflows/reusable-runtime-boot.yml",
+        service="a booted ONEX runtime with Kafka and Postgres",
+    )
+    if not INTEGRATION_POSTGRES_HOST:
+        pytest.fail(
+            "INTEGRATION_POSTGRES_HOST is unset, so this suite would have "
+            "skipped silently after its opt-in was asserted. The job that owns "
+            "it (reusable-runtime-boot.yml) provisions Postgres and exports "
+            "this variable -- see OMN-18795.",
+            pytrace=False,
+        )
 
 
 TERMINAL_TOPIC = "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"

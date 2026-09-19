@@ -70,34 +70,24 @@ _INFISICAL_ADDR = os.environ.get("INFISICAL_ADDR", "http://192.168.86.201:8880")
 # to each individual test.
 # ---------------------------------------------------------------------------
 
-_INFISICAL_REACHABLE: bool = False
-try:
-    import httpx
-
-    with httpx.Client(timeout=3) as _client:
-        _resp = _client.get(f"{_INFISICAL_ADDR}/api/status")
-        _INFISICAL_REACHABLE = _resp.status_code == 200
-except Exception:  # noqa: BLE001
-    _INFISICAL_REACHABLE = False
-
-# The --execute path also requires the admin token file produced by
-# provision-infisical.py. Without it, folder creation aborts before any
-# secret writes, so idempotency cannot be exercised. Skip if absent.
-_ADMIN_TOKEN_FILE = _REPO_ROOT / ".infisical-admin-token"
-_ADMIN_TOKEN_PRESENT: bool = _ADMIN_TOKEN_FILE.is_file() and bool(
-    _ADMIN_TOKEN_FILE.read_text(encoding="utf-8").strip()
-)
-
-_EXECUTE_PREREQS_MET = _INFISICAL_REACHABLE and _ADMIN_TOKEN_PRESENT
-
-_requires_infisical = pytest.mark.skipif(
-    not _EXECUTE_PREREQS_MET,
-    reason=(
-        f"Infisical not reachable at {_INFISICAL_ADDR}"
-        if not _INFISICAL_REACHABLE
-        else f"Admin token not provisioned at {_ADMIN_TOKEN_FILE} — run scripts/provision-infisical.py first"
-    ),
-)
+# OMN-18795: the two `--execute` tests that lived here were DELETED, and with
+# them the live-Infisical reachability probe and the `_requires_infisical`
+# skip marker that gated them.
+#
+# They asserted the idempotency guarantee of `onboard-repo --execute`: a second
+# run reports only `skipped`, `0 created`, `0 errors`. They could only ever run
+# against a reachable Infisical PLUS an admin token file produced by
+# scripts/provision-infisical.py, and CI has neither. Providing them would mean
+# standing up a secret store in CI and minting an admin credential for it --
+# a credential-posture decision of its own, not a test-wiring one -- so the
+# suite was registered in config/env_gated_test_skips.yaml as having no
+# execution path, which is a description of the gap rather than a fix.
+#
+# WHAT IS GIVEN UP: `_upsert_secret(overwrite=False)` idempotency proven against
+# a REAL Infisical. No CI gate covers that today; the gap is recorded on
+# OMN-18795 rather than left implied by a permanently-skipped test. What
+# remains below needs no infrastructure at all and runs on every pull request:
+# the dry-run path, the service-key set it reports, and the repo-name refusal.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -213,79 +203,3 @@ def test_dry_run_invalid_repo_name_rejected(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Tests 2 + 3: live Infisical idempotency (skipped when Infisical unreachable)
 # ---------------------------------------------------------------------------
-
-
-def _build_execute_env() -> dict[str, str]:
-    """Build a subprocess env that inherits the shell env plus any .omnibase/.env values."""
-    _load_omnibase_env_into_process()
-    env = dict(os.environ)
-    return env
-
-
-@pytest.mark.integration
-@pytest.mark.serial
-@_requires_infisical
-def test_execute_first_run_exits_zero(tmp_path: Path) -> None:
-    """First --execute run must exit 0 for a clean onboard."""
-    env_file = _make_minimal_env_file(tmp_path)
-    execute_env = _build_execute_env()
-
-    result = _run(
-        [
-            "onboard-repo",
-            "--repo",
-            "omnimarket",
-            "--env-file",
-            str(env_file),
-            "--execute",
-        ],
-        env=execute_env,
-    )
-
-    assert result.returncode == 0, (
-        f"First --execute run failed (rc={result.returncode})\n"
-        f"stdout: {result.stdout}\n"
-        f"stderr: {result.stderr}"
-    )
-
-
-@pytest.mark.integration
-@pytest.mark.serial
-@_requires_infisical
-def test_execute_second_run_is_idempotent(tmp_path: Path) -> None:
-    """Second --execute run must exit 0 with zero errors and only 'skipped' outcomes.
-
-    This is the core idempotency guarantee: onboard-repo can be re-run safely
-    without duplicating secrets or failing on already-existing keys.
-    """
-    env_file = _make_minimal_env_file(tmp_path)
-    execute_env = _build_execute_env()
-    run_args = [
-        "onboard-repo",
-        "--repo",
-        "omnimarket",
-        "--env-file",
-        str(env_file),
-        "--execute",
-    ]
-
-    first = _run(run_args, env=execute_env)
-    assert first.returncode == 0, (
-        f"First run failed — cannot test idempotency:\n"
-        f"stdout: {first.stdout}\nstderr: {first.stderr}"
-    )
-
-    second = _run(run_args, env=execute_env)
-
-    assert second.returncode == 0, (
-        f"Second (idempotent) run failed (rc={second.returncode})\n"
-        f"stdout: {second.stdout}\n"
-        f"stderr: {second.stderr}"
-    )
-    assert "0 errors" in second.stdout, (
-        f"Expected '0 errors' in second run output:\n{second.stdout}"
-    )
-    # No new keys should be created on the second run (all already exist).
-    assert "0 created" in second.stdout, (
-        f"Expected '0 created' in second run output (idempotency failed):\n{second.stdout}"
-    )

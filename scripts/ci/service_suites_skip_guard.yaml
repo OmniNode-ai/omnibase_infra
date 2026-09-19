@@ -24,11 +24,20 @@ silent_skip_allowed: false
 curated_test_paths:
   - "tests/integration/event_bus/test_kafka_event_bus_integration.py"
   - "tests/integration/handlers/test_handler_qdrant_integration.py"
-# The two suites carry 19 and 8 cases respectively at the time of writing. The
-# floor is deliberately below that total and above zero: it must catch a
-# collection that silently selects nothing or nearly nothing (the original
-# defect), without going red every time a case is legitimately added or removed.
-require_executed_min: 20
+  # OMN-18795: six suites that had no execution path at all.
+  - "tests/integration/event_bus/test_dlq_integration.py"
+  - "tests/integration/nodes/test_node_reward_binder_effect.py"
+  - "tests/integration/handlers/test_handler_graph_integration.py"
+  - "tests/integration/correlation/test_correlation_propagation_heavy.py"
+  - "tests/integration/registration/e2e/test_topic_catalog_e2e.py"
+  - "tests/integration/registration/e2e/test_full_orchestrator_flow.py"
+  - "tests/integration/registration/e2e/test_two_way_registration_e2e.py"
+# Measured against real services on the lab, 2026-09-19: 19 + 9 + 17 + 2 + 44 +
+# 7 + 7 + 9 + 27 = 141 executed, zero skipped. The floor is deliberately well
+# below that total and far above zero: it must catch a collection that silently
+# selects nothing or nearly nothing (the original defect), without going red
+# every time a case is legitimately added or removed.
+require_executed_min: 100
 # Services this job PROVISIONS. A skip whose reason names one of these as absent
 # is a false green: the service is right there.
 required_services:
@@ -49,7 +58,25 @@ required_services:
       - "Qdrant not available"
       - "QDRANT_URL not set"
       - "QDRANT_INTEGRATION_TESTS"
+  memgraph:
+    provisioned_by: "ci.yml `service-integration-suites` job (explicit fail-closed `docker pull`/`docker run` of memgraph/memgraph, MEMGRAPH_BOLT_URL + GRAPH_INTEGRATION_TESTS=1 exported) -- OMN-18795"
+    missing_skip_patterns:
+      - "Memgraph integration suite not opted in"
+      - "MEMGRAPH_BOLT_URL not set"
+      - "GRAPH_INTEGRATION_TESTS"
+      - "Graph integration tests skipped"
+  postgres:
+    provisioned_by: "ci.yml `service-integration-suites` job (explicit fail-closed `docker pull`/`docker run` of postgres:16-alpine, migrations applied by scripts/run-migrations.py, OMNIBASE_INFRA_DB_URL + POSTGRES_* exported) -- OMN-18795"
+    missing_skip_patterns:
+      # The registration E2E conftest and the correlation suite both used to
+      # skip on an unreachable database. On THIS job the database is running,
+      # so any of these reaching the junit is a false green.
+      - "Kafka and Postgres integration suite not opted in"
+      - "PostgreSQL: MISSING"
+      - "Postgres not reachable"
+      - "POSTGRES_HOST"
+      - "OMNIBASE_INFRA_DB_URL"
 # Nothing is legitimately optional on this job: it provisions every service its
-# two suites need. The list is present and empty so that `--strict` reports an
+# suites need. The list is present and empty so that `--strict` reports an
 # unrecognised skip reason for a human to classify rather than passing it.
 allowed_optional_skip_patterns: []
