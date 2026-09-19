@@ -395,3 +395,98 @@ def test_ac3_this_script_never_opens_a_broker_connection_itself() -> None:
     assert "rpk topic produce" not in body
     assert "KafkaProducer" not in body
     assert "--event-out" in body
+
+
+# --------------------------------------------------------------------------
+# AC3 (transport) — the event document is published on the LANE-DECLARED
+# transport, and a broker that cannot be reached never fails the lab pass
+# --------------------------------------------------------------------------
+#
+# WHY THIS SECTION EXISTS. Writing the event document is not publishing it.
+# The first revision of this change published it with a bare
+# `rpk topic produce --brokers "$KAFKA_BOOTSTRAP_SERVERS"` step, and both
+# halves of that were wrong on the job it ran in: nothing in
+# runtime-rebuild-trigger.yml sets KAFKA_BOOTSTRAP_SERVERS, so the step could
+# only ever take its own "unset" branch, and the .201 dev-lane Redpanda
+# EXTERNAL listener has required SASL/SCRAM-SHA-256 since OMN-18012 Phase B,
+# which a bare `--brokers` invocation does not speak. A step that can only
+# warn is not a mechanism; it is a comment that runs.
+
+PUBLISHER = REPO_ROOT / "scripts" / "ci" / "publish_lab_pass_event.py"
+REBUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
+
+
+def test_ac3_the_publisher_exists_as_its_own_script() -> None:
+    """The broker concern lives beside the emitter, not inside it.
+
+    ``lab_pass_receipt.py`` stays a pure document builder -- the test above
+    pins that -- so the transport gets its own file rather than being folded
+    into the receipt model's module.
+    """
+    assert PUBLISHER.is_file()
+
+
+def test_ac3_the_publisher_never_infers_a_transport() -> None:
+    """OMN-18012: credential PRESENCE is not a statement about transport.
+
+    The protocol and mechanism come from the checked-in lane overlay and from
+    nowhere else. A publisher that picked SASL_SSL because credentials happened
+    to be in the environment is the exact 2026-09-07 outage.
+    """
+    body = PUBLISHER.read_text()
+    assert "resolve_ci_bus_security" in body
+    assert "build_kafka_producer_config" in body
+    # Read the CODE, not the prose: the docstring names SASL_SSL to record the
+    # outage this design exists to avoid, which a naive substring check would
+    # flag. What must be absent is any statement that SETS a transport here.
+    code = "\n".join(
+        line for line in body.splitlines() if not line.lstrip().startswith("#")
+    )
+    code = code.split('"""', 2)[-1]
+    assert "security.protocol" not in code
+    assert "sasl.mechanisms" not in code
+    assert "SASL_SSL" not in code
+
+
+def test_ac3_the_publisher_never_defaults_a_broker_address() -> None:
+    """Rule 8: no localhost fallback, no `or "localhost:19092"`."""
+    body = PUBLISHER.read_text()
+    assert "localhost:19092" not in body
+    assert "127.0.0.1" not in body
+
+
+def test_ac3_an_unreachable_broker_reports_zero_and_never_fails_the_lab_pass() -> None:
+    """A broker that is down is not a lab pass that failed.
+
+    The publisher reports a FACT about a run that has already happened. Its
+    exit code is 0 on every publish-side failure, and the failure is loud in
+    the log. The artifact -- the authority the delivery gate reads -- is
+    unaffected either way.
+    """
+    publisher = _load(PUBLISHER, "omn18769_publish_lab_pass_event")
+    assert publisher.EXIT_OK == 0
+    assert publisher.main(["--event", "/nonexistent/event.json"]) == 0
+
+
+def test_ac3_the_workflow_calls_the_publisher_and_not_raw_rpk() -> None:
+    """The step that publishes is the one that can actually publish."""
+    body = REBUILD_WORKFLOW.read_text()
+    assert "scripts/ci/publish_lab_pass_event.py" in body
+    assert "rpk topic produce onex.evt.omnibase-infra.lab-pass-receipt.v1" not in body
+
+
+def test_ac3_the_publishing_step_is_given_the_sasl_credentials() -> None:
+    """A SASL lane cannot be published to without them.
+
+    The publisher refuses to downgrade the declared transport, so omitting the
+    credentials here would turn every publish into a loud no-op -- which is
+    precisely the failure this section was written to remove.
+    """
+    body = REBUILD_WORKFLOW.read_text()
+    publish_step = body.split("Publish the compose-dev lab-pass verdict to the bus", 1)
+    assert len(publish_step) == 2, "the publishing step must still exist"
+    step = publish_step[1].split("- name:", 1)[0]
+    assert "KAFKA_SASL_USERNAME" in step
+    assert "KAFKA_SASL_PASSWORD" in step
+    assert "--bus-lane" in step
+    assert "--bus-overlay" in step

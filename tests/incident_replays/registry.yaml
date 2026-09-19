@@ -104,6 +104,17 @@ scope:
     - scripts/ci/merge_queue_enqueue.py
     - scripts/ci/occ_manual_replay_precheck.py
     - scripts/ci/parity_red_on_base_baseline.py
+    # OMN-18769: NOT A GUARD, and this entry is the honest place the current
+    # inventory can hold it. publish_lab_pass_event.py publishes a lab-pass
+    # verdict onto the bus beside the artifact; it asserts nothing, refuses
+    # nothing and returns 0 on every failure by design, so there is no verdict
+    # for a replay case to pin. It is the same class as
+    # scripts/publish_pr_merged_event.py and scripts/trigger_rebuild_on_merge.py
+    # below, which sit in this list for the identical reason: the wired-guard
+    # inventory keys on "named by a workflow run: line under scripts/", which
+    # cannot tell a publisher from a gate. Fixing that classification is its
+    # own change, not a side effect of adding a publisher.
+    - scripts/ci/publish_lab_pass_event.py
     - scripts/ci/publish_with_retry.py
     - scripts/ci/reject-node-implementations.sh
     - scripts/ci/run_duplication_sweep.py
