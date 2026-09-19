@@ -48,6 +48,8 @@ def _pr(**overrides: object) -> ModelPRInfo:
         "ci_status": "SUCCESS",
         "is_draft": False,
         "has_auto_merge": False,
+        "assignees": (),
+        "requested_reviewers": (),
     }
     defaults.update(overrides)
     return ModelPRInfo(**defaults)
@@ -72,6 +74,7 @@ async def test_real_dispatch_callback_returns_success() -> None:
     payload = {
         "correlation_id": cid,
         "require_approval": True,
+        "collaborator_logins": [],
         "prs": [
             _pr(number=1).model_dump(mode="json"),  # Track A
             _pr(number=2, ci_status="FAILURE").model_dump(mode="json"),  # Track B
@@ -99,6 +102,7 @@ async def test_handle_owns_behavior_direct_call() -> None:
         ModelClassifyInput(
             correlation_id=uuid4(),
             require_approval=False,
+            collaborator_logins=(),
             prs=(_pr(number=7, review_decision=""),),
         )
     )

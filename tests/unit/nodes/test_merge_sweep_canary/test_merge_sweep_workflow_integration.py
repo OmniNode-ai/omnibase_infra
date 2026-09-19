@@ -112,6 +112,7 @@ class TestMergeSweepWorkflowIntegration:
         classify_input = await pr_list_complete.handle(
             correlation_id=pr_list_result.correlation_id,
             prs=pr_list_result.prs,
+            collaborator_logins=(),
         )
         assert len(classify_input.prs) == 3
 
@@ -188,7 +189,9 @@ class TestMergeSweepWorkflowIntegration:
         # Classify empty
         classify_handler = HandlerClassifyPRs()
         classify_result = await classify_handler.handle(
-            ModelClassifyInput(prs=pr_list_result.prs, correlation_id=cid)
+            ModelClassifyInput(
+                prs=pr_list_result.prs, correlation_id=cid, collaborator_logins=()
+            )
         )
         assert classify_result.total_classified == 0
 
