@@ -43,6 +43,7 @@ _PROFILE_ENV_PREFIX: dict[RuntimeProfileName, str] = {
     # fail-closed; a lane in the contract with no prefix here is a KeyError at
     # render time, not a silent omission.
     "lakshman": "LAKSHMAN",
+    "dogfood": "DOGFOOD",
 }
 _PROCESS_ENV_PREFIX: dict[RuntimeProcessName, str] = {
     "main": "MAIN",
