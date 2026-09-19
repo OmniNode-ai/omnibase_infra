@@ -238,6 +238,33 @@ def test_known_producers_allowlist_complete() -> None:
     )
 
 
+@pytest.mark.unit
+def test_the_deploy_agents_three_live_topics_are_accepted() -> None:
+    """OMN-18816: the .201 deploy agent's producer segment is real, not a typo.
+
+    The agent is a standalone uv sub-project at ``scripts/deploy-agent/`` with no node
+    and no ``contract.yaml``, so "deploy" is not a repo name and cannot become one.
+    All three strings below are live production topics declared as constants in
+    ``deploy_agent.events``; the third is the one this ticket gave a reader.
+
+    RED before the allowlist entry: ``rebuild-rejected`` was refused as
+    ``unknown producer 'deploy'``, which is what blocked the consumer's contract from
+    declaring the subscription that provisions the topic. The first two were reachable
+    only through omnimarket's suppression baseline, whose own header forbids new
+    entries -- so without this the third had no non-suppressing path at all.
+    """
+    for topic in (
+        "onex.cmd.deploy.rebuild-requested.v1",
+        "onex.evt.deploy.rebuild-completed.v1",
+        "onex.evt.deploy.rebuild-rejected.v1",
+    ):
+        result = lint_topic(topic)
+        assert result.is_valid, (
+            f"{topic} rejected by the naming lint: {result.violations}. This topic is "
+            "published by the deploy agent and cannot be renamed from the consumer side"
+        )
+
+
 # ---------------------------------------------------------------------------
 # LintResult model
 # ---------------------------------------------------------------------------

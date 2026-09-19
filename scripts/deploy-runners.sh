@@ -260,6 +260,11 @@ SYNC_PATHS=(
     "docker/runners/entrypoint.sh"
     "docker/runners/runner-job-started.sh"
     "docker/runners/runner-monitor.sh"
+    # OMN-18819: absent until 2026-09-19, which is the mechanical reason
+    # OMN-16056's four added mirrors never reached the fleet while that ticket
+    # read Done for a month. Nothing else carries this file.
+    "docker/runners/git-mirror-refresh.sh"
+    "docker/runners/toolcache-seed.sh"
     "docker/runners/healthcheck.sh"
     "docker/runners/model-review-healthcheck.sh"
     "docker/runners/model-review-observation.json"
@@ -625,10 +630,11 @@ ENVEOF
     # before credentials load, silently disabling Slack alerts when no MTA exists.
     # Force bash and redirect the whole monitor invocation so setup failures are
     # visible in /tmp/runner-monitor.log.
-    local monitor_cron_line="*/3 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}' >> /tmp/runner-monitor.log 2>&1 # runner-monitor-alert"
-    local repair_cron_line="*/10 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600 ${monitor_script}' >> /tmp/runner-repair.log 2>&1 # runner-repair-check"
+    local monitor_cron_line="*/3 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}' >> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-monitor.log 2>&1 # runner-monitor-alert"
+    local repair_cron_line="*/10 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600 ${monitor_script}' >> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-repair.log 2>&1 # runner-repair-check"
 
     run_ssh "
+        mkdir -p ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs
         EXISTING=\$(crontab -l 2>/dev/null || true)
         echo \"\${EXISTING}\" | grep -Ev 'runner-monitor|runner-repair-check' | { cat; echo '${monitor_cron_line}'; echo '${repair_cron_line}'; } | crontab -
     "
@@ -839,8 +845,9 @@ install_health_cron() {
     # Determine the repo root (this script lives in scripts/)
     local repo_root
     repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    mkdir -p "${repo_root}/.onex_state/runner-fleet-logs"
 
-    local cron_line="*/3 * * * * set -a && . ~/.omnibase/.env && set +a && cd ${repo_root} && PYTHONPATH=${repo_root}/src RUNNER_FLEET_CONFIG_PATH=${RUNNER_FLEET_CONFIG} RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --emit --alert >> /tmp/runner-health.log 2>&1 # runner-health-check"
+    local cron_line="*/3 * * * * set -a && . ~/.omnibase/.env && set +a && cd ${repo_root} && PYTHONPATH=${repo_root}/src RUNNER_FLEET_CONFIG_PATH=${RUNNER_FLEET_CONFIG} RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --emit --alert >> ${repo_root}/.onex_state/runner-fleet-logs/runner-health.log 2>&1 # runner-health-check"
 
     # Filter out any existing runner-health-check line, then append new one
     local existing
@@ -876,9 +883,10 @@ install_network_janitor_cron() {
 
     local repo_root
     repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    mkdir -p "${repo_root}/.onex_state/runner-fleet-logs"
 
     # NOTE: no --reclaim — observe + alert only. Live reclaim is gated.
-    local cron_line="*/15 * * * * set -a && . ~/.omnibase/.env && set +a && cd ${repo_root} && PYTHONPATH=${repo_root}/src RUNNER_FLEET_CONFIG_PATH=${RUNNER_FLEET_CONFIG} RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --network --emit --alert >> /tmp/network-janitor.log 2>&1 # network-janitor-check"
+    local cron_line="*/15 * * * * set -a && . ~/.omnibase/.env && set +a && cd ${repo_root} && PYTHONPATH=${repo_root}/src RUNNER_FLEET_CONFIG_PATH=${RUNNER_FLEET_CONFIG} RUNNER_HEALTH_HOST=${RUNNER_HOST} uv run python -m omnibase_infra.observability.runner_health.cli_runner_health --network --emit --alert >> ${repo_root}/.onex_state/runner-fleet-logs/network-janitor.log 2>&1 # network-janitor-check"
 
     local existing
     existing=$(crontab -l 2>/dev/null || true)
@@ -920,13 +928,28 @@ install_host_artifact_freshness_cron() {
     local repo_root
     repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-    local cron_line="*/30 * * * * cd ${repo_root} && uv run python scripts/ci/check_runner_host_artifact_freshness.py --runner-host ${RUNNER_HOST} --runner-host-dir ${RUNNER_HOST_DIR} >> /tmp/runner-host-artifact-freshness.log 2>&1 # runner-host-artifact-freshness-check"
+    # OMN-18819: logs live under the workspace, never /tmp -- a standing rule
+    # on this host, and self-defeating besides, because the evidence of a
+    # drift run should outlive a reboot.
+    local log_dir="${repo_root}/.onex_state/runner-fleet-logs"
+    mkdir -p "${log_dir}"
+
+    local cron_line="*/30 * * * * cd ${repo_root} && uv run python scripts/ci/check_runner_host_artifact_freshness.py --runner-host ${RUNNER_HOST} --runner-host-dir ${RUNNER_HOST_DIR} >> ${log_dir}/freshness.log 2>&1 # runner-host-artifact-freshness-check"
+
+    # The converge half. Reporting drift and not fixing it is what left a
+    # merged hook sitting un-deployed until somebody copied it by hand.
+    # Resolved from origin/dev, so an in-flight local edit is never pushed to
+    # the fleet; the fetch is part of the entry so the ref is not itself stale.
+    local converge_line="*/30 * * * * cd ${repo_root} && git fetch --quiet origin dev && uv run python scripts/ci/check_runner_host_artifact_freshness.py --mode converge --ref origin/dev --runner-host ${RUNNER_HOST} --runner-host-dir ${RUNNER_HOST_DIR} >> ${log_dir}/converge.log 2>&1 # runner-host-hook-converge"
 
     local existing
     existing=$(crontab -l 2>/dev/null || true)
-    echo "${existing}" | grep -v 'runner-host-artifact-freshness-check' | { cat; echo "${cron_line}"; } | crontab -
+    echo "${existing}" \
+        | grep -v 'runner-host-artifact-freshness-check' \
+        | grep -v 'runner-host-hook-converge' \
+        | { cat; echo "${cron_line}"; echo "${converge_line}"; } | crontab -
 
-    log "Runner host artifact-freshness cron installed locally (every 30 minutes)."
+    log "Runner host artifact-freshness + hook-converge crons installed locally (every 30 minutes)."
 }
 
 # ---------------------------------------------------------------------------
