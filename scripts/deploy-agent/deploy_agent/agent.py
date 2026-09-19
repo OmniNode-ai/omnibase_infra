@@ -161,6 +161,12 @@ LAB_OVERLAY_SOURCE_DIR = Path(
 #: it moves.
 JOB_POOL_MAX_WORKERS = 1
 
+#: Milliseconds a rejection publish may spend resolving broker metadata
+#: (OMN-18143). See the call site in ``_publish_rejection_event`` for the
+#: measurement this replaces and for why the cause is recorded rather than
+#: worked around here.
+REJECTION_PUBLISH_MAX_BLOCK_MS = 10_000
+
 
 class DeployAgent:
     def __init__(self, *, skip_self_update: bool = False):
@@ -1250,6 +1256,31 @@ class DeployAgent:
             producer = KafkaProducer(
                 **self._kafka_config.producer_kwargs(),
                 value_serializer=lambda v: v,
+                # OMN-18143. Bound the metadata wait. `send()` blocks up to
+                # kafka-python's `max_block_ms` (default 60_000) resolving the
+                # topic, so a publish to a topic the broker does not have
+                # occupies this process's SINGLE job thread for a full minute
+                # before raising -- and the retry loop then does it again every
+                # 30 s until the circuit breaker trips at ten consecutive
+                # failures. That is ten minutes of job-thread time per record,
+                # spent on a send that cannot land.
+                #
+                # Measured on the .201 dev lane 2026-09-19: of 1714 topics,
+                # `onex.evt.deploy.rebuild-requested.v1` and
+                # `...rebuild-completed.v1` are present and
+                # `...rebuild-rejected.v1` is ABSENT, so every rejection this
+                # agent publishes takes exactly that path. Two attempts for
+                # correlation 63858212 each took 60 s, at 11:50:49Z and
+                # 11:51:49Z, while a completion publish to the present topic
+                # succeeded at 11:49:34Z on the same config.
+                #
+                # This bounds the COST, and deliberately does not pretend to
+                # fix the cause: the topic's absence, and the fact that nothing
+                # in any repository consumes it, are recorded on OMN-18143 and
+                # are not the agent's to resolve. Ten seconds is far above the
+                # sub-second publish this lane achieves when the topic exists,
+                # so a healthy publish is unaffected.
+                max_block_ms=REJECTION_PUBLISH_MAX_BLOCK_MS,
             )
             producer.send(TOPIC_REBUILD_REJECTED, payload)
             producer.flush(timeout=5)
