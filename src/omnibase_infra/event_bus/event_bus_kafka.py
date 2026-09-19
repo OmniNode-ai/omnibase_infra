@@ -2973,7 +2973,14 @@ class EventBusKafka(
 
         Args:
             topic: Topic the wedged consumer was subscribed to.
-            group_id: Effective consumer group id.
+            group_id: The SUBSCRIPTION group id -- the key ``_group_consumers``
+                is indexed by, not the effective group id sent to Kafka. The
+                two differ: the effective id carries the per-topic ``.__t.``
+                suffix and the instance discriminator. Resolving it here rather
+                than accepting it is what keeps the replacement in the same
+                Kafka group as the consumer it replaces; joining a different
+                group would resume from a different committed offset and
+                silently replay or skip.
 
         Returns:
             A started replacement consumer, already published into
@@ -2983,10 +2990,13 @@ class EventBusKafka(
             Exception: Propagated to the supervisor, which records a failed
                 rejoin and retries after the cooldown.
         """
-        resolved_group_instance_id = self._resolve_group_instance_id(group_id)
+        effective_group_id = self._resolve_effective_group_id(
+            group_id, topic, uuid4(), (topic, group_id)
+        )
+        resolved_group_instance_id = self._resolve_group_instance_id(effective_group_id)
         consumer = self._build_consumer(
             topic,
-            group_id,
+            effective_group_id,
             resolved_group_instance_id,
             self._config.auto_offset_reset,
         )
@@ -2996,8 +3006,8 @@ class EventBusKafka(
             "consumer_group_rejoined topic=%s group=%s -- replacement consumer "
             "started and rejoined from committed offsets (OMN-18640)",
             topic,
-            group_id,
-            extra={"topic": topic, "group_id": group_id},
+            effective_group_id,
+            extra={"topic": topic, "group_id": effective_group_id},
         )
         return consumer
 
