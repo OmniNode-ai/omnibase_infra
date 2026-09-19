@@ -248,15 +248,15 @@ def _write_payload(
 @click.option(
     "--omni-home",
     type=click.Path(path_type=Path),
-    envvar="OMNI_HOME",
+    envvar="OMNIBASE_PATH",
     default=None,
     help=(
-        "Canonical omni_home workspace root for the local omnimarket drift "
-        "check. Defaults to the $OMNI_HOME environment variable (OMN-14531) "
-        "-- without this binding the drift guard silently receives "
-        "omni_home=None and never fires in normal usage, even when "
-        "$OMNI_HOME is exported, because callers never pass this flag "
-        "explicitly."
+        "Canonical OmniNode workspace root for the local omnimarket drift "
+        "check. Bound to $OMNIBASE_PATH, the product name for that root "
+        "(OMN-16855/OMN-16852; the binding itself is OMN-14531) -- without "
+        "it the drift guard silently receives omni_home=None and never "
+        "fires in normal usage, even when the root is exported, because "
+        "callers never pass this flag explicitly."
     ),
 )
 @click.option(
