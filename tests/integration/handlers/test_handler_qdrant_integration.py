@@ -1,46 +1,42 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Integration tests for HandlerQdrant against real Qdrant infrastructure.  # ai-slop-ok: pre-existing
+"""Integration tests for HandlerQdrant against a real Qdrant server.
 
-These tests validate HandlerQdrant behavior against an actual Qdrant vector database
-instance. They require a running Qdrant server and will be skipped gracefully if
-the server is not available.
+Selection in CI (OMN-18781). These tests do NOT skip gracefully in CI, because
+a silent skip and a green run are indistinguishable in a junit summary:
 
-CI/CD Graceful Skip Behavior
-============================  # ai-slop-ok: pre-existing
+    - the module carries ``pytest.mark.qdrant``, which the PR test splits
+      deselect, so they are never collected-and-skipped on a pull request;
+    - the service-backed job in ``.github/workflows/ci.yml`` starts a real
+      Qdrant, exports ``QDRANT_URL`` and ``QDRANT_INTEGRATION_TESTS=1``, and
+      runs them;
+    - a CI job that selects them without that provisioning FAILS, naming the
+      variable, rather than skipping.
 
-These tests skip gracefully in CI/CD environments without Qdrant access:
+Outside CI they skip, so a laptop with no Qdrant is not forced to stand one up.
 
-Skip Conditions:
-    - Skips if QDRANT_URL environment variable is not set
-    - Tests are marked with module-level ``pytestmark`` using ``pytest.mark.skipif``
+``QDRANT_URL`` alone is never evidence that a server exists: ``tests/conftest.py``
+supplies a localhost default for it so models can be instantiated offline.
 
-Example CI/CD Output::
+Why this file was rewritten, not merely ungated. The suite these tests replace could not run at all, and had not been able to for
+a long time. It called ``handler.execute(envelope)`` with hand-built envelopes
+and treated ``describe()`` as synchronous. ``HandlerQdrant`` has neither: it
+implements ``ProtocolVectorStoreHandler`` — ``store_embedding``,
+``query_similar``, ``delete_embedding``, ``create_index``, ``health_check`` and
+an async ``describe`` — and its constructor takes a ``ModelONEXContainer``.
+The very first thing an ungated run produced was
+``HandlerQdrant.__init__() missing 1 required positional argument: 'container'``.
 
-    $ pytest tests/integration/handlers/test_handler_qdrant_integration.py -v
-    test_qdrant_describe SKIPPED (QDRANT_URL not set - Qdrant integration tests skipped)
-    test_qdrant_full_workflow SKIPPED (QDRANT_URL not set - Qdrant integration tests skipped)
+That is the cost of a suite that skips: it keeps its shape while the thing it
+claims to cover moves out from under it, and nothing says so. The coverage
+below is written against the protocol the handler actually exposes today.
 
 Run with infrastructure::
 
-    $ QDRANT_URL=http://localhost:6333 uv run pytest tests/integration/handlers/test_handler_qdrant_integration.py -v
+    $ QDRANT_URL=http://localhost:6333 QDRANT_INTEGRATION_TESTS=1 \\
+        uv run pytest tests/integration/handlers/test_handler_qdrant_integration.py -v
 
-Test Categories
-===============  # ai-slop-ok: pre-existing
-
-- Handler Metadata Tests: Validate describe functionality and capabilities
-- Collection Tests: Create and manage vector collections
-- Vector Operations Tests: Upsert, search, and delete vectors
-- Full Workflow Tests: End-to-end vector database operations
-
-Environment Variables
-=====================
-
-    QDRANT_URL: Qdrant server URL (required - skip if not set)
-        Example: http://localhost:6333 or http://your-server-ip:6333
-    QDRANT_API_KEY: Optional API key for authentication
-
-Related Ticket: OMN-1142
+Related tickets: OMN-1142 (original suite), OMN-18781 (this rewrite).
 """
 
 from __future__ import annotations
@@ -52,34 +48,48 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
+from omnibase_core.enums.enum_vector_distance_metric import EnumVectorDistanceMetric
+from omnibase_core.enums.enum_vector_filter_operator import EnumVectorFilterOperator
+from omnibase_core.models.common.model_schema_value import ModelSchemaValue
+from omnibase_core.models.vector.model_embedding import ModelEmbedding
+from omnibase_core.models.vector.model_vector_connection_config import (
+    ModelVectorConnectionConfig,
+)
+from omnibase_core.models.vector.model_vector_metadata_filter import (
+    ModelVectorMetadataFilter,
+)
+from omnibase_infra.errors import InfraConnectionError
+from tests.helpers.service_env import require_service_env
+
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerQdrant
-
-# =============================================================================
-# Environment Configuration
-# =============================================================================
 
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
-# Check if Qdrant is available — requires QDRANT_URL AND QDRANT_INTEGRATION_TESTS=1.
-# QDRANT_URL is set globally in conftest for model instantiation, so we gate real-server
-# integration tests on QDRANT_INTEGRATION_TESTS=1 to prevent false connects in CI.
-QDRANT_AVAILABLE = (
-    QDRANT_URL is not None and os.getenv("QDRANT_INTEGRATION_TESTS") == "1"
-)
+# Four-dimensional vectors keep the assertions readable. The axis-aligned unit
+# vectors below are mutually orthogonal, so cosine similarity separates them
+# completely and a ranking assertion cannot pass by accident.
+DIMENSION = 4
+VECTOR_X: list[float] = [1.0, 0.0, 0.0, 0.0]
+VECTOR_Y: list[float] = [0.0, 1.0, 0.0, 0.0]
+VECTOR_Z: list[float] = [0.0, 0.0, 1.0, 0.0]
 
-# =============================================================================
-# Test Configuration and Skip Conditions
-# =============================================================================
-
-# Module-level markers - skip all tests if Qdrant is not available
 pytestmark = [
-    pytest.mark.skipif(
-        not QDRANT_AVAILABLE,
-        reason="QDRANT_URL not set - Qdrant integration tests skipped",
-    ),
+    pytest.mark.qdrant,
 ]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _require_qdrant() -> None:
+    """Refuse to skip this suite silently once CI has selected it."""
+    require_service_env(
+        opt_in="QDRANT_INTEGRATION_TESTS",
+        endpoint="QDRANT_URL",
+        workflow=".github/workflows/ci.yml (service-integration-suites)",
+        service="Qdrant",
+    )
 
 
 # =============================================================================
@@ -88,448 +98,314 @@ pytestmark = [
 
 
 @pytest.fixture
-def qdrant_config() -> dict[str, object]:
-    """Provide Qdrant configuration for HandlerQdrant.
-
-    Returns:
-        Configuration dict for HandlerQdrant.initialize()
-    """
-    config: dict[str, object] = {
-        "url": QDRANT_URL,
-        "timeout_seconds": 30.0,
-        "prefer_grpc": False,
-    }
-
-    if QDRANT_API_KEY:
-        config["api_key"] = QDRANT_API_KEY
-
-    return config
+def connection_config() -> ModelVectorConnectionConfig:
+    """Connection configuration pointing at the provisioned Qdrant."""
+    return ModelVectorConnectionConfig(
+        url=QDRANT_URL or "",
+        api_key=QDRANT_API_KEY,
+        timeout=30.0,
+    )
 
 
 @pytest.fixture
-async def initialized_qdrant_handler(
-    qdrant_config: dict[str, object],
+async def handler(
+    connection_config: ModelVectorConnectionConfig,
 ) -> AsyncGenerator[HandlerQdrant, None]:
-    """Provide an initialized HandlerQdrant instance with automatic cleanup.
-
-    Creates a HandlerQdrant, initializes it with the test configuration,
-    yields it for the test, then ensures proper cleanup via shutdown().
-
-    Cleanup Behavior:
-        - Calls handler.shutdown() after test completion
-        - Closes Qdrant client connection
-        - Idempotent: safe to call shutdown() multiple times
-        - Ignores cleanup errors to prevent test pollution
-
-    Yields:
-        Initialized HandlerQdrant ready for vector operations.
-    """
+    """An initialized HandlerQdrant, shut down after the test."""
     from omnibase_infra.handlers import HandlerQdrant
 
-    handler = HandlerQdrant()
-    await handler.initialize(qdrant_config)
-
-    yield handler
-
-    # Cleanup: ensure handler is properly shut down
+    instance = HandlerQdrant(ModelONEXContainer(enable_service_registry=False))
+    await instance.initialize(connection_config)
     try:
-        await handler.shutdown()
-    except Exception:  # noqa: BLE001 — boundary: swallows for resilience
-        pass  # Ignore cleanup errors
+        yield instance
+    finally:
+        await instance.shutdown()
 
 
 @pytest.fixture
-def unique_collection_name() -> str:
-    """Generate a unique collection name for test isolation.
+def index_name() -> str:
+    """A collection name unique to this test.
 
-    Returns:
-        Unique collection name prefixed with 'test_collection_'.
+    Unique per test so a parallel run, or a leftover from a failed run, cannot
+    make one test's assertions depend on another's data.
     """
     return f"test_collection_{uuid4().hex[:12]}"
 
 
+@pytest.fixture
+async def created_index(
+    handler: HandlerQdrant,
+    index_name: str,
+) -> AsyncGenerator[str, None]:
+    """A freshly created collection, deleted on every exit path."""
+    await handler.create_index(
+        index_name=index_name,
+        dimension=DIMENSION,
+        metric=EnumVectorDistanceMetric.COSINE.value,
+    )
+    try:
+        yield index_name
+    finally:
+        await handler.delete_index(index_name)
+
+
 # =============================================================================
-# Handler Metadata Tests
+# Handler metadata and health
 # =============================================================================
 
 
 class TestHandlerQdrantMetadata:
-    """Tests for HandlerQdrant metadata and describe functionality."""
+    """The handler describes itself, and reports on the server it is talking to."""
 
     @pytest.mark.asyncio
-    async def test_qdrant_describe(
-        self, initialized_qdrant_handler: HandlerQdrant
+    async def test_describe_reports_the_vector_store_contract(
+        self, handler: HandlerQdrant
     ) -> None:
-        """Test handler describe returns correct metadata.
+        """describe() names the handler and the metrics it can actually serve."""
+        metadata = await handler.describe()
 
-        Verifies that:
-        - Describe returns supported operations
-        - Handler reports correct type and version
-        - Handler is initialized
-        """
-        description = initialized_qdrant_handler.describe()
-
-        assert description["handler_type"] == "infra_handler"
-        assert description["handler_category"] == "effect"
-        assert description["initialized"] is True
-        assert "qdrant.create_collection" in description["supported_operations"]
-        assert "qdrant.upsert" in description["supported_operations"]
-        assert "qdrant.search" in description["supported_operations"]
-        assert "qdrant.delete" in description["supported_operations"]
-
-
-# =============================================================================
-# Collection Tests
-# =============================================================================
-
-
-class TestHandlerQdrantCollections:
-    """Tests for HandlerQdrant collection operations."""
+        assert metadata.handler_type
+        assert metadata.capabilities
+        assert EnumVectorDistanceMetric.COSINE in metadata.supported_metrics
 
     @pytest.mark.asyncio
-    async def test_create_collection(
-        self,
-        initialized_qdrant_handler: HandlerQdrant,
-        unique_collection_name: str,
+    async def test_health_check_reports_a_reachable_server(
+        self, handler: HandlerQdrant
     ) -> None:
-        """Test creating a new vector collection.
+        """A live server reports healthy with a measured latency and no error.
 
-        Verifies that:
-        - Collection can be created with specified parameters
-        - Response indicates success
-        - Collection name is returned in response
+        This is the assertion the whole job exists to make possible: it can only
+        pass against a real Qdrant, and it fails rather than skips when there is
+        not one.
         """
-        envelope = {
-            "operation": "qdrant.create_collection",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "vector_size": 4,
-                "distance": "cosine",
-            },
-            "correlation_id": str(uuid4()),
-        }
+        health = await handler.health_check()
 
-        result = await initialized_qdrant_handler.execute(envelope)
-
-        assert result.result.status == "success"
-        assert result.result.payload.data.collection_name == unique_collection_name
-        assert result.result.payload.data.vector_size == 4
-        assert result.result.payload.data.success is True
+        assert health.healthy is True
+        assert health.latency_ms >= 0
+        assert health.last_error is None
 
 
 # =============================================================================
-# Vector Operations Tests
+# Collection lifecycle
+# =============================================================================
+
+
+class TestHandlerQdrantIndexLifecycle:
+    """Collections are created and deleted against the real server."""
+
+    @pytest.mark.asyncio
+    async def test_create_index_reports_the_dimension_and_metric_it_created(
+        self, handler: HandlerQdrant, index_name: str
+    ) -> None:
+        """The result echoes the geometry actually created, not the request."""
+        result = await handler.create_index(
+            index_name=index_name,
+            dimension=DIMENSION,
+            metric=EnumVectorDistanceMetric.COSINE.value,
+        )
+        try:
+            assert result.success is True
+            assert result.index_name == index_name
+            assert result.dimension == DIMENSION
+            assert result.metric is EnumVectorDistanceMetric.COSINE
+        finally:
+            await handler.delete_index(index_name)
+
+    @pytest.mark.asyncio
+    async def test_delete_index_reports_the_geometry_it_removed_and_the_index_is_gone(
+        self, handler: HandlerQdrant, index_name: str
+    ) -> None:
+        """Deletion reports the real geometry, and absence is proven by a query.
+
+        Two claims, and both needed a live server to state. The reported
+        dimension and metric are read from the collection BEFORE it is removed
+        — this method previously returned a placeholder ``dimension=0`` that the
+        result model rejects, so it could never succeed at all (OMN-18781).
+        Absence is then proven by asking the server for the collection again,
+        rather than by ``health_check().indices``, whose value is cached inside
+        the handler and would report the pre-delete inventory.
+        """
+        await handler.create_index(
+            index_name=index_name,
+            dimension=DIMENSION,
+            metric=EnumVectorDistanceMetric.COSINE.value,
+        )
+
+        result = await handler.delete_index(index_name)
+
+        assert result.success is True
+        assert result.index_name == index_name
+        assert result.dimension == DIMENSION
+        assert result.metric is EnumVectorDistanceMetric.COSINE
+
+        with pytest.raises(InfraConnectionError):
+            await handler.query_similar(
+                query_vector=VECTOR_X,
+                top_k=1,
+                index_name=index_name,
+            )
+
+
+# =============================================================================
+# Vector operations
 # =============================================================================
 
 
 class TestHandlerQdrantVectorOperations:
-    """Tests for HandlerQdrant vector CRUD operations."""
+    """Store, query and delete against a real collection."""
 
     @pytest.mark.asyncio
-    async def test_upsert_vector(
-        self,
-        initialized_qdrant_handler: HandlerQdrant,
-        unique_collection_name: str,
+    async def test_stored_embedding_is_returned_by_a_similarity_query(
+        self, handler: HandlerQdrant, created_index: str
     ) -> None:
-        """Test upserting a vector with payload.
+        """The round trip: what was stored comes back, with its metadata."""
+        embedding_id = str(uuid4())
 
-        Verifies that:
-        - Collection can be created
-        - Vector can be upserted with metadata payload
-        - Response indicates success
-        """
-        # First create collection
-        create_envelope = {
-            "operation": "qdrant.create_collection",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "vector_size": 4,
-                "distance": "cosine",
-            },
-            "correlation_id": str(uuid4()),
-        }
-        await initialized_qdrant_handler.execute(create_envelope)
+        stored = await handler.store_embedding(
+            embedding_id=embedding_id,
+            vector=VECTOR_X,
+            metadata={"kind": "unit-x"},
+            index_name=created_index,
+        )
+        assert stored.success is True
+        assert stored.embedding_id == embedding_id
 
-        # Upsert vector
-        point_id = f"test-point-{uuid4().hex[:8]}"
-        upsert_envelope = {
-            "operation": "qdrant.upsert",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "point_id": point_id,
-                "vector": [0.1, 0.2, 0.3, 0.4],
-                "payload": {"text": "hello world", "category": "test"},
-            },
-            "correlation_id": str(uuid4()),
-        }
+        found = await handler.query_similar(
+            query_vector=VECTOR_X,
+            top_k=1,
+            index_name=created_index,
+            include_metadata=True,
+        )
 
-        result = await initialized_qdrant_handler.execute(upsert_envelope)
-
-        assert result.result.status == "success"
-        assert result.result.payload.data.collection_name == unique_collection_name
-        assert result.result.payload.data.success is True
+        assert found.total_results == 1
+        hit = found.results[0]
+        assert hit.id == embedding_id
+        assert hit.score == pytest.approx(1.0, abs=1e-3)
+        assert hit.metadata["kind"].get_string() == "unit-x"
 
     @pytest.mark.asyncio
-    async def test_search_vectors(
-        self,
-        initialized_qdrant_handler: HandlerQdrant,
-        unique_collection_name: str,
+    async def test_a_batch_is_ranked_by_similarity_to_the_query(
+        self, handler: HandlerQdrant, created_index: str
     ) -> None:
-        """Test searching for similar vectors.
+        """Three orthogonal vectors rank deterministically against one of them."""
+        ids = [str(uuid4()) for _ in range(3)]
+        batch = [
+            ModelEmbedding(
+                id=ids[position],
+                vector=vector,
+                metadata={"axis": ModelSchemaValue.from_value(axis)},
+            )
+            for position, (vector, axis) in enumerate(
+                ((VECTOR_X, "x"), (VECTOR_Y, "y"), (VECTOR_Z, "z"))
+            )
+        ]
 
-        Verifies that:
-        - Vectors can be found by similarity search
-        - Search results include scores
-        - Payloads are returned with results
-        """
-        # Create collection and upsert vectors
-        create_envelope = {
-            "operation": "qdrant.create_collection",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "vector_size": 4,
-                "distance": "cosine",
-            },
-            "correlation_id": str(uuid4()),
-        }
-        await initialized_qdrant_handler.execute(create_envelope)
+        result = await handler.store_embeddings_batch(
+            embeddings=batch,
+            index_name=created_index,
+        )
+        assert result.success is True
 
-        # Upsert multiple vectors
-        for i in range(3):
-            upsert_envelope = {
-                "operation": "qdrant.upsert",
-                "payload": {
-                    "collection_name": unique_collection_name,
-                    "point_id": f"point-{i}",
-                    "vector": [
-                        0.1 * (i + 1),
-                        0.2 * (i + 1),
-                        0.3 * (i + 1),
-                        0.4 * (i + 1),
-                    ],
-                    "payload": {"index": i, "text": f"document {i}"},
-                },
-                "correlation_id": str(uuid4()),
-            }
-            await initialized_qdrant_handler.execute(upsert_envelope)
+        found = await handler.query_similar(
+            query_vector=VECTOR_Y,
+            top_k=3,
+            index_name=created_index,
+            include_metadata=True,
+        )
 
-        # Search for similar vectors
-        search_envelope = {
-            "operation": "qdrant.search",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "query_vector": [0.1, 0.2, 0.3, 0.4],
-                "limit": 10,
-            },
-            "correlation_id": str(uuid4()),
-        }
-
-        result = await initialized_qdrant_handler.execute(search_envelope)
-
-        assert result.result.status == "success"
-        assert len(result.result.payload.data.results) > 0
-        # Verify results have scores
-        for search_result in result.result.payload.data.results:
-            assert hasattr(search_result, "score")
-            assert hasattr(search_result, "id")
+        assert found.total_results == 3
+        assert found.results[0].id == ids[1]
+        assert found.results[0].score == pytest.approx(1.0, abs=1e-3)
+        # The two orthogonal vectors score far below the match; the ranking is a
+        # property of the server, so a handler that dropped the query vector
+        # would fail here rather than returning an arbitrary order.
+        assert found.results[0].score > found.results[1].score
 
     @pytest.mark.asyncio
-    async def test_delete_vectors(
-        self,
-        initialized_qdrant_handler: HandlerQdrant,
-        unique_collection_name: str,
+    async def test_deleted_embedding_is_no_longer_returned(
+        self, handler: HandlerQdrant, created_index: str
     ) -> None:
-        """Test deleting vectors by ID.
+        """Delete is proven by a read-back, not by the delete call's own verdict."""
+        embedding_id = str(uuid4())
+        await handler.store_embedding(
+            embedding_id=embedding_id,
+            vector=VECTOR_X,
+            metadata={"kind": "doomed"},
+            index_name=created_index,
+        )
 
-        Verifies that:
-        - Vectors can be deleted by point ID
-        - Deleted vectors are no longer returned in search
-        """
-        # Create collection and upsert a vector
-        create_envelope = {
-            "operation": "qdrant.create_collection",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "vector_size": 4,
-                "distance": "cosine",
-            },
-            "correlation_id": str(uuid4()),
-        }
-        await initialized_qdrant_handler.execute(create_envelope)
+        deleted = await handler.delete_embedding(
+            embedding_id=embedding_id,
+            index_name=created_index,
+        )
+        assert deleted.success is True
+        assert deleted.deleted is True
 
-        point_id = "delete-test-point"
-        upsert_envelope = {
-            "operation": "qdrant.upsert",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "point_id": point_id,
-                "vector": [0.5, 0.5, 0.5, 0.5],
-                "payload": {"text": "to be deleted"},
-            },
-            "correlation_id": str(uuid4()),
-        }
-        await initialized_qdrant_handler.execute(upsert_envelope)
-
-        # Delete the vector
-        delete_envelope = {
-            "operation": "qdrant.delete",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "point_ids": [point_id],
-            },
-            "correlation_id": str(uuid4()),
-        }
-
-        result = await initialized_qdrant_handler.execute(delete_envelope)
-
-        assert result.result.status == "success"
-        assert result.result.payload.data.success is True
-
-
-# =============================================================================
-# Full Workflow Tests
-# =============================================================================
-
-
-class TestHandlerQdrantFullWorkflow:
-    """End-to-end workflow tests for HandlerQdrant."""
+        found = await handler.query_similar(
+            query_vector=VECTOR_X,
+            top_k=5,
+            index_name=created_index,
+        )
+        assert [hit.id for hit in found.results] == []
 
     @pytest.mark.asyncio
-    async def test_full_vector_workflow(
-        self,
-        initialized_qdrant_handler: HandlerQdrant,
-        unique_collection_name: str,
+    async def test_a_metadata_filter_narrows_the_result_set(
+        self, handler: HandlerQdrant, created_index: str
     ) -> None:
-        """Test complete workflow: create, upsert, search, delete.
+        """Filtering is done by the server, so it must be exercised against one."""
+        keep_id, drop_id = str(uuid4()), str(uuid4())
+        await handler.store_embedding(
+            embedding_id=keep_id,
+            vector=VECTOR_X,
+            metadata={"tenant": "keep"},
+            index_name=created_index,
+        )
+        await handler.store_embedding(
+            embedding_id=drop_id,
+            vector=VECTOR_X,
+            metadata={"tenant": "drop"},
+            index_name=created_index,
+        )
 
-        This test validates the full lifecycle of vector operations:
-        1. Create a collection
-        2. Upsert vectors with payloads
-        3. Search for similar vectors
-        4. Delete vectors
-        5. Verify deletion by searching again
-        """
-        # 1. Create collection
-        create_envelope = {
-            "operation": "qdrant.create_collection",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "vector_size": 4,
-                "distance": "cosine",
-            },
-            "correlation_id": str(uuid4()),
-        }
-        result = await initialized_qdrant_handler.execute(create_envelope)
-        assert result.result.status == "success"
+        found = await handler.query_similar(
+            query_vector=VECTOR_X,
+            top_k=5,
+            index_name=created_index,
+            filter_metadata=ModelVectorMetadataFilter(
+                field="tenant",
+                operator=EnumVectorFilterOperator.EQ,
+                value=ModelSchemaValue.from_value("keep"),
+            ),
+            include_metadata=True,
+        )
 
-        # 2. Upsert vectors
-        point_ids = []
-        for i in range(5):
-            point_id = f"workflow-point-{i}"
-            point_ids.append(point_id)
-            upsert_envelope = {
-                "operation": "qdrant.upsert",
-                "payload": {
-                    "collection_name": unique_collection_name,
-                    "point_id": point_id,
-                    "vector": [
-                        0.1 * (i + 1),
-                        0.2 * (i + 1),
-                        0.3 * (i + 1),
-                        0.4 * (i + 1),
-                    ],
-                    "payload": {"index": i, "category": "workflow_test"},
-                },
-                "correlation_id": str(uuid4()),
-            }
-            result = await initialized_qdrant_handler.execute(upsert_envelope)
-            assert result.result.status == "success"
-
-        # 3. Search for vectors
-        search_envelope = {
-            "operation": "qdrant.search",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "query_vector": [0.2, 0.4, 0.6, 0.8],
-                "limit": 10,
-            },
-            "correlation_id": str(uuid4()),
-        }
-        result = await initialized_qdrant_handler.execute(search_envelope)
-        assert result.result.status == "success"
-        assert len(result.result.payload.data.results) == 5
-
-        # 4. Delete some vectors
-        delete_envelope = {
-            "operation": "qdrant.delete",
-            "payload": {
-                "collection_name": unique_collection_name,
-                "point_ids": point_ids[:2],  # Delete first two
-            },
-            "correlation_id": str(uuid4()),
-        }
-        result = await initialized_qdrant_handler.execute(delete_envelope)
-        assert result.result.status == "success"
-
-        # 5. Search again - should have fewer results
-        result = await initialized_qdrant_handler.execute(search_envelope)
-        assert result.result.status == "success"
-        assert len(result.result.payload.data.results) == 3
-
-
-# =============================================================================
-# Correlation ID Tests
-# =============================================================================
-
-
-class TestHandlerQdrantCorrelationId:
-    """Tests for correlation ID handling in HandlerQdrant."""
+        assert [hit.id for hit in found.results] == [keep_id]
 
     @pytest.mark.asyncio
-    async def test_correlation_id_preserved(
-        self,
-        initialized_qdrant_handler: HandlerQdrant,
-        unique_collection_name: str,
+    async def test_vectors_are_returned_only_when_asked_for(
+        self, handler: HandlerQdrant, created_index: str
     ) -> None:
-        """Verify correlation_id from envelope is preserved in response."""
-        test_correlation_id = uuid4()
+        """include_vectors is a real round trip through the server's payload."""
+        embedding_id = str(uuid4())
+        await handler.store_embedding(
+            embedding_id=embedding_id,
+            vector=VECTOR_Z,
+            metadata={"kind": "unit-z"},
+            index_name=created_index,
+        )
 
-        envelope = {
-            "operation": "qdrant.create_collection",
-            "correlation_id": str(test_correlation_id),
-            "payload": {
-                "collection_name": unique_collection_name,
-                "vector_size": 4,
-                "distance": "cosine",
-            },
-        }
+        without = await handler.query_similar(
+            query_vector=VECTOR_Z,
+            top_k=1,
+            index_name=created_index,
+            include_vectors=False,
+        )
+        assert without.results[0].vector is None
 
-        result = await initialized_qdrant_handler.execute(envelope)
-
-        assert result.correlation_id == test_correlation_id
-        assert result.result.correlation_id == test_correlation_id
-
-    @pytest.mark.asyncio
-    async def test_correlation_id_generated_if_missing(
-        self,
-        initialized_qdrant_handler: HandlerQdrant,
-        unique_collection_name: str,
-    ) -> None:
-        """Verify correlation_id is generated when not provided."""
-        from uuid import UUID
-
-        envelope = {
-            "operation": "qdrant.create_collection",
-            # No correlation_id provided
-            "payload": {
-                "collection_name": unique_collection_name,
-                "vector_size": 4,
-                "distance": "cosine",
-            },
-        }
-
-        result = await initialized_qdrant_handler.execute(envelope)
-
-        # Should have a generated correlation_id
-        assert result.correlation_id is not None
-        assert isinstance(result.correlation_id, UUID)
+        with_vectors = await handler.query_similar(
+            query_vector=VECTOR_Z,
+            top_k=1,
+            index_name=created_index,
+            include_vectors=True,
+        )
+        assert with_vectors.results[0].vector == pytest.approx(VECTOR_Z)

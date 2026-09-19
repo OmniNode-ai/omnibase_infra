@@ -115,6 +115,16 @@ pytestmark = [
 # The previous values (if any) are stored on the config object and restored
 # by pytest_unconfigure after the session ends.
 
+# OMN-18781: the environment the event-bus suite configures its bus with, and
+# therefore the prefix MixinKafkaBroadcast derives its topics from —
+# `{environment}.broadcast` and `{environment}.{group}`. It is defined once,
+# here, because the broadcast tests must subscribe to the topic the bus will
+# actually publish to. They previously hardcoded "integration-test.", which
+# stopped being the bus's environment at some point and was never noticed: the
+# whole module skipped on an env var no workflow set, so both broadcast tests
+# had been asserting against a topic nothing published to.
+BUS_TEST_ENVIRONMENT: str = "local"
+
 _BUS_LOCAL_BOOTSTRAP: str = "localhost:19092"
 # Allow both hostname forms: code may normalize to 127.0.0.1 internally
 _BUS_LOCAL_ALLOWLIST: str = "localhost:19092,127.0.0.1:19092"
@@ -146,8 +156,30 @@ def pytest_configure(config: pytest.Config) -> None:
         len(cli_args) == 1 and str(cli_args[0]) == __file__
     )
 
-    config._kafka_isolation_active = scoped_to_event_bus  # type: ignore[attr-defined]
-    if not scoped_to_event_bus:
+    # OMN-18781: the pin protects a DEVELOPER's scoped run from dialing a shared
+    # broker. In CI, a job that PROVISIONED a broker owns its address, and that
+    # address is not localhost on a runner executing inside a container that
+    # shares the host Docker daemon — overriding it would point the suite at a
+    # port nothing is listening on, and the suite could not run in CI at all
+    # when selected by path.
+    #
+    # The comparison is against the pin's own value, deliberately, and not
+    # merely "is the variable set". tests/conftest.py supplies
+    # KAFKA_BOOTSTRAP_SERVERS=localhost:19092 as a session default for every
+    # run, so "set" is always true and a stand-down keyed on that would disarm
+    # the pin — and stop exporting KAFKA_BROKER_ALLOWLIST — on any CI run whose
+    # impacted-test selection happens to name a path in this directory. A value
+    # that DIFFERS from the pin can only have come from a job that stood a
+    # broker up.
+    provisioned = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
+    ci_provided = (
+        os.environ.get("CI", "").strip().lower() in {"1", "true", "yes"}
+        and bool(provisioned)
+        and provisioned != _BUS_LOCAL_BOOTSTRAP
+    )
+
+    config._kafka_isolation_active = scoped_to_event_bus and not ci_provided  # type: ignore[attr-defined]
+    if not scoped_to_event_bus or ci_provided:
         config._kafka_isolation_prev = (None, None)  # type: ignore[attr-defined]
         return
 
@@ -323,7 +355,7 @@ _kafka_config_validation: KafkaConfigValidationResult = validate_bootstrap_serve
 
 @pytest.fixture
 async def ensure_test_topic() -> AsyncGenerator[
-    Callable[[str, int], Coroutine[None, None, str]], None
+    Callable[[str, int], Coroutine[object, object, str]], None
 ]:
     """Create test topics via Kafka admin API before tests and cleanup after.
 
@@ -438,7 +470,7 @@ async def created_broadcast_topic(
     Returns:
         The created broadcast topic name.
     """
-    topic_name: str = "integration-test.broadcast"
+    topic_name: str = f"{BUS_TEST_ENVIRONMENT}.broadcast"
     await ensure_test_topic(topic_name, 1)
     return topic_name
 

@@ -88,6 +88,55 @@ _ENUM_TO_QDRANT_METRIC: dict[EnumVectorDistanceMetric, qdrant_models.Distance] =
     EnumVectorDistanceMetric.DOT_PRODUCT: qdrant_models.Distance.DOT,
 }
 
+# Reverse mapping from Qdrant's own distance enum back to the ONEX metric, used
+# when reporting the geometry of a collection the server already holds (OMN-18781).
+_QDRANT_TO_ENUM_METRIC: dict[qdrant_models.Distance, EnumVectorDistanceMetric] = {
+    qdrant_models.Distance.COSINE: EnumVectorDistanceMetric.COSINE,
+    qdrant_models.Distance.EUCLID: EnumVectorDistanceMetric.EUCLIDEAN,
+    qdrant_models.Distance.DOT: EnumVectorDistanceMetric.DOT_PRODUCT,
+    qdrant_models.Distance.MANHATTAN: EnumVectorDistanceMetric.MANHATTAN,
+}
+
+
+def _describe_collection_geometry(
+    described: object,
+) -> tuple[int, EnumVectorDistanceMetric]:
+    """Return ``(dimension, metric)`` as the SERVER reports them for a collection.
+
+    Qdrant allows either a single unnamed vector config or a mapping of named
+    ones. Both shapes are read here rather than assumed, because assuming the
+    unnamed shape would turn a named-vector collection into an AttributeError
+    on a delete path (OMN-18781).
+
+    Raises:
+        ValueError: when the response carries no readable vector geometry. The
+            caller turns this into its own transport error rather than
+            substituting a placeholder — the placeholder is what broke this path
+            in the first place.
+    """
+    config = getattr(getattr(described, "config", None), "params", None)
+    vectors = getattr(config, "vectors", None)
+
+    if isinstance(vectors, dict):
+        # Named vectors: report the first declared one, in declaration order.
+        vectors = next(iter(vectors.values()), None)
+
+    size = getattr(vectors, "size", None)
+    distance = getattr(vectors, "distance", None)
+    if not isinstance(size, int) or size < 1:
+        raise ValueError(
+            f"collection reported no readable vector dimension (got {size!r})"
+        )
+
+    if not isinstance(distance, qdrant_models.Distance):
+        # A server that reports a geometry we cannot name is still a geometry we
+        # must not invent: cosine is Qdrant's own default and is stated here as
+        # a fallback rather than smuggled in as a fact.
+        return size, EnumVectorDistanceMetric.COSINE
+
+    return size, _QDRANT_TO_ENUM_METRIC.get(distance, EnumVectorDistanceMetric.COSINE)
+
+
 # Filter operator mapping
 _FILTER_OP_MAP: dict[EnumVectorFilterOperator, str] = {
     EnumVectorFilterOperator.EQ: "match",
@@ -971,6 +1020,21 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
             if self._client is None:
                 raise RuntimeHostError("Client is None after initialization check")
 
+            # OMN-18781: read the geometry BEFORE deleting it. This method used
+            # to report `dimension=0` with the comment "Unknown after
+            # deletion", and ModelVectorIndexResult constrains dimension to
+            # >= 1 -- so every successful deletion raised a pydantic
+            # ValidationError, which the handler then re-raised as
+            # InfraConnectionError("Failed to delete index: ValidationError")
+            # AFTER the collection was already gone. The method could not
+            # succeed, and nothing noticed because its only integration suite
+            # skipped on an env var no workflow set.
+            #
+            # The collection's own reported geometry is both truthful and
+            # available, which the placeholder was not.
+            described = self._client.get_collection(collection_name=index_name)
+            deleted_dimension, deleted_metric = _describe_collection_geometry(described)
+
             self._client.delete_collection(collection_name=index_name)
 
             # Reset circuit breaker on success
@@ -980,8 +1044,8 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
             return ModelVectorIndexResult(
                 success=True,
                 index_name=index_name,
-                dimension=0,  # Unknown after deletion
-                metric=EnumVectorDistanceMetric.COSINE,  # Default
+                dimension=deleted_dimension,
+                metric=deleted_metric,
                 created_at=None,
             )
         except (InfraUnavailableError, RuntimeHostError):
