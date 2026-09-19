@@ -425,6 +425,24 @@ class ModelKafkaEventBusConfig(BaseModel):
         ge=0.0,
         le=86_400.0,
     )
+    consumer_sync_unready_seconds: float = Field(
+        default=600.0,
+        description=(
+            "Seconds a consumer group may sit behind the partition leaders "
+            "without advancing before the runtime's own readiness reports it "
+            "out of sync (OMN-18640 AC1). Deliberately LONGER than "
+            "consumer_stall_seconds plus one consumer_rejoin_cooldown_seconds: "
+            "by the time this elapses the self-heal above has attempted a "
+            "rejoin and been given a full cooldown to attempt a second, so "
+            "what readiness reports is the wedge that recovery did not fix. A "
+            "shorter window would have the runtime declare itself unhealthy "
+            "while the cheapest remedy was still working, and the deploy "
+            "agent would recreate a container that was about to fix itself. "
+            "Sized well inside the 30, 50 and 97 minute outages on record."
+        ),
+        gt=0.0,
+        le=86_400.0,
+    )
 
     # Kafka producer settings
     acks: EnumKafkaAcks = Field(

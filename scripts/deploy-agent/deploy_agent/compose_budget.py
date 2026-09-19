@@ -92,7 +92,10 @@ def _compose_tag_constructor(
     return None
 
 
-_ComposeLoader.add_multi_constructor("!", _compose_tag_constructor)
+# OMN-18640: registered through the module-level function, which the yaml
+# stubs annotate, rather than the classmethod, which they do not. Identical
+# effect -- it forwards to the same registry on the Loader named here.
+yaml.add_multi_constructor("!", _compose_tag_constructor, Loader=_ComposeLoader)
 
 
 class ComposeDurationError(ValueError):

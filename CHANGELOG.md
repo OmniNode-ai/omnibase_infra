@@ -1,3 +1,29 @@
+## v0.38.33 (2026-09-19)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.33 by the scheduled release train.
+- 17 release-relevant commit(s) merged since v0.38.32.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.32
+- chore(OMN-17292): advance omnimarket contract pin to 168a66fd9906 [bot] (#3849)
+- feat(OMN-18768): the runner monitor emits the fleet on the bus, so the fleet has a producer at all (#3819)
+- fix(OMN-16852): the packaged onex CLI reads OMNIBASE_PATH for the workspace root (#3845)
+- feat(OMN-18814): a known-ancestor omnimarket lag is stamped and proceeds (#3827)
+- fix(OMN-18810): onex delegate run files record the locus, transport and lane (#3820)
+- feat(OMN-18640): the runtime's readiness reports a stalled consumer group (#3817)
+- fix(OMN-18795): the nine env-gated suites with no execution path get one or are deleted (#3811)
+- fix(OMN-18640): effects consumer rejoins its group after coordinator loss (#3807)
+- fix(OMN-18781): the always-skip integration suites now execute against provisioned services (#3801)
+- fix(OMN-18749): a closed cited PR clears on a ticket-declared merged successor (#3774)
+- feat(OMN-18708): the built runtime image carries a node inventory, and the lab-pass receipt carries the same triples (#3782)
+- feat(OMN-18490): the sweep records every per-check result, and the backfill reaches its whole pool (#3777)
+- feat(OMN-17255): the omnimarket drift guard says what it checked off registry (#3772)
+- feat(OMN-18709): the manifest's per-contract hash is a content hash (#3771)
+- fix(OMN-18627): an ACL refusal fails fast with its own type instead of surfacing as a timeout (#3770)
+- fix(OMN-18663): venv reconciler reports success only after a readback, under a lock (#3765)
+- fix(OMN-16831): every producer records which tenant its event belongs to (#3762)
+
 ## v0.38.32 (2026-09-18)
 
 ### Release

@@ -162,6 +162,11 @@ GOVERNED_LANES: dict[str, LaneSpec] = {
             "silently diverge; its ratchet moves when its owner deploys, not here."
         ),
     ),
+    "dogfood": LaneSpec(
+        overlay="docker-compose.dogfood.yml",
+        mutable_here=True,
+        owner_note="isolated mutable delegation dogfood lane (OMN-18693)",
+    ),
 }
 
 
@@ -203,6 +208,18 @@ class WriterOwned(NamedTuple):
 # still fails, and one that moved OUT of it would change `derived_writer_owned`
 # and fail the derivation assertion instead.
 GOVERNED_RUNNER_NAMESPACE = "omnimarket.nodes."
+
+# OMN-18693: dogfood runs the current dedicated profiles through the kernel
+# entrypoint. Dev and stability retain the legacy runner process shape this
+# gate originally covered, so their module coverage remains unchanged.
+DOGFOOD_KERNEL_WRITER_PROFILES: dict[str, str] = {
+    "projection_tenant_registry": "projection-writer-tenant-registry",
+    "projection_delegation": "projection-writer-delegation",
+    "projection_registration": "projection-writer-registration",
+    "projection_savings": "projection-writer-savings",
+    "projection_tenant_credentials": "projection-writer-tenant-credentials",
+    "projection_live_events": "projection-writer-live-events",
+}
 
 
 WRITER_OWNED_PROJECTIONS: dict[str, WriterOwned] = {
@@ -378,6 +395,7 @@ LANE_UNCOVERED_RATCHET: dict[str, int] = {
     "dev": 10,
     "stability-test": 10,
     "lakshman": 16,
+    "dogfood": 10,
 }
 
 # Writers the mutable dev lane has that the PROOF lane does not. The proof lane
@@ -510,11 +528,24 @@ def _writer_modules_on_lane(lane: str) -> dict[str, str]:
 def _covered_projections(lane: str) -> set[str]:
     """Writer-owned projections that have a writer service on ``lane``."""
     modules = set(_writer_modules_on_lane(lane))
-    return {
+    covered = {
         name
         for name, spec in WRITER_OWNED_PROJECTIONS.items()
         if spec.runner_module in modules
     }
+    if lane != "dogfood":
+        return covered
+
+    kernel_profiles = {
+        _environment(body).get("RUNTIME_PROFILE")
+        for body in _services(DOCKER_DIR / GOVERNED_LANES[lane].overlay).values()
+    }
+    covered.update(
+        name
+        for name, profile in DOGFOOD_KERNEL_WRITER_PROFILES.items()
+        if profile in kernel_profiles
+    )
+    return covered
 
 
 def _discovered_strict_overlays() -> set[str]:
@@ -697,6 +728,24 @@ def test_every_adopted_projection_has_a_writer_service_on_every_mutable_lane(
         "and writes nothing. Add the service to "
         f"docker/{GOVERNED_LANES[lane].overlay}."
     )
+
+
+def test_dogfood_kernel_profiles_fulfill_the_adopted_writer_set() -> None:
+    """Dogfood uses current kernel ownership, not a stale runner command."""
+    services = _services(DOCKER_DIR / GOVERNED_LANES["dogfood"].overlay)
+    expected_services = {
+        f"projection-{name.removeprefix('projection_').replace('_', '-')}-writer": profile
+        for name, profile in DOGFOOD_KERNEL_WRITER_PROFILES.items()
+    }
+
+    assert set(expected_services) <= set(services)
+    for service_name, profile in expected_services.items():
+        body = services[service_name]
+        environment = _environment(body)
+        assert body.get("command") is None, service_name
+        assert environment["RUNTIME_PROFILE"] == profile
+        assert environment["RUNTIME_INSTANCE_ID"] == f"dogfood-{profile}"
+        assert environment[STRICT_MODE_BINDING] == "1"
 
 
 def test_the_ruled_sets_are_exactly_the_ruled_names_and_disjoint() -> None:

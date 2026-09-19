@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Unattended worktree prune — macOS LaunchAgent (OMN-18832).
+
+  This is a TEMPLATE. Do not install it by hand and do not commit a rendered
+  copy: the rendered plist carries this machine's absolute paths, which
+  CLAUDE.md Operating Rule 6 forbids in source. Render and install with
+
+      bash scripts/launchd/install-worktree-prune.sh
+
+  which resolves $OMNI_HOME and the brew interpreter and writes the result to
+  ~/Library/LaunchAgents/.
+
+  Why the interpreter is a literal path: launchd executes with a restricted
+  PATH and does not run a login shell, so `python3` and `$(brew --prefix)`
+  both fail here. CLAUDE.md Operating Rule 11.
+
+  launchd DOES fire on this Mac. The standing claim that it does not was
+  corrected under OMN-17173: the earlier ticks had been bootout'd, not failed.
+  Before believing this agent runs, check BOTH `launchctl list` for the label
+  and a fresh entry in the log below — a loaded-but-bootout'd job looks
+  installed and does nothing.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.omninode.worktree-prune</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@BREW_PYTHON@</string>
+        <string>@OMNI_HOME@/omnibase_infra/scripts/worktree_prune_timer.py</string>
+        <string>--config</string>
+        <string>@OMNI_HOME@/omnibase_infra/config/worktree_prune_timer.yaml</string>
+        <string>--ledger</string>
+        <string>@OMNI_HOME@/docs/tracking/ROLLING_WORK_LEDGER.md</string>
+        <string>--state-dir</string>
+        <string>@OMNI_HOME@/.onex_state/worktree-prune</string>
+        <string>--execute</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>OMNI_HOME</key>
+        <string>@OMNI_HOME@</string>
+        <!-- launchd does not inherit a shell PATH; uv and git must be findable -->
+        <key>PATH</key>
+        <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Daily, in the same early window as the other morning processes and
+         after the 04:43 ground state, so the prune reads a settled tree. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>15</integer>
+    </dict>
+
+    <!-- Deliberately NOT RunAtLoad: installing the agent must not start a
+         removal pass as a side effect. The first run is taken by hand. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Deliberately NOT KeepAlive: this is a periodic batch job, not a
+         daemon, and restarting a prune that just exited would loop removals. -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>@OMNI_HOME@/.onex_state/worktree-prune/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>@OMNI_HOME@/.onex_state/worktree-prune/launchd.err.log</string>
+</dict>
+</plist>

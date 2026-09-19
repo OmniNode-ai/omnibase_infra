@@ -61,6 +61,9 @@ class RenderFixture(NamedTuple):
     # Module-level dict constants holding the render env. Extracted by AST, so
     # a fixture must expose them at module scope, not inside a test body.
     env_dicts: tuple[str, ...]
+    # Standalone fixtures name their compose file explicitly. A standalone
+    # render must still exercise every `:?` guard in the file it renders.
+    compose_file: str | None = None
     # (var, reason) pairs. Escape hatch for a fixture that must NOT set a var
     # because proving the unset behaviour is the point of that fixture.
     intentionally_unset: tuple[tuple[str, str], ...] = ()
@@ -116,6 +119,14 @@ RENDER_FIXTURES: tuple[RenderFixture, ...] = (
     RenderFixture(
         path="tests/integration/infra/test_lakshman_compose_render.py",
         env_dicts=("RENDER_ONLY_SECRETS",),
+    ),
+    # Dogfood is standalone, so it validates its own compose guards rather than
+    # skipping the base-compose path. This prevents a new dogfood `:?` input
+    # from becoming an unexecuted matrix row.
+    RenderFixture(
+        path="tests/integration/infra/test_dogfood_compose_render.py",
+        env_dicts=("RENDER_ONLY_SECRETS",),
+        compose_file="docker/docker-compose.dogfood.yml",
     ),
 )
 
@@ -232,13 +243,18 @@ def test_all_required_compose_vars_in_fixture(fixture: RenderFixture) -> None:
     introduces the gap, not on every unrelated PR afterwards.
     """
     source = _fixture_source(fixture)
-    if BASE_COMPOSE_FILENAME not in source:
+    if fixture.compose_file is None and BASE_COMPOSE_FILENAME not in source:
         pytest.skip(
             f"{fixture.path} does not layer {BASE_COMPOSE_FILENAME}; its `:?` "
             "vars come from another compose file."
         )
 
-    required = extract_required_compose_vars(COMPOSE_FILE)
+    compose_path = (
+        REPO_ROOT / fixture.compose_file
+        if fixture.compose_file is not None
+        else COMPOSE_FILE
+    )
+    required = extract_required_compose_vars(compose_path)
     provided = (
         extract_module_env_vars(source, fixture.env_dicts)
         | extract_env_file_vars(source)
@@ -246,7 +262,7 @@ def test_all_required_compose_vars_in_fixture(fixture: RenderFixture) -> None:
     )
     missing = required - provided
     assert not missing, (
-        "These `:?`-required env vars are in docker/docker-compose.infra.yml but "
+        f"These `:?`-required env vars are in {compose_path.relative_to(REPO_ROOT)} but "
         f"NOT supplied by the render fixture {fixture.path}:\n"
         + "\n".join(f"  - {var}" for var in sorted(missing))
         + "\n\nFix: add each missing var to "

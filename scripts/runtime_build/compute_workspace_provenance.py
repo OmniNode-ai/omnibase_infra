@@ -7,8 +7,10 @@ Run during Docker build (workspace mode only) to:
   - Hash each staged sibling repo tree under /workspace/sibling-repos/
   - Verify that the installed package content matches the recorded digest
   - Verify that the INSTALLED package directory in site-packages is
-    byte-for-byte identical to the staged source package directory
-    (OMN-14631 content-parity gate — see below)
+    byte-for-byte identical to the staged source package directory, plus
+    whatever the staged repo declares force-included into that package
+    from outside `src/` (OMN-14631 content-parity gate, OMN-18033
+    force-include resolution — see below)
   - Enforce that every staged sibling honors the consuming repo's uv.lock pin
     (fail-fast on a version regression below the pin — the 2026-06-11
     stability-crash condition, OMN-12989)
@@ -52,6 +54,7 @@ import importlib.util
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 
 # Co-located pin-resolution helpers (OMN-12989). Inside the build image this
@@ -145,13 +148,118 @@ def _tracked_files(root: Path) -> dict[str, bytes]:
     return out
 
 
+def _digest_files(files: dict[str, bytes]) -> str:
+    """Return a SHA-256 digest over a {relative_path: content} map, path-sorted."""
+    h = hashlib.sha256()
+    for rel in sorted(files):
+        h.update(rel.encode())
+        h.update(files[rel])
+    return h.hexdigest()
+
+
 def _hash_tree(root: Path) -> str:
     """Return a SHA-256 digest of every file under root, sorted by path."""
-    h = hashlib.sha256()
-    for rel, content in _tracked_files(root).items():
-        h.update(rel.encode())
-        h.update(content)
-    return h.hexdigest()
+    return _digest_files(_tracked_files(root))
+
+
+def _force_included_files(
+    repo_root: Path, import_name: str, errors: list[str]
+) -> dict[str, bytes]:
+    """Return the files a wheel force-include maps INTO this package's directory.
+
+    OMN-18033: a hatch `force-include` maps a path from outside `src/` into
+    the built wheel's package directory. Such a file is in the installed
+    tree by construction and can NEVER be in the staged `src/<pkg>` tree, so
+    the OMN-14631 content-parity comparison below read it as an extra
+    installed file -- i.e. as drift -- and hard-failed the build.
+
+    That is not a hypothetical. `omnibase_core#1710` (squash `5d562ab4`,
+    2026-09-19) added
+
+        [tool.hatch.build.targets.wheel.force-include]
+        "architecture-handshakes/gitignore-baseline.yaml" =
+            "omnibase_core/data/gitignore-baseline.yaml"
+
+    so the governance spec ships inside the wheel for downstream pre-commit
+    environments. Every `BUILD_SOURCE=workspace` build from 15:37Z that day
+    died on `differing files (1 total): ['data/gitignore-baseline.yaml']`,
+    and the .201 dev lane could not rebuild at all.
+
+    The answer is to RESOLVE the mapping, not to tolerate extra installed
+    files. Each declared source is read from its real location in the staged
+    tree and keyed by its destination relative to the package directory, so
+    the gate still compares its CONTENT byte-for-byte. An installed file
+    with no declaration behind it remains drift, which is what keeps this a
+    narrowing rather than a disarming.
+
+    Fail-closed: a declared mapping whose source is absent from the staged
+    tree means the staged tree is not the tree the wheel was built from --
+    exactly the condition this proof exists to refuse -- so it is recorded
+    as an error rather than read as "nothing declared".
+
+    Destinations outside `<import_name>/` are ignored: the parity comparison
+    only covers this package's own directory.
+    """
+    pyproject = repo_root / "pyproject.toml"
+    if not pyproject.exists():
+        return {}
+    try:
+        config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+        errors.append(
+            f"Cannot read force-include declarations for '{import_name}': "
+            f"{pyproject} does not parse as TOML ({exc}) (OMN-18033)."
+        )
+        return {}
+
+    build = config.get("tool", {}).get("hatch", {}).get("build", {})
+    if not isinstance(build, dict):
+        return {}
+    # The build-wide table applies to every target; the wheel target's own
+    # table overrides it for a repeated source key.
+    declared: dict[str, object] = {}
+    for table in (
+        build.get("force-include"),
+        build.get("targets", {}).get("wheel", {}).get("force-include")
+        if isinstance(build.get("targets"), dict)
+        else None,
+    ):
+        if isinstance(table, dict):
+            declared.update(table)
+
+    prefix = f"{import_name}/"
+    resolved: dict[str, bytes] = {}
+    for source_rel, destination in sorted(declared.items()):
+        if not isinstance(destination, str) or not destination.startswith(prefix):
+            continue
+        dest_rel = destination[len(prefix) :].strip("/")
+        if not dest_rel:
+            continue
+        source_path = repo_root / source_rel
+        if source_path.is_dir():
+            for rel, content in _tracked_files(source_path).items():
+                resolved[f"{dest_rel}/{rel}"] = content
+            continue
+        if source_path.is_file():
+            resolved[dest_rel] = source_path.read_bytes()
+            continue
+        errors.append(
+            f"Declared force-include source is missing from the staged tree "
+            f"for '{import_name}': {source_path} (declared as "
+            f"{source_rel!r} -> {destination!r} in {pyproject}). The staged "
+            "tree is not the tree the wheel was built from (OMN-18033)."
+        )
+    return resolved
+
+
+def _diff_file_maps(staged: dict[str, bytes], installed: dict[str, bytes]) -> list[str]:
+    """Return relative paths that differ (missing, extra, or changed content)."""
+    diffs = (
+        (set(staged) - set(installed))
+        | (set(installed) - set(staged))
+        | {rel for rel in set(staged) & set(installed) if staged[rel] != installed[rel]}
+    )
+    return sorted(diffs)
 
 
 def _installed_package_dir(import_name: str) -> Path | None:
@@ -179,14 +287,7 @@ def _content_parity_diff(staged_root: Path, installed_root: Path) -> list[str]:
     site-packages package directory file-by-file. An empty list means the
     installed content is byte-for-byte identical to the vendored source.
     """
-    staged = _tracked_files(staged_root)
-    installed = _tracked_files(installed_root)
-    diffs = (
-        (set(staged) - set(installed))
-        | (set(installed) - set(staged))
-        | {rel for rel in set(staged) & set(installed) if staged[rel] != installed[rel]}
-    )
-    return sorted(diffs)
+    return _diff_file_maps(_tracked_files(staged_root), _tracked_files(installed_root))
 
 
 def _installed_direct_url(dist_name: str) -> dict[str, object] | None:
@@ -373,12 +474,22 @@ def main() -> int:
             )
             continue
 
-        staged_pkg_digest = _hash_tree(package_src_dir)
-        installed_pkg_digest = _hash_tree(installed_dir)
+        # OMN-18033: the wheel's expected content is the staged `src/<pkg>`
+        # tree PLUS whatever the repo declares force-included into that
+        # package directory from outside `src/`. Resolving the declaration
+        # keeps the byte-for-byte comparison over those files instead of
+        # excusing them.
+        force_included = _force_included_files(repo_path, repo_dir_name, errors)
+        staged_files = _tracked_files(package_src_dir)
+        staged_files.update(force_included)
+        installed_files = _tracked_files(installed_dir)
+
+        staged_pkg_digest = _digest_files(staged_files)
+        installed_pkg_digest = _digest_files(installed_files)
         content_diff = (
             []
             if staged_pkg_digest == installed_pkg_digest
-            else _content_parity_diff(package_src_dir, installed_dir)
+            else _diff_file_maps(staged_files, installed_files)
         )
         if content_diff:
             errors.append(
@@ -401,6 +512,7 @@ def main() -> int:
                     "staged_package_digest": staged_pkg_digest,
                     "installed_package_digest": installed_pkg_digest,
                     "content_diff_files": content_diff,
+                    "force_included_files": sorted(force_included),
                     "status": "content_mismatch",
                 }
             )
@@ -416,6 +528,7 @@ def main() -> int:
                 "installed_dir": str(installed_dir),
                 "staged_package_digest": staged_pkg_digest,
                 "installed_package_digest": installed_pkg_digest,
+                "force_included_files": sorted(force_included),
                 "status": "verified",
             }
         )

@@ -48,9 +48,36 @@ set -euo pipefail
 # changes is that git's fetch negotiation now has a local "have" (the detached
 # HEAD commit) to offer, so the server sends a small delta instead of the whole
 # object graph. A mirror that is minutes behind costs a slightly larger delta.
-# A mirror that is missing, unreachable, or corrupt costs nothing: every step
+# A mirror that is missing, unreachable, or corrupt is skipped: every step
 # below is guarded and returns 0, leaving the workspace exactly as this hook
 # would have left it before this change.
+#
+# OMN-18802 CORRECTION -- the paragraph above used to end "costs nothing", and
+# that was false. Returning 0 is not the same as costing nothing. This is a
+# PRE-JOB hook, so its wall clock is billed to the job before the job's first
+# step runs, and the guards below were each independently reasonable while
+# their SERIAL SUM was not: two probes at 10s plus a 1s sleep, a seed fetch at
+# 180s, an ls-remote at 10s, a detached checkout at another 180s, the C2c
+# GITHUB_SHA fetch at 60s, and sibling probes at 20s apiece.
+#
+# On 2026-09-19T02:50Z that sum reached 325s against a degenerate
+# onex_change_control mirror (153,451 loose objects, 4.52 GiB, 389 packs), and
+# both OCC publisher jobs -- which declare `timeout-minutes: 5` -- were
+# cancelled with "The job has exceeded the maximum execution time of 5m0s"
+# having run ZERO steps. No publisher ran, so no companion was minted and the
+# caller PR's receipt gate reported `missing_contract`. A fail-open path that
+# costs more than the job has is not fail-open; it is a job-killer with a
+# reassuring log line.
+#
+# THE BOUND. Everything from here to the end of the mirror block shares ONE
+# wall-clock budget, _C2_HOOK_BUDGET_SECONDS, started at hook top level. Each
+# `timeout` is clamped to whatever is left of it, and once it is gone the rest
+# of the mirror work is skipped outright. The budget is deliberately a small
+# fraction of the tightest job on the fleet: a pre-job optimisation must never
+# be able to cancel the job it is optimising. Pinned by
+# tests/scripts/test_runner_job_started_hook_budget_omn18802.py, whose
+# behavioural leg times the hook against a listener that accepts and never
+# answers -- the shape an overflowed git-daemon accept queue actually presents.
 #
 # The detached checkout is load-bearing, not cosmetic: checkout's
 # `prepareExistingDirectory` runs `git checkout --detach` on the existing repo
@@ -62,6 +89,77 @@ _C2_MIRROR_PORT="${OMNI_GIT_MIRROR_PORT:-9418}"
 # needed); the committed default is the post-canary fleet-wide value.
 _C2_MIRROR_RUNNERS="${OMNI_GIT_MIRROR_RUNNERS:-ALL}"
 _C2_SEED_TIMEOUT="${OMNI_GIT_MIRROR_SEED_TIMEOUT:-180}"
+
+# OMN-18802 -- the one aggregate wall-clock budget for the whole mirror block.
+#
+# 60s against the 300s of the tightest job on the fleet (both OCC publishers,
+# and several onex_change_control guards.yml jobs, declare `timeout-minutes:
+# 5`). A healthy pre-seed is well inside it -- omnimarket measured 5s, and a
+# repacked onex_change_control mirror is the same order -- so this bound costs
+# the good path nothing and only ever truncates the pathological one.
+#
+# Raising this is a decision about how much of someone else's job this hook is
+# allowed to spend. The test asserts it stays at or under a quarter of the
+# tightest job, so raising it past that is a red test, not a review catch.
+#
+# The clock starts HERE, at top level, so it covers the whole hook and not
+# just the mirror calls -- the disk-admission gate and the C1 pypi probe run
+# before the mirror block and their time is the job's too. Both are already
+# bounded (the pypi probe by _C1_PYPI_PROBE_TIMEOUT, 5s), so in practice they
+# take a second or two of the 60. If one of them ever does run long, skipping
+# the mirror optimisation is the correct outcome rather than a regression:
+# by then the job is close enough to its own limit that a speculative
+# pre-seed is the last thing it needs.
+_C2_HOOK_BUDGET_SECONDS="${OMNI_GIT_MIRROR_HOOK_BUDGET:-60}"
+_C2_BUDGET_START="$(date +%s)"
+_C2_BUDGET_EXHAUSTED_REPORTED=0
+
+# Seconds left in the budget, floored at 0.
+_c2_budget_remaining() {
+    local now elapsed remaining
+    now="$(date +%s)"
+    elapsed=$(( now - _C2_BUDGET_START ))
+    remaining=$(( _C2_HOOK_BUDGET_SECONDS - elapsed ))
+    if [[ "${remaining}" -lt 0 ]]; then
+        remaining=0
+    fi
+    printf '%s' "${remaining}"
+}
+
+# Echo the duration a `timeout` may be given here: the smaller of what the call
+# site wants and what is left of the budget.
+#
+# RETURNS NON-ZERO, rather than echoing 0, when the budget is spent. This is
+# the whole reason the helper exists rather than inlining the arithmetic:
+# `timeout 0` means NO LIMIT to coreutils, so handing an exhausted budget to
+# `timeout` as a zero would convert the bound into an unbounded wait -- the
+# exact failure this budget exists to prevent, reintroduced by a helper that
+# looks correct.
+_c2_budget_timeout() {
+    local want="$1" remaining
+    remaining="$(_c2_budget_remaining)"
+    [[ "${remaining}" -gt 0 ]] || return 1
+    if [[ "${want}" -lt "${remaining}" ]]; then
+        printf '%s' "${want}"
+    else
+        printf '%s' "${remaining}"
+    fi
+}
+
+# True when the budget is gone. Says so exactly once per job: the point is a
+# diagnosable log, and one line per skipped probe would bury it.
+_c2_budget_spent() {
+    local remaining
+    remaining="$(_c2_budget_remaining)"
+    if [[ "${remaining}" -gt 0 ]]; then
+        return 1
+    fi
+    if [[ "${_C2_BUDGET_EXHAUSTED_REPORTED}" -eq 0 ]]; then
+        _C2_BUDGET_EXHAUSTED_REPORTED=1
+        echo "[c2-budget] the ${_C2_HOOK_BUDGET_SECONDS}s mirror budget is spent; skipping the rest of the mirror work (fail-open). The job keeps its own timeout-minutes -- this hook does not get to spend it (OMN-18802)."
+    fi
+    return 0
+}
 
 seed_workspace_from_mirror() {
     local workspace_dir="$1"
@@ -107,10 +205,15 @@ seed_workspace_from_mirror() {
     # the difference between "mirror is down" and "this repo is not mirrored"
     # undiagnosable from the job log, which is the only surface that matters
     # once the fleet is running unattended.
-    local probe_err probe_ok=0 attempt
+    local probe_err probe_ok=0 attempt _c2_t
     probe_err="$(mktemp)"
     for attempt in 1 2; do
-        if timeout 10 git ls-remote --heads "${mirror_url}" >/dev/null 2>"${probe_err}"; then
+        # OMN-18802: the retry is for a transient miss, not for a mirror that
+        # is stalling. If the first attempt consumed the budget there is no
+        # second attempt -- a stalling mirror is exactly the case where the
+        # retry doubled the cost for no chance of success.
+        _c2_t="$(_c2_budget_timeout 10)" || break
+        if timeout "${_c2_t}" git ls-remote --heads "${mirror_url}" >/dev/null 2>"${probe_err}"; then
             probe_ok=1
             break
         fi
@@ -128,6 +231,7 @@ seed_workspace_from_mirror() {
 
     (
         set +e
+        local _c2_t
         git init --quiet "${workspace_dir}" || exit 0
         # `origin` must match byte-for-byte what actions/checkout computes
         # (`${GITHUB_SERVER_URL}/${owner}/${repo}`, no .git suffix) or checkout
@@ -137,13 +241,15 @@ seed_workspace_from_mirror() {
         # Branch heads + tags only. refs/pull/* is deliberately NOT fetched:
         # the objects are shared with the branch graph anyway, and the ref
         # explosion would cost more than it saves.
-        timeout "${_C2_SEED_TIMEOUT}" git -C "${workspace_dir}" fetch --quiet --prune "${mirror_url}" \
+        _c2_t="$(_c2_budget_timeout "${_C2_SEED_TIMEOUT}")" || exit 0
+        timeout "${_c2_t}" git -C "${workspace_dir}" fetch --quiet --prune "${mirror_url}" \
             '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' || exit 0
 
         # Anchor HEAD on the mirror's default branch so checkout's detach
         # succeeds and so fetch negotiation has a "have" to offer.
         local head_ref head_sha
-        head_ref="$(timeout 10 git ls-remote --symref "${mirror_url}" HEAD 2>/dev/null | awk '/^ref:/ {print $2; exit}')"
+        _c2_t="$(_c2_budget_timeout 10)" || exit 0
+        head_ref="$(timeout "${_c2_t}" git ls-remote --symref "${mirror_url}" HEAD 2>/dev/null | awk '/^ref:/ {print $2; exit}')"
         head_sha=""
         if [[ -n "${head_ref}" ]]; then
             head_sha="$(git -C "${workspace_dir}" rev-parse --verify --quiet "refs/remotes/origin/${head_ref##refs/heads/}")"
@@ -155,7 +261,8 @@ seed_workspace_from_mirror() {
             done
         fi
         [[ -n "${head_sha}" ]] || exit 0
-        timeout "${_C2_SEED_TIMEOUT}" git -C "${workspace_dir}" checkout --quiet --detach "${head_sha}" || exit 0
+        _c2_t="$(_c2_budget_timeout "${_C2_SEED_TIMEOUT}")" || exit 0
+        timeout "${_c2_t}" git -C "${workspace_dir}" checkout --quiet --detach "${head_sha}" || exit 0
         exit 0
     ) || true
 
@@ -287,7 +394,9 @@ _c2_ensure_head_sha_fetched() {
     fi
     _c2_head_sha_fetched=1
     [[ -n "${GITHUB_SHA:-}" ]] || return 0
-    timeout 60 git -C "${workspace_dir}" fetch --quiet "${infra_mirror}" "${GITHUB_SHA}" 2>/dev/null || true
+    local _c2_t
+    _c2_t="$(_c2_budget_timeout 60)" || return 0
+    timeout "${_c2_t}" git -C "${workspace_dir}" fetch --quiet "${infra_mirror}" "${GITHUB_SHA}" 2>/dev/null || true
 }
 
 wire_uv_git_mirror_rewrite() {
@@ -296,6 +405,12 @@ wire_uv_git_mirror_rewrite() {
     # `if`, not an AND-list: under `set -e` a false AND-list would return
     # non-zero from the function. Same reasoning as the pre-seed kill switch.
     if [[ "${OMNI_GIT_MIRROR_REWRITE_DISABLE:-0}" == "1" ]]; then
+        return 0
+    fi
+
+    # OMN-18802: a spent budget skips this whole mechanism rather than
+    # entering it and paying one more clamped probe per discovered pin.
+    if _c2_budget_spent; then
         return 0
     fi
     if [[ "${OMNI_GIT_MIRROR_DISABLE:-0}" == "1" ]]; then
@@ -359,10 +474,15 @@ wire_uv_git_mirror_rewrite() {
         # on `uploadpack.allowFilter` being set on the mirror, so a mirror that
         # has not been prepared for this simply answers "absent" and the job
         # stays on github.com.
-        local probe_dir probe_ok=0
+        local probe_dir probe_ok=0 _c2_t
+        if _c2_budget_spent; then
+            echo "[c2-mirror-rewrite] ${repo} pin ${pin:0:12} not probed; leaving uv on github.com (fail-open)."
+            continue
+        fi
+        _c2_t="$(_c2_budget_timeout 20)" || continue
         probe_dir="$(mktemp -d)"
         if git -C "${probe_dir}" init --quiet 2>/dev/null \
-            && timeout 20 git -C "${probe_dir}" fetch --quiet --depth=1 --filter=tree:0 \
+            && timeout "${_c2_t}" git -C "${probe_dir}" fetch --quiet --depth=1 --filter=tree:0 \
                    "${repo_mirror}" "${pin}" >/dev/null 2>&1; then
             probe_ok=1
         fi
@@ -477,6 +597,12 @@ wire_sibling_checkout_mirror_rewrite() {
     if [[ "${OMNI_GIT_MIRROR_CHECKOUT_REWRITE_DISABLE:-0}" == "1" ]]; then
         return 0
     fi
+
+    # OMN-18802: a spent budget skips this whole mechanism rather than
+    # entering it and paying one more clamped probe per discovered ref.
+    if _c2_budget_spent; then
+        return 0
+    fi
     if [[ "${OMNI_GIT_MIRROR_DISABLE:-0}" == "1" ]]; then
         return 0
     fi
@@ -584,10 +710,15 @@ wire_sibling_checkout_mirror_rewrite() {
                 # Exact SHA -- same by-SHA servability probe C2b uses for the
                 # uv pin (see the long comment above this function for why
                 # this specific check exists).
-                local probe_dir probe_ok=0
+                local probe_dir probe_ok=0 _c2_t
+                if ! _c2_t="$(_c2_budget_timeout "${_C2C_SIBLING_PROBE_TIMEOUT}")"; then
+                    echo "[c2-mirror-rewrite] ${repo}@${ref:0:12} not probed; leaving ${repo} sibling checkout(s) on github.com (fail-open)."
+                    all_ok=0
+                    break
+                fi
                 probe_dir="$(mktemp -d)"
                 if git -C "${probe_dir}" init --quiet 2>/dev/null \
-                    && timeout "${_C2C_SIBLING_PROBE_TIMEOUT}" git -C "${probe_dir}" fetch --quiet --depth=1 --filter=tree:0 \
+                    && timeout "${_c2_t}" git -C "${probe_dir}" fetch --quiet --depth=1 --filter=tree:0 \
                            "${repo_mirror}" "${ref}" >/dev/null 2>&1; then
                     probe_ok=1
                 fi
@@ -600,7 +731,13 @@ wire_sibling_checkout_mirror_rewrite() {
             else
                 # Branch/tag literal -- confirm the mirror currently
                 # advertises it.
-                if ! timeout "${_C2C_SIBLING_PROBE_TIMEOUT}" git ls-remote --exit-code "${repo_mirror}" "${ref}" >/dev/null 2>&1; then
+                local _c2_t
+                if ! _c2_t="$(_c2_budget_timeout "${_C2C_SIBLING_PROBE_TIMEOUT}")"; then
+                    echo "[c2-mirror-rewrite] ${repo}@${ref} not probed; leaving ${repo} sibling checkout(s) on github.com (fail-open)."
+                    all_ok=0
+                    break
+                fi
+                if ! timeout "${_c2_t}" git ls-remote --exit-code "${repo_mirror}" "${ref}" >/dev/null 2>&1; then
                     echo "[c2-mirror-rewrite] ${repo}@${ref} not advertised by ${repo_mirror}; leaving ${repo} sibling checkout(s) on github.com (fail-open)."
                     all_ok=0
                     break

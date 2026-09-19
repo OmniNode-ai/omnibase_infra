@@ -15,7 +15,51 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-aiohttp>=1.0"]
+# OMN-18640 follow-up: `mypy` and `types-PyYAML` are here for the SAME reason
+# as the `[tool.mypy]` block below -- to make a local run in this directory
+# give the CI verdict. The root environment already carries both, so CI is
+# green either way; without them a local run either has no mypy at all, or
+# has one that reports `Class cannot subclass "SafeLoader" (has type "Any")`
+# because the stubs are absent. That is the second instance of the same
+# divergence, found while closing the first.
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-aiohttp>=1.0",
+    "mypy>=1.11",
+    "types-PyYAML>=6.0",
+]
+
+# OMN-18640 follow-up to #3818. That PR put this package inside the ROOT
+# project's type scope, which is where this repository declares scope and is
+# the right place for the gate. This block exists for a different reader: the
+# one who changes into this directory and runs `mypy` by hand.
+#
+# mypy resolves its config from `./pyproject.toml` and does NOT walk parents.
+# Without this block a local run in this directory gets NO configuration at
+# all -- in particular no `plugins = ["pydantic.mypy"]` -- and reports three
+# errors that do not exist, because without the plugin mypy cannot see that a
+# `mode="before"` field validator is what narrows a `str` onto a Literal field.
+# Measured on dev at 31d242a71, same tree, same moment: with the plugin,
+# `Success: no issues found in 27 source files`; with the identical config and
+# the plugin line deleted, `Found 3 errors in 2 files`. A lane acted on those
+# three before isolating them, so this is a cost that has already been paid
+# once rather than a hypothetical.
+#
+# These values MIRROR the root pyproject's `[tool.mypy]` and exist to make the
+# local verdict equal the CI verdict.
+# `tests/ci/test_deploy_agent_local_mypy_config_omn18640.py` fails if they
+# drift apart. `mypy_path`, `namespace_packages` and `explicit_package_bases`
+# are deliberately NOT copied: they point at the root `src/` tree, which is
+# not on this sub-project's import path.
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
+warn_redundant_casts = false
+no_implicit_reexport = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -25,6 +69,7 @@ markers = [
     "promotion_guard: test controls the prod promotion-lineage guard stub itself (OMN-12626)",
     "gateway_lane: test controls the gateway-lane deploy stub itself (OMN-18134)",
     "deps_recreate: test drives the real supervised deps recreate (OMN-18692)",
+    "deps_convergence: test drives the real deps-convergence observation (OMN-18640)",
 ]
 
 [tool.setuptools.packages.find]

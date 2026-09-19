@@ -689,7 +689,21 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # migration drops the policy, disables RLS and drops the column inside ONE
     # DO block, so the OMN-17288 window of "RLS enforcing, zero policies" cannot
     # open between statements.
-    assert len(result.declarations) == 188
+    # 188 -> 190 for OMN-18768: two new node-owned migrations,
+    # nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql,
+    # vendored from omnimarket by scripts/sync-node-migrations.sh. The count is
+    # asserted rather than derived on purpose -- it is what makes a vendored
+    # migration that arrives WITHOUT its declaration a red test here instead of
+    # a fail-closed surprise at bootstrap deploy time.
+    # 190 -> 195 for OMN-18693: five new GRANT-only migrations ordering the
+    # dogfood lane's tenant_projection_writer role onto five house-tenant
+    # relations ahead of the writer's own DDL --
+    # nodes/node_projection_dep_health/004_grant_tenant_projection_writer_dep_health_findings.sql,
+    # nodes/node_projection_pattern_learning/002_grant_tenant_projection_writer_pattern_learning_artifacts.sql,
+    # nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql,
+    # nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql,
+    # nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql.
+    assert len(result.declarations) == 195
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

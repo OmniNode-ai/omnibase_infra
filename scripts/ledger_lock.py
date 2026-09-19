@@ -763,6 +763,7 @@ def read_ledger_tail(path: Path, n: int) -> str:
 
 EXIT_SECTION_CAP = 74
 EXIT_ROW_SHAPE = 76
+EXIT_LEDGER_PATH = 77
 ROLL_RECEIPT_SCHEMA = "ledger-roll/1"
 ROLL_RECEIPT_PREFIX = "ledger_lock: ROLL "
 ROLL_POINTER_MARKER = "<!-- ledger-roll:"
@@ -985,6 +986,56 @@ def _repo_root_above(start: Path) -> Path | None:
         if (candidate / ".git").exists():
             return candidate
     return None
+
+
+def repo_root_ledger_reason(ledger: Path) -> str | None:
+    """Refuse a ledger that sits directly in the ROOT of a git repository.
+
+    The defect this closes, OMN-16729. A lane brief spelled the documented
+    recipe with an un-substituted placeholder standing where the ledger path
+    belongs. A worker passed that placeholder through literally, so this tool
+    was told to protect a file of that name -- and, doing exactly as asked,
+    CREATED it at the repository root and appended to it. Three rows were
+    written there over five days. Every one of them was invisible to every
+    reader of the real ledger, because nothing reads a file at the repo root,
+    and the append reported success each time.
+
+    The refusal is written against the SHAPE of that mistake rather than
+    against any particular ledger name. A placeholder passed through literally
+    always lands as a bare name at the caller's repository root; a real ledger
+    always lives in a directory inside the repository that exists to hold it.
+    So the rule is positional, not nominal: a ledger may not be a file sitting
+    directly in the directory that holds ``.git``.
+
+    Naming the accepted ledger instead would be the wrong control twice over.
+    It would not generalise past this fleet's one file, and it would hardcode
+    a tracking path into a tool whose whole claim is that it is told which
+    ledger to protect and resolves none itself -- the property OMN-17235 rests
+    on, and the one omni_home ``tests/test_ledger_lock_path_parametrization.py
+    ::test_ledger_path_is_a_positional_argument`` asserts by grepping this
+    source.
+
+    A tree with no ``.git`` above the ledger is not judged at all: that is a
+    scratch directory or a test fixture, and there is no repository whose
+    layout the ledger could be misplaced within.
+    """
+    root = _repo_root_above(ledger.parent)
+    if root is None:
+        return None
+    if ledger.parent != root:
+        return None
+    return (
+        f"{ledger} sits directly in the root of the git repository at {root}. "
+        "A ledger belongs in the directory inside that repository which holds "
+        "it -- the tracking directory the fleet's rows are read from, or an "
+        f"archive directory beneath it -- so pass the full path to the file "
+        f"you mean, of the form {root}/<tracking dir>/<LEDGER>.md or "
+        f"{root}/<tracking dir>/archive/<ARCHIVE>.md. The usual cause is a "
+        "brief whose recipe carried an un-substituted placeholder where the "
+        "ledger path belongs, passed through literally: that creates a new "
+        "file at the repository root which no reader of the real ledger ever "
+        "sees. Nothing was written and no file was created."
+    )
 
 
 def _portable_path(path: Path, ledger: Path) -> str:
@@ -4287,6 +4338,16 @@ def main(argv: list[str] | None = None) -> int:
     parser_argv, command = split_command(raw_argv)
     parser = build_parser()
     args = parser.parse_args(parser_argv)
+
+    # OMN-16729: judged FIRST, ahead of every action and ahead of the lock.
+    # LedgerLock creates its lock directory beside the ledger, and an append
+    # creates the ledger itself, so a refusal that ran any later would already
+    # have written the thing it refuses. This one writes nothing at all.
+    path_reason = repo_root_ledger_reason(args.ledger)
+    if path_reason is not None:
+        print(f"ledger_lock: LEDGER PATH REFUSED -- {path_reason}", file=sys.stderr)
+        return EXIT_LEDGER_PATH
+
     validate_section_cap_args(parser, args)
     payload = read_append_payload(args)
 

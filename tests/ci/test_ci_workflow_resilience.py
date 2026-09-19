@@ -266,8 +266,29 @@ def test_runtime_boot_smoke_is_not_run_on_pull_requests() -> None:
     job = workflow["jobs"]["runtime-boot-smoke"]
     summary = workflow["jobs"]["ci-summary"]
 
-    assert "github.event_name != 'pull_request'" in job["if"]
-    assert "needs.tests-gate.result == 'success'" in job["if"]
+    # OMN-18835: this asserted the LITERAL `github.event_name != 'pull_request'`
+    # until `push: branches: [dev]` landed, at which point that blanket
+    # condition also admitted every merge to `dev` -- roughly fifty a day, of a
+    # compose boot this repository has never once seen execute (it has
+    # concluded `skipped` on every observable run). The job is now enumerated
+    # positively, `merge_group` / `workflow_dispatch` / a push to `main`, which
+    # is strictly narrower than what this test used to accept and still
+    # excludes `pull_request`. So the property is asserted here instead of the
+    # spelling: whatever the condition says, it must not admit a pull request.
+    # The `dev`-push half is pinned separately by
+    # tests/ci/test_post_merge_dev_trigger_omn18835.py.
+    condition = str(job["if"])
+    assert "github.event_name == 'pull_request'" not in condition, (
+        "runtime-boot-smoke now admits a pull_request event; it is a compose "
+        f"boot and must not run on PRs. Got: {condition!r}"
+    )
+    assert "pull_request" not in condition.replace(
+        "github.event_name != 'pull_request'", ""
+    ), (
+        "runtime-boot-smoke's condition mentions pull_request in a shape this "
+        f"test does not understand; re-read it rather than widening. Got: {condition!r}"
+    )
+    assert "needs.tests-gate.result == 'success'" in condition
     # ci-summary is a NO-`needs` fail-closed poller (OMN-14127); regardless of
     # whether it declares `needs`, runtime-boot-smoke must never be a dependency
     # of it (a PR-skipped advisory job must not wedge the required summary gate).

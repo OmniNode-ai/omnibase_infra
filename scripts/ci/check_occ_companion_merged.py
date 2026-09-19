@@ -30,7 +30,8 @@ Verdict model (mirrors ci_summary_gate exit codes)
 --------------------------------------------------
 * ``PASS`` (0)    — evidence is durable, or the gate does not apply
   (non-PR event; trusted dependency-bot author, mirroring occ-preflight's
-  OMN-13762 exemption).
+  OMN-13762 exemption; or the occ-autobind producer classified this head's
+  own diff as dependency-pin-only, so no companion is owed — OMN-18848).
 * ``PENDING`` (2) — evidence may still become durable without a new commit:
   Evidence-Source not yet PATCHed onto the body by occ-autobind, companion
   still OPEN (auto-merge in flight), or a transient API error. The runner
@@ -103,6 +104,50 @@ EVIDENCE_SOURCE_FIELD = "Evidence-Source"
 AUTOBIND_OUTCOME_CHECK_NAME = "occ-autobind / outcome"
 AUTOBIND_OUTCOME_MARKER_PREFIX = "occ-autobind-outcome:"
 AUTOBIND_OUTCOME_ERROR = "ERROR"
+AUTOBIND_OUTCOME_DECLINED = "DECLINED"
+# OMN-18647 -- DECLINED is not one verdict, it is four, and only two of them are
+# permanent. The producer spells which in the marker line's ``reason=`` field
+# (omnimarket/.../handlers/occ_companion_emitter.py):
+#
+#   skip:NO_RED_DERIVABLE_CHECK  no changed-file candidate is RED-derivable, so
+#                                hand-authored evidence is required (OMN-15247)
+#   skip:DEFER_HAND_AUTHORED     deliberately deferred to a hand-authored
+#                                companion (OMN-15247 contention path)
+#
+# Both mean the bus path will never mint for this head. The other two --
+# ``skip:LEASE_HELD`` (another producer is minting right now, OMN-14793) and the
+# OMN-14741 F-17 suppressions (draft, closed, not a mergeable product PR) --
+# genuinely do resolve themselves, and polling through them is correct. Treating
+# every DECLINED as terminal would fail a draft PR that is about to be marked
+# ready, which is why this set is a denylist of reasons and not the verdict.
+AUTOBIND_PERMANENT_DECLINE_REASONS = (
+    "skip:NO_RED_DERIVABLE_CHECK",
+    "skip:DEFER_HAND_AUTHORED",
+)
+# OMN-18848 -- the one DECLINED reason that is a PASS rather than a refusal.
+#
+# A dependency-pin-only PR (a post-release version bump: manifest + lockfile,
+# manifest changes confined to version/dependency-pin keys) carries no
+# behavioural claim, so no changed file CAN be RED-derivable and the producer
+# can never mint. Before this token that shape declined as
+# ``skip:NO_RED_DERIVABLE_CHECK``, indistinguishable from "this PR owes evidence
+# nobody wrote", which makes every PR the release Dependency Cascade opens
+# unmergeable without a hand-authored companion, one per bump, forever.
+#
+# This is emphatically NOT a skip token. Nothing in the PR body is read here:
+# the producer CLASSIFIES THE DIFF ITSELF (omnimarket
+# ``occ_content_probe.classify_dependency_pin_only``, fail-closed in every
+# ambiguous direction) and records the verdict on the ``occ-autobind / outcome``
+# check-run, which is fetched for the PR's CURRENT head SHA and nothing else. So
+# an author cannot assert it, a stale outcome cannot survive a new commit (the
+# new SHA carries no outcome and the gate goes back to PENDING then FAIL), and a
+# diff carrying one source file is refused by the classifier before this
+# constant is ever consulted.
+AUTOBIND_NO_COMPANION_REQUIRED_REASONS = ("skip:DEPENDENCY_PIN_ONLY",)
+# Named, not linked: the URL Authority Gate is right that a literal URL in
+# source has no contract behind it, and the producer's own reason text
+# already carries this identifier.
+HAND_AUTHORING_REFERENCE = "OMN-15247 (hand-authored OCC evidence)"
 OCC_PR_REF_RE = re.compile(r"^OCC#(\d+)$", re.IGNORECASE)
 HEX_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 MERGE_GROUP_PR_RE = re.compile(r"/pr-(\d+)-")
@@ -278,14 +323,47 @@ def resolve_pr_number(
     return ""
 
 
-def _terminal_autobind_error(
+def is_permanent_decline(reason: str) -> bool:
+    """Whether a DECLINED ``reason=`` names a verdict that cannot resolve itself.
+
+    OMN-18647. Matched on the reason token the producer writes, never on the
+    prose after it, so rewording a message cannot silently change a verdict.
+    """
+    stripped = reason.strip()
+    return any(
+        stripped.startswith(marker) for marker in AUTOBIND_PERMANENT_DECLINE_REASONS
+    )
+
+
+def is_no_companion_required(reason: str) -> bool:
+    """Whether a DECLINED ``reason=`` names a verdict that needs no companion.
+
+    OMN-18848. Matched on the reason token the producer writes, never on the
+    prose after it, so rewording a message cannot silently change a verdict --
+    the same discipline :func:`is_permanent_decline` follows, and for the
+    stronger reason that this predicate returning ``True`` is the only path on
+    which a PR citing no evidence at all is allowed to pass.
+    """
+    stripped = reason.strip()
+    return any(
+        stripped.startswith(marker) for marker in AUTOBIND_NO_COMPANION_REQUIRED_REASONS
+    )
+
+
+def _terminal_autobind_outcome(
     fetcher: GhFetcher, repo: str, pr_number: str, head_sha: str
-) -> str | None:
-    """The producer's ERROR reason for *head_sha*, or ``None``.
+) -> tuple[str, str] | None:
+    """The producer's TERMINAL ``(outcome, reason)`` for *head_sha*, or ``None``.
+
+    Terminal means the companion is not coming for this head: an ``ERROR``, or a
+    ``DECLINED`` whose reason is one of the permanent ones (OMN-18647) or the
+    no-companion-required one (OMN-18848). A recoverable ``DECLINED`` (lease
+    held, draft/closed suppression) and a ``MINTED`` both return ``None``,
+    because in both cases the stamp genuinely may still arrive.
 
     Fail-OPEN by design, and only here: an unreadable check-run list, a missing
-    head SHA, or any non-ERROR outcome all return ``None`` and leave the caller
-    on its existing PENDING path. This short-circuit may only ever turn a
+    head SHA, or any non-terminal outcome all return ``None`` and leave the
+    caller on its existing PENDING path. This short-circuit may only ever turn a
     would-be timeout into a fast, reasoned failure -- it must never be able to
     fail a PR on its own, because the evidence it reads is written by a
     different repo's runtime and an outage there would otherwise become an
@@ -300,9 +378,17 @@ def _terminal_autobind_error(
     if parsed is None:
         return None
     outcome, reason = parsed
-    if outcome.upper() != AUTOBIND_OUTCOME_ERROR:
-        return None
-    return reason or "(no reason recorded)"
+    upper = outcome.upper()
+    if upper == AUTOBIND_OUTCOME_ERROR:
+        return AUTOBIND_OUTCOME_ERROR, reason or "(no reason recorded)"
+    if upper == AUTOBIND_OUTCOME_DECLINED and (
+        is_permanent_decline(reason) or is_no_companion_required(reason)
+    ):
+        # OMN-18848: "terminal" means the companion is not coming for this head.
+        # That is true of a no-companion-required decline too; whether terminal
+        # means FAIL or PASS is decided by the caller, not here.
+        return AUTOBIND_OUTCOME_DECLINED, reason
+    return None
 
 
 def evaluate_once(
@@ -370,13 +456,41 @@ def evaluate_once(
         # which the runtime already knew and had already typed. A terminal ERROR
         # outcome on the head SHA means the companion is not coming, so waiting
         # is not merely wasteful, it is wrong.
-        outcome = _terminal_autobind_error(fetcher, repo, pr_number, head_sha)
-        if outcome is not None:
+        terminal = _terminal_autobind_outcome(fetcher, repo, pr_number, head_sha)
+        if terminal is not None:
+            verdict_outcome, reason = terminal
+            if verdict_outcome == AUTOBIND_OUTCOME_DECLINED:
+                if is_no_companion_required(reason):
+                    # OMN-18848: the producer classified this diff as
+                    # dependency-pin-only and recorded that verdict against THIS
+                    # head SHA. There is no companion to wait for and none is
+                    # owed.
+                    return Verdict(
+                        EXIT_PASS,
+                        f"{repo}#{pr_number} needs no OCC companion: the "
+                        "occ-autobind producer classified this head's diff as "
+                        f"dependency-pin-only ({reason}). Derived from the diff "
+                        "and bound to this head SHA -- a new commit re-opens the "
+                        "gate (OMN-18848).",
+                    )
+                # OMN-18647: a permanent decline is a decision, not a fault. The
+                # author needs the producer's own words, because "stamp_absent --
+                # poll deadline reached" describes the clock, not the cause.
+                return Verdict(
+                    EXIT_FAIL,
+                    f"{repo}#{pr_number} has no 'Evidence-Source:' line and the "
+                    f"occ-autobind producer reported "
+                    f"{AUTOBIND_OUTCOME_DECLINED} for this head: {reason}. This "
+                    "is a deliberate, permanent refusal -- the OCC companion "
+                    "will NOT appear on its own and re-running the publisher "
+                    "will not change it. Hand-author the evidence: "
+                    f"{HAND_AUTHORING_REFERENCE} (OMN-18647).",
+                )
             return Verdict(
                 EXIT_FAIL,
                 f"{repo}#{pr_number} has no 'Evidence-Source:' line and the "
                 f"occ-autobind producer reported {AUTOBIND_OUTCOME_ERROR} for this "
-                f"head: {outcome}. The OCC companion will NOT appear on its own -- "
+                f"head: {reason}. The OCC companion will NOT appear on its own -- "
                 "repair the reported fault and re-run the publisher, or hand-author "
                 "the companion (OMN-18069).",
             )

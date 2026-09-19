@@ -1217,6 +1217,158 @@ jq -n \
     }' > "$STATE_FILE"
 
 # ---------------------------------------------------------------------------
+# Fleet-observation bus emit (OMN-18768, closing OMN-16943)
+# ---------------------------------------------------------------------------
+# Until this block, this monitor knew the state of every runner in the fleet on
+# a 3-minute cadence and told a CHAT CHANNEL, and nothing else. It emitted no
+# bus event, so nothing downstream could read the fleet: not alert triage, not a
+# projection, not the dashboard. A sweep of every onex.snapshot.projection.*
+# topic across the runtime sources returns 60+ topics and not one runner, lane,
+# fleet or host topic. "What runners are running" had no producer at all.
+#
+# This emits ONE typed event per observation cycle — a ~69-runner fleet is one
+# message, not 69 — on onex.evt.omnibase-infra.runner-fleet.v1, carrying per-runner name,
+# label class, host, online/offline/busy status, job id when resolvable, and
+# observed_at. The schema is built in Python (runner_fleet_event.py, beside this
+# script and rsynced with it) so it is deterministic and unit-testable; this
+# shell measures and publishes, exactly as scripts/disk-watermark-check.sh does.
+#
+# THIS EMIT NEVER CHANGES WHAT THE MONITOR DOES. It runs AFTER the state file is
+# written and BEFORE the alert logic, it is wrapped so a publish failure cannot
+# abort the run under `set -e`, and it dispatches no remediation. A broken bus
+# must never suppress a runner alert or a bounce.
+RUNNER_FLEET_TOPIC="${RUNNER_FLEET_TOPIC:-onex.evt.omnibase-infra.runner-fleet.v1}"
+# The fleet observation is scoped BROADER than the detection loop, deliberately.
+# RUNNER_NAME_PREFIX is `omninode-runner`, which scopes the crash-loop/wedge
+# checks to the interchangeable general pool. The FLEET question is "what
+# runners are running", and measured live on 2026-09-18 the org pool held 69
+# runners of which exactly one was offline: `omninode-air-runner-1`, on .105 —
+# a name the detection prefix does not match. Emitting on the narrow prefix
+# would have dropped the only runner that was down, which is precisely the
+# false-green AC4 exists to refuse.
+RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-omninode-}"
+RUNNER_FLEET_EMIT="${RUNNER_FLEET_EMIT:-true}"
+# The dev lane's broker container on this host, and the names of the env
+# vars INSIDE it that carry its SASL pair. Names, never values: the monitor
+# never reads, logs or passes the credential itself -- it hands the container
+# the variable names and the container expands them in its own shell. Set
+# RUNNER_FLEET_BROKER_CONTAINER to the empty string to skip this rung.
+RUNNER_FLEET_BROKER_CONTAINER="${RUNNER_FLEET_BROKER_CONTAINER-omnibase-infra-redpanda}"
+RUNNER_FLEET_BROKER_SASL_USER_VAR="${RUNNER_FLEET_BROKER_SASL_USER_VAR:-DEV_KAFKA_SASL_USERNAME}"
+RUNNER_FLEET_BROKER_SASL_PASS_VAR="${RUNNER_FLEET_BROKER_SASL_PASS_VAR:-DEV_KAFKA_SASL_PASSWORD}"
+RUNNER_FLEET_BROKER_SASL_MECHANISM="${RUNNER_FLEET_BROKER_SASL_MECHANISM:-SCRAM-SHA-256}"
+# The builder lives in scripts/, not beside this file. That is not a layout
+# preference: docker/runners/ is the runner IMAGE build context, and the
+# repo's check-env-reads gate approves env reads under scripts/ and tests/
+# only -- a builder here would have been blocked, correctly. Both the
+# deployed layout (${RUNNER_HOST_DIR}/docker/runners/ + ${RUNNER_HOST_DIR}/scripts/)
+# and the repo layout put it two levels up, resolved from this file's own
+# location so no absolute path is ever hardcoded (Operating Rule 6).
+_MONITOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNNER_FLEET_EVENT_BUILDER="${RUNNER_FLEET_EVENT_BUILDER:-${_MONITOR_DIR}/../../scripts/runner_fleet_event.py}"
+
+emit_fleet_observation() {
+    if [[ "${RUNNER_FLEET_EMIT}" != true ]]; then
+        log "fleet emit disabled (RUNNER_FLEET_EMIT=${RUNNER_FLEET_EMIT}) — skipping"
+        return 0
+    fi
+    if [[ "${github_api_failed}" == true ]] || [[ -z "${github_json}" ]]; then
+        # An unreadable GitHub API is a MISSING observation, never an empty
+        # fleet. Publishing zero runners here would render a GitHub blip
+        # downstream as a total fleet outage.
+        log "fleet emit skipped — org runner API unreadable this cycle (no observation to publish)"
+        return 0
+    fi
+    if [[ ! -f "${RUNNER_FLEET_EVENT_BUILDER}" ]]; then
+        log "fleet emit skipped — event builder not found at ${RUNNER_FLEET_EVENT_BUILDER} (deploy-runners.sh rsyncs it beside this script)"
+        return 0
+    fi
+
+    local event_json
+    event_json="$(
+        RUNNER_FLEET_HOST="${RUNNER_HOST}" \
+        RUNNER_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX}" \
+        RUNNER_GROUP="${RUNNER_GROUP}" \
+        TOPIC="${RUNNER_FLEET_TOPIC}" \
+        RUNNER_JOB_MAP_JSON="${RUNNER_JOB_MAP_JSON:-}" \
+        python3 "${RUNNER_FLEET_EVENT_BUILDER}" <<< "${github_json}" 2>/dev/null
+    )" || {
+        log "fleet emit FAILED to build event — continuing (alerting is unaffected)"
+        return 0
+    }
+    if [[ -z "${event_json}" ]]; then
+        log "fleet emit produced no event — continuing"
+        return 0
+    fi
+
+    # Publish. Fail-soft at every rung, never a hardcoded broker address
+    # (Operating Rule 8 / OMN-10741). Method 1 is the BROKER CONTAINER on this
+    # host, method 2 an rpk on PATH, method 3 the HTTP thin-publish endpoint,
+    # method 4 log-only so the event stays replayable.
+    #
+    # Method 1 exists because methods 2 and 3 are both INERT on the real runner
+    # host and this was measured, not assumed: on 2026-09-19 `command -v rpk`
+    # on 192.168.86.201 returns nothing, and the monitor's own env file
+    # declares neither KAFKA_BOOTSTRAP_SERVERS nor ONEX_BUS_PUBLISH_URL. A
+    # ladder whose every rung is absent publishes nothing forever while logging
+    # that it is fine -- the false-green this ticket exists to remove. What the
+    # host DOES have is docker and the dev lane's own broker container, so that
+    # is the rung that carries the emit.
+    #
+    # The SASL pair is expanded INSIDE the container by `sh -c`, so it never
+    # reaches this host's argv and never appears in `ps`
+    # (reference_secrets_on_argv_are_visible_in_ps). rpk reads RPK_USER /
+    # RPK_PASS / RPK_SASL_MECHANISM from the environment, so no -X flag carries
+    # a credential either.
+    # `printf '%s\n'`, not `printf '%s'`: rpk produce reads NEWLINE-DELIMITED
+    # records off stdin, and an unterminated final record is discarded with
+    # `record read error: unexpected EOF` while the pipeline still looks like it
+    # ran. Measured against the dev lane broker on 2026-09-19 -- the first
+    # readback attempt published nothing for exactly this reason.
+    local _fleet_published=false
+    if [[ -n "${RUNNER_FLEET_BROKER_CONTAINER}" ]] && command -v docker >/dev/null 2>&1; then
+        if printf '%s\n' "${event_json}" | docker exec -i "${RUNNER_FLEET_BROKER_CONTAINER}" sh -c \
+            'RPK_USER="${'"${RUNNER_FLEET_BROKER_SASL_USER_VAR}"'}" \
+             RPK_PASS="${'"${RUNNER_FLEET_BROKER_SASL_PASS_VAR}"'}" \
+             RPK_SASL_MECHANISM="'"${RUNNER_FLEET_BROKER_SASL_MECHANISM}"'" \
+             rpk topic produce "'"${RUNNER_FLEET_TOPIC}"'"' >/dev/null 2>&1; then
+            _fleet_published=true
+            log "fleet observation published to ${RUNNER_FLEET_TOPIC} via broker container ${RUNNER_FLEET_BROKER_CONTAINER}"
+        else
+            log "fleet emit via broker container ${RUNNER_FLEET_BROKER_CONTAINER} FAILED — falling through to rpk on PATH"
+        fi
+    fi
+    if [[ "${_fleet_published}" == false ]] && command -v rpk >/dev/null 2>&1 && [[ -n "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
+        if printf '%s\n' "${event_json}" | rpk topic produce "${RUNNER_FLEET_TOPIC}" \
+            --brokers "${KAFKA_BOOTSTRAP_SERVERS}" >/dev/null 2>&1; then
+            _fleet_published=true
+            log "fleet observation published to ${RUNNER_FLEET_TOPIC} via rpk (broker=${KAFKA_BOOTSTRAP_SERVERS})"
+        else
+            log "fleet emit via rpk FAILED (broker=${KAFKA_BOOTSTRAP_SERVERS}) — falling through to HTTP publish"
+        fi
+    fi
+    if [[ "${_fleet_published}" == false ]] && [[ -n "${ONEX_BUS_PUBLISH_URL:-}" ]]; then
+        local _status
+        _status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X POST "${ONEX_BUS_PUBLISH_URL}" \
+            -H "Content-Type: application/json" \
+            -d "${event_json}" 2>/dev/null || echo "000")"
+        if [[ "${_status}" =~ ^2 ]]; then
+            _fleet_published=true
+            log "fleet observation published to ${RUNNER_FLEET_TOPIC} via HTTP (status=${_status})"
+        else
+            log "fleet emit via HTTP FAILED (status=${_status}) — event logged below for replay"
+        fi
+    fi
+    if [[ "${_fleet_published}" == false ]]; then
+        log "fleet observation NOT published (no broker or publish URL configured); event: ${event_json}"
+    fi
+    return 0
+}
+
+emit_fleet_observation || true
+
+# ---------------------------------------------------------------------------
 # Alert logic — only on state transitions
 # ---------------------------------------------------------------------------
 
