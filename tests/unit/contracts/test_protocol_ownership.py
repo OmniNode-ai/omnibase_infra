@@ -174,6 +174,19 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # Added by omnibase_infra#3613, which did not update this allowlist and left
     # dev red; recorded here rather than routed around (OMN-17296 lane).
     "ConsumerGroupDescribeResponse": "backends/backend_probe.py",
+    # === [CLI] Drift-guard verdict contract ===
+    # [DI] OMN-18814 structural contract for one omnimarket drift-guard verdict.
+    # The guard returns more than one KIND of verdict (the OMN-17255
+    # off-registry check, the OMN-18814 ancestor-lag stamp) and the number of
+    # kinds is not fixed, so callers are annotated by what they need rather
+    # than by a union that every new kind would have to be added to.
+    # Deliberately NOT an spi contract: it describes how this CLI renders its
+    # own verdicts to stderr and to a receipt, and nothing outside this
+    # repository implements or consumes it.
+    # Added by omnibase_infra#3827, which did not update this allowlist and
+    # left dev red for every open pull request; recorded here rather than
+    # routed around (OMN-18833 lane).
+    "ProtocolDriftGuardVerdict": "cli/protocol_drift_guard_verdict.py",
     # === [NODE] Bifrost shadow policy protocol ===
     # [NODE] DI boundary for shadow comparison policy — pluggable shadow policy interface (OMN-5570)
     "ProtocolShadowPolicy": "nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py",
