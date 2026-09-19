@@ -47,6 +47,7 @@ import contextlib
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -447,6 +448,10 @@ def test_positive_control_a_reachable_mirror_still_seeds(tmp_path: Path) -> None
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env=scrub_git_location_env(os.environ),
+        # OMN-16995: `git daemon` FORKS a child per connection, so terminating
+        # the parent alone strands them and the test leaks processes onto the
+        # runner. Spawn a process group here and reap the whole group below.
+        start_new_session=True,
     )
     try:
         deadline = time.monotonic() + 15
@@ -484,8 +489,16 @@ def test_positive_control_a_reachable_mirror_still_seeds(tmp_path: Path) -> None
         assert (workspace / ".git").exists()
         assert elapsed < 60
     finally:
-        daemon.terminate()
+        # Reap the whole group, not just the parent: see start_new_session above.
+        try:
+            os.killpg(os.getpgid(daemon.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):  # pragma: no cover
+            daemon.terminate()
         try:
             daemon.wait(timeout=10)
         except subprocess.TimeoutExpired:  # pragma: no cover
-            daemon.kill()
+            try:
+                os.killpg(os.getpgid(daemon.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                daemon.kill()
+            daemon.wait(timeout=10)
