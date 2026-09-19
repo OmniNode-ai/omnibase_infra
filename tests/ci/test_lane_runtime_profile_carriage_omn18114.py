@@ -115,18 +115,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # rather than a default that leaks.
 INERT_COMPOSE_PROFILE = "profile-carrier-optin"
 
-# Compose profiles that each lane's runtime bring-up requests. Dogfood is a
-# standalone compose file, so its services opt into `dogfood` rather than the
-# base file's `runtime`/`full` profile pair.
+# Dogfood is standalone and starts the services in its explicit profile. The
+# profile remains meaningful after the optional carrier is removed: main/effects
+# still bind it literally.
 STARTED_COMPOSE_PROFILES_BY_LANE: dict[str, frozenset[str]] = {
     "dogfood": frozenset({"dogfood"}),
 }
 DEFAULT_STARTED_COMPOSE_PROFILES: frozenset[str] = frozenset({"runtime", "full"})
 
-# Lanes this repo both measures AND deploys. `lakshman` is in GOVERNED_LANES and
-# is measured below, but its ratchet moves when its owner deploys, not here
-# (OMN-17150).
-MUTABLE_LAB_LANES: tuple[str, ...] = ("dev", "stability-test", "dogfood")
+# These lanes deliberately carry the tenant-projection profile. Dogfood remains
+# mutable, but its original measured ten-entry scope does not start that carrier.
+CARRIER_REQUIRED_LANES: tuple[str, ...] = ("dev", "stability-test")
 
 
 class CarrierProfile(NamedTuple):
@@ -180,7 +179,8 @@ LANE_UNCARRIED_PROFILE_RATCHET: dict[str, int] = {
     "dev": 0,
     "stability-test": 0,
     "lakshman": 1,
-    "dogfood": 0,
+    # The original dogfood scope intentionally leaves tenant-projection uncarried.
+    "dogfood": 1,
 }
 
 _OMNIMARKET_ABSENT_REASON = (
@@ -297,14 +297,14 @@ def test_every_carrier_profile_is_registered_and_consumer_attached() -> None:
 
 
 def test_carrier_profiles_are_carried_on_every_mutable_lab_lane() -> None:
-    """dev and stability-test must each START a process for every carrier profile.
+    """Each carrier-required lane must START a process for every carrier profile.
 
     This is the assertion the ticket exists for. Before the carrier service
     lands, `tenant-projection` is uncarried on both lanes and this fails naming
     them.
     """
     missing: list[str] = []
-    for lane in MUTABLE_LAB_LANES:
+    for lane in CARRIER_REQUIRED_LANES:
         carried = _carried_profiles_on_lane(lane)
         for name, spec in sorted(CARRIER_PROFILES.items()):
             if name not in carried:
@@ -327,6 +327,21 @@ def test_carrier_profiles_are_carried_on_every_mutable_lab_lane() -> None:
         "`runtime` compose profile), or move the contracts off the profile. Do "
         "NOT hand-add a subscription anywhere: carriage is a deployment fact."
     )
+
+
+def test_dogfood_declares_no_optional_writer_services() -> None:
+    """The measured ten-entry dogfood lane has no optional writer activation."""
+    services = _services(DOCKER_DIR / GOVERNED_LANES["dogfood"].overlay)
+    optional_writers = {
+        "tenant-projection-writer",
+        "projection-tenant-registry-writer",
+        "projection-delegation-writer",
+        "projection-registration-writer",
+        "projection-savings-writer",
+        "projection-tenant-credentials-writer",
+        "projection-live-events-writer",
+    }
+    assert services.keys().isdisjoint(optional_writers)
 
 
 def test_lane_uncarried_profile_count_is_shrink_only() -> None:

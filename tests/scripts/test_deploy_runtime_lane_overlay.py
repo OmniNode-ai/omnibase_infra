@@ -226,12 +226,7 @@ def test_dogfood_project_uses_its_complete_standalone_overlay() -> None:
 def test_dogfood_restart_set_matches_its_standalone_services() -> None:
     text = _script_text()
     assert 'compose_project}" == "omnibase-infra-dogfood"' in text
-    assert (
-        "(omninode-runtime runtime-effects projection-api tenant-projection-writer "
-        "projection-tenant-registry-writer projection-delegation-writer "
-        "projection-registration-writer projection-savings-writer "
-        "projection-tenant-credentials-writer projection-live-events-writer)"
-    ) in text
+    assert ("(omninode-runtime runtime-effects projection-api)") in text
 
 
 @pytest.mark.unit

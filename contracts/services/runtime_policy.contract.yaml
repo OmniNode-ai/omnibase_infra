@@ -758,20 +758,6 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: false
-      # OMN-18693: standalone dogfood also starts the tenant projection carrier.
-      # It owns the contracts filtered out of main and effects by their literal
-      # `runtime_profiles: [tenant-projection]` declaration.
-      tenant-projection:
-        runtime_id: dogfood-tenant-projection
-        runtime_address: runtime://omninode-pc/dogfood/tenant-projection
-        capabilities:
-          - projection.writer
-          - tenant.projection
-          - runtime.tenant-projection
-        bifrost_verify_endpoints: false
-        omnimemory_enabled: false
-        omnimemory_memgraph_host: ""
-        publish_introspection: false
       worker:
         runtime_id: dogfood-worker
         runtime_address: runtime://omninode-pc/dogfood/worker
