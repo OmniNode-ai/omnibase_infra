@@ -1157,6 +1157,49 @@ repair_unowned_cli_venv() {
     return 1
   fi
 
+  # THE REPAIR MUST BE ABLE TO REACH THE HEAD BEFORE IT IS SPENT (OMN-18815).
+  #
+  # Found by this function's own first live run, one minute after it merged:
+  #
+  #   repair : running .../repair-plugin-venv.sh (marker-writing path)
+  #   repair : ran and exited 0, but the venv STILL does not carry
+  #
+  # The readback was right to refuse, and the rebuild was never going to work.
+  # `repair-plugin-venv.sh` reaches `ensure-plugin-venv.sh`, whose
+  # `uv sync --frozen` installs the rev the omniclaude LOCK names, while the
+  # drift verdict above compares against the CLONE head. When those differ the
+  # rebuild lands on the lock's rev, which is still drift, every time.
+  #
+  # Unchecked that is a full venv rebuild per tick, forever, always failing, on
+  # a venv other lanes are using -- load on the box for nothing and a readback
+  # that reads DRIFT no matter how long anyone waits.
+  #
+  # So the precondition is checked rather than hoped for, and when it does not
+  # hold the LOCK is named as the blocker. Naming the venv there would send the
+  # next reader to rebuild the one thing that is already doing as it is told.
+  #
+  # FAILS TOWARD NOT SPENDING THE REBUILD. An unreadable or absent lock is an
+  # unknown precondition, not a satisfied one, and the drift is reported either
+  # way -- so declining hides nothing and costs nothing.
+  local lock="$CLAUDE_DIR/uv.lock" lock_rev=""
+  if [[ -f "$lock" ]]; then
+    lock_rev="$(sed -n 's|.*omnimarket\.git?rev=\([0-9a-f]\{40\}\).*|\1|p' "$lock" | head -1)"
+  fi
+  if [[ "$lock_rev" != "$head" ]]; then
+    if [[ -z "$lock_rev" ]]; then
+      say "  repair     : NOT ATTEMPTED -- no omnimarket rev readable in $lock"
+    else
+      say "  repair     : NOT ATTEMPTED -- the LOCK is the blocker, not this venv"
+      say "               lock names  ${lock_rev:0:12}"
+      say "               clone head  ${head:0:12}"
+      say "               The marker-writing rebuild installs the LOCK's rev, so"
+      say "               it would land on ${lock_rev:0:12} and still read DRIFT."
+    fi
+    say "               Owner: omniclaude .github/workflows/sibling-lock-refresh.yml"
+    say "               (workflow_dispatch; it opens the bump PR that advances the lock)"
+    return 1
+  fi
+
   say "  repair     : running $repair (marker-writing path)"
   if out="$(CLAUDE_PLUGIN_DATA="$candidate" \
       PATH="$candidate/.venv/bin:$PATH" \
