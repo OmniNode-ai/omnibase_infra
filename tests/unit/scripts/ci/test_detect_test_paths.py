@@ -65,10 +65,22 @@ def test_ci_process_change_selects_ci_tests() -> None:
     # that exercise scripts/ — scripts/ci/ci_summary_gate.py is a scripts/ file
     # — plus (OMN-15410) the collocated roots that live inside scripts/ itself
     # and are collected via pyproject testpaths.
+    #
+    # OMN-18833 adds one MODULE, and it belongs here:
+    # tests/integration/chains/test_event_chain_gate.py reads the changed gate
+    # off disk and asserts its contents, so a diff changing that gate can break
+    # it. Before the reference scan this selection could not reach it — the
+    # same shape as the #3829 dev break, sitting in this repo's own test
+    # expectations and read as correct. Its sibling modules in that directory
+    # do not name the gate and are not selected, which is the difference
+    # between +0.3% and +12.3% fleet-wide. If this list grows again, check that
+    # the new entry genuinely names a changed script before widening the
+    # expectation: the assertion being exact is what makes the cost observable.
     assert paths == [
         "scripts/ci/tests/",
         "scripts/tests/",
         "tests/ci/",
+        "tests/integration/chains/test_event_chain_gate.py",
         "tests/scripts/",
         "tests/unit/scripts/",
     ]
@@ -932,20 +944,29 @@ def test_omn16745_workflow_plus_narrowable_source_keeps_both_classes() -> None:
 
 
 def test_omn16745_root_level_test_file_is_a_valid_selection_target() -> None:
-    """The output contract widened exactly as far as the ruling needs.
+    """The output contract widened exactly as far as the rulings need.
 
-    A root-level module pytest collects is emittable; a root-level helper it
-    does not collect, and any source file, still are not.
+    A module pytest collects is emittable at any depth under `tests/`
+    (OMN-18833 extended this from the root, for the scripts/-reference scan);
+    a helper it does not collect, and any source file, still are not.
     """
-    ModelTestSelection(
-        selected_paths=["tests/test_compose_profile_teardown_policy.py"],
-        split_count=1,
-        is_full_suite=False,
-        matrix=[1],
-    )
+    for accepted in (
+        "tests/test_compose_profile_teardown_policy.py",
+        # OMN-18833: a nested module is emittable now. A test that NAMES a
+        # changed script is the unit the script can break, and paying its whole
+        # directory for it costs +12.3% collectable modules against +0.3%.
+        "tests/unit/cli/test_foo.py",
+        "tests/unit/observability/runner_health/test_deploy_runner_health_cron.py",
+    ):
+        ModelTestSelection(
+            selected_paths=[accepted],
+            split_count=1,
+            is_full_suite=False,
+            matrix=[1],
+        )
     for rejected in (
         "tests/infrastructure_config.py",  # pytest would not collect it
-        "tests/unit/cli/test_foo.py",  # nested files narrow to their directory
+        "tests/unit/cli/helpers.py",  # nor this one, at any depth
         "src/omnibase_infra/cli/foo.py",  # never a source file
     ):
         with pytest.raises(ValidationError):
