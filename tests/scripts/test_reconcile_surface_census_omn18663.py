@@ -245,7 +245,19 @@ def test_a_drifted_cli_venv_is_drift_not_in_sync(ws: _Workspace) -> None:
     assert "provider   : DRIFT" in combined
     assert "verdict: DRIFT" in combined
     # The remedy is named, and it is the sanctioned one rather than this script.
-    assert "check-omnimarket-venv-drift.sh" in combined
+    #
+    # CHANGED by OMN-18815, and the change is the point rather than a rename.
+    # This used to name `check-omnimarket-venv-drift.sh --repair`, which
+    # installs the clone head through a targeted `--no-deps` install and writes
+    # no `.built-from` marker -- so following it converged the drift guard and
+    # left the skew gate red on a stale marker, which is the split a lane hit
+    # and unpicked by hand on 2026-09-19. The marker-writing path is
+    # `repair-plugin-venv.sh`, and in repair mode this script now RUNS it
+    # rather than printing it.
+    assert "repair-plugin-venv.sh" in combined
+    assert "check-omnimarket-venv-drift.sh" not in combined, (
+        "the remedy names the path that leaves the .built-from marker stale"
+    )
 
 
 def test_an_in_sync_cli_venv_does_not_by_itself_cause_drift(ws: _Workspace) -> None:
