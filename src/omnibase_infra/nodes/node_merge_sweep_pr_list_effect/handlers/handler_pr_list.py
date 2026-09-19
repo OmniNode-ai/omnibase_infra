@@ -22,11 +22,34 @@ from omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_list_r
 
 logger = logging.getLogger(__name__)
 
+# `assignees` and `reviewRequests` are here because the classifier's
+# collaborator exclusion cannot be evaluated without them, and ModelPRInfo
+# refuses a record that did not observe them (OMN-18823).
 _GH_JSON_FIELDS = (
     "number,title,headRefName,baseRefName,author,isDraft,"
     "mergeable,reviewDecision,statusCheckRollup,autoMergeRequest,"
-    "labels,updatedAt"
+    "labels,updatedAt,assignees,reviewRequests"
 )
+
+
+def _logins(entries: object) -> tuple[str, ...]:
+    """Pull GitHub logins out of a gh actor list.
+
+    A requested reviewer may be a TEAM rather than a user, in which case gh
+    reports a `name`/`slug` and no `login`. Both are carried: a PR awaiting a
+    team's review has still been handed to someone.
+    """
+    if not isinstance(entries, list):
+        return ()
+    out: list[str] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            value = entry.get("login") or entry.get("slug") or entry.get("name") or ""
+        else:
+            value = str(entry)
+        if value:
+            out.append(value)
+    return tuple(out)
 
 
 def _extract_ci_status(pr_json: dict) -> str:
@@ -63,6 +86,8 @@ def _pr_json_to_model(pr_json: dict, repo: str) -> ModelPRInfo:
             for label in labels_raw
         ),
         updated_at=pr_json.get("updatedAt", ""),
+        assignees=_logins(pr_json.get("assignees")),
+        requested_reviewers=_logins(pr_json.get("reviewRequests")),
     )
 
 

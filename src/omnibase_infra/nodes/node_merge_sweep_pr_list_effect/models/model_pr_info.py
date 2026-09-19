@@ -18,6 +18,21 @@ class ModelPRInfo(BaseModel):
     head_ref: str = Field(default="", description="Head branch name.")
     base_ref: str = Field(default="main", description="Base branch name.")
     author: str = Field(default="", description="PR author login.")
+    assignees: tuple[str, ...] = Field(
+        ...,
+        description=(
+            "Logins assigned to this PR. REQUIRED with no default: a record "
+            "that never observed the field must not read as 'nobody assigned' "
+            "(OMN-18823)."
+        ),
+    )
+    requested_reviewers: tuple[str, ...] = Field(
+        ...,
+        description=(
+            "Logins whose review has been requested. REQUIRED with no default, "
+            "for the same reason as assignees (OMN-18823)."
+        ),
+    )
     is_draft: bool = Field(default=False, description="Whether PR is a draft.")
     mergeable: str = Field(
         default="UNKNOWN",

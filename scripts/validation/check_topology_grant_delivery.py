@@ -151,6 +151,61 @@ granted SELECT return zero rows, inverting the ``NOT EXISTS`` anti-join into
 re-finalizing every session forever (OMN-16770).
 
 The full residual is tracked by OMN-17440.
+
+THE REVERSE ARM: DELIVERED BUT UNDECLARED (OMN-18768)
+-----------------------------------------------------
+Everything above reads in one direction -- the topology declares, the corpus
+must deliver. The opposite direction is the one that took the runtime down.
+
+On 2026-09-19 the main ONEX runtime on the ``.201`` dev lane crash-looped on
+every boot, 16 restarts, on::
+
+    Auto-wiring contract 'projection_runner_fleet' failed:
+    handler=FleetLivenessProjectionWriter: ValueError: Projection binding
+    'omninode_runtime_service' principal 'omninode_runtime' lacks declared read
+
+The database was not the problem. ``omninode_runtime`` HELD every privilege it
+needed: this corpus's own
+``node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql``
+had issued them, and it landed here at 17:33Z. What was missing was the
+DECLARATION -- the ``object_type: TABLE`` entry in the topology instances that
+``_require_projection_binding_privileges`` reads. The runtime is fail-closed on
+the declaration, so an undeclared relation refuses the whole process, not just
+that one handler.
+
+The declaration was missing because it is DERIVED from omnimarket node
+contracts at a PINNED ref (``.github/omnimarket-contract-pin.yaml``), and the
+window between a contract merging upstream and the pin advancing is real: the
+refresh job snapshotted omnimarket ``dev`` at 18:30Z and the contract declaring
+``runner_fleet_liveness`` merged at 18:41Z, eleven minutes later. Until the next
+refresh the derivation could not see it, so
+``application_database_domain_enforcement`` was GREEN by construction while the
+lane -- which builds omnimarket from source, not from the pin -- was down.
+
+This arm closes that window from inside the repository, with no network and no
+pin involved. A relation this corpus GRANTS to a principal the topology models
+is a relation this repository already knows about; if the topology does not
+declare it, the runtime will refuse it at boot. The grant migration and the
+declaration therefore land together or the gate fails -- and PR #3819, which
+vendored the migration four hours before the crash, is exactly where it would
+have fired.
+
+Same ratchet discipline as both arms above: the count may go DOWN in any change
+and may never go UP, and a reading below the bound fails too so the bound is
+tightened in the change that earns it. The residual of 4 is NOT an allowlist --
+every pair is printed on every run:
+
+  * ``omninode_runtime`` on ``savings_injection_signals``,
+    ``savings_correlation_finalizations`` and ``savings_validator_catch_signals``.
+    A different class, not this one: ``node_savings_estimation_compute`` lives
+    in omnibase_infra and declares NO ``db_io`` block at all, so no contract
+    anywhere declares these relations and the contract-driven derivation has
+    nothing to derive from. They cannot crash the runtime the way
+    ``runner_fleet_liveness`` did -- nothing resolves a projection binding for
+    them -- but the corpus granting a relation no contract declares is real
+    drift and is left visible rather than filtered away.
+  * ``tenant_projection_writer`` on ``public.projection_delegation_savings``,
+    granted by ``089_savings_aggregate_views_per_tenant.sql``.
 """
 
 from __future__ import annotations
@@ -188,6 +243,13 @@ MAX_UNDELIVERED = 1
 # OMN-17447: the SEQUENCE half of the same defect class, measured after this
 # change lands its own seven deliveries. Same ratchet discipline as above.
 MAX_UNDELIVERED_SEQUENCES = 0
+
+# OMN-18768: the REVERSE arm -- relations this corpus grants that the topology
+# does not declare. Measured on 2026-09-19 after this change declared
+# `runner_fleet_liveness`. Same ratchet discipline as both arms above; see THE
+# REVERSE ARM in the module docstring for what the 4 are and why each is a
+# different class from the crash this arm exists to prevent.
+MAX_UNDECLARED = 4
 
 TOPOLOGY_RELPATH = "src/omnibase_infra/topology/instances/local.yaml"
 CORPUS_RELPATH = "docker/migrations/forward"
@@ -526,8 +588,12 @@ def delivered_grants(corpus_root: Path) -> dict[GrantKey, list[str]]:
             schema, table = _split_relation(match.group("relation"))
             # `GRANT ... ON ALL TABLES IN SCHEMA x` parses here with a relation
             # of `ALL`; it grants no NAMED relation and must not be read as
-            # delivering one.
-            if table.upper() in {"ALL", "SCHEMA", "DATABASE", "SEQUENCE"}:
+            # delivering one. `TABLES` is the same class one statement over:
+            # `ALTER DEFAULT PRIVILEGES ... GRANT ... ON TABLES TO <role>`
+            # (099_create_omninode_internal_live_events.sql) names a future
+            # default, not a relation, and reading it as `public.TABLES` put a
+            # phantom pair in the delivered set (OMN-18768).
+            if table.upper() in {"ALL", "SCHEMA", "DATABASE", "SEQUENCE", "TABLES"}:
                 continue
             key = GrantKey(_unquote(match.group("role")), schema, table)
             delivered.setdefault(key, []).append(sql_path.name)
@@ -657,6 +723,30 @@ def undelivered(repo_root: Path) -> list[GrantKey]:
     )
 
 
+def undeclared(repo_root: Path) -> list[GrantKey]:
+    """Grants the corpus DELIVERS that the topology does not DECLARE.
+
+    The inverse of :func:`undelivered`, and the direction that crash-loops the
+    runtime rather than silently refusing writes: ``handler_wiring``'s
+    ``_require_projection_binding_privileges`` resolves a projection binding
+    against the topology's declared grants alone, so a relation this corpus has
+    already granted in the database is still refused at boot if no declaration
+    names it. See THE REVERSE ARM in the module docstring for the OMN-18768
+    incident this derives from.
+
+    Scoped to principals the topology actually models. A grant to a role the
+    topology has never heard of (a migration-internal ``role_*`` owner, say) is
+    not a declaration gap and is not this gate's subject.
+    """
+    declared = declared_grants(repo_root / TOPOLOGY_RELPATH)
+    delivered = delivered_grants(repo_root / CORPUS_RELPATH)
+    modelled = {key.principal for key in declared}
+    return sorted(
+        (key for key in delivered if key.principal in modelled and key not in declared),
+        key=lambda key: (key.principal, key.schema, key.table),
+    )
+
+
 def _render(missing: Iterable[GrantKey]) -> str:
     return "\n".join(f"  UNDELIVERED  {key}" for key in missing)
 
@@ -680,6 +770,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=MAX_UNDELIVERED_SEQUENCES,
         help="ratchet bound for implied SEQUENCE grants (OMN-17447)",
+    )
+    parser.add_argument(
+        "--max-undeclared",
+        type=int,
+        default=MAX_UNDECLARED,
+        help="ratchet bound for delivered-but-undeclared grants (OMN-18768)",
     )
     args = parser.parse_args(argv)
 
@@ -717,6 +813,47 @@ def main(argv: list[str] | None = None) -> int:
         )
         sequence_status = 1
 
+    # OMN-18768. Runs BEFORE the undelivered arm below so its findings are
+    # printed even on a run the other arm already fails: a lane that has to fix
+    # two arms should see both in one run, not discover the second after fixing
+    # the first.
+    extra = undeclared(args.repo_root)
+    print(
+        f"topology grant declaration: {len(extra)} delivered-but-undeclared "
+        f"(bound {args.max_undeclared})"
+    )
+    if extra:
+        print("\n".join(f"  UNDECLARED  {key}" for key in extra))
+    undeclared_status = 0
+    if len(extra) > args.max_undeclared:
+        print(
+            f"\nFAIL: {len(extra)} relations are GRANTED by this corpus and "
+            "declared by no topology principal, above the bound of "
+            f"{args.max_undeclared}.\n"
+            "This is the OMN-18768 crash, not a cosmetic gap: the runtime "
+            "resolves a projection binding against the DECLARATION, so a "
+            "relation the database already grants is still refused at boot -- "
+            "'principal ... lacks declared read' -- and auto-wiring failing "
+            "one contract takes the whole runtime process down, not just that "
+            "handler. Declare it, then lower the bound in the same change. If "
+            "the relation is declared by an omnimarket node contract, do NOT "
+            "hand-edit the instances: advance "
+            ".github/omnimarket-contract-pin.yaml and regenerate with "
+            "scripts/generate_application_database_table_grants.py --write, "
+            "which is the only sanctioned writer of that block.",
+            file=sys.stderr,
+        )
+        undeclared_status = 1
+    elif len(extra) < args.max_undeclared:
+        print(
+            f"\nFAIL: {len(extra)} delivered-but-undeclared is BELOW the bound "
+            f"of {args.max_undeclared}. Lower MAX_UNDECLARED in "
+            "scripts/validation/check_topology_grant_delivery.py to "
+            f"{len(extra)} in this same change, so the ratchet keeps biting.",
+            file=sys.stderr,
+        )
+        undeclared_status = 1
+
     missing = undelivered(args.repo_root)
     print(
         f"topology grant delivery: {len(missing)} undelivered (bound {args.max_undelivered})"
@@ -743,7 +880,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    return sequence_status
+    return sequence_status or undeclared_status
 
 
 if __name__ == "__main__":

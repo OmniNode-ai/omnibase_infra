@@ -33,6 +33,7 @@ class HandlerPRListComplete:
         self,
         correlation_id: UUID,
         prs: tuple[ModelPRInfo, ...],
+        collaborator_logins: tuple[str, ...],
         require_approval: bool = True,
     ) -> ModelClassifyInput:
         """Transform PR list result into classification input.
@@ -40,14 +41,21 @@ class HandlerPRListComplete:
         Args:
             correlation_id: Workflow correlation ID.
             prs: PRs discovered by the scan.
+            collaborator_logins: Accounts whose PRs the sweep must not admit,
+                resolved by the caller from the roster the classify node's
+                contract names. Positional and required: a caller that never
+                resolved a roster must not be able to omit it and get an
+                empty one (OMN-18823).
             require_approval: Whether to require review approval.
 
         Returns:
             ModelClassifyInput for the classify compute node.
         """
         logger.info(
-            "PR scan complete: %d PRs to classify (correlation_id=%s)",
+            "PR scan complete: %d PRs to classify against %d excluded "
+            "account(s) (correlation_id=%s)",
             len(prs),
+            len(collaborator_logins),
             correlation_id,
         )
 
@@ -55,4 +63,5 @@ class HandlerPRListComplete:
             correlation_id=correlation_id,
             prs=prs,
             require_approval=require_approval,
+            collaborator_logins=collaborator_logins,
         )
