@@ -155,7 +155,14 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
       - name: Run mypy type checking
-        run: uv run mypy src/omnibase_infra
+        # OMN-18640: scripts/deploy-agent/deploy_agent is IN the scope. It is
+        # the code that runs every deploy on the lab lane and it sat outside
+        # the type gate carrying ten errors, three of which were functions
+        # declared to return `str` while returning `Any`. Its tests have their
+        # own workflow because it is a standalone uv sub-project; its TYPES are
+        # checked here, with the root project's mypy, because that is where
+        # this repository declares type scope.
+        run: uv run mypy src/omnibase_infra scripts/deploy-agent/deploy_agent
 
   tests-shadow:
     # Fast, HERMETIC unit slice — NO postgres/redis/kafka/consul services. The

@@ -876,7 +876,11 @@ class DeployAgent:
             payload = build_completion_payload(
                 job,
                 self._current_git_sha,
-                health_checks,
+                # OMN-18640 AC8: the local above is the target of the
+                # assignment that raises when verification refuses, so it is
+                # empty on precisely the job whose probe readings matter. The
+                # executor records them before it raises.
+                health_checks or self.executor.health_checks,
                 services_restarted=services_restarted,
                 container_residue=self.executor.container_residue,
                 # OMN-18692: what the deps-phase ceiling did -- the deferral it

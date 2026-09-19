@@ -326,6 +326,10 @@ class _RefRecordingExecutor:
         # fake executor has to declare both.
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
+        # OMN-18640 AC8: the agent publishes the executor's own probe
+        # readings when its local list is empty, which is the case on
+        # every job that failed verification.
+        self.health_checks: list[object] = []
 
     def preflight(self, **kwargs: object) -> None:
         pass
