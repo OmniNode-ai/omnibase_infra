@@ -33,7 +33,9 @@ is not a property of the migration's prose.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import psycopg2
@@ -66,7 +68,7 @@ GRANT_FILE = (
     / "node_projection_delegation_inference_response"
     / "0004_grant_tenant_projection_writer.sql"
 )
-REASSERT_GRANT_FILE = (
+EARLY_REASSERT_GRANT_FILE = (
     REPO_ROOT
     / "docker"
     / "migrations"
@@ -75,6 +77,53 @@ REASSERT_GRANT_FILE = (
     / "node_projection_delegation_inference_response"
     / "0005_reassert_tenant_projection_writer_projection_grants.sql"
 )
+WRITER_GRANT_FILES = {
+    "agent_routing_decisions": (
+        REPO_ROOT
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "nodes"
+        / "node_projection_routing_decision"
+        / "0023_grant_tenant_projection_writer_agent_routing_decisions.sql"
+    ),
+    "dep_health_findings": (
+        REPO_ROOT
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "nodes"
+        / "node_projection_dep_health"
+        / "004_grant_tenant_projection_writer_dep_health_findings.sql"
+    ),
+    "pattern_learning_artifacts": (
+        REPO_ROOT
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "nodes"
+        / "node_projection_pattern_learning"
+        / "002_grant_tenant_projection_writer_pattern_learning_artifacts.sql"
+    ),
+    "savings_estimates": (
+        REPO_ROOT
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "nodes"
+        / "node_projection_savings"
+        / "090_grant_tenant_projection_writer_savings_estimates.sql"
+    ),
+    "tenant_inference_credentials": (
+        REPO_ROOT
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "nodes"
+        / "node_projection_tenant_credentials"
+        / "003_grant_tenant_projection_writer_tenant_inference_credentials.sql"
+    ),
+}
 AGGREGATE_VIEWS_FILE = (
     REPO_ROOT
     / "docker"
@@ -99,6 +148,9 @@ BOOTSTRAP_SCRIPT = (
 LOCAL_TOPOLOGY = (
     REPO_ROOT / "src" / "omnibase_infra" / "topology" / "instances" / "local.yaml"
 )
+RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
+CLUSTER_SEED = REPO_ROOT / "docker" / "legacy-rds-fixture" / "cluster-seed.sql"
+LEGACY_SEED = REPO_ROOT / "docker" / "legacy-rds-fixture" / "legacy-seed.sql"
 
 PRINCIPAL = "tenant_projection_writer"
 
@@ -440,8 +492,8 @@ def test_grant_migration_proves_the_role_exists_before_granting() -> None:
 
 
 @pytest.mark.integration
-def test_reassert_grant_migration_repairs_only_the_missing_carrier_acls() -> None:
-    """Warm volumes need a new append-only grant, never a rewrite of 0004.
+def test_writer_grants_follow_their_relation_owner_lineages() -> None:
+    """Each SIU grant follows its creating migration in lexical runner order.
 
     The topology maps these tenant-domain relations to their current physical
     ``public`` schema. The carrier needs the three additional contracts it owns;
@@ -450,63 +502,52 @@ def test_reassert_grant_migration_repairs_only_the_missing_carrier_acls() -> Non
     routing-overlay write is already in 0004, so this repair must not widen it
     or grant a schema/default privilege.
     """
-    executable = _executable_text(REASSERT_GRANT_FILE).upper()
-
-    expected = {
-        "PUBLIC.SAVINGS_ESTIMATES",
-        "PUBLIC.TENANT_INFERENCE_CREDENTIALS",
-        "PUBLIC.AGENT_ROUTING_DECISIONS",
-        "PUBLIC.DEP_HEALTH_FINDINGS",
-        "PUBLIC.PATTERN_LEARNING_ARTIFACTS",
-    }
-    granted = set(
-        re.findall(
-            r"GRANT SELECT, INSERT, UPDATE ON (PUBLIC\.[A-Z0-9_]+) "
-            rf"TO {PRINCIPAL.upper()}",
-            executable,
-        )
+    assert not EARLY_REASSERT_GRANT_FILE.exists(), (
+        "cross-lineage 0005 runs before every carrier relation on a fresh "
+        "database; grants must live after their owning table migrations"
     )
-    assert granted == expected
-    assert "TO_REGCLASS('PUBLIC.SAVINGS_ESTIMATES')" in executable
-    assert "TO_REGCLASS('PUBLIC.TENANT_INFERENCE_CREDENTIALS')" in executable
-    assert "TO_REGCLASS('PUBLIC.AGENT_ROUTING_DECISIONS')" in executable
-    assert "TO_REGCLASS('PUBLIC.DEP_HEALTH_FINDINGS')" in executable
-    assert "TO_REGCLASS('PUBLIC.PATTERN_LEARNING_ARTIFACTS')" in executable
-    assert "RAISE EXCEPTION" in executable
-    assert "DELETE" not in executable
-    assert "ALL TABLES" not in executable
-    assert "DEFAULT PRIVILEGES" not in executable
-    assert "1 / COUNT" not in executable
-    for relation in expected:
+
+    for relation, grant_file in WRITER_GRANT_FILES.items():
+        assert grant_file.is_file(), f"missing owner-lineage grant for {relation}"
+        executable = _executable_text(grant_file).upper()
+        expected = f"PUBLIC.{relation.upper()}"
+        granted = set(
+            re.findall(
+                r"GRANT SELECT, INSERT, UPDATE ON (PUBLIC\.[A-Z0-9_]+) "
+                rf"TO {PRINCIPAL.upper()}",
+                executable,
+            )
+        )
+        assert granted == {expected}
+        assert f"TO_REGCLASS('{expected}')" in executable
+        assert "RAISE EXCEPTION" in executable
+        assert "DELETE" not in executable
+        assert "ALL TABLES" not in executable
+        assert "DEFAULT PRIVILEGES" not in executable
+        assert "1 / COUNT" not in executable
         for privilege in ("SELECT", "INSERT", "UPDATE"):
             assert (
-                f"HAS_TABLE_PRIVILEGE('{PRINCIPAL.upper()}', '{relation}', "
+                f"HAS_TABLE_PRIVILEGE('{PRINCIPAL.upper()}', '{expected}', "
                 f"'{privilege}')"
             ) in executable
 
 
 @pytest.mark.integration
 @pytest.mark.postgres
-def test_reassert_grant_migration_fails_when_a_grant_is_mutated_away(
+def test_owner_lineage_grant_migration_fails_when_a_grant_is_mutated_away(
     ephemeral_postgres: EphemeralPostgres, tmp_path: Path
 ) -> None:
     """The postcondition must reject a partial SIU grant, not merely return rows."""
-    relations = (
-        "agent_routing_decisions",
-        "dep_health_findings",
-        "pattern_learning_artifacts",
-        "savings_estimates",
-        "tenant_inference_credentials",
-    )
     with ephemeral_postgres.connect() as connection:
         with connection.cursor() as cursor:
             cursor.execute(f"CREATE ROLE {PRINCIPAL}")
-            for relation in relations:
-                cursor.execute(f"CREATE TABLE public.{relation} (id bigint)")
+            cursor.execute("CREATE TABLE public.agent_routing_decisions (id bigint)")
 
-    mutated = tmp_path / "0005_mutated_partial_grant.sql"
+    mutated = tmp_path / "0023_mutated_partial_grant.sql"
     mutated.write_text(
-        REASSERT_GRANT_FILE.read_text().replace(
+        WRITER_GRANT_FILES["agent_routing_decisions"]
+        .read_text()
+        .replace(
             "GRANT SELECT, INSERT, UPDATE ON public.agent_routing_decisions",
             "GRANT SELECT ON public.agent_routing_decisions",
             1,
@@ -517,6 +558,64 @@ def test_reassert_grant_migration_fails_when_a_grant_is_mutated_away(
 
     assert result.returncode != 0
     assert "missing required tenant_projection_writer privilege" in result.stderr
+
+
+def _seed_fixture_cluster(pg: EphemeralPostgres, *, legacy: bool) -> None:
+    """Reuse the CI fixture's exact fresh or legacy database preparation."""
+    for seed in (CLUSTER_SEED, *((LEGACY_SEED,) if legacy else ())):
+        result = pg.psql("-v", "ON_ERROR_STOP=1", "-f", str(seed))
+        assert result.returncode == 0, result.stderr
+
+
+def _run_forward_migrations(pg: EphemeralPostgres) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["sh", str(RUNNER)],
+        env={
+            **os.environ,
+            "POSTGRES_HOST": pg.socket_dir,
+            "POSTGRES_PORT": str(pg.port),
+            "POSTGRES_USER": "postgres",
+            "POSTGRES_PASSWORD": "",
+            "POSTGRES_DB": "omnibase_infra",
+            "NODE_POSTGRES_DB": "omnidash_analytics",
+            "MIGRATIONS_DIR": str(REPO_ROOT / "docker" / "migrations" / "forward"),
+            "PG_WAIT_RETRIES": "2",
+        },
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.parametrize("legacy", [False, True], ids=("fresh", "legacy"))
+def test_owner_lineage_grants_complete_the_real_forward_runner(
+    ephemeral_postgres: EphemeralPostgres, legacy: bool
+) -> None:
+    """The CI fresh/legacy seeds reach owner-lineage SIU grants in one run."""
+    _seed_fixture_cluster(ephemeral_postgres, legacy=legacy)
+
+    result = _run_forward_migrations(ephemeral_postgres)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Sentinel set. Migration gate will report HEALTHY." in result.stdout
+    for relation, grant_file in WRITER_GRANT_FILES.items():
+        migration_id = f"node:{grant_file.parent.name}:{grant_file.name}"
+        assert migration_id in result.stdout
+        privileges = ephemeral_postgres.psql(
+            "-tAc",
+            "SELECT has_table_privilege("
+            f"'{PRINCIPAL}', 'public.{relation}', 'SELECT')::text || ',' || "
+            "has_table_privilege("
+            f"'{PRINCIPAL}', 'public.{relation}', 'INSERT')::text || ',' || "
+            "has_table_privilege("
+            f"'{PRINCIPAL}', 'public.{relation}', 'UPDATE')::text",
+            dbname="omnidash_analytics",
+        )
+        assert privileges.returncode == 0, privileges.stderr
+        assert privileges.stdout.strip() == "true,true,true"
 
 
 # =============================================================================
