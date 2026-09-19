@@ -944,19 +944,41 @@ async def run_gateway_forwarder(
     declares. A default would let a mis-wired process silently fall back to the
     direct-MSK leg ruling 39 (OMN-15692) retires.
     """
+    # OMN-18691: this entrypoint builds a TENANT EDGE -- both trust-boundary
+    # transports, the delivery node over them, and the cloud heartbeat loop.
+    # A mirror-only forwarder (the CI-bus topology: consume the dedicated
+    # broker, republish onto the dev lane, no cloud leg at all) is now
+    # EXPRESSIBLE and fully validated, but running one needs this function to
+    # make the two trust-boundary legs conditional, which is a change to the
+    # live gateway process and is deliberately NOT bundled with the model work.
+    #
+    # Refused loudly and here, rather than tolerated. A process that started
+    # with half its legs unwired would report ready and move nothing, which is
+    # the green-and-silent failure the dedicated CI bus exists to remove.
+    if config.forwarder.cloud_bus is None:
+        raise ValueError(
+            "run_gateway_forwarder builds a tenant edge and requires a declared "
+            "cloud_bus; this config declares a lane_mirror only. Running a "
+            "mirror-only forwarder is OMN-18691 phase 3 step 3 and is a "
+            "separate change to this entrypoint"
+        )
+    assert config.local_bus is not None
+    assert config.cloud_bus is not None
+    mirror_topics = config.forwarder.mirror_topics
+    assert mirror_topics is not None
+
     tenant_slug = config.forwarder.tenant_identity.tenant_slug
     local_transport = KafkaTransport(
         config=config.local_bus,
         group=f"tenant-{tenant_slug}-gateway-forwarder-outbound",
-        topics=config.forwarder.mirror_topics.outbound,
+        topics=mirror_topics.outbound,
         auto_offset_reset=config.local_bus.auto_offset_reset,
     )
     cloud_transport = KafkaTransport(
         config=config.cloud_bus,
         group=f"tenant-{tenant_slug}-gateway-forwarder-inbound",
         topics=tuple(
-            prefix_topic(tenant_slug, topic)
-            for topic in config.forwarder.mirror_topics.inbound
+            prefix_topic(tenant_slug, topic) for topic in mirror_topics.inbound
         ),
         auto_offset_reset=config.cloud_bus.auto_offset_reset,
     )
