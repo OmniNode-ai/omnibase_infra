@@ -44,9 +44,7 @@ def _stub_promotion_guard(
     """
     if request.node.get_closest_marker("promotion_guard") is not None:
         return
-    monkeypatch.setattr(
-        executor_mod, "_load_promotion_guard", lambda: _NoopPromotionGuard()
-    )
+    monkeypatch.setattr(executor_mod, "_load_promotion_guard", _NoopPromotionGuard)
 
 
 @pytest.fixture(autouse=True)
@@ -378,6 +376,44 @@ def _resolve_gateway_lane_from_this_checkout(
         executor_mod.DeployExecutor,
         "_deploy_gateway_lane",
         lambda self, *args, **kwargs: None,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _keep_the_deps_convergence_observation_off_the_docker_daemon(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-18640: no-op the deps-convergence observation unless a test opts in.
+
+    The deps leg now reads, before it acts, what compose would render for each
+    core service and what the running containers carry -- `compose config
+    --hash`, `compose config --format json`, and one `docker inspect` per
+    service. Every one of those reaches the real machine, and dozens of
+    existing tests drive ``Scope.CORE`` while stubbing only
+    ``executor_mod._run``. Left live they do not fail; they SUCCEED and prepend
+    three commands to the list those tests index from, which is how a change
+    that observes can break tests that act.
+
+    So the observation is a no-op by default, and the tests that are about it
+    opt in with the ``deps_convergence`` marker and drive the real method.
+    This is the same visible arrangement
+    ``_keep_the_deps_recreate_off_the_docker_daemon`` below already uses, for
+    the same reason and against the same hazard.
+
+    It is not a hole: the observation's own behaviour -- that it names a
+    changed dependency, that it never gates, that it records no environment
+    value, and that it runs before the compose up -- is asserted directly in
+    ``test_visible_deps_convergence_omn18640.py``.
+    """
+    if request.node.get_closest_marker("deps_convergence") is not None:
+        return
+
+    from deploy_agent import executor as executor_mod
+
+    monkeypatch.setattr(
+        executor_mod.DeployExecutor,
+        "observe_deps_convergence",
+        lambda self, lane: [],
     )
 
 

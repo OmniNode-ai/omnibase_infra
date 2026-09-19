@@ -121,6 +121,11 @@ class _FastExecutor:
         # OMN-18640: the terminal event now also carries what verification
         # recreated, so a fake executor has to declare it.
         self.verify_recreate: list[object] = []
+        # OMN-18640: the terminal event now also carries what the deps leg
+        # found before it acted, and the argv of every compose call, so a
+        # fake executor has to declare both.
+        self.deps_convergence: list[object] = []
+        self.compose_invocations: list[object] = []
         self._pin_gate = pin_gate
         self._pin_running = pin_running
 
