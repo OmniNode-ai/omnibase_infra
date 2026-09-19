@@ -1138,12 +1138,20 @@ class HandlerGraph(
         if filter_conditions:
             where_clause = "WHERE " + " AND ".join(filter_conditions)
 
+        # OMN-18795: NOT a Cypher list comprehension with a function call in the
+        # map expression -- `[node in nodes(p) | toString(id(node))]` reads as
+        # valid openCypher but Memgraph 2.18.1 refuses it at runtime with
+        # `neo4j.exceptions.TransientError: Not yet implemented: atom expression
+        # '[nodeinnodes(p)|toString(id(node))]'`. Returning the raw `nodes(p)`
+        # list and deriving each id in Python (mirroring how `rel.element_id` is
+        # already read off driver-hydrated Relationship objects below) sidesteps
+        # the unsupported construct entirely.
         query = f"""
         {start_match}
         MATCH p = (start){rel_pattern}(n)
         {where_clause}
-        WITH DISTINCT n, relationships(p) as rels, [node in nodes(p) | toString(id(node))] as path_ids
-        RETURN n, toString(id(n)) as eid, id(n) as nid, rels, path_ids
+        WITH DISTINCT n, relationships(p) as rels, nodes(p) as path_nodes
+        RETURN n, toString(id(n)) as eid, id(n) as nid, rels, path_nodes
         LIMIT 1000
         """
 
@@ -1207,9 +1215,13 @@ class HandlerGraph(
                             )
                         )
 
-                # Process path
-                path_ids = record.get("path_ids", [])
-                if path_ids:
+                # Process path -- path_nodes is the raw `nodes(p)` list of
+                # driver-hydrated Node objects (see the query comment above);
+                # each one's element_id is read the same way rel.element_id is
+                # read above, never via a Cypher-side id() call.
+                path_nodes = record.get("path_nodes", [])
+                if path_nodes:
+                    path_ids = [str(pn.element_id) for pn in path_nodes]
                     paths.append(path_ids)
                     max_depth_reached = max(max_depth_reached, len(path_ids) - 1)
 
