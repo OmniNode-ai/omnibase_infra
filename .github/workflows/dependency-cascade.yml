@@ -255,6 +255,13 @@ jobs:
           echo "legacy_branch=$LEGACY_BRANCH" >> $GITHUB_OUTPUT
           echo "legacy_branch_omn18596=$LEGACY_BRANCH_OMN18596" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          # OMN-18272: the VALIDATED package name, for the machine-readable
+          # cascade provenance block the PR body emits. `inputs.package` is the
+          # same characters but has not passed the pattern check above, and the
+          # block is what clause 1 of the OMN-18233 supersession predicate
+          # parses — it reads the output the generator validated, never a raw
+          # input.
+          echo "package=$PACKAGE" >> $GITHUB_OUTPUT
           echo "pkg_hyphen=$PKG_HYPHEN" >> $GITHUB_OUTPUT
           echo "ticket=$TICKET" >> $GITHUB_OUTPUT
           echo "evidence_source=$EVIDENCE_SOURCE" >> $GITHUB_OUTPUT
@@ -442,6 +449,17 @@ jobs:
 
           - Updates `uv.lock` via `uv lock --upgrade-package ${{ inputs.package }}`
           - Updates `pyproject.toml` exact pins (`==X.Y.Z`) to match resolved version
+
+          ## Cascade provenance (OMN-16286)
+
+          This PR carries no dedicated testing of its own beyond this repo's own
+          CI running against the new lockfile. Its cited evidence below is the
+          upstream release's own Evidence-Ticket/Evidence-Source pair, which
+          already proved the released package version -- reused honestly rather
+          than fabricated or exempted:
+
+          - Source repo: `OmniNode-ai/${{ steps.vars.outputs.package }}`
+          - Released version: `${{ steps.vars.outputs.version }}`
 
           ## Triggered by
 
