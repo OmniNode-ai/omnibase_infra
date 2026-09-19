@@ -103,6 +103,25 @@ _KNOWN_PRODUCERS: frozenset[str] = frozenset(
         # node_ledger_projection_compute first subscribed to a steel_onslaught
         # topic; previously omnibase_infra never referenced one.
         "steel-onslaught",
+        # deploy (OMN-18816): the .201 deploy agent's own producer segment. It is a
+        # standalone uv sub-project at omnibase_infra scripts/deploy-agent/ with no
+        # node and no contract.yaml, so it is not a repo name and never will be one --
+        # same shape as "occ" and "steel-onslaught" above: a real, already-live
+        # production topic string, not a typo. Its three topics are declared as
+        # constants in deploy_agent.events: TOPIC_REBUILD_REQUESTED,
+        # onex.evt.deploy.rebuild-completed.v1, and TOPIC_REBUILD_REJECTED.
+        #
+        # WHY THIS IS AN ALLOWLIST ENTRY AND NOT A THIRD BASELINE LINE. omnimarket's
+        # scripts/validation/topic_naming_baseline.txt carries the first two under a
+        # deferred-work note proposing "omnibase-infra" as the producer, and says in
+        # its own header not to add new topics. That note describes a RENAME of three
+        # live topic strings across a producer in this repo and a consumer in another,
+        # which is its own ticket with its own migration; it is not something a
+        # consumer adding the third subscription can do. Suppressing a correctly-named
+        # topic as a "pre-existing violation" would be the wrong record of why it is
+        # here. If the rename does happen, this entry and those two baseline lines go
+        # in the same change.
+        "deploy",
     }
 )
 _KNOWN_SNAPSHOT_PRODUCERS: frozenset[str] = frozenset({"platform", "projection"})
