@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Publish a lab-pass receipt's verdict to the bus (OMN-18769, AC3).
+"""Publish one lab FACT document to the bus (OMN-18769, AC1 and AC3).
+
+TWO CALLERS, ONE TRANSPORT. ``runtime-rebuild-trigger.yml`` publishes the
+lab-pass receipt's verdict; ``lane-census-refresh.yml`` publishes the
+census-OBSERVED document. Both are facts about a lab lane that a projection
+folds onto that lane's row, both are emitted from a job on the .201 runner,
+and both have to speak the same SASL transport. A second copy of that
+resolution is a second thing to get wrong -- the topic is read OFF the
+document rather than passed in, so this script can never publish a fact
+onto a topic its own producer did not name.
 
 WHAT THIS IS FOR. ``scripts/ci/lab_pass_receipt.py emit --event-out`` writes the
 event document beside the artifact it has already written. That artifact stays
@@ -72,7 +81,7 @@ def _warn(message: str) -> None:
     and the plain line is what survives into a downloaded log.
     """
     print(f"::warning::{message}")
-    print(f"publish_lab_pass_event: {message}", file=sys.stderr)
+    print(f"publish_lab_fact_event: {message}", file=sys.stderr)
 
 
 def _load_trigger_rebuild() -> Any:
@@ -102,14 +111,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--event",
         required=True,
         type=Path,
-        help="the event document written by `lab_pass_receipt.py emit --event-out`",
+        help=(
+            "the fact document to publish: `lab_pass_receipt.py emit "
+            "--event-out`, or `lane-census-check.sh --observed-out`"
+        ),
     )
     parser.add_argument(
         "--bus-lane",
         default="dev",
         help=(
             "the CI bus lane id to publish on, as declared in the overlay. "
-            "The lab-pass verdict for the .201 dev lane belongs on `dev`."
+            "A fact about the .201 dev lane belongs on `dev`."
         ),
     )
     parser.add_argument(
@@ -129,18 +141,18 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if not args.event.is_file():
-        _warn(f"no lab-pass event document at {args.event} — nothing to publish")
+        _warn(f"no lab fact document at {args.event} — nothing to publish")
         return EXIT_OK
 
     try:
         payload: dict[str, Any] = json.loads(args.event.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        _warn(f"lab-pass event document at {args.event} is unreadable: {exc}")
+        _warn(f"lab fact document at {args.event} is unreadable: {exc}")
         return EXIT_OK
 
     topic = payload.get("topic")
     if not isinstance(topic, str) or not topic:
-        _warn("lab-pass event document names no topic — refusing to guess one")
+        _warn("lab fact document names no topic — refusing to guess one")
         return EXIT_OK
 
     if args.bus_overlay is None or not args.bus_overlay.is_file():
@@ -167,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     if not broker:
         _warn(
             f"CI bus lane {args.bus_lane!r} declares no cross-process broker "
-            "(in-memory lane) — lab-pass verdict NOT published"
+            "(in-memory lane) — the fact is NOT published"
         )
         return EXIT_OK
 
@@ -192,8 +204,11 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     # The message KEY is the lane, matching the projection's key_columns, so a
-    # lane's verdicts land on one partition and their order is the order the
-    # reducer sees. The reducer guards on observed_at in SQL regardless -- this
+    # lane's facts land on one partition and their order is the order the
+    # reducer sees. A census-observed document names no single lane (it covers
+    # the whole host), so it keys null and takes the default partitioner --
+    # correct, because its fold is per-finding and already guarded on
+    # `observed_at`. The reducer guards on observed_at in SQL regardless -- this
     # makes the common case ordered rather than relying on that guard.
     key = payload.get("lane")
     try:
@@ -205,20 +220,27 @@ def main(argv: list[str] | None = None) -> int:
         )
         remaining = producer.flush(timeout=FLUSH_TIMEOUT_SECONDS)
     except Exception as exc:  # noqa: BLE001 — see the module docstring on exit 0
-        _warn(f"lab-pass verdict publish to {topic} FAILED: {exc}")
+        _warn(f"lab fact publish to {topic} FAILED: {exc}")
         return EXIT_OK
 
     if remaining:
         _warn(
-            f"lab-pass verdict publish to {topic} did not flush within "
+            f"lab fact publish to {topic} did not flush within "
             f"{FLUSH_TIMEOUT_SECONDS}s ({remaining} message(s) still queued)"
         )
         return EXIT_OK
 
+    # Named from the document's own fields, and only the ones it carries: a
+    # lab-pass receipt has `result`/`lane`/`sha`, a census-observed document has
+    # `event_type`/`host`/`drift_count`, and printing a missing field as `None`
+    # is how a log line starts asserting something the fact never said.
+    described = ", ".join(
+        f"{field}={payload[field]!r}"
+        for field in ("event_type", "lane", "sha", "result", "host", "drift_count")
+        if field in payload
+    )
     print(
-        f"published lab-pass verdict {payload.get('result')} for "
-        f"{payload.get('lane')}/{payload.get('sha')} to {topic} on lane "
-        f"{args.bus_lane!r} ({protocol})"
+        f"published lab fact ({described}) to {topic} on lane {args.bus_lane!r} ({protocol})"
     )
     return EXIT_OK
 

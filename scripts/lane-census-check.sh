@@ -25,6 +25,7 @@
 #   ./scripts/lane-census-check.sh --dry-run        # print event/plan, do NOT publish
 #   ./scripts/lane-census-check.sh --json           # emit the plan JSON to stdout
 #   ./scripts/lane-census-check.sh --snapshot PATH  # write the census SNAPSHOT to PATH ('-' = stdout)
+#   ./scripts/lane-census-check.sh --observed-out PATH  # write the census-OBSERVED document (OMN-18769)
 #
 # THE SNAPSHOT IS NOT THE PLAN (OMN-18606). `--json` emits the PLAN document
 # (keys: findings, has_drift, lanes_checked, schema_version). The staleness gate
@@ -61,6 +62,11 @@ DRIFT_TOPIC="onex.evt.infra.lane-census-drift.v1"
 # a lane-health projection reads, and without a clean-run message that
 # projection cannot tell a matching fleet from a census that stopped running.
 OBSERVED_TOPIC="onex.evt.omnibase-infra.lane-census-observed.v1"
+# OMN-18769: destination for the census-OBSERVED document. Empty means "do not
+# write one"; "-" means stdout. The topic the document names is OBSERVED_TOPIC
+# above -- the publisher reads it off the document rather than being told, so
+# the name cannot be spelled two ways.
+OBSERVED_OUT=""
 # Inventory unobservable — NOT drift. See the exit-code table above (OMN-15466).
 EXIT_INVENTORY_UNAVAILABLE=4
 
@@ -72,6 +78,9 @@ while [[ $# -gt 0 ]]; do
     --snapshot)
       [[ $# -ge 2 ]] || { echo "ERROR: --snapshot requires a path ('-' for stdout)" >&2; exit 2; }
       SNAPSHOT_OUT="$2"; shift 2 ;;
+    --observed-out)
+      [[ $# -ge 2 ]] || { echo "ERROR: --observed-out requires a path ('-' for stdout)" >&2; exit 2; }
+      OBSERVED_OUT="$2"; shift 2 ;;
     --help|-h) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -81,6 +90,11 @@ done
 # PLAN document and --dry-run prints the EVENT document; either alongside
 # "--snapshot -" produces two concatenated JSON documents, which is exactly the
 # `Extra data: line 2 column 1` shape that made the old recipes unusable.
+if [[ "$OBSERVED_OUT" == "-" && ( "$SNAPSHOT_OUT" == "-" || "$EMIT_JSON" == true || "$DRY_RUN" == true ) ]]; then
+  echo "ERROR: --observed-out - cannot be combined with another stdout document" >&2
+  exit 2
+fi
+
 if [[ "$SNAPSHOT_OUT" == "-" ]]; then
   if [[ "$EMIT_JSON" == true || "$DRY_RUN" == true ]]; then
     echo "ERROR: --snapshot - cannot be combined with --json or --dry-run (two JSON documents on stdout)" >&2
@@ -198,24 +212,32 @@ if [[ -n "$SNAPSHOT_OUT" ]]; then
   fi
 fi
 
-# OMN-18769: publish the census-OBSERVED fact BEFORE the no-drift early exit, so
-# the clean case -- the one the drift topic structurally cannot carry -- reaches
-# the bus. This block never changes this script's exit-code contract: a publish
-# failure is logged and the run continues to its drift verdict, because a broker
-# that is down is not a lane that has drifted.
-OBSERVED_JSON="$(echo "$PLAN_JSON" | LANE_CENSUS_HOST="$HOST" "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_event.py" --observed)"
-
-if [[ "$DRY_RUN" == true ]]; then
-  log "DRY-RUN — not publishing census-observed event."
-elif [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
-  # Rule 8: fail loud, never a localhost default. The systemd unit injects it.
-  log "KAFKA_BOOTSTRAP_SERVERS unset — census-observed event NOT published."
-elif ! command -v rpk >/dev/null 2>&1; then
-  log "rpk not found — census-observed event NOT published."
-elif echo "$OBSERVED_JSON" | rpk topic produce "$OBSERVED_TOPIC" --brokers "$KAFKA_BOOTSTRAP_SERVERS" >>"$LOG_FILE" 2>&1; then
-  log "published lane-census-observed event to $OBSERVED_TOPIC via rpk"
-else
-  log "FAILED to publish census-observed via rpk (broker=$KAFKA_BOOTSTRAP_SERVERS)"
+# OMN-18769: write the census-OBSERVED document BEFORE the no-drift early exit,
+# so the clean case -- the one the drift topic structurally cannot carry --
+# is available to the caller. This block never changes this script's exit-code
+# contract: it writes a document and nothing else.
+#
+# THIS SCRIPT DOES NOT PUBLISH IT, and that is the correction rather than an
+# omission. The first revision of OMN-18769 ended this block with
+# `rpk topic produce --brokers "$KAFKA_BOOTSTRAP_SERVERS"`, and on the one host
+# this script actually runs on that branch is unreachable twice over: `rpk` is
+# not on the .201 host PATH (it lives inside the broker container -- the live
+# log has read `rpk not found` on every run since the drift event was added),
+# and the hourly drop-in sets no broker address. A publish that can only warn
+# is not a mechanism, it is a comment that runs. Publication is the caller's,
+# beside the declared transport: `lane-census-refresh.yml` runs
+# `scripts/ci/publish_lab_fact_event.py`, which resolves protocol and mechanism
+# from the checked-in lane overlay and carries the SASL credential the .201
+# broker's external listener has required since OMN-18012 Phase B.
+if [[ -n "$OBSERVED_OUT" ]]; then
+  OBSERVED_JSON="$(echo "$PLAN_JSON" | LANE_CENSUS_HOST="$HOST" "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_event.py" --observed)"
+  if [[ "$OBSERVED_OUT" == "-" ]]; then
+    printf '%s\n' "$OBSERVED_JSON"
+  else
+    mkdir -p "$(dirname "$OBSERVED_OUT")"
+    printf '%s\n' "$OBSERVED_JSON" >"$OBSERVED_OUT"
+    log "census-observed document written: $OBSERVED_OUT"
+  fi
 fi
 
 if [[ "$HAS_DRIFT" != "True" ]]; then

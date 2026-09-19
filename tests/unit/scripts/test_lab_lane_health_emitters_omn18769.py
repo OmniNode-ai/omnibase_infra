@@ -151,26 +151,63 @@ def test_ac1_the_cli_default_is_still_the_drift_event() -> None:
     assert json.loads(observed.stdout)["event_type"] == "lane-census-observed"
 
 
-def test_ac1_the_census_script_publishes_before_the_no_drift_exit() -> None:
-    """A publish placed after the early exit would never fire on a clean run.
+def test_ac1_the_observed_document_is_written_before_the_no_drift_exit() -> None:
+    """A write placed after the early exit would never fire on a clean run.
 
     Asserted on source ORDER rather than by running the script, which needs a
     lab host: the ordering is the whole mechanism, and getting it wrong looks
     identical to working until the fleet is healthy.
     """
     body = CENSUS_CHECK.read_text()
-    publish_at = body.index("lane-census-observed event to $OBSERVED_TOPIC")
+    write_at = body.index('log "census-observed document written: $OBSERVED_OUT"')
     exit_at = body.index('log "No lane drift. Desired == actual."')
 
-    assert publish_at < exit_at
+    assert write_at < exit_at
 
 
-def test_ac1_the_census_script_never_defaults_a_broker_address() -> None:
-    """Rule 8: fail loud, never a localhost fallback."""
+def test_ac1_the_census_script_does_not_publish_and_says_why() -> None:
+    """The publish moved OUT of this script, and that is the mechanism.
+
+    `rpk` is not on the .201 host PATH -- it lives inside the broker container,
+    and the live census log has read `rpk not found` on every run since the
+    drift event was added -- and the hourly drop-in sets no broker address. A
+    branch that can only warn is not a mechanism. This pins that the script
+    writes a document and opens no transport of its own, so a later change
+    cannot quietly reintroduce the unreachable branch.
+    """
     body = CENSUS_CHECK.read_text()
 
-    assert "census-observed event NOT published" in body
+    assert 'rpk topic produce "$OBSERVED_TOPIC"' not in body
     assert "localhost:9092" not in body
+    assert "publish_lab_fact_event.py" in body, (
+        "the script must name where publication actually happens"
+    )
+
+
+def test_ac1_the_refresh_workflow_publishes_the_observed_document() -> None:
+    """The caller that HAS the transport is the one that publishes it."""
+    workflow = (REPO_ROOT / ".github/workflows/lane-census-refresh.yml").read_text()
+
+    assert "--observed-out" in workflow
+    assert "scripts/ci/publish_lab_fact_event.py" in workflow
+    assert "config/ci_bus_lanes.yaml" in workflow
+    assert "rpk topic produce" not in workflow
+
+
+def test_ac1_the_refresh_publish_never_fails_the_census_collection() -> None:
+    """A broker that is down is not a lane that drifted.
+
+    The census file is the durable record; the publish is renderability. If the
+    publish could fail the job, an unreachable broker would stop the committed
+    census from ever being refreshed -- trading the surface this ticket is
+    making readable for the one that already worked.
+    """
+    workflow = (REPO_ROOT / ".github/workflows/lane-census-refresh.yml").read_text()
+    publish_at = workflow.index("Publish the census-observed fact to the bus")
+    tail = workflow[publish_at : publish_at + 600]
+
+    assert "continue-on-error: true" in tail
+    assert "if: always()" in tail
 
 
 # --------------------------------------------------------------------------
@@ -412,7 +449,7 @@ def test_ac3_this_script_never_opens_a_broker_connection_itself() -> None:
 # which a bare `--brokers` invocation does not speak. A step that can only
 # warn is not a mechanism; it is a comment that runs.
 
-PUBLISHER = REPO_ROOT / "scripts" / "ci" / "publish_lab_pass_event.py"
+PUBLISHER = REPO_ROOT / "scripts" / "ci" / "publish_lab_fact_event.py"
 REBUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
 
 
@@ -463,7 +500,7 @@ def test_ac3_an_unreachable_broker_reports_zero_and_never_fails_the_lab_pass() -
     the log. The artifact -- the authority the delivery gate reads -- is
     unaffected either way.
     """
-    publisher = _load(PUBLISHER, "omn18769_publish_lab_pass_event")
+    publisher = _load(PUBLISHER, "omn18769_publish_lab_fact_event")
     assert publisher.EXIT_OK == 0
     assert publisher.main(["--event", "/nonexistent/event.json"]) == 0
 
@@ -471,7 +508,7 @@ def test_ac3_an_unreachable_broker_reports_zero_and_never_fails_the_lab_pass() -
 def test_ac3_the_workflow_calls_the_publisher_and_not_raw_rpk() -> None:
     """The step that publishes is the one that can actually publish."""
     body = REBUILD_WORKFLOW.read_text()
-    assert "scripts/ci/publish_lab_pass_event.py" in body
+    assert "scripts/ci/publish_lab_fact_event.py" in body
     assert "rpk topic produce onex.evt.omnibase-infra.lab-pass-receipt.v1" not in body
 
 

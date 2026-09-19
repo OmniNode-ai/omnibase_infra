@@ -148,8 +148,11 @@ jobs:
           # `bash -e`, and `set -uo pipefail` above does NOT clear that. Reading
           # `$?` on the next line never ran, so exit 30 — DRIFT, a normal census
           # outcome — failed the job (run 35273920602).
+          OBSERVED="${RUNNER_TEMP}/census-observed-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          rm -f "$OBSERVED"
+
           rc=0
-          bash scripts/lane-census-check.sh --snapshot "$CANDIDATE" || rc=$?
+          bash scripts/lane-census-check.sh --snapshot "$CANDIDATE" --observed-out "$OBSERVED" || rc=$?
           if [[ $rc -ne 0 && $rc -ne 30 ]]; then
             echo "::error title=LANE-CENSUS-UNCOLLECTABLE::lane-census-check.sh exited ${rc}; no census collected, no PR opened."
             exit 1
@@ -159,7 +162,53 @@ jobs:
             exit 1
           fi
           echo "candidate=${CANDIDATE}" >> "$GITHUB_OUTPUT"
+          if [[ -s "$OBSERVED" ]]; then
+            echo "observed=${OBSERVED}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::the collector wrote no census-observed document; nothing to publish"
+          fi
           echo "Collected census (collector rc=${rc})."
+
+      # OMN-18769 AC1. The census has always been a committed FILE, refreshed at
+      # most once every few days by the step below, so a lane-health panel
+      # reading it could not tell a matching fleet from a census that stopped
+      # running two days ago. This publishes the census-OBSERVED document on
+      # EVERY run, drift or not, keyed on nothing and timestamped `observed_at`
+      # -- the moment the census looked, never the moment something republished
+      # it. The drift topic is untouched and stays the alert authority.
+      #
+      # `if: always()` and `continue-on-error`: a census that was collected is a
+      # fact whether or not the bump PR opens, and a broker that is unreachable
+      # is not a lane that drifted. The committed snapshot is the durable
+      # record either way.
+      - name: Fetch the CI bus lane overlay
+        if: always() && steps.collect.outputs.observed != ''
+        continue-on-error: true
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .ci-bus-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Publish the census-observed fact to the bus
+        if: always() && steps.collect.outputs.observed != ''
+        continue-on-error: true
+        env:
+          # OMN-18012 — the dev control-bus lane declares SASL_PLAINTEXT /
+          # SCRAM-SHA-256 in the overlay checked out above. Injected as
+          # ENVIRONMENT so no credential reaches argv or the process list.
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+        run: |
+          set -uo pipefail
+          uv run python scripts/ci/publish_lab_fact_event.py \
+            --event "${{ steps.collect.outputs.observed }}" \
+            --bus-lane "dev" \
+            --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml"
 
       - name: Decide whether the committed census has to move
         id: decide

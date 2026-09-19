@@ -700,7 +700,7 @@ jobs:
           KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
         run: |
           set -uo pipefail
-          uv run python scripts/ci/publish_lab_pass_event.py \
+          uv run python scripts/ci/publish_lab_fact_event.py \
             --event "${LAB_PASS_DIR}/event.json" \
             --bus-lane "dev" \
             --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml"
