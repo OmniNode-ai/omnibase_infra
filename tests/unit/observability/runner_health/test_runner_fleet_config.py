@@ -364,7 +364,10 @@ def test_deploy_runner_monitor_cron_uses_bash_for_source() -> None:
 
     assert "/bin/bash -lc" in deploy_script
     assert "source ${monitor_env}" in deploy_script
-    assert ">> /tmp/runner-monitor.log 2>&1" in deploy_script
+    assert (
+        ">> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-monitor.log 2>&1"
+        in deploy_script
+    )
     assert 'local cron_line="*/3 * * * * set -a && source' not in deploy_script
 
 
@@ -378,7 +381,10 @@ def test_deploy_runner_repair_cron_runs_every_ten_minutes() -> None:
     assert "runner-repair-check" in deploy_script
     assert "MONITOR_AUTO_BOUNCE=1" in deploy_script
     assert "OFFLINE_IDLE_RECREATE_AGE_SECONDS=600" in deploy_script
-    assert ">> /tmp/runner-repair.log 2>&1" in deploy_script
+    assert (
+        ">> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-repair.log 2>&1"
+        in deploy_script
+    )
     assert "grep -Ev 'runner-monitor|runner-repair-check'" in deploy_script
 
 
