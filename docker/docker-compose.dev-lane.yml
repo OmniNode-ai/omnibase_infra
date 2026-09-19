@@ -318,6 +318,79 @@ x-dev-lane-consumer-poll-env: &dev_lane_consumer_poll_env
   KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
 services:
   # ===========================================================================
+  # (6a) BROKER READINESS THAT READS A PARTITION -- OMN-18789
+  # ===========================================================================
+  # THE SURFACE THIS REPLACES WAS GREEN THROUGH A TOTAL OUTAGE.
+  #
+  # The base file gives this broker `rpk cluster health | grep -q
+  # 'Healthy:.*true'` (docker-compose.infra.yml, service `redpanda`). That is
+  # an ADMIN-API call; it never touches the Kafka data path. On 2026-09-18 the
+  # deploy agent recreated this container at 23:16:46Z and its controller left
+  # partition reconciliation stuck from 23:18:56Z to 23:36:18Z. In the
+  # 23:29:30Z-23:34:30Z slice alone the broker logged 5921
+  # `replicated_partition.cc:596 ... error obtaining latest start offset -
+  # { error_code: not_leader_for_partition [6] }` lines across essentially
+  # every topic, and 1500 `controller_backend.cc:963 [{kafka/
+  # __consumer_offsets/N}] reconciliation seems stuck` lines.
+  #
+  # Throughout, `docker ps` read `Up 26 minutes (healthy)` with RestartCount 0,
+  # and `GET :9644/v1/cluster/health_overview` returned `is_healthy true`,
+  # `leaderless_partitions []`, `leaderless_count 0`. That last answer is not
+  # wrong on its own terms -- on a single-node cluster every partition
+  # nominally has node 0 as its leader -- it simply answers a question no
+  # client asks. Ninety-seven minutes, every CI publisher on the fleet failing,
+  # every watched surface green.
+  #
+  # The probe mounted below asks the client's question instead: does an offset
+  # read return numbers, and is every consumer group that has committed before
+  # and is currently behind still committing? Its full reasoning, its measured
+  # bounds and its stated residual are in the two files it is built from.
+  #
+  # DEV LANE ONLY, AND MECHANICALLY SO. This is an override in the lane's
+  # SECOND `-f` file, which `resolve_compose_file_args()` in
+  # scripts/deploy-runtime.sh appends for the bare `omnibase-infra` project and
+  # never for a lane with its own overlay. stability-test and prod inherit the
+  # base healthcheck untouched; judge and lakshman redeclare the old one in
+  # their own overlays. All four are pinned by
+  # tests/unit/docker/test_omn18789_broker_readiness_lane_scope.py and by
+  # test_the_base_broker_probe_is_unchanged_for_every_other_lane.
+  #
+  # IT REPORTS, IT DOES NOT ACT. `redpanda` carries no `autoheal=true` label,
+  # so a NOT READY verdict turns `docker ps` red and restarts nothing. Making a
+  # wedged broker visible is this ticket; repairing one is OMN-18640.
+  #
+  # CREDENTIALS. Same two `:?` values the lane's clients already bind
+  # (`x-dev-lane-broker-auth-env`, OMN-18012), reaching rpk through RPK_USER /
+  # RPK_PASS inside the probe -- never on a command line, because `ps` is
+  # readable by every process in the container. `:?` and not `:-` for the same
+  # reason as everywhere else in this file: a lane that silently falls back to
+  # an empty password proves nothing. The probe tries an authenticated read
+  # first and an unauthenticated one second, so it is correct both before and
+  # after the `enable_sasl` flip below.
+  #
+  # `start_period` 120s: a recreated broker replays its controller log before
+  # it can serve offsets, and Docker reports `starting` (never `unhealthy`)
+  # for the whole period. `timeout` 15s against four rpk calls measured at
+  # ~0.2s each on this lane with ~899 consumer groups.
+  #
+  # Ticket: OMN-18789. Incident: OMN-18691 lane diagnosis, 2026-09-18/19.
+  redpanda:
+    environment:
+      DEV_KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane's broker readiness probe reads through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-18789); resolved from the operator env file, never inlined here}
+      DEV_KAFKA_SASL_PASSWORD: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the dev lane's broker readiness probe reads through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-18789); resolved from the operator env file, never inlined here}
+    volumes:
+      - ./redpanda/broker_readiness_probe.sh:/usr/local/bin/onex-broker-readiness-probe:ro
+      - ./redpanda/broker_readiness_declaration.conf:/etc/onex/broker_readiness_declaration.conf:ro
+    healthcheck:
+      test:
+        - CMD
+        - /usr/bin/bash
+        - /usr/local/bin/onex-broker-readiness-probe
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 120s
+  # ===========================================================================
   # (7) DEV-LANE BROKER PRINCIPAL -- phase A of OMN-18012
   # ===========================================================================
   # WHAT THIS IS FOR
