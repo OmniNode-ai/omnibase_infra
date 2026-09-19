@@ -703,7 +703,22 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql,
     # nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql,
     # nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql.
-    assert len(result.declarations) == 195
+    # 195 -> 196 for OMN-18851: one node-owned migration,
+    # nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql,
+    # vendored from omnimarket by scripts/sync-node-migrations.sh. It redefines
+    # projection_delegation_savings so the aggregate stops embedding each
+    # session's full prompt_text and response_text -- the snapshot the savings
+    # writer republishes after every applied event had reached 2,548,602 bytes
+    # against a 1,048,588-byte producer limit and was crash-looping the writer.
+    #
+    # It shares the 090 prefix with the OMN-18693 GRANT migration listed just
+    # above, in the same node directory, and that is fine rather than an
+    # oversight: the forward runner applies these under namespaced ids
+    # (node:<node>:<filename>), which is why sync-node-migrations.sh's header
+    # records that no renumber is ever needed. The two are independent -- one
+    # grants on savings_estimates, the other redefines a view -- so their
+    # relative order cannot matter, and it is deterministic regardless.
+    assert len(result.declarations) == 196
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
