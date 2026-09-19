@@ -378,11 +378,11 @@ def test_not_installed_refusal_recognizes_canonical_onex_symlink(
     assert str(path_onex) in message
 
 
-def test_not_installed_refusal_without_omni_home_does_not_resolve_placeholder(
+def test_not_installed_refusal_without_workspace_root_does_not_resolve_placeholder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """OMN-18280: diagnostics never resolve literal $OMNI_HOME against CWD."""
+    """OMN-18280: diagnostics never resolve the literal placeholder against CWD."""
     path_bin = tmp_path / "path-bin"
     path_onex = path_bin / "onex"
     path_bin.mkdir()
@@ -406,7 +406,7 @@ def test_not_installed_refusal_without_omni_home_does_not_resolve_placeholder(
     message = str(exc_info.value)
     assert str(path_onex) in message
     assert "filesystem identity cannot be compared" in message
-    assert "no OMNI_HOME was provided" in message
+    assert "no OMNIBASE_PATH was provided" in message
     assert "not the canonical wrapper" not in message
 
 
