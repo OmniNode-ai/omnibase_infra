@@ -107,6 +107,7 @@ def test_dry_run_plan_dogfood_lane_is_isolated(tmp_path: Path) -> None:
     result = _run(omni_home, "--lane", "dogfood")
     assert result.returncode == 0, result.stderr
     assert "OMNIBASE_INFRA_COMPOSE_PROJECT=omnibase-infra-dogfood" in result.stderr
+    assert "--profile dogfood" in result.stderr
 
 
 @pytest.mark.unit
