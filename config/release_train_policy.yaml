@@ -92,7 +92,7 @@ repos:
       no lab lane of its own and no runtime-rebuild-trigger.yml
     mode: report_only
     mode_note: >-
-      TWO blockers. OMN-18634: uv lock cannot resolve this repo's Python 3.15 / win32 marker split, so the dependency cascade has never moved its omnibase-infra pin off 0.38.21 and a release here could not propagate; team-lead direction 2026-09-17 excludes it from the cut until that clears, and its lockfile is deliberately not repaired from this lane. Separately, 67 unreleased source commits measured 2026-09-17 against a tag dated 2026-05-26: arming a patch cut over three months of accumulated change is the hazard OMN-18010 put out of scope, so this repo needs a deliberate minor release first.
+      ONE blocker now, and it is the backlog: 67 unreleased source commits measured 2026-09-17 against a tag dated 2026-05-26, so arming a patch cut over three months of accumulated change is the hazard OMN-18010 put out of scope and this repo needs a deliberate minor release first. The dependency-cascade blocker this entry also carried until 2026-09-19 is CLEARED and is no longer a reason to hold the repo: the cascade could not move this repo's omnibase-infra pin at all while its lock failed to resolve, omniintelligence#918 (squash 274f097f) removed the source override that caused that, and the cascade then ran green -- proof run 35412730230, job Cascade / Bump omniintelligence, conclusion success, with dev's lock now resolving omnibase-infra 0.38.32. The mode is unchanged because the two blockers were independent; only one of them cleared.
   omniclaude:
     package: omniclaude
     default_branch: dev

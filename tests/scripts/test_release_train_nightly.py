@@ -205,6 +205,55 @@ class TestLiveState:
         assert decision.unreleased_count == 67
         assert "deliberate minor release" in decision.detail
 
+    def test_the_shipped_policy_no_longer_records_the_cascade_as_blocked(
+        self,
+    ) -> None:
+        """omniintelligence's entry recorded a cascade blocker that has cleared.
+
+        The entry named OMN-18634 -- uv lock could not resolve this repo's
+        dependency graph, so the cascade had never moved its omnibase-infra pin
+        off 0.38.21 -- as one of two reasons the repo is report_only. That
+        blocker cleared on 2026-09-19 (omniintelligence#918, squash 274f097f;
+        proof run 35412730230, job "Cascade / Bump omniintelligence", success).
+        A policy note that keeps describing a cleared blocker as open is a
+        reader telling the next lane not to look.
+
+        The second blocker is a different fact and is NOT cleared, so the mode
+        stays report_only and this test asserts the surviving reason is still
+        stated -- a note that lost both halves would read as armed-and-silent.
+
+        A negative assertion on absent strings passes just as happily against a
+        typo in the matcher, so the pre-fix text is carried here as the positive
+        control: every marker this test demands be gone has to be findable in
+        the text it was written against.
+        """
+        markers = ("OMN-18634", "uv lock cannot resolve", "0.38.21")
+        pre_fix_note = (
+            "TWO blockers. OMN-18634: uv lock cannot resolve this repo's Python "
+            "3.15 / win32 marker split, so the dependency cascade has never "
+            "moved its omnibase-infra pin off 0.38.21 and a release here could "
+            "not propagate"
+        )
+        for marker in markers:
+            assert marker in pre_fix_note, (
+                f"positive control failed: {marker!r} is not in the pre-fix "
+                "note, so this test would report a clean absence against any "
+                "text at all"
+            )
+
+        note = rt.load_policy(_POLICY)["omniintelligence"].mode_note
+        for marker in markers:
+            assert marker not in note, (
+                f"omniintelligence's mode_note still carries {marker!r}; the "
+                "cascade blocker it describes cleared on 2026-09-19 and the "
+                "entry is the only durable record a later reader has"
+            )
+        assert "deliberate minor release" in note, (
+            "the surviving blocker -- the unreleased-commit backlog that makes "
+            "a patch cut the wrong shape -- must stay stated, because it is "
+            "what still holds this repo at report_only"
+        )
+
     def test_the_shipped_policy_file_parses_and_covers_the_seven_repos(self) -> None:
         policies = rt.load_policy(_POLICY)
         assert set(policies) == {
