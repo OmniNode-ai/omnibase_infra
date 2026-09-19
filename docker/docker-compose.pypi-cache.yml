@@ -31,6 +31,16 @@ services:
     image: omninode-pypi-cache:latest
     container_name: omninode-pypi-cache
     restart: unless-stopped
+    # OMN-18846 — run docker-init (tini) as PID 1 so orphaned children are reaped.
+    # devpi-server is a plain Python application with no SIGCHLD reaper, and the
+    # HEALTHCHECK below forks `sh` + `curl` every 30s; those exec'd processes
+    # re-parent to PID 1 and, without an init, are never collected. Measured on
+    # 192.168.86.201 2026-09-19: 936 defunct curls under the container's PID 1
+    # against the pids_limit of 1024, so the healthcheck could no longer fork
+    # (`/bin/sh: 1: Cannot fork`) and had been failing for 3384 consecutive
+    # checks — since 2026-09-18T12:14Z. A restart clears the count but not the
+    # cause; this is the cause.
+    init: true
     # LAN-exposed on the runner host so every fleet runner shares one cache. The
     # runner containers reach it via the host Tailscale MagicDNS name + this port.
     ports:
