@@ -92,13 +92,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- lane -> compose project (mirrors deploy-runtime.sh lane mapping) ------
+DEPLOY_PROFILE_ARGS=()
 case "${LANE}" in
     dev)
         COMPOSE_PROJECT="omnibase-infra" ;;
     stability-test)
         COMPOSE_PROJECT="omnibase-infra-stability-test" ;;
     dogfood)
-        COMPOSE_PROJECT="omnibase-infra-dogfood" ;;
+        COMPOSE_PROJECT="omnibase-infra-dogfood"
+        # This standalone lane puts every service behind the dogfood profile.
+        DEPLOY_PROFILE_ARGS=(--profile dogfood) ;;
     prod|judge)
         err "lane '${LANE}' is not a lab fast-lane target."
         err "  prod is Train 2 (grant-gated, PyPI-backed); judge is read-only."
@@ -189,7 +192,7 @@ fi
 
 log "deploy command  :"
 log "  ${PLAN_ENV[*]} \\"
-log "    ${DEPLOY_RUNTIME} --execute --force ${BRINGUP}"
+log "    ${DEPLOY_RUNTIME} --execute --force ${BRINGUP} ${DEPLOY_PROFILE_ARGS[*]}"
 
 if [[ "${MODE}" != "execute" ]]; then
     log "dry-run: no tags cut, no build/deploy performed. Re-run with --execute."
@@ -228,4 +231,4 @@ log "executing deploy-runtime.sh ..."
 # rebuild. Prod/release deploys never go through this wrapper (Train 2 is
 # grant-gated and refuses here -- see the lane case above), so the guard
 # stays fully intact for that path.
-exec bash "${DEPLOY_RUNTIME}" --execute --force "${BRINGUP}"
+exec bash "${DEPLOY_RUNTIME}" --execute --force "${BRINGUP}" "${DEPLOY_PROFILE_ARGS[@]}"
