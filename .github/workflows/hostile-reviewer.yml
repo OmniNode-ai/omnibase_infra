@@ -563,7 +563,20 @@ jobs:
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     needs: [occ-preflight, hostile-review]
-    if: always()
+    # OMN-18793: `!cancelled()`, never bare `always()`. This workflow declares
+    # `concurrency.cancel-in-progress: true`, so every re-push cancels the run
+    # already in flight. `always()` is TRUE on a cancelled run, so the gate
+    # executed there too, read `needs.occ-preflight.result == 'cancelled'`, and
+    # posted a hard `failure` against the pull-request head for a run that was
+    # never allowed to produce a verdict -- 9 of the 10 most recent heads when
+    # the OMN-18254 failure-rate alert first fired (run 35412814968).
+    #
+    # `!cancelled()` changes WHEN this job runs, never WHAT it refuses: a
+    # skipped or failed upstream still evaluates here (a draft/bot-skipped
+    # reviewer must not needs-cascade the gate into a vacuous skip), and both
+    # fail-closed branches below are unchanged. Only a cancelled run is silent,
+    # which is correct -- a superseded run has no verdict to report.
+    if: ${{ !cancelled() }}
     steps:
       - name: Evaluate gate
         working-directory: ${{ github.workspace }}
