@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable
+from datetime import datetime
 from uuid import UUID
 
 from aiohttp import web
@@ -15,7 +16,7 @@ from deploy_agent.accept_backlog import (
     EnumAcceptBacklogStatus,
     ModelAcceptBacklogVerdict,
 )
-from deploy_agent.job_state import JobStore
+from deploy_agent.job_state import JobState, JobStore
 from deploy_agent.lab_overlay import load_latest_record, load_record
 from deploy_agent.loaded_code import loaded_code_sha_if_recorded
 from deploy_agent.queue_depth import ModelControlTopicLag, compute_queue_snapshot
@@ -97,19 +98,24 @@ async def _health_handler(request: web.Request) -> web.Response:
 
     # Find the most recent completed job for last_result
     last_result = None
-    completed_jobs = []
+    # OMN-18640: carry the completion time ALONGSIDE the job rather than
+    # reaching back into an optional field to sort on. The filter below already
+    # establishes that `completed_at` is set, but that fact lived only in the
+    # `if` and the sort key had to re-assert it -- which is what strict mode
+    # refused. Pairing it here makes the invariant structural: a job reaches
+    # this list only with a time, and the sort reads the time it came with.
+    completed_jobs: list[tuple[datetime, JobState]] = []
     for path in store.state_dir.glob("*.json"):
         try:
-            from deploy_agent.job_state import JobState
-
             job = JobState.model_validate_json(path.read_text())
-            if job.status in ("success", "failed") and job.completed_at:
-                completed_jobs.append(job)
+            completed_at = job.completed_at
+            if job.status in ("success", "failed") and completed_at is not None:
+                completed_jobs.append((completed_at, job))
         except Exception:  # noqa: BLE001
             continue
     if completed_jobs:
-        completed_jobs.sort(key=lambda j: j.completed_at, reverse=True)
-        latest = completed_jobs[0]
+        completed_jobs.sort(key=lambda pair: pair[0], reverse=True)
+        latest = completed_jobs[0][1]
         last_result = {
             "correlation_id": str(latest.correlation_id),
             "status": latest.status,

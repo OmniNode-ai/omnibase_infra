@@ -650,7 +650,15 @@ def _decode_stream(stream: str | bytes | None) -> str:
     return str(stream)
 
 
-def _run(cmd: list[str], timeout: int, **kwargs) -> subprocess.CompletedProcess:
+def _run(
+    cmd: list[str], timeout: int, **kwargs: Any
+) -> subprocess.CompletedProcess[str]:
+    # OMN-18640: the `[str]` parameter is load-bearing, not decoration. This
+    # call passes `text=True`, so `stdout`/`stderr` ARE `str` at runtime; an
+    # unparameterised annotation made them `Any`, and every caller that did
+    # `result.stdout.strip()` silently returned `Any` into a function declared
+    # to return `str`. Two of this module's ten strict-mode errors were that
+    # one omission, one layer removed from where it was written.
     return subprocess.run(
         cmd,
         timeout=timeout,
@@ -916,7 +924,7 @@ def _runtime_version_from_pyproject(repo_dir: str = REPO_DIR) -> str:
     return version
 
 
-def _runtime_health_passed(result: subprocess.CompletedProcess) -> bool:
+def _runtime_health_passed(result: subprocess.CompletedProcess[str]) -> bool:
     """Return whether a runtime /health response proves deploy readiness."""
     if result.returncode != 0:
         return False

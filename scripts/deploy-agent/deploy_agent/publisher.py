@@ -24,6 +24,7 @@ from deploy_agent.events import (
     ModelRecreateSupervision,
     ModelVerifyRecreate,
     Phase,
+    PhaseStatus,
 )
 from deploy_agent.job_state import JobState
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
@@ -149,7 +150,11 @@ def build_completion_payload(
     completed_at = job.completed_at or datetime.now(UTC)
     duration = (completed_at - started_at).total_seconds()
 
-    phase_results = {
+    # OMN-18640: annotated because `dict` is INVARIANT in its key type. Without
+    # it mypy infers the key as the union of the Phase members this
+    # comprehension happens to see, which is not a `dict[Phase, PhaseStatus]`
+    # and cannot be passed as one -- a true variance finding, not noise.
+    phase_results: dict[Phase, PhaseStatus] = {
         phase: status
         for phase, status in job.phase_results.items()
         if phase != Phase.PUBLISH

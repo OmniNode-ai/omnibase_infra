@@ -999,7 +999,12 @@ class ModelRebuildCompleted(BaseModel):
             )
         return self
 
-    @computed_field
+    # `# type: ignore[prop-decorator]` is this repository's established
+    # handling of a mypy limitation, not a suppression of a real finding:
+    # `@computed_field` MUST sit outside `@property` for pydantic to see it,
+    # and mypy does not model a decorator above `@property`. Same form as
+    # `src/omnibase_infra/models/environment/model_machine_registry.py`.
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def status(self) -> Literal["success", "failed"]:
         non_skipped = {

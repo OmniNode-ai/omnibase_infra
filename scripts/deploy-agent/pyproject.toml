@@ -15,7 +15,32 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-aiohttp>=1.0"]
+# OMN-18640: mypy and types-PyYAML are dev deps because this sub-project is
+# now type-gated in CI on the same terms as the parent package. types-PyYAML
+# is what gives `yaml.SafeLoader` a real type -- without it the compose
+# ceiling loader subclasses `Any`, which strict mode refuses and which is a
+# true finding rather than noise: an untyped base silences every override.
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-aiohttp>=1.0",
+    "mypy>=1.11",
+    "types-PyYAML>=6.0",
+]
+
+# OMN-18640: this sub-project is type-gated on the SAME terms as the parent
+# package, so the settings are declared here rather than passed on a command
+# line that a second caller could spell differently. Mirrors the root
+# pyproject's `[tool.mypy]`: strict, missing third-party imports ignored,
+# untyped-import noise disabled. There is deliberately NO per-module override
+# list -- the parent carries one because 64 of its modules predate strict mode;
+# this sub-project has none, and adding the first one should be a visible
+# decision rather than a quiet append.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

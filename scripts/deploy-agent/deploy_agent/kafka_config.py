@@ -44,7 +44,7 @@ Credential PRESENCE is not a statement about transport. The lane is.
 from __future__ import annotations
 
 import os
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -245,10 +245,20 @@ def load_deploy_agent_kafka_config_from_env() -> ModelDeployAgentKafkaConfig:
     username = os.environ.get(f"{prefix}{ENV_SASL_USERNAME}") or None
     password = os.environ.get(f"{prefix}{ENV_SASL_PASSWORD}") or None
 
+    # OMN-18640: the two casts name where the narrowing actually happens. Both
+    # fields are declared as Literals, and both carry a `mode="before"`
+    # field_validator that upper-cases the value and RAISES on anything outside
+    # the valid set -- `normalise_security_protocol` and
+    # `normalise_sasl_mechanism` above. So the runtime check is real and
+    # fail-closed; what the cast asserts is only that this constructor accepts
+    # the wider input its own validators are written to narrow. Widening the
+    # field types instead would delete the constraint the client depends on.
     return ModelDeployAgentKafkaConfig(
         bootstrap_servers=bootstrap_servers,
-        security_protocol=security_protocol,
-        sasl_mechanism=os.environ.get(ENV_SASL_MECHANISM) or None,
+        security_protocol=cast("SecurityProtocol", security_protocol),
+        sasl_mechanism=cast(
+            "SaslMechanism | None", os.environ.get(ENV_SASL_MECHANISM) or None
+        ),
         sasl_username=username,
         sasl_password=password,
         sasl_env_prefix=prefix,

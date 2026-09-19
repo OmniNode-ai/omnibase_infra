@@ -92,6 +92,34 @@ jobs:
           working-directory: scripts/deploy-agent
           install-args: "--extra dev"
 
+      # OMN-18640: type-gate this sub-project on the same terms as the parent
+      # package. It was type-checked NOWHERE -- the repo's mypy leg runs
+      # `mypy src/omnibase_infra` and this tree is not under `src/` -- so its
+      # thirteen strict-mode errors sat unreported for as long as the agent has
+      # existed. Two of them were a real hole rather than annotation debt:
+      # `_run` returned an unparameterised `CompletedProcess`, so every caller
+      # doing `result.stdout.strip()` returned `Any` from a function declared
+      # to return `str`.
+      #
+      # It runs BEFORE the tests deliberately. A type error is cheaper to read
+      # than a test failure caused by one, and this job's whole purpose is that
+      # nothing about this sub-project is checked anywhere else.
+      #
+      # Settings are NOT spelled here: they live in
+      # `scripts/deploy-agent/pyproject.toml` `[tool.mypy]`, so a developer
+      # running `mypy` locally gets the same verdict this job does. A flag
+      # added here and not there is a divergence with no failing test.
+      #
+      # `working-directory` is load-bearing, not tidiness. mypy resolves its
+      # config from `./pyproject.toml` and does NOT walk parents, so the same
+      # command from the repo root reads the PARENT package's `[tool.mypy]` --
+      # its `mypy_path = "src"` and its 64-module override list, none of which
+      # apply here -- and then fails with `Can't find package 'deploy_agent'`.
+      # Measured, not assumed, while writing this step.
+      - name: Type-check deploy-agent (mypy --strict, OMN-18640)
+        working-directory: scripts/deploy-agent
+        run: uv run --extra dev mypy --package deploy_agent
+
       - name: Run deploy-agent unit tests (OMN-15378)
         run: |
           uv run --project scripts/deploy-agent --extra dev \
