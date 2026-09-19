@@ -272,6 +272,12 @@ SYNC_PATHS=(
     "docker/docker-compose.runners.yml"
     "docker/docker-compose.model-review-canary.yml"
     "docker/compose-overrides.list"
+    # OMN-18768: the fleet-observation event builder. runner-monitor.sh
+    # resolves it at ../../scripts/ relative to its own deployed location and
+    # skips the bus emit with a log line when it is absent, so a missing sync
+    # is a silently unobservable fleet rather than a failed monitor -- which
+    # is exactly why it is declared here.
+    "scripts/runner_fleet_event.py"
     "scripts/ci/build_runner_image.sh"
     "scripts/ci/ci_env_digest.py"
     "scripts/ci/ensure_ci_env.sh"
@@ -486,6 +492,10 @@ rsync_artifacts() {
         "${REPO_ROOT}/docker/runners/omni-curl" \
         "${REPO_ROOT}/docker/runners/omni-curl.sh" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/"
+
+    rsync -av --checksum \
+        "${REPO_ROOT}/scripts/runner_fleet_event.py" \
+        "${RUNNER_HOST}:${RUNNER_HOST_DIR}/scripts/"
 
     rsync -av --checksum \
         "${REPO_ROOT}/scripts/ci/build_runner_image.sh" \

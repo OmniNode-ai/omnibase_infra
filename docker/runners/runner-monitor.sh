@@ -1217,6 +1217,116 @@ jq -n \
     }' > "$STATE_FILE"
 
 # ---------------------------------------------------------------------------
+# Fleet-observation bus emit (OMN-18768, closing OMN-16943)
+# ---------------------------------------------------------------------------
+# Until this block, this monitor knew the state of every runner in the fleet on
+# a 3-minute cadence and told a CHAT CHANNEL, and nothing else. It emitted no
+# bus event, so nothing downstream could read the fleet: not alert triage, not a
+# projection, not the dashboard. A sweep of every onex.snapshot.projection.*
+# topic across the runtime sources returns 60+ topics and not one runner, lane,
+# fleet or host topic. "What runners are running" had no producer at all.
+#
+# This emits ONE typed event per observation cycle — a ~69-runner fleet is one
+# message, not 69 — on onex.evt.infra.runner-fleet.v1, carrying per-runner name,
+# label class, host, online/offline/busy status, job id when resolvable, and
+# observed_at. The schema is built in Python (runner_fleet_event.py, beside this
+# script and rsynced with it) so it is deterministic and unit-testable; this
+# shell measures and publishes, exactly as scripts/disk-watermark-check.sh does.
+#
+# THIS EMIT NEVER CHANGES WHAT THE MONITOR DOES. It runs AFTER the state file is
+# written and BEFORE the alert logic, it is wrapped so a publish failure cannot
+# abort the run under `set -e`, and it dispatches no remediation. A broken bus
+# must never suppress a runner alert or a bounce.
+RUNNER_FLEET_TOPIC="${RUNNER_FLEET_TOPIC:-onex.evt.infra.runner-fleet.v1}"
+# The fleet observation is scoped BROADER than the detection loop, deliberately.
+# RUNNER_NAME_PREFIX is `omninode-runner`, which scopes the crash-loop/wedge
+# checks to the interchangeable general pool. The FLEET question is "what
+# runners are running", and measured live on 2026-09-18 the org pool held 69
+# runners of which exactly one was offline: `omninode-air-runner-1`, on .105 —
+# a name the detection prefix does not match. Emitting on the narrow prefix
+# would have dropped the only runner that was down, which is precisely the
+# false-green AC4 exists to refuse.
+RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-omninode-}"
+RUNNER_FLEET_EMIT="${RUNNER_FLEET_EMIT:-true}"
+# The builder lives in scripts/, not beside this file. That is not a layout
+# preference: docker/runners/ is the runner IMAGE build context, and the
+# repo's check-env-reads gate approves env reads under scripts/ and tests/
+# only -- a builder here would have been blocked, correctly. Both the
+# deployed layout (${RUNNER_HOST_DIR}/docker/runners/ + ${RUNNER_HOST_DIR}/scripts/)
+# and the repo layout put it two levels up, resolved from this file's own
+# location so no absolute path is ever hardcoded (Operating Rule 6).
+_MONITOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNNER_FLEET_EVENT_BUILDER="${RUNNER_FLEET_EVENT_BUILDER:-${_MONITOR_DIR}/../../scripts/runner_fleet_event.py}"
+
+emit_fleet_observation() {
+    if [[ "${RUNNER_FLEET_EMIT}" != true ]]; then
+        log "fleet emit disabled (RUNNER_FLEET_EMIT=${RUNNER_FLEET_EMIT}) — skipping"
+        return 0
+    fi
+    if [[ "${github_api_failed}" == true ]] || [[ -z "${github_json}" ]]; then
+        # An unreadable GitHub API is a MISSING observation, never an empty
+        # fleet. Publishing zero runners here would render a GitHub blip
+        # downstream as a total fleet outage.
+        log "fleet emit skipped — org runner API unreadable this cycle (no observation to publish)"
+        return 0
+    fi
+    if [[ ! -f "${RUNNER_FLEET_EVENT_BUILDER}" ]]; then
+        log "fleet emit skipped — event builder not found at ${RUNNER_FLEET_EVENT_BUILDER} (deploy-runners.sh rsyncs it beside this script)"
+        return 0
+    fi
+
+    local event_json
+    event_json="$(
+        RUNNER_FLEET_HOST="${RUNNER_HOST}" \
+        RUNNER_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX}" \
+        RUNNER_GROUP="${RUNNER_GROUP}" \
+        TOPIC="${RUNNER_FLEET_TOPIC}" \
+        RUNNER_JOB_MAP_JSON="${RUNNER_JOB_MAP_JSON:-}" \
+        python3 "${RUNNER_FLEET_EVENT_BUILDER}" <<< "${github_json}" 2>/dev/null
+    )" || {
+        log "fleet emit FAILED to build event — continuing (alerting is unaffected)"
+        return 0
+    }
+    if [[ -z "${event_json}" ]]; then
+        log "fleet emit produced no event — continuing"
+        return 0
+    fi
+
+    # Publish. Broker address comes from env, fail-soft, never a hardcoded
+    # default (Operating Rule 8 / OMN-10741). Method 1 rpk, method 2 the HTTP
+    # thin-publish endpoint, method 3 log-only so the event stays replayable.
+    local _fleet_published=false
+    if command -v rpk >/dev/null 2>&1 && [[ -n "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
+        if printf '%s' "${event_json}" | rpk topic produce "${RUNNER_FLEET_TOPIC}" \
+            --brokers "${KAFKA_BOOTSTRAP_SERVERS}" >/dev/null 2>&1; then
+            _fleet_published=true
+            log "fleet observation published to ${RUNNER_FLEET_TOPIC} via rpk (broker=${KAFKA_BOOTSTRAP_SERVERS})"
+        else
+            log "fleet emit via rpk FAILED (broker=${KAFKA_BOOTSTRAP_SERVERS}) — falling through to HTTP publish"
+        fi
+    fi
+    if [[ "${_fleet_published}" == false ]] && [[ -n "${ONEX_BUS_PUBLISH_URL:-}" ]]; then
+        local _status
+        _status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X POST "${ONEX_BUS_PUBLISH_URL}" \
+            -H "Content-Type: application/json" \
+            -d "${event_json}" 2>/dev/null || echo "000")"
+        if [[ "${_status}" =~ ^2 ]]; then
+            _fleet_published=true
+            log "fleet observation published to ${RUNNER_FLEET_TOPIC} via HTTP (status=${_status})"
+        else
+            log "fleet emit via HTTP FAILED (status=${_status}) — event logged below for replay"
+        fi
+    fi
+    if [[ "${_fleet_published}" == false ]]; then
+        log "fleet observation NOT published (no broker or publish URL configured); event: ${event_json}"
+    fi
+    return 0
+}
+
+emit_fleet_observation || true
+
+# ---------------------------------------------------------------------------
 # Alert logic — only on state transitions
 # ---------------------------------------------------------------------------
 
