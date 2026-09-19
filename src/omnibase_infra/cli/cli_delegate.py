@@ -144,12 +144,18 @@ from omnibase_infra.cli.delegate_locus import (
     contract_terminal_topic,
     resolve_delegate_locus,
 )
+from omnibase_infra.cli.delegate_queue_depth import (
+    observe_delegate_queue_depth,
+)
 from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
     resolve_delegate_terminal,
 )
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
+)
+from omnibase_infra.cli.model_delegate_queue_depth import (
+    ModelDelegateQueueDepth,
 )
 from omnibase_infra.cli.model_delegate_run_addressing import (
     ModelDelegateRunAddressing,
@@ -1157,6 +1163,7 @@ def _timeout_receipt(
     bus: str,
     locus_decision: ModelDelegateLocusDecision,
     contract_path: Path,
+    queue_depth: ModelDelegateQueueDepth,
 ) -> ModelSkillResult[ModelDelegateTimeoutRefusal]:
     """Build the one typed result a timed-out delegation puts on stdout (OMN-17516).
 
@@ -1185,6 +1192,7 @@ def _timeout_receipt(
         terminal_topic=contract_terminal_topic(contract_path),
         command_topic=locus_decision.command_topic,
         broker=locus_decision.broker,
+        queue_depth=queue_depth,
     )
     return ModelSkillResult[ModelDelegateTimeoutRefusal](
         skill_name="delegate",
@@ -1816,7 +1824,20 @@ def run_delegate(
             # a run still in progress -- the whole of the 2026-08-26 "no result
             # at all" report. Nothing here invents a terminal: the receipt says
             # FAILED, and says what was awaited and for how long.
-            click.echo(str(exc), err=True)
+            # OMN-18852: a bare timeout does not tell the caller whether
+            # the run was slow or merely behind, and on the .201 dev lane on
+            # 2026-09-19 it was ALWAYS the second -- queue wait grew 3s ->
+            # 445s across nine delegations while a control run's own
+            # inference took 1.559s. The depth is OBSERVED from the broker
+            # here, never supplied or assumed, and an unresolvable one says
+            # so rather than printing a zero that would read as an idle queue.
+            queue_depth = observe_delegate_queue_depth(
+                bus=bus,
+                broker=locus_decision.broker,
+                command_topic=locus_decision.command_topic,
+                consumer_groups=locus_decision.lane_consumer_groups,
+            )
+            click.echo(f"{exc} Queue: {queue_depth.describe()}.", err=True)
             click.echo(
                 _timeout_receipt(
                     correlation_id=correlation_id,
@@ -1826,6 +1847,7 @@ def run_delegate(
                     bus=bus,
                     locus_decision=locus_decision,
                     contract_path=contract_path,
+                    queue_depth=queue_depth,
                 ).model_dump_json()
             )
             return 1

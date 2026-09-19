@@ -240,6 +240,7 @@ from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
 )
 from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
     ConsumerRejoinSupervisor,
+    ModelConsumerPollBatch,
 )
 from omnibase_infra.event_bus.kafka_auth import (
     MSKTokenProvider,
@@ -515,6 +516,14 @@ class EventBusKafka(
         self._consumer_rejoin_events: list[ModelConsumerGroupRejoinEvent] = []
         # Keys currently being started (reserved under lock before await consumer.start())
         self._pending_consumer_keys: set[tuple[str, str]] = set()
+
+        # OMN-18852: contract-declared in-flight bound per (topic, group_id).
+        # A key that is ABSENT means the serial default, which is not "a
+        # semaphore of size one" but the unchanged inline ``await`` branch of
+        # ``_consume_loop``. Written by ``declare_consume_concurrency`` before
+        # the ``subscribe`` that starts the loop; read once when the loop
+        # starts.
+        self._consume_concurrency: dict[tuple[str, str], int] = {}
 
         # Subscriber registry: topic -> list of (group_id, subscription_id, callback) tuples
         self._subscribers: dict[
@@ -1670,6 +1679,45 @@ class EventBusKafka(
             retry_count=self._max_retry_attempts + 1,
         ) from last_exception
 
+    def declare_consume_concurrency(
+        self,
+        *,
+        topic: str,
+        group_id: str,
+        max_in_flight_records: int,
+    ) -> None:
+        """Bound concurrently in-flight records for one ``(topic, group_id)``.
+
+        Satisfies ``ProtocolConsumeConcurrencyDeclarer``. Call before the
+        ``subscribe`` that starts the consume loop for this pair -- the loop
+        reads the bound once, when it starts, so a declaration made afterwards
+        does not take effect until the consumer is rebuilt.
+
+        ``group_id`` is the group the subscription RESOLVES to (what
+        ``subscribe`` computes from ``node_identity`` via
+        ``compute_consumer_group_id``), because that is the value
+        ``_group_consumers`` and ``_consume_loop`` are keyed by. It is not the
+        effective id sent to Kafka, which carries the per-topic suffix.
+
+        A bound of 1 is recorded but changes nothing: ``_consume_loop`` treats
+        1 and "undeclared" identically and takes the inline serial path.
+
+        Args:
+            topic: Topic the subscription consumes.
+            group_id: Resolved consumer group id for the subscription.
+            max_in_flight_records: Records this loop may dispatch at once.
+
+        Raises:
+            ValueError: ``max_in_flight_records`` is below 1. A bound that
+                admits nothing is a wedged consumer, not a configuration.
+        """
+        if max_in_flight_records < 1:
+            raise ValueError(
+                f"max_in_flight_records must be >= 1, got {max_in_flight_records} "
+                f"for topic={topic} group={group_id}"
+            )
+        self._consume_concurrency[(topic, group_id)] = max_in_flight_records
+
     async def subscribe(
         self,
         topic: str,
@@ -2774,6 +2822,8 @@ class EventBusKafka(
         group_id: str,
         correlation_id: UUID,
         failure_stage: str,
+        *,
+        rewind_sink: dict[int, int] | None = None,
     ) -> None:
         """Withhold offset advancement after an unconfirmed DLQ write (OMN-15232).
 
@@ -2797,6 +2847,13 @@ class EventBusKafka(
 
         Only the failed message's own partition is rewound; sibling partitions
         are untouched (same per-partition discipline as OMN-14757).
+
+        OMN-18852: when ``rewind_sink`` is supplied this method RECORDS the
+        request instead of performing the seek. It is supplied only by the
+        concurrent driver, where siblings are still running and a seek from
+        inside one of them races the others and is undone by whichever
+        finishes next. ``None`` -- every subscription that did not declare
+        ``consume_concurrency`` -- takes the seek path below unchanged.
         """
         msg_topic = getattr(msg, "topic", None) or topic
         partition = getattr(msg, "partition", None)
@@ -2816,6 +2873,35 @@ class EventBusKafka(
                     "group_id": group_id,
                     "correlation_id": str(correlation_id),
                     "failure_stage": failure_stage,
+                },
+            )
+            return
+
+        if rewind_sink is not None:
+            # OMN-18852: concurrent driver. Record the request; the driver
+            # drains and seeks once per partition, to the LOWEST offset here.
+            # Seeking now would race the siblings still running.
+            existing = rewind_sink.get(int(partition))
+            if existing is None or int(offset) < existing:
+                rewind_sink[int(partition)] = int(offset)
+            logger.error(
+                "dlq_unpersisted_rewind_requested topic=%s partition=%s "
+                "offset=%s stage=%s correlation_id=%s -- DLQ persistence was "
+                "NOT confirmed; rewind deferred to the consume loop, which "
+                "drains in-flight siblings before moving the fetch position "
+                "(OMN-15232/OMN-18852)",
+                msg_topic,
+                partition,
+                offset,
+                failure_stage,
+                str(correlation_id),
+                extra={
+                    "topic": msg_topic,
+                    "group_id": group_id,
+                    "partition": partition,
+                    "offset": offset,
+                    "failure_stage": failure_stage,
+                    "correlation_id": str(correlation_id),
                 },
             )
             return
@@ -3084,6 +3170,8 @@ class EventBusKafka(
         group_id: str,
         correlation_id: UUID,
         consumer: AIOKafkaConsumer,
+        *,
+        rewind_sink: dict[int, int] | None = None,
     ) -> bool:
         """Dispatch one fetched record to its subscribers.
 
@@ -3092,9 +3180,25 @@ class EventBusKafka(
         consumer forever. The dispatch, DLQ and offset-withhold behaviour is
         unchanged.
 
+        Args:
+            msg: The raw fetched record.
+            topic: Topic being consumed.
+            group_id: Subscription group id.
+            correlation_id: Correlation id for this consumer task.
+            consumer: Consumer handle, used to seek on the serial path.
+            rewind_sink: OMN-18852. ``None`` on the serial path, which is
+                every subscription that did not declare ``consume_concurrency``
+                -- the rewind then seeks inline, exactly as before. When the
+                concurrent driver supplies a sink, this record RECORDS its
+                rewind request there instead of seeking: with siblings running,
+                a seek from inside a task races the other tasks and is undone
+                by whichever of them finishes next. The driver drains and then
+                seeks once, to the lowest offset in the sink.
+
         Returns:
-            True when the fetch position was rewound for this record's
-            partition, in which case the caller MUST discard the rest of that
+            True when this record's partition must not advance -- because the
+            fetch position was rewound (serial) or a rewind was requested
+            (concurrent). The serial caller MUST then discard the rest of that
             partition's batch: those records sit past the rewind point and
             Kafka will redeliver them.
         """
@@ -3168,6 +3272,7 @@ class EventBusKafka(
                     group_id,
                     correlation_id,
                     "deserialization_error",
+                    rewind_sink=rewind_sink,
                 )
                 # OMN-18640: the fetch position was just moved back to this
                 # record. Every later record already buffered for this
@@ -3206,6 +3311,7 @@ class EventBusKafka(
                 group_id,
                 correlation_id,
                 "handler_retries_exhausted",
+                rewind_sink=rewind_sink,
             )
             return True
 
@@ -3250,7 +3356,22 @@ class EventBusKafka(
 
         supervisor = self._rejoin_supervisor_for(topic, group_id)
 
+        # OMN-18852: read the contract-declared in-flight bound ONCE, here.
+        # Absent or 1 means the inline serial path below, unchanged.
+        max_in_flight = self._consume_concurrency.get((topic, group_id), 1)
+
         try:
+            if max_in_flight > 1:
+                await self._consume_loop_concurrent(
+                    topic=topic,
+                    group_id=group_id,
+                    correlation_id=correlation_id,
+                    consumer=consumer,
+                    supervisor=supervisor,
+                    max_in_flight=max_in_flight,
+                )
+                return
+
             # OMN-18640: poll with a deadline rather than iterating the
             # consumer. ``async for msg in consumer`` never returns and never
             # raises while aiokafka retries a dead group coordinator in its own
@@ -3319,6 +3440,262 @@ class EventBusKafka(
                     "correlation_id": str(correlation_id),
                 },
             )
+
+    async def _consume_loop_concurrent(
+        self,
+        *,
+        topic: str,
+        group_id: str,
+        correlation_id: UUID,
+        consumer: AIOKafkaConsumer,
+        supervisor: ConsumerRejoinSupervisor,
+        max_in_flight: int,
+    ) -> None:
+        """Poll driver for a subscription that declared ``max_in_flight > 1``.
+
+        Reached only from ``_consume_loop``, and only when the node's
+        ``contract.yaml`` declared ``consume_concurrency``. Every other
+        subscription takes the inline ``await`` above and never enters here.
+
+        **What this gives up, stated rather than implied.** Records on an
+        opted-in topic no longer complete in partition order: they are
+        dispatched in order and finish in whatever order their handlers do.
+        Delegations and inference intents are independent per correlation id,
+        so only per-key ordering is required and no key is split across
+        concurrent records -- but a consumer that needs global partition
+        ordering must NOT declare this key.
+
+        **Why concurrency is not scoped to one poll batch.** The topic this
+        was built for has one partition and records arrive one per fetch, so
+        a driver that parallelised only within a batch would measure green in
+        a test and change nothing on the lane. Tasks therefore stay in flight
+        across polls, bounded by the semaphore rather than by the batch.
+
+        **Rewind safety, which is the hard part and is fail-closed.** On the
+        serial path a rewind is safe by construction: exactly one record is in
+        flight, so ``consumer.seek`` can only race itself. Here it cannot be,
+        for two reasons -- two tasks seeking the same ``TopicPartition``
+        concurrently is a race whose loser silently wins, and a sibling that
+        finishes AFTER a seek drives the fetch position forward again past the
+        record the seek was protecting. So a task never seeks. It records its
+        offset in ``rewind_requests``; the driver then stops spawning, drains
+        every in-flight task, and seeks once per partition to the LOWEST
+        offset that asked. Nothing at or after the rewind point is skipped.
+
+        The cost is redelivery of up to ``max_in_flight - 1`` siblings that
+        already completed. That is at-least-once, which
+        ``_process_consumed_record`` already documents as this path's delivery
+        contract, and it is strictly preferable to losing a record.
+
+        Args:
+            topic: Topic being consumed.
+            group_id: Subscription group id (the ``_group_consumers`` key).
+            correlation_id: Correlation id for this consumer task.
+            consumer: The started consumer handle to poll.
+            supervisor: Rejoin supervisor for this ``(topic, group_id)``.
+            max_in_flight: Declared bound, guaranteed greater than 1.
+        """
+        semaphore = asyncio.Semaphore(max_in_flight)
+        in_flight: set[asyncio.Task[None]] = set()
+        # partition -> lowest offset that asked for a rewind. Written only
+        # from task bodies, and only between awaits, so the read-compare-write
+        # there is atomic on the single-threaded event loop.
+        rewind_requests: dict[int, int] = {}
+        # Set by a task the instant it records a request. The driver races
+        # this against the poll so a rewind settles as soon as the requesting
+        # handler returns, rather than waiting out the poll deadline -- that
+        # window is time in which the auto-committer can commit past a record
+        # that exists nowhere durable, which is the whole failure OMN-15232
+        # closed on the serial path.
+        rewind_pending = asyncio.Event()
+        task_errors: list[BaseException] = []
+        poll_task: asyncio.Task[ModelConsumerPollBatch] | None = None
+
+        async def _drain() -> None:
+            """Wait for every dispatched record to finish."""
+            while in_flight:
+                await asyncio.gather(*list(in_flight), return_exceptions=True)
+
+        async def _dispatch_one(msg: object) -> None:
+            try:
+                await self._process_consumed_record(
+                    msg,
+                    topic,
+                    group_id,
+                    correlation_id,
+                    consumer,
+                    rewind_sink=rewind_requests,
+                )
+            except asyncio.CancelledError:
+                raise
+            except BaseException as task_error:  # noqa: BLE001 - re-raised by the driver
+                # Mirror the serial path: an unexpected error reaches
+                # ``_consume_loop``'s handler, which logs it and emits the
+                # health event. Swallowing it here would turn a dead consumer
+                # into a silent one.
+                task_errors.append(task_error)
+            finally:
+                if rewind_requests:
+                    rewind_pending.set()
+                semaphore.release()
+
+        async def _settle_rewinds() -> None:
+            """Drain, then move the fetch position back. Nothing may be running."""
+            await _drain()
+            await self._apply_deferred_rewinds(
+                consumer=consumer,
+                topic=topic,
+                group_id=group_id,
+                correlation_id=correlation_id,
+                rewind_requests=rewind_requests,
+            )
+            rewind_requests.clear()
+            rewind_pending.clear()
+
+        try:
+            while not self._shutdown:
+                if poll_task is None:
+                    poll_task = asyncio.create_task(supervisor.next_batch(consumer))
+                rewind_waiter = asyncio.create_task(rewind_pending.wait())
+                try:
+                    await asyncio.wait(
+                        {poll_task, rewind_waiter},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    rewind_waiter.cancel()
+
+                if rewind_requests:
+                    # A handler asked for a rewind. Discard the outstanding
+                    # fetch rather than applying records the seek is about to
+                    # invalidate, settle, and poll again from the new
+                    # position.
+                    poll_task.cancel()
+                    poll_task = None
+                    await _settle_rewinds()
+                    continue
+
+                if not poll_task.done():
+                    continue
+
+                batch = poll_task.result()
+                poll_task = None
+                consumer = cast("AIOKafkaConsumer", batch.consumer)
+
+                for records in batch.records.values():
+                    if self._shutdown or rewind_requests or task_errors:
+                        break
+                    for msg in records:
+                        if self._shutdown:
+                            logger.debug(
+                                f"Consumer loop shutdown signal received for topic {topic}",
+                                extra={
+                                    "topic": topic,
+                                    "correlation_id": str(correlation_id),
+                                },
+                            )
+                            break
+                        if rewind_requests or task_errors:
+                            # A rewind is pending: every later record in this
+                            # batch sits past the rewind point and is stale.
+                            break
+                        # Backpressure. Acquiring yields to the running
+                        # handlers, so the bound is an upper bound on
+                        # concurrency rather than a target.
+                        await semaphore.acquire()
+                        task = asyncio.create_task(_dispatch_one(msg))
+                        in_flight.add(task)
+                        task.add_done_callback(in_flight.discard)
+
+                if task_errors:
+                    break
+        finally:
+            if poll_task is not None:
+                poll_task.cancel()
+            # Shutdown, a rejoin failure or an unexpected error must not leave
+            # a dispatched record running against a bus that is closing: under
+            # auto-commit the position can advance past work that never
+            # finished, which is the drop this whole mechanism exists to stop.
+            await _drain()
+            if rewind_requests:
+                # A request recorded on the way out is still a record that
+                # exists nowhere durable. Settle it before the loop exits.
+                await self._apply_deferred_rewinds(
+                    consumer=consumer,
+                    topic=topic,
+                    group_id=group_id,
+                    correlation_id=correlation_id,
+                    rewind_requests=rewind_requests,
+                )
+                rewind_requests.clear()
+
+        if task_errors:
+            raise task_errors[0]
+
+    async def _apply_deferred_rewinds(
+        self,
+        *,
+        consumer: AIOKafkaConsumer,
+        topic: str,
+        group_id: str,
+        correlation_id: UUID,
+        rewind_requests: dict[int, int],
+    ) -> None:
+        """Seek each partition back to the lowest offset that asked (OMN-18852).
+
+        Called by the concurrent driver only, with nothing in flight. The
+        seek is applied to the CURRENT consumer handle, which may be a
+        replacement the supervisor rejoined while records were running -- a
+        replacement resumes from the same committed offsets, so the rewind
+        means the same thing on it.
+        """
+        for partition, offset in sorted(rewind_requests.items()):
+            try:
+                consumer.seek(TopicPartition(topic, partition), offset)
+            except Exception as seek_error:
+                logger.exception(
+                    "dlq_unpersisted_rewind_failed topic=%s partition=%s "
+                    "offset=%s stage=deferred_concurrent correlation_id=%s "
+                    "error=%s -- could NOT withhold offset advancement after "
+                    "an unconfirmed DLQ write; this record may be lost "
+                    "(OMN-15232/OMN-18852)",
+                    topic,
+                    partition,
+                    offset,
+                    str(correlation_id),
+                    str(seek_error),
+                    extra={
+                        "topic": topic,
+                        "group_id": group_id,
+                        "partition": partition,
+                        "offset": offset,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                continue
+
+            logger.error(
+                "dlq_unpersisted_offset_rewound topic=%s partition=%s "
+                "offset=%s stage=deferred_concurrent correlation_id=%s -- DLQ "
+                "persistence was NOT confirmed for at least one concurrently "
+                "dispatched record; fetch position rewound to the LOWEST such "
+                "offset, so siblings after it are redelivered rather than the "
+                "record being lost (OMN-15232/OMN-18852)",
+                topic,
+                partition,
+                offset,
+                str(correlation_id),
+                extra={
+                    "topic": topic,
+                    "group_id": group_id,
+                    "partition": partition,
+                    "offset": offset,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        if DLQ_UNPERSISTED_REWIND_BACKOFF_SECONDS > 0:
+            await asyncio.sleep(DLQ_UNPERSISTED_REWIND_BACKOFF_SECONDS)
 
     async def start_consuming(self) -> None:
         """Start the consumer loop.

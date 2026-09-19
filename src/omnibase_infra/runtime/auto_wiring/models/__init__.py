@@ -13,6 +13,10 @@ from omnibase_infra.runtime.auto_wiring.models.enum_handshake_failure_reason imp
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
     ModelAutoWiringManifest,
 )
+from omnibase_infra.runtime.auto_wiring.models.model_consume_concurrency import (
+    ModelConsumeConcurrency,
+    load_consume_concurrency,
+)
 from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
     ModelContractVersion,
 )
@@ -56,6 +60,7 @@ from omnibase_infra.runtime.auto_wiring.models.model_runtime_build_sha import (
 __all__ = [
     "HandshakeFailureReason",
     "ModelAutoWiringManifest",
+    "ModelConsumeConcurrency",
     "ModelContractVersion",
     "ModelDiscoveredContract",
     "ModelDiscoveryError",
@@ -69,4 +74,5 @@ __all__ = [
     "ModelLifecycleHooks",
     "ModelQuarantineRecord",
     "ModelRuntimeBuildSha",
+    "load_consume_concurrency",
 ]
