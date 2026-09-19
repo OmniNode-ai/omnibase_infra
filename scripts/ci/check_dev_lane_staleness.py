@@ -954,36 +954,67 @@ class ModelQueueFacts:
     def reach_bound_seconds(self, *, margin_seconds: int) -> int | None:
         """How long before the agent could REACH this command.
 
-        OMN-18144, 2026-09-19. This, and not
-        :meth:`derived_wait_bound_seconds`, is what decides whether a wait is
-        worth starting. The two differ by the lane's own post-acceptance grant,
-        and the difference is the whole defect: that grant is funded SEPARATELY
-        out of the job ceiling, for the probe step that runs after this one
-        (``2700 - 1500 - 900 - 120``, see
-        :data:`lane_settle_budget.STEP_OVERHEAD_SECONDS`), so charging the
-        convergence window for it compares a wait against a window the wait was
-        never meant to cover.
+        Acceptance only. This is NOT the predicate -- see
+        :meth:`convergence_horizon_seconds`, which is this plus the one more
+        service time the lane needs before it carries the sha. Kept as its own
+        term because the horizon is defined in relation to it and the two are
+        pinned against each other in the tests.
 
-        Measured cost of getting this wrong: on 2026-09-19 one command ahead
-        produced a 3003s worst case against a 1620s window, the guard declined,
-        and the lane carried the sha 554 seconds later. The release train then
-        read the unmeasured receipt as a lane failure and refused to cut
-        ``0.38.33``.
-
-        Reaching acceptance is the thing that makes a measurement possible, so
-        it is the thing the predicate asks about. A watch that reaches it
-        either sees convergence -- a real PASS, strictly better than an
-        estimate -- or stops at its wall clock and writes the same
-        INDETERMINATE the refusal would have written, having risked nothing.
-
-        ``None`` on an unreadable queue, exactly as above: a bound with no
-        measured service time behind it is a guess wearing a number's clothes.
+        ``None`` on an unreadable queue: a bound with no measured service time
+        behind it is a guess wearing a number's clothes.
         """
         if self.commands_ahead is None or self.mean_service_time_seconds is None:
             return None
         return round(
             self.commands_ahead * self.mean_service_time_seconds + margin_seconds
         )
+
+    def convergence_horizon_seconds(self, *, margin_seconds: int) -> int | None:
+        """How long before the LANE could be expected to carry this sha.
+
+        This is the refusal predicate. OMN-18144, and the second revision of it
+        in one day -- the reasoning of the first is recorded here because the
+        correction is only legible against it.
+
+        ``omnibase_infra#3823`` (12:33:02Z) moved the predicate off
+        :meth:`derived_wait_bound_seconds` -- reach plus the lane's declared
+        1500s post-acceptance grant -- and onto the reach alone, arguing that
+        reaching acceptance is what makes a measurement possible. Half of that
+        was right and half was wrong.
+
+        RIGHT: the lane's ``--wait-timeout`` grant does not belong here. It is
+        a declared ceiling, not an estimate of anything this command will
+        spend, and the job ceiling funds it SEPARATELY for the probe step that
+        runs after this one (``2700 - 1500 - 900 - 120``, see
+        :data:`lane_settle_budget.STEP_OVERHEAD_SECONDS`). It stays out.
+
+        WRONG: the reach is not the horizon. ``mean_service_time_seconds`` is
+        the agent's ACCEPT-TO-COMPLETION time, so arriving at acceptance still
+        leaves this command's own full service before the lane carries the
+        sha. Lane ``post-merge-lab-verify-reds-diag-1230`` measured the cost
+        within the hour: at ``commands_ahead = 1`` the reach predicate starts a
+        watch that cannot converge, holds the single host-201 verify runner for
+        the whole 1620s window, and arrives at the same INDETERMINATE the
+        refusal writes in about a second -- with the next merge's guard queued
+        behind it. Two of the four runs measured that morning sat at exactly
+        that position, so it is the common case.
+
+        So the horizon charges one measured service per place in line:
+        ``queue_position_at_start x mean + margin``. This command is Nth, each
+        takes a mean, convergence is at N means.
+
+        AN EMPTY QUEUE IS NOT A HORIZON QUESTION and is handled by the caller,
+        which never refuses on one. Charging a full mean to a command with
+        nothing ahead of it would refuse the healthy path whenever the agent's
+        mean drifted above the window -- and that path is the one that
+        normally PASSES.
+
+        ``None`` on an unreadable queue, for the same reason as above.
+        """
+        if self.commands_ahead is None or self.mean_service_time_seconds is None:
+            return None
+        position = self.commands_ahead + 1
+        return round(position * self.mean_service_time_seconds + margin_seconds)
 
     def evidence_clause(self, *, lane_budget_seconds: int, margin_seconds: int) -> str:
         """The named fields AC5 requires the receipt's check to carry."""
@@ -1114,41 +1145,48 @@ def queue_exceeds_bound(
 
     WHICH BOUND DECIDES, AND WHY IT IS NOT THE ONE IN THE EVIDENCE
     --------------------------------------------------------------
-    OMN-18144, corrected 2026-09-19. The question is "could the agent REACH
-    this command inside this window", so the predicate is
-    :meth:`ModelQueueFacts.reach_bound_seconds`. The worst case that AC5 puts
-    in the receipt -- reach plus the lane's whole post-acceptance grant -- is
-    the wrong question to refuse on, because the ceiling funds that grant
-    separately for the probe step; asking it charged a 1620s window for 3003s
-    of work it was never meant to do, and a lane that converged in 554s went
-    unmeasured while the release train reported it as failed. A worst case is
-    the right thing to REPORT and the wrong thing to REFUSE on: refusing on it
-    discards every run where reality beats it, which on the measured evidence
-    is the common case.
+    OMN-18144, corrected twice on 2026-09-19. The question is "could the LANE
+    be expected to carry this sha inside this window", so the predicate is
+    :meth:`ModelQueueFacts.convergence_horizon_seconds` -- one measured
+    service per place in line. That method carries the full reasoning,
+    including why the reach alone (``omnibase_infra#3823``, 12:33:02Z) was too
+    permissive and why the lane's declared grant stays out.
 
-    The refusal that remains is the one AC4 asked for, unchanged in intent: a
-    queue this window cannot reach at all is pure waste, and the runner is
-    better given to the next merge's guard.
+    TWO CASES NEVER REFUSE, and both are deliberate:
+
+    * an EMPTY queue. A refusal is about a queue ahead of this run, and there
+      is none; it is also the case that normally PASSES, so a horizon applied
+      to it would refuse the healthy path whenever the agent's mean drifted
+      above the window.
+    * an UNREADABLE queue. Falling back to the clock is today's behaviour and
+      the right fallback: this may only ever make a verdict better informed,
+      never harder to obtain.
+
+    The refusal that remains is the one AC4 asked for: a queue this window
+    cannot outlast is a foregone conclusion, and the single verify runner is
+    better given to the next merge's guard than spent arriving at it.
     """
-    reach = facts.reach_bound_seconds(margin_seconds=margin_seconds)
-    if reach is None or reach <= wall_clock_seconds:
+    if not facts.commands_ahead:
+        return ""
+    horizon = facts.convergence_horizon_seconds(margin_seconds=margin_seconds)
+    if horizon is None or horizon <= wall_clock_seconds:
         return ""
     bound = facts.derived_wait_bound_seconds(
         lane_budget_seconds=lane_budget_seconds, margin_seconds=margin_seconds
     )
-    assert facts.commands_ahead is not None
     assert facts.mean_service_time_seconds is not None
     return (
         f"the deploy agent has {facts.commands_ahead} command(s) ahead of this "
         f"one, so this merge is number {facts.queue_position_at_start} in line. "
         f"At the agent's observed {facts.mean_service_time_seconds:.0f}s mean "
-        f"service time that is {reach}s before the agent could even reach this "
-        f"command, against the {wall_clock_seconds}s this job can watch for "
-        f"(and {bound}s before the lane could be expected to have settled on "
-        "this sha). The wait is not started: the lane is not late, this run "
-        "cannot afford the queue ahead of it, and holding the verify runner "
-        "open for the difference would delay the next merge's guard behind "
-        "this one"
+        f"service time that is {horizon}s before the lane could be expected to "
+        f"carry this sha -- one service for each place in line, this command's "
+        f"own included -- against the {wall_clock_seconds}s this job can watch "
+        f"for (the receipt's worst case, which also charges the lane's declared "
+        f"grant, is {bound}s). The wait is not started: the lane is not late, "
+        "this run cannot outlast the queue ahead of it, and holding the verify "
+        "runner open for the difference would delay the next merge's guard "
+        "behind this one"
     )
 
 
