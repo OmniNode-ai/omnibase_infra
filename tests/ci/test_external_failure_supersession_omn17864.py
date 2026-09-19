@@ -415,3 +415,182 @@ class TestTheHelperIsDirectlyPinned:
             rows, ("red-one", "cancelled-one", "green-one"), now
         )
         assert listed == ["cancelled-one", "red-one"]
+
+
+class TestTheNewestAttemptIsTheOneEvaluated:
+    """The attempt-selection half, asserted independently of either grace.
+
+    RAISED AS A SECOND FLAVOUR OF THIS DEFECT, AND PARTLY FALSIFIED. The
+    report was that the umbrella "records against the first attempt it sees,
+    not the latest attempt", observed on ``omnibase_infra#3785``. The live
+    records do not support that reading of #3785, and the sequence is in this
+    class's own fixture-free assertions plus the timeline below:
+
+    * ``verify / verify`` attempt 1 concluded ``failure`` at 22:16:58Z;
+    * ``CI Summary`` attempt 1 concluded FAILURE at 22:17:45Z, its log naming
+      exactly one context, ``verify / verify``;
+    * the REPLACEMENT ``verify / verify`` started at 22:17:46Z — one second
+      AFTER the verdict, and four seconds after the poll that produced it.
+
+    So no later attempt was running when the umbrella read. There was one row
+    for that context and it was the failure. That is the companion race this
+    module already fixes, not an attempt-selection defect.
+
+    The ``Hostile Review Gate`` half does not reach the verdict either: it
+    went red at 22:18:37Z, 52 seconds AFTER the umbrella had already exited,
+    and it is deliberately absent from every gate table here — its own
+    workflow says so (``hostile-reviewer.yml``: "does not gate merge today").
+
+    WHY THIS CLASS EXISTS ANYWAY. "Newest wins, and a newest that is running
+    is PENDING" is a property worth pinning whether or not #3785 exercised it,
+    and nothing asserted it against a stale FAILURE predecessor. Each test
+    below runs with the failure grace deliberately EXPIRED, so it proves the
+    ordering on its own rather than borrowing the grace's answer.
+    """
+
+    #: Far enough past the older row that the OMN-17864 grace cannot be what
+    #: produces PENDING. Any test in this class that passes is passing on
+    #: attempt selection alone.
+    GRACE_EXPIRED = datetime(2026, 9, 18, 23, 30, 0, tzinfo=UTC)
+
+    OLDER_RED = {
+        "name": RECEIPT_GATE,
+        "status": "completed",
+        "conclusion": "failure",
+        "started_at": "2026-09-18T22:16:49Z",
+        "completed_at": "2026-09-18T22:16:58Z",
+        "id": 105780085858,
+    }
+
+    def test_a_newer_completed_success_wins_over_an_older_failure(self) -> None:
+        rows = [
+            self.OLDER_RED,
+            {
+                "name": RECEIPT_GATE,
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-09-18T22:17:46Z",
+                "completed_at": "2026-09-18T22:18:38Z",
+                "id": 105780316906,
+            },
+        ]
+        assert latest_check_run_by_name(rows)[RECEIPT_GATE].conclusion == "success"
+        failures, unresolved = evaluate_external_contexts(
+            rows, (RECEIPT_GATE,), now=self.GRACE_EXPIRED
+        )
+        assert failures == []
+        assert unresolved == []
+
+    def test_a_newer_running_attempt_is_pending_not_failure(self) -> None:
+        """The property the second report asked for, with the grace expired."""
+        rows = [
+            self.OLDER_RED,
+            {
+                "name": RECEIPT_GATE,
+                "status": "in_progress",
+                "conclusion": None,
+                "started_at": "2026-09-18T22:17:46Z",
+                "completed_at": None,
+                "id": 105780316906,
+            },
+        ]
+        winner = latest_check_run_by_name(rows)[RECEIPT_GATE]
+        assert winner.status == "in_progress"
+        failures, unresolved = evaluate_external_contexts(
+            rows, (RECEIPT_GATE,), now=self.GRACE_EXPIRED
+        )
+        assert failures == [], (
+            "a running replacement must never read as this head's verdict"
+        )
+        assert unresolved == [RECEIPT_GATE]
+
+    def test_row_order_in_the_payload_does_not_decide_the_verdict(self) -> None:
+        """Newest wins by its own timestamps, not by where it sits in the list."""
+        running = {
+            "name": RECEIPT_GATE,
+            "status": "in_progress",
+            "conclusion": None,
+            "started_at": "2026-09-18T22:17:46Z",
+            "completed_at": None,
+            "id": 105780316906,
+        }
+        for rows in ([self.OLDER_RED, running], [running, self.OLDER_RED]):
+            failures, unresolved = evaluate_external_contexts(
+                rows, (RECEIPT_GATE,), now=self.GRACE_EXPIRED
+            )
+            assert failures == []
+            assert unresolved == [RECEIPT_GATE]
+
+    def test_three_attempts_resolve_on_the_newest_not_the_worst(self) -> None:
+        """red, green, red, green on one head — the last one decides."""
+        rows = [self.OLDER_RED]
+        for index, (conclusion, minute) in enumerate(
+            [("success", 17), ("failure", 22), ("success", 26)], start=2
+        ):
+            rows.append(
+                {
+                    "name": RECEIPT_GATE,
+                    "status": "completed",
+                    "conclusion": conclusion,
+                    "started_at": f"2026-09-18T22:{minute}:00Z",
+                    "completed_at": f"2026-09-18T22:{minute}:40Z",
+                    "id": 105780085858 + index,
+                }
+            )
+        assert latest_check_run_by_name(rows)[RECEIPT_GATE].conclusion == "success"
+        failures, _ = evaluate_external_contexts(
+            rows, (RECEIPT_GATE,), now=self.GRACE_EXPIRED
+        )
+        assert failures == []
+
+    @pytest.mark.parametrize("missing", [None, ""])
+    def test_residual_a_replacement_with_no_start_time_loses_the_ordering(
+        self, missing: str | None
+    ) -> None:
+        """KNOWN RESIDUAL, pinned rather than fixed, because it is unreachable.
+
+        Ordering is ``(started_at, id)`` and a missing ``started_at`` sorts
+        FIRST, so a queued replacement that carries none loses to the stale
+        failure and, once the grace expires, the head fails on a row a
+        replacement is already queued to supersede.
+
+        NOT FIXED HERE, deliberately. It does not occur: across every captured
+        payload in this repository's fixtures (174 + 100 rows) and a live sweep
+        of three open PR heads, ZERO check-runs carried a null or empty
+        ``started_at`` — GitHub populates it at creation. Changing the
+        resolution rule is changing a rule chosen by measurement over a
+        rejected alternative (see :func:`latest_check_run_by_name`), and doing
+        that on an unreachable case, with no measurement of its own, is how a
+        measured rule gets replaced by a guess.
+
+        This test states the behaviour so it is a recorded decision. If a live
+        payload ever shows a null ``started_at``, this test is the place the
+        next reader finds the reasoning, and it will fail the moment somebody
+        changes the rule without also changing the record.
+        """
+        rows = [
+            self.OLDER_RED,
+            {
+                "name": RECEIPT_GATE,
+                "status": "queued",
+                "conclusion": None,
+                "started_at": missing,
+                "completed_at": None,
+                "id": 105780316906,
+            },
+        ]
+        assert latest_check_run_by_name(rows)[RECEIPT_GATE].conclusion == "failure"
+        failures, _ = evaluate_external_contexts(
+            rows, (RECEIPT_GATE,), now=self.GRACE_EXPIRED
+        )
+        assert failures == [RECEIPT_GATE]
+
+        # Inside the grace the same payload is held PENDING, so the window this
+        # ticket adds already covers the realistic form of this shape.
+        inside, unresolved = evaluate_external_contexts(
+            rows,
+            (RECEIPT_GATE,),
+            now=datetime(2026, 9, 18, 22, 20, 0, tzinfo=UTC),
+        )
+        assert inside == []
+        assert unresolved == [RECEIPT_GATE]
