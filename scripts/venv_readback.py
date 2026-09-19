@@ -59,9 +59,11 @@ import re
 import subprocess
 import sys
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 EXIT_IN_SYNC = 0
 EXIT_DRIFTED = 1
@@ -318,17 +320,27 @@ def packaged_floor_rows(
     install (an extras gate, a platform gate) are not floors the base install
     must meet, and are skipped rather than failed.
     """
-    try:
-        from packaging.requirements import InvalidRequirement, Requirement
-    except ImportError:
-        return [
-            ReadbackRow(
-                "packaged floors",
-                "packaging installed",
-                None,
-                ReadbackVerdict.UNREADABLE,
-            )
-        ]
+    # ``packaging`` is imported LAZILY, on the first candidate requirement,
+    # never up front. The first version of this function imported it here and
+    # returned UNREADABLE when the import failed — before looking at whether
+    # any floor existed to evaluate at all. A target venv built
+    # ``--without-pip`` has no ``packaging``, so a correct repair with nothing
+    # to assert was reported INDETERMINATE and the readback exited non-zero;
+    # that turned a passing integration test red on ``dev`` within the hour.
+    #
+    # Failing closed is right when the answer matters and cannot be computed.
+    # It is wrong when there is no question. A capability this function never
+    # needed must not decide the verdict — and when a floor IS declared and
+    # cannot be parsed, the UNREADABLE row below still fires.
+    requirement_cls: Callable[[str], Any] | None = None
+    invalid_requirement_cls: type[Exception] = Exception
+
+    def _load_packaging() -> tuple[Callable[[str], Any], type[Exception]] | None:
+        try:
+            from packaging.requirements import InvalidRequirement, Requirement
+        except ImportError:
+            return None
+        return Requirement, InvalidRequirement
 
     rows: list[ReadbackRow] = []
     for declarer, facts in sorted(installed.items()):
@@ -340,21 +352,54 @@ def packaged_floor_rows(
         for raw in raw_requires:
             if not isinstance(raw, str):
                 continue
-            try:
-                requirement = Requirement(raw)
-            except InvalidRequirement:
-                # Only an omni-internal-looking requirement is ours to fail on;
-                # an unparseable third-party line is not this readback's
-                # business. Fail closed on ours rather than skipping it.
-                if any(p in raw for p in _OMNI_INTERNAL_PREFIXES):
+            # Pre-filter: only an omni-internal line is worth loading a
+            # parser for, so a venv declaring none never needs ``packaging``
+            # at all. It resolves the NORMALIZED name (PEP 503) rather than
+            # matching the raw text, because a raw substring test is
+            # fail-OPEN on exactly the spellings a floor is most likely to
+            # arrive in: ``omnibase_core>=1`` and ``Omnibase-Core>=1`` are
+            # both omni-internal after normalization and neither contains
+            # ``omnibase-``. Skipping those would silently stop asserting a
+            # floor this readback owns, which is the failure mode it exists
+            # to remove. ``requirement_name`` is a regex over the name and
+            # needs no ``packaging``, so the narrowing holds.
+            #
+            # A line whose name cannot even be located falls back to the
+            # substring test over the normalized text: it cannot be parsed
+            # either, so if it looks like ours it must reach the UNREADABLE
+            # row below rather than be dropped here.
+            candidate = requirement_name(raw)
+            if candidate is None:
+                if not any(p in normalize_name(raw) for p in _OMNI_INTERNAL_PREFIXES):
+                    continue
+            elif not _is_omni_internal(candidate):
+                continue
+            if requirement_cls is None:
+                loaded = _load_packaging()
+                if loaded is None:
                     rows.append(
                         ReadbackRow(
-                            f"{normalize_name(declarer)} declares {raw!r}",
-                            raw,
+                            "packaged floors",
+                            "packaging installed",
                             None,
                             ReadbackVerdict.UNREADABLE,
                         )
                     )
+                    return rows
+                requirement_cls, invalid_requirement_cls = loaded
+            try:
+                requirement = requirement_cls(raw)
+            except invalid_requirement_cls:
+                # Reached only for an omni-internal-looking line, per the
+                # pre-filter above. Fail closed on ours rather than skipping it.
+                rows.append(
+                    ReadbackRow(
+                        f"{normalize_name(declarer)} declares {raw!r}",
+                        raw,
+                        None,
+                        ReadbackVerdict.UNREADABLE,
+                    )
+                )
                 continue
             if not _is_omni_internal(requirement.name):
                 continue
