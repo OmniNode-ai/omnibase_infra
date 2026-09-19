@@ -696,11 +696,15 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # migration that arrives WITHOUT its declaration a red test here instead of
     # a fail-closed surprise at bootstrap deploy time.
     #
-    # 190 -> 191 for OMN-18769 (C2 of epic OMN-18767), which adds
-    # nodes/node_projection_lab_lane_health/0000_create_lab_lane_health.sql --
-    # the projection table folding the lane census, runtime health and
-    # lab-pass receipt facts the lab observability tab reads.
-    assert len(result.declarations) == 191
+    # 190 -> 192 for OMN-18769 (C2 of epic OMN-18767), which adds TWO
+    # node-owned migrations: 0000_create_lab_lane_health.sql, the projection
+    # table folding the lane census, runtime health and lab-pass receipt facts
+    # the lab observability tab reads, and 0001_grant_omninode_runtime_lab_
+    # lane_health.sql, which ISSUES the grants the topology only declares.
+    # The grant rides in the owning node's own lineage rather than a shared
+    # file, so it is a second declaration here rather than an edit to the
+    # first -- the same shape as node_projection_runner_fleet's pair above.
+    assert len(result.declarations) == 192
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
