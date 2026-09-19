@@ -230,7 +230,11 @@ def test_maintenance_moves_objects_and_never_expires_them() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(shutil.which("ionice") is None, reason="needs ionice (Linux)")
+# Deliberately NOT skipped where `ionice` is absent. `maintain_mirror_packs`
+# resolves the nicing tools and degrades without them, so this runs on macOS
+# too -- and it has to. An earlier revision skipped here, which meant the one
+# test that exercises the fixture end to end never ran locally and a broken
+# fixture (4 packs against a threshold of 12) was first seen in CI.
 def test_end_to_end_a_fragmented_mirror_is_consolidated(tmp_path: Path) -> None:
     """Drive a real mirror past the threshold and run the real function.
 
@@ -259,6 +263,16 @@ def test_end_to_end_a_fragmented_mirror_is_consolidated(tmp_path: Path) -> None:
 
     # Fragment it the way the production mirror fragmented: many small
     # fetches, each landing its own pack.
+    #
+    # `fetch.unpackLimit 1` is what makes this deterministic, and it is the
+    # same setting the fix adds in production: without it git's default of
+    # 100 unpacks each small fetch into loose objects and the pack count
+    # barely moves. An earlier revision of this fixture called `git repack`
+    # once per iteration instead, and CI produced 4 packs against a threshold
+    # of 12 -- repack CONSOLIDATES, so it was undoing the fragmentation it
+    # was there to create.
+    _git("-C", str(mirror), "config", "fetch.unpackLimit", "1")
+    _git("-C", str(mirror), "config", "gc.auto", "0")
     for i in range(1, 20):
         (upstream / "f.txt").write_text(f"{i}\n")
         _git("add", "-A", cwd=upstream)
@@ -266,7 +280,6 @@ def test_end_to_end_a_fragmented_mirror_is_consolidated(tmp_path: Path) -> None:
         _git(
             "-C", str(mirror), "fetch", "--quiet", "--prune", "origin", "+refs/*:refs/*"
         )
-        _git("-C", str(mirror), "repack", "-q")
 
     packs_before = len(list((mirror / "objects" / "pack").glob("*.pack")))
     refs_before = _git(
