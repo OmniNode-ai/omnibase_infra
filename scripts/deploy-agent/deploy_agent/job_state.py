@@ -15,7 +15,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from deploy_agent.events import DEPLOY_PHASE_ORDER, Phase, PhaseStatus
+from deploy_agent.events import (
+    DEPLOY_PHASE_ORDER,
+    ModelOnexApiDelivery,
+    Phase,
+    PhaseStatus,
+)
 
 
 class EnumJobSettlingStage(StrEnum):
@@ -99,6 +104,16 @@ class JobState(BaseModel):
     #: records those correlations wrote.
     superseded_count: int = 0
     superseded_correlation_ids: list[UUID] = Field(default_factory=list)
+    #: OMN-18572. What the onex-api pin delivery did on this job's tail.
+    #:
+    #: Durable on the job record as well as on the terminal event, because the
+    #: two answer different questions: the event is read by a bus consumer at
+    #: the moment it lands, and this is what an operator reads on the host
+    #: afterwards when asking why the lane runs the image it runs. Defaults to
+    #: ``None`` so a record written by an older agent -- the state directory
+    #: survives a restart -- loads as "no delivery recorded" rather than
+    #: failing validation.
+    onex_api_delivery: ModelOnexApiDelivery | None = None
 
     @model_validator(mode="after")
     def _supersession_fields_are_paired(self) -> JobState:
@@ -402,6 +417,23 @@ class JobStore:
         if job is None:
             return None
         job.settling_stage = stage
+        self._save(job)
+        return job
+
+    def record_onex_api_delivery(
+        self, correlation_id: UUID, delivery: ModelOnexApiDelivery
+    ) -> JobState | None:
+        """Persist the onex-api pin delivery verdict on the job record.
+
+        Returns ``None`` for an unknown job rather than raising, for the same
+        reason ``set_settling`` does: every caller is on the post-terminal path
+        where an exception would cost the terminal publish, and a degraded
+        record is cheaper than a lost result.
+        """
+        job = self.load(correlation_id)
+        if job is None:
+            return None
+        job.onex_api_delivery = delivery
         self._save(job)
         return job
 

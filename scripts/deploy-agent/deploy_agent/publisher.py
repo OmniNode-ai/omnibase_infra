@@ -19,6 +19,7 @@ from deploy_agent.events import (
     ModelContainerResidue,
     ModelDepsConvergenceFinding,
     ModelHealthCheck,
+    ModelOnexApiDelivery,
     ModelRebuildCompleted,
     ModelRecreateSupervision,
     ModelVerifyRecreate,
@@ -87,6 +88,7 @@ def build_completion_payload(
     deps_convergence: list[ModelDepsConvergenceFinding] | None = None,
     compose_invocations: list[ModelComposeInvocation] | None = None,
     verify_recreate: list[ModelVerifyRecreate] | None = None,
+    onex_api_delivery: ModelOnexApiDelivery | None = None,
 ) -> dict[str, Any]:
     """Build the completion event payload from job state.
 
@@ -127,6 +129,14 @@ def build_completion_payload(
     any durable artifact. The 2026-09-18 kill had to be reconstructed from the
     dockerd journal by a third lane, because the terminal event recorded only
     that the phase failed.
+
+    OMN-18572 adds ``onex_api_delivery``: what the onex-api pin delivery did
+    on this job's tail. ``None`` says the delivery was never reached, which is
+    a different fact from one that ran and refused -- and the two were
+    indistinguishable while the event carried neither. It never affects
+    ``status``: the compose lane's verdict is settled before the delivery runs,
+    and a lane that converged is not broken because an image failed to reach
+    it.
 
     OMN-18640 adds ``verify_recreate``: the runtime containers this deploy
     force-recreated because their own post-deploy health probe failed, and
@@ -175,6 +185,7 @@ def build_completion_payload(
         deps_convergence=list(deps_convergence or []),
         compose_invocations=list(compose_invocations or []),
         verify_recreate=list(verify_recreate or []),
+        onex_api_delivery=onex_api_delivery,
     )
     return completed.model_dump(mode="json")
 

@@ -160,9 +160,11 @@ from omnibase_infra.cli.model_delegate_timeout_refusal import (
 )
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
-    ModelOffRegistryCheck,
     OmnimarketDriftError,
     check_omnimarket_drift,
+)
+from omnibase_infra.cli.protocol_drift_guard_verdict import (
+    ProtocolDriftGuardVerdict,
 )
 from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
@@ -447,15 +449,24 @@ def _unattributed_reason(result: ModelDelegateTerminal) -> str:
 
 
 def _drift_guard_receipt_block(
-    drift_guard: ModelOffRegistryCheck | None,
+    drift_guard: ProtocolDriftGuardVerdict | None,
 ) -> dict[str, object]:
-    """The off-registry drift verdict, as a receipt fragment (OMN-17255).
+    """The drift guard's verdict, as a receipt fragment.
 
-    Present exactly when the guard ran OFF-REGISTRY -- i.e. on a machine with
-    no canonical clone, where the stderr verdict line is the only other place
-    the fact appears and is gone the moment the terminal scrolls. On a registry
-    machine the guard returns ``None`` and this contributes no key at all, so
-    every receipt written today stays byte-identical.
+    Present for either verdict the guard can hand back, and both are rendered
+    through the same ``as_receipt_fields`` call so this function never learns
+    which one it got:
+
+    * the OFF-REGISTRY verdict (OMN-17255), on a machine with no canonical
+      clone, where the stderr line is the only other place the fact appears
+      and is gone the moment the terminal scrolls;
+    * the ANCESTOR-LAG stamp (OMN-18814), on a registry machine whose
+      installed omnimarket is a known ancestor of the clone head -- a run that
+      proceeded while behind the tip, which a later reader has no other way to
+      tell apart from a run that was AT the tip.
+
+    ``None`` -- the guard's exact-match path -- still contributes no key at
+    all, so a receipt from a converged machine stays byte-identical.
     """
     if drift_guard is None:
         return {}
@@ -471,7 +482,7 @@ def _write_unattributed_run_files(
     task_type: str,
     task_type_resolution: str,
     addressing: ModelDelegateRunAddressing,
-    drift_guard: ModelOffRegistryCheck | None = None,
+    drift_guard: ProtocolDriftGuardVerdict | None = None,
 ) -> None:
     """Persist a terminally-failed delegation that attributed no route.
 
@@ -559,7 +570,7 @@ def _write_local_run_files(
     task_type: str,
     addressing: ModelDelegateRunAddressing,
     task_type_resolution: str | None = None,
-    drift_guard: ModelOffRegistryCheck | None = None,
+    drift_guard: ProtocolDriftGuardVerdict | None = None,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 

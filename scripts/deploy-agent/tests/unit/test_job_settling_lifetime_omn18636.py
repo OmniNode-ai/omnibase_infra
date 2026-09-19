@@ -126,6 +126,10 @@ class _FastExecutor:
         # fake executor has to declare both.
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
+        # OMN-18640 AC8: the agent publishes the executor's own probe
+        # readings when its local list is empty, which is the case on
+        # every job that failed verification.
+        self.health_checks: list[object] = []
         self._pin_gate = pin_gate
         self._pin_running = pin_running
 
@@ -177,8 +181,12 @@ class _BlockingApplier:
     def __init__(self, gate: threading.Event, running: threading.Event) -> None:
         self.gate = gate
         self.running = running
+        self.manifest_sha: str | None = None
 
     def apply(self, *, sha: str, stamp: str, correlation_id: str) -> str:
+        # OMN-18572: the real applier resolves this before anything that can
+        # block or fail, and the agent reads it after the apply returns.
+        self.manifest_sha = "b" * 40
         self.running.set()
         self.gate.wait(timeout=BLOCK_SECONDS * 4)
         self.running.clear()

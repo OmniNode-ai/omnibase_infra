@@ -263,7 +263,10 @@ repos:
         entry: bash -c 'uv run --frozen mypy "$@" --show-error-codes --no-error-summary' --
         language: system
         types: [python]
-        files: ^src/omnibase_infra/.*\.py$
+        # OMN-18640 extends the scope to the deploy agent's package, the same
+        # way and in the same file the CI mypy job does. Its tests stay out,
+        # matching the exclusion of this repo's own tests/ above.
+        files: ^(src/omnibase_infra/|scripts/deploy-agent/deploy_agent/).*\.py$
         exclude: ^(tests/|archived/).*\.py$
         pass_filenames: true # Only check changed files, not entire codebase
         stages: [pre-push] # Moved to pre-push: ~1-5s for changed files only

@@ -129,6 +129,10 @@ class _FakeExecutor:
         # fake executor has to declare both.
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
+        # OMN-18640 AC8: the agent publishes the executor's own probe
+        # readings when its local list is empty, which is the case on
+        # every job that failed verification.
+        self.health_checks: list[object] = []
 
     def resolve_stability_ready_digest(
         self, service: str = "omninode-runtime"
@@ -192,6 +196,11 @@ class _FakeApplier:
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
+        #: OMN-18572: the omninode_infra overlay commit the apply resolved.
+        #: The lab image tags carry THIS sha, never the merged omnibase_infra
+        #: one, and the agent reads it to decide which lineage to deliver -- so
+        #: a double that omits it no longer models the object it replaces.
+        self.manifest_sha: str | None = None
         _FakeApplier.instances.append(self)
 
     def _record(self, entry: str, sha: str, correlation_id: str) -> Path:
