@@ -218,6 +218,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "OmniGateValidatorCallable": "gate/validator_registry.py",
     # [NODE] OMN-11207 structural protocol for evidence bundles accepted by the writer
     "ProtocolEvidenceBundle": "utils/util_evidence_bundle_writer.py",
+    # [OBS] OMN-18814 one drift-guard verdict, renderable for a terminal and for a receipt
+    "ProtocolDriftGuardVerdict": "cli/protocol_drift_guard_verdict.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal

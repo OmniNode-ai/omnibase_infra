@@ -1402,14 +1402,15 @@ def _timeout_receipt(
 @click.option(
     "--omni-home",
     type=click.Path(path_type=Path),
-    envvar="OMNI_HOME",
+    envvar="OMNIBASE_PATH",
     default=None,
     help=(
-        "Canonical omni_home workspace root for the local omnimarket drift "
-        "check (OMN-13930). Defaults to the $OMNI_HOME environment variable "
-        "-- the envvar binding is load-bearing: without it the guard "
-        "silently receives omni_home=None and never fires, because callers "
-        "never pass this flag explicitly."
+        "Canonical OmniNode workspace root for the local omnimarket drift "
+        "check (OMN-13930). Bound to $OMNIBASE_PATH, the product name for "
+        "that root (OMN-16855/OMN-16852) -- the envvar binding is "
+        "load-bearing: without it the guard silently receives "
+        "omni_home=None and the canonical-clone check never fires, because "
+        "callers never pass this flag explicitly."
     ),
 )
 @click.option(

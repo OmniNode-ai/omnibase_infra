@@ -35,6 +35,17 @@ the trigger moved from a human to the guard itself. Callers that want the old
 pure detect-and-refuse behaviour simply omit ``reconcile``, which remains the
 default.
 
+## Which environment variable feeds ``omni_home`` (OMN-16852)
+
+This module takes a workspace root as a keyword argument and does not read the
+environment itself. The packaged CLI binds that argument to ``$OMNIBASE_PATH``
+-- the product name for the workspace root, shipped by OMN-16855 -- as of
+OMN-16852. The older ``OMNI_HOME`` spelling is retained throughout the rest of
+this repository for maintainer-registry surfaces (the workspace reconciler,
+dispatch-venv purity, the machine-registry export) by the 2026-08-28 boundary
+ruling under OMN-16849; it is no longer read by any packaged CLI option, so
+every message below names the variable a caller can actually set.
+
 ## Off registry (OMN-17255)
 
 The canonical clone is a REGISTRY-machine convention. A customer has no
@@ -731,7 +742,7 @@ def check_omnimarket_drift(
       OMN-13930). Every refusal message names that variable, so the escape
       hatch is discoverable from the failure itself rather than requiring a
       source read. Before it existed the only workaround was unsetting
-      ``$OMNI_HOME``, which disables the guard globally and SILENTLY --
+      ``$OMNIBASE_PATH``, which disables the guard globally and SILENTLY --
       strictly worse than a named, logged override.
 
     Performs no network I/O of its own. A supplied ``reconcile`` may (it
@@ -810,13 +821,13 @@ def check_omnimarket_drift(
         )
         if attachment is CanonicalCloneAttachment.DETACHED:
             clone_detail = (
-                f"canonical $OMNI_HOME/omnimarket clone is on a DETACHED HEAD "
+                f"canonical $OMNIBASE_PATH/omnimarket clone is on a DETACHED HEAD "
                 f"at {canonical[:12]} -- it tracks no branch, so it can no "
                 f"longer follow its upstream"
             )
         else:
             clone_detail = (
-                f"canonical $OMNI_HOME/omnimarket clone HEAD is {canonical[:12]}, "
+                f"canonical $OMNIBASE_PATH/omnimarket clone HEAD is {canonical[:12]}, "
                 "but the guard could not prove that HEAD is attached to a ref"
             )
         attachment_detail = (
@@ -885,10 +896,21 @@ def check_omnimarket_drift(
     # this branch in production -- canonical is non-None here only when a
     # real omni_home resolved it -- but keeps the message sane if a caller
     # ever reaches this branch without one, e.g. a direct unit test).
+    #
+    # ``install-node-skill-package.sh`` reads the workspace root from
+    # ``OMNI_HOME``, not from the CLI's ``OMNIBASE_PATH`` parameter: its only
+    # invokers are the workspace reconciler and the drift-check script, both
+    # maintainer-registry tooling that keeps the older spelling by the
+    # OMN-16849 boundary ruling. Since OMN-16852 moved this CLI's parameter,
+    # the two names can legitimately disagree on one machine, so the repair
+    # command carries the RESOLVED path as an explicit assignment rather than
+    # naming a variable and hoping the reader has the right one exported.
     if omni_home:
         infra_scripts = Path(omni_home) / "omnibase_infra" / "scripts"
         repair_cmd = str(infra_scripts / "check-omnimarket-venv-drift.sh")
-        install_cmd = str(infra_scripts / "install-node-skill-package.sh")
+        install_cmd = f"OMNI_HOME={omni_home} " + str(
+            infra_scripts / "install-node-skill-package.sh"
+        )
     else:
         repair_cmd = "scripts/check-omnimarket-venv-drift.sh"
         install_cmd = "scripts/install-node-skill-package.sh"
@@ -910,7 +932,7 @@ def check_omnimarket_drift(
         canonical_wrapper = (
             str(canonical_wrapper_path)
             if canonical_wrapper_path is not None
-            else "$OMNI_HOME/omnibase_infra/scripts/onex"
+            else "$OMNIBASE_PATH/omnibase_infra/scripts/onex"
         )
         path_onex_identity = _path_onex_identity()
         canonical_wrapper_resolution_error = None
@@ -944,7 +966,7 @@ def check_omnimarket_drift(
                 )
         elif canonical_wrapper_identity is None:
             if canonical_wrapper_path is None:
-                canonical_detail = "no OMNI_HOME was provided"
+                canonical_detail = "no OMNIBASE_PATH was provided"
             else:
                 canonical_detail = (
                     "canonical wrapper resolution failed: "
@@ -973,13 +995,13 @@ def check_omnimarket_drift(
             "omnimarket is NOT INSTALLED from git in this interpreter "
             f"({sys.executable}) (absent, or installed from PyPI/a non-VCS "
             "source), but a "
-            f"canonical clone exists at $OMNI_HOME/omnimarket (HEAD "
+            f"canonical clone exists at $OMNIBASE_PATH/omnimarket (HEAD "
             f"{canonical[:12]}). 'onex skill'/'onex node'/'onex delegate' "
             "dispatch for market-provided nodes (e.g. node_aislop_sweep) "
             f"will fail with 'Unknown node'. {path_diagnosis} If that interpreter "
             f"is not the dispatch venv's python "
-            f"($OMNI_HOME/.onex-dispatch-venv/bin/python by default; it was "
-            f"$OMNI_HOME/omnibase_infra/.venv/bin/python before the OMN-17819 "
+            f"($OMNIBASE_PATH/.onex-dispatch-venv/bin/python by default; it was "
+            f"$OMNIBASE_PATH/omnibase_infra/.venv/bin/python before the OMN-17819 "
             f"gate/dispatch split), invoke the "
             f"canonical wrapper directly: {canonical_wrapper} (see "
             f"knowledge-base-internal:runbooks/omnibase-infra-onex-cli-invocation.md). Otherwise repair with: "
@@ -988,7 +1010,7 @@ def check_omnimarket_drift(
     else:
         detail = (
             f"omnimarket venv is STALE: installed commit {installed[:12]} != "
-            f"canonical $OMNI_HOME/omnimarket HEAD {canonical[:12]}. Repair with: "
+            f"canonical $OMNIBASE_PATH/omnimarket HEAD {canonical[:12]}. Repair with: "
             f"{repair_cmd} --repair (or re-run {install_cmd} --execute directly)."
         )
 
@@ -1069,7 +1091,7 @@ def check_omnimarket_drift(
             f"{detail} Reconcile run {outcome.run_id} reported a "
             f"readback-PROVEN success and this venv is STILL drifted: installed "
             f"{(installed or 'ABSENT')[:12]} != canonical "
-            f"$OMNI_HOME/omnimarket HEAD {canonical[:12]}. That is a "
+            f"$OMNIBASE_PATH/omnimarket HEAD {canonical[:12]}. That is a "
             f"contradiction between two readings of the same fact, not a stale "
             f"venv, and no retry will resolve it. Reproduce run "
             f"{outcome.run_id} with:\n"
