@@ -112,6 +112,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
@@ -123,6 +124,10 @@ from packaging.version import InvalidVersion, Version
 from omnibase_infra.cli.enum_off_registry_reason import EnumOffRegistryReason
 from omnibase_infra.cli.enum_off_registry_verdict import EnumOffRegistryVerdict
 from omnibase_infra.cli.model_off_registry_check import ModelOffRegistryCheck
+from omnibase_infra.cli.model_omnimarket_lag_stamp import ModelOmnimarketLagStamp
+from omnibase_infra.cli.protocol_drift_guard_verdict import (
+    ProtocolDriftGuardVerdict,
+)
 from omnibase_infra.cli.workspace_reconcile import ReconcileFn
 
 __all__ = [
@@ -615,12 +620,99 @@ def _run_off_registry_check() -> ModelOffRegistryCheck:
     return check
 
 
+def resolve_ancestor_lag(
+    *,
+    installed: str,
+    clone_head: str,
+    omni_home: str,
+) -> ModelOmnimarketLagStamp | None:
+    """Return a stamp when ``installed`` is a strict ANCESTOR of ``clone_head``
+    in the canonical clone, else ``None``.
+
+    ``None`` means "not a known ancestor" and nothing more. It is returned for
+    a divergent commit, for a commit the clone has never heard of, and for any
+    probe that could not be completed -- and the caller treats all three the
+    same way, by refusing. That collapse is deliberate: ``git merge-base
+    --is-ancestor`` exits non-zero both for "no" and for "no such object", and
+    a reading that told them apart in order to be lenient about one would be
+    inventing provenance it does not have.
+
+    FAILS CLOSED on every error path. A timeout, a missing git, an unreadable
+    clone and a malformed count all return ``None``, because an ancestry
+    question that could not be ASKED has not been answered yes. This is the
+    single most important property in this module: the whole relaxation rests
+    on the claim that the installed bytes are reachable from the head, and a
+    probe error is exactly the case where nobody knows whether they are.
+
+    No network I/O. Ancestry is resolved against the objects the canonical
+    clone already has; keeping that clone current belongs to the reconcile
+    tick (OMN-18815), not to a dispatch.
+    """
+    clone = Path(omni_home) / "omnimarket"
+    if not (clone / ".git").exists():
+        return None
+    try:
+        ancestry = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(clone),
+                "merge-base",
+                "--is-ancestor",
+                installed,
+                clone_head,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if ancestry.returncode != 0:
+        return None
+
+    try:
+        counted = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(clone),
+                "rev-list",
+                "--count",
+                f"{installed}..{clone_head}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return None
+    try:
+        behind = int(counted.stdout.strip())
+    except ValueError:
+        return None
+    if behind <= 0:
+        # A zero count with a non-equal commit pair is incoherent -- the caller
+        # only reaches here when the two differ. Refuse rather than stamp a
+        # lag of nothing, which would read as "at the tip".
+        return None
+
+    return ModelOmnimarketLagStamp(
+        installed_commit=installed,
+        clone_head=clone_head,
+        commits_behind=behind,
+        stamped_at=datetime.now(UTC),
+    )
+
+
 def check_omnimarket_drift(
     omni_home: str | None = None,
     *,
     allow_drift: bool = False,
     reconcile: ReconcileFn | None = None,
-) -> ModelOffRegistryCheck | None:
+) -> ProtocolDriftGuardVerdict | None:
     """Fail fast if the current venv's omnimarket is missing or has drifted
     from its reference point.
 
@@ -754,6 +846,36 @@ def check_omnimarket_drift(
     installed = installed_omnimarket_commit()
     if installed == canonical:
         return None
+
+    # OMN-18814. A strict ANCESTOR of the clone head is a staleness fact, not a
+    # provenance failure: those bytes are merged, reviewed and reachable from
+    # the head, they are simply not the tip. Proceed and STAMP the lag, so the
+    # receipt says how far behind the run was instead of the run not happening.
+    #
+    # Placed after the exact-match return and BEFORE every refusal branch
+    # below, and reached only when a canonical clone resolved and is attached
+    # -- the off-registry branch (OMN-17255) and the detached-clone branch both
+    # return or raise above this point, so neither changes behaviour.
+    #
+    # `allow_drift` is deliberately NOT consulted here. That flag is the
+    # operator's manual, unbounded opt-out and it is untouched by this change;
+    # an ancestor lag proceeds on its own merits, so consulting the flag would
+    # make an automatic, bounded decision look like it needed the manual one.
+    #
+    # `reconcile` is deliberately NOT invoked either. It installs packages, and
+    # spending that latency mid-dispatch to close a lag that is already safe to
+    # proceed on would charge a human for a run that was going to succeed. The
+    # reconciler that DOES close the lag is the tick (OMN-18815), off the hot
+    # path. The refusal branches below still reconcile exactly as before.
+    if installed is not None and omni_home:
+        ancestor_lag = resolve_ancestor_lag(
+            installed=installed,
+            clone_head=canonical,
+            omni_home=omni_home,
+        )
+        if ancestor_lag is not None:
+            logger.warning("%s", ancestor_lag.line)
+            return ancestor_lag
 
     # Name the exact repair command with its FULL path (not a cwd-relative
     # one) so the message is copy-pasteable from any working directory --
