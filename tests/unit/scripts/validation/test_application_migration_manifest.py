@@ -718,7 +718,14 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # records that no renumber is ever needed. The two are independent -- one
     # grants on savings_estimates, the other redefines a view -- so their
     # relative order cannot matter, and it is deterministic regardless.
-    assert len(result.declarations) == 196
+    # 196 -> 198 for OMN-18770: two more node-owned migrations,
+    # nodes/node_projection_runtime_error_fingerprints/0000_create_runtime_error_fingerprints.sql
+    # and its 0001_grant_omninode_runtime_runtime_error_fingerprints.sql, vendored
+    # from omnimarket by the same script. The grant file is a separate declaration
+    # rather than folded into the create, because the create runs as the migration
+    # role and the grant names the runtime role explicitly -- the OMN-17379 half
+    # whose absence left the projection writer unable to write.
+    assert len(result.declarations) == 198
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

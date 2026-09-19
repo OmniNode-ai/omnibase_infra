@@ -81,6 +81,7 @@ databases:
               - open_obligations
               - projection_watermarks
               - runner_fleet_liveness
+              - runtime_error_fingerprints
               - topic_produce_windows
               - work_events
             privileges: [INSERT, SELECT, UPDATE]
