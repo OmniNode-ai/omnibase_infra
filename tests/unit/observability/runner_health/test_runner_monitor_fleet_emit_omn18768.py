@@ -131,6 +131,12 @@ def _run(
         "AUTO_BOUNCE_BOUNCE_LOG": str(tmp_path / "bounce.log"),
         # The bus address is env-resolved, never defaulted (Operating Rule 8).
         "KAFKA_BOOTSTRAP_SERVERS": "mock-broker:9092",
+        # These cases pin the rpk-on-PATH rung and its failure modes, so the
+        # broker-container rung ahead of it is switched OFF explicitly rather
+        # than left to whether a `docker` mock happens to be on PATH. The
+        # rung itself is pinned by
+        # test_the_monitor_publishes_via_the_hosts_broker_container below.
+        "RUNNER_FLEET_BROKER_CONTAINER": "",
     }
     if rpk_mode == "absent":
         env.pop("KAFKA_BOOTSTRAP_SERVERS")
@@ -334,3 +340,146 @@ def test_the_builder_is_declared_in_the_deploy_sync_set(tmp_path: Path) -> None:
     # path (Operating Rule 6) and never from PATH.
     monitor = MONITOR_SCRIPT.read_text(encoding="utf-8")
     assert "${_MONITOR_DIR}/../../scripts/runner_fleet_event.py" in monitor
+
+
+def test_the_monitor_publishes_via_the_hosts_broker_container(tmp_path: Path) -> None:
+    """The rung that is not inert on the real runner host.
+
+    Measured on 192.168.86.201 on 2026-09-19: `command -v rpk` returns nothing
+    and the monitor's env file declares neither KAFKA_BOOTSTRAP_SERVERS nor
+    ONEX_BUS_PUBLISH_URL. A publish ladder whose every rung is absent publishes
+    nothing forever while logging that everything is fine -- which is the
+    false-green this ticket exists to remove, reintroduced one layer down. What
+    the host does have is docker and the dev lane's own broker container, so
+    that rung has to exist and has to be first.
+
+    The credential never appears here either: the monitor hands the container
+    the NAMES of the env vars holding its SASL pair and the container's own
+    shell expands them, so nothing reaches this host's argv.
+    """
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _make_mock_bin(
+        bindir,
+        docker_status="Up (healthy)",
+        docker_restart_count=0,
+        docker_logs="Listening for Jobs",
+        runners_json=_runners_json(status="online", busy=False, count=TEST_FLEET_COUNT),
+        queued_run_id=None,
+        queued_job_created_at="2026-09-18T23:00:00Z",
+        now_epoch=1789000000,
+        job_created_epoch=1789000000,
+    )
+
+    produced = tmp_path / "container-produced.jsonl"
+    argv_log = tmp_path / "container-argv.log"
+    # A docker that answers `exec -i <container> sh -c <script>` by recording
+    # the record on stdin, and delegates nothing else -- the monitor's other
+    # docker calls already went through the shared mock, which this shadows
+    # only for the exec-with-stdin shape.
+    real_docker = bindir / "docker"
+    real_docker.rename(bindir / "docker-real")
+    _write_exec(
+        bindir / "docker",
+        f"""\
+        set -uo pipefail
+        if [[ "${{1:-}}" == "exec" && "${{2:-}}" == "-i" ]]; then
+            printf '%s\\n' "$*" >> "{argv_log}"
+            cat >> "{produced}"
+            exit 0
+        fi
+        exec "{bindir}/docker-real" "$@"
+        """,
+    )
+
+    state_file = tmp_path / "runner-monitor-state.json"
+    fleet_config = tmp_path / "runner_fleet.yaml"
+    _write_fleet_config(fleet_config)
+    _write_required_compose_overrides(tmp_path)
+
+    env = {
+        "PATH": f"{bindir}:{os.environ.get('PATH', '')}",
+        "HOME": str(tmp_path),
+        "STATE_FILE": str(state_file),
+        "RUNNER_FLEET_CONFIG_PATH": str(fleet_config),
+        "SLACK_BOT_TOKEN": "xoxb-test",
+        "SLACK_CHANNEL_ID": "C-test",
+        "RUNNER_GITHUB_TOKEN": "ghp-test",
+        "MOCK_DOCKER_CALLLOG": str(tmp_path / "docker-calls.log"),
+        "MOCK_SLACK_CALLLOG": str(tmp_path / "slack-calls.log"),
+        "WEDGE_QUEUE_AGE_SECONDS": "600",
+        "WEDGE_WATCH_REPOS": "OmniNode-ai/omnibase_infra",
+        "MONITOR_AUTO_BOUNCE": "0",
+        "AUTO_BOUNCE_LOCKFILE": str(tmp_path / "bounce.lock"),
+        "AUTO_BOUNCE_BOUNCE_LOG": str(tmp_path / "bounce.log"),
+        "RUNNER_FLEET_EVENT_BUILDER": str(BUILDER),
+        "RUNNER_FLEET_BROKER_CONTAINER": "test-broker",
+        # Deliberately NO KAFKA_BOOTSTRAP_SERVERS and NO ONEX_BUS_PUBLISH_URL:
+        # the real host has neither, and this proves the emit still lands.
+    }
+
+    modern_bash = resolve_modern_bash()
+    wrapper = tmp_path / "run.sh"
+    wrapper.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            sed 's#^STATE_FILE=.*#STATE_FILE="{state_file}"#' "{MONITOR_SCRIPT}" > "{tmp_path}/monitor.sh"
+            "{modern_bash}" "{tmp_path}/monitor.sh"
+            """
+        ),
+        encoding="utf-8",
+    )
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
+
+    result = subprocess.run(
+        [modern_bash, str(wrapper)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert produced.exists(), (
+        "nothing reached the broker container; the emit is inert on a host "
+        f"with no rpk and no publish URL. stdout:\n{result.stdout}"
+    )
+    records = [line for line in produced.read_text().splitlines() if line.strip()]
+    assert len(records) == 1, f"expected ONE record per cycle, got {len(records)}"
+    event = json.loads(records[0])
+    assert event["event_type"] == "runner-fleet-observation"
+    assert event["topic"] == TOPIC
+    assert event["runner_count"] == POOL_COUNT
+    assert "via broker container test-broker" in result.stdout
+
+    argv = argv_log.read_text()
+    assert "test-broker" in argv
+    assert TOPIC in argv
+    # The SASL pair travels as VARIABLE NAMES for the container to expand, so
+    # no credential is ever on this host's argv
+    # (reference_secrets_on_argv_are_visible_in_ps).
+    assert "DEV_KAFKA_SASL_USERNAME" in argv
+    assert "DEV_KAFKA_SASL_PASSWORD" in argv
+
+
+def test_the_produced_record_is_newline_terminated(tmp_path: Path) -> None:
+    """`rpk topic produce` reads NEWLINE-DELIMITED records off stdin.
+
+    Without the trailing newline it discards the final record with `record read
+    error: unexpected EOF` while the pipeline still exits 0 and the monitor
+    logs a successful publish. Measured against the dev-lane broker on
+    2026-09-19: the first lab readback attempt published nothing for exactly
+    this reason and looked fine doing it.
+    """
+    _run_result, _events = _run(
+        tmp_path,
+        runners_json=_runners_json(status="online", busy=False, count=TEST_FLEET_COUNT),
+    )
+    raw = (tmp_path / "rpk-produced.jsonl").read_text(encoding="utf-8")
+    assert raw.endswith("\n")
+    # One line in, one line out: the builder emits compact JSON, so a record
+    # split across lines would be produced as several malformed records.
+    assert len([line for line in raw.splitlines() if line.strip()]) == 1

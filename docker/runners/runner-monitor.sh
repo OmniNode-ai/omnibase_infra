@@ -1248,6 +1248,15 @@ RUNNER_FLEET_TOPIC="${RUNNER_FLEET_TOPIC:-onex.evt.omnibase-infra.runner-fleet.v
 # false-green AC4 exists to refuse.
 RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-omninode-}"
 RUNNER_FLEET_EMIT="${RUNNER_FLEET_EMIT:-true}"
+# The dev lane's broker container on this host, and the names of the env
+# vars INSIDE it that carry its SASL pair. Names, never values: the monitor
+# never reads, logs or passes the credential itself -- it hands the container
+# the variable names and the container expands them in its own shell. Set
+# RUNNER_FLEET_BROKER_CONTAINER to the empty string to skip this rung.
+RUNNER_FLEET_BROKER_CONTAINER="${RUNNER_FLEET_BROKER_CONTAINER-omnibase-infra-redpanda}"
+RUNNER_FLEET_BROKER_SASL_USER_VAR="${RUNNER_FLEET_BROKER_SASL_USER_VAR:-DEV_KAFKA_SASL_USERNAME}"
+RUNNER_FLEET_BROKER_SASL_PASS_VAR="${RUNNER_FLEET_BROKER_SASL_PASS_VAR:-DEV_KAFKA_SASL_PASSWORD}"
+RUNNER_FLEET_BROKER_SASL_MECHANISM="${RUNNER_FLEET_BROKER_SASL_MECHANISM:-SCRAM-SHA-256}"
 # The builder lives in scripts/, not beside this file. That is not a layout
 # preference: docker/runners/ is the runner IMAGE build context, and the
 # repo's check-env-reads gate approves env reads under scripts/ and tests/
@@ -1292,12 +1301,45 @@ emit_fleet_observation() {
         return 0
     fi
 
-    # Publish. Broker address comes from env, fail-soft, never a hardcoded
-    # default (Operating Rule 8 / OMN-10741). Method 1 rpk, method 2 the HTTP
-    # thin-publish endpoint, method 3 log-only so the event stays replayable.
+    # Publish. Fail-soft at every rung, never a hardcoded broker address
+    # (Operating Rule 8 / OMN-10741). Method 1 is the BROKER CONTAINER on this
+    # host, method 2 an rpk on PATH, method 3 the HTTP thin-publish endpoint,
+    # method 4 log-only so the event stays replayable.
+    #
+    # Method 1 exists because methods 2 and 3 are both INERT on the real runner
+    # host and this was measured, not assumed: on 2026-09-19 `command -v rpk`
+    # on 192.168.86.201 returns nothing, and the monitor's own env file
+    # declares neither KAFKA_BOOTSTRAP_SERVERS nor ONEX_BUS_PUBLISH_URL. A
+    # ladder whose every rung is absent publishes nothing forever while logging
+    # that it is fine -- the false-green this ticket exists to remove. What the
+    # host DOES have is docker and the dev lane's own broker container, so that
+    # is the rung that carries the emit.
+    #
+    # The SASL pair is expanded INSIDE the container by `sh -c`, so it never
+    # reaches this host's argv and never appears in `ps`
+    # (reference_secrets_on_argv_are_visible_in_ps). rpk reads RPK_USER /
+    # RPK_PASS / RPK_SASL_MECHANISM from the environment, so no -X flag carries
+    # a credential either.
+    # `printf '%s\n'`, not `printf '%s'`: rpk produce reads NEWLINE-DELIMITED
+    # records off stdin, and an unterminated final record is discarded with
+    # `record read error: unexpected EOF` while the pipeline still looks like it
+    # ran. Measured against the dev lane broker on 2026-09-19 -- the first
+    # readback attempt published nothing for exactly this reason.
     local _fleet_published=false
-    if command -v rpk >/dev/null 2>&1 && [[ -n "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
-        if printf '%s' "${event_json}" | rpk topic produce "${RUNNER_FLEET_TOPIC}" \
+    if [[ -n "${RUNNER_FLEET_BROKER_CONTAINER}" ]] && command -v docker >/dev/null 2>&1; then
+        if printf '%s\n' "${event_json}" | docker exec -i "${RUNNER_FLEET_BROKER_CONTAINER}" sh -c \
+            'RPK_USER="${'"${RUNNER_FLEET_BROKER_SASL_USER_VAR}"'}" \
+             RPK_PASS="${'"${RUNNER_FLEET_BROKER_SASL_PASS_VAR}"'}" \
+             RPK_SASL_MECHANISM="'"${RUNNER_FLEET_BROKER_SASL_MECHANISM}"'" \
+             rpk topic produce "'"${RUNNER_FLEET_TOPIC}"'"' >/dev/null 2>&1; then
+            _fleet_published=true
+            log "fleet observation published to ${RUNNER_FLEET_TOPIC} via broker container ${RUNNER_FLEET_BROKER_CONTAINER}"
+        else
+            log "fleet emit via broker container ${RUNNER_FLEET_BROKER_CONTAINER} FAILED — falling through to rpk on PATH"
+        fi
+    fi
+    if [[ "${_fleet_published}" == false ]] && command -v rpk >/dev/null 2>&1 && [[ -n "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
+        if printf '%s\n' "${event_json}" | rpk topic produce "${RUNNER_FLEET_TOPIC}" \
             --brokers "${KAFKA_BOOTSTRAP_SERVERS}" >/dev/null 2>&1; then
             _fleet_published=true
             log "fleet observation published to ${RUNNER_FLEET_TOPIC} via rpk (broker=${KAFKA_BOOTSTRAP_SERVERS})"
