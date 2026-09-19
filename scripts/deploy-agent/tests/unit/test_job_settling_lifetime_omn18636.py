@@ -118,6 +118,9 @@ class _FastExecutor:
         # OMN-18692: the agent reads this when it builds the terminal event,
         # so a double that omits it no longer models the object it replaces.
         self.recreate_supervision: list[object] = []
+        # OMN-18640: the terminal event now also carries what verification
+        # recreated, so a fake executor has to declare it.
+        self.verify_recreate: list[object] = []
         self._pin_gate = pin_gate
         self._pin_running = pin_running
 

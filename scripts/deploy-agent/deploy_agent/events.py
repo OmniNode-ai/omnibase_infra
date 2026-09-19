@@ -467,6 +467,76 @@ class ModelRecreateSupervision(BaseModel):
         return "; ".join(parts)
 
 
+class EnumVerifyRecreateOutcome(StrEnum):
+    """How a post-deploy verification recreate ended (OMN-18640 AC7).
+
+    FOUR values rather than a boolean, because "we bounced the container" is
+    not one fact. The 2026-09-18 wedge was invisible for 97 minutes precisely
+    because the agent's record could not distinguish a remedy that worked from
+    one that was never attempted.
+
+    * ``recovered`` -- the service was recreated and the SAME health probe
+      then passed. The lane repaired itself.
+    * ``still_failing`` -- recreated, re-probed, still failing. The job fails
+      exactly as it did before this remedy existed; a second recreate is NOT
+      attempted, because a remedy that did not work the first time is a
+      diagnosis, not something to repeat.
+    * ``recreate_failed`` -- the ``docker compose up --force-recreate`` itself
+      exited non-zero or was killed. The container may be in any state and the
+      probe was not re-run; this is a different fact from a recreate that ran
+      and did not help.
+    * ``recreate_timed_out`` -- the recreate command exceeded its own ceiling.
+      Named apart from ``recreate_failed`` because a compose command killed
+      mid-recreate is the shape that removed a lane on 2026-09-18 (OMN-18692),
+      and reading it as a plain non-zero exit is what cost that incident its
+      diagnosis.
+    """
+
+    RECOVERED = "recovered"
+    STILL_FAILING = "still_failing"
+    RECREATE_FAILED = "recreate_failed"
+    RECREATE_TIMED_OUT = "recreate_timed_out"
+
+
+class ModelVerifyRecreate(BaseModel):
+    """One runtime container this deploy recreated because its health failed.
+
+    Carried on the terminal event beside ``container_residue`` and
+    ``recreate_supervision``, for the same reason both of those are: a
+    mutation this agent decided to perform on a lane is a durable fact, not a
+    log line the next reader has to go and find on the host.
+
+    ``compose_project`` is recorded rather than derived by a reader, because
+    the one property this remedy must never violate is WHICH project it
+    touched -- the governed stability-test, judge and lakshman lanes are out
+    of scope by construction, and the record is what makes that checkable
+    after the fact rather than only assertable in a review.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    service: str
+    lane: EnumRuntimeLane
+    compose_project: str
+    endpoint: str
+    outcome: EnumVerifyRecreateOutcome
+    recreate_returncode: int | None = None
+    readiness_wait_seconds: float = 0.0
+    readiness_budget_seconds: int = 0
+    detail: str = ""
+
+    def describe(self) -> str:
+        """One-line, log-ready statement of what was recreated and how it ended."""
+        line = (
+            f"{self.service} on {self.compose_project} recreated after "
+            f"{self.endpoint} failed: {self.outcome.value}"
+        )
+        if self.outcome == EnumVerifyRecreateOutcome.RECOVERED:
+            line += f" after {self.readiness_wait_seconds:.0f}s"
+        if self.detail:
+            line += f" ({self.detail})"
+        return line
+
+
 class ModelRebuildRequested(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID
@@ -543,6 +613,14 @@ class ModelRebuildCompleted(BaseModel):
     # phase was never reached, which is a different fact from a deploy whose
     # deps phase ran without incident (that one carries a `completed` entry).
     recreate_supervision: list[ModelRecreateSupervision] = Field(default_factory=list)
+    # OMN-18640 AC7: the runtime containers this deploy force-recreated because
+    # their own health endpoint failed post-deploy, and whether that repaired
+    # them. Empty is the normal reading and is a FACT, not an absence: it says
+    # the verification phase found nothing to repair. Before this, a verify
+    # failure left the container exactly as it was found and the event said
+    # only that the job failed, which is why the same wedge recurred three
+    # times across two nights with nothing to distinguish the occurrences.
+    verify_recreate: list[ModelVerifyRecreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_phase_results_are_settled(self) -> ModelRebuildCompleted:

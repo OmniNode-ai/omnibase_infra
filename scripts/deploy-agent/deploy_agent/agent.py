@@ -851,6 +851,9 @@ class DeployAgent:
                 # took before touching the lane, or the wait it held rather
                 # than cancelling a live recreate.
                 recreate_supervision=self.executor.recreate_supervision,
+                # OMN-18640 AC7: the runtime containers verification found dead
+                # and recreated, and whether that repaired them.
+                verify_recreate=self.executor.verify_recreate,
                 # OMN-17135: which sibling commits this build actually vendored.
                 # The command's git_ref pins omnibase_infra alone.
                 sibling_refs=self.executor.sibling_source_refs,

@@ -19,6 +19,7 @@ from deploy_agent.events import (
     ModelHealthCheck,
     ModelRebuildCompleted,
     ModelRecreateSupervision,
+    ModelVerifyRecreate,
     Phase,
 )
 from deploy_agent.job_state import JobState
@@ -81,6 +82,7 @@ def build_completion_payload(
     container_residue: list[ModelContainerResidue] | None = None,
     sibling_refs: dict[str, str] | None = None,
     recreate_supervision: list[ModelRecreateSupervision] | None = None,
+    verify_recreate: list[ModelVerifyRecreate] | None = None,
 ) -> dict[str, Any]:
     """Build the completion event payload from job state.
 
@@ -114,6 +116,13 @@ def build_completion_payload(
     any durable artifact. The 2026-09-18 kill had to be reconstructed from the
     dockerd journal by a third lane, because the terminal event recorded only
     that the phase failed.
+
+    OMN-18640 adds ``verify_recreate``: the runtime containers this deploy
+    force-recreated because their own post-deploy health probe failed, and
+    whether that repaired them. An empty list is the normal reading and is a
+    positive fact -- verification found nothing to repair -- which is what
+    makes the field's absence from an older event distinguishable from a
+    deploy that repaired nothing.
     """
     started_at = job.accepted_at
     completed_at = job.completed_at or datetime.now(UTC)
@@ -152,6 +161,7 @@ def build_completion_payload(
         health_checks=list(health_checks or []),
         container_residue=list(container_residue or []),
         recreate_supervision=list(recreate_supervision or []),
+        verify_recreate=list(verify_recreate or []),
     )
     return completed.model_dump(mode="json")
 
