@@ -821,6 +821,7 @@ class HandlerGraph(
         query = f"""
         MATCH (a), (b)
         WHERE {from_cond} AND {to_cond}
+        WITH a, b
         CREATE (a)-[r:{relationship_type} $props]->(b)
         RETURN r, toString(id(r)) as eid, id(r) as rid,
                toString(id(a)) as start_eid, toString(id(b)) as end_eid
