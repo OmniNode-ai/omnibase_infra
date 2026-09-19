@@ -1100,6 +1100,96 @@ cli_venv_candidates() {
 
 # Report every unowned CLI venv. Returns 1 when any of them is drifted against
 # the canonical clone, so the caller can decide what that means for its verdict.
+# --------------------------------------------------------------------------- #
+# Repairing the unowned CLI venv (OMN-18815)
+# --------------------------------------------------------------------------- #
+# WHY A RECONCILER CALLS SOMEBODY ELSE'S SCRIPT. OMN-18663 made this venv
+# VISIBLE; before it, this script reported zero failures while the CLI venv sat
+# a bump behind and the in-process drift guard refused every plugin-path
+# delegation. Visible was the right first step and it was not enough. Measured
+# 2026-09-19: that venv was drifted for about 545 of 740 elapsed minutes,
+# roughly 74% of the day, in windows of 8h31m and 34m, and BOTH were closed by
+# a lane typing the command it read off this script's own output. A remedy
+# nobody runs is a remedy in name, and omnimarket merges about 22.7 times a
+# day, so the next window opens within the hour.
+#
+# THE OWNERSHIP BOUNDARY IS KEPT, NOT MOVED. Rule 11's table says
+# `repair-plugin-venv.sh` owns this venv, and the block above still refuses to
+# WRITE it -- there is no `uv pip install` here, no venv creation, no marker
+# write. What changed is that this script now CALLS the owner instead of
+# printing its name and hoping.
+#
+# WHICH REPAIR, AND WHY IT IS THE WHOLE POINT. Two scripts will make the
+# installed commit equal the clone head and they are NOT interchangeable:
+#
+#   * `repair-plugin-venv.sh` delegates to `ensure-plugin-venv.sh`, whose
+#     `uv sync --frozen` rebuilds the venv from the lock AND writes the
+#     `.built-from` marker. It is the only writer of that marker.
+#   * `check-omnimarket-venv-drift.sh --repair` installs the clone head with a
+#     targeted `--no-deps` install and touches the marker nowhere.
+#
+# Taking the second converges the drift guard and leaves the SKEW gate red on a
+# stale marker -- two gates disagreeing about one venv, which is exactly the
+# split a lane hit and had to unpick by hand on 2026-09-19. It has also
+# downgraded siblings before. So this calls the first, and a test pins the
+# second as never invoked from here.
+#
+# PATH, DELIBERATELY. `repair-plugin-venv.sh` refuses to run unless the venv it
+# repairs is already on PATH. That precondition is circular for the case the
+# script exists to serve -- a venv broken enough to need repair is one no shell
+# has a reason to have on PATH, and a detached tick has no interactive PATH at
+# all. Satisfying it here is not a workaround for a guard: the guard is about
+# repairing the venv you meant, and naming it explicitly is the strongest form
+# of meaning it.
+#
+# A FAILURE IS REPORTED, NEVER FATAL. This runs inside a tick that is detached
+# and exits 0 on every path, so a repair that cannot reach the index must leave
+# a line naming the venv and the reason, and let the rest of the reconcile
+# finish. The alternative -- aborting -- turns one unreachable index into a
+# host with nothing converged and no verdict.
+repair_unowned_cli_venv() {
+  local candidate="$1" python_bin="$2" head="$3" readback="$4"
+  local repair="$CLAUDE_DIR/scripts/repair-plugin-venv.sh"
+  local out rc
+
+  if [[ ! -f "$repair" ]]; then
+    say "  repair     : UNAVAILABLE -- no owner script at $repair"
+    return 1
+  fi
+
+  say "  repair     : running $repair (marker-writing path)"
+  if out="$(CLAUDE_PLUGIN_DATA="$candidate" \
+      PATH="$candidate/.venv/bin:$PATH" \
+      bash "$repair" 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if (( rc != 0 )); then
+    say "  repair     : FAILED (exit $rc) -- $candidate/.venv left as found"
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && say "    $line"
+    done <<< "$out"
+    return 1
+  fi
+
+  # READ IT BACK before calling it repaired (OMN-18663). A script that exited 0
+  # has reported its own opinion; the venv carrying the commit is the fact.
+  if [[ ! -x "$DISPATCH_PYTHON" ]]; then
+    say "  repair     : ran, but UNPROVEN -- no dispatch interpreter to read back"
+    return 1
+  fi
+  if env -u PYTHONPATH "$DISPATCH_PYTHON" "$readback" \
+      --python "$python_bin" --clone "$MARKET_CLONE" --ref "$head" \
+      --label "unowned CLI venv repair readback (OMN-18815)" >/dev/null 2>&1; then
+    return 0
+  fi
+  say "  repair     : ran and exited 0, but the venv STILL does not carry"
+  say "               omnimarket ${head:0:12} -- reporting rather than retrying,"
+  say "               because an identical second attempt fixes nothing"
+  return 1
+}
+
 report_unowned_cli_venvs() {
   local head="$1"
   local candidate python_bin drifted=0
@@ -1130,12 +1220,21 @@ report_unowned_cli_venvs() {
       say "  provider   : in sync (omnimarket ${head:0:12})"
     else
       say "  provider   : DRIFT -- does not carry omnimarket ${head:0:12}"
-      say "  Every \`onex delegate\` through the plugin path refuses until this is"
-      say "  converged. This script does not write that venv; the sanctioned"
-      say "  remedy is:"
-      say "    OMNI_HOME=$OMNI_HOME bash $_VENV_SCRIPT_DIR/check-omnimarket-venv-drift.sh \\"
-      say "      --repair $python_bin"
-      drifted=1
+      if [[ "$MODE" == "check" ]]; then
+        # --check mutates nothing, by contract. Name the remedy and stop.
+        say "  Until this is converged, an \`onex delegate\` through the plugin"
+        say "  path runs behind the clone head (OMN-18814 stamps the lag when it"
+        say "  is a known ancestor, and still refuses when it is not). This"
+        say "  script does not write that venv; the sanctioned remedy is:"
+        say "    bash $CLAUDE_DIR/scripts/repair-plugin-venv.sh"
+        drifted=1
+        continue
+      fi
+      if repair_unowned_cli_venv "$candidate" "$python_bin" "$head" "$readback"; then
+        say "  provider   : REPAIRED and PROVEN (omnimarket ${head:0:12})"
+      else
+        drifted=1
+      fi
     fi
   done < <(cli_venv_candidates)
   return "$drifted"
