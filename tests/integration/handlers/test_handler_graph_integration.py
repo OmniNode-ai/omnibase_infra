@@ -554,8 +554,18 @@ class TestHandlerGraphRelationships:
         assert relationship.type == "KNOWS"
         assert relationship.properties == {"since": 2020}
 
+        # OMN-18795: NOT `MATCH (a)-[r:KNOWS]->(b) WHERE id(r) = $rel_id RETURN
+        # a.name, ...` with no `WITH` between the `MATCH` and the `WHERE`. On
+        # Memgraph 2.18.1 that shape is a genuine query-planner defect: filtering
+        # on `id(r)` immediately after the `MATCH`, before a `WITH` boundary,
+        # returns the correct relationship but nulls out every property read off
+        # `a`/`b` in the same `RETURN` -- reproduced directly against a bare
+        # memgraph/memgraph:2.18.1 container, isolated from this handler's own
+        # driver session. Forcing a `WITH a, b, r` boundary before the `WHERE`
+        # (the same shape `handler_graph.py`'s own OMN-18795 fix already uses
+        # elsewhere in this file) makes the planner bind correctly.
         stored = await reader.rows(
-            "MATCH (a)-[r:KNOWS]->(b) WHERE id(r) = $rel_id "
+            "MATCH (a)-[r:KNOWS]->(b) WITH a, b, r WHERE id(r) = $rel_id "
             "RETURN a.name AS source, b.name AS target, r.since AS since",
             {"rel_id": int(relationship.id)},
         )
