@@ -25,12 +25,15 @@ from deploy_agent.accept_backlog import (
     AcceptBacklogWatchdog,
     read_accept_queue,
 )
+from deploy_agent.coalesce import GitAncestryResolver, ModelSupersession
 from deploy_agent.consumer import DeployConsumer
 from deploy_agent.events import (
     TOPIC_REBUILD_REJECTED,
     DeployInProgressError,
+    EnumRejectionReason,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
+    ModelRebuildRejected,
     ModelRebuildRequested,
     Phase,
     PhaseStatus,
@@ -47,7 +50,7 @@ from deploy_agent.executor import (
     resolve_prod_target_service,
 )
 from deploy_agent.health import create_health_app
-from deploy_agent.job_state import EnumJobSettlingStage, JobStore
+from deploy_agent.job_state import EnumJobSettlingStage, JobState, JobStore
 from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lab_overlay import (
     DEFAULT_APPLY_BUDGET_SECONDS,
@@ -346,6 +349,14 @@ class DeployAgent:
             allowed_lanes=self._allowed_lanes,
             self_update_hook=self._self_update_pre_accept,
             lag_sampler=self._lag_sampler,
+            # OMN-18143. Both halves of coalescing are injected rather than
+            # constructed inside the consumer: the ancestry fact comes from
+            # the deploy-source clone, which is the executor's concern, and
+            # the terminal event needs a producer, which is this class's. A
+            # consumer built without either -- every test that does not ask
+            # for coalescing -- folds nothing.
+            ancestry_resolver=GitAncestryResolver(REPO_DIR),
+            on_superseded=self._publish_superseded,
         )
 
         # Handle signals
@@ -562,7 +573,7 @@ class DeployAgent:
                 "Single-flight lock held — rejecting %s (in_progress)",
                 cmd.correlation_id,
             )
-            self._publish_rejected(cmd, reason="in_progress")
+            self._publish_rejected(cmd, reason=EnumRejectionReason.IN_PROGRESS)
             return
 
         # OMN-16442 job boundary: the job has a terminal status, its result has
@@ -1037,16 +1048,81 @@ class DeployAgent:
             budget_seconds=LAB_OVERLAY_BUDGET_SECONDS,
         )
 
-    def _publish_rejected(self, cmd: ModelRebuildRequested, *, reason: str) -> None:
+    def _publish_rejected(
+        self, cmd: ModelRebuildRequested, *, reason: EnumRejectionReason
+    ) -> None:
+        self._publish_rejection_event(
+            ModelRebuildRejected(
+                correlation_id=cmd.correlation_id,
+                reason=reason,
+                scope=cmd.scope,
+            )
+        )
+
+    def _publish_superseded(self, supersession: ModelSupersession) -> None:
+        """AC6's terminal event: this command will not run, and here is what did.
+
+        On the SAME topic as every other "will not run" outcome, with its own
+        reason token and the two fields that make it actionable. A new topic
+        was weighed and refused: it would need a consumer nobody has, while
+        the rejection topic already carries the class of outcome this belongs
+        to -- and ``ModelRebuildRejected`` is what keeps the three cases AC6
+        names apart, since a timeout and a rollback cannot carry
+        ``reason=superseded`` and a supersession cannot omit the sha.
+        """
+        cmd = supersession.superseded.command
+        published = self._publish_rejection_event(
+            ModelRebuildRejected(
+                correlation_id=cmd.correlation_id,
+                reason=EnumRejectionReason.SUPERSEDED,
+                scope=cmd.scope,
+                superseded_by_sha=supersession.superseded_by_sha,
+                superseded_by_correlation_id=supersession.superseded_by_correlation_id,
+            )
+        )
+        if published:
+            self.job_store.mark_published(cmd.correlation_id)
+
+    def _publish_superseded_for_job(self, job: JobState) -> bool:
+        """Re-publish a superseded record's terminal event from the record alone.
+
+        The retry loop must be able to pay this debt without the in-memory
+        ``ModelSupersession`` the scan built, because the process that built
+        it may be gone -- the job store outlives it, which is the reason the
+        record carries both fields rather than only the log line naming them.
+        """
+        if job.superseded_by_sha is None or job.superseded_by_correlation_id is None:
+            # Refused by JobState's own validator, so this is unreachable
+            # through any write path; it is here because an unreachable branch
+            # that silently publishes a malformed event is worse than one that
+            # says the record is unusable.
+            logger.error(
+                "Superseded job %s names no replacement, so no terminal event "
+                "can be built for it",
+                job.correlation_id,
+            )
+            return False
+        return self._publish_rejection_event(
+            ModelRebuildRejected(
+                correlation_id=job.correlation_id,
+                reason=EnumRejectionReason.SUPERSEDED,
+                scope=Scope(job.command["scope"]),
+                superseded_by_sha=job.superseded_by_sha,
+                superseded_by_correlation_id=job.superseded_by_correlation_id,
+            )
+        )
+
+    def _publish_rejection_event(self, event: ModelRebuildRejected) -> bool:
+        """Publish one rejection. Returns whether the broker took it.
+
+        The return value is new and the swallow is not: every existing caller
+        ignores it and behaves exactly as before, while the supersession path
+        needs to know, because a superseded record's publish debt is only
+        cleared when the event actually landed.
+        """
         from kafka import KafkaProducer
 
-        payload = json.dumps(
-            {
-                "correlation_id": str(cmd.correlation_id),
-                "reason": reason,
-                "scope": cmd.scope,
-            }
-        ).encode()
+        payload = json.dumps(event.to_wire()).encode()
         try:
             producer = KafkaProducer(
                 **self._kafka_config.producer_kwargs(),
@@ -1057,8 +1133,12 @@ class DeployAgent:
             producer.close()
         except Exception:  # noqa: BLE001
             logger.warning(
-                "Failed to publish rebuild-rejected for %s", cmd.correlation_id
+                "Failed to publish rebuild-rejected (reason=%s) for %s",
+                event.reason.value,
+                event.correlation_id,
             )
+            return False
+        return True
 
     def _retry_pending_publishes(self) -> None:
         """Replay any result still owed to the bus. BLOCKING — see ``_offload``."""
@@ -1075,6 +1155,24 @@ class DeployAgent:
                 )
                 self.job_store.mark_published(job.correlation_id)
                 self._publish_cb.clear(cid_str)
+                continue
+
+            # OMN-18143. A superseded job owes a REJECTION event, not a
+            # completion one. Routing it through the completion builder below
+            # would publish a ModelRebuildCompleted whose phases are all
+            # SKIPPED onto the completed topic -- an event asserting that a
+            # rebuild finished for a command that never started, on the topic
+            # the redeploy effect waits on.
+            if job.status == "superseded":
+                if self._publish_superseded_for_job(job):
+                    self.job_store.mark_published(job.correlation_id)
+                    self._publish_cb.record_success(cid_str)
+                    logger.info("Retried superseded publish for %s: success", cid_str)
+                else:
+                    self._publish_cb.record_failure(cid_str)
+                    logger.warning(
+                        "Retried superseded publish for %s: still failing", cid_str
+                    )
                 continue
 
             payload = build_completion_payload(job, "")

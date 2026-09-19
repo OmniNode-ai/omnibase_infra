@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from deploy_agent.events import DEPLOY_PHASE_ORDER, Phase, PhaseStatus
 
@@ -57,7 +57,24 @@ class JobState(BaseModel):
     accepted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     current_phase: Phase = Phase.PREFLIGHT
     phase_results: dict[Phase, PhaseStatus] = Field(default_factory=dict)
-    status: Literal["accepted", "in_progress", "success", "failed"] = "accepted"
+    #: OMN-18143 adds ``superseded``, a FOURTH terminal status that is neither a
+    #: success nor a failure.
+    #:
+    #: Folding it into ``failed`` was the obvious cheap move and is refused:
+    #: every reader of this field would then report a lane failure for a
+    #: command the lane was never asked to run, and AC6 asks for exactly the
+    #: opposite -- a terminal record distinguishable from a timeout and from a
+    #: rollback. Three readers already branch on this literal and each had to
+    #: be told which side of the line the new value falls on:
+    #: ``has_active_job``/``load_active`` (terminal, so it never blocks the
+    #: next command), ``queue_depth.NON_TERMINAL_STATUSES`` (terminal, so a
+    #: superseded record is not counted as queued work) and
+    #: ``queue_depth.mean_service_time`` (EXCLUDED, because a job that took
+    #: milliseconds to refuse did not occupy the agent and averaging it in
+    #: would shrink the very bound OMN-18144 derives from it).
+    status: Literal["accepted", "in_progress", "success", "failed", "superseded"] = (
+        "accepted"
+    )
     errors: list[str] = Field(default_factory=list)
     result_publish_pending: bool = False
     completed_at: datetime | None = None
@@ -69,6 +86,53 @@ class JobState(BaseModel):
     #: settling" rather than turning every job already on disk into a
     #: permanently-settling one at the moment of upgrade.
     settling_stage: EnumJobSettlingStage | None = None
+    #: OMN-18143. Set on a ``superseded`` record only: the exact commit that
+    #: ran in this command's place, and the correlation that ran it. Both, or
+    #: neither -- a supersession that cannot name what replaced it is not
+    #: distinguishable from a command that was dropped.
+    superseded_by_sha: str | None = None
+    superseded_by_correlation_id: UUID | None = None
+    #: OMN-18143. Set on the RUNNING record: how many queued commands this one
+    #: replaced, and which. The count is a field rather than a length a reader
+    #: derives, because it is the number a journal line and a job payload both
+    #: quote, and the ids are what make the claim checkable against the
+    #: records those correlations wrote.
+    superseded_count: int = 0
+    superseded_correlation_ids: list[UUID] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _supersession_fields_are_paired(self) -> JobState:
+        """Neither half of a supersession may stand without the other.
+
+        A record with a status of ``superseded`` and no replacement named
+        asserts that the command was dropped, which is the silence this ticket
+        exists to remove; a replacement named on a record that is not
+        superseded asserts a fact about a job that ran.
+        """
+        named = self.superseded_by_sha is not None
+        if named != (self.superseded_by_correlation_id is not None):
+            msg = (
+                "superseded_by_sha and superseded_by_correlation_id stand or "
+                f"fall together; got sha={self.superseded_by_sha!r}, "
+                f"correlation_id={self.superseded_by_correlation_id!r}"
+            )
+            raise ValueError(msg)
+        if (self.status == "superseded") != named:
+            msg = (
+                f"status={self.status!r} disagrees with the supersession "
+                f"fields (sha={self.superseded_by_sha!r}). A superseded record "
+                "must name what replaced it, and only a superseded record may."
+            )
+            raise ValueError(msg)
+        if self.superseded_count != len(self.superseded_correlation_ids):
+            msg = (
+                f"superseded_count={self.superseded_count} does not match the "
+                f"{len(self.superseded_correlation_ids)} correlation id(s) "
+                "recorded. A count a reader cannot check against the ids "
+                "behind it is a number, not evidence."
+            )
+            raise ValueError(msg)
+        return self
 
 
 def reconcile_terminal_phase_results(
@@ -184,8 +248,72 @@ class JobStore:
             job.model_dump_json(indent=2),
         )
 
-    def accept(self, correlation_id: UUID, command: dict[str, Any]) -> JobState:
-        job = JobState(correlation_id=correlation_id, command=command)
+    def accept(
+        self,
+        correlation_id: UUID,
+        command: dict[str, Any],
+        superseded_correlation_ids: list[UUID] | None = None,
+    ) -> JobState:
+        """Write the accepted record, naming any commands it replaced.
+
+        ``superseded_correlation_ids`` is part of THIS write rather than a
+        second one after it, for the reason ``complete`` gives about
+        ``settling_stage``: a window in which the running record does not yet
+        say what it replaced is a window in which a reader sees a plain deploy
+        and the superseded records point at a job that disclaims them.
+        """
+        ids = list(superseded_correlation_ids or [])
+        job = JobState(
+            correlation_id=correlation_id,
+            command=command,
+            superseded_count=len(ids),
+            superseded_correlation_ids=ids,
+        )
+        self._save(job)
+        return job
+
+    def record_superseded(
+        self,
+        correlation_id: UUID,
+        command: dict[str, Any],
+        *,
+        superseded_by_sha: str,
+        superseded_by_correlation_id: UUID,
+    ) -> JobState:
+        """Write a command's terminal record without ever running it (OMN-18143).
+
+        Born terminal, in one atomic write. There is deliberately no
+        accept-then-complete pair: a crash between the two would leave an
+        ``accepted`` record for a command nothing is going to execute, and
+        ``has_active_job`` would then refuse every command behind it until
+        ``recover_crashed_jobs`` reclassified it as a FAILURE -- turning a
+        supersession into exactly the lane-failure claim this status exists to
+        avoid making.
+
+        ``result_publish_pending`` is set: the terminal event owed to the bus
+        for this command is the one AC6 asks for, and the agent's existing
+        retry loop is what makes it survive a broker that is briefly away.
+        """
+        now = datetime.now(UTC)
+        job = JobState(
+            correlation_id=correlation_id,
+            command=command,
+            accepted_at=now,
+            completed_at=now,
+            status="superseded",
+            superseded_by_sha=superseded_by_sha,
+            superseded_by_correlation_id=superseded_by_correlation_id,
+            # Every deploy phase is SKIPPED rather than absent, the same rule
+            # reconcile_terminal_phase_results applies to a crashed job: "not
+            # run" is a fact on the record, not a gap in it.
+            phase_results=reconcile_terminal_phase_results({}),
+            result_publish_pending=True,
+            errors=[
+                f"superseded by {superseded_by_correlation_id} at "
+                f"{superseded_by_sha}, which contains this command's ref and "
+                "was already queued when the agent reached this one"
+            ],
+        )
         self._save(job)
         return job
 

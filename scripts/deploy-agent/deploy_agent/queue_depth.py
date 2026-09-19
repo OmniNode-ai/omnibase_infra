@@ -78,6 +78,21 @@ from deploy_agent.job_state import JobState, JobStore
 #: without deciding which side of this line it falls on.
 NON_TERMINAL_STATUSES: Final = frozenset({"accepted", "in_progress"})
 
+#: Job statuses that are terminal but did NOT occupy the agent (OMN-18143).
+#:
+#: A ``superseded`` record is born terminal in the same millisecond it is
+#: written: the command was folded into a newer one and never ran. Counting it
+#: in the rolling mean below would divide real service time by a number of
+#: jobs that includes refusals, and the bound OMN-18144 derives from that mean
+#: -- commands ahead multiplied by mean service time -- would collapse toward
+#: zero exactly when the queue is deepest, which is the one moment it matters.
+#: Measured shape of the hazard: a night with forty merges and one running job
+#: produces thirty-nine sub-second records against ten real ones.
+#:
+#: They stay OUT of ``NON_TERMINAL_STATUSES`` as well, because the agent owes
+#: them no further work; they are terminal, just not service.
+UNSERVICED_TERMINAL_STATUSES: Final = frozenset({"superseded"})
+
 #: How many recent completed jobs the mean service time is taken over. Not a
 #: tuning knob standing in for a measurement: it is the window over which "how
 #: long does this agent take per command" is a question with a current answer.
@@ -255,14 +270,23 @@ def _service_seconds(job: JobState) -> float | None:
 def mean_service_time(
     jobs: list[JobState], sample_size: int = DEFAULT_SERVICE_SAMPLE_SIZE
 ) -> tuple[float | None, int]:
-    """Rolling mean over the most recently COMPLETED jobs.
+    """Rolling mean over the most recently SERVICED jobs.
 
     Failed jobs count. The question the bound asks is "how long until the agent
     reaches my command", and a command that failed after 30 minutes occupied
     the agent for 30 minutes exactly as a successful one did.
+
+    Superseded jobs do NOT count, for the same reason and in the other
+    direction: they occupied the agent for no time at all. See
+    ``UNSERVICED_TERMINAL_STATUSES``.
     """
     completed = sorted(
-        (job for job in jobs if job.completed_at is not None),
+        (
+            job
+            for job in jobs
+            if job.completed_at is not None
+            and job.status not in UNSERVICED_TERMINAL_STATUSES
+        ),
         key=lambda job: job.completed_at,  # type: ignore[arg-type,return-value]
         reverse=True,
     )[:sample_size]

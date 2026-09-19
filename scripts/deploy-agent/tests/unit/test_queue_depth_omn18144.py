@@ -20,6 +20,7 @@ from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobState, JobStore
 from deploy_agent.queue_depth import (
     NON_TERMINAL_STATUSES,
+    UNSERVICED_TERMINAL_STATUSES,
     LagSampler,
     ModelControlTopicLag,
     ModelQueueSnapshot,
@@ -117,10 +118,27 @@ class TestCommandsAhead:
         assert snapshot.commands_ahead == 0
 
     def test_non_terminal_statuses_mirror_the_job_state_literal(self) -> None:
-        """A new status must be classified deliberately, not inherited silently."""
+        """A new status must be classified deliberately, not inherited silently.
+
+        OMN-18143 added ``superseded`` and this assertion is what made that a
+        decision: the status is terminal, so it joins the complement below,
+        and it is additionally UNSERVICED, which is a second classification
+        the mean-service-time sample depends on and which no other terminal
+        status carries.
+        """
         declared = set(JobState.model_fields["status"].annotation.__args__)  # type: ignore[union-attr]
         assert declared > NON_TERMINAL_STATUSES
-        assert declared - NON_TERMINAL_STATUSES == {"success", "failed"}
+        assert declared - NON_TERMINAL_STATUSES == {
+            "success",
+            "failed",
+            "superseded",
+        }
+        # Every unserviced status must also be a real, terminal one: a value
+        # excluded from the service sample that no record can carry excludes
+        # nothing, and one that is non-terminal would be excluded from the
+        # sample while still counted as queued work.
+        assert declared >= UNSERVICED_TERMINAL_STATUSES
+        assert not (UNSERVICED_TERMINAL_STATUSES & NON_TERMINAL_STATUSES)
 
 
 class TestMeanServiceTime:
