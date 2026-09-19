@@ -97,13 +97,15 @@ case "${LANE}" in
         COMPOSE_PROJECT="omnibase-infra" ;;
     stability-test)
         COMPOSE_PROJECT="omnibase-infra-stability-test" ;;
+    dogfood)
+        COMPOSE_PROJECT="omnibase-infra-dogfood" ;;
     prod|judge)
         err "lane '${LANE}' is not a lab fast-lane target."
         err "  prod is Train 2 (grant-gated, PyPI-backed); judge is read-only."
         err "  cut-lab-ref drives dev / stability-test only."
         exit 2 ;;
     *)
-        err "unknown lane '${LANE}'; expected dev or stability-test."
+        err "unknown lane '${LANE}'; expected dev, stability-test, or dogfood."
         exit 2 ;;
 esac
 

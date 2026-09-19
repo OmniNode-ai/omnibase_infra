@@ -474,6 +474,41 @@ lanes:
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------
+  # Prospective OMN-18693 dogfood boundary: owner Codex; optional lane only.
+  # No production or runtime evidence is asserted here; it is not deployed.
+  dogfood:
+    compose_file: docker/docker-compose.dogfood.yml
+    compose_project: omnibase-infra-dogfood
+    network: omnibase-infra-dogfood-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omnibase-infra-dogfood-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dogfood-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dogfood-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-dogfood-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dogfood-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-dogfood-migration-gate
+        kind: keepalive
+      - name: omnibase-infra-dogfood-intelligence-migration
+        kind: oneshot
+      - name: omninode-dogfood-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-dogfood-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-dogfood-projection-api
+        kind: service
+        replicas: 1
   # ci-bus — the fleet's DEDICATED CI bus broker (OMN-18691)
   # ---------------------------------------------------------------------------
   # NOT A RUNTIME LANE, and declared here anyway. It runs no runtime, no

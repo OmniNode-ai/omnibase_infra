@@ -18,6 +18,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CUT_LAB_REF = REPO_ROOT / "scripts" / "runtime_build" / "cut-lab-ref.sh"
 
@@ -36,7 +40,7 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env=scrub_git_location_env(os.environ) | {"GIT_TERMINAL_PROMPT": "0"},
     ).stdout.strip()
 
 
@@ -94,6 +98,15 @@ def test_dry_run_plan_stability_lane(tmp_path: Path) -> None:
     assert (
         "OMNIBASE_INFRA_COMPOSE_PROJECT=omnibase-infra-stability-test" in result.stderr
     )
+
+
+@pytest.mark.unit
+def test_dry_run_plan_dogfood_lane_is_isolated(tmp_path: Path) -> None:
+    """Dogfood resolves to its own compose project, never the shared dev lane."""
+    omni_home = _make_omni_home(tmp_path)
+    result = _run(omni_home, "--lane", "dogfood")
+    assert result.returncode == 0, result.stderr
+    assert "OMNIBASE_INFRA_COMPOSE_PROJECT=omnibase-infra-dogfood" in result.stderr
 
 
 @pytest.mark.unit
