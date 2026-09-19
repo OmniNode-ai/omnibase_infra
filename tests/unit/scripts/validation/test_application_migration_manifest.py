@@ -695,7 +695,14 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # asserted rather than derived on purpose -- it is what makes a vendored
     # migration that arrives WITHOUT its declaration a red test here instead of
     # a fail-closed surprise at bootstrap deploy time.
-    assert len(result.declarations) == 190
+    # 190 -> 192 for OMN-18770: two more node-owned migrations,
+    # nodes/node_projection_runtime_error_fingerprints/0000_create_runtime_error_fingerprints.sql
+    # and its 0001_grant_omninode_runtime_runtime_error_fingerprints.sql, vendored
+    # from omnimarket by the same script. The grant file is a separate declaration
+    # rather than folded into the create, because the create runs as the migration
+    # role and the grant names the runtime role explicitly -- the OMN-17379 half
+    # whose absence left the projection writer unable to write.
+    assert len(result.declarations) == 192
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
