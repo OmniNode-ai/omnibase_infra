@@ -151,6 +151,9 @@ from omnibase_infra.cli.delegate_terminal_resolver import (
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
 )
+from omnibase_infra.cli.model_delegate_run_addressing import (
+    ModelDelegateRunAddressing,
+)
 from omnibase_infra.cli.model_delegate_terminal import ModelDelegateTerminal
 from omnibase_infra.cli.model_delegate_timeout_refusal import (
     ModelDelegateTimeoutRefusal,
@@ -467,6 +470,7 @@ def _write_unattributed_run_files(
     prompt: str,
     task_type: str,
     task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
     drift_guard: ModelOffRegistryCheck | None = None,
 ) -> None:
     """Persist a terminally-failed delegation that attributed no route.
@@ -505,6 +509,10 @@ def _write_unattributed_run_files(
                 "cost_usd": cost_usd,
                 "attempts": _attempt_evidence(result),
                 "receipt": envelope,
+                # OMN-18810: where a failed run RAN is the first question
+                # asked about it, and route attribution being fail-closed is
+                # exactly why it cannot be inferred from anything else here.
+                **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
             },
             indent=2,
@@ -517,11 +525,16 @@ def _write_unattributed_run_files(
             {
                 "run_id": run_id,
                 "correlation_id": correlation_id,
-                "lane": None,
+                # OMN-18810: no rung answered, so no tier is named -- the
+                # same fail-closed attribution the receipt above applies.
+                # This key used to be spelled ``lane``, which is now the
+                # ``--lane`` value that ``addressing`` supplies.
+                "routing_tier": None,
                 "route_attributed": False,
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                **addressing.as_run_file_fields(),
             },
             indent=2,
             sort_keys=True,
@@ -544,6 +557,7 @@ def _write_local_run_files(
     state_root: Path,
     prompt: str,
     task_type: str,
+    addressing: ModelDelegateRunAddressing,
     task_type_resolution: str | None = None,
     drift_guard: ModelOffRegistryCheck | None = None,
 ) -> None:
@@ -603,6 +617,7 @@ def _write_local_run_files(
             prompt=prompt,
             task_type=task_type,
             task_type_resolution=task_type_resolution,
+            addressing=addressing,
             drift_guard=drift_guard,
         )
         return
@@ -644,6 +659,10 @@ def _write_local_run_files(
                 "routing_tier": routing_tier,
                 "status": envelope.get("status"),
                 "receipt": envelope,
+                # OMN-18810: the rung that answered is not the machine that
+                # ran it. Both files carry the same four addressing keys so
+                # neither can be read against the other.
+                **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
             },
             indent=2,
@@ -656,10 +675,17 @@ def _write_local_run_files(
             {
                 "run_id": run_id,
                 "correlation_id": correlation_id,
-                "lane": routing_tier,
+                # OMN-18810: this key was spelled ``lane`` and held the
+                # accepted rung's TIER, so a run dispatched to the ``dev``
+                # lane wrote ``lane: "local"`` and was read as a silent
+                # local fallback. The tier now uses the spelling
+                # ``receipt.json`` already gave it, and ``lane`` below is
+                # the ``--lane`` value and nothing else.
+                "routing_tier": routing_tier,
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                **addressing.as_run_file_fields(),
             },
             indent=2,
             sort_keys=True,
@@ -1716,6 +1742,22 @@ def run_delegate(
         except DelegateLocusRefusedError as exc:
             raise click.ClickException(str(exc)) from exc
 
+        # OMN-18810: the four addressing facts the two written files record,
+        # built from the decision that was just PROVEN viable rather than
+        # from the raw flags. ``--lane dev`` that resolved to no broker never
+        # reaches here (``resolve_delegate_locus`` refuses first), so a file
+        # can never name a lane the run did not actually address.
+        addressing = ModelDelegateRunAddressing(
+            locus=locus_decision.locus,
+            bus=bus,
+            lane=lane_target.lane if lane_target is not None else None,
+            dispatch_target=(
+                f"{locus_decision.command_topic} via {locus_decision.broker}"
+                if locus_decision.locus is EnumDelegateLocus.DEPLOYED_LANE
+                else None
+            ),
+        )
+
         try:
             # OMN-17516: the refusal reports the wall time actually served,
             # which routinely exceeds declared + grace because a SIGALRM
@@ -1750,6 +1792,7 @@ def run_delegate(
                         prompt=prompt,
                         task_type=resolved_task_type,
                         task_type_resolution=task_class.resolution.value,
+                        addressing=addressing,
                         drift_guard=drift_guard_check,
                     ),
                 )
