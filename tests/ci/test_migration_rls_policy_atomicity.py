@@ -216,3 +216,111 @@ def test_the_gate_exits_non_zero_when_a_violation_exists(
         encoding="utf-8",
     )
     assert gate.main(["--root", str(tmp_path)]) == 0  # type: ignore[attr-defined]
+
+
+class TestRuleBAdmitsTheDisablingForm:
+    """OMN-18774: removing a posture is not the same as stranding one.
+
+    RULE B's hazard is a COMMITTED state of "row-level security enforcing,
+    zero policies", which denies every row to every non-owner principal. A
+    block that drops the last policy and DISABLEs enforcement on the same
+    relation in the same commit produces no such state.
+
+    This arm exists because the recreate RULE B demanded is, for an
+    omninode_internal relation, the very thing the operator ruled out: such a
+    relation receives no tenant stamping and no row-level security at all
+    (docs/tracking/ROLLING_WORK_LEDGER.md:654). Without the arm the gate would
+    have no passing shape for a posture REMOVAL, and the only way past it
+    would be an allowlist -- which is how a gate stops meaning anything.
+    """
+
+    @staticmethod
+    def _write(tmp_path: Path, body: str) -> Path:
+        forward = tmp_path / "docker" / "migrations" / "forward" / "nodes" / "n"
+        forward.mkdir(parents=True, exist_ok=True)
+        path = forward / "0001_posture.sql"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_drop_then_disable_in_one_block_passes(
+        self, gate: object, tmp_path: Path
+    ) -> None:
+        self._write(
+            tmp_path,
+            "DO $b$ BEGIN\n"
+            "  DROP POLICY IF EXISTS tenant_isolation ON public.t;\n"
+            "  ALTER TABLE public.t DISABLE ROW LEVEL SECURITY;\n"
+            "  ALTER TABLE public.t DROP COLUMN IF EXISTS tenant_id;\n"
+            "END $b$;\n",
+        )
+        assert gate.main(["--root", str(tmp_path)]) == 0  # type: ignore[attr-defined]
+
+    def test_a_bare_drop_in_a_block_still_fails(
+        self, gate: object, tmp_path: Path
+    ) -> None:
+        """The negative control: the original hazard is still refused."""
+        self._write(
+            tmp_path,
+            "DO $b$ BEGIN\n"
+            "  DROP POLICY IF EXISTS tenant_isolation ON public.t;\n"
+            "END $b$;\n",
+        )
+        assert gate.main(["--root", str(tmp_path)]) == 1  # type: ignore[attr-defined]
+
+    def test_a_disable_placed_before_the_drop_still_fails(
+        self, gate: object, tmp_path: Path
+    ) -> None:
+        """Order is load-bearing: the committed state is what the LAST statement leaves."""
+        self._write(
+            tmp_path,
+            "DO $b$ BEGIN\n"
+            "  ALTER TABLE public.t DISABLE ROW LEVEL SECURITY;\n"
+            "  DROP POLICY IF EXISTS tenant_isolation ON public.t;\n"
+            "END $b$;\n",
+        )
+        assert gate.main(["--root", str(tmp_path)]) == 1  # type: ignore[attr-defined]
+
+    def test_a_reenable_after_the_disable_still_fails(
+        self, gate: object, tmp_path: Path
+    ) -> None:
+        """Re-arming enforcement inside the block re-opens the window."""
+        self._write(
+            tmp_path,
+            "DO $b$ BEGIN\n"
+            "  DROP POLICY IF EXISTS tenant_isolation ON public.t;\n"
+            "  ALTER TABLE public.t DISABLE ROW LEVEL SECURITY;\n"
+            "  ALTER TABLE public.t ENABLE ROW LEVEL SECURITY;\n"
+            "END $b$;\n",
+        )
+        assert gate.main(["--root", str(tmp_path)]) == 1  # type: ignore[attr-defined]
+
+    def test_a_disable_on_a_DIFFERENT_relation_does_not_excuse_the_drop(
+        self, gate: object, tmp_path: Path
+    ) -> None:
+        self._write(
+            tmp_path,
+            "DO $b$ BEGIN\n"
+            "  DROP POLICY IF EXISTS tenant_isolation ON public.t;\n"
+            "  ALTER TABLE public.other DISABLE ROW LEVEL SECURITY;\n"
+            "END $b$;\n",
+        )
+        assert gate.main(["--root", str(tmp_path)]) == 1  # type: ignore[attr-defined]
+
+    def test_the_two_omn18774_migrations_pass_on_their_real_bytes(
+        self, gate: object
+    ) -> None:
+        """The shape this arm admits is the shape that actually landed."""
+        for relative in (
+            "nodes/node_projection_delegation/"
+            "0043_generation_events_drop_tenant_posture.sql",
+            "nodes/node_projection_registration/"
+            "0007_node_service_registry_drop_tenant_posture.sql",
+        ):
+            path = _FORWARD / relative
+            assert path.is_file(), relative
+            assert (
+                gate.violations_for(  # type: ignore[attr-defined]
+                    path, path.read_text(encoding="utf-8")
+                )
+                == []
+            )

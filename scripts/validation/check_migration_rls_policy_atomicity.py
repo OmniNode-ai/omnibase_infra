@@ -40,9 +40,20 @@ TWO RULES, both static, both proven against real checked-in bytes by
   the admitting rule to some other file is the defect class itself.
 
   RULE B -- POLICY ATOMICITY. If a file drops a policy on a relation from
-  inside a dollar-quoted block, it must recreate a policy on that relation
-  inside the SAME block. A drop that commits with ``END$$`` and a recreate that
-  runs afterwards is the 0032 window above.
+  inside a dollar-quoted block, that block must ALSO, inside itself, either
+  recreate a policy on the relation or ``DISABLE ROW LEVEL SECURITY`` on it. A
+  drop that commits with ``END$$`` and a recreate that runs afterwards is the
+  0032 window above.
+
+  The disabling arm is OMN-18774 and is not a relaxation: the hazard is a
+  COMMITTED state of "enforcing with zero policies", and a block that turns
+  enforcement off commits no such state. It is the only correct shape for a
+  relation whose posture is being REMOVED rather than replaced -- an
+  omninode_internal relation receives no tenant posture at all (operator
+  ruling, docs/tracking/ROLLING_WORK_LEDGER.md:654), so demanding a recreate
+  there would demand the very policy the ruling forbids. The arm is narrow:
+  the DISABLE must follow the drop, and a later ENABLE or FORCE in the same
+  block re-arms the hazard and re-opens the refusal.
 
 WHAT IS DELIBERATELY NOT CHECKED
   Whether the policy's predicate actually admits the writer at runtime. That is
@@ -100,6 +111,14 @@ _CREATE_POLICY = re.compile(
 )
 _DROP_POLICY = re.compile(
     rf"\bDROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?{_IDENT}\s+ON\s+(?:ONLY\s+)?({_QUALIFIED})\b",
+    re.IGNORECASE,
+)
+# The disabling form. RULE B's hazard is a COMMITTED state of "RLS enforcing,
+# zero policies"; a block that also turns enforcement off for the relation
+# commits no such state, so the drop is atomic with its own remedy (OMN-18774).
+_RLS_OFF = re.compile(
+    rf"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?({_QUALIFIED})\s+"
+    r"DISABLE\s+ROW\s+LEVEL\s+SECURITY\b",
     re.IGNORECASE,
 )
 _DOLLAR_TAG = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$")
@@ -228,6 +247,43 @@ def _enclosing_block(
     return None
 
 
+def _enforcement_ends_in_block(
+    relation: str,
+    drop_at: int,
+    block: tuple[int, int],
+    enabled: dict[str, list[int]],
+    disabled: dict[str, list[int]],
+) -> bool:
+    """Whether the block commits with enforcement OFF for ``relation``.
+
+    OMN-18774. RULE B exists because a committed "RLS enforcing, zero policies"
+    state denies every row to every non-owner principal. A block that DROPs the
+    last policy and then DISABLEs row-level security on the same relation
+    commits no such state: enforcement is off, and off is the intended end
+    state for a relation whose contract declares it omninode_internal, which
+    receives no tenant posture at all (operator ruling,
+    docs/tracking/ROLLING_WORK_LEDGER.md:654).
+
+    Deliberately narrow, in two ways. The DISABLE must come AFTER the drop, so
+    a block that disables, re-drops and leaves enforcement on is still caught.
+    And a later ENABLE or FORCE inside the same block re-arms the hazard and
+    re-opens the refusal -- the last enforcement statement in the block is the
+    one that commits.
+    """
+    later_disables = [
+        at
+        for at in disabled.get(relation, ())
+        if block[0] <= at < block[1] and at > drop_at
+    ]
+    if not later_disables:
+        return False
+    last_disable = max(later_disables)
+    return not any(
+        block[0] <= at < block[1] and at > last_disable
+        for at in enabled.get(relation, ())
+    )
+
+
 def violations_for(path: Path, sql: str) -> list[str]:
     """Both rules, evaluated against one migration's scrubbed bytes."""
     scrubbed = scrub(sql)
@@ -237,6 +293,14 @@ def violations_for(path: Path, sql: str) -> list[str]:
     created: dict[str, list[int]] = {}
     for match in _CREATE_POLICY.finditer(text):
         created.setdefault(_relation(match.group(1)), []).append(match.start())
+
+    enabled: dict[str, list[int]] = {}
+    for match in _RLS_ON.finditer(text):
+        enabled.setdefault(_relation(match.group(1)), []).append(match.start())
+
+    disabled: dict[str, list[int]] = {}
+    for match in _RLS_OFF.finditer(text):
+        disabled.setdefault(_relation(match.group(1)), []).append(match.start())
 
     # RULE A -- policy presence.
     for match in _RLS_ON.finditer(text):
@@ -257,16 +321,23 @@ def violations_for(path: Path, sql: str) -> list[str]:
         if block is None:
             continue
         relation = _relation(match.group(1))
-        if not any(block[0] <= at < block[1] for at in created.get(relation, ())):
-            found.append(
-                f"{path}: RULE B -- DROPs a policy on {relation!r} inside a "
-                "dollar-quoted block but does not CREATE one on it inside the "
-                "same block. The forward runner uses `psql -v ON_ERROR_STOP=1 "
-                "-f <file>` with no --single-transaction, so the block COMMITS "
-                "at its terminator: a recreate placed after it leaves a real "
-                "window in which the relation is enforcing RLS with no policy. "
-                "Move the CREATE POLICY inside the block (see migration 0033)."
-            )
+        if any(block[0] <= at < block[1] for at in created.get(relation, ())):
+            continue
+        if _enforcement_ends_in_block(
+            relation, match.start(), block, enabled, disabled
+        ):
+            continue
+        found.append(
+            f"{path}: RULE B -- DROPs a policy on {relation!r} inside a "
+            "dollar-quoted block but does not CREATE one on it inside the "
+            "same block. The forward runner uses `psql -v ON_ERROR_STOP=1 "
+            "-f <file>` with no --single-transaction, so the block COMMITS "
+            "at its terminator: a recreate placed after it leaves a real "
+            "window in which the relation is enforcing RLS with no policy. "
+            "Move the CREATE POLICY inside the block (see migration 0033), "
+            "or DISABLE ROW LEVEL SECURITY on it inside the same block if "
+            "the posture is being removed rather than replaced."
+        )
     return found
 
 
