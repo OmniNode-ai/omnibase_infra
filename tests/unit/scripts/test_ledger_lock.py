@@ -330,12 +330,15 @@ def test_cli_stale_same_host_lock_is_broken_automatically(tmp_path: Path) -> Non
         ),
         encoding="utf-8",
     )
-    result = _run_cli(
-        [str(ledger), "--timeout", "3s", "--append", "- after stale break"]
-    )
+    # Row-shaped since OMN-18801: the shape guard now runs on every append to
+    # a markdown ledger, not only when a --section-heading is passed. This
+    # test is about breaking a stale lock, so its payload must not also be
+    # asserting the old unguarded shape.
+    row = "- 2026-09-19 after stale break"
+    result = _run_cli([str(ledger), "--timeout", "3s", "--append", row])
     assert result.returncode == 0, result.stderr
     assert "removed dead same-host lock" in result.stderr
-    assert ledger.read_text(encoding="utf-8") == "- after stale break\n"
+    assert ledger.read_text(encoding="utf-8") == f"{row}\n"
 
 
 def test_cli_command_verb_passes_through_exit_code(tmp_path: Path) -> None:

@@ -23,8 +23,19 @@ Row convention: callers typically write three row shapes into a ledger of
 this kind — a CLAIM row ("I am about to do X"), zero or more PROGRESS rows,
 and a TERMINAL row ("X is done, here is the evidence") — so that concurrent
 agents can grep the ledger to see who is doing what before claiming new work
-themselves. Row shape is otherwise the caller's business; the one shape this
-script recognizes is the CLAIM row, for the claim-token support below.
+themselves.
+
+Every append to a MARKDOWN ledger must OPEN a row -- a UTC date, optionally
+behind a ``- `` bullet or a ``| `` table pipe, or a markdown heading --
+because an append that does not open one lands inside the row above it and
+silently rewrites that row (exit 76; OMN-17403, widened to every markdown
+ledger by OMN-18801, which found the guard was scoped to a ``--section-heading``
+the documented recipe never passes). A non-markdown ledger, such as the JSON
+Lines engagement ledger, is not judged by that model. Regardless of suffix,
+every append begins on a fresh line: the writer adds the separating newline
+when the file does not end with one. Beyond opening a row, shape is the
+caller's business; the one shape this script recognizes is the CLAIM row, for
+the claim-token support below.
 
 Claim tokens (OMN-16400)
 ------------------------
@@ -342,8 +353,59 @@ class LedgerLock:
         self.release()
 
 
+def ends_without_newline(path: Path) -> bool:
+    """True when `path` exists, is non-empty, and its last byte is not a
+    newline -- i.e. an append landing now would continue the last line.
+
+    Read as bytes from the end rather than by decoding the file: the answer
+    is one byte, and the ledger is large enough that reading it whole on
+    every append is not free.
+    """
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                return False
+            handle.seek(-1, os.SEEK_END)
+            return handle.read(1) != b"\n"
+    except FileNotFoundError:
+        return False
+
+
+def ensure_row_boundary(path: Path) -> bool:
+    """Guarantee the next append starts on a fresh line (OMN-18801).
+
+    `append_text` has always normalized the trailing newline of the PAYLOAD
+    and never checked the FILE. A ledger whose last byte is not a newline --
+    which is what a hand-edit, a truncated write, or a peer tool that appended
+    without this helper leaves behind -- therefore welded the next row onto
+    the previous one. Two rows then parse as one: the row above silently
+    changes its digest, and the row below is invisible to every reader that
+    counts rows.
+
+    Observed 2026-09-19 on the live rolling work ledger: a CLAIM row was
+    accepted, minted a claim token, and landed welded onto a peer lane's
+    TERMINAL row.
+
+    Returns True when a separator was written, so a caller can say so.
+    Idempotent: calling it twice writes one newline.
+    """
+    if not ends_without_newline(path):
+        return False
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return True
+
+
 def append_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Before the payload, never instead of it: the separator is what makes the
+    # appended text a row of its own rather than the tail of the row above.
+    # This is NOT scoped to markdown the way the row-shape guard is -- welding
+    # two records together corrupts a .jsonl exactly as it corrupts a .md.
+    ensure_row_boundary(path)
     if text and not text.endswith("\n"):
         text += "\n"
     with path.open("a", encoding="utf-8") as handle:
@@ -752,6 +814,29 @@ ROW_START_PATTERN = re.compile(
     r"|(?:[-*] +)?\|? *\d{4}-\d{2}-\d{2}"  # optional bullet, optional pipe, a date
     r")"
 )
+
+
+# Which files the markdown row model above actually describes (OMN-18801).
+#
+# Every shape in ROW_START_PATTERN is markdown vocabulary -- a heading, a '- '
+# bullet, a '| ' table cell. Applying it to a file that is not markdown would
+# be the guard judging a row model the file does not use: the one non-markdown
+# caller in the fleet appends JSON Lines to
+# docs/marketing/linkedin-engagement/events.jsonl, where '{' IS the start of a
+# record and refusing it would be a false positive, not a catch.
+#
+# A caller that names a --section-heading has declared the file row-structured
+# itself, and is judged whatever its suffix is -- that is the pre-OMN-18801
+# behaviour, unchanged.
+#
+# The newline separator in `ensure_row_boundary` is deliberately NOT scoped
+# this way. Welding is corruption in any line-structured file.
+ROW_STRUCTURED_SUFFIXES = frozenset({".md", ".markdown"})
+
+
+def is_row_structured(path: Path) -> bool:
+    """Whether the markdown row model describes `path`."""
+    return path.suffix.lower() in ROW_STRUCTURED_SUFFIXES
 
 
 def opens_a_row(payload: str) -> bool:
@@ -4096,26 +4181,39 @@ def run_roll_section(args: argparse.Namespace) -> int:
 
 def enforce_row_shape(args: argparse.Namespace, payload: str) -> int | None:
     """Refuse an append that would extend the previous row instead of opening
-    its own (OMN-17403).
+    its own (OMN-17403, widened by OMN-18801).
 
-    Scoped to a caller that named a capped section, because that is the caller
-    who has declared the file to be row-structured. Without this the row model
-    holds only by the goodwill of every lane in the fleet, and one careless
-    payload silently rewrites the digest of the row above it -- which is
-    exactly how the 2026-09-04 friction-sweep anchor was invalidated.
+    OMN-17403 scoped this to a caller that named a capped section, on the
+    reasoning that such a caller had declared the file row-structured. The
+    scoping was the defect: the documented append recipe -- rule 19's
+    `ledger_lock.py <ledger> --append '<row>'`, and ledger section 0.8 -- names
+    no section heading, so the guard was OFF on every append the fleet actually
+    makes. It governed a calling convention nobody used.
+
+    What decides the scope now is the FILE, not the flag: the markdown row
+    model is applied to markdown ledgers (see `is_row_structured`), with or
+    without a heading. A caller that does name a heading is still judged
+    whatever the suffix is, and still gets the heading-specific resolution
+    below, so nothing OMN-17403 enforced is given up.
     """
-    if args.section_heading is None:
+    if args.section_heading is not None:
+        # Resolve the section BEFORE judging the payload, so a heading that is
+        # absent or duplicated still fails closed as the usage error it is
+        # rather than being masked by a shape complaint about the payload.
+        parse_section_file(args.ledger, args.section_heading)
+    elif not is_row_structured(args.ledger):
         return None
-    # Resolve the section BEFORE judging the payload, so a heading that is
-    # absent or duplicated still fails closed as the usage error it is rather
-    # than being masked by a shape complaint about the payload.
-    parse_section_file(args.ledger, args.section_heading)
     if opens_a_row(payload):
         return None
     first = next((line for line in payload.splitlines() if line.strip()), "")
+    where = (
+        f" in {args.section_heading!r}"
+        if args.section_heading is not None
+        else f" in {args.ledger.name}"
+    )
     print(
-        "ledger_lock: ROW SHAPE REFUSED -- this payload does not open a row in "
-        f"{args.section_heading!r}, so appending it would extend the row above it. "
+        "ledger_lock: ROW SHAPE REFUSED -- this payload does not open a row"
+        f"{where}, so appending it would extend the row above it. "
         f"First line: {first[:120]!r}. A row opens with a UTC date (optionally "
         "behind a '- ' bullet or a '| ' table pipe) or with a markdown heading. "
         "Nothing was written.",
@@ -4344,6 +4442,13 @@ def main(argv: list[str] | None = None) -> int:
                     # the restored row's own, and a reader scanning upwards
                     # from the row finds its provenance on the line above.
                     append_text(args.ledger, replay_marker)
+                # The separator lands BEFORE the offset is read, so the
+                # offset and line number a claim token carries describe where
+                # the row actually starts. It is deliberately here and not
+                # earlier: every refusal above promises that nothing was
+                # written, and a separator written before a refusal would
+                # break that promise over a row that never landed.
+                ensure_row_boundary(args.ledger)
                 offset = _ledger_size(args.ledger)
                 line_no = len(_offsets_and_lines(args.ledger)) + 1
                 appended_at = utc_now()

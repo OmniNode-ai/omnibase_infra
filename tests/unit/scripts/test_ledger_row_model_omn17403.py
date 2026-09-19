@@ -446,14 +446,24 @@ def test_the_guard_only_judges_the_first_line(tmp_path: Path) -> None:
     assert "wrapped continuation" in ledger.read_text(encoding="utf-8")
 
 
-def test_the_guard_is_scoped_to_a_capped_section(tmp_path: Path) -> None:
-    """Callers that never opted into a section keep the pre-OMN-17023
-    behaviour -- the guard governs the append-only section it was written
-    for, not every file this tool can lock."""
+def test_the_guard_is_scoped_by_the_file_not_by_the_heading_flag(
+    tmp_path: Path,
+) -> None:
+    """SUPERSEDED BY OMN-18801, and inverted deliberately.
+
+    This test used to assert that a caller who passed no ``--section-heading``
+    kept the pre-OMN-17023 behaviour. That scoping was the defect: the
+    documented append recipe passes no heading, so the guard was off on every
+    append the fleet makes. What decides the scope now is the file -- a
+    markdown ledger is judged with or without a heading, and a non-markdown
+    one is not judged by the markdown row model at all. The non-markdown half
+    lives in test_ledger_row_shape_default_on_omn18801.py.
+    """
     ledger = _ledger(tmp_path, 3)
+    before = ledger.read_text(encoding="utf-8")
     result = _run(_LOCK, [str(ledger), "--append", "free-form prose"])
-    assert result.returncode == 0, result.stderr
-    assert "free-form prose" in ledger.read_text(encoding="utf-8")
+    assert result.returncode == EXIT_ROW_SHAPE, result.stderr
+    assert ledger.read_text(encoding="utf-8") == before
 
 
 # --------------------------------------------------------------------------

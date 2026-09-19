@@ -551,8 +551,14 @@ def test_cap_still_exceeded_after_a_roll_blocks_rather_than_growing(
 
 
 def test_caps_are_opt_in_and_absent_by_default(tmp_path: Path) -> None:
-    """No --section-heading means the pre-OMN-17023 behaviour, unchanged."""
+    """No --section-heading means no CAP, and that is still true.
+
+    The payload is row-shaped since OMN-18801, which widened the SHAPE guard
+    to every markdown ledger. The caps did not widen with it: this test is the
+    one that says so, so it must exercise an append the shape guard admits.
+    """
     ledger = _ledger(tmp_path, 3)
-    result = _run([str(ledger), "--append", "- plain row"])
+    row = "- 2026-09-19 plain row"
+    result = _run([str(ledger), "--append", row])
     assert result.returncode == 0, result.stderr
-    assert "- plain row" in ledger.read_text(encoding="utf-8")
+    assert row in ledger.read_text(encoding="utf-8")
