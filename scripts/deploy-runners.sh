@@ -619,7 +619,9 @@ ENVEOF
     # Cron uses /bin/sh by default on the runner host; bare `source` fails there
     # before credentials load, silently disabling Slack alerts when no MTA exists.
     # Force bash and redirect the whole monitor invocation so setup failures are
-    # visible in /tmp/runner-monitor.log.
+    # visible in the fleet's own log directory, which OMN-18819 moved off /tmp
+    # so it survives a reboot:
+    # ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-monitor.log.
     local monitor_cron_line="*/3 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}' >> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-monitor.log 2>&1 # runner-monitor-alert"
     local repair_cron_line="*/10 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600 ${monitor_script}' >> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-repair.log 2>&1 # runner-repair-check"
 
