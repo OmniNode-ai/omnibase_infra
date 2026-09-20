@@ -1,13 +1,26 @@
 name: Sanitized Legacy RDS Fixture Proof
 
+# OMN-18926: the `pull_request` trigger is deliberately GONE and is replaced by
+# `workflow_call`, which ci.yml invokes from an unconditional `legacy-rds-fixture-proof`
+# job. This is the OMN-15378 pattern recorded in scripts/enforcement_parity_manifest.yaml
+# and already used by `deploy-agent-tests` and `route`.
+#
+# WHY. This proof is the ONLY leg anywhere that builds `omnidash_analytics` from EMPTY
+# and runs the real scripts/run-forward-migrations.sh over the real corpus. While it was
+# its own separately-triggered workflow it had its own run_id, so ci_summary_gate.py's
+# poll of this run's jobs structurally could not observe it, and `dev` requires exactly
+# one context ("CI Summary", the OMN-4497 single-umbrella design) -- a RED fixture proof
+# left the required context green. That is how OMN-18926's defect merged and stayed
+# merged: 107 migrations apply against a fresh pair and the 108th raises
+# `division by zero`, with nothing blocking on it.
+#
+# It is UNCONDITIONAL rather than path-filtered, which the STRICT registration requires
+# (absent/red/skipped all fail), and which also closes the path-filter hole: the corpus
+# can be broken from empty by a change to neither docker/migrations/** nor the runner --
+# a role or grant seam, for instance. Affordable: measured 0-1 min per run over the last
+# eight runs, among the cheapest jobs in this workflow.
 on:
-  pull_request:
-    branches: [main, dev]
-    paths:
-      - ".github/workflows/legacy-rds-fixture-proof.yml"
-      - "docker/legacy-rds-fixture/**"
-      - "docker/migrations/**"
-      - "scripts/run-forward-migrations.sh"
+  workflow_call:
   push:
     branches: [main]
     paths:

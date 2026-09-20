@@ -198,6 +198,20 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # run_id), so a RED run left "CI Summary" — the sole required context on
     # dev — green.
     "Deploy Agent Tests (OMN-15378) / deploy-agent-tests",
+    # OMN-18926: the ONLY leg anywhere that builds `omnidash_analytics` from EMPTY and
+    # runs the real scripts/run-forward-migrations.sh over the real corpus. ci.yml's
+    # `legacy-rds-fixture-proof` job CALLS
+    # .github/workflows/legacy-rds-fixture-proof.yml, so the inner job surfaces as
+    # "<caller display name> / <inner job name>" -- same shape as the two entries above.
+    # THIS LINE IS THE MECHANISM. While that proof was a separately-triggered workflow
+    # it had its own run_id and this poller could not observe it at all, so a RED
+    # from-empty build left "CI Summary" -- the sole required context on dev -- green.
+    # Measured: the corpus could not build `omnidash_analytics` from empty at all (107
+    # migrations applied, then `division by zero` on a precondition probe, because
+    # nothing deliverable created the `omninode_internal` schema), and that shipped and
+    # stayed shipped with every gate green. The job is unconditional in ci.yml (no
+    # needs/if), so a skip is anomalous and never a legitimate opt-out.
+    "Sanitized Legacy RDS Fixture Proof / PostgreSQL 16 Fresh + Legacy Fixture",
     # OMN-15484: the Merge Hold Gate, fanned out from OMN-15483 (omnibase_infra
     # carries incident §C, #2560, and had zero coverage). THIS LINE IS THE
     # MECHANISM — not the job's existence in ci.yml. The default-deny sweep
