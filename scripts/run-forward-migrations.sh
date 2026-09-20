@@ -1654,12 +1654,119 @@ for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
   APPLIED=$((APPLIED + 1))
 done
 
+# ---- BEGIN application internal schema provisioning seam (OMN-18926) ----
+# Without this seam the node corpus cannot build ${NODE_PGDB} from EMPTY.
+#
+# WHAT WAS BROKEN
+# ---------------
+# `omninode_internal` is the APPLICATION database's own schema and more than
+# thirty node migrations write into it. Nothing DELIVERABLE created it:
+#   - 098_create_omninode_internal_schema.sql is the only flat migration whose
+#     CREATE SCHEMA targets that database, and it is declared `undeliverable`
+#     in cross-database-flat-migrations.yaml (OMN-15819). The runner prints
+#     UNDELIVERABLE and moves on, so its SQL never executes on any lane.
+#   - 100_create_gateway_link_health.sql creates the schema but is a FLAT
+#     migration, so it runs against ${PGDB}, never against ${NODE_PGDB}.
+#   - The node files that mention CREATE SCHEMA only do so in PROSE.
+#     nodes/node_projection_registration/0005_create_projection_watermarks.sql
+#     records that it used to issue the statement and no longer does.
+# A warm lane carries the schema only as applied history from that retired
+# revision of 0005.
+#
+# Measured 2026-09-20 against a genuinely fresh database pair on the .201 dev
+# lane's Postgres: 107 migrations apply cleanly, then the first node migration
+# that needs the schema --
+# nodes/node_gateway_link_health_write_effect/0001_create_gateway_link_health.sql
+# -- raises `ERROR: division by zero` from its own precondition probe and the
+# run exits 3. A fresh staging build, a disaster-recovery rebuild of the
+# application database, and every pre-PR verify slot (epic OMN-18888, AC-1) hit
+# it.
+#
+# WHY A RUNNER SEAM AND NOT A MIGRATION
+# --------------------------------------
+# Because that is already how this corpus provisions a schema, and the other
+# option is barred. `platform_catalog` -- the only other non-system schema a
+# fresh ${NODE_PGDB} carries -- is created by the SUPERUSER from here, in
+# _ledger/bootstrap.sql, not by any migration. The rule the corpus already
+# follows is: the RUNNER provisions SCHEMAS, the CORPUS provisions the OBJECTS
+# inside them. `omninode_internal` was simply never added to the provisioned
+# set.
+#
+# The alternative -- a node migration issuing CREATE SCHEMA -- is refused for
+# every file in the corpus by
+# tests/unit/db/test_migration_no_database_level_privilege_omn16759.py, and
+# that gate was written by two production incidents: OMN-16249 (stalled deploy
+# 32301533344) and OMN-16759, whose `permission denied for database
+# omnibase_infra` aborted EVERY onex-dev staging deploy (run 33080116991).
+# CREATE SCHEMA needs CREATE on the DATABASE, which role_omnidash does not hold
+# on the managed lane, and IF NOT EXISTS does not help because Postgres checks
+# the privilege BEFORE it checks existence.
+#
+# This seam runs as ${PGUSER}, the same identity that already creates
+# platform_catalog here, so it needs no database-level grant and reintroduces
+# no database-level privilege anywhere. The OMN-16759 objection is answered by
+# REMOVING THE NEED for the privilege, not by granting it -- which is why this
+# change adds no exemption to that gate and
+# tests/unit/db/test_application_internal_schema_provisioning_omn18926.py
+# asserts the gate still holds over the whole corpus.
+#
+# GRANTS ARE DELIBERATELY NOT ISSUED HERE. The corpus already issues
+# `GRANT USAGE ON SCHEMA omninode_internal TO omninode_runtime` from each
+# migration that needs it; re-issuing them here would fork one decision across
+# two owners. This seam creates the schema and stops.
+#
+# NO-OP ON A WARM LANE. CREATE SCHEMA IF NOT EXISTS against a lane that already
+# has the schema changes nothing -- not its owner, not its ACL. Readback on the
+# .201 dev lane before and after: `omninode_internal | owner=postgres |
+# acl=postgres=UC/postgres,omninode_runtime=U/postgres,jake_ro=U/postgres`,
+# byte-identical.
+#
+# SCOPE. This runner is the compose lanes, the pre-PR verify slots and the
+# legacy-RDS fixture proof. The managed k3s lane applies its corpus through a
+# separate inline runner in omninode_infra/k8s/migrations/*.yaml, which this
+# change does not reach; that lane's RDS database already carries the schema,
+# and giving its runner the same seam is tracked separately.
+APPLICATION_INTERNAL_SCHEMA="omninode_internal"
+
+provision_application_internal_schema() {
+  schema_database="$1"
+  validate_database_identifier "$schema_database"
+  slot_fence_assert "$schema_database" "application schema database"
+
+  echo "[forward-migration] Provisioning ${APPLICATION_INTERNAL_SCHEMA} in ${schema_database}..."
+
+  if ! psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$schema_database" \
+    -v ON_ERROR_STOP=1 -q -c "CREATE SCHEMA IF NOT EXISTS ${APPLICATION_INTERNAL_SCHEMA};"; then
+    echo "[forward-migration] FATAL: could not create schema ${APPLICATION_INTERNAL_SCHEMA} in ${schema_database} as ${PGUSER} -- every node migration that writes into it will fail, the first being nodes/node_gateway_link_health_write_effect/0001_create_gateway_link_health.sql (OMN-18926)" >&2
+    exit 3
+  fi
+
+  # READ IT BACK, and fail with a NAMED reason rather than letting the node
+  # corpus discover the absence. The corpus asserts this precondition with
+  # `SELECT 1 / count(*)`, so an absent schema surfaces there as
+  # `ERROR: division by zero` -- a true failure with a useless reason, three
+  # minutes and 107 migrations after the actual cause. This check is the same
+  # verdict named at the point it can still be explained.
+  schema_present=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$schema_database" -tAc \
+    "SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = '${APPLICATION_INTERNAL_SCHEMA}'")
+  if [ "$schema_present" != "1" ]; then
+    echo "[forward-migration] FATAL: ${APPLICATION_INTERNAL_SCHEMA} is still absent from ${schema_database} after CREATE SCHEMA IF NOT EXISTS reported success -- refusing to start the node phase, which would fail on a precondition probe with an unnamed division-by-zero (OMN-18926)" >&2
+    unset schema_present
+    exit 3
+  fi
+
+  echo "[forward-migration]   ok    ${APPLICATION_INTERNAL_SCHEMA} present in ${schema_database}"
+  unset schema_present
+}
+# ---- END application internal schema provisioning seam (OMN-18926) ----
+
 # Converge only the unified application database when this invocation actually
 # carries the node migration tree. omnibase_infra remains a separate
 # service-owned database under plan section 0.1.
 if [ -d "$NODE_MIGRATIONS_DIR" ]; then
   prepare_canonical_ledger "$NODE_PGDB"
   import_cloud_history "$NODE_PGDB"
+  provision_application_internal_schema "$NODE_PGDB"
 fi
 
 # ---------------------------------------------------------------------------

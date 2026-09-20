@@ -3398,6 +3398,30 @@ jobs:
       contents: read
     uses: ./.github/workflows/deploy-agent-tests.yml
 
+  # OMN-18926. The sanitized legacy-RDS fixture proof is the ONLY leg anywhere that
+  # builds `omnidash_analytics` from EMPTY and runs the real
+  # scripts/run-forward-migrations.sh over the real corpus, twice, asserting
+  # idempotence on the second pass. Until now it was a separately-triggered workflow
+  # with its own run_id, so ci_summary_gate.py could not observe it and a RED proof left
+  # "CI Summary" -- the sole required context on dev -- green. That is exactly how the
+  # OMN-18926 defect merged: 107 migrations apply against a genuinely fresh database pair
+  # and the 108th dies on a precondition probe, with no gate blocking on it.
+  #
+  # Calling it from HERE puts its job in ci.yml's own run as the check-run
+  # "Sanitized Legacy RDS Fixture Proof / PostgreSQL 16 Fresh + Legacy Fixture",
+  # registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS (pinned by
+  # tests/ci/test_ci_summary_gate.py) -- so absent/red/skipped now fails the required
+  # context. Unconditional (no needs/if) exactly as a STRICT gate requires, which also
+  # closes the old path-filter hole: a change to neither docker/migrations/** nor the
+  # runner can still break the from-empty build, through a role or grant seam.
+  # DO NOT rename this job or the inner job -- the two display names are the two
+  # segments of the STRICT_GATE_JOBS entry; a rename makes the gate permanently PENDING.
+  legacy-rds-fixture-proof:
+    name: Sanitized Legacy RDS Fixture Proof
+    permissions:
+      contents: read
+    uses: ./.github/workflows/legacy-rds-fixture-proof.yml
+
   # OMN-15484 (fan-out of OMN-15483). The merge sweep lands PRs while
   # adversarial verification is still running against them. OMN-15483 built the
   # fix — a required check that fails while a PR carries a hold marker in its
