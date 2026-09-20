@@ -13,7 +13,10 @@ import pytest
 from omnibase_core.enums.enum_delegation_traffic_class import (
     EnumDelegationTrafficClass,
 )
-from omnibase_core.models.delegation.wire import ModelDelegationProvenance
+from omnibase_core.models.delegation.wire import (
+    ModelDelegationProvenance,
+    ModelDelegationRequest,
+)
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
@@ -134,6 +137,9 @@ async def test_absent_consumer_features_dispatch_through_runtime_bus(
     assert "system_prompt" not in captured_commands[0].payload
     assert "temperature" not in captured_commands[0].payload
     assert "response_format" not in captured_commands[0].payload
+    request = ModelDelegationRequest.model_validate(captured_commands[0].payload)
+    assert request.requested_timeout_seconds == 240
+    assert "terminal_delivery_margin_seconds" not in captured_commands[0].payload
 
 
 @pytest.mark.asyncio

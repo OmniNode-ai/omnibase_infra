@@ -298,8 +298,11 @@ class RuntimeDelegationDispatchPort:
             "acceptance_criteria": list(acceptance_criteria),
             "tenant_id": tenant_id,
             "response_contract": response_contract,
-            "execution_timeout_seconds": execution_timeout_seconds,
-            "terminal_delivery_margin_seconds": terminal_delivery_margin_seconds,
+            # The selected node_delegation_orchestrator contract validates this
+            # payload as ModelDelegationRequest. Its request timeout is part of
+            # that model; the terminal delivery margin only bounds this caller's
+            # broker wait and is not a delegation request field.
+            "requested_timeout_seconds": execution_timeout_seconds,
             # OMN-18321 / OMN-18172: carried ONTO THE WIRE, not merely accepted.
             # Accepting the keyword and dropping it would trade a loud TypeError
             # for a silent classification hole -- precisely the silent-drop

@@ -282,8 +282,8 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
     assert timeout_seconds == [300.0]
     assert payloads[0]["prompt"] == "probe"
     assert payloads[0]["task_type"] == "document"
-    assert payloads[0]["execution_timeout_seconds"] == 240
-    assert payloads[0]["terminal_delivery_margin_seconds"] == 60
+    assert payloads[0]["requested_timeout_seconds"] == 240
+    assert "terminal_delivery_margin_seconds" not in payloads[0]
     assert broker_kwargs[0]["command_topic"] == route.command_topic
 
 
