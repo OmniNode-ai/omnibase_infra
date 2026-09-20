@@ -535,6 +535,7 @@ class TestPayloadScratch:
             "task_type": "refactor",
             "source": DELEGATE_SOURCE,
             "max_tokens": 4096,
+            "requested_timeout_seconds": 60,
         }
 
     def test_explicit_task_type_overrides_classification(
@@ -780,7 +781,7 @@ class TestSingleReceiptOnStdout:
     def test_stdout_is_exactly_one_validated_skill_result(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        contract_path = tmp_path / "contract.yaml"
+        contract_path = tmp_path / f"{cli_delegate.DELEGATE_NODE_NAME}.yaml"
         contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
         monkeypatch.setattr(
             cli_delegate,
@@ -814,7 +815,7 @@ class TestSingleReceiptOnStdout:
     def test_no_runtime_info_logs_on_stdout(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        contract_path = tmp_path / "contract.yaml"
+        contract_path = tmp_path / f"{cli_delegate.DELEGATE_NODE_NAME}.yaml"
         contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
         monkeypatch.setattr(
             cli_delegate,
@@ -1277,6 +1278,27 @@ class TestHardTimeoutBackstop:
             "_resolve_packaged_contract",
             lambda _name: tmp_path / "contract.yaml",
         )
+        task_class_contract_path = tmp_path / "task_class_contract.yaml"
+        task_class_contract_path.write_text(
+            (
+                Path(__file__).resolve().parents[2]
+                / "fixtures"
+                / "delegation"
+                / "omn18305"
+                / "task_class_contracts_vocabulary.yaml"
+            )
+            .read_text(encoding="utf-8")
+            .replace(
+                "terminal_delivery_margin_seconds: 60",
+                "terminal_delivery_margin_seconds: 1",
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            cli_delegate,
+            "resolve_task_class_contract_path",
+            lambda: task_class_contract_path,
+        )
         monkeypatch.setattr(
             cli_delegate, "run_receipt_mode", _swallowing_run_receipt_mode
         )
@@ -1495,7 +1517,7 @@ class TestOfflineStandaloneGolden:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        contract_path = tmp_path / "contract.yaml"
+        contract_path = tmp_path / f"{cli_delegate.DELEGATE_NODE_NAME}.yaml"
         contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
         monkeypatch.setattr(
             cli_delegate,
@@ -1912,7 +1934,7 @@ class TestCorrelationReachesTheReceipt:
         caller correlating its own request against the printed receipt was
         matching on two different identities. Real dispatch path, no mocks.
         """
-        contract_path = tmp_path / "contract.yaml"
+        contract_path = tmp_path / f"{cli_delegate.DELEGATE_NODE_NAME}.yaml"
         contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
         monkeypatch.setattr(
             cli_delegate, "_resolve_packaged_contract", lambda _name: contract_path
@@ -2405,7 +2427,7 @@ class TestFailedDelegationIsRendered:
         This is the ordering pin. Reorder the callback back in front of the
         render and stdout goes to zero bytes, which is the defect verbatim.
         """
-        contract_path = tmp_path / "contract.yaml"
+        contract_path = tmp_path / f"{cli_delegate.DELEGATE_NODE_NAME}.yaml"
         contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
         monkeypatch.setattr(
             cli_delegate,
@@ -2704,7 +2726,7 @@ class TestUnresolvableTerminalFailsLoudly:
         catches a callback failure rather than letting it erase the answer
         (OMN-18306), and the two guarantees have to hold together.
         """
-        contract_path = tmp_path / "contract.yaml"
+        contract_path = tmp_path / f"{cli_delegate.DELEGATE_NODE_NAME}.yaml"
         contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
         monkeypatch.setattr(
             cli_delegate, "_resolve_packaged_contract", lambda _name: contract_path
