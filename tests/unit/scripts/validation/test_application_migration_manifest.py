@@ -725,7 +725,16 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # rather than folded into the create, because the create runs as the migration
     # role and the grant names the runtime role explicitly -- the OMN-17379 half
     # whose absence left the projection writer unable to write.
-    assert len(result.declarations) == 198
+    #
+    # 198 -> 200 for OMN-18769 (C2 of epic OMN-18767), which adds TWO
+    # node-owned migrations: 0000_create_lab_lane_health.sql, the projection
+    # table folding the lane census, runtime health and lab-pass receipt facts
+    # the lab observability tab reads, and 0001_grant_omninode_runtime_lab_
+    # lane_health.sql, which ISSUES the grants the topology only declares.
+    # The grant rides in the owning node's own lineage rather than a shared
+    # file, so it is a second declaration here rather than an edit to the
+    # first -- the same shape as node_projection_runner_fleet's pair above.
+    assert len(result.declarations) == 200
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
