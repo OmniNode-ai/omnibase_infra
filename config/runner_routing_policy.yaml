@@ -1017,4 +1017,5 @@ route:
         - Type Safety Validation
         - URL Authority Gate
         - verify / verify
+        - wheel-content-parity
         - Writer-Migration Coupling Check
