@@ -850,7 +850,6 @@ OMN_18768_UNDECLARED_RESIDUAL = frozenset(
         GrantKey(
             "omninode_runtime", "omninode_internal", "savings_validator_catch_signals"
         ),
-        GrantKey("tenant_projection_writer", "public", "projection_delegation_savings"),
     }
 )
 

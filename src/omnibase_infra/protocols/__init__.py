@@ -69,6 +69,9 @@ from omnibase_infra.protocols.protocol_capability_projection import (
     ProtocolCapabilityProjection,
 )
 from omnibase_infra.protocols.protocol_capability_query import ProtocolCapabilityQuery
+from omnibase_infra.protocols.protocol_consume_concurrency_declarer import (
+    ProtocolConsumeConcurrencyDeclarer,
+)
 from omnibase_infra.protocols.protocol_container_aware import ProtocolContainerAware
 from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
@@ -116,6 +119,7 @@ __all__: list[str] = [
     "ProtocolAutoWiringManifestLike",
     "ProtocolCapabilityProjection",
     "ProtocolCapabilityQuery",
+    "ProtocolConsumeConcurrencyDeclarer",
     "ProtocolContainerAware",
     "ProtocolDispatchResultApplier",
     "ProtocolEventBusLike",

@@ -1,3 +1,18 @@
+## v0.38.34 (2026-09-20)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.34 by the scheduled release train.
+- 6 release-relevant commit(s) merged since v0.38.33.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.33
+- feat(OMN-18769): the three lab lane-health facts reach the bus from the jobs that hold them (#3821)
+- fix(OMN-18863): declare runtime_error_fingerprints so the derivation reproduces it (#3861)
+- chore(OMN-18770): vendor the runtime-error-fingerprints node migration (#3795)
+- feat(OMN-18823): the merge-sweep classifier withholds a PR handed to a collaborator (#3835)
+- chore(deps): bump omnibase-core to 0.47.18 (OMN-18595) (#3855)
+- feat(infra): add isolated dogfood lane (OMN-18693) (#3840)
+
 ## v0.38.33 (2026-09-19)
 
 ### Release

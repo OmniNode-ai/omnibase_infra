@@ -59,8 +59,14 @@ class ModelProjectionReadbackOutcome(BaseModel):
     error: str = Field(
         default="",
         description=(
-            "Why no claim is made, for the non-passing members. Sanitized: "
-            "never carries the DSN, and never carries a credential."
+            "Why no claim is made, for the non-passing members — or, for the "
+            "members that DO make a negative claim, how that claim was "
+            "reached. OMN-18872: ROW_ABSENT and STRANDED carry how long the "
+            "bounded poll ran and how many reads it took, because an absence "
+            "found after one read and an absence found after two minutes of "
+            "polling are different findings and the first one was this leg's "
+            "defect. Sanitized: never carries the DSN, and never carries a "
+            "credential."
         ),
     )
 
