@@ -1,3 +1,16 @@
+## v0.38.36 (2026-09-20)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.36 by the scheduled release train.
+- 4 release-relevant commit(s) merged since v0.38.35.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.35
+- feat(OMN-18891): apply an optional topic namespace at every transport seam (#3881)
+- fix(OMN-18831): gate ambiguous task-class selection phrases on a nearby declared qualifier (#3879)
+- chore(OMN-17292): advance omnimarket contract pin to e1c4c8f61a1f (#3869)
+- fix(OMN-18872): link 2 waits for the projection instead of sampling it once (#3870)
+
 ## v0.38.34 (2026-09-20)
 
 ### Release
