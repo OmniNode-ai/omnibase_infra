@@ -783,6 +783,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=main.__doc__)
     parser.add_argument("--compose", type=Path, required=True)
     parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="also write the groups here, one per line. A FILE rather than a "
+        "step output, because OMN-18866's first wiring passed them through a "
+        "workflow step output and a silent failure in the producing step "
+        "delivered an EMPTY string that read as 'this lane declares no "
+        "groups'. A file that does not exist is distinguishable from a file "
+        "containing nothing; an unset step output is not.",
+    )
+    parser.add_argument(
         "--env",
         required=True,
         help="the lane's group-id prefix, so a shared compose fragment cannot "
@@ -803,8 +814,11 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    for group in groups:
-        print(group.name)
+    rendered = "\n".join(group.name for group in groups)
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(rendered + "\n", encoding="utf-8")
+    print(rendered)
     return 0
 
 
