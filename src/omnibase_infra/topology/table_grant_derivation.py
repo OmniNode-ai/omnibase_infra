@@ -301,6 +301,47 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="runtime_error_fingerprints",
         ),
     ),
+    # OMN-18863, second occurrence: the lab lane-health projection, same cycle
+    # and same remedy as the entry directly above, nine minutes later.
+    #
+    # THIS IS THE POINT OF THE TICKET, not an incidental repeat. OMN-18770
+    # vendored the fingerprints relation, dev went red, the entry above cleared
+    # it at 2026-09-20T02:16:49Z -- and OMN-18769 (`omnibase_infra#3821`,
+    # merged 02:25:15Z, paired with the still-open `omnimarket#2674`) landed
+    # `lab_lane_health` through the identical seam and re-reddened dev at
+    # 02:25:52Z. Both pull requests passed the enforcement gate because their
+    # bodies carried `Node-Migration-Source-*` trailers, which swap the gate's
+    # derivation input to the omnimarket BRANCH; a push to `dev` carries no
+    # pull-request payload, falls back to the committed pin, and the pin
+    # declares neither relation. The trees were byte-identical across both
+    # verdicts. So this is a recurring window, not an accident, and every
+    # occurrence blocks the whole fleet until someone lands an entry here.
+    #
+    # `0001` in this lineage grants SELECT, INSERT, UPDATE on
+    # `omninode_internal.lab_lane_health` to `omninode_runtime` and asserts
+    # every privilege took, so `read_write` is what the corpus actually
+    # delivers. Deleting the declaration instead would arm the same OMN-18768
+    # boot crash the entry above documents.
+    #
+    # Inert, then removable, once the pin advances past `omnimarket#2674`.
+    ContractTableDeclaration(
+        node="legacy_migration:lab_lane_health",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_lab_lane_health/"
+            "0000_create_lab_lane_health.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="lab_lane_health",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_lab_lane_health/"
+                "0000_create_lab_lane_health.sql"
+            ),
+            access="read_write",
+            role="lab_lane_health",
+        ),
+    ),
     # OMN-17426: the savings overview READ VIEW follows the same temporary
     # supplemental-declaration path as OMN-18159 above. Infra vendors migration
     # 089 before the omnimarket source PR can merge, and the market PR cannot
