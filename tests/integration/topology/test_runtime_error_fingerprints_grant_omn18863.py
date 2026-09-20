@@ -60,6 +60,7 @@ from omnibase_core.models.contracts.subcontracts.model_db_table_declaration impo
 )
 from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.table_grant_derivation import (
+    LEGACY_MIGRATION_TABLE_DECLARATIONS,
     WRITE_PRIVILEGES,
     ContractTableDeclaration,
     derive_table_grants,
@@ -223,3 +224,33 @@ class TestRemovingTheDeclarationIsWhatBreaksIt:
             if relation in _VENDORED_RELATIONS
         }
         assert granted == set()
+
+
+class TestTheBridgesWereRetired:
+    """The handover completed, asserted rather than assumed (OMN-18863).
+
+    Both relations reached the shipped instances through a supplemental
+    bridge during their infra-first window, and both bridges were deleted by
+    the pin advance that made them redundant -- ``ac35d56338b3`` and
+    ``e1c4c8f61a1f``. The assertions above would pass either way, because they
+    are about the relation rather than about which source declares it, which
+    is what makes them survive the handover. This is the part that would not:
+    it fails if a retired bridge comes back, or is never removed.
+
+    Five of the manifest's eight entries had gone silently redundant before
+    the expiry mechanism existed, so a stale bridge is the default outcome
+    rather than an unusual one.
+    """
+
+    @pytest.mark.parametrize("relation", sorted(_VENDORED_RELATIONS))
+    def test_no_supplemental_bridge_remains(self, relation: str) -> None:
+        carried = {
+            declaration.table.name
+            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+        }
+        assert relation not in carried, (
+            f"{relation} still has a supplemental "
+            "LEGACY_MIGRATION_TABLE_DECLARATIONS entry, but the pinned "
+            "contracts declare it. A redundant bridge contributes "
+            "byte-identical output and nothing else will tell you it is there"
+        )

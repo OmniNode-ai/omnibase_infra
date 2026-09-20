@@ -11,35 +11,37 @@ vendored counterpart is on this repo's ``dev``. During that window no pinned
 contract declares the relation, so the derivation cannot reproduce the shipped
 grant and the enforcement gate reds every open pull request at once.
 
-The entry closes the window. Nothing closes the ENTRY.
+The entry closes the window. Nothing closed the ENTRY, until this.
 
 **A stale supplemental entry is silent by construction.** The derivation unions
 by relation, so once the pinned contract declares the same table the entry
 contributes byte-identical output: nothing fails, nothing warns, and the only
 trace is a hand-maintained declaration that no longer has a reason to exist.
-Measured 2026-09-20 on the tuple this test guards: five of its eight entries
-were already redundant against the pin, the oldest for weeks. That is the same
-silent-success shape this ticket's sibling defect has on the deploy agent's
-terminal event -- a surface reporting "fine" because it cannot tell "correct"
-from "never checked".
+Measured across one night: five of the tuple's eight entries were already
+redundant at 01:55Z, six by 02:46Z when a pin advance expired the newest one
+thirty minutes after it merged. Nobody was careless. There was no signal.
 
-So the expiry is asserted rather than remembered. The moment the pinned
-contract set declares one of these relations, this test goes RED and names the
-entry to delete, which lands in the pin-advance that made it redundant instead
-of accumulating.
+So the expiry is asserted rather than remembered. It has now fired twice on
+real handovers rather than synthetic ones -- ``runtime_error_fingerprints`` on
+the pin advance to ``ac35d56338b3``, and ``lab_lane_health`` on the advance to
+``e1c4c8f61a1f``, each time naming the entry on the bot's own pull request so
+the deletion rides the commit that made it redundant.
 
-It lives in ``tests/ci/`` and is named in the OMN-15361 enforcement job's own
-pytest list, which is the one place the pinned checkout exists. That follows
-``test_omnimarket_contract_pin.py``, the established home for a
-checkout-dependent assertion in this repo; its two skipped ids are recorded in
-``config/skip_count_baseline.yaml`` with provenance for the same reason that
-module's are, because the split test job has no cross-repo checkout and would
-otherwise collect them and never run them.
+**Where this runs, stated rather than implied.** It needs the pinned contract
+set, which only the ``Application Database Domain Enforcement (OMN-15361)`` job
+checks out, so it lives here in ``tests/ci/`` and is named in that job's own
+pytest list. It is therefore real coverage on every pull request and no
+coverage at all in the ordinary test splits, where it is recorded in
+``config/skip_count_baseline.yaml`` with provenance. That is a conditional
+coverage and the honest limit is that one workflow edit could silence it; the
+alternative considered was answering the question from in-repo artifacts alone,
+and nothing committed here encodes whether a relation is contract-declared.
 
-Scoped to the entries this ticket added, deliberately. The other five are a
-real cleanup with a real risk of deleting something still load-bearing, and
-adopting them here under a red-dev fix would be exactly the unreviewed widening
-this repo's gates exist to refuse. They are named in the ticket instead.
+**Adding an entry is one line.** The assertions loop over the map rather than
+parametrising on it, so a new bridge costs a map entry and moves no node ids
+and no baseline number. That is deliberate: the previous shape charged a
+baseline edit for every bridge, which is friction pointed at exactly the person
+doing the right thing.
 """
 
 from __future__ import annotations
@@ -56,24 +58,19 @@ from omnibase_infra.topology.table_grant_derivation import (
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-# The cross-repo checkout the OMN-15361 enforcement job provides, resolved at
-# the committed pin. Absent in a bare local run, which is why every test here
-# skips rather than passing vacuously -- a green that means "I could not look"
-# is the failure mode this whole module is about.
 _PINNED_CONTRACTS = (
-    _REPO_ROOT / ".proof-dependencies" / "omnimarket" / "src" / ("omnimarket") / "nodes"
+    _REPO_ROOT / ".proof-dependencies" / "omnimarket" / "src" / "omnimarket" / "nodes"
 )
 
-# The relations this ticket declared by hand, each with the omnimarket pull
-# request whose merge plus pin advance retires it.
-# ``runtime_error_fingerprints`` was here until the pin advanced to
-# ac35d56338b3. This module went red naming it, the entry was deleted in the
-# same change, and the instances came back byte-identical -- the loop closing
-# exactly once, on its first occasion, which is the behaviour the module exists
-# to produce.
-_INTERIM_ENTRIES: dict[str, str] = {
-    "lab_lane_health": "omnimarket#2674",
-}
+# Relations this repo declares by hand during an infra-first window, each with
+# the omnimarket pull request whose merge plus pin advance retires it.
+#
+# EMPTY IS THE GOAL STATE, not a gap. Both entries this ticket added have been
+# retired by the mechanism below. A relation belongs here only while it is
+# declared in the shipped topology instances and derivable from no pinned
+# contract; add it in the same pull request that vendors it, and this module
+# will tell you when to take it out.
+_INTERIM_ENTRIES: dict[str, str] = {}
 
 _SKIP_REASON = (
     "requires the pinned omnimarket checkout at .proof-dependencies/omnimarket, "
@@ -94,53 +91,64 @@ def _supplemental_relation_names() -> set[str]:
     }
 
 
-class TestTheInterimEntriesAreStillCarried:
-    """The premise. Without these the expiry assertions below are about nothing."""
+class TestTheMapMatchesTheManifest:
+    """Runs everywhere. Needs no foreign tree, so it is never skipped."""
 
-    @pytest.mark.parametrize("relation", sorted(_INTERIM_ENTRIES))
-    def test_the_entry_exists(self, relation: str) -> None:
-        assert relation in _supplemental_relation_names(), (
-            f"{relation} is no longer declared in "
-            "LEGACY_MIGRATION_TABLE_DECLARATIONS. If the pin now declares it, "
-            "delete this parametrisation entry too -- the pair is retired "
-            "together or not at all"
+    def test_every_mapped_relation_is_actually_carried(self) -> None:
+        """A map entry for a relation nobody declares asserts nothing.
+
+        This is the premise the expiry assertion rests on: if an entry were
+        removed from the manifest but left in the map, the expiry check would
+        keep watching a relation this repo no longer bridges, and would read
+        green for the wrong reason.
+        """
+        orphaned = sorted(set(_INTERIM_ENTRIES) - _supplemental_relation_names())
+        assert not orphaned, (
+            f"{orphaned} appear in _INTERIM_ENTRIES but in no "
+            "LEGACY_MIGRATION_TABLE_DECLARATIONS entry. Either the bridge was "
+            "deleted and the map was not, or the name is misspelled"
         )
 
 
 @pytest.mark.skipif(not _PINNED_CONTRACTS.is_dir(), reason=_SKIP_REASON)
 class TestEachEntryExpiresWhenThePinDeclaresIt:
-    @pytest.mark.parametrize(
-        ("relation", "source_pr"), sorted(_INTERIM_ENTRIES.items())
-    )
-    def test_the_pin_does_not_yet_declare_it(
-        self, relation: str, source_pr: str
-    ) -> None:
+    def test_no_interim_entry_is_redundant(self) -> None:
         """RED the moment the pin catches up. That redness is the whole point.
 
         This is not a check that the pin is behind. It is an instruction,
         delivered at the only moment anyone can act on it cheaply: the
-        pin-advance commit that makes the hand entry redundant.
+        pin-advance commit that makes the hand entry redundant. It has fired
+        twice on real advances, and both times the deletion landed on the bot's
+        own pull request.
+
+        Vacuous when the map is empty, which is the goal state and is why the
+        positive control below is not optional.
         """
-        assert relation not in _pinned_relation_names(), (
-            f"the pinned omnimarket contracts now declare {relation!r}, so the "
-            "supplemental LEGACY_MIGRATION_TABLE_DECLARATIONS entry for it is "
-            f"redundant and must be DELETED in this same change ({source_pr} "
-            "has merged and the pin has advanced past it). Remove the entry "
-            "from src/omnibase_infra/topology/table_grant_derivation.py, remove "
-            "it from _INTERIM_ENTRIES here, and regenerate -- the instances "
-            "must come back byte-identical, because the contract now derives "
-            "what the entry used to"
+        pinned = _pinned_relation_names()
+        redundant = sorted(name for name in _INTERIM_ENTRIES if name in pinned)
+        assert not redundant, (
+            f"the pinned omnimarket contracts now declare {redundant}, so the "
+            "supplemental LEGACY_MIGRATION_TABLE_DECLARATIONS entries for them "
+            "are redundant and must be DELETED in this same change (source: "
+            + ", ".join(f"{name} -> {_INTERIM_ENTRIES[name]}" for name in redundant)
+            + "). Remove each entry from "
+            "src/omnibase_infra/topology/table_grant_derivation.py, remove it "
+            "from _INTERIM_ENTRIES here, and regenerate -- the instances must "
+            "come back byte-identical, because the contract now derives what "
+            "the entry used to"
         )
 
     def test_the_pin_is_readable_and_non_empty(self) -> None:
         """Positive control: prove the lookup can see contracts at all.
 
-        Without this, a checkout that resolved to an empty tree would make
-        every expiry assertion above pass for the wrong reason -- the exact
-        vacuous-green this module exists to refuse.
+        Without this, a checkout that resolved to an empty tree would make the
+        assertion above pass for the wrong reason -- the exact vacuous-green
+        this module exists to refuse. It matters more once the map is empty,
+        because then this is the only thing distinguishing "nothing to retire"
+        from "could not look".
         """
         pinned = _pinned_relation_names()
         assert len(pinned) > 50, (
             f"the pinned contract set yielded only {len(pinned)} relations; "
-            "the expiry assertions above are vacuous against a tree this small"
+            "the expiry assertion above is vacuous against a tree this small"
         )
