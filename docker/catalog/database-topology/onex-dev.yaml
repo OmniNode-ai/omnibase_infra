@@ -75,6 +75,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - ci_attempt_outcome
               - consumer_flow_windows
               - lab_lane_health
               - live_events
@@ -364,5 +365,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 6283ff1dec3d6ba3c38b8ff914eadc4946873b5d72cd25827c565bb37a3f892c
+  sha256: 430ab47efb4787d104039e3891ddbd71af1cf53214d7c22a56671bb5fc99afb1
 topology_instance: onex-dev
