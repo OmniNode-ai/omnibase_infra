@@ -101,6 +101,80 @@ PGDB="${POSTGRES_DB:-omnibase_infra}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations/forward}"
 NODE_MIGRATIONS_DIR="${NODE_MIGRATIONS_DIR:-${MIGRATIONS_DIR}/nodes}"
 NODE_PGDB="${NODE_POSTGRES_DB:-${PGDB}}"
+
+# ---- BEGIN pre-PR verify slot fence (OMN-18892) ----
+# A pre-PR verify slot reuses the dev lane's Postgres SERVER (epic OMN-18888).
+# THIS script is the seam a slot actually reaches, and the plan named the other
+# one: Postgres runs 000_create_multiple_databases.sh from
+# /docker-entrypoint-initdb.d only when the data directory is EMPTY, and a slot
+# shares a warm volume. This runner executes on every compose up.
+#
+# WHAT WOULD GO WRONG WITHOUT THIS BLOCK
+# ---------------------------------------
+# Three seams below (sections 0, 3b and the corpus-applier seam) end in an
+# UNCONDITIONAL `ALTER ROLE <literal> WITH LOGIN PASSWORD` on their existing-role
+# branch. Roles are CLUSTER-WIDE objects bound to fixed names by those maps, so a
+# slot running this script with its own credentials in the environment would
+# rewrite the DEV LANE's role passwords for the whole cluster. The dev lane's
+# containers hold the old values in their environment and would begin failing
+# authentication at their next reconnect. Suffixing the DATABASE names alone does
+# not help, because none of those statements names a database.
+#
+# WHAT THIS BLOCK DOES, AND WHAT IT DELIBERATELY DOES NOT
+# --------------------------------------------------------
+# With ONEX_DB_SLOT set, the runner targets the slot's own suffixed databases and
+# SKIPS every role-provisioning seam outright. It does not fence them, suffix
+# them or re-point them: role provisioning belongs to scripts/provision_db_slot.sh,
+# which runs as the superuser, mints only suffixed principals, and refuses to
+# alter a role that is not a member of the slot's own group role. Removing the
+# whole class of role mutation from this runner's slot path is strictly safer
+# than making each of its four seams individually slot-aware, and it leaves a
+# single owner for cluster-wide objects.
+#
+# Each skip is LOGGED BY NAME. A silently skipped provisioning seam and a seam
+# that ran are indistinguishable from the exit status, and telling those apart is
+# the reason the log line exists.
+#
+# UNSET IS BYTE-IDENTICAL. Every lane running today sets nothing and takes the
+# path it takes now; the whole block is inert. Pinned by
+# tests/unit/infra/test_db_slot_provisioner_omn18892.py.
+ONEX_DB_SLOT="${ONEX_DB_SLOT:-}"
+SLOT_ACTIVE=0
+if [ -n "$ONEX_DB_SLOT" ]; then
+  # Same grammar as the provisioner, and fail-closed for the same reason: a typo
+  # would otherwise point the runner at a differently-fenced database set, which
+  # reads exactly like isolation working.
+  if ! printf '%s' "$ONEX_DB_SLOT" | grep -Eq '^[a-z][a-z0-9]{0,11}$'; then
+    echo "[forward-migration] slot_fence_refusal: ONEX_DB_SLOT '${ONEX_DB_SLOT}' is malformed (expected ^[a-z][a-z0-9]{0,11}\$)" >&2
+    exit 3
+  fi
+  SLOT_ACTIVE=1
+  PGDB="${PGDB}_${ONEX_DB_SLOT}"
+  NODE_PGDB="${NODE_PGDB}_${ONEX_DB_SLOT}"
+  echo "[forward-migration] pre-PR verify slot '${ONEX_DB_SLOT}' active: targeting ${PGDB} / ${NODE_PGDB}"
+fi
+
+# Asserts a name is inside the slot's fence before any statement naming it is
+# issued. Inert when no slot is active.
+slot_fence_assert() {
+  _sfa_name="$1"
+  _sfa_what="$2"
+  [ "$SLOT_ACTIVE" -eq 1 ] || return 0
+  case "$_sfa_name" in
+    *"_${ONEX_DB_SLOT}") ;;
+    *)
+      echo "[forward-migration] slot_fence_refusal: ${_sfa_what} '${_sfa_name}' does not carry the slot suffix '_${ONEX_DB_SLOT}' — refusing to issue any statement naming it" >&2
+      exit 4
+      ;;
+  esac
+}
+
+# Names a role-provisioning seam this runner is NOT running under a slot, so the
+# skip is an observation rather than an absence.
+slot_skip_role_seam() {
+  echo "[forward-migration]   slot '${ONEX_DB_SLOT}': SKIPPING role seam '$1' — cluster-wide role provisioning belongs to scripts/provision_db_slot.sh"
+}
+# ---- END pre-PR verify slot fence (OMN-18892) ----
 PG_WAIT_RETRIES="${PG_WAIT_RETRIES:-30}"
 LEDGER_BOOTSTRAP="${MIGRATIONS_DIR}/_ledger/bootstrap.sql"
 APPLICATION_MIGRATION_MANIFEST="${MIGRATIONS_DIR}/_ledger/application-migrations.tsv"
@@ -662,6 +736,13 @@ ensure_directive_database() {
       | sed -E 's/^--[[:space:]]*onex-create-database[[:space:]]*:[[:space:]]*//; s/[[:space:]]*$//'
   )"
   validate_database_identifier "$database"
+  # OMN-18892: under a slot the directive's database is the SLOT's, never the
+  # shared one. The directive names a logical database the migration needs to
+  # exist; which physical database that is, is a deployment fact.
+  if [ "$SLOT_ACTIVE" -eq 1 ]; then
+    database="${database}_${ONEX_DB_SLOT}"
+    slot_fence_assert "$database" "directive database"
+  fi
   echo "[forward-migration]   ensure database ${database}..."
   psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 <<-EOSQL
     SELECT 'CREATE DATABASE "$database"'
@@ -1464,18 +1545,22 @@ EOSQL
   unset role_password escaped_password
 }
 
-echo "[forward-migration] Re-asserting deployment-owned login credentials..."
-# LOGIN_ONLY_ROLE_MAP — entries are quoted individually rather than split out of
-# one string so the loop needs no word splitting to stay correct.
-for login_role_entry in \
-  "omninode_runtime:OMNINODE_RUNTIME_PASSWORD" \
-  "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD" \
-  "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD" \
-; do
-  entry_role_name=${login_role_entry%%:*}
-  entry_password_var=${login_role_entry#*:}
-  reassert_login_only_role_credential "$entry_role_name" "$entry_password_var"
-done
+if [ "$SLOT_ACTIVE" -eq 1 ]; then
+  slot_skip_role_seam "login-only role credentials (section 0)"
+else
+  echo "[forward-migration] Re-asserting deployment-owned login credentials..."
+  # LOGIN_ONLY_ROLE_MAP — entries are quoted individually rather than split out of
+  # one string so the loop needs no word splitting to stay correct.
+  for login_role_entry in \
+    "omninode_runtime:OMNINODE_RUNTIME_PASSWORD" \
+    "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD" \
+    "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD" \
+  ; do
+    entry_role_name=${login_role_entry%%:*}
+    entry_password_var=${login_role_entry#*:}
+    reassert_login_only_role_credential "$entry_role_name" "$entry_password_var"
+  done
+fi
 
 # ---------------------------------------------------------------------------
 # 1. Ensure service-owned schema_migrations tracking table exists (idempotent)
@@ -1901,17 +1986,21 @@ echo "[forward-migration] Re-asserting deployment-owned least-privilege grants..
 # named here MUST also be in that map: a grant on a principal whose credential
 # this deployment does not own is authorization without provenance, and
 # tests/unit/infra/test_login_only_role_grants_omn18060.py pins the subset.
-for grant_role_entry in \
-  "chain_canary_reader:public.delegation_workflow_state:correlation_id,state,traffic_class" \
-  "chain_canary_reader:public.ledger_chain:correlation_id,hop,hop_index,replay_green,verifier_verdict" \
-; do
-  entry_grant_role=${grant_role_entry%%:*}
-  entry_grant_rest=${grant_role_entry#*:}
-  entry_grant_relation=${entry_grant_rest%%:*}
-  entry_grant_columns=${entry_grant_rest#*:}
-  reassert_login_only_role_grants \
-    "$entry_grant_role" "$entry_grant_relation" "$entry_grant_columns"
-done
+if [ "$SLOT_ACTIVE" -eq 1 ]; then
+  slot_skip_role_seam "login-only role grants (OMN-18060)"
+else
+  for grant_role_entry in \
+    "chain_canary_reader:public.delegation_workflow_state:correlation_id,state,traffic_class" \
+    "chain_canary_reader:public.ledger_chain:correlation_id,hop,hop_index,replay_green,verifier_verdict" \
+  ; do
+    entry_grant_role=${grant_role_entry%%:*}
+    entry_grant_rest=${grant_role_entry#*:}
+    entry_grant_relation=${entry_grant_rest%%:*}
+    entry_grant_columns=${entry_grant_rest#*:}
+    reassert_login_only_role_grants \
+      "$entry_grant_role" "$entry_grant_relation" "$entry_grant_columns"
+  done
+fi
 # ---- END login-only role grant seam (OMN-18060) ----
 
 # ---- BEGIN service-role database access seam (OMN-18438) ----
@@ -2108,16 +2197,20 @@ echo "[forward-migration] Re-asserting service-role database access..."
 # bootstrap's SERVICE_DB_MAP: only the principals this deployment actually owns
 # the credential for belong here, and
 # tests/unit/infra/test_service_role_db_access_omn18438.py pins the membership.
-for service_role_entry in \
-  "role_omninode:ROLE_OMNINODE_PASSWORD:omninode_cloud" \
-; do
-  entry_service_role=${service_role_entry%%:*}
-  entry_service_rest=${service_role_entry#*:}
-  entry_service_password_var=${entry_service_rest%%:*}
-  entry_service_database=${entry_service_rest#*:}
-  reassert_service_role_database_access \
-    "$entry_service_role" "$entry_service_password_var" "$entry_service_database"
-done
+if [ "$SLOT_ACTIVE" -eq 1 ]; then
+  slot_skip_role_seam "service-role database access (OMN-18438)"
+else
+  for service_role_entry in \
+    "role_omninode:ROLE_OMNINODE_PASSWORD:omninode_cloud" \
+  ; do
+    entry_service_role=${service_role_entry%%:*}
+    entry_service_rest=${service_role_entry#*:}
+    entry_service_password_var=${entry_service_rest%%:*}
+    entry_service_database=${entry_service_rest#*:}
+    reassert_service_role_database_access \
+      "$entry_service_role" "$entry_service_password_var" "$entry_service_database"
+  done
+fi
 # ---- END service-role database access seam (OMN-18438) ----
 
 # ---- BEGIN corpus-applier database CREATE seam (OMN-18508) ----
@@ -2196,17 +2289,150 @@ EOSQL
   unset corpus_role_present corpus_database_present corpus_create_ok
 }
 
-echo "[forward-migration] Re-asserting database CREATE for corpus appliers..."
-# CORPUS_APPLIER_DB_CREATE_MAP -- "database:role", entries quoted individually so
-# the loop needs no word splitting to stay correct, matching the three maps above.
-for corpus_applier_entry in \
-  "omninode_cloud:role_omninode" \
-; do
-  entry_corpus_database=${corpus_applier_entry%%:*}
-  entry_corpus_role=${corpus_applier_entry#*:}
-  grant_corpus_applier_database_create "$entry_corpus_database" "$entry_corpus_role"
-done
+if [ "$SLOT_ACTIVE" -eq 1 ]; then
+  slot_skip_role_seam "corpus-applier database CREATE (OMN-18508)"
+else
+  echo "[forward-migration] Re-asserting database CREATE for corpus appliers..."
+  # CORPUS_APPLIER_DB_CREATE_MAP -- "database:role", entries quoted individually so
+  # the loop needs no word splitting to stay correct, matching the three maps above.
+  for corpus_applier_entry in \
+    "omninode_cloud:role_omninode" \
+  ; do
+    entry_corpus_database=${corpus_applier_entry%%:*}
+    entry_corpus_role=${corpus_applier_entry#*:}
+    grant_corpus_applier_database_create "$entry_corpus_database" "$entry_corpus_role"
+  done
+fi
 # ---- END corpus-applier database CREATE seam (OMN-18508) ----
+
+# ---- BEGIN directive-created database PUBLIC revocation seam (OMN-18892) ----
+# EVERY database this repository creates must have PUBLIC's default CONNECT
+# revoked. Two seams already do that for the databases named in the bootstrap's
+# maps. NOTHING did it for a database created by an `onex-create-database`
+# directive, and that gap was measured live rather than reasoned about.
+#
+# MEASURED ON THE .201 DEV LANE, 2026-09-20, read-only:
+#
+#     datname      datacl
+#     -----------  ------------------------------------------------
+#     keycloak     <null>            <- PUBLIC holds the default CONNECT
+#     omniclaude   =T/postgres ...   <- TEMP only; CONNECT revoked
+#
+# `keycloak` is created by 042_create_keycloak_db.sql's directive and appears in
+# no bootstrap map, so the bootstrap's `REVOKE CONNECT ... FROM PUBLIC` loop over
+# ALL_MANAGED_DBS never reaches it. The consequence, read from the catalog: 22
+# non-superuser login roles held CONNECT on the identity provider's database,
+# including the two read-only collaborator identities, none of which has any
+# business there. The database is reached in practice only by `postgres`
+# (KC_DB_USERNAME=postgres, and the only live session on it is that superuser),
+# so the revocation costs nothing a consumer was using -- superusers bypass
+# privilege checks entirely.
+#
+# FOUND BY THE SLOT ISOLATION PROOF, WHICH IS WHY IT IS FIXED HERE. A pre-PR
+# verify slot's principal inherits PUBLIC like every other role, so on its first
+# live run scripts/provision_db_slot.sh refused: the slot could reach `keycloak`.
+# The remedy for a principal reaching a database it should not is to close the
+# database, never to narrow the test.
+#
+# WHY A STANDING RE-ASSERT AND NOT A LINE IN ensure_directive_database(). That
+# helper runs only for a migration about to be APPLIED. 042 applied long ago on
+# every warm lane, so a fix there would close the hole on a fresh volume and
+# leave it open on every lane that already exists -- which is all of them.
+#
+# The directive list is read from the corpus on disk rather than hardcoded, so a
+# database added by a future directive is covered the day it lands.
+echo "[forward-migration] Revoking PUBLIC CONNECT on directive-created databases..."
+directive_databases="$(
+  grep -rhiE '^--[[:space:]]*onex-create-database[[:space:]]*:' "$MIGRATIONS_DIR" 2>/dev/null     | sed -E 's/^--[[:space:]]*[Oo][Nn][Ee][Xx]-[Cc][Rr][Ee][Aa][Tt][Ee]-[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee][[:space:]]*:[[:space:]]*//; s/[[:space:]]*$//'     | sort -u
+)"
+if [ -z "$directive_databases" ]; then
+  # An empty result here is not evidence of absence -- the corpus carries these
+  # directives, so an empty read means the scan broke, and a broken scan that
+  # revokes nothing looks exactly like a clean bill of health.
+  echo "[forward-migration] FATAL: the onex-create-database directive scan returned nothing over ${MIGRATIONS_DIR}" >&2
+  exit 1
+fi
+for directive_db in $directive_databases; do
+  validate_database_identifier "$directive_db"
+  if [ "$SLOT_ACTIVE" -eq 1 ]; then
+    directive_db="${directive_db}_${ONEX_DB_SLOT}"
+    slot_fence_assert "$directive_db" "directive database"
+  fi
+  directive_db_present="$(
+    psql -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB"       -c "SELECT 1 FROM pg_database WHERE datname = '${directive_db}'"
+  )"
+  if [ "$directive_db_present" != "1" ]; then
+    echo "[forward-migration]   skip  ${directive_db} (absent on this lane)"
+    continue
+  fi
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -q     -c "REVOKE CONNECT ON DATABASE \"${directive_db}\" FROM PUBLIC;"
+  # READ IT BACK. A REVOKE issued by a role without the privilege on the object
+  # returns success rather than raising -- the same trap the OMN-18060 and
+  # OMN-18508 seams both document. The readback asks the question that matters:
+  # can an arbitrary role still reach it?
+  directive_public_connect="$(
+    psql -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB"       -c "SELECT has_database_privilege('public', '${directive_db}', 'CONNECT')"
+  )"
+  if [ "$directive_public_connect" != "f" ]; then
+    echo "[forward-migration]   FAIL: PUBLIC still holds CONNECT on ${directive_db} after the revoke" >&2
+    exit 1
+  fi
+  echo "[forward-migration]   ok    ${directive_db}: PUBLIC holds no CONNECT"
+done
+unset directive_databases directive_db directive_db_present directive_public_connect
+
+# THE CLUSTER'S MAINTENANCE DATABASE, AND WHY IT IS FAIL-SOFT WHILE THE ABOVE IS
+# FAIL-CLOSED. `postgres` ships with PUBLIC's default CONNECT on any stock
+# server and is created by the server, not by this repository, so no seam here
+# owns it. The bootstrap's ALL_MANAGED_DBS was meant to cover the default
+# database and covers ${POSTGRES_DB}, which on every compose lane is
+# `omnibase_infra` -- so the literal `postgres` database was never closed on any
+# lane.
+#
+# It is not empty, and that is the reason to close it. Measured on the .201 dev
+# lane, 2026-09-20: five application tables, an `omninode_internal` schema
+# duplicated there with 0 rows (the live one, with rows, is in
+# `omnidash_analytics`, which is what 098's and 099's directives name and what
+# OMNINODE_INTERNAL_DB_URL points at) plus four tables in a leftover test
+# schema. A stray schema from a mis-targeted run is still a table an arbitrary
+# role can read.
+#
+# FAIL-SOFT, unlike the loop above: this repository OWNS the databases its own
+# directives create and a failed revoke there is a real defect, but it does not
+# own the maintenance database, and on a lane where the connecting role is not
+# its owner the REVOKE legitimately cannot be issued. Failing a whole migration
+# run over the ACL of a database that carries no lane data would be a gate that
+# is harder to satisfy than the mistake it prevents. The outcome is named either
+# way, and scripts/provision_db_slot.sh holds the fail-closed half: a slot is
+# refused if it can reach this database AND this database holds any application
+# table, so a lane where the revoke did not land is still not silently
+# un-isolated.
+maintenance_db="postgres"
+if [ "$SLOT_ACTIVE" -eq 0 ]; then
+  maintenance_db_present="$(
+    psql -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+      -c "SELECT 1 FROM pg_database WHERE datname = '${maintenance_db}'"
+  )"
+  if [ "$maintenance_db_present" = "1" ]; then
+    if psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 -q \
+         -c "REVOKE CONNECT ON DATABASE \"${maintenance_db}\" FROM PUBLIC;" 2>/dev/null
+    then
+      maintenance_public_connect="$(
+        psql -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
+          -c "SELECT has_database_privilege('public', '${maintenance_db}', 'CONNECT')"
+      )"
+      if [ "$maintenance_public_connect" = "f" ]; then
+        echo "[forward-migration]   ok    ${maintenance_db}: PUBLIC holds no CONNECT"
+      else
+        echo "[forward-migration]   WARNING: PUBLIC still holds CONNECT on ${maintenance_db} after the revoke -- this lane cannot host an isolated verify slot until it is closed" >&2
+      fi
+    else
+      echo "[forward-migration]   WARNING: could not revoke PUBLIC CONNECT on ${maintenance_db} (not its owner on this lane) -- this lane cannot host an isolated verify slot until it is closed" >&2
+    fi
+  fi
+fi
+unset maintenance_db maintenance_db_present maintenance_public_connect
+# ---- END directive-created database PUBLIC revocation seam (OMN-18892) ----
 
 # ---------------------------------------------------------------------------
 # 4. Set the sentinel TRUE only after ALL migrations succeed (OMN-13062)
