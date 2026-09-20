@@ -476,6 +476,40 @@ jobs:
           kubectl kustomize "${LAB_OVERLAY}" > /tmp/onex-lab-render.yaml
           wc -l /tmp/onex-lab-render.yaml
 
+      # OMN-18364. `hostPath` is the ONE volume type the kubelet does not apply
+      # `fsGroup` to: `type: DirectoryOrCreate` creates the directory as root at
+      # 0755 and never re-owns an existing one. The lane binds Postgres to a
+      # static hostPath PV (OMN-18186) and runs it as uid 70 under the
+      # namespace's restricted Pod Security Standard (OMN-18765). Both are
+      # correct; together, on a cluster created fresh every run, they are fatal.
+      #
+      # Measured 2026-09-19: `onex-lab-postgres` crash-looped on
+      #   mkdir: can't create directory '/var/lib/postgresql/data/pgdata':
+      #   Permission denied
+      # to Restart Count 5, blew its 180s progressDeadlineSeconds, and every
+      # delivery reaching this job from 09:29Z died at `exceeded its progress
+      # deadline`. The PERSISTENT lab lane never showed it, because its
+      # directory already exists owned by 70 from when the image's entrypoint
+      # still ran as root -- which is why this sat undetected.
+      #
+      # The manifest cannot fix this for itself: under `restricted`, an
+      # initContainer running as root to chown its own volume is refused at
+      # admission. So the directory has to ARRIVE already owned, which is the
+      # condition the persistent lane has by history and this one must be given
+      # deliberately. Ownership is DERIVED from the render that is about to be
+      # applied, never restated here, so a change to the pod's uid moves this
+      # step with it. Fail-closed on every unresolvable shape, including an
+      # empty one.
+      - name: Prepare the lane's static hostPath directories on the node
+        id: host-paths
+        run: |
+          set -euo pipefail
+          NODE="$(kind get nodes --name onex-lab-boot-gate | head -1)"
+          echo "preparing hostPath directories on ${NODE}"
+          python3 omnibase_infra/scripts/ci/boot_gate.py prepare-host-paths \
+            --render /tmp/onex-lab-render.yaml \
+            --node "${NODE}"
+
       - name: Apply
         id: apply
         run: |
@@ -624,8 +658,35 @@ jobs:
           # The Job's first act is to connect, and its readiness loop gives up
           # after MAX_RETRIES. Waiting for the server here keeps a slow initdb
           # from being reported as a migration failure.
-          kubectl rollout status "deployment/${LAB_DB_SERVICE}" \
-            -n "${LAB_NAMESPACE}" --timeout="${DB_WAIT_SECONDS}s"
+          # OMN-18364: dump on failure. The migrate-Job branch below already
+          # prints describe + full logs inline when it fails; this wait printed
+          # only `exceeded its progress deadline` and nothing else, so reading
+          # the one line of pod log that names the actual cause cost an artifact
+          # download. Seventeen consecutive deliveries failed here before anyone
+          # read `mkdir: ... Permission denied`.
+          if ! kubectl rollout status "deployment/${LAB_DB_SERVICE}" \
+              -n "${LAB_NAMESPACE}" --timeout="${DB_WAIT_SECONDS}s"; then
+            echo "::error::${LAB_DB_SERVICE} did not become available within" \
+              "${DB_WAIT_SECONDS}s. Describe, namespace events and FULL pod" \
+              "logs follow, and are also in the uploaded artifact."
+            kubectl describe "deployment/${LAB_DB_SERVICE}" \
+              -n "${LAB_NAMESPACE}" || true
+            kubectl get events -n "${LAB_NAMESPACE}" \
+              --sort-by=.lastTimestamp || true
+            for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+                -l "app.kubernetes.io/name=${LAB_DB_SERVICE}" \
+                -o jsonpath='{.items[*].metadata.name}'); do
+              kubectl describe pod -n "${LAB_NAMESPACE}" "${POD}" || true
+              # No --tail, ever (OMN-17534 AC-2). --previous is where a
+              # CrashLoopBackOff pod's actual death is; the current container is
+              # usually still starting when it is read.
+              kubectl logs -n "${LAB_NAMESPACE}" "${POD}" \
+                --all-containers --timestamps || true
+              kubectl logs -n "${LAB_NAMESPACE}" "${POD}" \
+                --all-containers --timestamps --previous || true
+            done
+            exit 1
+          fi
 
           # A rerun can reach a cluster where an earlier attempt already created
           # this fixed-name Job. Deleting it here keeps the verdict tied to this
