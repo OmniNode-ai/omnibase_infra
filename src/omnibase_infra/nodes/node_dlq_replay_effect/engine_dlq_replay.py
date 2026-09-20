@@ -46,6 +46,7 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_unparseable_dlq_re
     DlqRecordUnparseableError,
     ModelUnparseableDlqRecord,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils.util_datetime import is_timezone_aware
 
 logger = logging.getLogger(__name__)
@@ -478,7 +479,7 @@ class DLQConsumer:
         )
         try:
             self._consumer = AIOKafkaConsumer(
-                self.config.dlq_topic,
+                apply_topic_namespace(self.config.dlq_topic),
                 bootstrap_servers=self.config.bootstrap_servers,
                 auto_offset_reset="earliest",
                 enable_auto_commit=False,
@@ -535,7 +536,10 @@ class DLQConsumer:
         if self._started and self._consumer is not None:
             await self._consumer.commit(
                 {
-                    TopicPartition(topic, partition): next_offset
+                    # The ledger keys the CANONICAL topic (it is copied from
+                    # the configured dlq_topic); a commit coordinate must be
+                    # PHYSICAL (OMN-18891).
+                    TopicPartition(apply_topic_namespace(topic), partition): next_offset
                     for (topic, partition), next_offset in offsets.items()
                 }
             )
@@ -725,8 +729,13 @@ class DLQProducer:
         )
         value = message.original_value.encode("utf-8", errors="replace")
 
+        # Replay lands back on the ORIGINAL topic, in this lane's namespace
+        # rather than the shared one (OMN-18891).
         await self._producer.send_and_wait(
-            message.original_topic, value=value, key=key, headers=headers
+            apply_topic_namespace(message.original_topic),
+            value=value,
+            key=key,
+            headers=headers,
         )
         self._last_publish = datetime.now(UTC)
 
@@ -861,7 +870,10 @@ class DLQQuarantineProducer:
         key = str(message.correlation_id).encode("utf-8")
         value = json.dumps(payload).encode("utf-8")
         return await self._producer.send_and_wait(
-            self.config.quarantine_topic, value=value, key=key, headers=headers
+            apply_topic_namespace(self.config.quarantine_topic),
+            value=value,
+            key=key,
+            headers=headers,
         )
 
     async def quarantine_unparseable_record(
@@ -895,7 +907,10 @@ class DLQQuarantineProducer:
         ).encode()
         value = json.dumps(payload).encode("utf-8")
         return await self._producer.send_and_wait(
-            self.config.quarantine_topic, value=value, key=key, headers=headers
+            apply_topic_namespace(self.config.quarantine_topic),
+            value=value,
+            key=key,
+            headers=headers,
         )
 
 

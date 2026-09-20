@@ -25,6 +25,8 @@ from uuid import uuid4
 import click
 from aiokafka import AIOKafkaProducer
 
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
+
 
 def _build_envelope(
     payload_dict: dict[str, object], requested_by: str
@@ -121,7 +123,9 @@ def produce(
         producer = AIOKafkaProducer(bootstrap_servers=bootstrap_servers, acks="all")
         await producer.start()
         try:
-            await producer.send_and_wait(topic, final_json.encode())
+            await producer.send_and_wait(
+                apply_topic_namespace(topic), final_json.encode()
+            )
         finally:
             await producer.stop()
 

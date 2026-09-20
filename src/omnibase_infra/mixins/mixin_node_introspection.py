@@ -238,7 +238,11 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
-from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED, TopicResolver
+from omnibase_infra.topics import (
+    SUFFIX_NODE_REGISTRATION_ACKED,
+    TopicResolver,
+    create_topic_resolver,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.models.contracts import ModelContractBase
@@ -1078,7 +1082,7 @@ class MixinNodeIntrospection:
             in ONEX. The environment/realm is enforced via envelope identity, not
             topic naming.
             """
-            topic_resolver = TopicResolver()
+            topic_resolver = create_topic_resolver()
 
             # Strip whitespace from suffix to handle YAML formatting artifacts
             suffix = suffix.strip()

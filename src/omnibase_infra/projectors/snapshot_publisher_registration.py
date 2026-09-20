@@ -123,6 +123,7 @@ from omnibase_infra.models.projection import (
     ModelSnapshotTopicConfig,
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -591,7 +592,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
             # Send and wait for acknowledgment
             await self._producer.send_and_wait(
-                self._config.topic,
+                apply_topic_namespace(self._config.topic),
                 key=key,
                 value=value,
             )
@@ -914,7 +915,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             # Using a unique group ensures we get our own offset tracking
             consumer_group = f"snapshot-reader-{self._config.topic}-{uuid4()!s}"
             consumer = AIOKafkaConsumer(
-                self._config.topic,
+                apply_topic_namespace(self._config.topic),
                 bootstrap_servers=bootstrap_servers,
                 group_id=consumer_group,
                 auto_offset_reset="earliest",
@@ -1239,7 +1240,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
             # Publish tombstone (null value)
             await self._producer.send_and_wait(
-                self._config.topic,
+                apply_topic_namespace(self._config.topic),
                 key=key,
                 value=None,  # Tombstone - null value triggers deletion on compaction
             )

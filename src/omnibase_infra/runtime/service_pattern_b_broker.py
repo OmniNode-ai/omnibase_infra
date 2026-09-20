@@ -38,6 +38,7 @@ from omnibase_infra.runtime.dispatch_envelope_context import (
     current_dispatch_envelope,
 )
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,
     sanitize_error_string,
@@ -289,11 +290,17 @@ async def _assign_direct_terminal_partitions(
     loop = asyncio.get_running_loop()
     grace = min(_DIRECT_TERMINAL_PARTITIONLESS_GRACE_SECONDS, assign_cap_seconds)
     deadline = loop.time() + grace
-    await _force_terminal_topic_metadata(consumer, terminal_topic)
+    # Every broker-facing call below names the PHYSICAL topic. The caller
+    # passes the canonical one, which is what the route and the status
+    # mapping are keyed by (OMN-18891).
+    physical_terminal_topic = apply_topic_namespace(terminal_topic)
+    await _force_terminal_topic_metadata(consumer, physical_terminal_topic)
     while True:
-        partitions = consumer.partitions_for_topic(terminal_topic) or set()
+        partitions = consumer.partitions_for_topic(physical_terminal_topic) or set()
         if partitions:
-            consumer.assign([TopicPartition(terminal_topic, p) for p in partitions])
+            consumer.assign(
+                [TopicPartition(physical_terminal_topic, p) for p in partitions]
+            )
             return
         if loop.time() >= deadline:
             # The broker has had the grace window to advertise partitions and
