@@ -424,11 +424,44 @@ def test_omnimarket_ref_resolution_survives_fork_and_dependabot_prs() -> None:
     assert "gh api" not in resolve_step
     assert "commits/dev" not in resolve_step
 
-    # Still gated to the not-yet-pinned ("dev") case only: an explicit
-    # Omnimarket-Source-Ref trailer continues to override the pin for
-    # cross-repo co-development (OMN-15703's escape hatch, preserved).
-    assert "if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'" in resolve_step
     assert "scripts/resolve_omnimarket_contract_pin.py" in resolve_step
+
+    # OMN-18863 MOVED THIS ASSERTION, and the move is the point.
+    #
+    # It used to read `assert "if: steps.resolve-omnimarket-ref.outputs.ref ==
+    # 'dev'" in resolve_step`, on the RESOLVE step. That asserted the escape
+    # hatch on the wrong step: the hatch is about which omnimarket tree the job
+    # CHECKS OUT, and the resolve step only computes a sha from a committed
+    # file. Gating the resolver was an optimisation, not the invariant.
+    #
+    # The resolver is now unconditional because a TRAILERED pull request needs
+    # that sha too: OMN-18863 derives a second time against the committed pin,
+    # exactly as the push to dev will, so a vendoring pull request cannot merge
+    # into a state its own required gate rejects one push later. Keeping the
+    # old condition would have made the second derivation impossible.
+    #
+    # So the escape hatch is asserted where it actually lives, on the checkout's
+    # ref expression, which is unchanged: the pin is used only when no trailer
+    # resolved a ref.
+    assert "if:" not in resolve_step, (
+        "the pin resolver must stay unconditional: the OMN-18863 committed-pin "
+        "derivation arm reads this sha on trailered pull requests too, and "
+        "re-gating it on ref == 'dev' silently removes that arm"
+    )
+
+    checkout_step = workflow.split(
+        "- name: Checkout exact typed registry dependency",
+        maxsplit=1,
+    )[1].split("- name:", maxsplit=1)[0]
+    assert (
+        "steps.resolve-omnimarket-ref.outputs.ref == 'dev' "
+        "&& steps.resolve-omnimarket-pin.outputs.sha "
+        "|| steps.resolve-omnimarket-ref.outputs.ref" in checkout_step
+    ), (
+        "the OMN-15703 escape hatch must be preserved: an explicit "
+        "Omnimarket-Source-Ref trailer still overrides the pin for cross-repo "
+        "co-development, and the pin is used only when no trailer resolved"
+    )
 
     # Fail-closed is preserved inside the resolver: a non-40-hex ref is
     # rejected rather than resolved, so no mutable branch/tag can sneak back in
