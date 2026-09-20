@@ -236,6 +236,70 @@ def test_omn_16964_delegation_chain_topics_select_ledger_projection(
 
 
 @pytest.mark.integration
+def test_omn_18937_the_failure_terminal_selects_both_ledger_consumers(
+    live_snapshot: dict[str, Any],
+) -> None:
+    """A FAILED delegation must reach the ledger, not only a successful one.
+
+    The sibling test above asserts the success terminal. That is exactly the
+    half that was wired: both omnibase_infra consumers subscribed to
+    ``delegate-skill-completed.v1`` and neither subscribed to
+    ``delegate-skill-failed.v1``, so a delegation that failed selected NO
+    dispatcher here and left zero rows in ``public.event_ledger``,
+    ``public.ledger_chain`` and ``delegation_workflow_state`` -- measured on
+    chain-canary run 35533286353, correlation
+    ``b267d3bd-0f60-466e-8c8a-e7c60446e1f0``.
+
+    This runs against the LIVE engine snapshot over the real contract corpus,
+    so it proves the subscription actually DISPATCHES rather than that the
+    contract text mentions the topic. A contract-text assertion would have
+    stayed green through the whole defect: both contracts were internally
+    consistent, each pairing its one subscription with its one routing entry.
+
+    Both consumers are asserted in one test deliberately. The projection is
+    the only writer of ``event_ledger``; the chain writer is dispatched BY the
+    terminal. Either one missing reproduces the same zero-trace symptom, so a
+    test naming only one of them would go green on half a fix.
+    """
+    failure_terminal = "onex.evt.omnimarket.delegate-skill-failed.v1"
+    success_terminal = "onex.evt.omnimarket.delegate-skill-completed.v1"
+    consumers = (
+        "node_ledger_projection_compute.HandlerLedgerProjection",
+        "node_delegation_chain_ledger_effect.HandlerDelegationChainLedger",
+    )
+
+    def _selecting(topic: str, consumer: str) -> list[dict[str, Any]]:
+        return [
+            probe
+            for probe in live_snapshot["probes"].values()
+            if probe["family"] == "P4_payload_type_scoping"
+            and probe["topic"] == topic
+            and probe["selection"]["status"] == "success"
+            and any(
+                consumer in dispatcher_id
+                for dispatcher_id in probe["selection"]["dispatcher_ids"]
+            )
+        ]
+
+    for consumer in consumers:
+        # Positive control first: the SUCCESS terminal has always selected
+        # this consumer. If it does not, the probe filter above is wrong and
+        # the failure assertion that follows would be vacuous rather than
+        # informative -- a zero that means "found nothing" reads identically
+        # to a zero that means "looked wrong".
+        assert _selecting(success_terminal, consumer), (
+            f"control failed: {consumer} does not select the SUCCESS terminal "
+            f"{success_terminal}, so this test's probe filter is wrong and its "
+            "failure-terminal assertion proves nothing"
+        )
+        assert _selecting(failure_terminal, consumer), (
+            f"{consumer} does not select {failure_terminal}. A delegation that "
+            "FAILS is dispatched to nobody here, so it leaves no trace in "
+            "event_ledger or ledger_chain (OMN-18937)"
+        )
+
+
+@pytest.mark.integration
 def test_p0_1_guard_tripped_orchestrators_now_route(
     committed_fixture: dict[str, Any],
 ) -> None:
