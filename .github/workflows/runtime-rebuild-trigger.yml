@@ -535,8 +535,25 @@ jobs:
             --consumer-groups "$DECLARED_GROUPS" \
             --out "${LAB_PASS_DIR}/lag-sample.json"
 
+      # ONE fetch, TWO consumers. This job gained a second, byte-identical
+      # checkout of the same repository at the same ref into the same path
+      # when OMN-18769 (#3821) and OMN-18866 landed within hours of each other
+      # -- two changes that each needed the lane overlay, neither of which
+      # could see the other's step because they were written against the same
+      # base. Collapsed here rather than left as a duplicate: two checkouts
+      # racing one path is a clash waiting for a version of `checkout` that
+      # stops cleaning the destination first.
+      #
+      # It carries OMN-18769's continue-on-error, not this ticket's absence of
+      # one, because that is the stricter reading and the correct one for BOTH
+      # consumers: an overlay fetch failure must not fail the lab pass. The
+      # delegation dispatch below already warns and exits 0 without it, and
+      # the verdict publish below already treats a failed publish as an
+      # observability gap rather than a lab-pass failure.
+      # advisory-ok: OMN-18866 overlay fetch shared by the delegation dispatch and the OMN-18769 verdict publish; neither may fail the lab pass on it
       - name: Fetch the declared CI bus lanes
         if: always()
+        continue-on-error: true
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
@@ -888,22 +905,12 @@ jobs:
       # reads it rather than inferring one. `trigger-rebuild` above already
       # sparse-checks the same file out for the same reason; this job is a
       # separate job with a separate checkout, so it takes its own copy.
-      - name: Fetch the CI bus lane overlay
-        if: always()
-        # The lab-pass ARTIFACT is the durable evidence the rule-24(b) delivery
-        # gate reads; a failed overlay fetch must not fail the lab pass.
-        # advisory-ok: OMN-18769 overlay fetch for an observability publish
-        continue-on-error: true
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/omnimarket
-          ref: dev
-          path: .ci-bus-overlay
-          persist-credentials: false
-          sparse-checkout: |
-            config/ci_bus_lanes.yaml
-          sparse-checkout-cone-mode: false
-
+      # OMN-18769's own overlay checkout stood here and has been REMOVED, not
+      # disabled: it was byte-identical to the one earlier in this job, same
+      # repository, same ref, same path, same sparse-checkout. Its reason for
+      # continue-on-error ("a failed overlay fetch must not fail the lab pass")
+      # was the better of the two and now governs the single remaining fetch.
+      # The publish below is unchanged and still reads `.ci-bus-overlay`.
       - name: Publish the compose-dev lab-pass verdict to the bus
         if: always()
         # A broker that is down is not a lab pass that failed; failing here would
