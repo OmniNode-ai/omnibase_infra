@@ -672,7 +672,70 @@ jobs:
             --check "superseded_by_newer_rebuild:${SUPERSEDED_OUTCOME}:${SUPERSEDED_EVIDENCE}" \
             --checks-json "${LAB_PASS_CHECKS}" \
             --agent-command-id "${CORRELATION_ID}" \
-            --out "${LAB_PASS_DIR}/receipt.json"
+            --out "${LAB_PASS_DIR}/receipt.json" \
+            --event-out "${LAB_PASS_DIR}/event.json"
+
+      # OMN-18769: the verdict, on the bus, beside the artifact.
+      #
+      # The ARTIFACT remains the durable evidence and the delivery gate keeps
+      # reading it; nothing about that changes. What this adds is
+      # renderability: an artifact is reachable only by an exact-name REST
+      # query with `actions: read`, which a dashboard panel cannot make, so a
+      # lab-pass verdict has been invisible to every surface except the gate.
+      #
+      # `if: always()` for the same reason the artifact is written under
+      # always(): a record that exists only on success cannot distinguish a
+      # failed lab pass from one nobody ran.
+      #
+      # `continue-on-error` is deliberate and is NOT a swallowed failure. This
+      # step reports a FACT about a lab pass that has already happened; a
+      # broker that is unreachable is not a lane that failed, and failing the
+      # job here would turn an observability publish into a delivery outage.
+      # The failure is loud in the log and the artifact — the authority — is
+      # unaffected either way.
+      # The overlay is the DECLARED transport for the lane, and this publish
+      # reads it rather than inferring one. `trigger-rebuild` above already
+      # sparse-checks the same file out for the same reason; this job is a
+      # separate job with a separate checkout, so it takes its own copy.
+      - name: Fetch the CI bus lane overlay
+        if: always()
+        # The lab-pass ARTIFACT is the durable evidence the rule-24(b) delivery
+        # gate reads; a failed overlay fetch must not fail the lab pass.
+        # advisory-ok: OMN-18769 overlay fetch for an observability publish
+        continue-on-error: true
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .ci-bus-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Publish the compose-dev lab-pass verdict to the bus
+        if: always()
+        # A broker that is down is not a lab pass that failed; failing here would
+        # turn an observability publish into a delivery outage while the artifact
+        # already carries the verdict.
+        # advisory-ok: OMN-18769 lab-pass verdict publish is not the lab-pass verdict
+        continue-on-error: true
+        env:
+          # OMN-18012 — the dev control-bus lane declares
+          # `security_protocol: SASL_PLAINTEXT` / `sasl_mechanism:
+          # SCRAM-SHA-256` in the overlay checked out above. The publisher
+          # READS that declaration and refuses to downgrade it, so these are
+          # not optional: without them a SASL lane publish is a loud no-op.
+          # Injected as ENVIRONMENT so no credential reaches argv or the
+          # process list.
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+        run: |
+          set -uo pipefail
+          uv run python scripts/ci/publish_lab_fact_event.py \
+            --event "${LAB_PASS_DIR}/event.json" \
+            --bus-lane "dev" \
+            --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml"
 
       # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
       # since the directory matches whether or not the receipt carries bytes.

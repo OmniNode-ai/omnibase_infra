@@ -881,9 +881,12 @@ def test_omn_18768_incident_relation_is_declared_by_the_topology() -> None:
         f"{OMN_18768_INCIDENT} is granted by a migration in this repo and "
         "declared by no topology principal. The runtime resolves projection "
         "bindings against the declaration, so this refuses auto-wiring at boot "
-        "with 'lacks declared read' and takes the whole process down. Advance "
-        ".github/omnimarket-contract-pin.yaml and regenerate -- never hand-edit "
-        "the generated grant block."
+        "with 'lacks declared read' and takes the whole process down. "
+        "Regenerate against the tree the OMN-15361 job checks out -- the "
+        "migration SOURCE ref for a PR carrying Node-Migration-Source-* "
+        "trailers, and .github/omnimarket-contract-pin.yaml otherwise -- and "
+        "never hand-edit the generated grant block. The gate's own failure "
+        "text carries the long form."
     )
 
 

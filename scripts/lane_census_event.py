@@ -28,6 +28,26 @@ from typing import Any
 
 DRIFT_TOPIC = "onex.evt.infra.lane-census-drift.v1"
 
+#: OMN-18769. The census-OBSERVED topic, published on EVERY run rather than
+#: only on drift.
+#:
+#: Why a second topic instead of publishing the drift event on clean runs: the
+#: drift topic is the ALERT authority. A downstream consumer (the runtime_sweep
+#: auto-ticket path) creates a Linear ticket from what lands there, so a
+#: no-drift event on it would be a ticket about nothing, six times a day.
+#:
+#: Why a second topic instead of nothing: a topic that only carries drift
+#: cannot distinguish "the lane matches its manifest" from "the census has not
+#: run for two days". A lane-health panel needs both answers, and a reducer
+#: fed only the drift topic renders a silent fleet identically to a healthy
+#: one -- which is the false-green this whole surface exists to remove.
+#: The producer segment is ``omnibase-infra``, not ``infra``: the topic-naming
+#: lint in the consuming repository admits only real repository names, and the
+#: older ``onex.evt.infra.lane-census-drift.v1`` above predates that rule and
+#: sits in its baseline. A new topic does not get to inherit a baselined
+#: spelling.
+OBSERVED_TOPIC = "onex.evt.omnibase-infra.lane-census-observed.v1"
+
 # A drift finding is a flat string mapping (lane, kind, container, detail, severity)
 # as emitted by lane_census_plan.py. The plan envelope is loosely typed (str/Any)
 # because it round-trips through JSON; the helpers below narrow it locally.
@@ -127,6 +147,40 @@ def build_event(
     }
 
 
+def build_observed_event(
+    *,
+    host: str,
+    plan: Plan,
+    topic: str = OBSERVED_TOPIC,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Construct the census-OBSERVED event, drift or no drift (OMN-18769).
+
+    This is a statement that the census RAN and what it saw, which is a
+    different claim from the drift event's "something is wrong". It carries no
+    ``alert_key``, no ``ticket_title`` and no ``ticket_body``: it is not an
+    alert and must never be mistaken for one by a consumer that pattern-matches
+    on those fields.
+
+    ``observed_at`` rather than ``emitted_at`` is deliberate. The consumer keys
+    this fact's freshness on it, and "when the census looked" is the honest
+    name for that instant; ``emitted_at`` would invite a republisher to restamp
+    it and make a two-day-old observation read as current.
+    """
+    now = now or datetime.now(UTC)
+    findings = _findings(plan)
+    return {
+        "schema_version": "1.0.0",
+        "event_type": "lane-census-observed",
+        "topic": topic,
+        "host": host,
+        "observed_at": now.isoformat(),
+        "lanes_checked": plan.get("lanes_checked", []),
+        "drift_count": len(findings),
+        "findings": findings,
+    }
+
+
 def main() -> int:
     host = os.environ.get("LANE_CENSUS_HOST", "")
     if not host:
@@ -134,7 +188,12 @@ def main() -> int:
         print("ERROR: LANE_CENSUS_HOST must be set", file=sys.stderr)
         return 2
     plan = json.load(sys.stdin)
-    event = build_event(host=host, plan=plan)
+    # The default stays the drift event so every existing caller is byte-for-byte
+    # unchanged; --observed is additive.
+    if "--observed" in sys.argv[1:]:
+        event = build_observed_event(host=host, plan=plan)
+    else:
+        event = build_event(host=host, plan=plan)
     json.dump(event, sys.stdout)
     sys.stdout.write("\n")
     return 0
