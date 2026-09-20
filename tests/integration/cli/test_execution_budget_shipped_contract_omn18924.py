@@ -24,6 +24,7 @@ itself is honest where a vacuous pass is not.
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -38,19 +39,46 @@ from omnibase_infra.cli.task_class_selection import (
 pytestmark = pytest.mark.integration
 
 
-def _installed_contract_or_skip() -> Path:
+#: Where the contract sits relative to the omnimarket package root.
+_CONTRACT_RELATIVE = Path("configs") / "task_class_contracts.v1.yaml"
+
+
+def _shipped_contract_or_skip() -> Path:
+    """Resolve the contract omnimarket actually ships, however it is present.
+
+    Three sources, in the order that makes this test RUN rather than skip.
+    The installed package is the truest, but this repo's venv-purity gate
+    refuses to run with omnimarket installed, so it is never available in CI.
+    The sibling SOURCE checkout is what CI wires, resolved by the same order
+    node-migration-sync and the skill-catalog check already use. Either way
+    the bytes are omnimarket's, not a fixture this repo wrote about itself,
+    which is the whole point of the module.
+    """
     spec = importlib.util.find_spec("omnimarket")
-    if spec is None or not spec.origin:
-        pytest.skip(
-            "omnimarket is not importable here, so the INSTALLED contract cannot "
-            "be read; this assertion did NOT run and is not evidence"
+    if spec is not None and spec.origin:
+        installed = Path(spec.origin).resolve().parent / _CONTRACT_RELATIVE
+        if installed.is_file():
+            return installed
+
+    explicit = os.environ.get("OMNIMARKET_SRC")
+    if explicit and (Path(explicit) / "pyproject.toml").is_file():
+        candidate = Path(explicit) / "src" / "omnimarket" / _CONTRACT_RELATIVE
+        if candidate.is_file():
+            return candidate
+
+    omni_home = os.environ.get("OMNI_HOME")
+    if omni_home:
+        candidate = (
+            Path(omni_home) / "omnimarket" / "src" / "omnimarket" / _CONTRACT_RELATIVE
         )
-    path = (
-        Path(spec.origin).resolve().parent / "configs" / "task_class_contracts.v1.yaml"
+        if candidate.is_file():
+            return candidate
+
+    pytest.skip(
+        "omnimarket is neither installed nor resolvable as a source tree "
+        "(set OMNIMARKET_SRC or OMNI_HOME); CI wires the sibling checkout, so "
+        "this assertion did NOT run and is not evidence"
     )
-    if not path.is_file():
-        pytest.skip(f"the installed omnimarket ships no contract at {path}")
-    return path
 
 
 @pytest.mark.integration
@@ -60,7 +88,7 @@ def test_every_exposed_class_resolves_a_budget_on_the_installed_contract() -> No
     Before this change, this raised for the first class tried, which is what
     refused every delegation on the host.
     """
-    contract = _installed_contract_or_skip()
+    contract = _shipped_contract_or_skip()
     exposed = [entry.name for entry in load_selectable_task_classes(contract)]
     assert exposed, "the installed contract exposes no public class"
     for task_type in exposed:
@@ -78,7 +106,7 @@ def test_the_resolution_agrees_with_what_the_installed_contract_declares() -> No
     against whichever contract happens to be installed, so the module stays
     honest after the producer lands and the map appears.
     """
-    contract = _installed_contract_or_skip()
+    contract = _shipped_contract_or_skip()
     declared = yaml.safe_load(contract.read_text(encoding="utf-8")).get(
         "execution_budgets"
     )
