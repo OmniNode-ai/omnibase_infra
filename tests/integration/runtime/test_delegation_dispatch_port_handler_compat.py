@@ -77,11 +77,12 @@ def test_runtime_port_exposes_consumer_handler_optional_parameters() -> None:
         assert parameters["provenance"].default is None
 
 
-@pytest.mark.asyncio
-async def test_absent_consumer_features_dispatch_through_runtime_bus(
+async def _dispatch_with_captured_command(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Always-supplied None kwargs must reach the existing Pattern-B route."""
+    *,
+    response_contract: dict[str, object] | None,
+) -> tuple[dict[str, object], ModelDispatchBusCommand]:
+    """Capture the exact command Pattern-B publishes through the runtime port."""
     route = _delegation_route()
     captured_commands: list[ModelDispatchBusCommand] = []
 
@@ -108,7 +109,6 @@ async def test_absent_consumer_features_dispatch_through_runtime_bus(
         event_bus=object(),  # type: ignore[arg-type]
         routes={"delegation.orchestrate": route},
     )
-
     result = await port.dispatch(
         prompt="workflow probe",
         task_type="reasoning",
@@ -123,23 +123,68 @@ async def test_absent_consumer_features_dispatch_through_runtime_bus(
         acceptance_criteria=(),
         tenant_id=None,
         backend_id=None,
-        response_contract=None,
+        response_contract=response_contract,
         system_prompt=None,
         temperature=None,
         response_format=None,
     )
+    return result, captured_commands[0]
+
+
+@pytest.mark.asyncio
+async def test_absent_consumer_features_dispatch_through_runtime_bus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Always-supplied None kwargs must reach the existing Pattern-B route."""
+    result, command = await _dispatch_with_captured_command(
+        monkeypatch, response_contract=None
+    )
 
     assert result["status"] == "completed"
-    assert captured_commands[0].payload["prompt"] == "workflow probe"
-    assert "max_tokens" not in captured_commands[0].payload
-    assert "backend_id" not in captured_commands[0].payload
-    assert "response_contract" not in captured_commands[0].payload
-    assert "system_prompt" not in captured_commands[0].payload
-    assert "temperature" not in captured_commands[0].payload
-    assert "response_format" not in captured_commands[0].payload
-    request = ModelDelegationRequest.model_validate(captured_commands[0].payload)
+    assert command.payload["prompt"] == "workflow probe"
+    assert "max_tokens" not in command.payload
+    assert "backend_id" not in command.payload
+    assert "response_contract" not in command.payload
+    assert "system_prompt" not in command.payload
+    assert "temperature" not in command.payload
+    assert "response_format" not in command.payload
+    request = ModelDelegationRequest.model_validate(command.payload)
     assert request.requested_timeout_seconds == 240
-    assert "terminal_delivery_margin_seconds" not in captured_commands[0].payload
+    assert "terminal_delivery_margin_seconds" not in command.payload
+
+
+@pytest.mark.asyncio
+async def test_runtime_bus_publishes_declared_contract_to_the_core_wire_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A nested schema survives publication and validates in the consumer model."""
+    response_contract: dict[str, object] = {
+        "type": "object",
+        "properties": {
+            "result": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "sources": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["summary"],
+                "additionalProperties": False,
+            }
+        },
+        "required": ["result"],
+        "additionalProperties": False,
+    }
+    result, command = await _dispatch_with_captured_command(
+        monkeypatch, response_contract=response_contract
+    )
+
+    published_wire_request = ModelDelegationRequest.model_validate(command.payload)
+    assert result["status"] == "completed"
+    assert command.payload["response_contract"] == response_contract
+    assert published_wire_request.response_contract == response_contract
+    assert published_wire_request.requested_timeout_seconds == 240
+    assert "terminal_delivery_margin_seconds" not in command.payload
+    assert command.timeout_seconds == 300.0
 
 
 @pytest.mark.asyncio
