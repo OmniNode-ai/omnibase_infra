@@ -350,7 +350,18 @@ class TestCliPlumbing:
             lambda *a, **k: type(
                 "O",
                 (),
-                {"phrase": "settled", "timed_out": False, "waited_seconds": 0.0},
+                # granted_seconds added by OMN-18886: probe_compose_dev now
+                # DERIVES the health-observation budget from the unused
+                # settle remainder, so a stub missing it is an
+                # incomplete double of the real ModelSettleOutcome. 0.0
+                # granted keeps these cases single-sample, which is what
+                # they were written to exercise.
+                {
+                    "phrase": "settled",
+                    "timed_out": False,
+                    "waited_seconds": 0.0,
+                    "granted_seconds": 0.0,
+                },
             )(),
         )
         inventory_out = tmp_path / "inventory.json"
@@ -417,7 +428,18 @@ class TestCliPlumbing:
             lambda *a, **k: type(
                 "O",
                 (),
-                {"phrase": "settled", "timed_out": False, "waited_seconds": 0.0},
+                # granted_seconds added by OMN-18886: probe_compose_dev now
+                # DERIVES the health-observation budget from the unused
+                # settle remainder, so a stub missing it is an
+                # incomplete double of the real ModelSettleOutcome. 0.0
+                # granted keeps these cases single-sample, which is what
+                # they were written to exercise.
+                {
+                    "phrase": "settled",
+                    "timed_out": False,
+                    "waited_seconds": 0.0,
+                    "granted_seconds": 0.0,
+                },
             )(),
         )
 
