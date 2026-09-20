@@ -116,5 +116,7 @@ $require_tenant_projection_writer$;
 
 GRANT USAGE ON SCHEMA public TO tenant_projection_writer;
 GRANT SELECT, INSERT, UPDATE ON public.delegation_shadow_comparisons TO tenant_projection_writer;
+GRANT USAGE ON SCHEMA public TO app_dashboard;
+GRANT SELECT ON public.delegation_shadow_comparisons TO app_dashboard;
 
 COMMIT;

@@ -772,7 +772,11 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # row-level security, so a tenant posture would assert an isolation the
     # schema does not enforce. Vendored into omnibase_infra FIRST per the
     # node-migration-vendor-parity ordering, ahead of omnimarket#2744.
-    assert len(result.declarations) == 205
+    #
+    # 205 -> 206 for OMN-18693 / OMN-15714: restore the owning node's
+    # 0044 delegation_shadow_comparisons migration. Its checksum declaration
+    # is retained only after the byte-identical vendor artifact exists.
+    assert len(result.declarations) == 206
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
