@@ -210,6 +210,7 @@ databases:
               - projection_cost_savings_overview
               - projection_delegation_model_routing
               - projection_delegation_quality_gate
+              - projection_delegation_savings
               - projection_delegation_summary
               - projection_delegation_token_usage
             privileges:
@@ -363,5 +364,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 4d53034b0f54d495c376396ff29e49c6681bc5d3b30fce06dcb7ecbb00ce89d6
+  sha256: 386978144c7967e118c68e4d10d1b7233aa7b832f84c11c10b300d67370ae488
 topology_instance: onex-prod

@@ -245,11 +245,13 @@ MAX_UNDELIVERED = 1
 MAX_UNDELIVERED_SEQUENCES = 0
 
 # OMN-18768: the REVERSE arm -- relations this corpus grants that the topology
-# does not declare. Measured on 2026-09-19 after this change declared
+# does not declare. OMN-18862 lowered it 4 -> 3 by declaring
+# `projection_delegation_savings`, the second of the two views migration 089
+# grants on adjacent lines. Measured on 2026-09-19 after this change declared
 # `runner_fleet_liveness`. Same ratchet discipline as both arms above; see THE
 # REVERSE ARM in the module docstring for what the 4 are and why each is a
 # different class from the crash this arm exists to prevent.
-MAX_UNDECLARED = 4
+MAX_UNDECLARED = 3
 
 TOPOLOGY_RELPATH = "src/omnibase_infra/topology/instances/local.yaml"
 CORPUS_RELPATH = "docker/migrations/forward"
