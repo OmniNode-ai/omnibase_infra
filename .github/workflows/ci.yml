@@ -3570,7 +3570,11 @@ jobs:
         # this step immune to the fork/dependabot org-secret withholding
         # (OMN-16152 / OMN-16373) the live-resolve step had to work around.
         id: resolve-omnimarket-pin
-        if: steps.resolve-omnimarket-ref.outputs.ref == 'dev'
+        # OMN-18863: resolved UNCONDITIONALLY. It reads one committed file with
+        # stdlib only, and the checkout below still uses it only when no
+        # trailer named a ref -- that expression is unchanged. What changed is
+        # that a TRAILERED pull request also needs this sha now, to derive a
+        # second time against the pin exactly as the push to dev will.
         shell: bash
         run: python3 scripts/resolve_omnimarket_contract_pin.py
 
@@ -3581,6 +3585,32 @@ jobs:
           ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && steps.resolve-omnimarket-pin.outputs.sha || steps.resolve-omnimarket-ref.outputs.ref }}
           path: .proof-dependencies/omnimarket
           persist-credentials: false
+
+      # OMN-18863: THE SECOND DERIVATION, and the whole of the fix.
+      #
+      # A trailered pull request derives from the omnimarket BRANCH its
+      # trailers name; a push to dev derives from the committed pin. So a
+      # vendoring pull request could be green on its own head and red for
+      # every other open pull request one push later -- measured twice on
+      # 2026-09-19/20, nine minutes apart, on byte-identical trees. These two
+      # steps make the pull request answer the push-side question too.
+      #
+      # Only on a trailered pull request. Without trailers both sides already
+      # derive from the pin, so there is nothing asymmetric to check and this
+      # would be a second identical derivation.
+      - name: Checkout omnimarket at the committed pin (push-side mirror)
+        if: steps.resolve-omnimarket-ref.outputs.ref != 'dev'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: ${{ steps.resolve-omnimarket-pin.outputs.sha }}
+          path: .proof-dependencies/omnimarket-pin
+          persist-credentials: false
+        # The assertion that consumes this checkout runs AFTER "Setup Python
+        # and uv", not here: it invokes the generator, which imports
+        # omnibase_infra, and every step before that setup is stdlib-only by a
+        # rule this job's own test enforces.
+
 
       - name: Prove the omnimarket contract pin only moves forward
         # OMN-17292 AC3. Runs ONLY when this PR's own diff touches the pin
@@ -3667,6 +3697,16 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
 
+      # OMN-18863: consumes the pin mirror checked out above. Placed after the
+      # Python setup because it runs the real generator, which imports
+      # omnibase_infra; the steps before that setup are stdlib-only.
+      - name: Prove the derivation also holds against the committed pin (OMN-18863)
+        if: steps.resolve-omnimarket-ref.outputs.ref != 'dev'
+        run: >-
+          uv run python scripts/ci/assert_push_side_derivation.py
+          --pin-contracts-root .proof-dependencies/omnimarket-pin/src/omnimarket/nodes
+          --trailer-ref "${{ steps.resolve-omnimarket-ref.outputs.ref }}"
+
       - name: Execute mandatory source assertions and seeded RED controls
         run: >-
           uv run pytest -q
@@ -3679,6 +3719,7 @@ jobs:
           tests/unit/runtime/auto_wiring/test_projection_domain_adapters.py
           tests/ci/test_application_database_domain_enforcement_contract.py
           tests/ci/test_omnimarket_contract_pin.py
+          tests/ci/test_push_side_derivation_omn18863.py
           tests/ci/test_supplemental_declaration_expiry_omn18863.py
           tests/ci/test_application_database_sql_authority_isolation.py
           tests/ci/test_application_database_sql_gate.py
