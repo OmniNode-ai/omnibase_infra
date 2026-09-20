@@ -85,6 +85,26 @@ class ModelRuntimeHealthCheckEvent(BaseModel):
             "quarantine sink over the observation window (OMN-16994)"
         ),
     )
+    lane: str | None = Field(
+        default=None,
+        description=(
+            "OMN-18769. The runtime lane this verdict is ABOUT -- compose-dev, "
+            "onex-lab, onex-lab-k3s -- read from the ONEX_RUNTIME_LANE "
+            "environment variable at emit time.\n"
+            "\n"
+            "Nullable, and deliberately so. A runtime whose deployment does "
+            "not set the variable genuinely does not know which lane it is, "
+            "and a default would be a guess: this event is consumed by a "
+            "per-lane projection, and a guessed lane puts one cluster's "
+            "verdict onto another lane's row. A consumer that cannot read a "
+            "lane here must DROP the event rather than attribute it, which is "
+            "what node_projection_lab_lane_health does.\n"
+            "\n"
+            "It is not a required field because that would make every "
+            "already-deployed runtime fail to construct its own health event "
+            "-- turning an observability improvement into an outage."
+        ),
+    )
     nonwriting_projection_count: int = Field(
         default=0,
         description=(
