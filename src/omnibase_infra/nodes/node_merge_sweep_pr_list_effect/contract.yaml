@@ -5,14 +5,19 @@
 # Canary: skill-to-node migration — merge-sweep.
 # Lists open PRs across GitHub repositories via gh CLI.
 #
+# Related Tickets:
+#   - OMN-18823: the scan now asks GitHub for `assignees` and `reviewRequests`
+#     and populates them on ModelPRInfo, because the classifier's collaborator
+#     exclusion cannot be evaluated on a field the scan never observed.
+#
 name: "node_merge_sweep_pr_list_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
-description: "Lists open PRs across GitHub repositories and emits PR metadata."
+  patch: 1
+node_version: "1.0.1"
+description: "Lists open PRs across GitHub repositories and emits PR metadata. Contract patch 1 widens the gh field set to carry assignees and requested reviewers (OMN-18823), which ModelPRInfo requires with no default so an unobserved field cannot read as an empty one."
 input_model:
   name: "ModelPRListRequest"
   module: "omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_list_request"

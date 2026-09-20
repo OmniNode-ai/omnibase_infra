@@ -5,15 +5,21 @@
 # Canary: skill-to-node migration — merge-sweep.
 # Coordinates: scan repos -> classify PRs -> enable auto-merge.
 #
+# Related Tickets:
+#   - OMN-18823: HandlerPRListComplete now resolves the collaborator roster and
+#     threads it onto ModelClassifyInput. The argument is required, so a caller
+#     that never resolved a roster cannot silently hand the classifier an empty
+#     one.
+#
 name: "node_merge_sweep_workflow_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
-  Orchestrates the merge-sweep workflow: receive command, dispatch PR scan, dispatch classification, dispatch auto-merge, emit completion event.
+  Orchestrates the merge-sweep workflow: receive command, dispatch PR scan, dispatch classification, dispatch auto-merge, emit completion event. Contract patch 1 threads the collaborator-exclusion roster from the caller onto the classification input (OMN-18823).
 
 event_bus:
   version:

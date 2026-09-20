@@ -54,15 +54,17 @@ def test_health_cron_sources_env_file() -> None:
 
 
 @pytest.mark.unit
-def test_health_cron_logs_to_tmp() -> None:
-    """The health cron log lives under the runner host's .onex_state tree (OMN-18819).
+def test_health_cron_logs_to_the_state_directory() -> None:
+    """The health cron redirects into the repo's state dir, not into /tmp.
 
-    Renamed from a literal /tmp path once the health, monitor and repair
-    crons were moved under ``${...}/.onex_state/runner-fleet-logs/`` so the
-    fleet log survives a host reboot instead of being cleared with /tmp.
+    OMN-18819 moved this log off /tmp so it survives a reboot and sits beside
+    the fleet's other state. This asserts the destination the script's own
+    cron line writes to, and asserts /tmp is gone, so a silent move back is a
+    failure rather than a second passing assertion.
     """
     content = _read_script()
-    assert ".onex_state/runner-fleet-logs/runner-health.log" in content
+    assert "/.onex_state/runner-fleet-logs/runner-health.log 2>&1" in content
+    assert "/tmp/runner-health.log" not in content  # noqa: S108
 
 
 @pytest.mark.unit
