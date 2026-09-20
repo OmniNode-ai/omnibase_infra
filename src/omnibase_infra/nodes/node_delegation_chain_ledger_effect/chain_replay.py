@@ -120,9 +120,13 @@ def _declared_hop_for(
     places would let the two tiers disagree about what a hop IS. Tier 1 asks
     only whether the recorded causal edge closes, which is a statement about
     this hop's identity and not about where it sits.
+
+    OMN-18937: matched against every name the hop may be observed on, not
+    only its canonical one. Without this the delegation FAILURE terminal has
+    no declaration to grade against and replays red as an undeclared hop.
     """
     for candidate in declared_chain:
-        if candidate.topic == topic:
+        if topic in candidate.topics:
             return candidate
     return None
 
@@ -173,10 +177,21 @@ def _replay_one_hop(
     # envelope id, so the declared parent topic can legitimately appear more
     # than once. Matching against ANY of them is not a loosening: the edge is
     # checked against a concrete observed envelope id either way.
+    # OMN-18937: the parent is CITED by its canonical topic, but it may have
+    # been OBSERVED on one of its alternatives. Resolving the citation to the
+    # declared hop first, then matching observations against every name that
+    # hop answers to, keeps `alternatives` usable on a hop that is somebody's
+    # parent. Citing a hop that is not declared at all is already refused at
+    # parse time, so the fallback below is unreachable in a parsed topology
+    # and exists so this function is total on its own.
+    declared_parent = _declared_hop_for(declared.parent, declared_chain)
+    parent_names = (
+        declared_parent.topics if declared_parent is not None else (declared.parent,)
+    )
     candidates = tuple(
         candidate.envelope_id
         for candidate in observed
-        if candidate.topic == declared.parent
+        if candidate.topic in parent_names
     )
     if not candidates:
         return (
@@ -226,15 +241,22 @@ def _verify_one_hop(
     if index >= len(declared_chain):
         return EnumTierTwoVerdict.SKIP, _NO_DECLARATION_DETAIL
 
-    expected_topic = declared_chain[index].topic
-    if hop.topic == expected_topic:
+    # OMN-18937: a hop may declare ALTERNATIVES -- the delegation terminal is
+    # one hop observed on either the success or the failure topic. The
+    # position is still one position; what widens is the set of topics that
+    # position accepts. The FAIL detail names the whole accepted set, because
+    # a message naming one topic when two were acceptable is a red verdict
+    # that misreports what was expected.
+    accepted = declared_chain[index].topics
+    if hop.topic in accepted:
         return EnumTierTwoVerdict.PASS, ""
 
+    expected = accepted[0] if len(accepted) == 1 else f"one of {list(accepted)!r}"
     return (
         EnumTierTwoVerdict.FAIL,
         (
-            f"the declared chain has {expected_topic!r} at position {index}, "
-            f"but {hop.topic!r} was observed there"
+            f"the declared chain has {expected if len(accepted) > 1 else repr(expected)} "
+            f"at position {index}, but {hop.topic!r} was observed there"
         ),
     )
 
