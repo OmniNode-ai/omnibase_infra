@@ -734,7 +734,15 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # The grant rides in the owning node's own lineage rather than a shared
     # file, so it is a second declaration here rather than an edit to the
     # first -- the same shape as node_projection_runner_fleet's pair above.
-    assert len(result.declarations) == 200
+    #
+    # 200 -> 202 for OMN-18900 (decision 3 of the 2026-09-20 decision-workflow
+    # eval plan), which adds TWO node-owned migrations in the same shape:
+    # 0000_create_dod_verify_runs.sql, one durable row per
+    # definition-of-done verification run keyed on ticket, correlation id and
+    # completion time, and 0001_grant_omninode_runtime_dod_verify_runs.sql,
+    # which ISSUES the grants the topology only declares -- the table half and
+    # the BIGSERIAL cursor's own standalone sequence, both asserted.
+    assert len(result.declarations) == 202
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
