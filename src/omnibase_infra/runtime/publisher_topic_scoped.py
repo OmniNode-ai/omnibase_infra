@@ -77,7 +77,7 @@ from uuid import UUID
 from omnibase_core.types import JsonType
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
-from omnibase_infra.topics import TopicResolver
+from omnibase_infra.topics import TopicResolver, create_topic_resolver
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class PublisherTopicScoped:
         self._allowed_topics = frozenset(allowed_topics)
         self._environment = environment
         self._logger = logging.getLogger(__name__)
-        self._topic_resolver = TopicResolver()
+        self._topic_resolver = create_topic_resolver()
 
     def _normalize_correlation_id(
         self,

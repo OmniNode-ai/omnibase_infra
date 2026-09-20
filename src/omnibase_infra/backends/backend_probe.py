@@ -27,6 +27,7 @@ from typing import Protocol, cast
 
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -356,11 +357,13 @@ async def consumer_group_topic_backlog(
             # (OMN-12632), and is itself the full surface the observer needs.
             observer = ServiceConsumerLagObserver(AdapterKafkaAdminLag(admin, consumer))
             lag = await observer.observe(consumer_group)
-            if not lag.has_partitions_for_topic(topic):
+            # The observed lag is keyed by PHYSICAL topic name (OMN-18891).
+            physical_topic = apply_topic_namespace(topic)
+            if not lag.has_partitions_for_topic(physical_topic):
                 raise ValueError(
                     f"group {consumer_group!r} has no observed partitions on {topic!r}"
                 )
-            return lag.lag_for_topic(topic)
+            return lag.lag_for_topic(physical_topic)
         finally:
             await consumer.stop()
     finally:

@@ -192,12 +192,45 @@ class TopicResolver:
     def __init__(
         self,
         bus_descriptors: list[ModelBusDescriptor] | None = None,
+        *,
+        default_namespace_prefix: str = "",
     ) -> None:
         # Index descriptors by trust_domain for O(1) lookup.
         self._descriptors_by_domain: dict[str, ModelBusDescriptor] = {}
         if bus_descriptors is not None:
             for desc in bus_descriptors:
                 self._descriptors_by_domain[desc.trust_domain] = desc
+        # Deployment-level namespace, applied when trust-domain routing does
+        # not supply one. Empty is the default and yields the historical
+        # pass-through behaviour byte for byte. Build this through
+        # ``omnibase_infra.topics.topic_namespace.create_topic_resolver``
+        # rather than passing it here by hand (OMN-18891).
+        self._default_namespace_prefix = default_namespace_prefix
+
+    @property
+    def namespace_prefix(self) -> str:
+        """Return the deployment namespace prefix, or ``""`` in pass-through.
+
+        Exposed so a caller holding a resolver can map a physical topic name
+        back to its canonical form without re-reading configuration.
+        """
+        return self._default_namespace_prefix
+
+    def canonical(self, physical_topic: str) -> str:
+        """Map a physical topic name back to the contract-declared suffix.
+
+        The inverse of :meth:`resolve` for the deployment namespace. Every
+        consume boundary that compares or indexes by topic name calls this
+        first, because a handler registry is keyed by the canonical name and a
+        prefixed physical name would miss it (OMN-18891).
+
+        Tolerant of a name that carries no prefix, so a seam that calls it is
+        correct in both pass-through and namespaced deployments.
+        """
+        prefix = self._default_namespace_prefix
+        if prefix and physical_topic.startswith(prefix):
+            return physical_topic[len(prefix) :]
+        return physical_topic
 
     @property
     def bus_descriptors(self) -> list[ModelBusDescriptor]:
@@ -289,5 +322,10 @@ class TopicResolver:
                 )
             if descriptor.namespace_prefix:
                 return f"{descriptor.namespace_prefix}{topic_suffix}"
+
+        # Deployment namespace: applied after validation, so the physical name
+        # is legal on the wire and illegal as a contract-declared suffix.
+        if self._default_namespace_prefix:
+            return f"{self._default_namespace_prefix}{topic_suffix}"
 
         return topic_suffix

@@ -41,6 +41,7 @@ from omnibase_infra.handlers.models.model_slack_alert import (
 from omnibase_infra.services.waitlist_signup_notifier.config import (
     ConfigWaitlistSignupNotifier,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class WaitlistSignupNotifier:
     async def start(self) -> None:
         """Start the Kafka consumer and health check server."""
         self._consumer = AIOKafkaConsumer(
-            self._config.kafka_topic,
+            apply_topic_namespace(self._config.kafka_topic),
             bootstrap_servers=self._config.kafka_bootstrap_servers,
             group_id=self._config.kafka_group_id,
             auto_offset_reset="latest",

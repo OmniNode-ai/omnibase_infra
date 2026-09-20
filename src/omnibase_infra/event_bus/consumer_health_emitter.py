@@ -34,6 +34,7 @@ from omnibase_infra.models.health.model_consumer_health_event import (
     ModelConsumerHealthEvent,
 )
 from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -147,7 +148,7 @@ class ConsumerHealthEmitter:
             payload = json.dumps(
                 event.model_dump(mode="json"),
             ).encode("utf-8")
-            await self._producer.send(self._topic, value=payload)
+            await self._producer.send(apply_topic_namespace(self._topic), value=payload)
             self.events_emitted += 1
         except Exception:  # noqa: BLE001 - intentional catch-all for best-effort emission
             self.events_dropped += 1

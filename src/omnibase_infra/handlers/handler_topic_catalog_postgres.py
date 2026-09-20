@@ -1,5 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# no-migration: OMN-18891 routes this handler's default topic resolver through
+# the namespace factory. No column, table or query changed.
 
 # Copyright (c) 2026 OmniNode Team
 """PostgreSQL-backed Topic Catalog Handler.
@@ -58,6 +60,7 @@ from omnibase_infra.models.catalog.model_topic_catalog_entry import (
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
 )
+from omnibase_infra.topics.topic_namespace import create_topic_resolver
 from omnibase_infra.topics.topic_resolver import TopicResolutionError, TopicResolver
 
 if TYPE_CHECKING:
@@ -138,14 +141,14 @@ class HandlerTopicCatalogPostgres:
             pool: Optional asyncpg connection pool. When ``None`` all catalog
                 methods return empty results with a ``DB_UNAVAILABLE`` warning.
             topic_resolver: Optional resolver for mapping topic suffixes to
-                Kafka topic names. Defaults to a plain ``TopicResolver()``
+                Kafka topic names. Defaults to a plain ``create_topic_resolver()``
                 (pass-through).
             query_timeout_seconds: Maximum seconds for a DB query before
                 returning partial results. Defaults to 5.0.
         """
         self._container = container
         self._pool = pool
-        self._topic_resolver = topic_resolver or TopicResolver()
+        self._topic_resolver = topic_resolver or create_topic_resolver()
         self._query_timeout_seconds = query_timeout_seconds
 
         # in-process cache: catalog_version (int) -> ModelTopicCatalogResponse

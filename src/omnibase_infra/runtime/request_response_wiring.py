@@ -83,7 +83,8 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
-from omnibase_infra.topics import TopicResolver
+from omnibase_infra.topics import TopicResolver, create_topic_resolver
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 if TYPE_CHECKING:
     from aiokafka import ConsumerRecord
@@ -254,7 +255,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             self._bootstrap_servers = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
 
         # Canonical topic resolver - all topic resolution delegates here
-        self._topic_resolver = TopicResolver()
+        self._topic_resolver = create_topic_resolver()
 
         # Initialize circuit breaker for publish protection
         self._init_circuit_breaker(
@@ -363,8 +364,8 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
 
         # Create consumer for reply topics
         consumer = AIOKafkaConsumer(
-            completed_topic,
-            failed_topic,
+            apply_topic_namespace(completed_topic),
+            apply_topic_namespace(failed_topic),
             bootstrap_servers=self._bootstrap_servers,
             group_id=consumer_group,
             auto_offset_reset=instance.auto_offset_reset,

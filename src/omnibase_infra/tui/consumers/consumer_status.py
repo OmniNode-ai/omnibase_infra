@@ -38,6 +38,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_GITHUB_PR_STATUS,
     SUFFIX_LINEAR_SNAPSHOT,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace_all
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ async def consume_all(app: object) -> None:
     consumer: AIOKafkaConsumer | None = None
     try:
         consumer = AIOKafkaConsumer(
-            *_ALL_TOPICS,
+            *apply_topic_namespace_all(_ALL_TOPICS),
             bootstrap_servers=bootstrap_servers,
             group_id="onex-tui-status",
             auto_offset_reset="latest",
