@@ -21,18 +21,20 @@ WHAT THESE ASSERT, AND WHAT THEY DO NOT
     and `timestamp with time zone`. The omnimarket side additionally carries a
     real-Postgres write-path test over this same file.
 
-WHY BYTE-IDENTITY IS ASSERTED HERE
-    This file is a VENDORED copy. Its source of truth is the omnimarket node's
+WHY A CHECKSUM CHECK IS HERE
+    These are VENDORED copies. Their source of truth is the omnimarket node's
     own migrations directory, and the two drifting apart is a recurring defect
     with six recorded occurrences (OMN-14975 and the five it names). The
-    parity gate catches it from the omnimarket side; this catches the half
-    where a hand edit lands here.
+    parity gate watches the direction where the SOURCE moves; this watches the
+    other one, a hand edit landing here, and it answers that locally against
+    the checksum the forward-migration ledger already records rather than by
+    reaching for a cross-repository checkout that is absent in every ordinary
+    test split.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
 from pathlib import Path
 
 import pytest
@@ -48,6 +50,14 @@ NODE_DIR = (
 )
 CREATE_FILE = NODE_DIR / "0000_create_dod_verify_runs.sql"
 GRANT_FILE = NODE_DIR / "0001_grant_omninode_runtime_dod_verify_runs.sql"
+LEDGER = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "_ledger"
+    / "application-migrations.tsv"
+)
 
 TABLE = "omninode_internal.dod_verify_runs"
 SEQUENCE = "omninode_internal.dod_verify_runs_projection_cursor_seq"
@@ -206,51 +216,52 @@ def test_no_create_schema_statement_is_issued() -> None:
         assert "CREATE SCHEMA" not in _executable_sql(path), path.name
 
 
-@pytest.mark.integration
-def test_the_vendored_pair_is_byte_identical_to_its_omnimarket_source() -> None:
-    """Vendored copies drifting from their source is a six-occurrence defect.
+def _ledger_digests() -> dict[str, str]:
+    """The sha256 each ledger row records for this node's vendored files.
 
-    The omnimarket-side parity gate catches the half where the source moves.
-    This catches the half where someone hand-edits the copy here, which is the
-    direction that gate cannot see. Resolved the same way the vendoring script
-    itself resolves the source tree, and SKIPPED only when no omnimarket tree
-    is present at all -- which is a missing optional cross-repo checkout, not
-    a provisioned service, so it is not a silent-skip false green.
+    Six tab-separated columns; the relative path is first and the digest last.
     """
-    source_root = os.environ.get("OMNIMARKET_SRC") or os.environ.get("OMNI_HOME", "")
-    candidates = []
-    if source_root:
-        base = Path(source_root)
-        candidates.append(base / "src" / "omnimarket" / "nodes")
-        candidates.append(base / "omnimarket" / "src" / "omnimarket" / "nodes")
-    candidates.append(
-        REPO_ROOT
-        / ".proof-dependencies"
-        / "omnimarket"
-        / "src"
-        / "omnimarket"
-        / "nodes"
+    digests: dict[str, str] = {}
+    for line in LEDGER.read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        columns = line.split("\t")
+        if len(columns) != 6:
+            continue
+        relpath, digest = columns[0], columns[5]
+        if relpath.startswith("nodes/node_projection_dod_verdict/"):
+            digests[Path(relpath).name] = digest
+    return digests
+
+
+@pytest.mark.integration
+def test_the_vendored_pair_matches_the_checksum_the_ledger_records() -> None:
+    """A hand edit here without a ledger update is the drift nothing else sees.
+
+    Vendored copies drifting from their omnimarket source is a defect with six
+    recorded occurrences, and the omnimarket-side parity gate watches only the
+    direction where the SOURCE moves. This watches the other direction, and it
+    does so WITHOUT needing the omnimarket tree: the forward-migration ledger
+    already records a sha256 per vendored file, and bootstrap resolves a
+    historical migration against exactly that checksum. So a file edited here
+    and a ledger left alone is both a real defect and a locally answerable
+    question.
+
+    It is written this way rather than as a cross-repository comparison on
+    purpose. The comparison skipped whenever no omnimarket checkout was
+    present, which is every ordinary test split, and a collected-but-never-run
+    test proves nothing -- the skip-count ratchet said so by name. This one
+    executes everywhere.
+    """
+    recorded = _ledger_digests()
+    assert set(recorded) == {CREATE_FILE.name, GRANT_FILE.name}, (
+        "the ledger does not carry exactly the two rows this node vendors; "
+        f"got {sorted(recorded)}"
     )
-
-    nodes_root = next((c for c in candidates if c.is_dir()), None)
-    if nodes_root is None:
-        pytest.skip(
-            "no omnimarket source tree resolvable for the vendor byte-identity "
-            "check; this is an optional cross-repo checkout, not a provisioned "
-            "service"
-        )
-
-    source_dir = nodes_root / "node_projection_dod_verdict" / "migrations"
-    if not source_dir.is_dir():
-        pytest.skip(
-            "the omnimarket tree resolved here predates node_projection_dod_verdict; "
-            "the node package lands in the third pull request of this sequence"
-        )
-
     for vendored in (CREATE_FILE, GRANT_FILE):
-        origin = source_dir / vendored.name
-        assert origin.is_file(), f"{vendored.name} has no omnimarket source"
-        assert (
-            hashlib.sha256(vendored.read_bytes()).hexdigest()
-            == hashlib.sha256(origin.read_bytes()).hexdigest()
-        ), f"{vendored.name} has drifted from its omnimarket source"
+        actual = hashlib.sha256(vendored.read_bytes()).hexdigest()
+        assert actual == recorded[vendored.name], (
+            f"{vendored.name} does not match the checksum its ledger row "
+            "records. Either the file was hand-edited here, or the vendoring "
+            "was re-run without re-declaring it"
+        )
