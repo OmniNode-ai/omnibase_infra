@@ -38,6 +38,11 @@ THE THREE RULES, each a contract field rather than an implementation detail:
 * **Shape gates the keyword.** ``min_words`` / ``max_words`` are evaluated
   BEFORE any phrase, so a long prose task is structurally ineligible for the
   short keyword-driven classes whatever words it contains.
+* **An ambiguous phrase is gated on its object** (OMN-18831). A phrase
+  declared under ``qualified_phrases`` claims a prompt only where one of the
+  class's declared qualifiers sits within ``within_words`` words of it, so
+  "write a parser" is a code request and "write a PR body" is not. The
+  vocabulary is the contract's; see ``ModelQualifiedPhrases``.
 
 Ties between eligible classes are broken by ``priority`` (higher wins) and then
 by class name, so resolution is total and deterministic.
@@ -50,13 +55,16 @@ import re
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
+from omnibase_infra.cli.model_qualified_phrases import ModelQualifiedPhrases
 from omnibase_infra.cli.model_selectable_task_class import ModelSelectableTaskClass
 from omnibase_infra.cli.model_task_type_resolution import ModelTaskTypeResolution
 from omnibase_infra.enums.enum_task_type_resolution import EnumTaskTypeResolution
 
 __all__ = [
     "EnumTaskTypeResolution",
+    "ModelQualifiedPhrases",
     "ModelSelectableTaskClass",
     "ModelTaskTypeResolution",
     "TaskClassContractError",
@@ -157,15 +165,24 @@ def load_selectable_task_classes(
                 "selection predicate; a class the CLI can select must say how "
                 "a prompt selects it"
             )
-        selectable.append(
-            ModelSelectableTaskClass(
-                name=str(name),
-                priority=int(selection["priority"]),
-                phrases=tuple(str(phrase) for phrase in selection.get("phrases") or ()),
-                min_words=selection.get("min_words"),
-                max_words=selection.get("max_words"),
+        try:
+            selectable.append(
+                ModelSelectableTaskClass(
+                    name=str(name),
+                    priority=int(selection["priority"]),
+                    phrases=tuple(
+                        str(phrase) for phrase in selection.get("phrases") or ()
+                    ),
+                    min_words=selection.get("min_words"),
+                    max_words=selection.get("max_words"),
+                    qualified_phrases=selection.get("qualified_phrases"),
+                )
             )
-        )
+        except ValidationError as exc:
+            raise TaskClassContractError(
+                f"task class {name!r} declares an invalid selection predicate in "
+                f"{contract_path}: {exc}"
+            ) from exc
     if not selectable:
         raise TaskClassContractError(
             f"task-class contract at {contract_path} exposes no public class"
