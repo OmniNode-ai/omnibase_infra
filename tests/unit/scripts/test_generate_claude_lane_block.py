@@ -134,12 +134,26 @@ def test_block_includes_port_for_dev() -> None:
     assert "`8085`" in block
 
 
-def test_block_includes_port_for_prod() -> None:
-    manifest = _minimal_manifest(["prod"])
+def test_block_includes_port_for_a_second_mapped_lane() -> None:
+    """A second lane's port renders, so the map lookup is not a dev special case.
+
+    OMN-18890 repointed this from ``prod`` to ``prepr-1``. The fixture was never
+    about the prod lane — it was about a non-dev lane resolving its own port —
+    and the lab compose lane named ``prod`` was shut down on 2026-09-13
+    (OMN-18320), so its row has been removed from the port map. ``prepr-1``
+    now claims the same 28085, which is why the assertion below is unchanged.
+    """
+    manifest = _minimal_manifest(["prepr-1"])
     block = MOD.generate_block(
         manifest, None, now=datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
     )
     assert "`28085`" in block
+
+
+def test_retired_prod_lane_has_no_port_map_row() -> None:
+    """The retired lab lane may not reclaim a port the pool now holds."""
+    assert "prod" not in MOD._LANE_PORT_MAP
+    assert MOD._LANE_PORT_MAP["prepr-1"]["main"] == "28085"
 
 
 def test_block_unknown_lane_gets_dash_ports() -> None:
