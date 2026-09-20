@@ -21,6 +21,8 @@ from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
 )
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
+    DEFAULT_EXECUTION_TIMEOUT_SECONDS,
+    DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
     ProtocolDelegationDispatchPort,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
@@ -243,8 +245,20 @@ class RuntimeDelegationDispatchPort:
         source_file_path: str | None,
         source_session_id: str | None,
         wait: bool,
-        execution_timeout_seconds: int,
-        terminal_delivery_margin_seconds: int,
+        # OMN-18924. These arrived as REQUIRED keyword-only arguments under
+        # OMN-15504 while the caller deployed on the lane passes neither, so
+        # every delegation on the dev lane terminalized `provider_error` with
+        # a missing-argument TypeError -- the same producer-before-consumer
+        # inversion as the absent `execution_budgets` map, from the same
+        # change. Defaulted rather than required until the caller passes them:
+        # a new argument lands consumer-first or is excluded when unset.
+        #
+        # The values are the contract default, kept honest against
+        # `DEFAULT_EXECUTION_BUDGET` by
+        # `tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py`
+        # rather than by an import, because runtime does not depend on cli.
+        execution_timeout_seconds: int = DEFAULT_EXECUTION_TIMEOUT_SECONDS,
+        terminal_delivery_margin_seconds: int = DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
         output_schema_key: str | None = None,
         quality_contract_mode: str = "extend_task_class",
         acceptance_criteria: tuple[str, ...] = (),
