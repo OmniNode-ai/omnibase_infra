@@ -549,16 +549,17 @@ jobs:
 
       - name: Fire one live delegation through the deployed lane ingress
         if: always()
-        # advisory-ok: OMN-18866 this step is the DISPATCH, not the verdict. Its
-        # failure is graded by the delegation_golden_chain check in the probe
-        # step below, which reads the receipt this writes and reports an absent
-        # or unusable one as INDETERMINATE -- non-passing, so the delivery gate
-        # stays closed. Letting a failed dispatch abort the job instead would
-        # take the whole RECEIPT with it, and an unwritten receipt cannot tell
-        # "the delegation failed" apart from "nobody ran it", which is the one
-        # distinction rule 24(a) exists to preserve. The coverage this
-        # continue-on-error might otherwise fake is therefore not faked: it is
-        # asserted elsewhere, by a check that can and does fail.
+        # This step is the DISPATCH, not the verdict. Its failure is graded by
+        # the delegation_golden_chain check in the probe step below, which
+        # reads the receipt this writes and reports an absent or unusable one
+        # as INDETERMINATE -- non-passing, so the delivery gate stays closed.
+        # Letting a failed dispatch abort the job instead would take the whole
+        # RECEIPT with it, and an unwritten receipt cannot tell "the delegation
+        # failed" apart from "nobody ran it", which is the one distinction rule
+        # 24(a) exists to preserve. The coverage this setting might otherwise
+        # fake is therefore not faked: it is asserted by a check that can and
+        # does fail, in the step immediately below.
+        # advisory-ok: OMN-18866 dispatch step; its verdict is the delegation_golden_chain check below, which fails closed on an absent receipt
         continue-on-error: true
         env:
           # 8090, the lane's onex-api, NOT 8085. That route carries a tenant;
