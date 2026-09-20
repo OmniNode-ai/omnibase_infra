@@ -615,7 +615,9 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # gate. It proves this repository's built wheel carries byte-for-byte the
     # tracked source tree under src/, plus whatever the repo declares
     # force-included into it -- the property the image build already proves on
-    # the lab, moved to the pull request that introduces the change.
+    # the lab, moved to the pull request that introduces the change. The job
+    # is an ordinary job running a local composite action, so the check-run
+    # name is the job's own name, one segment.
     #
     # Registered here rather than in branch protection for the OMN-16878
     # reason the kb-doc-gate note above gives: `dev` requires exactly ONE
@@ -623,7 +625,7 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # tuple IS the external enforcement surface on this repo. Admitted under
     # POST_FIXTURE_WINDOW_CONTEXTS, which carries the admission argument, and
     # placed at the tail for the reason the entry above states.
-    "wheel-content-parity / wheel-content-parity",
+    "wheel-content-parity",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -721,9 +723,9 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         #     `uses:` job carries no `needs:` and no job-level `if:` -- so it
         #     reports on every pull-request shape and on a queue SHA, and
         #     cannot be skipped-as-passed.
-        #   * The reusable takes ONE input, the package's import name, which
-        #     selects WHAT is judged and cannot soften a verdict. There is no
-        #     force input, no skip input and no allowlist.
+        #   * The action takes ONE meaningful input, the package's import
+        #     name, which selects WHAT is judged and cannot soften a verdict.
+        #     There is no force input, no skip input and no allowlist.
         #   * It is proven able to FAIL on real input, on three independent
         #     historical trees, each reproducing a real incident's finding
         #     byte-for-byte: omnimarket at the #2670 merge commit reds on
@@ -741,7 +743,7 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         #   * Its unresolvable cases exit 2, never 0: a missing source package
         #     directory, a failed wheel build, and a build root the repo's own
         #     ignore patterns match all refuse rather than pass.
-        "wheel-content-parity / wheel-content-parity",
+        "wheel-content-parity",
     }
 )
 

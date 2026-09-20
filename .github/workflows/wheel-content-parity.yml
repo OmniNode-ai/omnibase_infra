@@ -6,9 +6,9 @@
 #
 # The pre-merge twin of the OMN-14631 workspace content-parity gate: it proves
 # this repository's built wheel carries byte-for-byte the tracked source tree
-# under src/, plus whatever the repo declares force-included into it. The image
-# build proves the same property on the lab, after merge; this proves it on the
-# pull request that introduces the change.
+# under src/omnibase_infra, plus whatever the repo declares force-included into
+# that package. The image build proves the same property on the lab, after
+# merge; this proves it on the pull request that introduces the change.
 #
 # This file is a thin caller. The comparison lives in
 # scripts/ci/check_wheel_content_parity.py, which imports every primitive from
@@ -38,6 +38,24 @@ permissions:
 
 jobs:
   wheel-content-parity:
-    uses: ./.github/workflows/wheel-content-parity-reusable.yml
-    with:
-      package: omnibase_infra
+    name: wheel-content-parity
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci;
+    # public forks default to ubuntu-latest. The untrusted test is the FORK
+    # test and only the fork test (OMN-18205). Read live from the routing
+    # seam; this workflow never writes a routing variable.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Judge wheel content parity
+        uses: ./.github/actions/wheel-content-parity
+        with:
+          package: omnibase_infra
