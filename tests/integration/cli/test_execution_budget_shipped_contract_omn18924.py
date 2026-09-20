@@ -49,8 +49,10 @@ def _shipped_contract_or_skip() -> Path:
     Three sources, in the order that makes this test RUN rather than skip.
     The installed package is the truest, but this repo's venv-purity gate
     refuses to run with omnimarket installed, so it is never available in CI.
-    The sibling SOURCE checkout is what CI wires, resolved by the same order
-    node-migration-sync and the skill-catalog check already use. Either way
+    The pinned checkout at `.proof-dependencies/omnimarket` is what the
+    Application Database Domain Enforcement job provides, and is the same
+    source the OMN-18863 modules use. The sibling SOURCE checkout is resolved
+    by the same order node-migration-sync and the skill-catalog check use. Either way
     the bytes are omnimarket's, not a fixture this repo wrote about itself,
     which is the whole point of the module.
     """
@@ -59,6 +61,10 @@ def _shipped_contract_or_skip() -> Path:
         installed = Path(spec.origin).resolve().parent / _CONTRACT_RELATIVE
         if installed.is_file():
             return installed
+
+    pinned = Path(".proof-dependencies/omnimarket") / "src" / "omnimarket"
+    if (pinned / _CONTRACT_RELATIVE).is_file():
+        return pinned / _CONTRACT_RELATIVE
 
     explicit = os.environ.get("OMNIMARKET_SRC")
     if explicit and (Path(explicit) / "pyproject.toml").is_file():
