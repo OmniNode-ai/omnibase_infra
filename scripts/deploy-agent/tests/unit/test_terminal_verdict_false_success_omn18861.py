@@ -79,8 +79,16 @@ _LIVE_445BDFA9_ERROR = (
 )
 
 
+# What a scope-default FULL deploy on the dev lane actually brings up, trimmed.
+# Any non-empty list exercises the third premise identically; these are real
+# service names so the fixture cannot be mistaken for a placeholder.
+_RESTARTED = ["omninode-runtime", "runtime-effects", "runtime-worker"]
+
+
 def _completed(
-    phase_results: dict[Phase, PhaseStatus], errors: list[str]
+    phase_results: dict[Phase, PhaseStatus],
+    errors: list[str],
+    services_restarted: list[str] | None = None,
 ) -> ModelRebuildCompleted:
     now = datetime.now(UTC)
     return ModelRebuildCompleted(
@@ -94,6 +102,9 @@ def _completed(
         runtime_lane="dev",
         phase_results=phase_results,
         errors=errors,
+        services_restarted=(
+            list(_RESTARTED) if services_restarted is None else services_restarted
+        ),
     )
 
 
@@ -118,7 +129,10 @@ class TestTheVerdictFailsClosedOnErrors:
     """AC1 / AC3: a recorded error outranks a phase map of successes."""
 
     def test_the_live_false_green_now_reads_failed(self) -> None:
-        completed = _completed(_LIVE_445BDFA9_PHASES, [_LIVE_445BDFA9_ERROR])
+        """Offset 916 reproduced exactly, empty services_restarted included."""
+        completed = _completed(
+            _LIVE_445BDFA9_PHASES, [_LIVE_445BDFA9_ERROR], services_restarted=[]
+        )
         assert completed.status == "failed"
 
     def test_the_wire_payload_agrees_with_the_job_record(self) -> None:
@@ -149,6 +163,53 @@ class TestTheVerdictFailsClosedOnErrors:
         phases = dict(_LIVE_445BDFA9_PHASES)
         phases[Phase.RUNTIME] = PhaseStatus.FAILED
         assert _completed(phases, []).status == "failed"
+
+
+class TestADeployThatRestartedNothingIsNotASuccess:
+    """The third premise: a failure that was never RECORDED is still a failure.
+
+    The errors premise catches a recorded one. This catches the case where a
+    future path raises without writing an error, which the phase map alone
+    would still read as success.
+    """
+
+    def test_an_empty_services_restarted_fails_on_a_clean_phase_map(self) -> None:
+        every_phase_green = dict.fromkeys(_LIVE_445BDFA9_PHASES, PhaseStatus.SUCCESS)
+        assert _completed(every_phase_green, [], services_restarted=[]).status == (
+            "failed"
+        )
+
+    def test_the_premise_is_independent_of_errors(self) -> None:
+        """No error recorded, nothing restarted, every phase green: still failed."""
+        assert _completed(_LIVE_445BDFA9_PHASES, [], services_restarted=[]).status == (
+            "failed"
+        )
+
+    def test_one_restarted_service_is_enough_to_clear_it(self) -> None:
+        """Not vacuous: the premise is emptiness, not a count or a whitelist."""
+        every_phase_green = dict.fromkeys(_LIVE_445BDFA9_PHASES, PhaseStatus.SUCCESS)
+        completed = _completed(
+            every_phase_green, [], services_restarted=["omninode-runtime"]
+        )
+        assert completed.status == "success"
+
+    def test_a_gateway_only_deploy_is_not_false_redded(self) -> None:
+        """The shape a per-scope phase requirement would have broken.
+
+        A command naming only gateway services returns from ``rebuild_scope``
+        before ``Phase.CORE`` or ``Phase.RUNTIME`` is ever marked, so both are
+        SKIPPED on a wholly successful deploy. It restarted something, so it
+        reads success -- which is why the premise is "restarted nothing" and
+        not "every leg of the scope ran".
+        """
+        gateway_shape = dict(_LIVE_445BDFA9_PHASES)
+        gateway_shape[Phase.VERIFICATION] = PhaseStatus.SUCCESS
+        completed = _completed(
+            gateway_shape, [], services_restarted=["onex-gateway-forwarder"]
+        )
+        assert completed.phase_results[Phase.CORE] == PhaseStatus.SKIPPED
+        assert completed.phase_results[Phase.RUNTIME] == PhaseStatus.SKIPPED
+        assert completed.status == "success"
 
 
 class TestTheVerdictStaysDerived:
