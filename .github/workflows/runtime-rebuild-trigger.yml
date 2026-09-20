@@ -490,14 +490,34 @@ jobs:
           # second declaration free to disagree with the first, which is the
           # whole of the OMN-15837 defect that module exists to end.
           #
-          # It exits 2 on an empty result rather than printing nothing: an
-          # empty group list read as "no lag to check" is how a probe reports
-          # green on a lane it never looked at.
-          GROUPS=$(cd scripts/runtime_build && uv run python declared_consumer_groups.py \
-            --compose ../../docker/docker-compose.dev-lane.yml \
-            --env local | paste -sd, -)
-          echo "declared writer groups: ${GROUPS}"
-          echo "groups=${GROUPS}" >> "$GITHUB_OUTPUT"
+          # TWO THINGS HERE ARE FIXES FOR HOW THIS STEP FAILED IN PRODUCTION
+          # on run 35488731787, and neither is cosmetic.
+          #
+          # 1. INVOKED FROM THE REPOSITORY ROOT, by path, with no `cd`. The
+          #    first version ran `cd scripts/runtime_build && uv run python
+          #    declared_consumer_groups.py`, which exited 1 in 0.086s having
+          #    printed NOTHING -- before Python started. Every other step in
+          #    this job that works calls `uv run python <path-from-root>`, and
+          #    that is the shape the shared CI env's `uv` shim is exercised
+          #    with. There is no reason to be the one step that differs.
+          #
+          # 2. THE RESULT TRAVELS AS A FILE, not a step output. The stdout of
+          #    the first version was swallowed by a command substitution, so
+          #    when it failed the step output was simply never set, the
+          #    consuming expression delivered an EMPTY STRING, and the probe
+          #    read that as "this lane declares no consumer groups" -- a false
+          #    statement about a lane that declares six, which then refused
+          #    every dev sha for staging. An unset step output and an empty
+          #    declaration are the same bytes; a MISSING FILE and an EMPTY
+          #    FILE are not.
+          #
+          # The deriver still exits non-zero on an empty result, so a lane that
+          # genuinely declares nothing stops here rather than being reported as
+          # measured.
+          uv run python scripts/runtime_build/declared_consumer_groups.py \
+            --compose docker/docker-compose.dev-lane.yml \
+            --env local \
+            --out "${LAB_PASS_DIR}/declared-groups.txt"
 
       - name: Take the earlier consumer-lag sample
         if: always()
@@ -516,7 +536,6 @@ jobs:
           KAFKA_SASL_MECHANISM: SCRAM-SHA-256
           KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
           KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
-          DECLARED_GROUPS: ${{ steps.groups.outputs.groups }}
         run: |
           set -euo pipefail
           # BEFORE the convergence wait would be better still, but the lane is
@@ -532,7 +551,7 @@ jobs:
           uv run python scripts/ci/lab_pass_receipt.py sample-lag \
             --broker-container "$DEV_LANE_BROKER_CONTAINER" \
             --broker-address "$DEV_LANE_BROKER_ADDRESS" \
-            --consumer-groups "$DECLARED_GROUPS" \
+            --consumer-groups-file "${LAB_PASS_DIR}/declared-groups.txt" \
             --out "${LAB_PASS_DIR}/lag-sample.json"
 
       # ONE fetch, TWO consumers. This job gained a second, byte-identical
@@ -544,12 +563,16 @@ jobs:
       # racing one path is a clash waiting for a version of `checkout` that
       # stops cleaning the destination first.
       #
-      # It carries OMN-18769's continue-on-error, not this ticket's absence of
-      # one, because that is the stricter reading and the correct one for BOTH
-      # consumers: an overlay fetch failure must not fail the lab pass. The
-      # delegation dispatch below already warns and exits 0 without it, and
-      # the verdict publish below already treats a failed publish as an
-      # observability gap rather than a lab-pass failure.
+      # It carries OMN-18769's continue-on-error, which was the stricter of the
+      # two readings and is the right one: an overlay fetch failure must not
+      # fail the lab pass, because the verdict publish it feeds is
+      # observability and the artifact already carries the verdict.
+      #
+      # Since the delegation dispatch was removed, OMN-18769's verdict publish
+      # is the ONLY remaining consumer of this checkout. It is left in place
+      # rather than folded back into that step so the two are not re-coupled;
+      # if the delegation check is ever wired the way its own note argues, it
+      # will want this same fetch and will not have to re-add it.
       - name: Fetch the declared CI bus lanes
         if: always()
         # advisory-ok: OMN-18866 overlay fetch shared by the delegation dispatch and the OMN-18769 verdict publish; neither may fail the lab pass on it
@@ -564,67 +587,28 @@ jobs:
             config/ci_bus_lanes.yaml
           sparse-checkout-cone-mode: false
 
-      - name: Fire one live delegation through the deployed lane ingress
-        if: always()
-        # This step is the DISPATCH, not the verdict. Its failure is graded by
-        # the delegation_golden_chain check in the probe step below, which
-        # reads the receipt this writes and reports an absent or unusable one
-        # as INDETERMINATE -- non-passing, so the delivery gate stays closed.
-        # Letting a failed dispatch abort the job instead would take the whole
-        # RECEIPT with it, and an unwritten receipt cannot tell "the delegation
-        # failed" apart from "nobody ran it", which is the one distinction rule
-        # 24(a) exists to preserve. The coverage this setting might otherwise
-        # fake is therefore not faked: it is asserted by a check that can and
-        # does fail, in the step immediately below.
-        # advisory-ok: OMN-18866 dispatch step; its verdict is the delegation_golden_chain check below, which fails closed on an absent receipt
-        continue-on-error: true
-        env:
-          # 8090, the lane's onex-api, NOT 8085. That route carries a tenant;
-          # the tenant-less ingress produced chains whose every event the
-          # delegation projection writer refused fail-closed (OMN-18421).
-          GATEWAY_URL: http://host.docker.internal:8090
-          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
-          BUS_LANE: dev
-          # This job's runner carries no OMNI_HOME clone, so the omnimarket
-          # drift guard the canary workflow has to override cannot fire here.
-          # The override is deliberately NOT copied: adding it would suppress a
-          # real warning on a path that does not need it.
-        run: |
-          set -uo pipefail
-          # NOT `set -e`. A non-zero dispatch is itself a finding and must
-          # still leave a receipt for the probe to grade; an absent receipt is
-          # reported as INDETERMINATE (a fact about this step) rather than as a
-          # lane failure, which is a different claim.
-          #
-          # Fail-closed by construction: load_lane_transport RAISES on a
-          # missing lane, an in-memory lane, an undeclared protocol or a broker
-          # that is itself a host alias. It never returns a default.
-          uv run python -c "
-          import os, pathlib
-          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
-              lane_transport_env, load_lane_transport,
-          )
-          transport = load_lane_transport(
-              pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'),
-              os.environ['BUS_LANE'],
-          )
-          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
-              for key, value in lane_transport_env(transport).items():
-                  handle.write(f'{key}={value}\n')
-          " || {
-            echo "::warning::lane transport unresolved; the delegation check will report INDETERMINATE"
-            exit 0
-          }
-          # The NAME is safe to print and is the one thing worth printing.
-          echo "gateway key var: CHAIN_CANARY_GATEWAY_API_KEY"
-          uv run onex skill chain_canary \
-            --gateway-url "${GATEWAY_URL}" \
-            --gateway-api-key-env CHAIN_CANARY_GATEWAY_API_KEY \
-            --task-type test \
-            --budget-ms 120000 \
-            --terminal-bootstrap-servers "${KAFKA_BOOTSTRAP_SERVERS:-}" \
-            --quarantine-bootstrap-servers "${KAFKA_BOOTSTRAP_SERVERS:-}" \
-            > "${LAB_PASS_DIR}/chain-canary-receipt.json"
+      # THE CHAIN-CANARY DISPATCH THAT STOOD HERE HAS BEEN REMOVED (OMN-18866
+      # follow-up), and this comment is the record of why, because the next
+      # person to want a delegation check in this receipt will reach for
+      # exactly what was here.
+      #
+      # It fired one live delegation through the deployed lane ingress and the
+      # probe below graded its receipt. That coupled the compose-dev lab-pass
+      # receipt -- which rule 24(b) makes a hard precondition for delivery to
+      # staging -- to a SEPARATELY OWNED surface whose scheduled runs were
+      # already red on the tenant-bearing ingress (OMN-18872). The result,
+      # measured on run 35488731787: a healthy, converged lane with seven
+      # passing checks was refused for staging, and every dev sha after it,
+      # until this was reverted.
+      #
+      # A check that cannot pass blocks delivery, which makes it strictly worse
+      # than one that merely cannot fail. Do not re-add the dispatch here. The
+      # right shape, argued at the PROBES_NOT_YET_WIRED entry in
+      # scripts/ci/lab_pass_receipt.py, is for the canary to emit its OWN
+      # sha-keyed receipt and for this gate to READ it -- which decouples the
+      # two surfaces and keeps the delivery path off another lane's dispatch.
+      # The probe function, its CLI flag and its tests are all still there for
+      # that wiring.
 
       - name: Probe the dev lane
         id: probe
@@ -699,7 +683,6 @@ jobs:
           # different failure of a group that is enormously behind and stays
           # there across both reads.
           DEV_LANE_MAX_CONSUMER_LAG: "10000"
-          DECLARED_GROUPS: ${{ steps.groups.outputs.groups }}
           KAFKA_SASL_MECHANISM: SCRAM-SHA-256
           KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
           KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
@@ -769,10 +752,9 @@ jobs:
             --forward-migrations-dir docker/migrations/forward \
             --broker-container "$DEV_LANE_BROKER_CONTAINER" \
             --broker-address "$DEV_LANE_BROKER_ADDRESS" \
-            --consumer-groups "$DECLARED_GROUPS" \
+            --consumer-groups-file "${LAB_PASS_DIR}/declared-groups.txt" \
             --max-consumer-lag "$DEV_LANE_MAX_CONSUMER_LAG" \
             --first-lag-sample-json "${LAB_PASS_DIR}/lag-sample.json" \
-            --chain-canary-receipt "${LAB_PASS_DIR}/chain-canary-receipt.json" \
             > "${LAB_PASS_CHECKS}"
           cat "${LAB_PASS_CHECKS}"
 
