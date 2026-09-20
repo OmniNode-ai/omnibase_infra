@@ -254,6 +254,15 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="aggregate_token_usage",
         ),
     ),
+    # OMN-18863: the runtime-error fingerprints entry that used to sit here was
+    # DELETED when the pin advanced to ac35d56338b3, which is omnimarket#2664's
+    # squash, because the contract declares the relation itself now. That is the
+    # expiry test in tests/integration/topology working on its first real
+    # occasion rather than a cleanup somebody remembered: it went red naming
+    # this entry, and this is the deletion it asked for. The instances came back
+    # byte-identical, which is the proof the contract derives what the entry
+    # used to. The lab_lane_health entry below is still live because its own
+    # source pull request has not merged.
     # OMN-18863: the two supplemental bridges that sat here, for
     # runtime_error_fingerprints and lab_lane_health, were both DELETED by the
     # pin advances that made them redundant -- ac35d56338b3 and e1c4c8f61a1f.
