@@ -132,9 +132,27 @@ async def test_ledger_projection_wires_when_result_applier_registered() -> None:
     (dispatch rejected every message on them), and OMN-18398 added the four
     delegation-chain topics the chain-ledger writer reads back out of
     public.event_ledger. OMN-18419 added the fifth chain hop,
-    delegation-request.v1, so wiring_count is 25, one per topic-scoped
-    dispatcher.
+    delegation-request.v1; OMN-18937 added the delegation FAILURE terminal.
+
+    OMN-18937: the expected count is now DERIVED from the contract's own
+    routing table rather than written here as a literal. The invariant is
+    "every declared routing entry produced a wiring", which is what the
+    literal stood in for -- and that literal had to be edited by four
+    consecutive tickets, each of which learned about it from a red test
+    rather than from the change it was making. Deriving it keeps the
+    invariant and drops the restale: a contract declaring 26 entries and
+    wiring 25 still fails here, which is the case worth catching.
     """
+    declared_routing_entries = len(
+        yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))["handler_routing"][
+            "handlers"
+        ]
+    )
+    assert declared_routing_entries > 1, (
+        "the contract declares one routing entry per topic; a count this small "
+        "means the derivation is reading the wrong key and the wiring "
+        "assertion below is vacuous"
+    )
     outcome, wiring_count, reason = await _wire(with_applier=True)
 
     assert outcome is EnumWiringOutcome.WIRED, (
@@ -142,8 +160,9 @@ async def test_ledger_projection_wires_when_result_applier_registered() -> None:
         f"reason={reason!r}). A raw audit/projection contract that does not reach "
         "WIRED never creates a consumer, so event_ledger stays empty."
     )
-    assert wiring_count == 25, (
-        f"expected 25 wired handlers (1 per topic), got {wiring_count}"
+    assert wiring_count == declared_routing_entries, (
+        f"expected {declared_routing_entries} wired handlers (1 per declared "
+        f"handler_routing entry), got {wiring_count}"
     )
 
 

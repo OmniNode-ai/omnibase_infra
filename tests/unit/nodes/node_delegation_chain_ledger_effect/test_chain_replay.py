@@ -376,3 +376,138 @@ def test_a_declared_hop_may_not_name_itself_as_its_own_cause() -> None:
     """The declaration cannot ask for an edge the transport would reject."""
     with pytest.raises(ValueError, match="its own parent"):
         ModelDeclaredChainHop(topic=TOPICS[0], parent=TOPICS[0])
+
+
+# ---------------------------------------------------------------------------
+# OMN-18937: the terminal hop has TWO possible topics
+#
+# A delegation terminates as either completed or failed, never both. That is
+# one hop with an alternative name, not two hops -- and the distinction is
+# load-bearing, because tier 2 grades POSITIONALLY and the canary reads the
+# whole chain's tier-2 verdict from the LAST row. Declared as a sixth hop, a
+# failed terminal observed at index 4 would be graded against the SUCCESS
+# topic and fail the one row that decides the verdict. These tests pin the
+# alternative shape against exactly that regression.
+# ---------------------------------------------------------------------------
+
+FAILED_TERMINAL = "onex.evt.omnimarket.delegate-skill-failed.v1"
+
+# The live topology: five entries, the terminal answering to either topic.
+DECLARED_TREE_WITH_ALTERNATIVE = (
+    ModelDeclaredChainHop(topic=TOPICS[0], parent=None),
+    ModelDeclaredChainHop(topic=TOPICS[1], parent=TOPICS[0]),
+    ModelDeclaredChainHop(topic=TOPICS[2], parent=TOPICS[1]),
+    ModelDeclaredChainHop(
+        topic=TOPICS[3], parent=TOPICS[0], alternatives=(FAILED_TERMINAL,)
+    ),
+)
+
+
+def _chain_ending_in(terminal_topic: str) -> tuple[ModelObservedHop, ...]:
+    """The tree chain, terminating on whichever terminal is passed."""
+    return (
+        _hop(TOPICS[0], E0, None),
+        _hop(TOPICS[1], E1, E0),
+        _hop(TOPICS[2], E2, E1),
+        _hop(terminal_topic, E3, E0),
+    )
+
+
+@pytest.mark.parametrize("terminal", [TOPICS[3], FAILED_TERMINAL])
+def test_either_declared_terminal_replays_green_and_verifies_pass(
+    terminal: str,
+) -> None:
+    """Both terminals are the same hop, so both grade identically.
+
+    The failure terminal is the one that regressed: before OMN-18937 it had
+    no declaration at all, so tier 1 returned "no declared parent" red and
+    tier 2 graded it against the success topic.
+    """
+    rows = assemble_replay_and_verify(
+        CORRELATION, _chain_ending_in(terminal), DECLARED_TREE_WITH_ALTERNATIVE
+    )
+
+    assert len(rows) == 4
+    assert all(row.replay_green for row in rows), [
+        (row.observed_topic, row.replay_detail) for row in rows if not row.replay_green
+    ]
+    assert all(row.verifier_verdict is EnumTierTwoVerdict.PASS for row in rows), [
+        (row.observed_topic, row.verifier_detail) for row in rows
+    ]
+    # The canary reads the chain's tier-2 verdict from the LAST row only.
+    assert rows[-1].observed_topic == terminal
+    assert rows[-1].verifier_verdict is EnumTierTwoVerdict.PASS
+
+
+def test_an_undeclared_terminal_at_the_terminal_position_still_fails() -> None:
+    """Negative control: accepting two topics is not accepting any topic.
+
+    Without this, `test_either_declared_terminal_replays_green...` is also
+    satisfied by a verifier that stopped checking the terminal position.
+    """
+    rows = assemble_replay_and_verify(
+        CORRELATION,
+        _chain_ending_in("onex.evt.omnimarket.delegate-skill-abandoned.v1"),
+        DECLARED_TREE_WITH_ALTERNATIVE,
+    )
+
+    assert rows[-1].verifier_verdict is EnumTierTwoVerdict.FAIL
+    # The detail must name BOTH accepted topics: a red verdict that reports
+    # one expected topic when two were acceptable misdescribes the check.
+    assert TOPICS[3] in rows[-1].verifier_detail
+    assert FAILED_TERMINAL in rows[-1].verifier_detail
+    # Tier 1 is independent and also red -- the hop has no declaration.
+    assert not rows[-1].replay_green
+
+
+def test_a_hop_observed_on_its_alternative_can_still_be_a_parent() -> None:
+    """An alias is a name for the hop, so an edge may close against it.
+
+    Nothing in the live topology cites the terminal as a parent today. This
+    pins the semantics anyway, because a resolution that worked for leaves
+    only would be an undeclared limitation of `alternatives` rather than a
+    decision.
+    """
+    follow_on = "onex.evt.omnibase-infra.delegation-postmortem.v1"
+    declared = (
+        *DECLARED_TREE_WITH_ALTERNATIVE,
+        ModelDeclaredChainHop(topic=follow_on, parent=TOPICS[3]),
+    )
+    observed = (*_chain_ending_in(FAILED_TERMINAL), _hop(follow_on, UNRELATED, E3))
+
+    rows = assemble_replay_and_verify(CORRELATION, observed, declared)
+
+    assert rows[-1].observed_topic == follow_on
+    assert rows[-1].replay_green, rows[-1].replay_detail
+    assert rows[-1].verifier_verdict is EnumTierTwoVerdict.PASS
+
+
+def test_a_hop_may_not_name_its_own_alternative_as_its_parent() -> None:
+    """Self-causation refused through an alias too, not only by canonical name."""
+    with pytest.raises(ValueError, match="own parent"):
+        ModelDeclaredChainHop(
+            topic=TOPICS[3], parent=FAILED_TERMINAL, alternatives=(FAILED_TERMINAL,)
+        )
+
+
+@pytest.mark.parametrize(
+    ("alternatives", "expected"),
+    [
+        ((TOPICS[3],), "canonical topic"),
+        ((FAILED_TERMINAL, FAILED_TERMINAL), "repeats an alternative"),
+        (("",), "empty alternative"),
+    ],
+)
+def test_an_unmatchable_alternative_is_refused_at_declaration(
+    alternatives: tuple[str, ...], expected: str
+) -> None:
+    """A hop whose aliases cannot be resolved must refuse at construction.
+
+    Each of these would otherwise reach the replay as an ambiguity graded
+    silently: first-match-wins over a duplicate, or an empty string matching
+    no observation while looking like a declared name.
+    """
+    with pytest.raises(ValueError, match=expected):
+        ModelDeclaredChainHop(
+            topic=TOPICS[3], parent=TOPICS[0], alternatives=alternatives
+        )

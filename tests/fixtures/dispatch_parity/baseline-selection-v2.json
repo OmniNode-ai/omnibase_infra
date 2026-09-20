@@ -408,6 +408,24 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89": {
+      "category": "event",
+      "contract_name": "node_delegation_chain_ledger_effect",
+      "event_model_module": "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models",
+      "event_model_name": "ModelDelegationTerminalPayload",
+      "handler_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89",
+      "handler_module": "omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_delegation_chain_ledger",
+      "handler_name": "HandlerDelegationChainLedger",
+      "message_types": [
+        "ModelDelegationTerminalPayload",
+        "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
+        "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e": {
       "category": "event",
       "contract_name": "node_delegation_chain_ledger_effect",
@@ -419,7 +437,9 @@
       "message_types": [
         "ModelDelegationTerminalPayload",
         "omnimarket.delegate-skill-completed",
-        "onex.evt.omnimarket.delegate-skill-completed.v1"
+        "omnimarket.delegate-skill-failed",
+        "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -717,6 +737,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -736,6 +757,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -781,6 +803,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -800,6 +823,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -845,6 +869,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -864,6 +889,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -909,6 +935,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -928,6 +955,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -973,6 +1001,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -992,6 +1021,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1037,6 +1067,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1056,6 +1087,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1101,6 +1133,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1120,6 +1153,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1165,6 +1199,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1184,6 +1219,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1229,6 +1265,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1248,6 +1285,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1293,6 +1331,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1312,6 +1351,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1357,6 +1397,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1376,6 +1417,73 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
+        "onex.evt.omnimarket.runtime-deployment-proof.v1",
+        "onex.evt.onex-change-control.contract-drift-detected.v1",
+        "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
+        "onex.evt.onex-change-control.governance-check-completed.v1",
+        "onex.evt.platform.fsm-state-transitions.v1",
+        "onex.evt.platform.node-heartbeat.v1",
+        "onex.evt.platform.node-introspection.v1",
+        "onex.evt.platform.node-registration.v1",
+        "onex.evt.platform.registration-snapshots.v1",
+        "onex.evt.steel-onslaught.match-terminal.v1",
+        "onex.intent.platform.runtime-tick.v1",
+        "platform.fsm-state-transitions",
+        "platform.node-heartbeat",
+        "platform.node-introspection",
+        "platform.node-registration",
+        "platform.registration-snapshots",
+        "platform.request-introspection",
+        "platform.runtime-tick",
+        "steel-onslaught.match-terminal"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5": {
+      "category": "event",
+      "contract_name": "node_ledger_projection_compute",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "handler_module": "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection",
+      "handler_name": "HandlerLedgerProjection",
+      "message_types": [
+        "ModelEventMessage",
+        "occ.nightly-promotion",
+        "omnibase-infra.build-loop-append",
+        "omnibase-infra.build-loop-appended",
+        "omnibase-infra.commands",
+        "omnibase-infra.delegation-request",
+        "omnibase-infra.delegation-routing-request",
+        "omnibase-infra.events",
+        "omnibase-infra.intents",
+        "omnibase-infra.routing-decision",
+        "omnimarket.build-loop-orchestrator-completed",
+        "omnimarket.delegate-skill",
+        "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
+        "omnimarket.redeploy-start",
+        "omnimarket.runtime-deployment-proof",
+        "onex-change-control.contract-drift-detected",
+        "onex-change-control.cosmetic-compliance-scored",
+        "onex-change-control.governance-check-completed",
+        "onex.cmd.omnibase-infra.build-loop-append.v1",
+        "onex.cmd.omnibase-infra.delegation-request.v1",
+        "onex.cmd.omnibase-infra.delegation-routing-request.v1",
+        "onex.cmd.omnimarket.delegate-skill.v1",
+        "onex.cmd.omnimarket.redeploy-start.v1",
+        "onex.cmd.platform.request-introspection.v1",
+        "onex.dlq.omnibase-infra.commands.v1",
+        "onex.dlq.omnibase-infra.events.v1",
+        "onex.dlq.omnibase-infra.intents.v1",
+        "onex.evt.occ.nightly-promotion.v1",
+        "onex.evt.omnibase-infra.build-loop-appended.v1",
+        "onex.evt.omnibase-infra.routing-decision.v1",
+        "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1421,6 +1529,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1440,6 +1549,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1485,6 +1595,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1504,6 +1615,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1549,6 +1661,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1568,6 +1681,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1613,6 +1727,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1632,6 +1747,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1677,6 +1793,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1696,6 +1813,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1741,6 +1859,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1760,6 +1879,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1805,6 +1925,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1824,6 +1945,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1869,6 +1991,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1888,6 +2011,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1933,6 +2057,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -1952,6 +2077,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -1997,6 +2123,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -2016,6 +2143,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -2061,6 +2189,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -2080,6 +2209,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -2125,6 +2255,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -2144,6 +2275,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -2189,6 +2321,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -2208,6 +2341,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -2253,6 +2387,7 @@
         "omnimarket.build-loop-orchestrator-completed",
         "omnimarket.delegate-skill",
         "omnimarket.delegate-skill-completed",
+        "omnimarket.delegate-skill-failed",
         "omnimarket.redeploy-start",
         "omnimarket.runtime-deployment-proof",
         "onex-change-control.contract-drift-detected",
@@ -2272,6 +2407,7 @@
         "onex.evt.omnibase-infra.routing-decision.v1",
         "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.evt.omnimarket.runtime-deployment-proof.v1",
         "onex.evt.onex-change-control.contract-drift-detected.v1",
         "onex.evt.onex-change-control.cosmetic-compliance-scored.v1",
@@ -3291,11 +3427,11 @@
       },
       "contracts_discovered": 144,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 102,
-      "probe_count": 975,
-      "registered_dispatchers": 123,
-      "registered_routes": 118,
-      "type_scoped_dispatchers": 72
+      "distinct_subscribe_topics": 103,
+      "probe_count": 1031,
+      "registered_dispatchers": 125,
+      "registered_routes": 120,
+      "type_scoped_dispatchers": 74
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3335,10 +3471,10 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-09-16T09:04:13.029373+00:00",
+    "generated_at_utc": "2026-09-20T21:52:48.146538+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.15",
-      "omnibase-infra": "0.38.29",
+      "omnibase-core": "0.47.18",
+      "omnibase-infra": "0.38.40",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -4557,6 +4693,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P1a::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnimarket.v1",
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P1a::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -6090,6 +6241,21 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P1b::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P1b::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -7064,6 +7230,46 @@
       },
       "topic": "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
     },
+    "P4::dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89::onex.evt.omnimarket.delegate-skill-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89",
+      "event_model": "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.ModelDelegationTerminalPayload",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-completed",
+        "payload": "ModelDelegationTerminalPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89",
+      "event_model": "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.ModelDelegationTerminalPayload",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelDelegationTerminalPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e::onex.evt.omnimarket.delegate-skill-completed.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e",
@@ -7083,6 +7289,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e",
+      "event_model": "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.ModelDelegationTerminalPayload",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelDelegationTerminalPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
@@ -7387,6 +7613,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -7891,6 +8137,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a",
@@ -8393,6 +8659,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -8897,6 +9183,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375",
@@ -9399,6 +9705,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -9903,6 +10229,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9",
@@ -10405,6 +10751,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_520a72c1::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_520a72c1",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_520a72c1::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -10909,6 +11275,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7",
@@ -11411,6 +11797,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_5901b214::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_5901b214",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_5901b214::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -11915,6 +12321,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_5a09f3c2::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_5a09f3c2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_5a09f3c2::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_5a09f3c2",
@@ -12418,6 +12844,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1",
@@ -12621,6 +13067,529 @@
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1::onex.intent.platform.runtime-tick.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runtime-tick",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "platform.runtime-tick",
+        "status": "success"
+      },
+      "topic": "onex.intent.platform.runtime-tick.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.cmd.omnibase-infra.build-loop-append.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.build-loop-append",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_build_loop_write_effect.HandlerBuildLoopAppend.build_loop_append_1eb0a5fb",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_b1cf841e"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.build-loop-append",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.build-loop-append.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.cmd.omnibase-infra.delegation-request.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.delegation-request",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_5901b214"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.delegation-request",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.delegation-request.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.cmd.omnibase-infra.delegation-routing-request.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.delegation-routing-request",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e28bbe9e"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.delegation-routing-request",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.cmd.omnimarket.delegate-skill.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_5a09f3c2"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnimarket.delegate-skill",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnimarket.delegate-skill.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.cmd.omnimarket.redeploy-start.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.redeploy-start",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnimarket.redeploy-start",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnimarket.redeploy-start.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.cmd.platform.request-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.request-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_58404bf7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.request-introspection",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.dlq.omnibase-infra.commands.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.commands",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.commands",
+        "status": "success"
+      },
+      "topic": "onex.dlq.omnibase-infra.commands.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.dlq.omnibase-infra.events.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.events",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_8a4ba739",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.events",
+        "status": "success"
+      },
+      "topic": "onex.dlq.omnibase-infra.events.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.dlq.omnibase-infra.intents.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.intents",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_520a72c1"
+        ],
+        "dlq_topic": null,
+        "message_category": "intent",
+        "message_type": "omnibase-infra.intents",
+        "status": "success"
+      },
+      "topic": "onex.dlq.omnibase-infra.intents.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.occ.nightly-promotion.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "occ.nightly-promotion",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "occ.nightly-promotion",
+        "status": "success"
+      },
+      "topic": "onex.evt.occ.nightly-promotion.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.omnibase-infra.build-loop-appended.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.build-loop-appended",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3579d375"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.build-loop-appended",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnibase-infra.build-loop-appended.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.omnibase-infra.routing-decision.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.routing-decision",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_94163f65"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.routing-decision",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnibase-infra.routing-decision.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.omnimarket.build-loop-orchestrator-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.build-loop-orchestrator-completed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_build_loop_projection_compute.HandlerBuildLoopProjection.build_loop_project_b48dcfa8",
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.build-loop-orchestrator-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.omnimarket.delegate-skill-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-completed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c2df17da"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.omnimarket.runtime-deployment-proof.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.runtime-deployment-proof",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.runtime-deployment-proof",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.runtime-deployment-proof.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.onex-change-control.contract-drift-detected.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "onex-change-control.contract-drift-detected",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "onex-change-control.contract-drift-detected",
+        "status": "success"
+      },
+      "topic": "onex.evt.onex-change-control.contract-drift-detected.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.onex-change-control.cosmetic-compliance-scored.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "onex-change-control.cosmetic-compliance-scored",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_20b031bf"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "onex-change-control.cosmetic-compliance-scored",
+        "status": "success"
+      },
+      "topic": "onex.evt.onex-change-control.cosmetic-compliance-scored.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.onex-change-control.governance-check-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "onex-change-control.governance-check-completed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_106cf59a"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "onex-change-control.governance-check-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.onex-change-control.governance-check-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.platform.fsm-state-transitions.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.fsm-state-transitions",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_3bd91ec3"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.fsm-state-transitions",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.fsm-state-transitions.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.platform.node-heartbeat.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-heartbeat",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-heartbeat",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-heartbeat.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.platform.node-introspection.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-introspection",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_4180e0d9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-introspection",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-introspection.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.platform.node-registration.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-registration",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.node-registration",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.node-registration.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.platform.registration-snapshots.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.registration-snapshots",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.registration-snapshots",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.registration-snapshots.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.evt.steel-onslaught.match-terminal.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "steel-onslaught.match-terminal",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "steel-onslaught.match-terminal",
+        "status": "success"
+      },
+      "topic": "onex.evt.steel-onslaught.match-terminal.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5::onex.intent.platform.runtime-tick.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
       "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
       "family": "P4_payload_type_scoping",
       "input": {
@@ -12920,6 +13889,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_85d7b3d6::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -13424,6 +14413,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_8d5b772c",
@@ -13926,6 +14935,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_94163f65::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_94163f65",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_94163f65::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -14430,6 +15459,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_982021ab",
@@ -14932,6 +15981,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a0d95493::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -15436,6 +16505,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_a132611f",
@@ -15938,6 +17027,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_b1cf841e::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_b1cf841e",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_b1cf841e::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -16442,6 +17551,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_ba940a93",
@@ -16944,6 +18073,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c2df17da::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c2df17da",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_c2df17da::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -17448,6 +18597,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_cb26001f",
@@ -17950,6 +19119,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_d9e78fa2::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -18454,6 +19643,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_dfa36ec6",
@@ -18957,6 +20166,26 @@
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
     },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e1f3db33",
@@ -19459,6 +20688,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1"
+    },
+    "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e28bbe9e::onex.evt.omnimarket.delegate-skill-failed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e28bbe9e",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnimarket.delegate-skill-failed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnimarket.delegate-skill-failed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_e28bbe9e::onex.evt.omnimarket.runtime-deployment-proof.v1": {
       "construct_only": true,
@@ -22066,6 +23315,16 @@
     },
     {
       "contract_name": "node_delegation_chain_ledger_effect",
+      "dispatcher_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89",
+      "handler_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89",
+      "message_category": "event",
+      "route_id": "route.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_5d43fb89.onex_evt_omnimarket_delegate_skill_failed_v1",
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1",
+      "topic_pattern": "*.evt.omnimarket.delegate-skill-failed.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_delegation_chain_ledger_effect",
       "dispatcher_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e",
       "handler_id": "dispatcher.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e",
       "message_category": "event",
@@ -22322,6 +23581,16 @@
       "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_6ef6ade1.onex_evt_omnimarket_build_loop_orchestrator_completed_v1",
       "topic": "onex.evt.omnimarket.build-loop-orchestrator-completed.v1",
       "topic_pattern": "*.evt.omnimarket.build-loop-orchestrator-completed.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_ledger_projection_compute",
+      "dispatcher_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "handler_id": "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5",
+      "message_category": "event",
+      "route_id": "route.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_707f94b5.onex_evt_omnimarket_delegate_skill_failed_v1",
+      "topic": "onex.evt.omnimarket.delegate-skill-failed.v1",
+      "topic_pattern": "*.evt.omnimarket.delegate-skill-failed.*",
       "type_scoped": true
     },
     {

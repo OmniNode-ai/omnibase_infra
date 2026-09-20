@@ -59,14 +59,14 @@ contract_name: "node_ledger_projection_compute"
 node_name: "node_ledger_projection_compute"
 contract_version:
   major: 1
-  minor: 4
+  minor: 5
   patch: 0
 node_version: "0.5.0"
 # Node type - COMPUTE for event projection logic
 node_type: "COMPUTE_GENERIC"
 # Description
 description: >
-  COMPUTE node that subscribes to 25 topics (7 platform-lifecycle + 12 business command/completion/DLQ topics remaining from OMN-15006 after OMN-18013 deleted six category-less DLQ subscriptions + 1 external steel_onslaught terminal-event topic, OMN-15168 + 5 delegation-chain topics, OMN-18398 and OMN-18419) for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract 1.4.0 (OMN-18419) adds the fifth delegation-chain hop, delegation-request.v1, without which the routing request's recorded causal parent resolved to nothing; contract 1.3.0 (OMN-18398) adds the four delegation-chain topics the chain-canary link-5 writer reads back out of public.event_ledger; contract 1.2.0 (OMN-15168) adds the steel_onslaught terminal-match topic as a paired subscribe_topics+handler_routing diff; contract 1.1.0 (OMN-15006) widened the truth surface to build_loop + OCC governance + DLQ topics whose silent loss OMN-15002 documented; contract patch 2 (1.0.2) recorded the OMN-14823 canonical def-B handler entrypoint flip.
+  COMPUTE node that subscribes to 26 topics (7 platform-lifecycle + 12 business command/completion/DLQ topics remaining from OMN-15006 after OMN-18013 deleted six category-less DLQ subscriptions + 1 external steel_onslaught terminal-event topic, OMN-15168 + 5 delegation-chain topics, OMN-18398 and OMN-18419 + the second delegation terminal, OMN-18937) for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract 1.5.0 (OMN-18937) adds the delegation FAILURE terminal, without which a delegation that failed left no trace in event_ledger at all and the chain writer's read was empty by construction; contract 1.4.0 (OMN-18419) adds the fifth delegation-chain hop, delegation-request.v1, without which the routing request's recorded causal parent resolved to nothing; contract 1.3.0 (OMN-18398) adds the four delegation-chain topics the chain-canary link-5 writer reads back out of public.event_ledger; contract 1.2.0 (OMN-15168) adds the steel_onslaught terminal-match topic as a paired subscribe_topics+handler_routing diff; contract 1.1.0 (OMN-15006) widened the truth surface to build_loop + OCC governance + DLQ topics whose silent loss OMN-15002 documented; contract patch 2 (1.0.2) recorded the OMN-14823 canonical def-B handler entrypoint flip.
 
 # Event bus configuration
 event_bus:
@@ -74,7 +74,7 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
-  # Subscribe to 25 topics for complete audit coverage: 7 platform-lifecycle
+  # Subscribe to 26 topics for complete audit coverage: 7 platform-lifecycle
   # topics, plus the 12 business command/completion/DLQ topics that remain from
   # OMN-15006 after OMN-18013 deleted six category-less DLQ subscriptions, plus 1
   # external steel_onslaught terminal-event topic (OMN-15168), plus the 4
@@ -147,6 +147,21 @@ event_bus:
     - "onex.cmd.omnibase-infra.delegation-routing-request.v1"
     - "onex.evt.omnibase-infra.routing-decision.v1"
     - "onex.evt.omnimarket.delegate-skill-completed.v1"
+    # --- OMN-18937: the OTHER terminal ---
+    # A delegation has TWO terminals, not one. The producer declares both
+    # (omnimarket node_delegate_skill_orchestrator, `runtime_dispatch.
+    # terminal_events` success/failure) and publishes both; the in-repo
+    # producer mirror is `src/omnibase_infra/runtime/topics.yaml` (OMN-13202).
+    # This node is the ONLY writer of public.event_ledger, so while the
+    # failure terminal was absent here a FAILED delegation left zero rows in
+    # event_ledger, zero in ledger_chain, and nothing detected it: the
+    # contract was internally consistent (one subscription, one paired
+    # routing entry), and the chain writer's read came back empty BY
+    # CONSTRUCTION rather than erroneously. Measured on chain-canary run
+    # 35533286353, correlation b267d3bd-0f60-466e-8c8a-e7c60446e1f0: terminal
+    # confirmed on the dev-lane broker, absent from all three tables.
+    # Paired with its handler_routing entry below per the OMN-14594 rule.
+    - "onex.evt.omnimarket.delegate-skill-failed.v1"
     # --- OMN-18419: the fifth delegation-chain hop ---
     # The pattern-B worker command the runtime's delegation dispatch port
     # publishes while consuming the delegate-skill command. It was always on
@@ -518,6 +533,23 @@ handler_routing:
       supported_operations:
         - "ledger.project"
     - topic: "onex.evt.omnimarket.delegate-skill-completed.v1"
+      operation: ledger.project
+      message_category: "event"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    # OMN-18937: the failure terminal, paired with its subscribe_topics entry
+    # above per the OMN-14594 rule. Same handler, same operation: the
+    # projection records an event, it does not interpret one, so a terminal
+    # whose payload carries an error instead of a result needs no separate
+    # path. The handler reads the envelope, not the body.
+    - topic: "onex.evt.omnimarket.delegate-skill-failed.v1"
       operation: ledger.project
       message_category: "event"
       handler_type: "ledger_projection"

@@ -807,7 +807,7 @@ class TestContractValidation:
         with open(CONTRACT_PATH) as f:
             return yaml.safe_load(f)
 
-    def test_contract_has_all_25_dispatchable_topics(self, contract_data: dict) -> None:
+    def test_contract_has_all_26_dispatchable_topics(self, contract_data: dict) -> None:
         """Verify contract subscribes to every topic the runtime can deliver.
 
         7 platform topic suffixes + 12 of the business command/completion/DLQ
@@ -839,7 +839,11 @@ class TestContractValidation:
         event_bus = contract_data.get("event_bus", {})
         topics = event_bus.get("subscribe_topics", [])
 
-        assert len(topics) == 25, f"Expected 25 topics, got {len(topics)}: {topics}"
+        # OMN-18937: 26, not 25 -- the delegation FAILURE terminal joined the
+        # success one. A delegation has two terminals and this node is the only
+        # writer of public.event_ledger, so while only the success terminal was
+        # recorded a failed delegation left zero rows there.
+        assert len(topics) == 26, f"Expected 26 topics, got {len(topics)}: {topics}"
 
         # Verify expected topic suffixes/categories are covered
         expected_suffixes = [
