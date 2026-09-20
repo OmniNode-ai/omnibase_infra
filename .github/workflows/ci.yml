@@ -3679,6 +3679,7 @@ jobs:
           tests/unit/runtime/auto_wiring/test_projection_domain_adapters.py
           tests/ci/test_application_database_domain_enforcement_contract.py
           tests/ci/test_omnimarket_contract_pin.py
+          tests/ci/test_supplemental_declaration_expiry_omn18863.py
           tests/ci/test_application_database_sql_authority_isolation.py
           tests/ci/test_application_database_sql_gate.py
 
