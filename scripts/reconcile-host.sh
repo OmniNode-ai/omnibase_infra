@@ -75,12 +75,17 @@
 # ----------------------------------------------------------------------------
 # Usage:
 #   reconcile-host.sh [--check] [--verbose] [--omni-home PATH] [--branch NAME]
+#                     [--pinned-candidate-manifest PATH]
 #
 #     --check       Observe and verdict; run NO delegate and mutate NOTHING.
 #                   Fetches (to establish targets) but never checks out or syncs.
 #     --verbose     Echo each collaborator command.
 #     --omni-home   Registry root, overriding $OMNI_HOME.
 #     --branch      Tracked branch (default: dev).
+#     --pinned-candidate-manifest
+#                   Reconcile a clean, explicit source candidate without moving
+#                   any clone toward origin/<branch>. The manifest is generated
+#                   and revalidated by reconcile_verify_movement.py.
 #
 # Env:
 #   OMNI_HOME                       required unless --omni-home (rule 8: no default)
@@ -120,6 +125,7 @@ MODE="repair"
 VERBOSE=0
 OMNI_HOME_ARG=""
 BRANCH="dev"
+PINNED_CANDIDATE_MANIFEST=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -137,6 +143,12 @@ while [[ $# -gt 0 ]]; do
       BRANCH="$1"
       ;;
     --branch=*) BRANCH="${1#--branch=}" ;;
+    --pinned-candidate-manifest)
+      shift
+      [[ $# -gt 0 ]] || { echo "reconcile-host.sh: --pinned-candidate-manifest requires a path" >&2; exit "$EXIT_INDETERMINATE"; }
+      PINNED_CANDIDATE_MANIFEST="$1"
+      ;;
+    --pinned-candidate-manifest=*) PINNED_CANDIDATE_MANIFEST="${1#--pinned-candidate-manifest=}" ;;
     -h|--help) sed -n '2,110p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
     *) echo "reconcile-host.sh: unknown argument: $1" >&2; exit "$EXIT_INDETERMINATE" ;;
   esac
@@ -432,6 +444,33 @@ done
 clone_head() { git -C "$1" rev-parse HEAD 2>/dev/null || true; }
 clone_target() { git -C "$1" rev-parse "origin/$BRANCH" 2>/dev/null || true; }
 
+candidate_manifest_args=()
+candidate_floor_args=()
+candidate_manifest_sha256=""
+if [[ -n "$PINNED_CANDIDATE_MANIFEST" ]]; then
+  if [[ "${#present_clones[@]}" -ne "${#SIBLING_CLONE_MANIFEST[@]}" ]]; then
+    say "INDETERMINATE: pinned candidate requires every declared sibling clone."
+    exit "$EXIT_INDETERMINATE"
+  fi
+  for repo in "${SIBLING_CLONE_MANIFEST[@]}"; do
+    candidate_manifest_args+=(--repo "$repo")
+    candidate_floor_args+=(--candidate-repo "$repo")
+  done
+  if ! candidate_manifest_proof="$("$PYTHON_BIN" "$VERIFIER" candidate-verify \
+      --manifest "$PINNED_CANDIDATE_MANIFEST" --omni-home "$OMNI_HOME" \
+      "${candidate_manifest_args[@]}" 2>&1)"; then
+    say "INDETERMINATE: pinned candidate manifest is not a clean exact source set."
+    say "  $candidate_manifest_proof"
+    exit "$EXIT_INDETERMINATE"
+  fi
+  candidate_manifest_sha256="$(printf '%s' "$candidate_manifest_proof" | sed -n 's/.*"sha256": "\([0-9a-f]*\)".*/\1/p')"
+  [[ "$candidate_manifest_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+    say "INDETERMINATE: candidate verifier returned no manifest digest."
+    exit "$EXIT_INDETERMINATE"
+  }
+  say "pinned candidate source: ${candidate_manifest_sha256:0:12}; clone movement disabled"
+fi
+
 # --------------------------------------------------------------------------- #
 # Who the clone-surface writes run as (OMN-17366)
 # --------------------------------------------------------------------------- #
@@ -512,12 +551,14 @@ say "surfaces under $OMNI_HOME (branch $BRANCH): clones=${#present_clones[@]}"
 
 plan_clone_privileges
 
-fetch_all
+if [[ -z "$PINNED_CANDIDATE_MANIFEST" ]]; then
+  fetch_all
+fi
 for repo in "${present_clones[@]}"; do
   before_heads+=("$(clone_head "$OMNI_HOME/$repo")")
 done
 
-if [[ "$MODE" == "repair" ]]; then
+if [[ "$MODE" == "repair" && -z "$PINNED_CANDIDATE_MANIFEST" ]]; then
   if [[ ! -f "$CLONE_DELEGATE" ]]; then
     # Not a skip. See the header.
     record "clone-surface" "UNCOVERED" \
@@ -536,12 +577,18 @@ fi
 
 # Re-establish targets after the delegate ran; a delegate that fetched moves
 # origin/<branch>, and one that did not leaves it where we put it above.
-fetch_all
+if [[ -z "$PINNED_CANDIDATE_MANIFEST" ]]; then
+  fetch_all
+fi
 idx=0
 for repo in "${present_clones[@]}"; do
   clone="$OMNI_HOME/$repo"
   if health="$("$PYTHON_BIN" "$VERIFIER" clone-health --clone "$clone" 2>/dev/null)"; then
-    judge "clone:$repo" "${before_heads[$idx]}" "$(clone_head "$clone")" "$(clone_target "$clone")"
+    if [[ -n "$PINNED_CANDIDATE_MANIFEST" ]]; then
+      judge "clone:$repo" "${before_heads[$idx]}" "$(clone_head "$clone")" "${before_heads[$idx]}"
+    else
+      judge "clone:$repo" "${before_heads[$idx]}" "$(clone_head "$clone")" "$(clone_target "$clone")"
+    fi
   else
     IFS=$'\t' read -r _ _ health_reason <<<"$health"
     # The core.bare=true trap: fetch succeeds, checkout cannot. Reported ahead
@@ -731,6 +778,9 @@ path_onex_shadow_check
   printf '{\n  "schema": "onex.workspace.reconcile.v1",\n'
   printf '  "generated_at": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '  "mode": "%s",\n  "omni_home": "%s",\n  "branch": "%s",\n' "$MODE" "$OMNI_HOME" "$BRANCH"
+  if [[ -n "$PINNED_CANDIDATE_MANIFEST" ]]; then
+    printf '  "candidate_manifest": "%s",\n  "candidate_manifest_sha256": "%s",\n' "$PINNED_CANDIDATE_MANIFEST" "$candidate_manifest_sha256"
+  fi
   printf '  "surfaces": [\n'
   sep=""
   for line in "${SURFACE_LINES[@]}"; do
@@ -782,7 +832,13 @@ if [[ "${#floor_args[@]}" -gt 0 ]]; then
   # As the owner: the floor lives inside $OMNI_HOME, and `scripts/onex` reads it
   # on every invocation. A root-owned floor is one the operator's own reconcile
   # can no longer restamp.
-  as_owner "$PYTHON_BIN" "$VERIFIER" floor --output "$FLOOR" --omni-home "$OMNI_HOME" "${floor_args[@]}" >&2
+  if [[ -n "$PINNED_CANDIDATE_MANIFEST" ]]; then
+    floor_args+=(--candidate-manifest "$PINNED_CANDIDATE_MANIFEST" "${candidate_floor_args[@]}")
+  fi
+  if ! as_owner "$PYTHON_BIN" "$VERIFIER" floor --output "$FLOOR" --omni-home "$OMNI_HOME" "${floor_args[@]}" >&2; then
+    say "VERDICT: FAILED — candidate floor could not be stamped from the verified source set."
+    exit "$EXIT_FAILED"
+  fi
 else
   say "WARNING: nothing observable to stamp; floor left untouched."
 fi

@@ -25,12 +25,17 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -95,12 +100,17 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env=scrub_git_location_env(os.environ),
     ).stdout.strip()
 
 
 def _init_clone(repo: Path) -> str:
     repo.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+    subprocess.run(
+        ["git", "init", "--quiet", str(repo)],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
     _git(repo, "config", "user.email", "t@example.invalid")
     _git(repo, "config", "user.name", "t")
     (repo / "README.md").write_text("x\n", encoding="utf-8")
@@ -334,6 +344,76 @@ def test_floor_refuses_a_hyphenated_distribution_key(
             omni_home=tmp_path,
             distributions={"omnibase-infra": "0.38.16"},
             omnimarket_commit="aaaa",
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Pinned candidate source provenance -- OMN-18929
+# --------------------------------------------------------------------------- #
+def _candidate_root(tmp_path: Path) -> tuple[Path, list[str]]:
+    root = tmp_path / "candidate"
+    names = ["omnibase_infra", "omnibase_core"]
+    for name in names:
+        _init_clone(root / name)
+    return root, names
+
+
+def test_candidate_manifest_proves_exact_clean_source_set(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-source.json"
+
+    vm.write_candidate_source_manifest(
+        output=manifest, omni_home=root, repositories=names
+    )
+    proof = vm.verify_candidate_source_manifest(
+        manifest=manifest, omni_home=root, repositories=names
+    )
+
+    assert proof["manifest"] == str(manifest)
+    assert len(proof["sha256"]) == 64
+
+
+def test_candidate_manifest_rejects_changed_or_dirty_source(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-source.json"
+    vm.write_candidate_source_manifest(
+        output=manifest, omni_home=root, repositories=names
+    )
+
+    (root / "omnibase_core" / "README.md").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="dirty"):
+        vm.verify_candidate_source_manifest(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+    _git(root / "omnibase_core", "add", "README.md")
+    _git(root / "omnibase_core", "commit", "-m", "different source")
+    with pytest.raises(ValueError, match="no longer matches"):
+        vm.verify_candidate_source_manifest(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+
+def test_candidate_manifest_rejects_missing_extra_or_escaped_repository(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-source.json"
+    vm.write_candidate_source_manifest(
+        output=manifest, omni_home=root, repositories=names
+    )
+
+    with pytest.raises(ValueError, match="repository set differs"):
+        vm.verify_candidate_source_manifest(
+            manifest=manifest, omni_home=root, repositories=[*names, "omnimarket"]
+        )
+    with pytest.raises(ValueError, match="invalid"):
+        vm.write_candidate_source_manifest(
+            output=manifest, omni_home=root, repositories=["../outside"]
         )
 
 

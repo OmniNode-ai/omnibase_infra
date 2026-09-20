@@ -665,6 +665,94 @@ def test_check_mode_still_reports_drift(ws: Workspace) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Pinned candidate mode -- OMN-18929
+# --------------------------------------------------------------------------- #
+def _prepare_pinned_candidate(ws: Workspace) -> Path:
+    # The fixture already places reconciler scripts under omnibase_infra. Turn
+    # that existing directory into a clean clone-shaped source surface instead
+    # of trying to clone over it.
+    _git(ws.infra, "init", "--quiet", "-b", "dev")
+    _git(ws.infra, "config", "user.email", "t@example.invalid")
+    _git(ws.infra, "config", "user.name", "t")
+    for repo in GOVERNED[1:]:
+        _make_clone(ws.root, repo)
+    _lock(
+        ws,
+        **{
+            "omnibase-infra": "0.38.38",
+            "omnibase-core": "0.47.18",
+            "omnibase-spi": "0.5.7",
+            "omnibase-compat": "0.5.7",
+        },
+    )
+    _write_dist(ws.site_packages, "omnibase_infra", "0.38.38")
+    _write_dist(ws.site_packages, "omnibase_core", "0.47.18")
+    _write_dist(ws.site_packages, "omnibase_spi", "0.5.7")
+    _write_dist(ws.site_packages, "omnibase_compat", "0.5.7")
+    _write_dist(
+        ws.site_packages,
+        "omnimarket",
+        "0.4.155",
+        commit=_git(ws.root / "omnimarket", "rev-parse", "HEAD"),
+    )
+    _stub(
+        ws.scripts / "runtime_build" / "reconcile_deploy_clones.sh", ws.delegate_witness
+    )
+    _stub(ws.scripts / "reconcile-workspace-venvs.sh", ws.delegate_witness)
+    _git(ws.infra, "add", "-A")
+    _git(ws.infra, "commit", "--quiet", "-m", "fixture infra")
+    manifest = ws.root / ".onex-candidate-source.json"
+    result = subprocess.run(
+        [
+            "python3",
+            str(ws.scripts / "reconcile_verify_movement.py"),
+            "candidate-manifest",
+            "--output",
+            str(manifest),
+            "--omni-home",
+            str(ws.root),
+            *[item for repo in GOVERNED for item in ("--repo", repo)],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == EXIT_OK, result.stderr
+    return manifest
+
+
+def test_pinned_candidate_stamps_floor_without_clone_delegate_movement(
+    ws: Workspace,
+) -> None:
+    manifest = _prepare_pinned_candidate(ws)
+
+    proc = _run(ws, "--pinned-candidate-manifest", str(manifest))
+
+    assert proc.returncode == EXIT_OK, proc.stderr
+    assert ws.floor.exists()
+    receipt = json.loads(ws.receipt.read_text(encoding="utf-8"))
+    assert receipt["candidate_manifest"] == str(manifest)
+    assert len(receipt["candidate_manifest_sha256"]) == 64
+    calls = ws.delegate_witness.read_text(encoding="utf-8")
+    assert "reconcile-workspace-venvs.sh" in calls
+    assert "reconcile_deploy_clones.sh" not in calls
+
+
+def test_pinned_candidate_refuses_dirty_source_before_any_delegate_runs(
+    ws: Workspace,
+) -> None:
+    manifest = _prepare_pinned_candidate(ws)
+    (ws.root / "omnibase_core" / "README.md").write_text("dirty\n", encoding="utf-8")
+
+    proc = _run(ws, "--pinned-candidate-manifest", str(manifest))
+
+    assert proc.returncode == EXIT_INDETERMINATE
+    assert "not a clean exact source set" in proc.stderr
+    assert not ws.delegate_witness.exists()
+    assert not ws.floor.exists()
+
+
+# --------------------------------------------------------------------------- #
 # Receipt
 # --------------------------------------------------------------------------- #
 def test_receipt_is_written_on_both_outcomes(ws: Workspace) -> None:

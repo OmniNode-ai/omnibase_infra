@@ -12,6 +12,7 @@ resolver is exercised against a REAL throwaway git repo (not mocked) so the
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -1065,6 +1066,144 @@ def _detach_head(root: Path) -> None:
         check=True,
         env=_scrubbed_git_env(),
     )
+
+
+def _floor_bound_candidate_root(tmp_path: Path) -> tuple[Path, str]:
+    """Create a real detached candidate with its verifier and floor proof."""
+    root = tmp_path / "candidate"
+    names = (
+        "omnibase_infra",
+        "omnibase_core",
+        "omnibase_spi",
+        "omnibase_compat",
+        "omnimarket",
+    )
+    for name in names:
+        repo = root / name
+        repo.mkdir(parents=True)
+        _make_git_repo(repo)
+
+    source_root = Path(__file__).resolve().parents[3]
+    candidate_infra = root / "omnibase_infra"
+    verifier = candidate_infra / "scripts" / "reconcile_verify_movement.py"
+    sibling_manifest = (
+        candidate_infra / "scripts" / "runtime_build" / "sibling_clone_manifest.sh"
+    )
+    verifier.parent.mkdir(parents=True)
+    sibling_manifest.parent.mkdir(parents=True)
+    verifier.write_text(
+        (source_root / "scripts" / "reconcile_verify_movement.py").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+    sibling_manifest.write_text(
+        (
+            source_root / "scripts" / "runtime_build" / "sibling_clone_manifest.sh"
+        ).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "scripts"],
+        cwd=candidate_infra,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "candidate verifier"],
+        cwd=candidate_infra,
+        check=True,
+        env=_scrubbed_git_env(),
+    )
+    manifest = root / ".onex-pinned-candidate.json"
+    generated = subprocess.run(
+        [
+            sys.executable,
+            str(verifier),
+            "candidate-manifest",
+            "--output",
+            str(manifest),
+            "--omni-home",
+            str(root),
+            *[item for name in names for item in ("--repo", name)],
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_scrubbed_git_env(),
+    )
+    assert "candidate manifest stamped" in generated.stdout
+    market_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root / "omnimarket",
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_scrubbed_git_env(),
+    ).stdout.strip()
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    (root / ".onex-workspace-floor.json").write_text(
+        json.dumps(
+            {
+                "schema": "onex.workspace.floor.v1",
+                "omni_home": str(root.resolve()),
+                "distributions": {},
+                "omnimarket_commit": market_commit,
+                "candidate_source": {"manifest": str(manifest), "sha256": digest},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _detach_head(root / "omnimarket")
+    return root, market_commit
+
+
+def test_floor_bound_clean_candidate_accepts_detached_market_clone(
+    tmp_path: Path,
+) -> None:
+    root, market_commit = _floor_bound_candidate_root(tmp_path)
+
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=market_commit,
+    ):
+        assert check_omnimarket_drift(omni_home=str(root)) is None
+
+
+def test_floor_bound_candidate_refuses_a_manifest_byte_change(tmp_path: Path) -> None:
+    root, market_commit = _floor_bound_candidate_root(tmp_path)
+    manifest = root / ".onex-pinned-candidate.json"
+    manifest.write_bytes(manifest.read_bytes() + b" ")
+
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=market_commit,
+    ):
+        with pytest.raises(OmnimarketDriftError, match="DETACHED"):
+            check_omnimarket_drift(omni_home=str(root))
+
+
+@pytest.mark.parametrize(
+    "candidate_source", [None, pytest.param("missing", id="absent")]
+)
+def test_detached_candidate_requires_an_explicit_floor_candidate_source(
+    tmp_path: Path, candidate_source: str | None
+) -> None:
+    root, market_commit = _floor_bound_candidate_root(tmp_path)
+    floor = root / ".onex-workspace-floor.json"
+    document = json.loads(floor.read_text(encoding="utf-8"))
+    if candidate_source == "missing":
+        document.pop("candidate_source")
+    else:
+        document["candidate_source"] = None
+    floor.write_text(json.dumps(document), encoding="utf-8")
+
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=market_commit,
+    ):
+        with pytest.raises(OmnimarketDriftError, match="DETACHED"):
+            check_omnimarket_drift(omni_home=str(root))
 
 
 def test_detached_canonical_clone_is_drift_even_when_commits_agree(
