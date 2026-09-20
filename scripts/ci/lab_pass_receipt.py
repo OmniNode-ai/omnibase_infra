@@ -137,7 +137,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -1253,6 +1253,14 @@ HEALTH_RUNTIME_BLOCK_KEY = "runtime_health"
 HEALTHY_DIMENSION_WORDS = frozenset({"healthy", "ok", "pass", "up"})
 
 
+#: OMN-18886. How long to keep asking for the health dimensions after the lane
+#: is READY, before calling them never observed. Separate from the readiness
+#: budget because it measures a different thing: readiness is the port binding,
+#: this is the first completed background observation, and on a fresh lane the
+#: second lags the first.
+HEALTH_OBSERVE_POLL_SECONDS: Final[float] = 10.0
+
+
 def check_health_dimensions(url: str, timeout_seconds: float) -> ModelLabPassCheck:
     """Every dimension the health payload reports must be healthy.
 
@@ -1260,6 +1268,11 @@ def check_health_dimensions(url: str, timeout_seconds: float) -> ModelLabPassChe
     block, and on a dimension carrying no status: "we could not find an
     unhealthy dimension" is not the same statement as "every dimension is
     healthy", and only the second one is a check.
+
+    ONE SAMPLE. Callers that can afford to wait should use
+    :func:`check_health_dimensions_observed`, which polls; this is the single
+    read it is built from, kept separate so the read and the waiting are
+    testable apart.
     """
     status, body = _http_get(url, timeout_seconds)
     if status != 200:
@@ -1310,6 +1323,122 @@ def check_health_dimensions(url: str, timeout_seconds: float) -> ModelLabPassChe
         evidence=(
             f"GET {url} -> 200, {len(dimensions)} dimensions, "
             + ("all healthy" if not unhealthy else f"unhealthy: {unhealthy}")
+        ),
+    )
+
+
+#: Distinguishes the two failing outcomes below in the evidence a reader sees.
+#: "Never observed" is a statement about the OBSERVER; "still unhealthy" is a
+#: statement about the LANE, and conflating them sent two lanes hunting a lane
+#: defect that did not exist (OMN-18886).
+_HEALTH_NEVER_OBSERVED = "never observed"
+
+
+def check_health_dimensions_observed(
+    url: str,
+    timeout_seconds: float,
+    observe_budget_seconds: float,
+    *,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> ModelLabPassCheck:
+    """Wait for the health dimensions to be OBSERVED, then judge them.
+
+    THE DEFECT THIS FIXES (OMN-18886). ``details.runtime_health`` is populated
+    ASYNCHRONOUSLY -- it carries its own ``observed_at`` and ``age_seconds``,
+    so it is a background observation and not a synchronous read of the
+    runtime. A single sample taken after readiness but before the first
+    observation completes finds it absent, and the single-sample check then
+    reported "an absent dimension set is not a healthy dimension set". That
+    sentence is correct and the conclusion was wrong: the dimensions were not
+    absent, they had not happened yet.
+
+    Measured on the omnimarket sibling emitter, runs 35505864089 (10:43Z) and
+    35507742784 (11:24Z): FAIL with exactly one failing check, on a lane where
+    every convergence check passed, sampled 595 s into a 900 s budget. Read
+    live afterwards the block was a present dict. Those receipts BLOCK a
+    staging delivery -- ``deliver-dev-candidate-to-staging.yml``'s
+    ``lab-pass-gate`` reads the sibling receipt and ``dispatch-to-staging``
+    needs that job -- so this was not a cosmetic red.
+
+    THREE OUTCOMES, deliberately distinct, because two of them were previously
+    one:
+
+    * never observed inside the budget -> FAIL, evidence says so in those
+      words. Still fail-closed: absent is not healthy, and this does not
+      weaken that. What changes is that the receipt now says whether the
+      OBSERVER ran out of time or the LANE is sick.
+    * observed and every dimension healthy -> PASS, evidence records how long
+      the observation took to appear, so a lane drifting slower is visible
+      before it starts failing.
+    * observed and still unhealthy when the budget expires -> FAIL, naming the
+      dimensions and how long they stayed that way.
+
+    WHY IT KEEPS POLLING AFTER AN UNHEALTHY OBSERVATION, and why that is not
+    papering over a degradation. Several dimensions are rolling-window
+    measures (``projection_dlq_saturation`` is "over 10 flow windows"), so the
+    first observation on a freshly recreated lane can be unhealthy from the
+    boot itself. Polling lets that clear. It cannot manufacture a green,
+    because the terminal condition on failure is "STILL unhealthy after the
+    full budget", with the offending dimension names in the evidence -- a
+    genuine degradation fails exactly as it did before, just later and with a
+    duration attached. **It never passes on first sight of an unhealthy set
+    and never stops early on one.**
+
+    A real degradation was live on the lane while this was written -- one
+    projection routing 100% of consumed events to a dead-letter sink -- and
+    this function reports it as a failure. That is the intended behaviour and
+    the reason the poll is bounded rather than open.
+    """
+    deadline = clock() + max(0.0, observe_budget_seconds)
+    started = clock()
+    last: ModelLabPassCheck | None = None
+    observed_after: float | None = None
+
+    while True:
+        last = check_health_dimensions(url, timeout_seconds)
+        elapsed = clock() - started
+        # "Observed" is decided by the evidence the single read produced, not
+        # by re-parsing the body here: one parser, one meaning. The absent
+        # branches are the only ones that phrase it this way.
+        is_absent = "an absent dimension set is not a healthy dimension set" in (
+            last.evidence
+        )
+        if not is_absent and last.ok:
+            return ModelLabPassCheck(
+                name=last.name,
+                ok=True,
+                evidence=(
+                    f"{last.evidence} [dimensions observed after {elapsed:.0f}s "
+                    f"of a {observe_budget_seconds:.0f}s budget]"
+                ),
+            )
+        if not is_absent and observed_after is None:
+            observed_after = elapsed
+        if clock() >= deadline:
+            break
+        sleep_fn(min(HEALTH_OBSERVE_POLL_SECONDS, max(0.0, deadline - clock())))
+
+    waited = clock() - started
+    assert last is not None
+    if observed_after is None:
+        return ModelLabPassCheck(
+            name=last.name,
+            ok=False,
+            evidence=(
+                f"{last.evidence} [the dimension set was {_HEALTH_NEVER_OBSERVED} "
+                f"within {waited:.0f}s; runtime_health is populated "
+                "asynchronously, so this says the observation never completed, "
+                "NOT that the lane reported an unhealthy dimension]"
+            ),
+        )
+    return ModelLabPassCheck(
+        name=last.name,
+        ok=False,
+        evidence=(
+            f"{last.evidence} [observed after {observed_after:.0f}s and STILL "
+            f"unhealthy {waited:.0f}s later, across the full budget; this is a "
+            "lane report, not a timing artefact]"
         ),
     )
 
@@ -2352,6 +2481,7 @@ def probe_compose_dev(
     expected_generation: ModelLaneGeneration | None = None,
     generation_container: str | None = None,
     node_inventory_probe: ModelNodeInventoryProbe | None = None,
+    health_observe_budget_seconds: float | None = None,
     declared_migrations: Sequence[str] | None = None,
     migration_ledger: ModelMigrationLedger | None = None,
     broker_access: ModelBrokerAccess | None = None,
@@ -2405,7 +2535,22 @@ def probe_compose_dev(
         check_ready(
             "ready_effects", f"{effects_url.rstrip('/')}/ready", timeout_seconds
         ),
-        check_health_dimensions(f"{main_url.rstrip('/')}/health", timeout_seconds),
+        check_health_dimensions_observed(
+            f"{main_url.rstrip('/')}/health",
+            timeout_seconds,
+            # DERIVED from the settle budget the lane already declares, minus
+            # what the readiness wait actually spent -- never a new constant.
+            # The job ceiling is already derived from `granted_seconds` plus a
+            # reserved tail (OMN-18436), so spending the UNUSED remainder here
+            # cannot overrun it, and a second hand-set number would be one more
+            # thing to keep in sync with that arithmetic. A caller may override
+            # for an ad hoc read or a test.
+            (
+                max(0.0, outcome.granted_seconds - outcome.waited_seconds)
+                if health_observe_budget_seconds is None
+                else health_observe_budget_seconds
+            ),
+        ),
         check_projections_ready(
             f"{projection_url.rstrip('/')}/projections", timeout_seconds
         ),
@@ -3001,6 +3146,21 @@ def build_parser() -> argparse.ArgumentParser:
     # here that SKIPS a check whose subject was supplied: a subject named is a
     # check owed, and the only way to not owe it is not to name it.
     probe.add_argument(
+        "--health-observe-budget-seconds",
+        type=float,
+        default=None,
+        help=(
+            "seconds to keep asking for details.runtime_health after the lane "
+            "is READY (OMN-18886). That block is populated ASYNCHRONOUSLY and "
+            "carries its own observed_at, so a single sample taken between "
+            "readiness and the first observation finds it absent and reports a "
+            "healthy lane as failing. The default of 0 preserves the "
+            "single-sample behaviour for an ad hoc read. It never turns an "
+            "unhealthy dimension into a pass: the terminal failure is 'STILL "
+            "unhealthy after the full budget', naming the dimensions."
+        ),
+    )
+    probe.add_argument(
         "--migration-container",
         default="",
         help=(
@@ -3348,6 +3508,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_generation=expected_generation,
             generation_container=args.generation_container,
             node_inventory_probe=inventory_probe,
+            health_observe_budget_seconds=args.health_observe_budget_seconds,
             declared_migrations=declared_migrations,
             migration_ledger=migration_ledger,
             broker_access=broker_access,
