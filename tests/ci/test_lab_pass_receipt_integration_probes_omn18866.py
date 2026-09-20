@@ -9,15 +9,24 @@ broken one has never been shown capable of passing. Either alone produces a
 check whose green is uninformative, which is the exact shape Operating Rule 16
 ("prove a zero with a positive control") exists to refuse.
 
+TWO of the three are wired into the compose-dev receipt. The third,
+``delegation_golden_chain``, was wired and reverted within the hour: its probe
+is correct and is kept, but binding the receipt to an inline chain-canary
+dispatch gated DELIVERY on a separately-owned surface that was already red, so
+a healthy lane was refused for staging. The last section of this module is the
+red-control set for that and for the other way this shipped wrong.
+
 The ticket's acceptance criteria, and where each is pinned:
 
 * AC1, one change adds the probe AND the check name --
-  ``test_nothing_remains_declared_unwired`` and
-  ``test_every_wired_name_has_a_callable_probe``.
+  ``test_the_unwired_list_names_exactly_what_is_unwired`` and
+  ``test_every_wired_name_has_a_callable_probe``, which together refuse both
+  directions: a name removed while nothing computes it, and a name left on the
+  unwired list while the job emits it.
 * AC2, evidence on every check including passing ones --
   ``test_every_probe_emits_non_empty_evidence_on_both_verdicts``.
-* AC3, a negative control per probe -- the three ``*_fails_*`` cases.
-* AC4, a positive control per probe -- the three ``*_passes_*`` cases.
+* AC3, a negative control per probe -- the ``*_fails_*`` cases.
+* AC4, a positive control per probe -- the ``*_passes_*`` cases.
 * AC5, indeterminate is not a pass -- the ``*_indeterminate_*`` cases, plus
   ``test_indeterminate_is_never_a_pass_for_any_probe``.
 
@@ -43,12 +52,14 @@ from scripts.ci.lab_pass_receipt import (
     DELEGATION_GOLDEN_CHAIN_CHECK,
     MIGRATIONS_APPLIED_CHECK,
     PROBES_NOT_YET_WIRED,
+    GroupSourceError,
     ModelBrokerAccess,
     ModelMigrationLedger,
     check_consumer_group_lag,
     check_delegation_golden_chain,
     check_migrations_applied,
     declared_forward_migrations,
+    load_declared_groups,
     load_lag_sample,
     parse_group_list_argument,
     read_group_total_lag,
@@ -130,14 +141,24 @@ def _canary_receipt(
 # ---------------------------------------------------------------------------
 
 
-def test_nothing_remains_declared_unwired() -> None:
-    """The three names left the unwired list because they are wired.
+def test_the_unwired_list_names_exactly_what_is_unwired() -> None:
+    """Two of the three names left the list because they are wired; one came
+    back, and the list has to say so.
 
-    Falsifier for the inverse mistake: if a future change empties the list
-    WITHOUT wiring something, the companion test below fails, so the two
-    together refuse both directions of the rule-24 error.
+    `delegation_golden_chain` was wired and then reverted within the hour --
+    not because the probe was wrong but because the WIRING gated delivery on a
+    separately-owned surface that was already red. Rule 24 cuts both ways: a
+    name must not be removed while nothing computes it, and it must not stay
+    removed while the job no longer emits it.
+
+    Falsifier for the inverse mistake: if a future change empties this list
+    without wiring something, the companion test below fails, so the two
+    together refuse both directions of the error.
     """
-    assert PROBES_NOT_YET_WIRED == ()
+    assert PROBES_NOT_YET_WIRED == (DELEGATION_GOLDEN_CHAIN_CHECK,)
+    assert not set(PROBES_NOT_YET_WIRED) & set(COMPOSE_DEV_INTEGRATION_CHECKS), (
+        "a name cannot be both wired and declared unwired"
+    )
 
 
 def test_every_wired_name_has_a_callable_probe() -> None:
@@ -145,11 +166,13 @@ def test_every_wired_name_has_a_callable_probe() -> None:
     probes = {
         MIGRATIONS_APPLIED_CHECK: check_migrations_applied,
         CONSUMER_GROUP_LAG_CHECK: check_consumer_group_lag,
-        DELEGATION_GOLDEN_CHAIN_CHECK: check_delegation_golden_chain,
     }
     assert set(COMPOSE_DEV_INTEGRATION_CHECKS) == set(probes)
     for name, probe in probes.items():
         assert callable(probe), name
+    # The unwired one keeps its probe too, so re-wiring it is a workflow
+    # change and not a rewrite.
+    assert callable(check_delegation_golden_chain)
 
 
 def test_the_three_names_are_not_also_http_checks() -> None:
@@ -564,4 +587,173 @@ def test_indeterminate_is_never_a_pass_for_any_probe(tmp_path: Path) -> None:
 def test_each_probe_names_itself_correctly(tmp_path: Path) -> None:
     """A check's name is its key on the receipt; a typo silently orphans it."""
     names = {c.name for c in _every_verdict(tmp_path)}  # type: ignore[attr-defined]
-    assert names == set(COMPOSE_DEV_INTEGRATION_CHECKS)
+    assert names == set(COMPOSE_DEV_INTEGRATION_CHECKS) | {
+        DELEGATION_GOLDEN_CHAIN_CHECK
+    }
+
+
+# ---------------------------------------------------------------------------
+# OMN-18866 follow-up: the two ways this shipped wrong in production
+# ---------------------------------------------------------------------------
+#
+# Both of these are RED CONTROLS for real failures, not hypotheticals. On
+# run 35488731787 a healthy, converged dev lane produced a FAIL receipt with
+# seven checks passing and these two failing, and that refused every dev sha
+# for staging under rule 24(b) until it was reverted.
+
+
+def test_an_unreadable_group_source_is_not_reported_as_an_empty_declaration(
+    tmp_path: Path,
+) -> None:
+    """RED CONTROL 1, reproducing the exact production evidence string.
+
+    The deriving step failed silently -- exit 1, no output, because its stdout
+    was swallowed by a command substitution -- so its step output was never
+    set, the workflow expression delivered an empty string, and this check
+    said "no consumer groups were declared for this lane". That sentence was
+    FALSE: the lane declares six. The check was refusing for the right reason
+    applied to the wrong fact, which is the worst kind of correct.
+
+    The two facts now have two outcomes, and the falsifier is that they stop
+    being distinguishable.
+    """
+    missing = tmp_path / "never-written.txt"
+    with pytest.raises(GroupSourceError, match="does not exist"):
+        load_declared_groups(missing)
+
+    source_error = "the declared-group source /x/declared-groups.txt does not exist"
+    unreadable = check_consumer_group_lag(
+        ACCESS, [], max_lag=10, runner=FakeRunner(), source_error=source_error
+    )
+    genuinely_empty = check_consumer_group_lag(
+        ACCESS, [], max_lag=10, runner=FakeRunner()
+    )
+
+    # Both refuse -- neither may become a pass.
+    assert unreadable.ok is False and unreadable.indeterminate is True
+    assert genuinely_empty.ok is False and genuinely_empty.indeterminate is True
+    # ...but they must not say the same thing.
+    assert unreadable.evidence != genuinely_empty.evidence
+    assert "does not exist" in unreadable.evidence
+    assert "read successfully and contained no groups" in genuinely_empty.evidence
+
+
+def test_a_populated_group_file_restores_the_live_reading(tmp_path: Path) -> None:
+    """GREEN CONTROL 1: the corrected input, in the shape the deriver writes.
+
+    Six groups, one per line, exactly as measured on the live lane.
+    """
+    source = tmp_path / "declared-groups.txt"
+    source.write_text(
+        "\n".join(
+            f"local.omnimarket-projections.{name}-writer.consume.v1"
+            for name in (
+                "delegation",
+                "live-events",
+                "registration",
+                "savings",
+                "tenant-credentials",
+                "tenant-registry",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    groups = load_declared_groups(source)
+    assert len(groups) == 6
+    assert "local.omnimarket-projections.savings-writer.consume.v1" in groups
+
+    check = check_consumer_group_lag(
+        ACCESS,
+        groups,
+        max_lag=10000,
+        first_sample=dict.fromkeys(groups, 0),
+        runner=FakeRunner(stdout=_describe(0)),
+    )
+    assert check.ok is True
+    assert "6 declared group(s)" in check.evidence
+
+
+def test_a_trailing_newline_only_file_is_an_empty_declaration_not_an_error(
+    tmp_path: Path,
+) -> None:
+    """The boundary between the two facts, pinned so it cannot drift."""
+    source = tmp_path / "declared-groups.txt"
+    source.write_text("\n\n  \n", encoding="utf-8")
+    assert load_declared_groups(source) == ()
+
+
+def test_the_delegation_check_is_declared_unwired_again(tmp_path: Path) -> None:
+    """RED CONTROL 2, and the reason it is a REMOVAL rather than a repair.
+
+    The delegation check was bound to a chain-canary dispatch fired inline by
+    the job that gates delivery. The canary is separately owned and its
+    scheduled runs were already red, so the binding refused delivery for shas
+    with no defect in them. The probe was behaving exactly as designed; the
+    WIRING was the defect.
+
+    So the check comes off the emitted set and the name goes back on the
+    unwired list. The probe, its flag and its tests all stay, because the fix
+    is a wiring change -- the canary emitting its own sha-keyed receipt -- and
+    not a rewrite.
+
+    Falsifier: the name is emitted by the compose-dev job again without that
+    receipt surface existing, which would re-block delivery on another lane's
+    dispatch.
+    """
+    assert DELEGATION_GOLDEN_CHAIN_CHECK in PROBES_NOT_YET_WIRED
+    assert DELEGATION_GOLDEN_CHAIN_CHECK not in COMPOSE_DEV_INTEGRATION_CHECKS
+
+    # The probe itself is retained and still works, in both directions.
+    assert (
+        check_delegation_golden_chain(_canary_receipt(tmp_path, success=True)).ok
+        is True
+    )
+    assert (
+        check_delegation_golden_chain(_canary_receipt(tmp_path, success=False)).ok
+        is False
+    )
+
+
+def test_the_emitting_job_no_longer_dispatches_the_chain_canary() -> None:
+    """The workflow, not just the module, must have stopped doing it.
+
+    Asserting only the module's constant would pass while the job still fired
+    a dispatch whose failure took the receipt with it.
+    """
+    workflow = Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
+        encoding="utf-8"
+    )
+    verify = workflow.split("verify-lane-converged:", 1)[1]
+    assert "onex skill chain_canary" not in verify
+    assert "--chain-canary-receipt" not in verify
+
+
+def test_the_deriver_is_invoked_from_the_repository_root() -> None:
+    """The `cd` into a subdirectory is what died silently in CI.
+
+    Every working step in that job calls `uv run python <path-from-root>`, and
+    the one step that did otherwise exited 1 in 0.086s having printed nothing.
+    Pinned so nobody reintroduces the subdirectory form.
+    """
+    raw = Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
+        encoding="utf-8"
+    )
+    # COMMENT LINES ARE STRIPPED FIRST, and that is not a convenience. The
+    # comment beside the fixed step QUOTES the broken form in order to explain
+    # it, so a naive substring assertion over the whole file fails on the
+    # documentation of the very thing it is checking for. That is the rule-15
+    # shape -- prose mentioning a literal a matcher reacts to -- reproduced in
+    # a test rather than in a PR body, and the fix is the same: judge the
+    # executable text, not the prose about it.
+    executable = "\n".join(
+        line for line in raw.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "cd scripts/runtime_build" not in executable
+    assert (
+        "uv run python scripts/runtime_build/declared_consumer_groups.py" in executable
+    )
+    # And the result must travel as a file, not a step output.
+    assert "declared-groups.txt" in executable
+    assert "--consumer-groups-file" in executable
+    assert "steps.groups.outputs.groups" not in executable

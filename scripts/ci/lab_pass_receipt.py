@@ -1098,21 +1098,44 @@ COMPOSE_DEV_HTTP_CHECKS = (
 COMPOSE_DEV_INTEGRATION_CHECKS = (
     MIGRATIONS_APPLIED_CHECK,
     CONSUMER_GROUP_LAG_CHECK,
-    DELEGATION_GOLDEN_CHAIN_CHECK,
 )
 
 #: Named here rather than silently absent, so a reader can see what a
 #: ``compose-dev`` receipt does NOT cover. Widening the set means adding the
 #: probe AND the check name in ONE change -- never the name alone (rule 24).
 #:
-#: EMPTIED by OMN-18866. Its three entries were `migrations_applied`,
-#: `consumer_group_lag` and `delegation_golden_chain`, all three of which are
-#: now wired above. The tuple is kept rather than deleted because the NEXT
-#: unwired probe needs somewhere honest to be declared, and an absent list is
-#: how a gap stops being visible. It is empty because nothing is currently
-#: known to be missing, which is a different statement from nothing being
-#: missing.
-PROBES_NOT_YET_WIRED: tuple[str, ...] = ()
+#: OMN-18866 wired `migrations_applied` and `consumer_group_lag`, which are
+#: live-proven against the lane. It ALSO wired `delegation_golden_chain`, and
+#: that was a mistake, reverted here within the hour. The reason is recorded
+#: rather than quietly dropped, because the next person to reach for it will
+#: otherwise make the same one.
+#:
+#: WHAT WENT WRONG. The check was bound to a chain-canary dispatch fired inline
+#: by `verify-lane-converged`. The canary is a SEPARATELY OWNED surface, its
+#: scheduled runs were already red on the tenant-bearing ingress (OMN-18872,
+#: gateway-key work), and this job sits on the delivery critical path. So the
+#: binding made every compose-dev receipt FAIL on a defect in another lane's
+#: surface, which blocked the infra release train under rule 24(b) on shas that
+#: had nothing to do with it. Measured on run 35488731787: the lane was healthy
+#: and converged, seven checks passed, and delivery was refused anyway.
+#:
+#: A check that cannot pass is exactly as useless as one that cannot fail, and
+#: considerably more expensive, because it stops delivery instead of merely
+#: failing to report. That is the rule-5 lesson the wiring got backwards.
+#:
+#: WHAT IT NEEDS INSTEAD, and it is a design rather than a patch: the canary
+#: should emit a SHA-KEYED receipt of its own, the way this module's own
+#: docstring already argues a durable premise must be keyed, and this gate
+#: should READ that receipt rather than dispatch the canary itself. That
+#: decouples the two surfaces, keeps the delivery path off another lane's
+#: dispatch, and answers "was this sha's delegation exercised" for a sha whose
+#: run is minutes old. The probe function, its parser flag and its full test
+#: set are DELIBERATELY RETAINED below, unused by the emitting job, so that
+#: design is a wiring change and not a rewrite.
+#:
+#: The tuple is kept rather than deleted for the same reason it always was: an
+#: absent list is how a gap stops being visible.
+PROBES_NOT_YET_WIRED: tuple[str, ...] = (DELEGATION_GOLDEN_CHAIN_CHECK,)
 
 
 def _http_get(url: str, timeout_seconds: float) -> tuple[int, str]:
@@ -1778,6 +1801,7 @@ def check_consumer_group_lag(
     first_sample: Mapping[str, int] | None = None,
     runner: CommandRunner | None = None,
     timeout_seconds: float = 60.0,
+    source_error: str = "",
 ) -> ModelLabPassCheck:
     """Declared groups are under their lag bound AND not growing.
 
@@ -1793,11 +1817,22 @@ def check_consumer_group_lag(
     reads a millisecond apart. Absent, the probe reports the bound only and
     says so in its evidence rather than implying it checked growth.
     """
+    # The source failing to be READ and the lane declaring NOTHING are two
+    # different facts, and conflating them is the OMN-18866 production defect:
+    # a silently-failed deriving step produced an empty value, and this check
+    # reported "the lane declares no groups", which was false and which nobody
+    # could act on. The source error is now reported as itself.
+    if source_error:
+        return ModelLabPassCheck.indeterminate_check(
+            CONSUMER_GROUP_LAG_CHECK, source_error
+        )
     if not groups:
         return ModelLabPassCheck.indeterminate_check(
             CONSUMER_GROUP_LAG_CHECK,
-            "no consumer groups were declared for this lane, so there is "
-            "nothing to measure; an empty declaration is not a healthy lane",
+            "the declared-group source was read successfully and contained no "
+            "groups, so there is nothing to measure; an empty declaration is "
+            "not a healthy lane, and this is NOT the same as the source being "
+            "unreadable, which is reported separately",
         )
     second: dict[str, int] = {}
     unreadable: list[str] = []
@@ -1870,6 +1905,47 @@ def parse_group_list_argument(raw: str) -> tuple[str, ...]:
         return ()
     parts = [chunk.strip() for chunk in raw.replace("\n", ",").split(",")]
     return tuple(part for part in parts if part)
+
+
+class GroupSourceError(RuntimeError):
+    """The declared-group source could not be read at all."""
+
+
+def load_declared_groups(path: Path) -> tuple[str, ...]:
+    """Read the declared group list from the file the deriver wrote.
+
+    OMN-18866 follow-up. The first wiring passed this list through a WORKFLOW
+    STEP OUTPUT, and that is how the probe came to assert something false in
+    production. The producing step failed -- silently, exit 1 with no output,
+    because its stdout was swallowed by a command substitution -- so the step
+    output was never set, the expression delivered an EMPTY STRING, and the
+    probe read that as "this lane declares no consumer groups". It then
+    reported INDETERMINATE for the right reason applied to the wrong fact, and
+    every dev sha got a non-PASS receipt.
+
+    An unset step output and a genuinely empty declaration are the same bytes.
+    A MISSING FILE and an EMPTY FILE are not, which is the whole reason this
+    reads a path: the two failures now have two different outcomes, and only
+    one of them is "this lane declares nothing".
+
+    Raises rather than returning empty when the file is absent, so the caller
+    reports "the source could not be read" instead of "there is nothing to
+    measure". Both are non-PASS; only one of them is true.
+    """
+    if not path.exists():
+        msg = (
+            f"the declared-group source {path} does not exist, so the deriving "
+            "step did not run or did not write it. That is a different fact "
+            "from a lane declaring no consumer groups, and it is reported as "
+            "its own failure rather than folded into that one"
+        )
+        raise GroupSourceError(msg)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        msg = f"the declared-group source {path} could not be read: {exc}"
+        raise GroupSourceError(msg) from exc
+    return parse_group_list_argument(raw)
 
 
 def sample_group_lag(
@@ -2280,6 +2356,7 @@ def probe_compose_dev(
     migration_ledger: ModelMigrationLedger | None = None,
     broker_access: ModelBrokerAccess | None = None,
     declared_consumer_groups: Sequence[str] | None = None,
+    consumer_group_source_error: str = "",
     max_consumer_lag: int = 0,
     first_lag_sample: Mapping[str, int] | None = None,
     chain_canary_receipt: Path | None = None,
@@ -2392,6 +2469,7 @@ def probe_compose_dev(
                 max_lag=max_consumer_lag,
                 first_sample=first_lag_sample,
                 runner=runner,
+                source_error=consumer_group_source_error,
             )
         )
     if chain_canary_receipt is not None:
@@ -2976,6 +3054,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     probe.add_argument(
+        "--consumer-groups-file",
+        type=Path,
+        default=None,
+        help=(
+            "a file of declared group names, one per line, as written by "
+            "scripts/runtime_build/declared_consumer_groups.py --out. "
+            "PREFERRED over --consumer-groups: an absent file and an empty "
+            "file are distinguishable, while an unset step output and an "
+            "empty declaration are the same bytes -- which is exactly how "
+            "OMN-18866's first wiring reported 'this lane declares no groups' "
+            "about a lane that declares six."
+        ),
+    )
+    probe.add_argument(
         "--max-consumer-lag",
         type=int,
         default=0,
@@ -3033,7 +3125,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sample.add_argument("--broker-container", required=True)
     sample.add_argument("--broker-address", default="redpanda:9092")
-    sample.add_argument("--consumer-groups", required=True)
+    group_src = sample.add_mutually_exclusive_group(required=True)
+    group_src.add_argument("--consumer-groups")
+    group_src.add_argument(
+        "--consumer-groups-file",
+        type=Path,
+        help="the file written by declared_consumer_groups.py --out. Preferred, "
+        "for the reason load_declared_groups records.",
+    )
     sample.add_argument("--out", type=Path, required=True)
     sample.add_argument("--sasl-mechanism-env", default="KAFKA_SASL_MECHANISM")
     sample.add_argument("--sasl-username-env", default="KAFKA_SASL_USERNAME")
@@ -3136,9 +3235,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ValueError as exc:
             print(f"::warning::lag baseline not taken: {exc}", file=sys.stderr)
             return 0
-        readings = sample_group_lag(
-            sample_access, parse_group_list_argument(args.consumer_groups)
-        )
+        if args.consumer_groups_file is not None:
+            try:
+                sample_groups = load_declared_groups(args.consumer_groups_file)
+            except GroupSourceError as exc:
+                # A baseline that cannot be taken is not a failure: the growth
+                # arm simply has nothing to compare against and the check says
+                # so. Failing here would turn a missing baseline into a missing
+                # RECEIPT.
+                print(f"::warning::lag baseline not taken: {exc}", file=sys.stderr)
+                return 0
+        else:
+            sample_groups = parse_group_list_argument(args.consumer_groups or "")
+        readings = sample_group_lag(sample_access, sample_groups)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(readings, indent=2, sort_keys=True), "utf-8")
         print(
@@ -3218,6 +3327,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         first_lag_sample = load_lag_sample(args.first_lag_sample_json)
 
+        declared_groups = parse_group_list_argument(args.consumer_groups)
+        group_source_error = ""
+        if args.consumer_groups_file is not None:
+            try:
+                declared_groups = load_declared_groups(args.consumer_groups_file)
+            except GroupSourceError as exc:
+                # NOT a hard exit. The other checks in this receipt are still
+                # worth recording, and an unwritten receipt is the one outcome
+                # worse than a failing one. The lag check reports the cause.
+                group_source_error = str(exc)
+
         checks = probe_compose_dev(
             args.main_url,
             args.effects_url,
@@ -3231,7 +3351,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             declared_migrations=declared_migrations,
             migration_ledger=migration_ledger,
             broker_access=broker_access,
-            declared_consumer_groups=parse_group_list_argument(args.consumer_groups),
+            declared_consumer_groups=declared_groups,
+            consumer_group_source_error=group_source_error,
             max_consumer_lag=args.max_consumer_lag,
             first_lag_sample=first_lag_sample,
             chain_canary_receipt=args.chain_canary_receipt,
