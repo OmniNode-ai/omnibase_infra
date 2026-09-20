@@ -837,10 +837,17 @@ def main(argv: list[str] | None = None) -> int:
             "one contract takes the whole runtime process down, not just that "
             "handler. Declare it, then lower the bound in the same change. If "
             "the relation is declared by an omnimarket node contract, do NOT "
-            "hand-edit the instances: advance "
-            ".github/omnimarket-contract-pin.yaml and regenerate with "
+            "hand-edit the instances: regenerate with "
             "scripts/generate_application_database_table_grants.py --write, "
-            "which is the only sanctioned writer of that block.",
+            "which is the only sanctioned writer of that block. Regenerate "
+            "against the tree the OMN-15361 job will actually check out, "
+            "which is NOT always the pin: a PR carrying "
+            "Node-Migration-Source-* trailers has .proof-dependencies/"
+            "omnimarket checked out at the migration SOURCE ref, so derive "
+            "from that ref and advance .github/omnimarket-contract-pin.yaml "
+            "only for a PR without them. Both wrong choices produce a "
+            "confident, correct-looking diff, and the resulting failure names "
+            "the PIN while the cause is the trailer (OMN-18769).",
             file=sys.stderr,
         )
         undeclared_status = 1
