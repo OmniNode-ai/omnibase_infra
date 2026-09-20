@@ -825,6 +825,7 @@ def run_receipt_mode(
     verbose: bool,
     emit_socket: Path,
     expected_correlation_id: uuid.UUID | None = None,
+    receipt_validator: Callable[[object], str | None] | None = None,
     receipt_callback: Callable[[object], None] | None = None,
     host_handlers: bool = True,
     locus_decision: ModelDelegateLocusDecision | None = None,
@@ -849,6 +850,7 @@ def run_receipt_mode(
                 verbose=verbose,
                 emit_socket=emit_socket,
                 expected_correlation_id=expected_correlation_id,
+                receipt_validator=receipt_validator,
                 receipt_callback=receipt_callback,
                 host_handlers=host_handlers,
                 locus_decision=locus_decision,
@@ -904,6 +906,7 @@ def _run_receipt_mode(
     verbose: bool,
     emit_socket: Path,
     expected_correlation_id: uuid.UUID | None = None,
+    receipt_validator: Callable[[object], str | None] | None = None,
     receipt_callback: Callable[[object], None] | None = None,
     host_handlers: bool = True,
     locus_decision: ModelDelegateLocusDecision | None = None,
@@ -1283,6 +1286,48 @@ def _run_receipt_mode(
             artifact_refs=artifact_refs,
             runtime_identity=runtime_identity,
         )
+
+    if receipt_validator is not None:
+        validation_error = receipt_validator(receipt)
+        if validation_error is not None:
+            summary = ModelReceiptRuntimeSummary(
+                workflow_result="error",
+                exit_code=1,
+                workflow=str(contract_path),
+                handler_locus=_json_str(workflow_data.get("handler_locus")),
+                wire_correlation_id=_json_uuid(
+                    workflow_data.get("wire_correlation_id")
+                ),
+                orchestrator_distribution=(
+                    locus_decision.orchestrator_distribution
+                    if locus_decision is not None
+                    else ""
+                ),
+                dispatch_target=(
+                    _format_dispatch_target(locus_decision)
+                    if locus_decision is not None
+                    else ""
+                ),
+                terminal_payload=workflow_data.get("terminal_payload"),
+                handler_result=handler_result_json,
+                error=validation_error,
+                capture_log=capture_text,
+            )
+            receipt = ModelSkillResult[ModelReceiptRuntimeSummary](
+                skill_name=node_name,
+                node_name=node_name,
+                status=EnumSkillResultStatus.FAILED,
+                correlation_id=correlation_id,
+                run_id=run_id,
+                exit_code=1,
+                duration_ms=duration_ms,
+                result=summary,
+                result_model=_fully_qualified_name(summary),
+                metrics=metrics,
+                artifact_refs=artifact_refs,
+                runtime_identity=runtime_identity,
+            )
+            exit_code = 1
 
     # One line, stderr, never stdout: stdout carries exactly ONE receipt JSON
     # and that invariant is what this whole module is built around. This is the

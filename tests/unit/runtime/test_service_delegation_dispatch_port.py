@@ -261,6 +261,8 @@ async def _dispatch_with_fake_broker(
         "source_file_path": None,
         "source_session_id": None,
         "wait": True,
+        "execution_timeout_seconds": 240,
+        "terminal_delivery_margin_seconds": 60,
         "output_schema_key": None,
     } | dispatch_kwargs
     await port.dispatch(
@@ -277,9 +279,11 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
         monkeypatch
     )
 
-    assert timeout_seconds == [600.0]
+    assert timeout_seconds == [300.0]
     assert payloads[0]["prompt"] == "probe"
     assert payloads[0]["task_type"] == "document"
+    assert payloads[0]["requested_timeout_seconds"] == 240
+    assert "terminal_delivery_margin_seconds" not in payloads[0]
     assert broker_kwargs[0]["command_topic"] == route.command_topic
 
 
@@ -334,14 +338,28 @@ async def test_runtime_delegation_dispatch_port_accepts_absent_optional_bus_feat
 
 
 @pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_forwards_response_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deployed-lane command carries the schema the model must be shown."""
+    response_contract = {
+        "type": "object",
+        "properties": {"category": {"type": "string"}},
+        "required": ["category"],
+    }
+
+    _, payloads, _, _ = await _dispatch_with_fake_broker(
+        monkeypatch, response_contract=response_contract
+    )
+
+    assert payloads[0]["response_contract"] == response_contract
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("dispatch_kwargs", "unsupported_feature"),
     [
         ({"backend_id": "local-coder-mlx"}, "backend_id"),
-        (
-            {"response_contract": {"type": "object"}},
-            "response_contract",
-        ),
         ({"system_prompt": "Answer tersely."}, "system_prompt"),
         ({"temperature": 0.2}, "temperature"),
         (
