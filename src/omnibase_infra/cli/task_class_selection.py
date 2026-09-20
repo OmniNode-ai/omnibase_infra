@@ -51,6 +51,7 @@ by class name, so resolution is total and deterministic.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import re
 from pathlib import Path
 
@@ -72,6 +73,7 @@ __all__ = [
     "ModelTaskClassExecutionBudget",
     "ModelTaskTypeResolution",
     "TaskClassContractError",
+    "DEFAULT_EXECUTION_BUDGET",
     "DEFAULT_TASK_TYPE",
     "load_selectable_task_classes",
     "load_selection_fallback",
@@ -79,6 +81,20 @@ __all__ = [
     "resolve_task_class_contract_path",
     "resolve_task_type",
 ]
+
+logger = logging.getLogger(__name__)
+
+#: The budget an absent ``execution_budgets`` map resolves to (OMN-18924).
+#:
+#: Not a number chosen here. OMN-15504 introduced the map and declared exactly
+#: these values for all eleven public classes in both fixtures it added, so
+#: this is the value that change intended, restated as the fallback rather
+#: than left implicit in test data. A contract that declares the map overrides
+#: it per class, so the day the producer lands this constant stops being read.
+DEFAULT_EXECUTION_BUDGET = ModelTaskClassExecutionBudget(
+    task_class_timeout_ceiling_seconds=240,
+    terminal_delivery_margin_seconds=60,
+)
 
 #: Where the task-class contract sits inside the installed omnimarket package.
 TASK_CLASS_CONTRACT_RELATIVE_PATH = Path("configs") / "task_class_contracts.v1.yaml"
@@ -216,8 +232,34 @@ def resolve_task_class_execution_budget(
         raise TaskClassContractError(
             f"task-class contract at {contract_path} is not a mapping"
         )
-    budgets = raw.get("execution_budgets")
+    if "execution_budgets" not in raw:
+        # OMN-18924. ABSENT is not malformed. No merged omnimarket branch has
+        # ever declared this map -- its producer is still an open pull request
+        # -- so failing closed here refused EVERY delegation on a host whose
+        # dispatch venv installs this package by local path, before any
+        # dispatch. A new contract field lands consumer-first or is excluded
+        # when unset; making an un-defaulted field mandatory inverts that and
+        # takes out every caller rather than the one feature it serves.
+        #
+        # The default is not invented here: it is the value the introducing
+        # change's own fixtures declare for all eleven public classes. Logged
+        # rather than silent, so a defaulted budget is never read back as a
+        # declared one, and so this line disappears from the logs on the day
+        # the producer lands.
+        logger.info(
+            "task-class contract at %s declares no execution_budgets map; "
+            "using the default budget (%ss ceiling, %ss delivery margin) "
+            "until the contract declares one",
+            contract_path,
+            DEFAULT_EXECUTION_BUDGET.task_class_timeout_ceiling_seconds,
+            DEFAULT_EXECUTION_BUDGET.terminal_delivery_margin_seconds,
+        )
+        return DEFAULT_EXECUTION_BUDGET
+    budgets = raw["execution_budgets"]
     if not isinstance(budgets, dict):
+        # PRESENT and malformed. A contract that states a budget and states it
+        # wrongly is a defect, and this refusal is kept exactly as OMN-15504
+        # wrote it.
         raise TaskClassContractError(
             f"task-class contract at {contract_path} declares no execution_budgets map"
         )
