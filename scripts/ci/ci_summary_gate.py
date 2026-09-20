@@ -611,6 +611,19 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # post-fixture-window admission belongs after every historical name rather
     # than in alphabetical position.
     "Governed helper primitive gate",  # governed-helper-primitive-gate.yml
+    # OMN-18865: the pre-merge twin of the OMN-14631 workspace content-parity
+    # gate. It proves this repository's built wheel carries byte-for-byte the
+    # tracked source tree under src/, plus whatever the repo declares
+    # force-included into it -- the property the image build already proves on
+    # the lab, moved to the pull request that introduces the change.
+    #
+    # Registered here rather than in branch protection for the OMN-16878
+    # reason the kb-doc-gate note above gives: `dev` requires exactly ONE
+    # context ("CI Summary", the OMN-4497 single-umbrella design), so this
+    # tuple IS the external enforcement surface on this repo. Admitted under
+    # POST_FIXTURE_WINDOW_CONTEXTS, which carries the admission argument, and
+    # placed at the tail for the reason the entry above states.
+    "wheel-content-parity / wheel-content-parity",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -695,6 +708,40 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         #     settings and 43 verification jobs grandfathered and zero findings.
         #     No baseline was edited to obtain that.
         "advisory-job-gate / advisory-job-gate",
+        # OMN-18865: the wheel content-parity caller lands in this same PR on
+        # 2026-09-20, so no merged PR in either fixture window could have
+        # produced this check-run. Comes out at the next fixture re-capture.
+        #
+        # ADMISSION IS BY CONSTRUCTION PLUS MEASURED REPLAYS, on the argument
+        # recorded for `exposure-reader-coverage` above. What stands in for
+        # the measured N-of-16 record:
+        #   * The producer (.github/workflows/wheel-content-parity.yml)
+        #     declares `pull_request` with no `types:`, no `branches:` filter
+        #     and no `paths:` filter, plus `merge_group`, and its single
+        #     `uses:` job carries no `needs:` and no job-level `if:` -- so it
+        #     reports on every pull-request shape and on a queue SHA, and
+        #     cannot be skipped-as-passed.
+        #   * The reusable takes ONE input, the package's import name, which
+        #     selects WHAT is judged and cannot soften a verdict. There is no
+        #     force input, no skip input and no allowlist.
+        #   * It is proven able to FAIL on real input, on three independent
+        #     historical trees, each reproducing a real incident's finding
+        #     byte-for-byte: omnimarket at the #2670 merge commit reds on
+        #     ['adapters/codex/skills/merge-sweep/SKILL.md'], the same single
+        #     path the image gate refused at 21:19Z on 2026-09-19;
+        #     omnibase_core at #1710 reds on ['data/gitignore-baseline.yaml']
+        #     under pre-#3846 comparison semantics, the same single path the
+        #     image gate refused at 15:37Z; and omnibase_compat before the
+        #     OMN-14636 fix reds on four files under env/.
+        #   * It is proven able to PASS: the dev heads of omnibase_core,
+        #     omnibase_compat, omnimarket and this repository all exit 0, and
+        #     omnibase_core at #1710 exits 0 under CURRENT semantics, which is
+        #     the control proving the force-include arm is a narrowing rather
+        #     than a blanket tolerance.
+        #   * Its unresolvable cases exit 2, never 0: a missing source package
+        #     directory, a failed wheel build, and a build root the repo's own
+        #     ignore patterns match all refuse rather than pass.
+        "wheel-content-parity / wheel-content-parity",
     }
 )
 
