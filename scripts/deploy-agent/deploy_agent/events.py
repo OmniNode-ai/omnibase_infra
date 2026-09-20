@@ -1055,6 +1055,38 @@ class ModelRebuildCompleted(BaseModel):
     # event's verdict, which is the last place to stop type-checking.
     @computed_field
     def status(self) -> Literal["success", "failed"]:
+        """The terminal verdict, derived. FAIL-CLOSED ON ``errors`` (OMN-18861).
+
+        The phase-string derivation alone reported ``success`` for 23 of the
+        last 120 events on this topic, every one of them a deploy whose image
+        build had failed. The mechanism: a failure raised from
+        ``DeployExecutor._compose_build`` leaves ``core``/``runtime``/
+        ``verification`` never marked, ``reconcile_terminal_phase_results``
+        settles a never-reached phase to SKIPPED, and the line below drops
+        SKIPPED -- so the remaining phases were preflight/git/compose_gen/seed,
+        all genuinely successful, and the verdict read ``success`` beside the
+        build error it was carrying. Job ``445bdfa9-4c86-4e45-bf68-b8e3ed534a7f``
+        (2026-09-19T23:33:45Z) is durably ``failed`` on disk and its event said
+        ``success``; the rule-24 compose-dev receipt for the same lane said
+        FAIL. Three surfaces, one liar.
+
+        ``errors`` is the fail-closed premise because EVERY writer of it writes
+        a failure -- the two ``job_store.complete(status="failed", ...)`` calls
+        in ``agent.py`` and the crash-recovery row in ``job_state.py``. A
+        non-empty list is therefore an unambiguous failure signal, and it was
+        already on the wire, being ignored by the one field that states the
+        verdict.
+
+        The verdict stays DERIVED. This event takes no ``status`` input and
+        ``extra="forbid"`` refuses one, so an emitter still cannot assert
+        success over a failure; it simply stops being able to derive success
+        over one either. The phase marker that SHOULD have been written is
+        fixed separately, at the raise site -- both halves are needed, because
+        a phase-only fix would still read ``success`` for any future failure
+        path that raises before its phase is marked.
+        """
+        if self.errors:
+            return "failed"
         non_skipped = {
             k: v for k, v in self.phase_results.items() if v != PhaseStatus.SKIPPED
         }
