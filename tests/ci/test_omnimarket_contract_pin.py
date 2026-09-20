@@ -44,6 +44,10 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 _ROOT = Path(__file__).resolve().parents[2]
 _CI_WORKFLOW = _ROOT / ".github" / "workflows" / "ci.yml"
 _PIN_FILE = _ROOT / ".github" / "omnimarket-contract-pin.yaml"
@@ -461,6 +465,25 @@ def test_refresh_bot_enforces_forward_only_advance() -> None:
     )
 
 
+def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run one git command against ``cwd`` and nothing else (OMN-14891).
+
+    Every git call in this module goes through here so the scrubbed
+    environment cannot be forgotten at one call site. That is also the shape
+    the no-unguarded-git-subprocess validator recognises, which matters: a
+    correct scrub it cannot see statically is indistinguishable to it from no
+    scrub at all.
+    """
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=scrub_git_location_env(os.environ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # AC2: replay the OMN-17290 shape end to end.
 # ---------------------------------------------------------------------------
@@ -547,7 +570,22 @@ def test_an_upstream_contract_addition_cannot_red_an_unrelated_infra_pr(
 
     # The same infra tree, derived from the pin: green.
     assert _check_against(pinned) == 0, (
-        "the pinned contract set must keep the checked-in grants in sync; if "
+        "OMN-18863: the pinned contract set must keep the checked-in grants in "
+        "sync. USUALLY this means the pin needs advancing, which is the "
+        "refresh bot's job and needs nothing from you. It does NOT mean "
+        "regenerate the grants. If a relation is declared in the shipped "
+        "topology instances and derivable from neither the pin nor a "
+        "supplemental entry -- the state a trailered vendoring pull request "
+        "leaves behind -- then regenerating DELETES that declaration while the "
+        "vendored migration still grants it, which trips the OMN-18768 reverse "
+        "ratchet and refuses the projection binding at boot, taking the whole "
+        "runtime process down. The remedy there is a self-expiring "
+        "supplemental declaration: a ContractTableDeclaration in "
+        "LEGACY_MIGRATION_TABLE_DECLARATIONS following the OMN-18159 / "
+        "OMN-17426 precedent, plus one line in _INTERIM_ENTRIES in "
+        "tests/ci/test_supplemental_declaration_expiry_omn18863.py so it is "
+        "deleted again by the pin advance that makes it redundant. Original "
+        "text, kept because it is right in the ordinary case: if "
         "this fails the pin needs advancing, which is the bot's job"
     )
 
@@ -607,23 +645,17 @@ def test_the_pin_introducing_pr_does_not_trip_its_own_forward_only_guard(
     """
     repo = tmp_path / "repo"
     (repo / ".github").mkdir(parents=True)
-    run = functools.partial(subprocess.run, cwd=repo, check=True, capture_output=True)
+    run = functools.partial(_git, cwd=repo)
 
-    run(["git", "init", "-q", "-b", "main"])
-    run(["git", "config", "user.email", "ci@omninode.ai"])
-    run(["git", "config", "user.name", "ci"])
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "ci@omninode.ai")
+    run("config", "user.name", "ci")
 
     # Base revision: no pin file at all -- the state of dev before this change.
     (repo / "README.md").write_text("base\n", encoding="utf-8")
-    run(["git", "add", "-A"])
-    run(["git", "commit", "-qm", "base without a pin"])
-    base_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+    run("add", "-A")
+    run("commit", "-qm", "base without a pin")
+    base_sha = run("rev-parse", "HEAD").stdout.strip()
 
     # HEAD: the pin file is introduced.
     head_pin = "fd3e66c71ccfd4f7383904baa19e5bd700993a05"
@@ -631,8 +663,8 @@ def test_the_pin_introducing_pr_does_not_trip_its_own_forward_only_guard(
         f"repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: {head_pin}\n",
         encoding="utf-8",
     )
-    run(["git", "add", "-A"])
-    run(["git", "commit", "-qm", "introduce the contract pin"])
+    run("add", "-A")
+    run("commit", "-qm", "introduce the contract pin")
 
     completed = subprocess.run(
         ["bash", "-c", _forward_only_guard_script()],
@@ -640,7 +672,11 @@ def test_the_pin_introducing_pr_does_not_trip_its_own_forward_only_guard(
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "PIN_BASE_REVISION": base_sha, "HEAD_PIN": head_pin},
+        env={
+            **scrub_git_location_env(os.environ),
+            "PIN_BASE_REVISION": base_sha,
+            "HEAD_PIN": head_pin,
+        },
     )
 
     assert completed.returncode == 0, (
