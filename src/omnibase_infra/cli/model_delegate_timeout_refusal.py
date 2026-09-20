@@ -60,6 +60,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.cli.model_delegate_queue_depth import ModelDelegateQueueDepth
+
 __all__ = ["ModelDelegateTimeoutRefusal"]
 
 
@@ -153,5 +155,18 @@ class ModelDelegateTimeoutRefusal(BaseModel):
         description=(
             "The broker address the run was bound to, or empty for an "
             "in-process bus that has none."
+        ),
+    )
+    queue_depth: ModelDelegateQueueDepth = Field(
+        ...,
+        description=(
+            "OMN-18852. How many records were ahead of this one on the "
+            "command topic when the wait expired, observed from the consumer "
+            "group's committed offsets against the broker's log-end offsets "
+            "at refusal time -- or a named reason the depth could not be "
+            "resolved. Answers the question the elapsed/declared fields do "
+            "not: was this run slow, or was it merely behind? On the .201 dev "
+            "lane on 2026-09-19 it was the second, for every timed-out caller "
+            "in the window, and nothing in the refusal said so. Required rather than defaulted: a refusal that silently omits the queue is the refusal this field replaces."
         ),
     )

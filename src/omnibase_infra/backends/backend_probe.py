@@ -289,6 +289,84 @@ async def _live_consumer_groups_async(
     return tuple(sorted(found))
 
 
+async def consumer_group_topic_backlog(
+    *,
+    topic: str,
+    consumer_group: str,
+    bootstrap_servers: str,
+) -> int:
+    """Return ``consumer_group``'s uncommitted backlog on ``topic``.
+
+    OMN-18852. The second broker question the delegation path asks, and it
+    lives beside the first on purpose: :func:`_live_consumer_groups_async`
+    resolves WHICH groups are bound to the command topic, and this resolves
+    HOW FAR BEHIND one of them is. Both are read-only observations made by a
+    CLI that owns no runtime bus, both are answered with the runtime's own
+    ``aiokafka`` family, and both authenticate through
+    :func:`build_aiokafka_auth_kwargs_for` so a bound lane transport answers
+    for its own address. Splitting them across two modules would have put the
+    second one's client construction in a module with no business owning a
+    transport at all, and would have reproduced the OMN-18418 split this
+    module's sibling docstring records: one client resolution path is the fix.
+
+    The figure is broker-reported throughout -- committed offsets against
+    log-end offsets, through the ``ServiceConsumerLagObserver`` /
+    ``AdapterKafkaAdminLag`` pair the topic-migration drain gate uses. Nothing
+    here accepts a depth from a caller.
+
+    Args:
+        topic: Topic whose backlog is wanted.
+        consumer_group: Group whose committed offsets are the low-water mark.
+        bootstrap_servers: Broker address the caller was itself bound to.
+
+    Returns:
+        Total uncommitted records across every partition of ``topic``.
+
+    Raises:
+        ValueError: the group reported no observed partitions on ``topic``,
+            so there is no committed offset to measure a backlog against and
+            a zero would be a fabrication.
+    """
+    from aiokafka import AIOKafkaConsumer
+    from aiokafka.admin import AIOKafkaAdminClient
+
+    from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_for
+    from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag
+    from omnibase_infra.migration.service_consumer_lag_observer import (
+        ServiceConsumerLagObserver,
+    )
+
+    auth_kwargs = build_aiokafka_auth_kwargs_for(bootstrap_servers)
+    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers, **auth_kwargs)
+    consumer = AIOKafkaConsumer(
+        bootstrap_servers=bootstrap_servers,
+        # No group_id and no auto-commit: join no group, commit nothing,
+        # perturb no offset the run being measured depends on.
+        group_id=None,
+        enable_auto_commit=False,
+        **auth_kwargs,
+    )
+    await admin.start()
+    try:
+        await consumer.start()
+        try:
+            # ``AIOKafkaAdminClient`` satisfies the committed-offset half of
+            # ``ProtocolKafkaAdminLike`` structurally; the adapter supplies
+            # the ``list_offsets`` half the pinned 0.13.0 client omits
+            # (OMN-12632), and is itself the full surface the observer needs.
+            observer = ServiceConsumerLagObserver(AdapterKafkaAdminLag(admin, consumer))
+            lag = await observer.observe(consumer_group)
+            if not lag.has_partitions_for_topic(topic):
+                raise ValueError(
+                    f"group {consumer_group!r} has no observed partitions on {topic!r}"
+                )
+            return lag.lag_for_topic(topic)
+        finally:
+            await consumer.stop()
+    finally:
+        await admin.close()
+
+
 def probe_kafka(
     *,
     bootstrap_servers: str | None = None,
