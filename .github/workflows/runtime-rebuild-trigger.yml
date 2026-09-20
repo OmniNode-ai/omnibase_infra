@@ -550,9 +550,9 @@ jobs:
       # delegation dispatch below already warns and exits 0 without it, and
       # the verdict publish below already treats a failed publish as an
       # observability gap rather than a lab-pass failure.
-      # advisory-ok: OMN-18866 overlay fetch shared by the delegation dispatch and the OMN-18769 verdict publish; neither may fail the lab pass on it
       - name: Fetch the declared CI bus lanes
         if: always()
+        # advisory-ok: OMN-18866 overlay fetch shared by the delegation dispatch and the OMN-18769 verdict publish; neither may fail the lab pass on it
         continue-on-error: true
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
