@@ -3589,9 +3589,23 @@ class DeployExecutor:
         # build is broken, so retrying buys nothing". On 2026-09-17 the second
         # rebuild was issued in exactly the wrong belief and reproduced the
         # kill within two seconds of the first.
+        # OMN-18861: NAME THE PHASE THAT RAISED. This method took
+        # ``on_phase_update`` from the day it was written and never called it,
+        # so a build failure left ``core``/``runtime`` unmarked;
+        # ``reconcile_terminal_phase_results`` then settled an unmarked phase
+        # to SKIPPED -- "never reached" -- and the terminal event's derived
+        # verdict drops SKIPPED. The record therefore said the build phase was
+        # never attempted on precisely the deploys where it was attempted and
+        # failed. Marked at the raise sites rather than wrapped around the
+        # whole body on purpose: a build that SUCCEEDS must leave no marker
+        # here, because ``_compose_up`` owns this phase's success verdict and a
+        # marker written on the way in would report the core phase failed
+        # whenever a later runtime build raised.
+        build_phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
         try:
             result = _run(cmd, timeout=timeout, env=_compose_env())
         except subprocess.TimeoutExpired as exc:
+            on_phase_update(build_phase, PhaseStatus.FAILED)
             # OMN-18615 (AC2): say what the build had DONE, not only what it
             # was allowed. subprocess.run communicates before re-raising, so
             # the partial BuildKit progress output is on the exception --
@@ -3609,6 +3623,7 @@ class DeployExecutor:
                 f"container was stopped, created or recreated by this command."
             ) from exc
         if result.returncode != 0:
+            on_phase_update(build_phase, PhaseStatus.FAILED)
             raise RuntimeError(
                 f"{EnumBuildOutcome.BUILD_ERRORED.value}: docker compose build "
                 f"for profile {profile!r} exited {result.returncode} inside its "
