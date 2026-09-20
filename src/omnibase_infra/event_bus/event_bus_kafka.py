@@ -285,6 +285,7 @@ from omnibase_infra.observability.wiring_health import (
 from omnibase_infra.protocols.protocol_rejoinable_consumer import (
     ProtocolRejoinableConsumer,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
@@ -1385,7 +1386,11 @@ class EventBusKafka(
                     )
 
                 future = await producer.send(
-                    topic,
+                    # PHYSICAL name: the canonical suffix was validated and
+                    # logged above, and the namespace is applied here so a
+                    # namespaced runtime cannot publish onto the shared
+                    # unprefixed topic (OMN-18891).
+                    apply_topic_namespace(topic),
                     value=value,
                     key=key,
                     headers=kafka_headers,
@@ -2123,7 +2128,12 @@ class EventBusKafka(
             An unstarted ``AIOKafkaConsumer``.
         """
         return AIOKafkaConsumer(
-            topic,
+            # PHYSICAL name. Every other use of ``topic`` in this class -- the
+            # ``_group_consumers`` key, the ``_consume_loop`` argument, the
+            # subscriber registry -- stays CANONICAL, so handler dispatch and
+            # topic comparison are unaffected by the deployment namespace and
+            # only the wire subscription moves (OMN-18891).
+            apply_topic_namespace(topic),
             bootstrap_servers=self._bootstrap_servers,
             group_id=effective_group_id,
             group_instance_id=group_instance_id,

@@ -221,6 +221,16 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     build_generated_tool_invoke_suffix,
     build_generated_tool_result_suffix,
 )
+from omnibase_infra.topics.topic_namespace import (
+    TOPIC_NAMESPACE_ENV_VAR,
+    TopicNamespaceError,
+    apply_topic_namespace,
+    apply_topic_namespace_all,
+    create_topic_resolver,
+    namespace_consumer_group_id,
+    resolve_topic_namespace,
+    strip_topic_namespace,
+)
 from omnibase_infra.topics.topic_resolver import (
     BusDescriptorNotFoundError,
     TopicResolutionError,
@@ -457,6 +467,15 @@ __all__: list[str] = [
     "ModelBusDescriptor",
     # Topic resolution
     "TopicResolver",
+    # Deployment topic namespace (OMN-18891)
+    "TOPIC_NAMESPACE_ENV_VAR",
+    "TopicNamespaceError",
+    "apply_topic_namespace",
+    "apply_topic_namespace_all",
+    "create_topic_resolver",
+    "namespace_consumer_group_id",
+    "resolve_topic_namespace",
+    "strip_topic_namespace",
     "TopicResolutionError",
     "BusDescriptorNotFoundError",
 ]

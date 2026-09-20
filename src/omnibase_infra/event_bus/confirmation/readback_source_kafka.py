@@ -39,6 +39,7 @@ from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportTyp
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_publish_receipt import ModelPublishReceipt
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 
 @runtime_checkable
@@ -142,7 +143,11 @@ class KafkaReadbackSource:
         consumer = self._consumer_factory()
         await consumer.start()
         try:
-            partition = TopicPartition(receipt.topic, receipt.partition)
+            # The receipt carries the CANONICAL topic; the assignment is a
+            # broker coordinate and must be PHYSICAL (OMN-18891).
+            partition = TopicPartition(
+                apply_topic_namespace(receipt.topic), receipt.partition
+            )
             consumer.assign([partition])
 
             # Poll the high-water mark until it passes the receipt's offset.

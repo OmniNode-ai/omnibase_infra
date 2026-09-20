@@ -44,6 +44,7 @@ from omnibase_infra.models.catalog.model_topic_catalog_entry import (
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
 )
+from omnibase_infra.topics.topic_namespace import create_topic_resolver
 from omnibase_infra.topics.topic_resolver import TopicResolutionError, TopicResolver
 
 logger = logging.getLogger(__name__)
@@ -97,14 +98,14 @@ class ServiceTopicCatalog:
         Args:
             container: ONEX container for dependency injection.
             topic_resolver: Optional resolver for mapping topic suffixes to
-                Kafka topic names. Defaults to a plain ``TopicResolver()``
+                Kafka topic names. Defaults to a plain ``create_topic_resolver()``
                 (pass-through).
             contracts_dir: Root directory to scan for ``contract.yaml`` files.
                 Defaults to the ``nodes/`` package directory inside
                 ``omnibase_infra``.
         """
         self._container = container
-        self._topic_resolver = topic_resolver or TopicResolver()
+        self._topic_resolver = topic_resolver or create_topic_resolver()
         self._contracts_dir = contracts_dir or _DEFAULT_CONTRACTS_DIR
 
         # Lazy-built cache: None = not yet built, value = full catalog

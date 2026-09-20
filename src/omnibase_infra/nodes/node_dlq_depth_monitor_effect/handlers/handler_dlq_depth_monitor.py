@@ -74,6 +74,7 @@ from omnibase_infra.protocols.protocol_dlq_admin_transport import (
     TopicPartition,
 )
 from omnibase_infra.protocols.protocol_topic_partition import ProtocolTopicPartition
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -455,8 +456,13 @@ class HandlerDlqDepthMonitor:
         )
 
         all_topics = await transport.list_topics()
+        # The enumeration sees EVERY topic on a shared broker, the dev lane's
+        # included. Namespacing the selection prefix is what keeps a slot's
+        # monitor reporting on the slot's own dead letters rather than on the
+        # lane it happens to share a broker with (OMN-18891).
+        physical_prefix = apply_topic_namespace(request.topic_prefix)
         dlq_topics = sorted(
-            topic for topic in all_topics if topic.startswith(request.topic_prefix)
+            topic for topic in all_topics if topic.startswith(physical_prefix)
         )
         logger.info(
             "DLQ depth monitor: %d topic(s) match prefix %r; window=%ds.",

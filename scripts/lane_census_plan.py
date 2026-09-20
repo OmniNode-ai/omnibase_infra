@@ -59,9 +59,15 @@ Output (stdout JSON):
   {
     "schema_version": "1.0.0",
     "lanes_checked": ["prod", ...],
+    "lanes_skipped_optional_down": ["prepr-1", ...],  # optional + entirely down
     "findings": [ {lane, kind, container, detail, severity}, ... ],
     "has_drift": true|false
   }
+
+``lanes_skipped_optional_down`` is a subset of ``lanes_checked``: those lanes
+were looked at, found to be optional and entirely absent, and deliberately
+produced no findings. It exists so a consumer can tell that silence apart from
+"reconciled and clean" (OMN-18890).
 """
 
 from __future__ import annotations
@@ -134,6 +140,33 @@ def _finding(
     }
 
 
+def _is_optional_and_entirely_down(
+    lane_spec: dict[str, Any], actual_by_name: dict[str, dict[str, Any]]
+) -> bool:
+    """True when an optional lane has none of its declared services running.
+
+    This is the condition :func:`reconcile_lane` returns no findings on. It is
+    lifted into its own predicate and REPORTED (OMN-18890) because zero findings
+    is otherwise two different facts wearing one face: "reconciled and clean"
+    and "skipped without looking". A consumer that cannot tell them apart states
+    the first when the truth is the second — which is how the generated lane
+    table came to render an entirely-down optional lane as
+    ``N running (census clean)``, the phantom-lane claim retro B-6 exists to make
+    unwritable. The ephemeral pre-PR pool makes that the NORMAL case rather than
+    a rare one, since an empty pool is its steady state.
+    """
+    if not lane_spec.get("optional", False):
+        return False
+    return not any(
+        _running(
+            actual_by_name.get(svc["name"], {}).get("State", ""),
+            actual_by_name.get(svc["name"], {}).get("Status", ""),
+        )
+        for svc in lane_spec.get("services", [])
+        if svc.get("kind", "service") == "service"
+    )
+
+
 def reconcile_lane(
     lane_name: str,
     lane_spec: dict[str, Any],
@@ -146,25 +179,16 @@ def reconcile_lane(
 ) -> list[dict[str, str]]:
     """Diff one lane's desired state against the actual inventory."""
     findings: list[dict[str, str]] = []
-    optional = bool(lane_spec.get("optional", False))
 
     declared = lane_spec.get("services", [])
     declared_names = {svc["name"] for svc in declared}
 
-    # An optional lane that is entirely down is NOT drift (developer lane). We
-    # detect "entirely down" as: none of its declared service containers are
+    # An optional lane that is entirely down is NOT drift (developer lane, the
+    # collaborator lane, and every ephemeral pre-PR slot, whose steady state is
+    # absent). "Entirely down" means none of its declared service containers are
     # running. If ANY are running, it is partially up and we reconcile it.
-    if optional:
-        any_running = any(
-            _running(
-                actual_by_name.get(svc["name"], {}).get("State", ""),
-                actual_by_name.get(svc["name"], {}).get("Status", ""),
-            )
-            for svc in declared
-            if svc.get("kind", "service") == "service"
-        )
-        if not any_running:
-            return findings  # lane legitimately down; no ticket
+    if _is_optional_and_entirely_down(lane_spec, actual_by_name):
+        return findings  # lane legitimately down; no ticket
 
     # 1. Network presence — the broker/lane network must exist.
     declared_network = lane_spec.get("network")
@@ -363,8 +387,11 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
 
     findings: list[dict[str, str]] = []
     checked: list[str] = []
+    skipped_optional_down: list[str] = []
     for lane_name, lane_spec in target_lanes.items():
         checked.append(lane_name)
+        if _is_optional_and_entirely_down(lane_spec, actual_by_name):
+            skipped_optional_down.append(lane_name)
         findings.extend(
             reconcile_lane(
                 lane_name,
@@ -380,6 +407,7 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
     return {
         "schema_version": SCHEMA_VERSION,
         "lanes_checked": checked,
+        "lanes_skipped_optional_down": skipped_optional_down,
         "findings": findings,
         "has_drift": len(findings) > 0,
     }

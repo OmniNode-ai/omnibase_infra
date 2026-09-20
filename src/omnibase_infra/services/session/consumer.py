@@ -71,25 +71,15 @@ from omnibase_infra.services.session.config_consumer import ConfigSessionConsume
 from omnibase_infra.services.session.protocol_session_aggregator import (
     ProtocolSessionAggregator,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace_all
 
-# TODO(OMN-5737): These imports need resolution - schemas remain in omniclaude
-# The consumer depends on hook event schemas which are domain-specific to omniclaude.
-# Options to resolve:
-# 1. Move schemas to a shared package (omnibase-schemas)
-# 2. Pass schema types as generic parameters
-# 3. Use raw dict processing without schema validation
-#
-# For now, commenting out the direct imports and using a protocol-based approach.
-#
-# Original imports from omniclaude:
-# from omniclaude.hooks.schemas import (
-#     HookEventType,
-#     ModelHookEventEnvelope,
-#     ModelHookPromptSubmittedPayload,
-#     ModelHookSessionEndedPayload,
-#     ModelHookSessionStartedPayload,
-#     ModelHookToolExecutedPayload,
-# )
+# This consumer deliberately imports NO hook event schema. Those schemas are
+# domain-specific to omniclaude, and importing them here would make an infra
+# service depend on an agent-tooling package. The protocol-based approach is
+# the settled answer rather than a stopgap: this module hands the raw JSON to
+# the aggregator behind ``ProtocolSessionAggregator``, which owns schema
+# validation. OMN-5737 proposed moving the schemas to a shared package and was
+# CANCELED; nothing here is pending.
 
 
 logger = logging.getLogger(__name__)
@@ -366,7 +356,7 @@ class SessionEventConsumer(MixinConsumerHealth):
 
         try:
             self._consumer = AIOKafkaConsumer(
-                *self._config.topics,
+                *apply_topic_namespace_all(self._config.topics),
                 bootstrap_servers=self._config.bootstrap_servers,
                 group_id=self._config.group_id,
                 auto_offset_reset=self._config.auto_offset_reset,
@@ -739,15 +729,9 @@ class SessionEventConsumer(MixinConsumerHealth):
         if isinstance(value, bytes):
             value = value.decode("utf-8")
 
-        # TODO(OMN-5737): Schema parsing moved to aggregator
-        # The original code parsed ModelHookEventEnvelope here, but that
-        # creates a dependency on omniclaude.hooks.schemas. The aggregator
-        # is now responsible for schema validation.
-        #
-        # Original code:
-        # envelope = ModelHookEventEnvelope.model_validate_json(value)
-        # payload = envelope.payload
-        # result = await self._aggregator.process_event(envelope, correlation_id)
+        # Schema parsing belongs to the aggregator, not here: parsing an
+        # envelope at this seam would put an omniclaude schema dependency
+        # inside an infra service. See the module header.
 
         logger.debug(
             "Processing event",

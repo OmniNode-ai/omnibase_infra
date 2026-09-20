@@ -72,6 +72,10 @@ from omnibase_infra.topics import (
     SUFFIX_OMNICLAUDE_SKILL_COMPLETED,
     SUFFIX_OMNICLAUDE_SKILL_STARTED,
 )
+from omnibase_infra.topics.topic_namespace import (
+    apply_topic_namespace,
+    apply_topic_namespace_all,
+)
 
 if TYPE_CHECKING:
     from aiokafka.structs import ConsumerRecord
@@ -347,7 +351,7 @@ class SkillLifecycleConsumer:
 
         # Kafka consumer
         self._consumer = AIOKafkaConsumer(
-            *self.config.topics,
+            *apply_topic_namespace_all(self.config.topics),
             bootstrap_servers=self.config.kafka_bootstrap_servers,
             group_id=self.config.kafka_group_id,
             auto_offset_reset=self.config.auto_offset_reset,
@@ -470,7 +474,9 @@ class SkillLifecycleConsumer:
         ).encode("utf-8")
 
         try:
-            await self._producer.send_and_wait(self.config.dlq_topic, value=dlq_payload)
+            await self._producer.send_and_wait(
+                apply_topic_namespace(self.config.dlq_topic), value=dlq_payload
+            )
             await self.metrics.record_sent_to_dlq()
             logger.warning(
                 "Message sent to DLQ",

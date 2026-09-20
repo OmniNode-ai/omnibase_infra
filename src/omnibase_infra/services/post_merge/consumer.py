@@ -89,6 +89,7 @@ from omnibase_infra.services.post_merge.model_post_merge_result import (
 from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_GITHUB_POST_MERGE_RESULT,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ class PostMergeConsumer:
             return
 
         self._consumer = AIOKafkaConsumer(
-            self._config.input_topic,
+            apply_topic_namespace(self._config.input_topic),
             bootstrap_servers=self._config.kafka_bootstrap_servers,
             group_id=self._config.kafka_group_id,
             auto_offset_reset=self._config.auto_offset_reset,
@@ -509,7 +510,7 @@ class PostMergeConsumer:
             payload = json.loads(result.model_dump_json())
             key = f"{result.repo}/pr/{result.pr_number}".encode()
             await self._producer.send_and_wait(
-                RESULT_TOPIC,
+                apply_topic_namespace(RESULT_TOPIC),
                 key=key,
                 value=payload,
             )

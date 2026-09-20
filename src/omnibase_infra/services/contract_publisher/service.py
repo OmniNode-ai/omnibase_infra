@@ -58,7 +58,7 @@ from omnibase_infra.services.contract_publisher.sources import (
     SourceContractFilesystem,
     SourceContractPackage,
 )
-from omnibase_infra.topics import TopicResolver
+from omnibase_infra.topics import TopicResolver, create_topic_resolver
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -120,7 +120,7 @@ class ServiceContractPublisher:
         self._source = source
         self._config = config
         self._environment = config.resolve_environment()
-        self._topic_resolver = TopicResolver()
+        self._topic_resolver = create_topic_resolver()
 
     @classmethod
     async def from_container(

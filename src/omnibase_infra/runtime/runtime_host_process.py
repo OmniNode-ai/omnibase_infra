@@ -249,6 +249,7 @@ from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSour
 from omnibase_infra.topics import (
     TopicResolutionError,
     TopicResolver,
+    create_topic_resolver,
 )
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
@@ -6420,7 +6421,7 @@ class RuntimeHostProcess:
         # Generate a correlation_id for this wiring phase (no request-scoped
         # correlation_id is available at startup time).
         wiring_correlation_id = uuid4()
-        topic_resolver = TopicResolver()
+        topic_resolver = create_topic_resolver()
         try:
             registration_topic = topic_resolver.resolve(
                 TOPIC_SUFFIX_CONTRACT_REGISTERED,

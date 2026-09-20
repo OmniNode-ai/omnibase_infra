@@ -18,6 +18,9 @@
 # system says so, not because a flag was remembered.
 #
 # Related Tickets:
+#   - OMN-18891: the DLQ topic enumeration is scoped to the configured deployment topic
+#     namespace, so a slot's monitor reports on its own dead letters rather
+#     than on every lane sharing the broker
 #   - OMN-16769: this ticket
 #   - OMN-16767: the delegation-chain defect this sink hid
 #   - OMN-16422: node_dlq_replay_effect self-amplifying replay loop, measured
@@ -31,7 +34,7 @@ contract_version:
   major: 1
   minor: 0
   patch: 1
-node_version: "1.0.1"
+node_version: "1.0.2"
 description: >
   Read-only dead-letter-queue depth and arrival-rate probe (OMN-16769). Enumerates every onex.dlq.* topic on the configured broker, measures retained depth and arrivals-in-window from broker offsets, evaluates them against contract-declared bounds, and returns a typed result stating both the full per-topic histogram and the run-gating decision. Performs no writes of any kind. OMN-18088: the alert is a VALUE (result.alert_exit_requested), not a raise — the scheduled workflow reads that field and exits non-zero on it, so the run that goes RED is the same run that wrote down which sinks breached and by how much.
 

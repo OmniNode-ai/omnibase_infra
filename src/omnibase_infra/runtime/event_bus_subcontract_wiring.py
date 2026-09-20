@@ -125,7 +125,7 @@ from omnibase_infra.models.event_bus import (
 )
 from omnibase_infra.observability.wiring_health import MixinConsumptionCounter
 from omnibase_infra.protocols import ProtocolIdempotencyStore
-from omnibase_infra.topics import TopicResolver
+from omnibase_infra.topics import TopicResolver, create_topic_resolver
 from omnibase_infra.utils import compute_consumer_group_id
 from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
@@ -373,7 +373,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         self._init_consumption_counter()
 
         # Canonical topic resolver - all topic resolution delegates here
-        self._topic_resolver = TopicResolver()
+        self._topic_resolver = create_topic_resolver()
 
     def resolve_topic(self, topic_suffix: str) -> str:
         """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
