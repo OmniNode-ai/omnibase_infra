@@ -734,7 +734,15 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # The grant rides in the owning node's own lineage rather than a shared
     # file, so it is a second declaration here rather than an edit to the
     # first -- the same shape as node_projection_runner_fleet's pair above.
-    assert len(result.declarations) == 200
+    #
+    # 200 -> 202 for OMN-18903 (decision 2 of epic OMN-18850), which adds TWO
+    # node-owned migrations: 0000_create_ci_attempt_outcome.sql, the read model
+    # holding one row per (repository, pull request, head commit, check, run
+    # attempt) with its cause code, and 0001_grant_omninode_runtime_ci_attempt_
+    # outcome.sql, which ISSUES the grants the topology only declares. Two
+    # declarations rather than one for the same reason as every pair above: the
+    # create runs as the migration role and the grant names the runtime role.
+    assert len(result.declarations) == 202
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
