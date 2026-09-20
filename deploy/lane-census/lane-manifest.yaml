@@ -100,6 +100,23 @@
 #   when it is ENTIRELY down, and this one is up — so what it actually buys is the future case:
 #   from here on, a ci-bus broker that has GONE down is drift instead of silence, which is the
 #   whole reason a CI bus is declared here at all.
+# verified: 2026-09-20 via read-only ssh jonah@192.168.86.201 — OMN-18890, the
+#   attestation for the two `prepr-1` / `prepr-2` pool entries this PR adds.
+#   STATE AT THIS LINE, which is the state the declaration is ahead of:
+#   `docker ps -a --filter label=com.docker.compose.project=omnibase-infra-prepr-1`
+#   and the same for `-prepr-2` each return ZERO containers;
+#   `docker network ls --format '{{.Name}}' | grep -c prepr` -> 0; and
+#   `ss -ltn` has NO listener on any of 28085, 28086, 28090, 23002, 38085, 38086,
+#   38090 or 33002 — the whole reserved block is free, re-confirming the live
+#   enumeration the plan took at 2026-09-20T12:42Z. Both entries are therefore
+#   DECLARED-BUT-ABSENT by design and are `optional: true` permanently, not
+#   temporarily: an empty pool is the steady state, not a stage before bring-up.
+#   Positive control for those zeros, taken in the same session on the same host:
+#   the identical `docker ps -a` shape against `omnibase-infra` returns 33 rows
+#   and `docker network ls` lists `omnibase-infra-network`, so the command can
+#   return a non-empty answer and the pool's zero is measured rather than an
+#   errored-and-empty read. No lane was mutated: every command in this attestation
+#   is a read.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -507,6 +524,186 @@ lanes:
         kind: service
         replicas: 1
       - name: omnimarket-dogfood-projection-api
+        kind: service
+        replicas: 1
+  # ---------------------------------------------------------------------------
+  # prepr-1 / prepr-2 — the EPHEMERAL PRE-PR VERIFY POOL (OMN-18890, epic
+  # OMN-18888)
+  # ---------------------------------------------------------------------------
+  # DECLARED BEFORE IT IS BUILT, deliberately, on the `lakshman` reservation
+  # precedent above: the compose project names, the network the slots must
+  # attach to and the port block are claimed in the desired-state authority
+  # first, so a slot that later appears on the host is reconciled rather than
+  # invisible. Undocumented-but-running is the dangerous direction (retro B-6 /
+  # OMN-13034). Nothing here is built by this change and no lane is mutated by
+  # it.
+  #
+  # WHAT A SLOT IS. A slot exists to run exactly ONE branch, for the minutes its
+  # verification takes, and is destroyed when the run ends or its lease expires.
+  # No other lane reads it. It is a premise for nothing: it promotes nothing,
+  # sources no `stability-proven` digest, and must never appear in a
+  # prod-promotion grant's evidence chain (OMN-13418 / OMN-15243). It is
+  # deliberately NOT in `scripts/preflight_lane_deploy_attribution.py`
+  # GOVERNED_LANES or GRANT_INTERLOCK_LANES, for the same reason the dev and
+  # collaborator lanes are not: gating a throwaway sandbox buys no governance and
+  # pushes its users off the sanctioned path.
+  #
+  # WHY TWO, AND WHY NO DEPENDENCY SERVERS. Sized in section 3.2 of the settled
+  # plan against readings taken on this host at 2026-09-20T12:41Z: about 2.75 GiB
+  # resident per slot against 53 GiB available, so memory is not the binding
+  # constraint — the IMAGE BUILD is, at roughly 20-25 minutes of the 33-37 minute
+  # rebuild cycles measured the same day. A third slot would only queue behind
+  # the same pool-wide build lock, so it costs memory for no throughput. Each
+  # slot reuses the dev lane's Postgres, Redpanda, Valkey and Keycloak SERVERS by
+  # service hostname and isolates by NAMESPACE on every axis instead: a topic
+  # prefix, a database name suffix, per-slot consumer groups, a Valkey database
+  # index and its own tenant. That is why the service list below carries no
+  # postgres, redpanda, valkey or keycloak, and why the declared network is the
+  # dev lane's own — a slot off that network cannot reach a single dependency it
+  # needs.
+  #
+  # `optional: true`, AND IT IS THE LOAD-BEARING FLAG HERE. Unlike every other
+  # entry in this file, ABSENT is the steady state: the pool is empty whenever no
+  # branch is under verification, which is most of the time. `optional` is read
+  # at scripts/lane_census_plan.py:149 and its only effect is at :157 — a lane
+  # with none of its declared service containers running returns no findings at
+  # all. A non-optional entry here would file a census ticket on every tick for a
+  # pool that is working exactly as designed, which is noise, and noise trains a
+  # reader to ignore the census. The moment ANY declared service is running the
+  # slot is reconciled normally, which is the half that makes a half-torn-down
+  # slot visible instead of silent. Unlike `ci-bus`, this flag is permanent: it
+  # will not be flipped when the pool is first built, because a built pool is
+  # still empty between runs.
+  #
+  # RESERVED PORT BLOCK — enumerated live from this host's listening sockets on
+  # 2026-09-20T12:42Z (plan section 3.3) and re-confirmed free on 2026-09-20 by
+  # the verified: line at the top of this file. In use and therefore avoided:
+  # 8085/8086/8090/3002 (dev), 18085/18086 (stability-test), 48085/48086 (judge),
+  # 58085/58086/53002 (lakshman), and 28080/38080/38877 on unrelated services.
+  #
+  #   slot   runtime main   runtime effects   gateway API   projection API
+  #   1      28085          28086             28090         23002
+  #   2      38085          38086             38090         33002
+  #
+  # NOTE ON 28085/28086, stated rather than left to be rediscovered. Those two
+  # are the RETIRED lab `prod` lane's old runtime ports — which is exactly why
+  # they are free: OMN-18320 shut that compose lane down on 2026-09-13. They are
+  # still the literals in omni_home's no-raw-prod-bypass matcher `_PROD_PORTS`
+  # (tests/test_no_raw_prod_bypass_policy.py). That matcher pairs a port literal
+  # with a `docker tag` / `docker commit` verb only — its recreate arm keys on the
+  # compose PROJECT name, and no governed project name is a substring of
+  # `omnibase-infra-prepr-1` — so a pool bring-up recipe cannot trip it. A
+  # committed `docker tag` line in omni_home that happens to name port 28085
+  # would, and that is the one shape to avoid writing there.
+  #
+  # THE SERVICE NAMES BELOW ARE A CONTRACT WITH TASK 4. There is no
+  # docker/docker-compose.prepr-*.yml yet, so these lanes are deliberately NOT in
+  # `_COMPOSE_LANES` in tests/unit/scripts/test_lane_census_manifest_parity.py —
+  # that ratchet scrapes `container_name` values from a file that does not exist.
+  # When Task 4 (OMN-18893) lands the compose file it must use exactly these
+  # names, or change both in the same PR, and add the lanes to the ratchet in
+  # that same change. The pairing is pinned by
+  # tests/unit/scripts/test_prepr_pool_lane_census_omn18890.py, which fails the
+  # moment a compose file appears without the ratchet entry.
+  #
+  # `${SLOT}` is written out per slot rather than templated: this file is read by
+  # a plain yaml.safe_load and the census must be able to name a container
+  # literally.
+  prepr-1:
+    compose_file: docker/docker-compose.prepr.yml
+    compose_project: omnibase-infra-prepr-1
+    network: omnibase-infra-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omninode-prepr-1-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-prepr-1-runtime-effects
+        kind: service
+        replicas: 1
+      # Declared `kind: service, replicas: 1` so the OMN-12988 silent-zero class
+      # cannot recur on a slot. The plan's per-slot memory budget counts this
+      # container at 432 MiB, so it is part of the sizing, not an optional extra.
+      - name: omninode-prepr-1-runtime-worker
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-1-projection-api
+        kind: service
+        replicas: 1
+      # The seven projection carriers the dev lane runs, mirrored per slot. A
+      # slot that omitted them would consume its own prefixed topics to lag zero
+      # and write nothing, with no DLQ record and no ERROR log (OMN-15905 /
+      # OMN-16874) — a verification lane that silently proves nothing is worse
+      # than no verification lane.
+      - name: omnimarket-prepr-1-projection-tenant-registry-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-1-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-1-projection-registration-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-1-projection-savings-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-1-projection-tenant-credentials-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-1-projection-live-events-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-1-tenant-projection-writer
+        kind: service
+        replicas: 1
+      # The slot's own gateway API, on the slot's port. The dev lane's is the
+      # unprefixed `onex-api`, which is why this one carries the slot infix: two
+      # containers cannot share a name on one host.
+      - name: onex-api-prepr-1
+        kind: service
+        replicas: 1
+  prepr-2:
+    compose_file: docker/docker-compose.prepr.yml
+    compose_project: omnibase-infra-prepr-2
+    network: omnibase-infra-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omninode-prepr-2-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-prepr-2-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omninode-prepr-2-runtime-worker
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-2-projection-api
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-2-projection-tenant-registry-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-2-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-2-projection-registration-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-2-projection-savings-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-2-projection-tenant-credentials-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-2-projection-live-events-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-prepr-2-tenant-projection-writer
+        kind: service
+        replicas: 1
+      - name: onex-api-prepr-2
         kind: service
         replicas: 1
   # ci-bus — the fleet's DEDICATED CI bus broker (OMN-18691)

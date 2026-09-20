@@ -139,6 +139,7 @@ def build_event(
         "emitted_at": now.isoformat(),
         "severity": severity,
         "lanes_checked": plan.get("lanes_checked", []),
+        "lanes_skipped_optional_down": plan.get("lanes_skipped_optional_down", []),
         "drift_count": len(findings),
         "findings": findings,
         "alert_key": _alert_key(host, plan),
@@ -176,6 +177,12 @@ def build_observed_event(
         "host": host,
         "observed_at": now.isoformat(),
         "lanes_checked": plan.get("lanes_checked", []),
+        # OMN-18890. Carried on the OBSERVED event for the same reason the event
+        # exists at all: "the census ran and saw nothing wrong here" and "the
+        # census skipped this lane because it is optional and absent" are
+        # different observations, and a consumer that reads zero findings alone
+        # cannot tell them apart.
+        "lanes_skipped_optional_down": plan.get("lanes_skipped_optional_down", []),
         "drift_count": len(findings),
         "findings": findings,
     }

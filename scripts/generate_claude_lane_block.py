@@ -58,7 +58,16 @@ _DEFAULT_SNAPSHOT = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
 _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     "dev": {"main": "8085", "effects": "8086"},
     "stability-test": {"main": "18085", "effects": "18086"},
-    "prod": {"main": "28085", "effects": "28086"},
+    # OMN-18890: the `prod` row is GONE from this map, and its removal is part of
+    # this change rather than a tidy-up. The lab compose lane named `prod` was
+    # shut down on 2026-09-13 (OMN-18320) and removed from lane-manifest.yaml, so
+    # the row rendered nothing and was already dead. It cannot merely be left,
+    # because the pre-PR pool below now claims 28085/28086 — the very ports that
+    # row named — and a map in which two lanes claim one port is a map that will
+    # be read wrong exactly once. What those numbers used to mean is recorded in
+    # the lane manifest's pool comment, which is where a reader who meets them
+    # will be. This is the lab compose lane only; production is the AWS
+    # `onex-prod` namespace and has no row here in the first place.
     "judge": {"main": "—", "effects": "—"},
     # OMN-17143 — collaborator lane for Lakshman Patel. This block was verified free
     # on .201 by read-only `ss -ltn` on 2026-08-30 and is BOUND by that lane as of
@@ -67,12 +76,22 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # (docker/runtime-policy.env), and 49092 is the prod broker's external Kafka
     # port — the reserved block deliberately avoids both.
     "lakshman": {"main": "58085", "effects": "58086"},
+    # OMN-18890 — the ephemeral pre-PR verify pool. Enumerated live from the lab
+    # host's listening sockets on 2026-09-20 and free at that moment, every port
+    # in both blocks. Slot 1's pair is the RETIRED lab `prod` lane's old block,
+    # which is precisely why it is free (OMN-18320 shut that lane down on
+    # 2026-09-13); the stale `prod` row above is the reason this collision is
+    # visible here at all, and it is left standing because it still documents
+    # what those numbers used to mean. The two columns this table has cannot
+    # carry a slot's other two ports — gateway API 28090/38090 and projection
+    # API 23002/33002 — which are declared in the lane manifest's reserved block.
+    "prepr-1": {"main": "28085", "effects": "28086"},
+    "prepr-2": {"main": "38085", "effects": "38086"},
 }
 
 _LANE_BOUNDARY: dict[str, str] = {
     "dev": "fully mutable test platform",
     "stability-test": "preferred proof lane for synthetic integration evidence",
-    "prod": "read-only unless the user explicitly approves production mutation",
     "judge": "NOT authorized for mutation — read-only",
     "lakshman": (
         "collaborator lane — owned by Lakshman; mutable by him; NOT a proof "
@@ -85,6 +104,17 @@ _LANE_BOUNDARY: dict[str, str] = {
     "ci-bus": (
         "fleet CI bus — a broker only; NOT a runtime lane, never a proof lane, "
         "and never sourced for stability/prod grants"
+    ),
+    # OMN-18890. The boundary is the whole point of the entry: a slot runs one
+    # branch for the minutes its verification takes and is then destroyed, so it
+    # is a premise for nothing and no other lane may read it.
+    "prepr-1": (
+        "ephemeral pre-PR verify slot — one branch, destroyed at end of run; "
+        "never a proof lane and never sourced for stability/prod grants"
+    ),
+    "prepr-2": (
+        "ephemeral pre-PR verify slot — one branch, destroyed at end of run; "
+        "never a proof lane and never sourced for stability/prod grants"
     ),
 }
 
@@ -139,6 +169,23 @@ def _service_count(
             if s.get("kind", "service") == "service"
         )
         return f"{required} desired (not in last census)"
+
+    # OMN-18890: zero findings is TWO different facts. A lane the census
+    # reconciled and found clean is running; an optional lane it skipped because
+    # nothing of it is up is absent. Both arrive here as an empty findings list,
+    # and reading the second as the first is the phantom-lane claim retro B-6
+    # made unwritable — a table row asserting N containers running on a lane with
+    # none. The planner now says which lanes it skipped, so this reads the fact
+    # rather than inferring it. A snapshot predating that key falls through to
+    # the old behaviour, which is why the key is `.get`-ed rather than required:
+    # an old snapshot is stale, not malformed.
+    if lane_name in snapshot.get("lanes_skipped_optional_down", []):
+        declared = sum(
+            1
+            for s in lane_spec.get("services", [])
+            if s.get("kind", "service") == "service"
+        )
+        return f"0 running — optional lane down ({declared} declared)"
 
     findings = [f for f in snapshot.get("findings", []) if f.get("lane") == lane_name]
     drift_count = len(findings)
