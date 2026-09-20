@@ -86,6 +86,7 @@ databases:
           - object_type: TABLE
             objects:
               - consumer_flow_windows
+              - dod_verify_runs
               - lab_lane_health
               - live_events
               - log_entries
