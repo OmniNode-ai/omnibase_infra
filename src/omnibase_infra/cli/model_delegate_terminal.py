@@ -13,8 +13,14 @@ this object arrives in are resolved.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_core.models.delegation.wire import (
+    ModelDelegationBudgetEvidence,
+    ModelDelegationBudgetRefusal,
+    ModelDelegationContractEvidence,
+    ModelDelegationOutputRefusal,
+)
 from omnibase_infra.cli.model_delegate_attempt import ModelDelegateAttempt
 from omnibase_infra.cli.model_delegate_terminal_metrics import (
     ModelDelegateTerminalMetrics,
@@ -47,6 +53,21 @@ class ModelDelegateTerminal(BaseModel):
     quality_score: float | None = Field(default=None)
     quality_gates_failed: tuple[str, ...] = Field(default=())
     metrics: ModelDelegateTerminalMetrics | None = Field(default=None)
+    budget_evidence: ModelDelegationBudgetEvidence | None = Field(default=None)
+    budget_refusal: ModelDelegationBudgetRefusal | None = Field(default=None)
+    response_contract_evidence: ModelDelegationContractEvidence | None = Field(
+        default=None
+    )
+    preamble_chars: int | None = Field(default=None, ge=0)
+    output_refusal: ModelDelegationOutputRefusal | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _budget_outcome_is_unambiguous(self) -> ModelDelegateTerminal:
+        if self.budget_evidence is not None and self.budget_refusal is not None:
+            raise ValueError(
+                "delegation terminal cannot carry both budget_evidence and budget_refusal"
+            )
+        return self
 
     @property
     def accepted_attempt(self) -> ModelDelegateAttempt | None:
