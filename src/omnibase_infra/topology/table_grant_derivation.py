@@ -304,6 +304,41 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="lab_lane_health",
         ),
     ),
+    # OMN-18862: migration 089 grants BOTH savings read views to
+    # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
+    # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
+    # block below declared only the second. The first has therefore been granted
+    # by this corpus and declared by nothing since 089 landed, which the
+    # OMN-18768 reverse arm reports as a delivered-but-undeclared residual.
+    #
+    # UNLIKE the interim entries above, this pair has NO EXPIRY and is not
+    # tracked by the OMN-18863 expiry test. Those entries bridge a window until
+    # an omnimarket contract declares the relation; these two are VIEWS, and a
+    # view is never a `db_io.db_tables` entry, so no contract will ever declare
+    # them and the supplemental declaration is the steady state rather than a
+    # bridge. Adding them to _INTERIM_ENTRIES would require naming a retiring PR
+    # that does not exist and asserting an expiry that will never arrive.
+    #
+    # What guards them instead is the pairing: both views are granted by the
+    # same statement block in one migration, so declaring one and not the other
+    # is the defect, and a test asserts they are declared together.
+    ContractTableDeclaration(
+        node="legacy_migration:projection_delegation_savings",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="projection_delegation_savings",
+            database_ref="application",
+            schema="tenant",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_savings/"
+                "089_savings_aggregate_views_per_tenant.sql"
+            ),
+            access="read",
+            role="aggregate_delegation_savings",
+        ),
+    ),
     # OMN-17426: the savings overview READ VIEW follows the same temporary
     # supplemental-declaration path as OMN-18159 above. Infra vendors migration
     # 089 before the omnimarket source PR can merge, and the market PR cannot

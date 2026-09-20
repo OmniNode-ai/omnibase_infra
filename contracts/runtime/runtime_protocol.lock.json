@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.38.26",
-  "protocol_count": 23,
+  "package_version": "0.38.35",
+  "protocol_count": 24,
   "protocols": {
     "ProtocolAutoWiringManifestLike": {
       "runtime_checkable": false,
@@ -264,6 +264,35 @@
             }
           ],
           "return_annotation": "ModelRegistrationProjection | None"
+        }
+      }
+    },
+    "ProtocolConsumeConcurrencyDeclarer": {
+      "runtime_checkable": true,
+      "method_count": 1,
+      "methods": {
+        "declare_consume_concurrency": {
+          "parameters": [
+            {
+              "name": "topic",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "group_id",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "max_in_flight_records",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "int",
+              "default": null
+            }
+          ],
+          "return_annotation": "None"
         }
       }
     },

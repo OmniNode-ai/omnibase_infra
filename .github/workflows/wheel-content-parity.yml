@@ -1,0 +1,61 @@
+---
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# WHEEL CONTENT PARITY, called here. OMN-18865.
+#
+# The pre-merge twin of the OMN-14631 workspace content-parity gate: it proves
+# this repository's built wheel carries byte-for-byte the tracked source tree
+# under src/omnibase_infra, plus whatever the repo declares force-included into
+# that package. The image build proves the same property on the lab, after
+# merge; this proves it on the pull request that introduces the change.
+#
+# This file is a thin caller. The comparison lives in
+# scripts/ci/check_wheel_content_parity.py, which imports every primitive from
+# the image gate itself, so there is exactly one implementation on the fleet.
+#
+# NO `paths:` AND NO `branches:` FILTER, and no job-level `if:`, deliberately.
+# This context is asserted in this repository's EXPECTED_EXTERNAL_CONTEXTS, and
+# an asserted context that can be legitimately absent on some pull-request
+# shape does not fail that shape -- it wedges it, because the poller waits on a
+# context nothing will mint until its deadline converts the verdict to a
+# failure. `merge_group` is triggered for the same reason: this repository has
+# no queue today, but a context that vanished the day one was enabled would
+# wedge the queue rather than fail it.
+
+name: Wheel Content Parity
+
+on:
+  pull_request:
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  wheel-content-parity:
+    name: wheel-content-parity
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci;
+    # public forks default to ubuntu-latest. The untrusted test is the FORK
+    # test and only the fork test (OMN-18205). Read live from the routing
+    # seam; this workflow never writes a routing variable.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Judge wheel content parity
+        uses: ./.github/actions/wheel-content-parity
+        with:
+          package: omnibase_infra

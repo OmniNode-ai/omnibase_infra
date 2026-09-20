@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -752,3 +753,60 @@ def _compose_env_value(environment: object, key: str) -> str | None:
             if isinstance(entry, str) and entry.startswith(prefix):
                 return entry[len(prefix) :].strip().strip('"').strip("'")
     return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Print this lane's compose-declared writer groups, one per line.
+
+    OMN-18866. The compose-lane lab-pass receipt's ``consumer_group_lag`` check
+    needs a group list, and this module already owns the only honest way to
+    produce one. A CLI here rather than a second derivation there, because two
+    derivations are two declarations free to disagree -- which is the whole of
+    the OMN-15837 defect this module was written to end.
+
+    Scope, stated so it is not mistaken for the full set: these are the
+    STANDALONE projection writers, whose group ids the compose file mints
+    literally. The contract auto-wired groups are derived from a live manifest
+    by ``derive_contract_declared_groups`` and are deliberately not included --
+    reading them needs the lane, and a caller that has the lane can ask for
+    them directly. The writers are the set the lag check was motivated by:
+    OMN-18851's nine-day freeze was a standalone writer.
+
+    Exit codes: ``0`` groups printed; ``1`` the derivation failed and said why;
+    ``2`` the derivation succeeded and produced NOTHING, which is a lane whose
+    compose file declares no writer at all. That is reported as a failure
+    rather than an empty success, because an empty list read as "no lag to
+    check" is exactly how a probe reports green on a lane it never looked at.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument("--compose", type=Path, required=True)
+    parser.add_argument(
+        "--env",
+        required=True,
+        help="the lane's group-id prefix, so a shared compose fragment cannot "
+        "pull another lane's group into this list",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        groups = derive_compose_declared_groups(args.compose, env=args.env)
+    except DerivationError as exc:
+        print(f"::error::{exc}", file=sys.stderr)
+        return 1
+    if not groups:
+        print(
+            f"::error::{args.compose} declares no consumer group with the "
+            f"{args.env!r} prefix; refusing to report an empty group list as a "
+            "lane with nothing to measure",
+            file=sys.stderr,
+        )
+        return 2
+    for group in groups:
+        print(group.name)
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entrypoint
+    raise SystemExit(main())

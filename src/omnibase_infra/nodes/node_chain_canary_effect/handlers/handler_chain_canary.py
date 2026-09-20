@@ -252,6 +252,30 @@ _CANARY_DELEGATION_PROVENANCE = ModelDelegationProvenance(
 # is stranded by default instead of silently passing.
 _TERMINAL_FSM_STATES: frozenset[str] = frozenset({"COMPLETED", "FAILED"})
 
+# How often the link-2 bounded poll re-reads the projection (OMN-18872). The
+# interval is a floor on how quickly a row can be noticed and a ceiling on how
+# many queries a run costs: at one second, a 120 s window is at most ~120
+# single-row indexed lookups spread across two minutes, which is noise beside
+# the projection writer's own traffic. It is deliberately NOT a request field.
+# The thing a caller might reasonably want to tune is the DEADLINE, and that
+# already exists as the readback window every other leg is measured against --
+# a second knob would let a run narrow the poll without narrowing the window it
+# claims to have waited, which is the shape of a false red.
+_PROJECTION_POLL_INTERVAL_SECONDS: float = 1.0
+
+
+def _is_terminal_fsm_state(state: object) -> bool:
+    """Is this ``delegation_workflow_state.state`` value a terminal one?
+
+    One predicate for both the OMN-18872 poll's stop condition and the
+    classification that follows it. Two copies of "is this terminal" would be
+    free to disagree, and the disagreement would be silent: a poll that stops
+    on a state the classifier then calls stranded reports a stuck chain for a
+    row that finished.
+    """
+    return str(state or "").strip().upper() in _TERMINAL_FSM_STATES
+
+
 # The role probe the projection readback runs BEFORE its first read
 # (OMN-18060). `current_user` is resolved by the server from the authenticated
 # connection, so this is a fact about the DSN that was actually used -- not a
@@ -638,6 +662,32 @@ async def _readback_projection_via_asyncpg(
     id. This is the readback OMN-16025 link 2 asks for — from the projection,
     not from logs and not from the publish return.
 
+    **The read is a bounded poll against ``timeout_s``, not one sample
+    (OMN-18872).** It used to be a single ``SELECT`` fired the instant the
+    ingress answered, which was sound only while the ingress BLOCKED until the
+    chain finished. The OMN-18421 move to the tenant-bearing gateway made the
+    submission asynchronous — the route answers ``202`` in a few hundred
+    milliseconds — so the one sample started landing tens of seconds before the
+    projection wrote anything, and every run reported ``ROW_ABSENT`` against a
+    row that appeared shortly afterwards and reached ``COMPLETED`` well before
+    the verdict was published. Run 35482636275 is the measured case: submitted
+    ``01:56:17.26``, row created ``01:56:50.60``, ``COMPLETED`` at
+    ``01:57:14.11``, verdict "carries NO row" at ``01:58:17.98``.
+
+    **It polls to a TERMINAL state rather than to first sight of the row**, and
+    that distinction is the whole correctness of the fix. A row is created
+    non-terminal — ``RECEIVED`` and ``ROUTED`` both occur live — and reaches
+    ``COMPLETED`` a second or two later, so returning on first sight would have
+    replaced a wrong ``ROW_ABSENT`` with a wrong ``STRANDED`` and left the
+    canary just as red for just as wrong a reason. ``STRANDED`` is reported
+    only when the deadline expires with the row still non-terminal, which is
+    the OMN-14843 condition it was written to catch, and the last state seen is
+    what gets reported.
+
+    There is no blind sleep anywhere in this leg: it returns as soon as the
+    projection is terminal, and only a genuinely absent or genuinely stuck row
+    costs the full window.
+
     Before it reads anything it asks the connection who it is (OMN-18060). A
     canary is a READER, and ``SELECT rolsuper, rolbypassrls FROM pg_roles
     WHERE rolname = current_user`` is the only un-forgeable way to establish
@@ -721,14 +771,35 @@ async def _readback_projection_via_asyncpg(
                 status=EnumProjectionReadbackStatus.ERROR,
                 error="projection readback budget exhausted after the role probe",
             )
-        row = await asyncio.wait_for(
-            connection.fetchrow(
-                "SELECT state, traffic_class FROM delegation_workflow_state "
-                "WHERE correlation_id = $1",
-                correlation_id,
-            ),
-            timeout=_remaining(),
-        )
+        # The bounded poll. `row` carries the last read on the way out, so the
+        # deadline arms are written once below rather than duplicated here.
+        row = None
+        attempts = 0
+        while True:
+            remaining = _remaining()
+            if remaining <= 0:
+                # The deadline decides the outcome, so it must be checked
+                # BEFORE the read rather than handed to it. Passing a
+                # non-positive timeout to `wait_for` raises, and the except
+                # arm below would report ERROR — an expired window rendered
+                # as "the store did not answer", which is the wrong layer and
+                # exactly the confusion the status enum exists to prevent.
+                break
+            attempts += 1
+            row = await asyncio.wait_for(
+                connection.fetchrow(
+                    "SELECT state, traffic_class FROM delegation_workflow_state "
+                    "WHERE correlation_id = $1",
+                    correlation_id,
+                ),
+                timeout=remaining,
+            )
+            if row is not None and _is_terminal_fsm_state(row["state"]):
+                break
+            sleep_s = min(_PROJECTION_POLL_INTERVAL_SECONDS, _remaining())
+            if sleep_s <= 0:
+                break
+            await asyncio.sleep(sleep_s)
     except Exception as exc:  # noqa: BLE001 - fails closed, never to a verdict
         return ModelProjectionReadbackOutcome(
             status=EnumProjectionReadbackStatus.ERROR,
@@ -749,9 +820,17 @@ async def _readback_projection_via_asyncpg(
                     sanitize_error_message(close_exc),
                 )
 
+    # How long the poll actually ran, so a non-passing outcome says what it
+    # waited rather than leaving the reader to assume it sampled once. An
+    # absence reported after 0.2 s and one reported after 118 s are different
+    # findings, and telling them apart is what this leg got wrong.
+    waited_s = max(0.0, timeout_s - max(0.0, _remaining()))
+    waited = f"polled for {waited_s:.1f}s across {attempts} read(s)"
+
     if row is None:
         return ModelProjectionReadbackOutcome(
-            status=EnumProjectionReadbackStatus.ROW_ABSENT
+            status=EnumProjectionReadbackStatus.ROW_ABSENT,
+            error=f"no row appeared: {waited}",
         )
     state = str(row["state"] or "")
     traffic_class = _delegation_traffic_class_from_row(row["traffic_class"])
@@ -765,9 +844,10 @@ async def _readback_projection_via_asyncpg(
         )
     if not state:
         return ModelProjectionReadbackOutcome(
-            status=EnumProjectionReadbackStatus.ROW_ABSENT
+            status=EnumProjectionReadbackStatus.ROW_ABSENT,
+            error=f"a row exists but carries no FSM state: {waited}",
         )
-    if state.strip().upper() in _TERMINAL_FSM_STATES:
+    if _is_terminal_fsm_state(state):
         return ModelProjectionReadbackOutcome(
             status=EnumProjectionReadbackStatus.TERMINAL,
             state=state,
@@ -777,6 +857,7 @@ async def _readback_projection_via_asyncpg(
         status=EnumProjectionReadbackStatus.STRANDED,
         state=state,
         traffic_class=traffic_class,
+        error=f"still non-terminal at the deadline: {waited}",
     )
 
 
@@ -1693,10 +1774,11 @@ class HandlerChainCanary:
                 (
                     f"the terminal IS on the bus ({terminal_topic}) for this "
                     "correlation id, but delegation_workflow_state holds "
-                    f"{projection_state!r} — not a terminal FSM state. The "
-                    "chain carried the event and the FSM did not finish with "
-                    "it (OMN-14843). Link 4 passing while link 2 fails is the "
-                    "disagreement, not a contradiction."
+                    f"{projection_state!r} — not a terminal FSM state"
+                    f"{f' ({projection_error})' if projection_error else ''}. "
+                    "The chain carried the event and the FSM did not finish "
+                    "with it (OMN-14843). Link 4 passing while link 2 fails is "
+                    "the disagreement, not a contradiction."
                 ),
             )
         if projection_readback_status is EnumProjectionReadbackStatus.ROW_ABSENT:
@@ -1705,10 +1787,11 @@ class HandlerChainCanary:
                 (
                     f"the terminal IS on the bus ({terminal_topic}) for this "
                     "correlation id, but delegation_workflow_state carries NO "
-                    "row for it. Either the projection never consumed the "
-                    "event or it never wrote — a different layer from a row "
-                    "that stopped mid-FSM, which is why this is not reported "
-                    "as stranded."
+                    "row for it"
+                    f"{f' ({projection_error})' if projection_error else ''}. "
+                    "Either the projection never consumed the event or it "
+                    "never wrote — a different layer from a row that stopped "
+                    "mid-FSM, which is why this is not reported as stranded."
                 ),
             )
         if projection_readback_status is EnumProjectionReadbackStatus.REFUSED:

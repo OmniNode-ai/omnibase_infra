@@ -144,10 +144,31 @@ class TestTheModelRefusesAnUnfinishedVerdict:
         assert self._completed(settled).status == "failed"
 
     def test_a_clean_deploy_yields_success(self) -> None:
+        """OMN-18861 added ``services_restarted`` to what a success must show.
+
+        A clean phase map is no longer sufficient on its own: every successful
+        return from ``rebuild_scope`` yields a non-empty service list, so an
+        empty one means it raised. This test previously passed none, which is
+        the shape the deploys with a failed image build carried. The phases it
+        asserts on are unchanged; the deploy now also has to have restarted
+        something, which a clean deploy by definition did.
+        """
         settled = reconcile_terminal_phase_results(
             dict.fromkeys(DEPLOY_PHASE_ORDER, PhaseStatus.SUCCESS)
         )
-        assert self._completed(settled).status == "success"
+        completed = ModelRebuildCompleted(
+            correlation_id=uuid4(),
+            requested_git_ref="origin/dev",
+            git_sha="3461e4b0aeae4690fc5bb52c56aef63db1227109",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            duration_seconds=614.0,
+            scope="full",
+            runtime_lane="dev",
+            phase_results=settled,
+            services_restarted=["omninode-runtime", "runtime-effects"],
+        )
+        assert completed.status == "success"
 
 
 class TestTheTerminalPayload:

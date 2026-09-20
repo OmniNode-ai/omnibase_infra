@@ -99,6 +99,10 @@ def test_rebuild_completed_carries_lane_and_digest() -> None:
         image_ref="ghcr.io/omninode-ai/runtime:0.37.0",
         image_digest="sha256:" + "b" * 64,
         phase_results={Phase.RUNTIME: PhaseStatus.SUCCESS},
+        # OMN-18861: a success must also show what it restarted. A prod deploy
+        # of RUNTIME scope resolves its targets and returns them, so an empty
+        # list here would describe a deploy that raised, not this one.
+        services_restarted=["omninode-runtime"],
     )
     assert completed.runtime_lane is EnumRuntimeLane.PROD
     assert completed.image_digest == "sha256:" + "b" * 64

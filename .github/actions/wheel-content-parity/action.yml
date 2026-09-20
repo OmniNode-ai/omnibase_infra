@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# THE PRE-MERGE TWIN OF THE OMN-14631 WORKSPACE CONTENT-PARITY GATE. OMN-18865.
+#
+# Proves the caller repository's built wheel carries byte-for-byte the tracked
+# source tree under src/<package>, plus whatever that repo declares
+# force-included into the package from outside src/. The image build already
+# proves this on the lab, after merge; this proves it on the pull request.
+#
+# A COMPOSITE ACTION RATHER THAN A REUSABLE WORKFLOW, and the reason is
+# MEASURED, not stylistic. The first implementation was a reusable workflow
+# that checked omnibase_infra out at `github.job_workflow_sha` so one caller
+# pin fixed the workflow and the scripts together. That context is populated
+# for a LOCAL reusable and EMPTY for a cross-repository one: on
+# omnimarket#2696, omnibase_core#1721 and omnibase_compat#212 it resolved to
+# the empty string, actions/checkout silently fell back to the default branch,
+# and the run failed with `python3: can't open file ... check_wheel_content_
+# parity.py`. It failed CLOSED, which is the only reason that is a story about
+# a wasted run rather than about three repositories reporting green on a
+# comparison that never executed.
+#
+# An action does not have that problem by construction: GitHub checks the
+# action's repository out at the ref the caller pinned, so the comparison and
+# its library arrive WITH this file. One pin, no second ref to keep in sync,
+# no context that can be empty.
+#
+# THE COMPARISON IS NOT COPIED INTO ANY CALLER. It lives once, in this
+# repository's own image gate (scripts/runtime_build/compute_workspace_
+# provenance.py), and scripts/ci/check_wheel_content_parity.py imports every
+# primitive from it. A second copy is the failure this check exists to
+# prevent.
+#
+# A CI-TIME ACTION IS NOT A RUNTIME DEPENDENCY. A caller using this does not
+# depend on omnibase_infra: nothing enters its project metadata, lock file or
+# import graph, and the fetched files die with the runner. Rule 7 constrains
+# the RUNTIME dependency direction.
+name: Wheel content parity
+description: >
+  Refuse a wheel whose package tree is not byte-for-byte the repository's tracked source tree plus its declared force-includes (OMN-18865, the pre-merge twin of the OMN-14631 gate).
+
+inputs:
+  package:
+    description: >
+      The package's IMPORT name, e.g. omnibase_core. The source tree is read from src/<package> and the wheel's <package>/ entries are compared against it. This selects WHAT is judged; there is no input that softens a verdict, and deliberately so.
+
+    required: true
+  repo-root:
+    description: >
+      Repository root to judge. Defaults to the caller's checkout.
+
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+    - name: Judge wheel content parity
+      shell: bash
+      env:
+        PACKAGE: ${{ inputs.package }}
+        REPO_ROOT: ${{ inputs.repo-root }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+
+        # github.action_path is <checkout>/.github/actions/wheel-content-parity,
+        # so the repository root of THIS action's own checkout is three up.
+        action_repo_root="$(cd "${ACTION_PATH}/../../.." && pwd)"
+        checker="${action_repo_root}/scripts/ci/check_wheel_content_parity.py"
+
+        # Fail closed and name the path. An action checkout that did not
+        # yield the comparison has not passed, it has not run -- which is
+        # exactly the condition the reusable-workflow implementation hit.
+        if [ ! -s "${checker}" ]; then
+          echo "::error::the wheel-content-parity action checkout did not yield ${checker}"
+          exit 1
+        fi
+
+        python3 "${checker}" \
+          --repo-root "${REPO_ROOT:-$GITHUB_WORKSPACE}" \
+          --package "${PACKAGE}" \
+          --json "${RUNNER_TEMP}/wheel-content-parity.json"
+    - name: Upload the parity result
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: wheel-content-parity-${{ inputs.package }}-${{ github.event.pull_request.head.sha || github.sha }}
+        path: ${{ runner.temp }}/wheel-content-parity.json
+        if-no-files-found: ignore
+        retention-days: 14
