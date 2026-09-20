@@ -28,7 +28,15 @@ contract set declares one of these relations, this test goes RED and names the
 entry to delete, which lands in the pin-advance that made it redundant instead
 of accumulating.
 
-Scoped to the two entries this ticket added, deliberately. The other five are a
+It lives in ``tests/ci/`` and is named in the OMN-15361 enforcement job's own
+pytest list, which is the one place the pinned checkout exists. That follows
+``test_omnimarket_contract_pin.py``, the established home for a
+checkout-dependent assertion in this repo; its two skipped ids are recorded in
+``config/skip_count_baseline.yaml`` with provenance for the same reason that
+module's are, because the split test job has no cross-repo checkout and would
+otherwise collect them and never run them.
+
+Scoped to the entries this ticket added, deliberately. The other five are a
 real cleanup with a real risk of deleting something still load-bearing, and
 adopting them here under a red-dev fix would be exactly the unreviewed widening
 this repo's gates exist to refuse. They are named in the ticket instead.
@@ -45,9 +53,9 @@ from omnibase_infra.topology.table_grant_derivation import (
     load_contract_declarations,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 # The cross-repo checkout the OMN-15361 enforcement job provides, resolved at
 # the committed pin. Absent in a bare local run, which is why every test here
 # skips rather than passing vacuously -- a green that means "I could not look"
