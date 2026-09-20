@@ -184,6 +184,10 @@ from typing import TYPE_CHECKING
 import pytest
 import yaml
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 # Bound by assignment rather than `from ... import`: the OMN-15291 module owns
 # the scratch-Postgres harness, and re-exporting its `pg_target` fixture as an
 # import makes every test that takes it as a parameter read as a redefinition.
@@ -505,6 +509,12 @@ FENCED_BUDGET_STATE_RLS_IDS = (
     "node:node_projection_delegation:"
     "0041_delegation_budget_state_rls_tenant_isolation.sql",
 )
+# OMN-18693 / OMN-15714: shadow-comparison storage carries the same FORCE-RLS
+# posture as the other tenant projection relations.  It stays in the shared
+# baseline fence and is released only by the isolated dogfood policy below.
+FENCED_SHADOW_COMPARISONS_IDS = (
+    "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -513,6 +523,7 @@ EXPECTED_FENCE = (
     + FENCED_HOOK_EVENT_CAPTURE_IDS
     + FENCED_DELEGATION_UUID_CONVERSION_IDS
     + FENCED_BUDGET_STATE_RLS_IDS
+    + FENCED_SHADOW_COMPARISONS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -609,6 +620,7 @@ K8S_RELEASE_IDS_NOW_UNFENCED = (
 # block for the same fix applied at the runner.
 LANE_INDICATOR_ENV = "ONEX_MIGRATION_LANE"
 DEV_LANE_VALUE = "dev"
+DOGFOOD_LANE_VALUE = "dogfood"
 # Spelled out rather than aliased to FENCED_REGISTRATION_IDS: if the two are
 # meant to be equal, that equality is an assertion, not a definition. Aliasing
 # would let a change to one silently move the other.
@@ -650,9 +662,13 @@ LANE_RELEASED_IDS = (
     "node:node_projection_delegation:"
     "0041_delegation_budget_state_rls_tenant_isolation.sql",
 )
+DOGFOOD_LANE_RELEASED_IDS = (
+    "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql",
+)
 
 BASE_COMPOSE_RELPATH = "docker/docker-compose.infra.yml"
 DEV_LANE_OVERLAY_RELPATH = "docker/docker-compose.dev-lane.yml"
+DOGFOOD_LANE_OVERLAY_RELPATH = "docker/docker-compose.dogfood.yml"
 CATALOG_SERVICE_RELPATH = "docker/catalog/services/forward-migration.yaml"
 # Every lane that MERGES the base compose file. The lane indicator must not be
 # reachable from any of them.
@@ -865,8 +881,13 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         found[hook_event_capture_end:uuid_conversion_end]
         == FENCED_DELEGATION_UUID_CONVERSION_IDS
     ), "the OMN-16493 delegation-0031 hold is not the expected id"
-    assert found[uuid_conversion_end:] == FENCED_BUDGET_STATE_RLS_IDS, (
-        "the OMN-14894 delegation_budget_state RLS hold is not the expected id"
+    shadow_comparisons_begin = uuid_conversion_end + len(FENCED_BUDGET_STATE_RLS_IDS)
+    assert (
+        found[uuid_conversion_end:shadow_comparisons_begin]
+        == FENCED_BUDGET_STATE_RLS_IDS
+    ), "the OMN-14894 delegation_budget_state RLS hold is not the expected id"
+    assert found[shadow_comparisons_begin:] == FENCED_SHADOW_COMPARISONS_IDS, (
+        "the OMN-18693 shadow-comparisons RLS hold is not the expected id"
     )
 
 
@@ -1060,7 +1081,7 @@ def test_fence_predicate_is_posix_sh() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_lane_release_arms_are_exactly_dev_default_and_unknown() -> None:
+def test_lane_release_arms_are_exactly_dev_dogfood_default_and_unknown() -> None:
     """Every arm must ASSIGN. An arm that falls through inherits the last value.
 
     ``case`` in POSIX sh does not reset the variable between arms, so an arm
@@ -1068,9 +1089,9 @@ def test_lane_release_arms_are_exactly_dev_default_and_unknown() -> None:
     arm set. That is the shape of a fail-open bug, so the arm set is pinned.
     """
     policies = parse_lane_release_policies(extract_fence_block())
-    assert set(policies) == {DEV_LANE_VALUE, "", "*"}, (
-        "the lane-release policy must have exactly three arms — the dev/lab "
-        f"lane, the unset default, and the unknown-value catch-all. Found: "
+    assert set(policies) == {DEV_LANE_VALUE, DOGFOOD_LANE_VALUE, "", "*"}, (
+        "the lane-release policy must have exactly four arms — the dev/lab and "
+        f"dogfood lanes, the unset default, and the unknown-value catch-all. Found: "
         f"{sorted(policies)}"
     )
     unassigned = [label for label, ids in policies.items() if ids is None]
@@ -1126,6 +1147,18 @@ def test_dev_lane_releases_exactly_the_ruled_set() -> None:
         "node:node_projection_delegation:"
         "0041_delegation_budget_state_rls_tenant_isolation.sql",
     }, "the dev-lane release carries ids no operator ruling names"
+
+
+def test_dogfood_lane_releases_exactly_shadow_comparisons() -> None:
+    """The OMN-18693 dogfood release is one fenced migration, nothing else."""
+    policies = parse_lane_release_policies(extract_fence_block())
+    assert policies[DOGFOOD_LANE_VALUE] == DOGFOOD_LANE_RELEASED_IDS, (
+        "the dogfood release must un-gate only the reviewed shadow-comparisons "
+        "migration:\n  "
+        + "\n  ".join(DOGFOOD_LANE_RELEASED_IDS)
+        + "\nFound:\n  "
+        + "\n  ".join(policies[DOGFOOD_LANE_VALUE])
+    )
 
 
 def test_no_lane_can_release_anything_outside_the_fence() -> None:
@@ -1307,8 +1340,8 @@ def test_lane_indicator_is_absent_from_the_base_compose_file() -> None:
         )
 
 
-def test_only_the_dev_lane_overlay_carries_the_indicator() -> None:
-    """The dev overlay sets it to exactly ``dev``; no other overlay mentions it."""
+def test_only_dev_and_dogfood_lane_overlays_carry_the_indicator() -> None:
+    """The two explicit release overlays set only their own lane values."""
     dev_env = _forward_migration_environment(DEV_LANE_OVERLAY_RELPATH)
     assert dev_env is not None, (
         f"{DEV_LANE_OVERLAY_RELPATH} must define the forward-migration service"
@@ -1316,6 +1349,15 @@ def test_only_the_dev_lane_overlay_carries_the_indicator() -> None:
     assert dev_env.get(LANE_INDICATOR_ENV) == DEV_LANE_VALUE, (
         f"{DEV_LANE_OVERLAY_RELPATH} must set "
         f"{LANE_INDICATOR_ENV}={DEV_LANE_VALUE}; found {dev_env!r}"
+    )
+
+    dogfood_env = _forward_migration_environment(DOGFOOD_LANE_OVERLAY_RELPATH)
+    assert dogfood_env is not None, (
+        f"{DOGFOOD_LANE_OVERLAY_RELPATH} must define forward-migration"
+    )
+    assert dogfood_env.get(LANE_INDICATOR_ENV) == DOGFOOD_LANE_VALUE, (
+        f"{DOGFOOD_LANE_OVERLAY_RELPATH} must set "
+        f"{LANE_INDICATOR_ENV}={DOGFOOD_LANE_VALUE}; found {dogfood_env!r}"
     )
 
     for relpath in NON_DEV_OVERLAY_RELPATHS:
@@ -1424,6 +1466,7 @@ def _k8s_manifest_source(root: Path) -> tuple[str, str]:
         check=False,
         capture_output=True,
         text=True,
+        env=scrub_git_location_env(os.environ),
     )
     if show.returncode == 0:
         sha = subprocess.run(
@@ -1431,6 +1474,7 @@ def _k8s_manifest_source(root: Path) -> tuple[str, str]:
             check=False,
             capture_output=True,
             text=True,
+            env=scrub_git_location_env(os.environ),
         ).stdout.strip()
         return show.stdout, f"{root} origin/dev@{sha or '?'} (last local fetch)"
     return (
@@ -3218,6 +3262,7 @@ def test_guard_introduction_commit_is_reachable() -> None:
         capture_output=True,
         text=True,
         check=False,
+        env=scrub_git_location_env(os.environ),
     )
     assert result.returncode == 0, (
         f"GUARD_INTRODUCTION_COMMIT ({GUARD_INTRODUCTION_COMMIT}) is not an "
@@ -3247,6 +3292,7 @@ def test_grandfathered_ids_predate_the_guard_commit() -> None:
             capture_output=True,
             text=True,
             check=False,
+            env=scrub_git_location_env(os.environ),
         )
         assert result.returncode == 0, (
             f"{grandfathered} is grandfathered but did not exist at "

@@ -313,6 +313,13 @@ def test_dogfood_lane_render_carries_its_own_runtime_identity() -> None:
 
 
 @pytest.mark.integration
+def test_dogfood_forward_migration_selects_its_committed_release_policy() -> None:
+    """Only the dogfood migration job selects the dogfood fence release."""
+    environment = _compose_config_json()["services"]["forward-migration"]["environment"]
+    assert environment["ONEX_MIGRATION_LANE"] == "dogfood"
+
+
+@pytest.mark.integration
 def test_dogfood_lane_renders_no_dangling_credential_broker() -> None:
     """OMN-12966 / OMN-13037: this lane runs neither Keycloak nor Infisical, so
     no service may carry an address for either. A blank address fails visibly;

@@ -333,6 +333,9 @@ services:
       POSTGRES_DB: omnibase_infra
       NODE_POSTGRES_DB: omnidash_analytics
       MIGRATIONS_DIR: /migrations/forward
+      # This standalone overlay alone selects the reviewed 0044 fence release.
+      # The shared base must stay selector-free so every other lane fails closed.
+      ONEX_MIGRATION_LANE: dogfood
       # OMN-16993 / OMN-15425: warm-volume re-assert of the two non-superuser
       # LOGIN credentials. This service redeclares the base definition wholesale,
       # so the base file's copies of these lines do not reach this lane.

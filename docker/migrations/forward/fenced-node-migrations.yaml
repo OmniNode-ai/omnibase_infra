@@ -821,3 +821,10 @@ fenced_node_migrations:
   # construction -- the vendored bytes here were copied from it.
   - id: "node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
     ticket: "OMN-14894"
+  # OMN-18693 / OMN-15714: restores the shadow-comparison relation with a UUID
+  # tenant identity and FORCE ROW LEVEL SECURITY. It is fenced on arrival: a
+  # baseline removal would hit the unclassified-FORCE-RLS guard on every lane
+  # where it has not yet applied. The dogfood runner release is deliberately
+  # separate and names only this id; all other lanes retain the baseline hold.
+  - id: "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql"
+    ticket: "OMN-18693"

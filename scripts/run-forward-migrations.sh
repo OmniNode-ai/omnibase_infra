@@ -551,6 +551,15 @@ node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
 node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql
 node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
     ;;
+  dogfood)
+    # OMN-18693 / OMN-15714: the isolated dogfood lane is the reviewed
+    # proving ground for restoring the shadow-comparison projection. 0044
+    # remains in the shared baseline fence because it enables FORCE ROW LEVEL
+    # SECURITY; this narrow, committed lane policy releases that one id only.
+    # No other lane receives this selector through the base compose overlay.
+    LANE_RELEASED_NODE_MIGRATION_IDS="\
+node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql"
+    ;;
   "")
     LANE_RELEASED_NODE_MIGRATION_IDS=""
     ;;
