@@ -129,6 +129,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import re
 import subprocess  # fixed argv, no shell, trusted gh binary
 import sys
@@ -136,12 +137,12 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 #: Bump when a field is added or a meaning changes. A receipt carrying an
 #: unknown version is REFUSED by the gate rather than best-effort parsed: a
@@ -1026,6 +1027,10 @@ class ModelSettleBudget:
 #: PROBES_NOT_YET_WIRED because it needs nothing the other four do not -- the
 #: introspection manifest is served by the same health server, on the same
 #: port, as ``/ready`` and ``/health``.
+MIGRATIONS_APPLIED_CHECK: Final[str] = "migrations_applied"
+CONSUMER_GROUP_LAG_CHECK: Final[str] = "consumer_group_lag"
+DELEGATION_GOLDEN_CHAIN_CHECK: Final[str] = "delegation_golden_chain"
+
 COMPOSE_DEV_HTTP_CHECKS = (
     "ready_main",
     "ready_effects",
@@ -1034,15 +1039,33 @@ COMPOSE_DEV_HTTP_CHECKS = (
     "node_inventory",
 )
 
-#: Named here rather than silently absent, so a reader can see what a
-#: ``compose-dev`` receipt does NOT cover. Each needs database or broker access
-#: the emitting job does not have today; widening the set is a follow-up that
-#: adds the probe AND the check name in one change.
-PROBES_NOT_YET_WIRED = (
-    "migrations_applied",
-    "consumer_group_lag",
-    "delegation_golden_chain",
+#: The three integration checks OMN-18866 wired, named here beside the HTTP set
+#: because they are emitted by a different mechanism -- the docker socket and
+#: the chain canary's receipt, not an HTTP GET -- and a reader counting the
+#: checks on a receipt should be able to see where each came from.
+#:
+#: Each is emitted ONLY when the caller supplies its subject, on the same rule
+#: the settle budget and the generation binding already follow: supplying the
+#: input IS the claim, so an ad hoc read makes no claim about migrations, lag
+#: or delegation instead of making an empty one.
+COMPOSE_DEV_INTEGRATION_CHECKS = (
+    MIGRATIONS_APPLIED_CHECK,
+    CONSUMER_GROUP_LAG_CHECK,
+    DELEGATION_GOLDEN_CHAIN_CHECK,
 )
+
+#: Named here rather than silently absent, so a reader can see what a
+#: ``compose-dev`` receipt does NOT cover. Widening the set means adding the
+#: probe AND the check name in ONE change -- never the name alone (rule 24).
+#:
+#: EMPTIED by OMN-18866. Its three entries were `migrations_applied`,
+#: `consumer_group_lag` and `delegation_golden_chain`, all three of which are
+#: now wired above. The tuple is kept rather than deleted because the NEXT
+#: unwired probe needs somewhere honest to be declared, and an absent list is
+#: how a gap stops being visible. It is empty because nothing is currently
+#: known to be missing, which is a different statement from nothing being
+#: missing.
+PROBES_NOT_YET_WIRED: tuple[str, ...] = ()
 
 
 def _http_get(url: str, timeout_seconds: float) -> tuple[int, str]:
@@ -1373,6 +1396,561 @@ def check_node_inventory(url: str, timeout_seconds: float) -> ModelNodeInventory
     )
 
 
+# ---------------------------------------------------------------------------
+# OMN-18866 -- the three probes that were named in PROBES_NOT_YET_WIRED
+# ---------------------------------------------------------------------------
+#
+# WHY THEY ARE WIRED NOW, and what changed. The list they came off carried the
+# reason "each needs database or broker access the emitting job does not have
+# today". That premise was true of the `omnibase-deploy` runner the emitting
+# job used to run on. It is FALSE of the runner it runs on now: OMN-18602 moved
+# `verify-lane-converged` to `[self-hosted, omnibase-verify, host-201]`, and
+# every runner in `docker/docker-compose.runners.yml` bind-mounts the host's
+# `/var/run/docker.sock` and resolves `host.docker.internal` to the docker
+# bridge gateway where the lane publishes its ports.
+#
+# Re-measured 2026-09-20 from INSIDE `omninode-verify-runner-1`, with the
+# positive/negative control pair rule 16 requires, because "cannot connect" and
+# "connected, spoke no HTTP" are different facts and a probe that cannot tell
+# them apart reports a lane outage for a protocol mismatch:
+#
+#     host.docker.internal:5436  (lane postgres)  -> curl exit 52  CONNECTED
+#     host.docker.internal:19092 (lane broker)    -> curl exit 52  CONNECTED
+#     host.docker.internal:8085  (runtime, DOWN)  -> curl exit 7   REFUSED
+#
+# So the reachability claim is not assumed; exit 7 is what unreachable actually
+# looks like from this runner, and neither dependency produced it.
+#
+# HOW EACH ONE READS ITS SUBJECT, and why that choice:
+#
+# `migrations_applied` goes through the docker socket (`docker exec <pg> psql`)
+#     rather than over TCP. Inside the container the connection is trusted, so
+#     the probe needs NO network credential at all -- the smallest possible
+#     authority for the question, and the same mechanism `read_lane_generation`
+#     already uses for `docker inspect`.
+#
+# `consumer_group_lag` goes through `docker exec <broker> rpk`, because the
+#     lane broker requires SASL and `rpk` inside the container is where the
+#     existing stability-lane gate already runs it
+#     (`scripts/runtime_build/verify_stability_refresh.py:check_cluster_health`).
+#     The credential is the SAME org secret this workflow already hands its
+#     sibling `trigger-rebuild` job, so no new credential surface is created.
+#     The flag path is proven by its own negative control, recorded here
+#     because it is the evidence that the probe will authenticate rather than
+#     merely that it is spelled plausibly: with no credential the broker
+#     answers "SASL required but not provided"; with a deliberately WRONG
+#     credential it answers "SASL authentication failed". The second error is
+#     the flags being read.
+#
+# `delegation_golden_chain` does NOT fire its own delegation. `chain-canary.yml`
+#     already submits one through the deployed lane ingress and reads the
+#     terminal back off the broker for its own correlation, FROM THIS SAME
+#     RUNNER CLASS. A second dispatcher would be two delegation probes free to
+#     disagree about what a delegation is, so this reads the canary's receipt
+#     and grades it. The canary owns the dispatch; this owns the verdict.
+#
+# All three are READ-ONLY. None starts, stops, recreates or writes to anything.
+
+#: The forward-migration ledger the lane keeps, and the column holding the id.
+#: Measured on the live dev lane 2026-09-20: 90 rows, each shaped
+#: ``docker/<NNN_name.sql>``, exactly equalling the 90 flat ``*.sql`` files the
+#: delivered tree declares. A migration listed in ``skip-manifest.yaml`` still
+#: gets a row (with checksum ``skip-manifest``), so a skip is recorded rather
+#: than absent -- which is why presence, not execution, is the right question.
+MIGRATION_LEDGER_QUERY: Final[str] = "select migration_id from public.schema_migrations"
+
+#: How the delivered tree declares its forward migrations. FLAT and ``*.sql``
+#: only, matching ``scripts/check_schema_fingerprint.py``'s own glob
+#: ("The glob is intentionally flat (non-recursive)"). The two ``*.sh`` files
+#: beside them are bootstrap helpers the runner does not ledger, and the
+#: subdirectories are node-owned streams with their own ledgers.
+MIGRATION_ID_PREFIX: Final[str] = "docker/"
+
+
+class CommandRunner(Protocol):
+    """A ``subprocess.run``-shaped callable, so the probes are testable.
+
+    Declared rather than passing ``subprocess.run`` implicitly because each
+    probe below must be exercised by a NEGATIVE control -- a test that drives
+    it against a known-bad reading and asserts it fails. A probe no test has
+    ever made fail is a probe never proven capable of failing.
+    """
+
+    def __call__(
+        self, argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
+def _run_read_only(
+    argv: Sequence[str], *, timeout: float
+) -> subprocess.CompletedProcess[str]:
+    """Run a fixed-argv, no-shell, read-only command."""
+    return subprocess.run(
+        list(argv),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    )
+
+
+@dataclass(frozen=True)
+class ModelMigrationLedger:
+    """Where the lane keeps its applied-migration ledger."""
+
+    container: str
+    database: str
+    psql_user: str = "postgres"
+
+    def __post_init__(self) -> None:
+        for field_name in ("container", "database", "psql_user"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value:
+                msg = f"migration ledger {field_name} is required and must be non-empty"
+                raise ValueError(msg)
+
+
+def declared_forward_migrations(migrations_dir: Path) -> tuple[str, ...]:
+    """The migration ids the DELIVERED TREE declares, as the ledger spells them.
+
+    Raises rather than returning an empty tuple when the directory is absent:
+    an enumerator that answers "nothing is declared" for a missing directory
+    hands the caller a vacuous comparison that passes against any lane at all.
+    """
+    if not migrations_dir.is_dir():
+        msg = f"forward-migration directory not found: {migrations_dir}"
+        raise ValueError(msg)
+    names = sorted(path.name for path in migrations_dir.glob("*.sql"))
+    if not names:
+        msg = (
+            f"no *.sql forward migrations under {migrations_dir}; refusing to "
+            "compare a lane against an empty declaration"
+        )
+        raise ValueError(msg)
+    return tuple(f"{MIGRATION_ID_PREFIX}{name}" for name in names)
+
+
+def read_applied_migrations(
+    ledger: ModelMigrationLedger,
+    *,
+    runner: CommandRunner | None = None,
+    timeout_seconds: float = 30.0,
+) -> tuple[str, ...]:
+    """Read the lane's applied-migration ids through the docker socket."""
+    run = runner or _run_read_only
+    result = run(
+        [
+            "docker",
+            "exec",
+            ledger.container,
+            "psql",
+            "-U",
+            ledger.psql_user,
+            "-d",
+            ledger.database,
+            "-tAc",
+            MIGRATION_LEDGER_QUERY,
+        ],
+        timeout=timeout_seconds,
+    )
+    if result.returncode != 0:
+        msg = (
+            f"reading {ledger.database}.public.schema_migrations via "
+            f"{ledger.container} failed (exit {result.returncode}): "
+            f"{_truncate((result.stderr or '').strip())}"
+        )
+        raise ValueError(msg)
+    rows = [line.strip() for line in (result.stdout or "").splitlines()]
+    return tuple(row for row in rows if row)
+
+
+def check_migrations_applied(
+    declared: Sequence[str],
+    ledger: ModelMigrationLedger,
+    *,
+    runner: CommandRunner | None = None,
+    timeout_seconds: float = 30.0,
+) -> ModelLabPassCheck:
+    """Every migration the delivered tree declares has a row on the lane.
+
+    A lane can legitimately be AHEAD of the declaration -- OMN-18388 already
+    accepts a lane converged onto a DESCENDANT of the merge sha, and a
+    descendant may carry migrations this tree does not. So an extra row is
+    reported and does not fail. A MISSING row is the failure: it is a lane
+    serving an image whose schema was never applied, which every readiness
+    endpoint answers 200 straight through.
+    """
+    if not declared:
+        return ModelLabPassCheck.indeterminate_check(
+            MIGRATIONS_APPLIED_CHECK,
+            "the delivered tree declared no forward migrations, so there is "
+            "nothing to compare; refusing to report a pass on a vacuous set",
+        )
+    try:
+        applied = read_applied_migrations(
+            ledger, runner=runner, timeout_seconds=timeout_seconds
+        )
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return ModelLabPassCheck.indeterminate_check(
+            MIGRATIONS_APPLIED_CHECK,
+            f"could not read the lane's migration ledger: {type(exc).__name__}: {exc}",
+        )
+    if not applied:
+        return ModelLabPassCheck.indeterminate_check(
+            MIGRATIONS_APPLIED_CHECK,
+            f"{ledger.database}.public.schema_migrations returned zero rows via "
+            f"{ledger.container}; an empty ledger is a reading this probe cannot "
+            "tell apart from a table it failed to query, so it is not a pass",
+        )
+    declared_set = set(declared)
+    applied_set = set(applied)
+    missing = sorted(declared_set - applied_set)
+    extra = sorted(applied_set - declared_set)
+    evidence = (
+        f"{len(declared_set)} declared, {len(applied_set)} recorded applied on "
+        f"{ledger.container}:{ledger.database}"
+    )
+    if extra:
+        evidence += (
+            f"; {len(extra)} recorded but not declared here "
+            f"({', '.join(extra[:3])}{', ...' if len(extra) > 3 else ''}) "
+            "-- a lane ahead of this tree, which does not fail this check"
+        )
+    if missing:
+        return ModelLabPassCheck(
+            name=MIGRATIONS_APPLIED_CHECK,
+            ok=False,
+            evidence=(
+                f"{evidence}; {len(missing)} DECLARED BUT NOT APPLIED: "
+                f"{', '.join(missing[:5])}{', ...' if len(missing) > 5 else ''}"
+            ),
+        )
+    return ModelLabPassCheck(
+        name=MIGRATIONS_APPLIED_CHECK, ok=True, evidence=f"{evidence}; none missing"
+    )
+
+
+@dataclass(frozen=True)
+class ModelBrokerAccess:
+    """How to reach the lane broker from inside its own container.
+
+    ``sasl_username`` / ``sasl_password`` come from the job environment, never
+    from argv, and are never rendered into evidence. What evidence records is
+    the VARIABLE NAME and whether authentication succeeded, which is the part a
+    reader can act on.
+    """
+
+    container: str
+    brokers: str
+    sasl_mechanism: str = ""
+    sasl_username: str = ""
+    sasl_password: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.container, str) or not self.container:
+            msg = "broker container is required and must be non-empty"
+            raise ValueError(msg)
+        if not isinstance(self.brokers, str) or not self.brokers:
+            msg = "broker address is required and must be non-empty"
+            raise ValueError(msg)
+        supplied = [
+            bool(self.sasl_mechanism),
+            bool(self.sasl_username),
+            bool(self.sasl_password),
+        ]
+        if any(supplied) and not all(supplied):
+            msg = (
+                "SASL is all-or-nothing: mechanism, username and password must "
+                "be supplied together. A partial credential would be silently "
+                "dropped by rpk and read as an unauthenticated probe."
+            )
+            raise ValueError(msg)
+
+    @property
+    def authenticated(self) -> bool:
+        return bool(self.sasl_mechanism)
+
+    def rpk_flags(self) -> list[str]:
+        flags = ["-X", f"brokers={self.brokers}"]
+        if self.authenticated:
+            flags += [
+                "-X",
+                f"user={self.sasl_username}",
+                "-X",
+                f"pass={self.sasl_password}",
+                "-X",
+                f"sasl.mechanism={self.sasl_mechanism}",
+            ]
+        return flags
+
+
+def read_group_total_lag(
+    access: ModelBrokerAccess,
+    group: str,
+    *,
+    runner: CommandRunner | None = None,
+    timeout_seconds: float = 60.0,
+) -> int:
+    """Read one consumer group's TOTAL-LAG off ``rpk group describe``.
+
+    The parse mirrors ``scripts/runtime_build/declared_consumer_groups.py``'s
+    ``parse_group_describe`` -- a ``TOTAL-LAG <n>`` line, matched on the label
+    rather than a column offset, because rpk pads that table differently
+    between versions. One parse rule for one output format; two would be two
+    declarations free to disagree.
+    """
+    run = runner or _run_read_only
+    result = run(
+        ["docker", "exec", access.container, "rpk", "group", "describe", group]
+        + access.rpk_flags(),
+        timeout=timeout_seconds,
+    )
+    if result.returncode != 0:
+        msg = (
+            f"rpk group describe {group} failed (exit {result.returncode}): "
+            f"{_truncate((result.stderr or '').strip())}"
+        )
+        raise ValueError(msg)
+    for line in (result.stdout or "").splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[0] == "TOTAL-LAG":
+            try:
+                return int(fields[1])
+            except ValueError as exc:
+                msg = f"TOTAL-LAG for {group} is not an integer: {fields[1]!r}"
+                raise ValueError(msg) from exc
+    msg = f"rpk group describe {group} printed no TOTAL-LAG line"
+    raise ValueError(msg)
+
+
+def check_consumer_group_lag(
+    access: ModelBrokerAccess,
+    groups: Sequence[str],
+    *,
+    max_lag: int,
+    first_sample: Mapping[str, int] | None = None,
+    runner: CommandRunner | None = None,
+    timeout_seconds: float = 60.0,
+) -> ModelLabPassCheck:
+    """Declared groups are under their lag bound AND not growing.
+
+    TWO conditions, and the second is the one that matters. A bound alone
+    cannot see the failure this probe exists for: the savings writer sat at lag
+    498 for NINE DAYS (OMN-18851), a number a generous bound admits and a tight
+    bound would have flagged on every healthy busy group as well. Growth across
+    two samples separates a backlog being worked from a consumer that has
+    stopped, and it is the only one of the two that is scale-free.
+
+    ``first_sample`` is the earlier reading, taken by the caller before the
+    settle wait so the two samples straddle real time rather than being two
+    reads a millisecond apart. Absent, the probe reports the bound only and
+    says so in its evidence rather than implying it checked growth.
+    """
+    if not groups:
+        return ModelLabPassCheck.indeterminate_check(
+            CONSUMER_GROUP_LAG_CHECK,
+            "no consumer groups were declared for this lane, so there is "
+            "nothing to measure; an empty declaration is not a healthy lane",
+        )
+    second: dict[str, int] = {}
+    unreadable: list[str] = []
+    for group in groups:
+        try:
+            second[group] = read_group_total_lag(
+                access, group, runner=runner, timeout_seconds=timeout_seconds
+            )
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            unreadable.append(
+                f"{group} ({type(exc).__name__}: {_truncate(str(exc), 90)})"
+            )
+    if unreadable:
+        return ModelLabPassCheck.indeterminate_check(
+            CONSUMER_GROUP_LAG_CHECK,
+            f"{len(unreadable)} of {len(groups)} declared group(s) could not be "
+            f"read via {access.container} "
+            f"(authenticated={access.authenticated}): {'; '.join(unreadable[:3])}"
+            f"{', ...' if len(unreadable) > 3 else ''}",
+        )
+    over_bound = sorted(g for g, lag in second.items() if lag > max_lag)
+    growing: list[str] = []
+    if first_sample is not None:
+        growing = sorted(
+            g
+            for g, lag in second.items()
+            if g in first_sample and lag > first_sample[g]
+        )
+    worst = max(second.values())
+    evidence = (
+        f"{len(second)} declared group(s) read via {access.container}; "
+        f"max TOTAL-LAG {worst} against bound {max_lag}; "
+        + (
+            f"growth measured against an earlier sample of {len(first_sample)} group(s)"
+            if first_sample is not None
+            else "NO earlier sample supplied, so growth was NOT measured and "
+            "this check covers the bound only"
+        )
+    )
+    problems: list[str] = []
+    if over_bound:
+        problems.append(
+            f"over bound: {', '.join(f'{g}={second[g]}' for g in over_bound[:5])}"
+        )
+    if growing:
+        problems.append(
+            "GROWING across two samples: "
+            + ", ".join(
+                f"{g} {first_sample[g]}->{second[g]}"  # type: ignore[index]
+                for g in growing[:5]
+            )
+        )
+    if problems:
+        return ModelLabPassCheck(
+            name=CONSUMER_GROUP_LAG_CHECK,
+            ok=False,
+            evidence=f"{evidence}; {'; '.join(problems)}",
+        )
+    return ModelLabPassCheck(
+        name=CONSUMER_GROUP_LAG_CHECK,
+        ok=True,
+        evidence=f"{evidence}; none over bound"
+        + ("" if first_sample is None else ", none growing"),
+    )
+
+
+def parse_group_list_argument(raw: str) -> tuple[str, ...]:
+    """Split a comma- or newline-separated group list, dropping blanks."""
+    if not raw:
+        return ()
+    parts = [chunk.strip() for chunk in raw.replace("\n", ",").split(",")]
+    return tuple(part for part in parts if part)
+
+
+def sample_group_lag(
+    access: ModelBrokerAccess,
+    groups: Sequence[str],
+    *,
+    runner: CommandRunner | None = None,
+    timeout_seconds: float = 60.0,
+) -> dict[str, int]:
+    """One reading of every declared group's lag, for the EARLIER sample.
+
+    A group that cannot be read is OMITTED rather than recorded as zero. The
+    growth comparison then simply has no baseline for it, which is honest; a
+    zero would manufacture a baseline that makes any later reading look like
+    growth.
+    """
+    sample: dict[str, int] = {}
+    for group in groups:
+        try:
+            sample[group] = read_group_total_lag(
+                access, group, runner=runner, timeout_seconds=timeout_seconds
+            )
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    return sample
+
+
+def load_lag_sample(path: Path | None) -> dict[str, int] | None:
+    """Read an earlier lag sample, or None when the caller supplied none.
+
+    An unreadable or malformed file returns None rather than raising: the
+    growth arm is then not measured and ``check_consumer_group_lag`` SAYS it
+    was not measured in its own evidence. Silently treating a broken baseline
+    as an empty one would let the check claim it checked growth against
+    nothing.
+    """
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return {
+        str(key): int(value)
+        for key, value in payload.items()
+        if isinstance(value, int) and not isinstance(value, bool)
+    }
+
+
+def check_delegation_golden_chain(receipt_path: Path) -> ModelLabPassCheck:
+    """Grade the chain canary's receipt for a delegation fired at THIS lane.
+
+    WHAT THE BAR IS, and what it deliberately is not. The canary reports two
+    different claims: whether the delegation it submitted reached a terminal on
+    the bus for its own correlation (``success``), and whether all five declared
+    chain links were PROVEN (``chain_proof_complete``). This check is bound to
+    the first.
+
+    The second is not the bar because link 5 has no leg in any probe today --
+    OMN-16964 is the open ticket that says so in its own title -- so requiring
+    it would make this check permanently red and, within a week, permanently
+    ignored. The link counts ARE carried into the evidence, so a reader can see
+    the weaker claim rather than having to assume the stronger one. That is the
+    same distinction the canary's own summary step draws, and for the same
+    reason: a green probe verdict is not a five-link chain proof.
+    """
+    if not receipt_path.exists():
+        return ModelLabPassCheck.indeterminate_check(
+            DELEGATION_GOLDEN_CHAIN_CHECK,
+            f"no chain-canary receipt at {receipt_path}: the dispatch did not "
+            "run, or died before it could report. That is a fact about this "
+            "probe's own execution path, not about the lane, so it is "
+            "indeterminate rather than a lane failure",
+        )
+    raw = receipt_path.read_text(encoding="utf-8", errors="replace")
+    if not raw.strip():
+        return ModelLabPassCheck.indeterminate_check(
+            DELEGATION_GOLDEN_CHAIN_CHECK,
+            f"the chain-canary receipt at {receipt_path} is empty",
+        )
+    try:
+        envelope = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return ModelLabPassCheck.indeterminate_check(
+            DELEGATION_GOLDEN_CHAIN_CHECK,
+            f"the chain-canary receipt at {receipt_path} is not valid JSON: {exc}",
+        )
+    if not isinstance(envelope, dict):
+        return ModelLabPassCheck.indeterminate_check(
+            DELEGATION_GOLDEN_CHAIN_CHECK,
+            "the chain-canary receipt is not a JSON object",
+        )
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        return ModelLabPassCheck.indeterminate_check(
+            DELEGATION_GOLDEN_CHAIN_CHECK,
+            "the chain-canary receipt carries no 'result' object, so its "
+            "verdict cannot be read",
+        )
+    success = result.get("success")
+    if not isinstance(success, bool):
+        return ModelLabPassCheck.indeterminate_check(
+            DELEGATION_GOLDEN_CHAIN_CHECK,
+            "the chain-canary receipt's 'success' is missing or not a boolean; "
+            "a verdict that has to be guessed at is not a verdict",
+        )
+    verdict = str(result.get("verdict") or "<unnamed>")
+    detail = _truncate(str(result.get("detail") or ""), 160)
+    proven = result.get("links_proven")
+    total = result.get("links_total")
+    links = (
+        f"; chain links proven {proven} of {total} "
+        "(NOT the bar for this check -- see OMN-16964)"
+        if isinstance(proven, int) and isinstance(total, int)
+        else "; the receipt reported no link counts"
+    )
+    evidence = (
+        f"one live delegation through the deployed lane ingress: "
+        f"verdict={verdict}{links}"
+        f"{'; ' + detail if detail else ''}"
+    )
+    return ModelLabPassCheck(
+        name=DELEGATION_GOLDEN_CHAIN_CHECK, ok=success, evidence=evidence
+    )
+
+
 def _unhealthy_dimension_names(dimensions: list[Any]) -> list[str]:
     """Name every dimension that is not affirmatively healthy.
 
@@ -1651,6 +2229,14 @@ def probe_compose_dev(
     expected_generation: ModelLaneGeneration | None = None,
     generation_container: str | None = None,
     node_inventory_probe: ModelNodeInventoryProbe | None = None,
+    declared_migrations: Sequence[str] | None = None,
+    migration_ledger: ModelMigrationLedger | None = None,
+    broker_access: ModelBrokerAccess | None = None,
+    declared_consumer_groups: Sequence[str] | None = None,
+    max_consumer_lag: int = 0,
+    first_lag_sample: Mapping[str, int] | None = None,
+    chain_canary_receipt: Path | None = None,
+    runner: CommandRunner | None = None,
 ) -> list[ModelLabPassCheck]:
     """The read-only probes the ``.201`` dev lane emitter runs.
 
@@ -1733,6 +2319,36 @@ def probe_compose_dev(
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             read_error = f"{type(exc).__name__}: {exc}"
         annotated.append(generation_check(expected_generation, observed, read_error))
+
+    # OMN-18866. The three integration checks. Each is appended only when its
+    # SUBJECT was supplied, on the same rule the budget and generation checks
+    # above already follow: the input IS the claim. An ad hoc `probe-lane` that
+    # passes none of them emits none of them, and so asserts nothing about
+    # migrations, lag or delegation rather than asserting an empty result.
+    #
+    # These are NOT annotated with the settle phrase. The four HTTP checks read
+    # a lane that may still be coming up, so when they were read is part of
+    # what they mean. A migration ledger, a consumer group's lag and a
+    # delegation's terminal are not properties of the lane's boot, and stamping
+    # a settle phrase onto them would imply a relationship that is not there.
+    if migration_ledger is not None:
+        annotated.append(
+            check_migrations_applied(
+                declared_migrations or (), migration_ledger, runner=runner
+            )
+        )
+    if broker_access is not None:
+        annotated.append(
+            check_consumer_group_lag(
+                broker_access,
+                declared_consumer_groups or (),
+                max_lag=max_consumer_lag,
+                first_sample=first_lag_sample,
+                runner=runner,
+            )
+        )
+    if chain_canary_receipt is not None:
+        annotated.append(check_delegation_golden_chain(chain_canary_receipt))
     return annotated
 
 
@@ -2254,6 +2870,127 @@ def build_parser() -> argparse.ArgumentParser:
             "than skipping it."
         ),
     )
+    # --- OMN-18866: the three integration subjects -------------------------
+    # Every one is opt-in and defaults to unsupplied, so `probe-lane` keeps
+    # exactly its previous behaviour for an ad hoc caller. There is no flag
+    # here that SKIPS a check whose subject was supplied: a subject named is a
+    # check owed, and the only way to not owe it is not to name it.
+    probe.add_argument(
+        "--migration-container",
+        default="",
+        help=(
+            "the lane's postgres container. Supplying it emits the "
+            f"{MIGRATIONS_APPLIED_CHECK} check, read through the docker socket "
+            "with no network credential. Omitting it makes no claim about the "
+            "lane's schema."
+        ),
+    )
+    probe.add_argument(
+        "--migration-database",
+        default="omnibase_infra",
+        help="the database holding public.schema_migrations on that container.",
+    )
+    probe.add_argument(
+        "--forward-migrations-dir",
+        type=Path,
+        default=Path("docker/migrations/forward"),
+        help=(
+            "the DELIVERED TREE's forward migrations. Flat *.sql only, matching "
+            "check_schema_fingerprint.py's own glob. An absent or empty "
+            "directory is an ERROR, not an empty declaration: comparing a lane "
+            "against nothing passes against every lane."
+        ),
+    )
+    probe.add_argument(
+        "--broker-container",
+        default="",
+        help=(
+            "the lane's broker container. Supplying it emits the "
+            f"{CONSUMER_GROUP_LAG_CHECK} check via `rpk` inside that container. "
+            "Omitting it makes no claim about consumer lag."
+        ),
+    )
+    probe.add_argument(
+        "--broker-address",
+        default="redpanda:9092",
+        help=(
+            "the broker's INTERNAL listener, as addressed from inside its own "
+            "container -- not the published host port."
+        ),
+    )
+    probe.add_argument(
+        "--consumer-groups",
+        default="",
+        help=(
+            "the consumer groups this lane declares, comma- or newline-"
+            "separated. An empty list with --broker-container supplied reports "
+            "INDETERMINATE rather than passing: a lane declaring no groups is "
+            "not a lane with no lag."
+        ),
+    )
+    probe.add_argument(
+        "--max-consumer-lag",
+        type=int,
+        default=0,
+        help=(
+            "the declared lag bound. A bound alone cannot see a consumer that "
+            "has STOPPED at a lag the bound admits, which is why the growth arm "
+            "below exists and is the one that matters."
+        ),
+    )
+    probe.add_argument(
+        "--first-lag-sample-json",
+        type=Path,
+        default=None,
+        help=(
+            "an earlier lag reading from `sample-lag`, taken BEFORE the "
+            "convergence wait so the two samples straddle real time. Absent, "
+            "growth is not measured and the check says so in its evidence "
+            "rather than implying it looked."
+        ),
+    )
+    probe.add_argument(
+        "--chain-canary-receipt",
+        type=Path,
+        default=None,
+        help=(
+            "the receipt written by `onex skill chain_canary`, which fires ONE "
+            "live delegation through the deployed lane ingress. Supplying it "
+            f"emits the {DELEGATION_GOLDEN_CHAIN_CHECK} check. This probe does "
+            "not dispatch its own delegation: two dispatchers would be two "
+            "definitions of a delegation, free to disagree."
+        ),
+    )
+    for spec in (
+        ("--sasl-mechanism-env", "KAFKA_SASL_MECHANISM"),
+        ("--sasl-username-env", "KAFKA_SASL_USERNAME"),
+        ("--sasl-password-env", "KAFKA_SASL_PASSWORD"),
+    ):
+        probe.add_argument(
+            spec[0],
+            default=spec[1],
+            help=(
+                "the NAME of the environment variable carrying this credential "
+                "component. The name, never the value: a credential on a "
+                "command line is a credential in a process listing and in every "
+                "log that echoes the command."
+            ),
+        )
+
+    sample = sub.add_parser(
+        "sample-lag",
+        help=(
+            "take ONE lag reading per declared group and write it as JSON, for "
+            "`probe-lane --first-lag-sample-json` to compare against later"
+        ),
+    )
+    sample.add_argument("--broker-container", required=True)
+    sample.add_argument("--broker-address", default="redpanda:9092")
+    sample.add_argument("--consumer-groups", required=True)
+    sample.add_argument("--out", type=Path, required=True)
+    sample.add_argument("--sasl-mechanism-env", default="KAFKA_SASL_MECHANISM")
+    sample.add_argument("--sasl-username-env", default="KAFKA_SASL_USERNAME")
+    sample.add_argument("--sasl-password-env", default="KAFKA_SASL_PASSWORD")
 
     emit = sub.add_parser("emit", help="build, validate and write a receipt")
     emit.add_argument("--sha", required=True)
@@ -2323,6 +3060,34 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
+    if args.command == "sample-lag":
+        # Never fails the job. A baseline that could not be taken means the
+        # growth arm has nothing to compare against, and `check_consumer_group_lag`
+        # reports exactly that. Failing here would turn a missing baseline into
+        # a missing RECEIPT, which is strictly worse: an unwritten receipt is
+        # the one outcome worse than a failing one.
+        try:
+            sample_access = ModelBrokerAccess(
+                container=args.broker_container.strip(),
+                brokers=args.broker_address.strip(),
+                sasl_mechanism=os.environ.get(args.sasl_mechanism_env, ""),
+                sasl_username=os.environ.get(args.sasl_username_env, ""),
+                sasl_password=os.environ.get(args.sasl_password_env, ""),
+            )
+        except ValueError as exc:
+            print(f"::warning::lag baseline not taken: {exc}", file=sys.stderr)
+            return 0
+        readings = sample_group_lag(
+            sample_access, parse_group_list_argument(args.consumer_groups)
+        )
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(readings, indent=2, sort_keys=True), "utf-8")
+        print(
+            f"lag baseline: {len(readings)} group(s) read, written to {args.out}",
+            file=sys.stderr,
+        )
+        return 0
+
     if args.command == "probe-lane":
         budget: ModelSettleBudget | None = None
         settle_seconds = args.settle_timeout_seconds
@@ -2356,6 +3121,44 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.timeout_seconds,
             )
 
+        # OMN-18866. Each subject is assembled only when the caller named it,
+        # and a caller that names it PARTLY is refused rather than quietly
+        # degraded -- a half-supplied subject is the shape that produces a
+        # check asserting less than its name says.
+        migration_ledger: ModelMigrationLedger | None = None
+        declared_migrations: tuple[str, ...] = ()
+        if args.migration_container.strip():
+            try:
+                migration_ledger = ModelMigrationLedger(
+                    container=args.migration_container.strip(),
+                    database=args.migration_database.strip(),
+                )
+                declared_migrations = declared_forward_migrations(
+                    args.forward_migrations_dir
+                )
+            except ValueError as exc:
+                print(
+                    f"::error::migration subject unusable: {exc}",
+                    file=sys.stderr,
+                )
+                return 1
+
+        broker_access: ModelBrokerAccess | None = None
+        if args.broker_container.strip():
+            try:
+                broker_access = ModelBrokerAccess(
+                    container=args.broker_container.strip(),
+                    brokers=args.broker_address.strip(),
+                    sasl_mechanism=os.environ.get(args.sasl_mechanism_env, ""),
+                    sasl_username=os.environ.get(args.sasl_username_env, ""),
+                    sasl_password=os.environ.get(args.sasl_password_env, ""),
+                )
+            except ValueError as exc:
+                print(f"::error::broker subject unusable: {exc}", file=sys.stderr)
+                return 1
+
+        first_lag_sample = load_lag_sample(args.first_lag_sample_json)
+
         checks = probe_compose_dev(
             args.main_url,
             args.effects_url,
@@ -2366,6 +3169,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_generation=expected_generation,
             generation_container=args.generation_container,
             node_inventory_probe=inventory_probe,
+            declared_migrations=declared_migrations,
+            migration_ledger=migration_ledger,
+            broker_access=broker_access,
+            declared_consumer_groups=parse_group_list_argument(args.consumer_groups),
+            max_consumer_lag=args.max_consumer_lag,
+            first_lag_sample=first_lag_sample,
+            chain_canary_receipt=args.chain_canary_receipt,
         )
         if args.node_inventory_out is not None:
             # Written even when the probe found nothing usable, as an empty
