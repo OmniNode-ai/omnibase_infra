@@ -65,6 +65,9 @@ from omnibase_infra.runtime.health.projection_liveness import (
     select_projection_contracts,
     select_projection_group_suffixes,
 )
+from omnibase_infra.runtime.health.runtime_lane_identity import (
+    resolve_runtime_lane,
+)
 from omnibase_infra.runtime.observability import get_consumer_flow_counters
 from omnibase_infra.runtime.projection_dispatch_ledger import (
     projections_with_no_live_dispatcher,
@@ -982,6 +985,10 @@ class ServiceRuntimeHealthMonitor:
             unattached_projection_count=len(liveness.unattached_projections),
             dlq_saturated_projection_count=len(liveness.dlq_saturated_projections),
             nonwriting_projection_count=len(liveness.nonwriting_projections),
+            # OMN-18769: the lane this verdict is ABOUT. Absent when the
+            # deployment does not name one -- see the field's own note on
+            # why that is nullable rather than defaulted.
+            lane=resolve_runtime_lane(),
         )
 
         logger.info(
