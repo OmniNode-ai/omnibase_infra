@@ -167,6 +167,62 @@ class TestReceiptModeSuccess:
         assert str(payload["result_model"]).endswith("ModelProofNoopResult")
         assert receipt.artifact_refs, "capture log must be artifact-backed"
 
+    def test_validator_replaces_completed_receipt_before_stdout(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A completed run missing required evidence never prints success first."""
+        contract_path, input_path = _write_fixture_inputs(
+            tmp_path, _PROOF_NOOP_CONTRACT
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+        observed: list[ModelSkillResult[object]] = []
+
+        def reject_completed_receipt(receipt: object) -> str | None:
+            assert isinstance(receipt, ModelSkillResult)
+            assert receipt.status.is_success_like
+            return (
+                "completed delegation terminal omits required evidence: "
+                "budget_evidence, response_contract_evidence"
+            )
+
+        def observe_callback(receipt: object) -> None:
+            assert isinstance(receipt, ModelSkillResult)
+            observed.append(receipt)
+
+        exit_code = run_receipt_mode(
+            node_name="proof_noop",
+            contract_path=contract_path,
+            input_path=input_path,
+            state_root=tmp_path / "state",
+            backend_overrides={"event_bus": "inmemory"},
+            timeout=30,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+            receipt_validator=reject_completed_receipt,
+            receipt_callback=observe_callback,
+        )
+
+        stdout = capsys.readouterr().out
+        assert exit_code == 1
+        payload = _parse_single_receipt(stdout)
+        receipt: ModelSkillResult[object] = ModelSkillResult.model_validate(payload)
+        assert receipt.status.value == "failed"
+        assert receipt.exit_code == 1
+        result = payload["result"]
+        assert isinstance(result, dict)
+        assert result["error"] == (
+            "completed delegation terminal omits required evidence: "
+            "budget_evidence, response_contract_evidence"
+        )
+        # The callback receives the replaced failed receipt, so a delegate
+        # artifact writer cannot persist the completed envelope after this gate.
+        assert len(observed) == 1
+        assert observed[0].status.value == "failed"
+        assert observed[0].exit_code == 1
+
     def test_zero_runtime_log_lines_on_stdout_or_stderr(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -55,6 +55,11 @@ def test_runtime_port_exposes_consumer_handler_optional_parameters() -> None:
     ):
         parameters = inspect.signature(dispatch_method).parameters
         assert parameters["max_tokens"].annotation in {"int | None", int | None}
+        assert parameters["execution_timeout_seconds"].annotation in {"int", int}
+        assert parameters["terminal_delivery_margin_seconds"].annotation in {
+            "int",
+            int,
+        }
         assert parameters["backend_id"].default is None
         assert parameters["response_contract"].default is None
         assert parameters["system_prompt"].default is None
@@ -109,6 +114,8 @@ async def test_absent_consumer_features_dispatch_through_runtime_bus(
         source_file_path=None,
         source_session_id=None,
         wait=True,
+        execution_timeout_seconds=240,
+        terminal_delivery_margin_seconds=60,
         quality_contract_mode="extend_task_class",
         acceptance_criteria=(),
         tenant_id=None,
@@ -173,6 +180,8 @@ async def test_metered_terminal_cost_crosses_the_runtime_consumer_boundary(
         source_file_path=None,
         source_session_id=None,
         wait=True,
+        execution_timeout_seconds=240,
+        terminal_delivery_margin_seconds=60,
         quality_contract_mode="extend_task_class",
         acceptance_criteria=(),
         tenant_id=None,
@@ -235,6 +244,8 @@ async def test_provenance_reaches_the_published_dispatch_payload(
         source_file_path=None,
         source_session_id=None,
         wait=True,
+        execution_timeout_seconds=240,
+        terminal_delivery_margin_seconds=60,
         quality_contract_mode="extend_task_class",
         acceptance_criteria=(),
         tenant_id=None,
@@ -297,6 +308,8 @@ async def test_absent_provenance_leaves_no_key_on_the_dispatch_payload(
         source_file_path=None,
         source_session_id=None,
         wait=True,
+        execution_timeout_seconds=240,
+        terminal_delivery_margin_seconds=60,
         quality_contract_mode="extend_task_class",
         acceptance_criteria=(),
         tenant_id=None,
