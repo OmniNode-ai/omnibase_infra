@@ -76,6 +76,7 @@ databases:
           - object_type: TABLE
             objects:
               - consumer_flow_windows
+              - dod_verify_runs
               - lab_lane_health
               - live_events
               - log_entries
@@ -364,5 +365,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 6283ff1dec3d6ba3c38b8ff914eadc4946873b5d72cd25827c565bb37a3f892c
+  sha256: 1b84c06f23147bd1239527154187713296b817f8aac9e0fa36c2e62c814892e7
 topology_instance: onex-dev

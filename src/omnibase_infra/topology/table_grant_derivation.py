@@ -275,6 +275,40 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
+    # OMN-18900: the same infra-first window, for dod_verify_runs -- one
+    # durable row per definition-of-done verification run. This repository
+    # vendors the create and grant migrations (step 2 of the forced
+    # three-part order) BEFORE omnimarket lands the node package that
+    # declares the relation in its contract (step 3), so the shipped topology
+    # instances declare a relation the PINNED contracts cannot derive.
+    #
+    # Regenerating instead of bridging would DELETE that declaration while
+    # the vendored migration still grants it, tripping the OMN-18768 reverse
+    # ratchet and refusing the projection binding at boot. This entry is the
+    # remedy the OMN-18863 failure text names, and it is SELF-EXPIRING: it is
+    # registered in _INTERIM_ENTRIES in
+    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes
+    # red on the pin advance that makes it redundant and says to delete it.
+    #
+    # Retired by: omnimarket#2722 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:dod_verify_runs",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_dod_verdict/"
+            "0000_create_dod_verify_runs.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="dod_verify_runs",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_dod_verdict/"
+                "0000_create_dod_verify_runs.sql"
+            ),
+            access="write",
+            role="dod_verdict",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
