@@ -69,6 +69,11 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.topics.topic_namespace import (
+    apply_topic_namespace,
+    resolve_topic_namespace,
+    strip_topic_namespace,
+)
 
 __all__ = ["KafkaTransport"]
 
@@ -101,7 +106,19 @@ class KafkaTransport:
     ) -> None:
         self._config = config
         self._group = group
+        # CANONICAL topics -- the runtime's view, and what every comparison,
+        # log line and caught-up probe answer is expressed in.
         self._topics: tuple[str, ...] = tuple(topics)
+        # PHYSICAL topics -- what this process actually subscribes to on the
+        # broker. Identical to ``_topics`` unless a deployment namespace is
+        # configured, and resolved once at construction rather than per call
+        # so one process cannot straddle two namespaces mid-flight
+        # (OMN-18891).
+        self._topic_namespace: str = resolve_topic_namespace()
+        self._physical_topics: tuple[str, ...] = tuple(
+            apply_topic_namespace(t, namespace=self._topic_namespace)
+            for t in self._topics
+        )
         self._auto_offset_reset = auto_offset_reset
         self._producer: AIOKafkaProducer | None = None
         self._consumer: AIOKafkaConsumer | None = None
@@ -203,7 +220,7 @@ class KafkaTransport:
         # is the S6 boot invariant, R1). The one-time join latency is absorbed by
         # ``_prime`` below so the runtime's first ``poll`` still returns promptly.
         self._consumer = AIOKafkaConsumer(
-            *self._topics,
+            *self._physical_topics,
             bootstrap_servers=self._config.bootstrap_servers,
             group_id=self._group,
             # FORCED for the new transport consumers (plan S3): the runtime, not
@@ -347,8 +364,12 @@ class KafkaTransport:
             return frozenset()
         partitions_by_topic: dict[str, list[TopicPartition]] = {}
         for tp in consumer.assignment():
-            if tp.topic in topics:
-                partitions_by_topic.setdefault(tp.topic, []).append(tp)
+            # The assignment carries PHYSICAL names and the caller asks in
+            # CANONICAL ones, so map before comparing. Answering in canonical
+            # names keeps this probe's contract unchanged (OMN-18891).
+            canonical = strip_topic_namespace(tp.topic, namespace=self._topic_namespace)
+            if canonical in topics:
+                partitions_by_topic.setdefault(canonical, []).append(tp)
         caught_up: set[str] = set()
         for topic, partitions in partitions_by_topic.items():
             all_caught = True
@@ -461,7 +482,12 @@ class KafkaTransport:
             headers[key] = value if isinstance(value, bytes) else bytes(value)
         offset = int(record.offset)  # type: ignore[attr-defined]
         return ModelTransportMessage(
-            topic=record.topic,  # type: ignore[attr-defined]
+            # CANONICAL: the runtime routes handlers by this name. ``commit``
+            # and ``nack`` re-apply the namespace when they rebuild the
+            # broker-facing TopicPartition (OMN-18891).
+            topic=strip_topic_namespace(
+                record.topic  # type: ignore[attr-defined]
+            ),
             partition=int(record.partition),  # type: ignore[attr-defined]
             offset=offset,
             key=record.key,  # type: ignore[attr-defined]
@@ -484,7 +510,11 @@ class KafkaTransport:
         """
         msg = cast("ModelTransportMessage", message)
         consumer = self._require_consumer()
-        topic_partition = TopicPartition(msg.topic, msg.partition)
+        # ``msg.topic`` is CANONICAL; the broker coordinate is PHYSICAL.
+        topic_partition = TopicPartition(
+            apply_topic_namespace(msg.topic, namespace=self._topic_namespace),
+            msg.partition,
+        )
         await consumer.commit({topic_partition: msg.offset + 1})
 
     async def nack(self, message: object) -> None:
@@ -508,7 +538,11 @@ class KafkaTransport:
         """
         msg = cast("ModelTransportMessage", message)
         consumer = self._require_consumer()
-        topic_partition = TopicPartition(msg.topic, msg.partition)
+        # ``msg.topic`` is CANONICAL; the broker coordinate is PHYSICAL.
+        topic_partition = TopicPartition(
+            apply_topic_namespace(msg.topic, namespace=self._topic_namespace),
+            msg.partition,
+        )
         consumer.seek(topic_partition, msg.offset)
         # Keep prefetched residue from OTHER (topic, partition)s — dropping it strands
         # those messages until restart. Only the nacked partition's buffered records
@@ -580,6 +614,16 @@ class KafkaTransport:
             (key_, value_) for key_, value_ in headers.items()
         ] or None
         metadata = await self._producer.send_and_wait(
-            topic, value=value, key=key, headers=kafka_headers
+            apply_topic_namespace(topic, namespace=self._topic_namespace),
+            value=value,
+            key=key,
+            headers=kafka_headers,
         )
-        return (metadata.topic, metadata.partition, metadata.offset)
+        # The coordinate is returned in CANONICAL terms so a caller comparing
+        # it against what it asked to publish, which is what the gateway lane
+        # mirror does, still matches (OMN-18891).
+        return (
+            strip_topic_namespace(metadata.topic, namespace=self._topic_namespace),
+            metadata.partition,
+            metadata.offset,
+        )

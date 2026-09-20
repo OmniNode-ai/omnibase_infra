@@ -102,6 +102,11 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_OMNICLAUDE_PERFORMANCE_METRICS,
     SUFFIX_OMNICLAUDE_ROUTING_DECISION,
 )
+from omnibase_infra.topics.topic_namespace import (
+    apply_topic_namespace,
+    apply_topic_namespace_all,
+    strip_topic_namespace,
+)
 
 if TYPE_CHECKING:
     from aiokafka.structs import ConsumerRecord
@@ -704,7 +709,7 @@ class AgentActionsConsumer(MixinConsumerHealth):
 
             # Create Kafka consumer
             self._consumer = AIOKafkaConsumer(
-                *self._config.topics,
+                *apply_topic_namespace_all(self._config.topics),
                 bootstrap_servers=self._config.kafka_bootstrap_servers,
                 group_id=self._config.kafka_group_id,
                 auto_offset_reset=self._config.auto_offset_reset,
@@ -1182,7 +1187,10 @@ class AgentActionsConsumer(MixinConsumerHealth):
                 payload = json.loads(value)
 
                 # Get model class for topic
-                model_cls = TOPIC_TO_MODEL.get(msg.topic)
+                # Index by the CANONICAL name: the registry is keyed by the
+                # contract-declared suffix and a physical name would miss it,
+                # dead-lettering every record on a namespaced lane (OMN-18891).
+                model_cls = TOPIC_TO_MODEL.get(strip_topic_namespace(msg.topic))
                 if model_cls is None:
                     logger.warning(
                         "Unknown topic, skipping message",
@@ -1424,7 +1432,7 @@ class AgentActionsConsumer(MixinConsumerHealth):
 
         try:
             await self._dlq_producer.send_and_wait(
-                self._config.dlq_topic,
+                apply_topic_namespace(self._config.dlq_topic),
                 value=json.dumps(dlq_envelope).encode("utf-8"),
             )
             await self.metrics.record_sent_to_dlq()

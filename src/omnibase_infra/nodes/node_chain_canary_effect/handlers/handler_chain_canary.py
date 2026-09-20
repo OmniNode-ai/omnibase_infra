@@ -132,6 +132,7 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readb
     ModelProjectionReadbackOutcome,
     TypeDelegationTrafficClass,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace_all
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
@@ -498,7 +499,7 @@ async def _scan_topics_for_correlation(
     # makes aiokafka fetch that topic's metadata and auto-assign its
     # partitions (no group_id, so no coordinator and no group churn).
     consumer = AIOKafkaConsumer(
-        *topics,
+        *apply_topic_namespace_all(topics),
         bootstrap_servers=bootstrap,
         enable_auto_commit=False,
         auto_offset_reset="latest",

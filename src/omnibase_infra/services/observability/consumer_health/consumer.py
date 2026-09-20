@@ -54,6 +54,7 @@ from omnibase_infra.services.observability.consumer_health.config import (
 from omnibase_infra.services.observability.consumer_health.writer_postgres import (
     WriterConsumerHealthPostgres,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace_all
 
 if TYPE_CHECKING:
     from aiokafka.structs import ConsumerRecord
@@ -143,7 +144,7 @@ class ConsumerHealthProjectionConsumer:
 
         # Kafka consumer
         self._consumer = AIOKafkaConsumer(
-            *self._config.topics,
+            *apply_topic_namespace_all(self._config.topics),
             bootstrap_servers=self._config.kafka_bootstrap_servers,
             group_id=self._config.kafka_group_id,
             auto_offset_reset=self._config.auto_offset_reset,

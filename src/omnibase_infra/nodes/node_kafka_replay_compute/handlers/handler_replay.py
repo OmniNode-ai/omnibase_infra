@@ -34,6 +34,7 @@ from omnibase_infra.nodes.node_kafka_replay_compute.protocols import (
     ProtocolKafkaReplayConsumer,
     ProtocolReplayEnvelope,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -195,11 +196,14 @@ class HandlerKafkaReplay:
     ) -> list[TopicPartition]:
         partitions: list[TopicPartition] = []
         for topic in topics:
-            topic_partitions = await consumer.partitions_for_topic(topic)
+            # The replay command names CANONICAL topics; both broker calls
+            # below take the PHYSICAL one (OMN-18891).
+            physical_topic = apply_topic_namespace(topic)
+            topic_partitions = await consumer.partitions_for_topic(physical_topic)
             if topic_partitions is None:
                 raise ValueError(f"Kafka topic not found for replay: {topic}")
             for partition in sorted(topic_partitions):
-                partitions.append(TopicPartition(topic, partition))
+                partitions.append(TopicPartition(physical_topic, partition))
         return partitions
 
     async def _resolve_bounds(

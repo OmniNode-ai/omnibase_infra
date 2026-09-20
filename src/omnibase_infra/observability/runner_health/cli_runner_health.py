@@ -67,6 +67,7 @@ from omnibase_infra.observability.runner_health.model_runner_health_alert import
 from omnibase_infra.observability.runner_health.model_runner_health_snapshot import (
     ModelRunnerHealthSnapshot,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 
 async def main(args: list[str]) -> int:
@@ -270,13 +271,15 @@ async def _emit_to_kafka(
         await producer.start()
         try:
             await producer.send_and_wait(
-                SUFFIX_RUNNER_HEALTH_SNAPSHOT,
+                apply_topic_namespace(SUFFIX_RUNNER_HEALTH_SNAPSHOT),
                 value=snapshot.model_dump(mode="json"),
                 key=snapshot.host.encode(),
             )
             print("[runner-health] Snapshot emitted to Kafka.")
             for topic, value, key in extra_events:
-                await producer.send_and_wait(topic, value=value, key=key.encode())
+                await producer.send_and_wait(
+                    apply_topic_namespace(topic), value=value, key=key.encode()
+                )
                 print(f"[network-pool] Event emitted to Kafka ({topic}).")
         finally:
             await producer.stop()

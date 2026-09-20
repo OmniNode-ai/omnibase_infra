@@ -204,6 +204,7 @@ from omnibase_infra.topics import (
     SUFFIX_RUNTIME_ERROR,
     TopicResolutionError,
     TopicResolver,
+    create_topic_resolver,
 )
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
@@ -4516,7 +4517,7 @@ async def bootstrap() -> int:
                 # Resolve realm-agnostic topic names via TopicResolver (no env prefix).
                 # Topics are realm-agnostic in ONEX; the environment/realm is enforced
                 # via envelope identity and consumer group naming, not topic names.
-                topic_resolver = TopicResolver()
+                topic_resolver = create_topic_resolver()
                 try:
                     contract_registered_topic = topic_resolver.resolve(
                         SUFFIX_CONTRACT_REGISTERED,
@@ -4624,7 +4625,7 @@ async def bootstrap() -> int:
 
                 triage_handler = HandlerRuntimeErrorTriage(db_pool=postgres_pool)
 
-                triage_topic_resolver = TopicResolver()
+                triage_topic_resolver = create_topic_resolver()
                 runtime_error_topic = triage_topic_resolver.resolve(
                     SUFFIX_RUNTIME_ERROR,
                     correlation_id=correlation_id,
@@ -4768,7 +4769,7 @@ async def bootstrap() -> int:
                 )
                 from omnibase_infra.topics import SUFFIX_RUNTIME_MANIFEST_PUBLISHED
 
-                _manifest_topic = TopicResolver().resolve(
+                _manifest_topic = create_topic_resolver().resolve(
                     SUFFIX_RUNTIME_MANIFEST_PUBLISHED,
                     correlation_id=correlation_id,
                 )

@@ -71,6 +71,7 @@ from omnibase_infra.services.session.config_consumer import ConfigSessionConsume
 from omnibase_infra.services.session.protocol_session_aggregator import (
     ProtocolSessionAggregator,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace_all
 
 # TODO(OMN-5737): These imports need resolution - schemas remain in omniclaude
 # The consumer depends on hook event schemas which are domain-specific to omniclaude.
@@ -366,7 +367,7 @@ class SessionEventConsumer(MixinConsumerHealth):
 
         try:
             self._consumer = AIOKafkaConsumer(
-                *self._config.topics,
+                *apply_topic_namespace_all(self._config.topics),
                 bootstrap_servers=self._config.bootstrap_servers,
                 group_id=self._config.group_id,
                 auto_offset_reset=self._config.auto_offset_reset,
