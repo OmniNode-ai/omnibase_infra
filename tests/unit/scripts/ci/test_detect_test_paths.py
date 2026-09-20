@@ -76,12 +76,19 @@ def test_ci_process_change_selects_ci_tests() -> None:
     # between +0.3% and +12.3% fleet-wide. If this list grows again, check that
     # the new entry genuinely names a changed script before widening the
     # expectation: the assertion being exact is what makes the cost observable.
+    # OMN-18926 adds one MODULE, on the same terms as the OMN-18833 entry above:
+    # tests/unit/db/test_application_internal_schema_provisioning_omn18926.py reads
+    # scripts/ci/ci_summary_gate.py off disk and asserts that the from-empty
+    # migration proof is registered STRICT in it, so a diff changing that gate can
+    # break it and it genuinely belongs in this selection. Its sibling modules in
+    # tests/unit/db/ do not name the gate and are not selected.
     assert paths == [
         "scripts/ci/tests/",
         "scripts/tests/",
         "tests/ci/",
         "tests/integration/chains/test_event_chain_gate.py",
         "tests/scripts/",
+        "tests/unit/db/test_application_internal_schema_provisioning_omn18926.py",
         "tests/unit/scripts/",
     ]
 

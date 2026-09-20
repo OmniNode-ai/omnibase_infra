@@ -94,6 +94,22 @@ def _statement_lines(path: Path) -> list[str]:
     ]
 
 
+def _deliverable_corpus_files() -> list[Path]:
+    """The corpus MINUS the flat files the OMN-15819 ledger declares undeliverable.
+
+    The runner prints UNDELIVERABLE for those and never executes their SQL, so they
+    are outside the set the prohibition governs. Excluding them here, rather than
+    skipping them inside the test, keeps the suite free of collected-but-never-run
+    cases; the filter itself is controlled by the test below.
+    """
+    undeliverable = _undeliverable_files()
+    return [
+        path
+        for path in _corpus_files()
+        if not (path.parent == FORWARD_DIR and path.name in undeliverable)
+    ]
+
+
 def _undeliverable_files() -> frozenset[str]:
     """Filenames the OMN-15819 ledger declares as having no execution path.
 
@@ -222,28 +238,45 @@ class TestRunnerProvisionsTheApplicationSchema:
 class TestTheOmn16759ProhibitionIsUnweakened:
     """The fix must not reintroduce the privilege the gate exists to keep out."""
 
-    @pytest.mark.parametrize(
-        "migration", _corpus_files(), ids=lambda p: str(p.relative_to(FORWARD_DIR))
-    )
-    def test_no_migration_issues_database_level_ddl(self, migration: Path) -> None:
-        undeliverable = _undeliverable_files()
-        if migration.name in undeliverable and migration.parent == FORWARD_DIR:
-            pytest.skip(
-                f"{migration.name} is declared undeliverable by the OMN-15819 ledger; "
-                "the runner never executes it"
-            )
-        offenders = [
-            line
-            for line in _statement_lines(migration)
-            if _DATABASE_LEVEL_DDL.match(line)
-        ]
+    def test_no_deliverable_migration_issues_database_level_ddl(self) -> None:
+        # The undeliverable flat files are FILTERED OUT of the set under test rather
+        # than skipped inside it. They are not migrations this runner executes, so
+        # they are not cases with no verdict -- they are not cases at all, and a
+        # skipped test is a collected test that never runs.
+        deliverable = _deliverable_corpus_files()
+        offenders = {
+            str(path.relative_to(REPO_ROOT)): [
+                line
+                for line in _statement_lines(path)
+                if _DATABASE_LEVEL_DDL.match(line)
+            ]
+            for path in deliverable
+        }
+        offenders = {path: lines for path, lines in offenders.items() if lines}
         assert not offenders, (
-            f"{migration.relative_to(REPO_ROOT)} issues database-level DDL: {offenders}. "
+            f"deliverable migrations issue database-level DDL: {offenders}. "
             "CREATE SCHEMA needs CREATE on the DATABASE, which role_omnidash does not "
             "hold on the managed lane, and IF NOT EXISTS does not help because Postgres "
             "checks the privilege before it checks existence. OMN-18926 was fixed by "
             "provisioning the schema from the runner as superuser, NOT by relaxing this"
         )
+
+    def test_the_undeliverable_filter_removes_exactly_the_ledgered_flat_files(
+        self,
+    ) -> None:
+        # Control for the filter above. A filter that silently removed everything,
+        # or nothing, would make that assertion meaningless in opposite directions.
+        removed = {p.name for p in _corpus_files()} - {
+            p.name for p in _deliverable_corpus_files()
+        }
+        ledgered_on_disk = {
+            name for name in _undeliverable_files() if (FORWARD_DIR / name).is_file()
+        }
+        assert removed == ledgered_on_disk, (
+            "the undeliverable filter and the OMN-15819 ledger disagree; the "
+            "prohibition scan is then running over the wrong set"
+        )
+        assert removed, "the filter removed nothing, so it is not being exercised"
 
     def test_the_fix_added_no_exemption_to_the_undeliverable_ledger(self) -> None:
         # AC-2, derived from the ledger. 098 stays undeliverable: the flat corpus is
