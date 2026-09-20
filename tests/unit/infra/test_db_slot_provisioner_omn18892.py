@@ -463,3 +463,47 @@ class TestTeardownEnumeratesFromTheCatalog:
         drop_block = text.split('if [ "$MODE" = "--drop" ]; then', 1)[1]
         assert drop_block.count('assert_in_fence "$_db" "database"') == 1
         assert drop_block.count('assert_in_fence "$_role" "role"') == 1
+
+
+class TestTheDirectiveScanDistinguishesAbsenceFromABrokenScan:
+    """A zero directive count and a broken scan are different things.
+
+    The first revision of the PUBLIC-revocation seam failed the whole migration
+    run whenever the directive scan returned nothing, reasoning that the real
+    corpus carries directives so an empty read means the scan broke. That is
+    true of the real corpus and false in general: the OMN-15422 fresh-plus-legacy
+    fixture points the runner at a synthetic corpus of one flat and one node
+    migration which declares no directive by design, and it went red on a
+    perfectly correct input.
+
+    The positive control belongs on the CORPUS, not on the directive count. A
+    directory holding no ``.sql`` at all is a scan pointed somewhere wrong; a
+    directory holding migrations and no directive is an absence.
+    """
+
+    def test_the_fatal_is_conditioned_on_an_empty_corpus_not_an_empty_scan(
+        self,
+    ) -> None:
+        text = RUNNER.read_text(encoding="utf-8")
+        seam = text.split("BEGIN directive-created database PUBLIC revocation seam", 1)[
+            1
+        ].split("END directive-created database PUBLIC revocation seam", 1)[0]
+        assert 'if [ -z "$directive_corpus_size" ]; then' in seam, (
+            "the run may only fail when the corpus itself is empty"
+        )
+        assert "no .sql files under" in seam
+
+    def test_a_corpus_with_no_directive_is_reported_and_continues(self) -> None:
+        text = RUNNER.read_text(encoding="utf-8")
+        seam = text.split("BEGIN directive-created database PUBLIC revocation seam", 1)[
+            1
+        ].split("END directive-created database PUBLIC revocation seam", 1)[0]
+        assert 'if [ -z "$directive_databases" ]; then' in seam
+        # It must NAME the absence rather than pass silently: a seam that
+        # revoked nothing and said nothing is indistinguishable from one that
+        # never ran, which is the whole reason the readbacks exist.
+        assert "this corpus declares no onex-create-database directive" in seam
+        no_directive_branch = seam.split('if [ -z "$directive_databases" ]; then', 1)[
+            1
+        ].split("fi", 1)[0]
+        assert "exit" not in no_directive_branch

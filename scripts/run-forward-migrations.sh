@@ -2345,12 +2345,25 @@ echo "[forward-migration] Revoking PUBLIC CONNECT on directive-created databases
 directive_databases="$(
   grep -rhiE '^--[[:space:]]*onex-create-database[[:space:]]*:' "$MIGRATIONS_DIR" 2>/dev/null     | sed -E 's/^--[[:space:]]*[Oo][Nn][Ee][Xx]-[Cc][Rr][Ee][Aa][Tt][Ee]-[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee][[:space:]]*:[[:space:]]*//; s/[[:space:]]*$//'     | sort -u
 )"
-if [ -z "$directive_databases" ]; then
-  # An empty result here is not evidence of absence -- the corpus carries these
-  # directives, so an empty read means the scan broke, and a broken scan that
-  # revokes nothing looks exactly like a clean bill of health.
-  echo "[forward-migration] FATAL: the onex-create-database directive scan returned nothing over ${MIGRATIONS_DIR}" >&2
+# AN EMPTY RESULT IS NOT EVIDENCE OF ABSENCE, AND THE POSITIVE CONTROL IS THE
+# CORPUS, NOT THE DIRECTIVE COUNT. A broken scan and a corpus that legitimately
+# declares no directive both return nothing, and a broken scan that revokes
+# nothing reads exactly like a clean bill of health. What separates them is
+# whether the directory holds migrations at all.
+#
+# This distinction was learned the hard way rather than designed in: the first
+# revision failed the run on a zero directive count, and the OMN-15422
+# fresh-plus-legacy fixture -- which points the runner at a synthetic corpus of
+# one flat and one node migration, carrying no directive by design -- went red
+# on a correct corpus. A gate that fires on a legitimate input is a defect in
+# the gate.
+directive_corpus_size="$(find "$MIGRATIONS_DIR" -name '*.sql' 2>/dev/null | head -1)"
+if [ -z "$directive_corpus_size" ]; then
+  echo "[forward-migration] FATAL: no .sql files under ${MIGRATIONS_DIR} -- the directive scan has nothing to read, so its empty result is a broken scan rather than a corpus without directives" >&2
   exit 1
+fi
+if [ -z "$directive_databases" ]; then
+  echo "[forward-migration]   none  this corpus declares no onex-create-database directive (corpus is non-empty, so this is an absence rather than a failed scan)"
 fi
 for directive_db in $directive_databases; do
   validate_database_identifier "$directive_db"
@@ -2379,7 +2392,7 @@ for directive_db in $directive_databases; do
   fi
   echo "[forward-migration]   ok    ${directive_db}: PUBLIC holds no CONNECT"
 done
-unset directive_databases directive_db directive_db_present directive_public_connect
+unset directive_databases directive_db directive_db_present directive_public_connect directive_corpus_size
 
 # THE CLUSTER'S MAINTENANCE DATABASE, AND WHY IT IS FAIL-SOFT WHILE THE ABOVE IS
 # FAIL-CLOSED. `postgres` ships with PUBLIC's default CONNECT on any stock
