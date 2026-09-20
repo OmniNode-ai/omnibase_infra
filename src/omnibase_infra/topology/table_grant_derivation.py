@@ -263,47 +263,18 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # byte-identical, which is the proof the contract derives what the entry
     # used to. The lab_lane_health entry below is still live because its own
     # source pull request has not merged.
-    # OMN-18863, second occurrence: the lab lane-health projection, same cycle
-    # and same remedy as the entry directly above, nine minutes later.
+    # OMN-18863: the two supplemental bridges that sat here, for
+    # runtime_error_fingerprints and lab_lane_health, were both DELETED by the
+    # pin advances that made them redundant -- ac35d56338b3 and e1c4c8f61a1f.
+    # Neither deletion was remembered by anyone. The expiry module,
+    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, went red on
+    # each bot pull request naming the entry, and the deletion rode the commit
+    # that caused it. Both regenerations wrote nothing, which is the proof the
+    # contracts derive what the entries used to.
     #
-    # THIS IS THE POINT OF THE TICKET, not an incidental repeat. OMN-18770
-    # vendored the fingerprints relation, dev went red, the entry above cleared
-    # it at 2026-09-20T02:16:49Z -- and OMN-18769 (`omnibase_infra#3821`,
-    # merged 02:25:15Z, paired with the still-open `omnimarket#2674`) landed
-    # `lab_lane_health` through the identical seam and re-reddened dev at
-    # 02:25:52Z. Both pull requests passed the enforcement gate because their
-    # bodies carried `Node-Migration-Source-*` trailers, which swap the gate's
-    # derivation input to the omnimarket BRANCH; a push to `dev` carries no
-    # pull-request payload, falls back to the committed pin, and the pin
-    # declares neither relation. The trees were byte-identical across both
-    # verdicts. So this is a recurring window, not an accident, and every
-    # occurrence blocks the whole fleet until someone lands an entry here.
-    #
-    # `0001` in this lineage grants SELECT, INSERT, UPDATE on
-    # `omninode_internal.lab_lane_health` to `omninode_runtime` and asserts
-    # every privilege took, so `read_write` is what the corpus actually
-    # delivers. Deleting the declaration instead would arm the same OMN-18768
-    # boot crash the entry above documents.
-    #
-    # Inert, then removable, once the pin advances past `omnimarket#2674`.
-    ContractTableDeclaration(
-        node="legacy_migration:lab_lane_health",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_lab_lane_health/"
-            "0000_create_lab_lane_health.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="lab_lane_health",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_lab_lane_health/"
-                "0000_create_lab_lane_health.sql"
-            ),
-            access="read_write",
-            role="lab_lane_health",
-        ),
-    ),
+    # If you add a bridge here for a new infra-first vendoring, add it to that
+    # module's _INTERIM_ENTRIES map in the same pull request. One line, no
+    # baseline edit, and you will be told when to take it out.
     # OMN-17426: the savings overview READ VIEW follows the same temporary
     # supplemental-declaration path as OMN-18159 above. Infra vendors migration
     # 089 before the omnimarket source PR can merge, and the market PR cannot
