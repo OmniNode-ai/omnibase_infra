@@ -254,53 +254,15 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="aggregate_token_usage",
         ),
     ),
-    # OMN-18863: the runtime-error fingerprints projection, on the same
-    # temporary supplemental-declaration path as OMN-18159 above and for the
-    # same cycle -- OMN-18770 vendored this relation's create and grant
-    # migrations here first, deliberately, because omnimarket's
-    # node-migration-vendor-parity gate refuses the producing PR
-    # (omnimarket#2664) until the vendored counterpart is on this repo's dev.
-    # So the declaration exists here while the producing node's db_io is in no
-    # pinned contract, and the derivation cannot reproduce it. That is what
-    # turned dev red on `Application Database Domain Enforcement` at
-    # 2026-09-19T23:55:39Z, blocking every open pull request.
-    #
-    # WHY THE ONE-LINE FIX IS THE WRONG ONE, recorded because it is the
-    # tempting one. Deleting `runtime_error_fingerprints` from the topology
-    # instances makes the derivation check green immediately. It also arms the
-    # OMN-18768 crash: `0001` in this lineage GRANTS SELECT, INSERT, UPDATE on
-    # the relation plus the sequence USAGE, the runtime resolves a projection
-    # binding against the DECLARATION rather than the grant, and auto-wiring is
-    # fail-closed at the process level -- so one refused binding takes the whole
-    # runtime down, not one handler. Measured on a clean dev tree: regenerating
-    # against the pin deletes this line from three instances and nine rendered
-    # catalogs and takes `MAX_UNDECLARED` from 4 to 5, which is that gate
-    # refusing the deletion by name. Declaring it here instead makes the
-    # derivation REPRODUCE the checked-in grant, so a full regeneration writes
-    # nothing and no bound moves.
-    #
-    # Inert, then removable, once the pin advances past omnimarket#2664 and the
-    # source contract declares the same relation -- identical to the two blocks
-    # above. `access="read_write"` matches what `0001` actually grants, and the
-    # sequence arm derives its USAGE requirement from a declared INSERT.
-    ContractTableDeclaration(
-        node="legacy_migration:runtime_error_fingerprints",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_runtime_error_fingerprints/"
-            "0000_create_runtime_error_fingerprints.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="runtime_error_fingerprints",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_runtime_error_fingerprints/"
-                "0000_create_runtime_error_fingerprints.sql"
-            ),
-            access="read_write",
-            role="runtime_error_fingerprints",
-        ),
-    ),
+    # OMN-18863: the runtime-error fingerprints entry that used to sit here was
+    # DELETED when the pin advanced to ac35d56338b3, which is omnimarket#2664's
+    # squash, because the contract declares the relation itself now. That is the
+    # expiry test in tests/integration/topology working on its first real
+    # occasion rather than a cleanup somebody remembered: it went red naming
+    # this entry, and this is the deletion it asked for. The instances came back
+    # byte-identical, which is the proof the contract derives what the entry
+    # used to. The lab_lane_health entry below is still live because its own
+    # source pull request has not merged.
     # OMN-18863, second occurrence: the lab lane-health projection, same cycle
     # and same remedy as the entry directly above, nine minutes later.
     #

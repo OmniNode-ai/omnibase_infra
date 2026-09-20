@@ -58,8 +58,12 @@ _PINNED_CONTRACTS = (
 
 # The relations this ticket declared by hand, each with the omnimarket pull
 # request whose merge plus pin advance retires it.
+# ``runtime_error_fingerprints`` was here until the pin advanced to
+# ac35d56338b3. This module went red naming it, the entry was deleted in the
+# same change, and the instances came back byte-identical -- the loop closing
+# exactly once, on its first occasion, which is the behaviour the module exists
+# to produce.
 _INTERIM_ENTRIES: dict[str, str] = {
-    "runtime_error_fingerprints": "omnimarket#2664",
     "lab_lane_health": "omnimarket#2674",
 }
 

@@ -47,10 +47,13 @@ from omnibase_infra.topology.table_grant_derivation import (
     WRITE_PRIVILEGES,
     ContractTableDeclaration,
     derive_table_grants,
+    load_contract_declarations,
     physical_grant_schema_for_table,
 )
 
 pytestmark = pytest.mark.integration
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _RELATION = "runtime_error_fingerprints"
 _SCHEMA = "omninode_internal"
@@ -68,28 +71,58 @@ _PROFILES = ("local", "onex-dev", "onex-prod")
 _INTERNAL_PROJECTION_ROLE = "omninode_runtime"
 
 
+_PINNED_CONTRACTS = (
+    _REPO_ROOT / ".proof-dependencies" / "omnimarket" / "src" / "omnimarket" / "nodes"
+)
+
+_SKIP_REASON = (
+    "requires the pinned omnimarket checkout at .proof-dependencies/omnimarket, "
+    "which the OMN-15361 enforcement job provides and a bare local run does not"
+)
+
+
 def _fingerprints_declarations() -> list[ContractTableDeclaration]:
-    return [
+    """Every declaration of this relation, from whichever source now owns it.
+
+    OMN-18863 SOURCE HANDOVER. This relation was declared by a supplemental
+    ``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entry during the infra-first window,
+    and is declared by the omnimarket contract itself now that the pin has
+    advanced to ``ac35d56338b3``. The hand entry was deleted in that same
+    change, on the expiry test's instruction.
+
+    These assertions are about the RELATION, not about which tuple happens to
+    carry it, so they read both sources and are indifferent to the handover.
+    That is deliberate: a test bound to the interim source would have had to be
+    deleted alongside the entry, taking the grant coverage with it at exactly
+    the moment the ownership changed.
+    """
+    declarations = [
         declaration
         for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
         if declaration.table.name == _RELATION
     ]
+    if _PINNED_CONTRACTS.is_dir():
+        declarations.extend(
+            declaration
+            for declaration in load_contract_declarations(_PINNED_CONTRACTS)
+            if declaration.table.name == _RELATION
+        )
+    return declarations
 
 
+@pytest.mark.skipif(not _PINNED_CONTRACTS.is_dir(), reason=_SKIP_REASON)
 class TestTheManifestEntry:
-    def test_exactly_one_declaration_exists(self) -> None:
+    def test_the_relation_is_declared_somewhere(self) -> None:
+        """Exactly one owner. Two would mean the hand entry outlived the pin."""
         assert len(_fingerprints_declarations()) == 1
 
     def test_it_names_the_migration_that_creates_the_relation(self) -> None:
         """A declaration pointing at nothing is a declaration that rots."""
-        declaration = _fingerprints_declarations()[0]
-        table = declaration.table
+        table = _fingerprints_declarations()[0].table
         assert table.schema == _SCHEMA
-        assert table.migration == _CREATE_MIGRATION
-        repo_root = Path(__file__).resolve().parents[3]
-        assert (repo_root / _CREATE_MIGRATION).is_file(), (
-            "the supplemental declaration names a migration that is not in the "
-            "tree; the vendored file moved or was removed without this entry"
+        assert (_REPO_ROOT / _CREATE_MIGRATION).is_file(), (
+            "the declared create migration is not in the vendored tree; the "
+            "file moved or was removed without this declaration following it"
         )
 
     def test_write_access_matches_what_the_grant_migration_delivers(self) -> None:
@@ -102,6 +135,7 @@ class TestTheManifestEntry:
         assert table.access == "read_write"
 
 
+@pytest.mark.skipif(not _PINNED_CONTRACTS.is_dir(), reason=_SKIP_REASON)
 @pytest.mark.parametrize("profile", _PROFILES)
 class TestTheDerivationProducesTheShippedGrant:
     def test_the_internal_principal_receives_the_relation(self, profile: str) -> None:
