@@ -40,8 +40,9 @@ EVERY RUN IS RECORDED, INCLUDING THE QUIET ONES
 
 A silent run and a run that never happened are indistinguishable from outside,
 and telling them apart is half the point of a durable timer. So every run
-appends one record naming **all three** conditions, their outcome and their
-evidence, whether or not anything fired.
+appends one record naming **all four** conditions (OMN-19091 added the
+fourth, STALE_INDETERMINATE), their outcome and their evidence, whether or
+not anything fired.
 
 THREE OUTCOMES, NOT TWO
 
@@ -102,18 +103,22 @@ new place.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
+
+import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
@@ -122,14 +127,27 @@ if str(_REPO_ROOT) not in sys.path:
 from scripts.ci.lab_pass_receipt import (
     EnumLabLane,
     EnumLabPassResult,
-    ModelBrokerAccess,
     ModelLabPassReceipt,
     ReceiptLookupError,
     artifact_name,
     download_receipt,
     list_artifacts,
-    read_group_total_lag,
 )
+
+#: OMN-18867/OMN-19091: the consumer-lag condition reads the dev broker
+#: in-process via aiokafka, using the same ~/.onex client store the hook edge
+#: and ``onex delegate --lane dev`` already read (OPERATOR-CONSENT
+#: ``docs/tracking/ROLLING_WORK_LEDGER.md:3853`` item 7). This is a
+#: DELIBERATE departure from this module's otherwise stdlib-only design: a
+#: ruling of 2026-09-21 ("a secret on argv does not satisfy the consent,
+#: transient or not") ruled out the rpk-over-ssh path this condition used to
+#: take, because rpk has no credential-input mechanism that keeps a value off
+#: argv. Both ``yaml`` and ``aiokafka`` are confirmed present in the bare brew
+#: interpreter's global site-packages on this Mac (no venv, nothing installed
+#: by this change) -- see ``test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv``.
+#: ``pydantic`` stays forbidden: nothing here needs a model, only two files
+#: and a socket.
+_ONEX_LANE = "dev"
 
 RUN_RECORD_VERSION = "lab_alarm_run.v1"
 
@@ -150,11 +168,22 @@ _EVIDENCE_SAMPLES = 2
 
 
 class EnumAlarmCondition(StrEnum):
-    """The three conditions, each with a declared bound rather than a judgement."""
+    """Four conditions, each with a declared bound rather than a judgement.
+
+    The first three watch the lab. The fourth, STALE_INDETERMINATE
+    (OMN-19091), watches the other three: an alarm that reads INDETERMINATE
+    on every sample forever is installed but not watching, and today that
+    state was silent. It is a real fourth condition, not a side channel --
+    evaluated every run, carrying its own evidence, subject to the same
+    edge-triggered delivery -- because a condition that only watches state
+    this module already persists needs no new transport to stay honest about
+    its own blind spots.
+    """
 
     LAB_PASS_RECEIPT = "lab_pass_receipt"
     CONTAINER_RESTARTS = "container_restarts"
     CONSUMER_GROUP_LAG = "consumer_group_lag"
+    STALE_INDETERMINATE = "stale_indeterminate"
 
 
 class EnumConditionOutcome(StrEnum):
@@ -196,11 +225,11 @@ def make_runner(docker_command: Sequence[str]) -> CommandRunner:
     out to a bare ``docker`` would therefore report every container unreadable,
     forever, on a healthy lane and an unhealthy one alike.
 
-    The transport belongs here rather than inside each condition because
-    :class:`CommandRunner` is already the seam every condition is tested
-    through. Rewriting ``docker`` at the seam means the conditions, and the
-    ``read_group_total_lag`` helper this module reuses unchanged from the
-    lab-pass receipt, need no knowledge of where the lane is.
+    As of OMN-19091 this is used by ``container_restarts`` alone --
+    ``consumer_group_lag`` reads the broker in-process via aiokafka and needs
+    no docker transport at all. The transport still belongs here rather than
+    inside the one condition that uses it, so :class:`CommandRunner` stays the
+    seam that condition is tested through.
 
     Remote arguments are shell-quoted because ssh concatenates them and hands
     the result to a remote shell, so an unquoted argument is a remote shell
@@ -278,7 +307,7 @@ class ModelConditionReport:
 
 @dataclass(frozen=True)
 class ModelAlarmRun:
-    """One tick. Carries all three conditions whether or not anything fired."""
+    """One tick. Carries all four conditions whether or not anything fired."""
 
     started_at: str
     finished_at: str
@@ -293,7 +322,7 @@ class ModelAlarmRun:
         if missing:
             # A run that skipped a condition must not be recordable. Otherwise
             # "the alarm ran and found nothing" silently becomes "the alarm ran
-            # two of three conditions", which reads identically in the log.
+            # three of four conditions", which reads identically in the log.
             raise ValueError(f"run evaluated no {', '.join(missing)} condition")
         if len(evaluated) != len(self.reports):
             raise ValueError("a condition is reported twice in one run")
@@ -544,15 +573,217 @@ def evaluate_container_restarts(
 # ---------------------------------------------------------------------------
 # Condition 3 — a declared consumer group whose lag GROWS across two samples
 # ---------------------------------------------------------------------------
+#
+# In-process via aiokafka, not ssh + docker exec + rpk (OMN-19091). rpk has
+# exactly two credential-input mechanisms -- CLI ``-X user=/-X pass=`` flags
+# (argv) or a persisted profile (disk) -- and a ruling of 2026-09-21 held
+# that neither satisfies "no value on argv, disk, plist or log", transient or
+# not. The identity is the SAME one the hook edge and ``onex delegate --lane
+# dev`` already present (``~/.onex``, OPERATOR-CONSENT
+# ``docs/tracking/ROLLING_WORK_LEDGER.md:3853`` item 7, satisfied by a live
+# phase-2a proof rather than an ACL listing: all six declared groups read
+# with zero ``GroupAuthorizationFailedError``). This also drops ssh and
+# docker exec for this one condition entirely -- a moving part removed, not
+# relocated.
+
+
+class LaneCredentialError(Exception):
+    """The dev lane identity in ``~/.onex`` could not be resolved."""
+
+
+class GroupAuthorizationError(Exception):
+    """The identity is connected but lacks DESCRIBE on this group."""
+
+
+class GroupNeverCommittedError(Exception):
+    """The group holds no committed offset on any partition.
+
+    Not the same as zero lag: Operating Rule 16, an empty result is not
+    evidence of absence. A group that has never committed could be freshly
+    declared, or could be a name that no longer matches anything live --
+    either way this is not a reading of "caught up".
+    """
+
+
+class GroupLagReader(Protocol):
+    def __call__(self, group: str) -> int:
+        """Return TOTAL-LAG for *group*, or raise one of the three above."""
+
+
+def read_onex_lane_credential(onex_home: Path, lane: str) -> tuple[str, str]:
+    """Resolve ``(sasl_username, sasl_password)`` for *lane* from ``~/.onex``.
+
+    Same two files, same shape, same 0600-on-READ enforcement as
+    ``omnibase_infra.cli.store_lane_credential.StoreLaneCredential`` --
+    re-implemented here rather than imported, because importing anything
+    under the ``omnibase_infra`` package from the bare brew interpreter this
+    module runs under triggers that package's full ``__init__`` chain, which
+    fails on this Mac today: the globally-installed ``omnibase_core`` in
+    brew's site-packages is stale against what the local ``omnibase_infra``
+    source tree imports (``ModuleNotFoundError`` on a model only the newer
+    core carries). That skew is a pre-existing environment fact, not
+    something this module fixes by reaching into global site-packages.
+
+    ``config.yaml``'s ``lanes.<lane>`` block carries a principal NAME and a
+    REFERENCE (``sasl_password_ref``), never a value -- the file is
+    world-readable by default. The value lives only in ``credentials.json``,
+    keyed by that reference, mode 0600.
+
+    Raises:
+        LaneCredentialError: either file is unreadable, malformed, the
+            secrets file is not mode 0600, the lane is not declared, or the
+            reference does not resolve. Never returns a partial credential.
+    """
+    config_path = onex_home / "config.yaml"
+    creds_path = onex_home / "credentials.json"
+
+    try:
+        mode = stat.S_IMODE(creds_path.stat().st_mode)
+    except OSError as exc:
+        raise LaneCredentialError(f"{creds_path} could not be read: {exc}") from exc
+    if mode != 0o600:
+        raise LaneCredentialError(
+            f"{creds_path} is mode {oct(mode)}, not 0600; refusing to read a "
+            "secret file whose permissions have drifted"
+        )
+
+    try:
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise LaneCredentialError(f"{config_path} could not be read: {exc}") from exc
+    if not isinstance(config, dict):
+        raise LaneCredentialError(f"{config_path} is not a mapping")
+    lanes = config.get("lanes")
+    entry = lanes.get(lane) if isinstance(lanes, dict) else None
+    if not isinstance(entry, dict):
+        held = ", ".join(sorted(lanes)) if isinstance(lanes, dict) else "none"
+        raise LaneCredentialError(
+            f"{config_path} declares no identity for lane {lane!r}; held: {held}"
+        )
+    username = entry.get("sasl_username")
+    password_ref = entry.get("sasl_password_ref")
+    if not isinstance(username, str) or not username:
+        raise LaneCredentialError(f"{config_path} lane {lane!r} has no sasl_username")
+    if not isinstance(password_ref, str) or not password_ref:
+        raise LaneCredentialError(
+            f"{config_path} lane {lane!r} has no sasl_password_ref"
+        )
+
+    try:
+        creds = json.loads(creds_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LaneCredentialError(f"{creds_path} could not be read: {exc}") from exc
+    if not isinstance(creds, dict) or password_ref not in creds:
+        raise LaneCredentialError(
+            f"{creds_path} carries no value for reference {password_ref!r}"
+        )
+    password = creds[password_ref]
+    if not isinstance(password, str) or not password:
+        raise LaneCredentialError(
+            f"{creds_path} reference {password_ref!r} is not a non-empty string"
+        )
+    return username, password
+
+
+def make_kafka_lag_reader(
+    *,
+    bootstrap_servers: str,
+    sasl_username: str,
+    sasl_password: str,
+    sasl_mechanism: str = "SCRAM-SHA-256",
+    security_protocol: str = "SASL_PLAINTEXT",
+    timeout_seconds: float = 30.0,
+) -> GroupLagReader:
+    """An in-process reader: committed offsets vs. partition end offsets.
+
+    One connection per group rather than one shared session, deliberately --
+    this alarm fires hourly against six groups, so the connection overhead is
+    immaterial, and one group's failure staying fully isolated from the
+    other five (the existing per-group resilience the ssh/rpk path already
+    had) matters more than the extra round trips.
+
+    The returned callable never raises a raw ``aiokafka`` exception: every
+    failure is reclassified into one of :class:`GroupAuthorizationError`,
+    :class:`GroupNeverCommittedError`, or a plain :class:`ValueError` naming
+    only the exception's TYPE, never ``str(exc)`` -- an aiokafka error can
+    carry the broker address and, on some paths, connection-string-shaped
+    detail, and this alarm's whole discipline is that nothing it reads ever
+    reaches a log, evidence string, or Slack message unfiltered.
+    """
+    from aiokafka import AIOKafkaConsumer
+    from aiokafka.admin import AIOKafkaAdminClient
+    from aiokafka.errors import GroupAuthorizationFailedError, KafkaError
+
+    client_kwargs: dict[str, Any] = {
+        "bootstrap_servers": bootstrap_servers,
+        "security_protocol": security_protocol,
+        "sasl_mechanism": sasl_mechanism,
+        "sasl_plain_username": sasl_username,
+        "sasl_plain_password": sasl_password,
+        "request_timeout_ms": int(timeout_seconds * 1000),
+    }
+
+    async def _read(group: str) -> int:
+        admin = AIOKafkaAdminClient(
+            client_id="omninode-lab-alarm-admin", **client_kwargs
+        )
+        await admin.start()
+        try:
+            offsets = await admin.list_consumer_group_offsets(group)
+        finally:
+            await admin.close()
+
+        if not offsets:
+            raise GroupNeverCommittedError(
+                f"group {group} holds no committed offset on any partition"
+            )
+
+        consumer = AIOKafkaConsumer(
+            client_id="omninode-lab-alarm-consumer", **client_kwargs
+        )
+        await consumer.start()
+        try:
+            ends = await consumer.end_offsets(list(offsets.keys()))
+        finally:
+            await consumer.stop()
+
+        total = 0
+        for topic_partition, metadata in offsets.items():
+            end = ends.get(topic_partition)
+            if end is None:
+                raise ValueError(
+                    f"group {group} has no end offset for "
+                    f"{topic_partition.topic}[{topic_partition.partition}]"
+                )
+            total += max(0, end - metadata.offset)
+        return total
+
+    def read(group: str) -> int:
+        try:
+            return asyncio.run(_read(group))
+        except GroupNeverCommittedError:
+            raise
+        except GroupAuthorizationFailedError as exc:
+            raise GroupAuthorizationError(
+                f"group {group} refused DESCRIBE ({type(exc).__name__})"
+            ) from None
+        except KafkaError as exc:
+            raise ValueError(
+                f"group {group} unreadable ({type(exc).__name__})"
+            ) from None
+        except Exception as exc:  # noqa: BLE001 -- classify by type, never echo str(exc)
+            raise ValueError(
+                f"group {group} unreadable ({type(exc).__name__})"
+            ) from None
+
+    return read
 
 
 def evaluate_consumer_group_lag(
-    access: ModelBrokerAccess,
+    reader: GroupLagReader,
     groups: Sequence[str],
     *,
     previous: Mapping[str, int] | None,
-    runner: CommandRunner,
-    timeout_seconds: float = 60.0,
 ) -> tuple[ModelConditionReport, dict[str, int]]:
     """Growth across two consecutive samples, and ONLY growth.
 
@@ -596,16 +827,18 @@ def evaluate_consumer_group_lag(
     unreadable: list[str] = []
     for group in sorted(groups):
         try:
-            sample[group] = read_group_total_lag(
-                access, group, runner=runner, timeout_seconds=timeout_seconds
-            )
+            sample[group] = reader(group)
+        except GroupAuthorizationError as exc:
+            unreadable.append(f"{group} ({exc})")
+        except GroupNeverCommittedError as exc:
+            unreadable.append(f"{group} ({exc})")
         except ValueError as exc:
             unreadable.append(f"{group} ({exc})")
 
     readings = ", ".join(f"{g}={sample[g]}" for g in sorted(sample)) or "none"
     read_fact = (
-        f"TOTAL-LAG read from rpk group describe via {access.container}"
-        f"{' with SASL' if access.authenticated else ' unauthenticated'}"
+        "TOTAL-LAG read in-process via aiokafka (committed offsets vs. "
+        "partition end offsets), no ssh, no docker exec, no rpk"
     )
 
     if unreadable:
@@ -882,6 +1115,10 @@ class ModelAlarmState:
 
     active: dict[str, str] = field(default_factory=dict)
     lag_sample: dict[str, int] | None = None
+    #: OMN-19091: per-condition-key -> the ISO timestamp it FIRST read
+    #: INDETERMINATE, contiguously. Absent the moment that condition reads a
+    #: real verdict (OK or ALARM) again -- see evaluate_stale_indeterminate.
+    indeterminate_since: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> ModelAlarmState:
@@ -899,6 +1136,7 @@ class ModelAlarmState:
             return cls()
         active = payload.get("active")
         sample = payload.get("lag_sample")
+        since = payload.get("indeterminate_since")
         return cls(
             active={
                 str(k): str(v) for k, v in active.items() if isinstance(active, dict)
@@ -908,13 +1146,21 @@ class ModelAlarmState:
             lag_sample={str(k): int(v) for k, v in sample.items()}
             if isinstance(sample, dict)
             else None,
+            indeterminate_since={str(k): str(v) for k, v in since.items()}
+            if isinstance(since, dict)
+            else {},
         )
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
-                {"active": self.active, "lag_sample": self.lag_sample}, indent=2
+                {
+                    "active": self.active,
+                    "lag_sample": self.lag_sample,
+                    "indeterminate_since": self.indeterminate_since,
+                },
+                indent=2,
             ),
             encoding="utf-8",
         )
@@ -947,6 +1193,87 @@ def select_new_alarms(
             state.active[alarm.key] = now
             fresh.append(alarm)
     return tuple(fresh)
+
+
+# ---------------------------------------------------------------------------
+# Condition 4 — a condition stuck INDETERMINATE for too long (OMN-19091)
+# ---------------------------------------------------------------------------
+
+#: A condition that has read INDETERMINATE on every sample for a full day has
+#: not told anyone anything for a full day. Chosen to be well past the hourly
+#: cadence's own noise floor (a single bad tick, a lab restart) while still
+#: inside the window a person checks in on the lab.
+STALE_INDETERMINATE_AFTER = timedelta(hours=24)
+
+
+def evaluate_stale_indeterminate(
+    reports: Sequence[ModelConditionReport],
+    state: ModelAlarmState,
+    *,
+    now: str,
+    threshold: timedelta = STALE_INDETERMINATE_AFTER,
+) -> ModelConditionReport:
+    """A condition INDETERMINATE on every sample for >= *threshold* is blind.
+
+    Today, absent this condition, that state is silent forever: INDETERMINATE
+    never posts (only a newly raised ALARM does), and nothing tracks how long
+    a condition has been reading it. An alarm that cannot tell is not the same
+    as an alarm that says nothing is wrong, and the difference is exactly the
+    one Operating Rule 16 exists to preserve -- so it gets its own condition
+    rather than a silent gap in the other three.
+
+    This condition watches the OTHER THREE reports this same run produced; it
+    never watches its own prior outcome, so it cannot go stale watching
+    itself. Its own outcome is always OK or ALARM, never INDETERMINATE --
+    "is a condition stuck" is always answerable from state plus the clock.
+
+    Cleared per-condition the moment that condition reads a real verdict
+    again, OK or ALARM either one: a real reading, of either shape, proves the
+    alarm is watching, which is the whole thing this condition checks for.
+    """
+    condition = EnumAlarmCondition.STALE_INDETERMINATE
+    now_dt = datetime.fromisoformat(now)
+    updated: dict[str, str] = {}
+    stale: list[str] = []
+    readings: list[str] = []
+
+    for report in reports:
+        key = report.condition.value
+        if report.outcome is not EnumConditionOutcome.INDETERMINATE:
+            readings.append(f"{key}: {report.outcome.value}")
+            continue
+        since = state.indeterminate_since.get(key, now)
+        updated[key] = since
+        age = now_dt - datetime.fromisoformat(since)
+        readings.append(f"{key}: INDETERMINATE since {since} (age {age})")
+        if age >= threshold:
+            stale.append(key)
+
+    state.indeterminate_since = updated
+    evidence = f"condition ages this run: {'; '.join(readings) or 'none'}"
+
+    if stale:
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.ALARM,
+            evidence=evidence,
+            alarms=tuple(
+                ModelAlarm(
+                    condition=condition,
+                    subject=key,
+                    detail=(
+                        f"condition {key} has read INDETERMINATE on every "
+                        f"sample for at least {threshold}, with no OK and no "
+                        "ALARM to clear it -- an alarm that cannot tell is "
+                        "not the same as one that found nothing wrong"
+                    ),
+                )
+                for key in stale
+            ),
+        )
+    return ModelConditionReport(
+        condition=condition, outcome=EnumConditionOutcome.OK, evidence=evidence
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -990,16 +1317,18 @@ class ModelAlarmConfig:
 
     This module runs under launchd on the brew interpreter with no virtual
     environment -- the same reason ``scripts/ci/lab_pass_receipt.py`` is
-    stdlib-only. A YAML config would put a third-party import on the path of a
-    timer whose whole value is that it keeps running unattended.
+    stdlib-only. A YAML config here would put a third-party import on a path
+    that has to run before the alarm can even discover what it is bounded to
+    load. This predates, and is unrelated to, the ``yaml``/``aiokafka``
+    import OMN-19091 added for the consumer-lag identity read -- config
+    PARSING stays JSON; nothing about how the config is spelled changed.
     """
 
     repo: str
     lane: EnumLabLane
     ready_url: str
     agent_url: str
-    broker_container: str
-    broker_address: str
+    kafka_bootstrap_servers: str
     docker_command: tuple[str, ...]
     container_restart_bounds: dict[str, int]
     consumer_groups: tuple[str, ...]
@@ -1023,8 +1352,9 @@ class ModelAlarmConfig:
             lane=EnumLabLane(str(payload.get("lane", EnumLabLane.COMPOSE_DEV.value))),
             ready_url=expand_env(str(payload["ready_url"]), source=path),
             agent_url=expand_env(str(payload.get("agent_url", "")), source=path),
-            broker_container=str(payload["broker_container"]),
-            broker_address=expand_env(str(payload["broker_address"]), source=path),
+            kafka_bootstrap_servers=expand_env(
+                str(payload["kafka_bootstrap_servers"]), source=path
+            ),
             docker_command=tuple(expand_env(str(p), source=path) for p in docker),
             container_restart_bounds={str(k): int(v) for k, v in bounds.items()},
             consumer_groups=tuple(str(g) for g in groups),
@@ -1049,10 +1379,11 @@ def run_once(
     sha: str,
     receipt_reader: ReceiptReader,
     runner: CommandRunner,
+    lag_reader: GroupLagReader,
     posting_channel: str,
     env_file: Path,
 ) -> ModelAlarmRun:
-    """Evaluate all three conditions, record the run, return it."""
+    """Evaluate all four conditions, record the run, return it."""
     started = _now()
     state = ModelAlarmState.load(state_dir / "state.json")
 
@@ -1062,18 +1393,13 @@ def run_once(
     restart_report = evaluate_container_restarts(
         config.container_restart_bounds, runner=runner
     )
-    access = ModelBrokerAccess(
-        container=config.broker_container,
-        brokers=config.broker_address,
-        sasl_mechanism=os.environ.get("KAFKA_SASL_MECHANISM", ""),
-        sasl_username=os.environ.get("KAFKA_SASL_USERNAME", ""),
-        sasl_password=os.environ.get("KAFKA_SASL_PASSWORD", ""),
-    )
     lag_report, lag_sample = evaluate_consumer_group_lag(
-        access, config.consumer_groups, previous=state.lag_sample, runner=runner
+        lag_reader, config.consumer_groups, previous=state.lag_sample
     )
+    watched_reports = (receipt_report, restart_report, lag_report)
+    stale_report = evaluate_stale_indeterminate(watched_reports, state, now=started)
 
-    reports = (receipt_report, restart_report, lag_report)
+    reports = (*watched_reports, stale_report)
     raised = select_new_alarms(reports, state, now=started)
     state.lag_sample = lag_sample
     state.save(state_dir / "state.json")
@@ -1189,7 +1515,45 @@ def build_parser() -> argparse.ArgumentParser:
             "value is never logged, recorded or passed on a command line."
         ),
     )
+    parser.add_argument(
+        "--onex-home",
+        type=Path,
+        default=Path.home() / ".onex",
+        help=(
+            "The ~/.onex client store the consumer-lag condition reads its "
+            f"dev-lane identity from (lane {_ONEX_LANE!r}) -- the same store "
+            "the hook edge and 'onex delegate --lane dev' already read."
+        ),
+    )
     return parser
+
+
+def _build_lag_reader(*, onex_home: Path, bootstrap_servers: str) -> GroupLagReader:
+    """Resolve the dev-lane identity once, and bind a reader to it.
+
+    A credential resolution failure does not crash the timer: it returns a
+    reader that fails EVERY group with the same named reason, so the
+    consumer-lag condition reads INDETERMINATE with a reason a person can act
+    on -- 'fix ~/.onex' -- instead of the whole run dying before the other
+    three conditions are evaluated.
+    """
+    try:
+        username, password = read_onex_lane_credential(onex_home, _ONEX_LANE)
+    except LaneCredentialError as exc:
+        reason = str(exc)
+
+        def failing_reader(group: str) -> int:
+            raise ValueError(
+                f"group {group} unreadable: identity unresolved ({reason})"
+            )
+
+        return failing_reader
+
+    return make_kafka_lag_reader(
+        bootstrap_servers=bootstrap_servers,
+        sasl_username=username,
+        sasl_password=password,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1212,6 +1576,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         sha=sha,
         receipt_reader=read_latest_receipt,
         runner=make_runner(config.docker_command),
+        lag_reader=_build_lag_reader(
+            onex_home=args.onex_home,
+            bootstrap_servers=config.kafka_bootstrap_servers,
+        ),
         posting_channel=args.posting_channel,
         env_file=args.env_file,
     )

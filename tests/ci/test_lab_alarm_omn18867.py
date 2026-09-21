@@ -17,24 +17,32 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.ci.lab_pass_receipt import (
     EnumLabLane,
     EnumLabPassResult,
-    ModelBrokerAccess,
     ModelLabPassCheck,
     ModelLabPassReceipt,
     ReceiptLookupError,
 )
 from scripts.lab_alarm import (
+    STALE_INDETERMINATE_AFTER,
     EnumAlarmCondition,
     EnumConditionOutcome,
+    GroupAuthorizationError,
+    GroupLagReader,
+    GroupNeverCommittedError,
+    LaneCredentialError,
+    ModelAlarm,
     ModelAlarmConfig,
     ModelAlarmRun,
     ModelAlarmState,
@@ -42,10 +50,13 @@ from scripts.lab_alarm import (
     evaluate_consumer_group_lag,
     evaluate_container_restarts,
     evaluate_lab_pass_receipt,
+    evaluate_stale_indeterminate,
     expand_env,
     make_runner,
+    read_onex_lane_credential,
     resolve_posting_consent,
     run_once,
+    select_new_alarms,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -57,7 +68,20 @@ CONFIG = REPO_ROOT / "config" / "lab_alarm.json"
 SHA = "a" * 40
 CHANNEL = "#omninode-notifications"
 
-ACCESS = ModelBrokerAccess(container="broker", brokers="localhost:19092")
+
+def _lag_reader(lags: dict[str, int]) -> GroupLagReader:
+    """A GroupLagReader answering TOTAL-LAG per group from *lags*, or raising
+    ValueError for a group *lags* does not name -- the shape every group-lag
+    test drives instead of a fake CommandRunner (OMN-19091: in-process, no
+    subprocess at all).
+    """
+
+    def read(group: str) -> int:
+        if group not in lags:
+            raise ValueError(f"group {group} unreadable (unknown to this fixture)")
+        return lags[group]
+
+    return read
 
 
 def _receipt(result: EnumLabPassResult, *, ok: bool) -> ModelLabPassReceipt:
@@ -92,21 +116,6 @@ def _docker_runner(table: dict[str, subprocess.CompletedProcess[str]]):
     def run(argv: Sequence[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
         container = argv[-1]
         return table.get(container, _completed("", 1, f"No such object: {container}"))
-
-    return run
-
-
-def _lag_runner(lags: dict[str, int | str]):
-    """A runner answering ``rpk group describe`` per group from *lags*."""
-
-    def run(argv: Sequence[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
-        group = argv[argv.index("describe") + 1]
-        value = lags.get(group)
-        if value is None:
-            return _completed("", 1, f"unknown group {group}")
-        if isinstance(value, str):
-            return _completed(value)
-        return _completed(f"GROUP {group}\nTOTAL-LAG {value}\n")
 
     return run
 
@@ -224,7 +233,10 @@ def test_no_declared_container_is_indeterminate_not_ok() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Condition 3 — consumer group lag GROWTH
+# Condition 3 — consumer group lag GROWTH, read in-process via aiokafka
+# (OMN-19091: no ssh, no docker exec, no rpk -- see the GroupLagReader tests
+# below for the in-process reader's own error classification and the
+# ~/.onex identity read.)
 # ---------------------------------------------------------------------------
 
 
@@ -232,10 +244,9 @@ def test_no_declared_container_is_indeterminate_not_ok() -> None:
 def test_growing_lag_raises_an_alarm_naming_the_group() -> None:
     """AC4 falsifier: growth does not alarm, which is the nine-day freeze."""
     report, sample = evaluate_consumer_group_lag(
-        ACCESS,
+        _lag_reader({"savings": 631}),
         ["savings"],
         previous={"savings": 498},
-        runner=_lag_runner({"savings": 631}),
     )
     assert report.outcome is EnumConditionOutcome.ALARM
     assert report.alarms[0].subject == "savings"
@@ -254,10 +265,9 @@ def test_a_high_but_flat_lag_raises_nothing() -> None:
     have been ignored a second time. Falsifier: flat lag alarms.
     """
     report, _ = evaluate_consumer_group_lag(
-        ACCESS,
+        _lag_reader({"savings": 498}),
         ["savings"],
         previous={"savings": 498},
-        runner=_lag_runner({"savings": 498}),
     )
     assert report.outcome is EnumConditionOutcome.OK
     assert report.alarms == ()
@@ -267,10 +277,9 @@ def test_a_high_but_flat_lag_raises_nothing() -> None:
 def test_shrinking_lag_raises_nothing() -> None:
     """A backlog being worked off is the healthy case, at any magnitude."""
     report, _ = evaluate_consumer_group_lag(
-        ACCESS,
+        _lag_reader({"savings": 12}),
         ["savings"],
         previous={"savings": 900},
-        runner=_lag_runner({"savings": 12}),
     )
     assert report.outcome is EnumConditionOutcome.OK
 
@@ -279,7 +288,7 @@ def test_shrinking_lag_raises_nothing() -> None:
 def test_the_first_sample_is_indeterminate_not_ok() -> None:
     """With one sample, growth is not a question that has been answered."""
     report, sample = evaluate_consumer_group_lag(
-        ACCESS, ["savings"], previous=None, runner=_lag_runner({"savings": 498})
+        _lag_reader({"savings": 498}), ["savings"], previous=None
     )
     assert report.outcome is EnumConditionOutcome.INDETERMINATE
     assert "baseline" in report.evidence
@@ -291,10 +300,9 @@ def test_the_first_sample_is_indeterminate_not_ok() -> None:
 def test_an_unreadable_group_is_indeterminate_not_a_group_at_zero() -> None:
     """Operating Rule 16: an empty result is not evidence of absence."""
     report, _ = evaluate_consumer_group_lag(
-        ACCESS,
+        _lag_reader({"savings": 1}),
         ["savings", "delegation"],
         previous={"savings": 1, "delegation": 1},
-        runner=_lag_runner({"savings": 1}),
     )
     assert report.outcome is EnumConditionOutcome.INDETERMINATE
     assert "UNREADABLE" in report.evidence
@@ -309,9 +317,120 @@ def test_a_green_lag_reading_names_the_fact_it_read() -> None:
     saying the lane is fine.
     """
     report, _ = evaluate_consumer_group_lag(
-        ACCESS, ["savings"], previous={"savings": 5}, runner=_lag_runner({"savings": 5})
+        _lag_reader({"savings": 5}), ["savings"], previous={"savings": 5}
     )
     assert "TOTAL-LAG" in report.evidence
+
+
+@pytest.mark.unit
+def test_a_group_authorization_refusal_is_indeterminate_with_a_named_reason() -> None:
+    """AC3 falsifier: a typed authorization refusal reads OK instead of INDETERMINATE.
+
+    A ``GroupAuthorizationFailedError`` means the identity connected and was
+    refused -- a different fact from a connection failure -- so the reader
+    reclassifies it as :class:`GroupAuthorizationError`, and the evaluator
+    must never fold that into a passing reading.
+    """
+
+    def reader(group: str) -> int:
+        raise GroupAuthorizationError(f"group {group} refused DESCRIBE (test)")
+
+    report, _ = evaluate_consumer_group_lag(reader, ["savings"], previous=None)
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "savings" in report.evidence
+    assert "refused DESCRIBE" in report.evidence
+
+
+@pytest.mark.unit
+def test_a_group_that_never_committed_is_indeterminate_not_zero_lag() -> None:
+    """AC4 falsifier: an empty offset map reads as lag 0 instead of unread.
+
+    A group with no committed offset at all could be freshly declared, or
+    could be a stale name matching nothing live -- either way it is not a
+    reading of "caught up", and Rule 16 says an empty result proves nothing.
+    """
+
+    def reader(group: str) -> int:
+        raise GroupNeverCommittedError(
+            f"group {group} holds no committed offset on any partition"
+        )
+
+    report, sample = evaluate_consumer_group_lag(reader, ["savings"], previous=None)
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "no committed offset" in report.evidence
+    assert "savings" not in sample
+
+
+# ---------------------------------------------------------------------------
+# The in-process ~/.onex identity read (OMN-19091)
+# ---------------------------------------------------------------------------
+
+
+def _write_onex_store(
+    onex_home: Path,
+    *,
+    lane: str = "dev",
+    username: str = "dev-cli-test",
+    password_ref: str = "dev-lane-sasl",  # noqa: S107
+    password: str = "s3cr3t-test-value",  # noqa: S107
+    mode: int = 0o600,
+    omit_lane: bool = False,
+) -> None:
+    onex_home.mkdir(parents=True, exist_ok=True)
+    config_path = onex_home / "config.yaml"
+    creds_path = onex_home / "credentials.json"
+    lanes = (
+        {}
+        if omit_lane
+        else {lane: {"sasl_username": username, "sasl_password_ref": password_ref}}
+    )
+    config_path.write_text(yaml.safe_dump({"lanes": lanes}), encoding="utf-8")
+    creds_path.write_text(json.dumps({password_ref: password}), encoding="utf-8")
+    creds_path.chmod(mode)
+
+
+@pytest.mark.unit
+def test_read_onex_lane_credential_resolves_username_and_password(
+    tmp_path: Path,
+) -> None:
+    """The positive control every negative test below is measured against."""
+    _write_onex_store(tmp_path)
+    username, password = read_onex_lane_credential(tmp_path, "dev")
+    assert username == "dev-cli-test"
+    assert password == "s3cr3t-test-value"
+
+
+@pytest.mark.unit
+def test_read_onex_lane_credential_refuses_a_non_0600_secrets_file(
+    tmp_path: Path,
+) -> None:
+    """The value survives chmod/backup/restore; the mode is checked on READ."""
+    _write_onex_store(tmp_path, mode=0o644)
+    with pytest.raises(LaneCredentialError, match="0600"):
+        read_onex_lane_credential(tmp_path, "dev")
+
+
+@pytest.mark.unit
+def test_read_onex_lane_credential_refuses_an_undeclared_lane(tmp_path: Path) -> None:
+    _write_onex_store(tmp_path, omit_lane=True)
+    with pytest.raises(LaneCredentialError, match="dev"):
+        read_onex_lane_credential(tmp_path, "dev")
+
+
+@pytest.mark.unit
+def test_read_onex_lane_credential_refuses_a_dangling_reference(tmp_path: Path) -> None:
+    _write_onex_store(tmp_path, password_ref="dev-lane-sasl")
+    (tmp_path / "credentials.json").write_text(
+        json.dumps({"a-different-ref": "value"}), encoding="utf-8"
+    )
+    with pytest.raises(LaneCredentialError, match="dev-lane-sasl"):
+        read_onex_lane_credential(tmp_path, "dev")
+
+
+@pytest.mark.unit
+def test_read_onex_lane_credential_refuses_a_missing_store(tmp_path: Path) -> None:
+    with pytest.raises(LaneCredentialError):
+        read_onex_lane_credential(tmp_path / "does-not-exist", "dev")
 
 
 # ---------------------------------------------------------------------------
@@ -332,8 +451,7 @@ def _run(
         lane=EnumLabLane.COMPOSE_DEV,
         ready_url="http://lane/ready",
         agent_url="http://lane:8098",
-        broker_container="broker",
-        broker_address="localhost:19092",
+        kafka_bootstrap_servers="lab-host:19092",
         docker_command=("docker",),
         container_restart_bounds={"savings-writer": 2},
         consumer_groups=("savings",),
@@ -342,9 +460,7 @@ def _run(
     def runner(
         argv: Sequence[str], *, timeout: float
     ) -> subprocess.CompletedProcess[str]:
-        if "inspect" in argv:
-            return _completed(restarts)
-        return _completed(f"TOTAL-LAG {lag}\n")
+        return _completed(restarts)
 
     return run_once(
         config,
@@ -355,6 +471,7 @@ def _run(
             result, ok=result is EnumLabPassResult.PASS
         ),
         runner=runner,
+        lag_reader=_lag_reader({"savings": lag}),
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
     )
@@ -458,7 +575,7 @@ def test_an_indeterminate_does_not_clear_an_active_alarm(tmp_path: Path) -> None
 
 
 @pytest.mark.unit
-def test_a_healthy_run_raises_nothing_and_records_all_three_conditions(
+def test_a_healthy_run_raises_nothing_and_records_all_four_conditions(
     tmp_path: Path,
 ) -> None:
     """AC5. Falsifier: a silent run is indistinguishable from one that never ran."""
@@ -531,6 +648,130 @@ def test_a_condition_reporting_no_evidence_is_refused() -> None:
             outcome=EnumConditionOutcome.OK,
             evidence="   ",
         )
+
+
+# ---------------------------------------------------------------------------
+# Condition 4 — STALE_INDETERMINATE, a condition blind for too long (OMN-19091)
+# ---------------------------------------------------------------------------
+
+_WATCHED = (
+    EnumAlarmCondition.LAB_PASS_RECEIPT,
+    EnumAlarmCondition.CONTAINER_RESTARTS,
+    EnumAlarmCondition.CONSUMER_GROUP_LAG,
+)
+
+
+def _watched_report(outcome: EnumConditionOutcome) -> tuple[ModelConditionReport, ...]:
+    return tuple(
+        ModelConditionReport(condition=c, outcome=outcome, evidence="test")
+        for c in _WATCHED
+    )
+
+
+@pytest.mark.unit
+def test_stale_indeterminate_stays_ok_under_the_threshold() -> None:
+    """AC7's negative control: a fresh or recent INDETERMINATE is not stale yet."""
+    state = ModelAlarmState()
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    reports = _watched_report(EnumConditionOutcome.INDETERMINATE)
+
+    first = evaluate_stale_indeterminate(reports, state, now=t0.isoformat())
+    assert first.outcome is EnumConditionOutcome.OK
+    assert state.indeterminate_since  # baselined so the NEXT tick can age it
+
+    still_early = t0 + STALE_INDETERMINATE_AFTER - timedelta(minutes=1)
+    second = evaluate_stale_indeterminate(reports, state, now=still_early.isoformat())
+    assert second.outcome is EnumConditionOutcome.OK
+
+
+@pytest.mark.unit
+def test_stale_indeterminate_raises_exactly_once_past_the_threshold() -> None:
+    """AC7 falsifier: a condition stuck INDETERMINATE for >=24h never posts."""
+    state = ModelAlarmState()
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    reports = _watched_report(EnumConditionOutcome.INDETERMINATE)
+
+    # Baseline tick: not yet stale, nothing raised.
+    stale = evaluate_stale_indeterminate(reports, state, now=t0.isoformat())
+    assert select_new_alarms((*reports, stale), state, now=t0.isoformat()) == ()
+
+    # Past the threshold: ALARM, and it raises for every still-stale subject.
+    t1 = t0 + STALE_INDETERMINATE_AFTER + timedelta(minutes=1)
+    stale = evaluate_stale_indeterminate(reports, state, now=t1.isoformat())
+    assert stale.outcome is EnumConditionOutcome.ALARM
+    raised = select_new_alarms((*reports, stale), state, now=t1.isoformat())
+    assert {a.subject for a in raised} == {c.value for c in _WATCHED}
+
+    # A later tick, still stale: edge-triggered, so it raises nothing NEW.
+    t2 = t1 + timedelta(hours=1)
+    stale = evaluate_stale_indeterminate(reports, state, now=t2.isoformat())
+    assert select_new_alarms((*reports, stale), state, now=t2.isoformat()) == ()
+
+
+@pytest.mark.unit
+def test_stale_indeterminate_clears_on_recovery_and_can_re_raise() -> None:
+    """AC7 falsifier: a recovery-then-stale-again cycle re-raises zero or twice."""
+    state = ModelAlarmState()
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    indeterminate = _watched_report(EnumConditionOutcome.INDETERMINATE)
+
+    evaluate_stale_indeterminate(indeterminate, state, now=t0.isoformat())
+    t1 = t0 + STALE_INDETERMINATE_AFTER + timedelta(minutes=1)
+    stale = evaluate_stale_indeterminate(indeterminate, state, now=t1.isoformat())
+    first_raise = select_new_alarms((*indeterminate, stale), state, now=t1.isoformat())
+    assert len(first_raise) == 3
+    assert any(k.startswith("stale_indeterminate:") for k in state.active)
+
+    # All three conditions read a real verdict: the clock and the alarm clear.
+    t2 = t1 + timedelta(hours=1)
+    healthy = _watched_report(EnumConditionOutcome.OK)
+    recovered = evaluate_stale_indeterminate(healthy, state, now=t2.isoformat())
+    assert recovered.outcome is EnumConditionOutcome.OK
+    assert state.indeterminate_since == {}
+    cleared = select_new_alarms((*healthy, recovered), state, now=t2.isoformat())
+    assert cleared == ()
+    assert not any(k.startswith("stale_indeterminate:") for k in state.active)
+
+    # Stale again, for a fresh >=24h window: re-raises.
+    t3 = t2 + timedelta(minutes=1)
+    evaluate_stale_indeterminate(indeterminate, state, now=t3.isoformat())
+    t4 = t3 + STALE_INDETERMINATE_AFTER + timedelta(minutes=1)
+    stale_again = evaluate_stale_indeterminate(indeterminate, state, now=t4.isoformat())
+    assert stale_again.outcome is EnumConditionOutcome.ALARM
+    second_raise = select_new_alarms(
+        (*indeterminate, stale_again), state, now=t4.isoformat()
+    )
+    assert len(second_raise) == 3
+
+
+@pytest.mark.unit
+def test_stale_indeterminate_never_reads_indeterminate_about_itself() -> None:
+    """No infinite regress: 'is a condition stuck' is answerable from state
+    and the clock alone, so this condition's own outcome is always OK or
+    ALARM -- it cannot itself become the thing it is trying to detect.
+    """
+    state = ModelAlarmState()
+    now = datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+    for outcome in (
+        EnumConditionOutcome.OK,
+        EnumConditionOutcome.ALARM,
+        EnumConditionOutcome.INDETERMINATE,
+    ):
+        reports = (
+            _watched_report(outcome)
+            if outcome is not EnumConditionOutcome.ALARM
+            else tuple(
+                ModelConditionReport(
+                    condition=c,
+                    outcome=EnumConditionOutcome.ALARM,
+                    evidence="test",
+                    alarms=(ModelAlarm(condition=c, subject="x", detail="test"),),
+                )
+                for c in _WATCHED
+            )
+        )
+        report = evaluate_stale_indeterminate(reports, state, now=now)
+        assert report.outcome is not EnumConditionOutcome.INDETERMINATE
 
 
 # ---------------------------------------------------------------------------
@@ -1025,16 +1266,39 @@ def test_the_installer_refuses_rather_than_render_an_empty_lab_host(
 def test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv() -> None:
     """Operating Rule 11: launchd has a restricted PATH and no login shell.
 
-    The agent names a literal brew interpreter, and the alarm is stdlib-only
-    plus the stdlib-only lab-pass receipt module, so no virtual environment
-    has to stay healthy for the timer to keep working.
+    The agent names a literal brew interpreter. Most of the alarm is
+    stdlib-only, plus the stdlib-only lab-pass receipt module -- OMN-19091 is
+    a DELIBERATE, documented exception: the consumer-lag condition reads
+    ``yaml``/``aiokafka`` in-process, because a ruling of 2026-09-21 held
+    that a secret on argv does not satisfy the OMN-18867 consent and rpk's
+    only other credential-input mechanism is a value on disk. ``pydantic``
+    stays forbidden -- nothing in this module needs a model.
+
+    The two new imports must resolve from the SAME brew interpreter the
+    launch agent names, with no venv activated, or the job dies at import
+    time every hour with nothing but a traceback in a log nobody reads.
+    Falsifier: either import needs a venv this installer never activates.
     """
     installer = INSTALLER.read_text(encoding="utf-8")
     assert "/opt/homebrew/bin/python3.13" in installer
     assert "/usr/local/bin/python3.13" in installer
     source = (REPO_ROOT / "scripts" / "lab_alarm.py").read_text(encoding="utf-8")
-    assert "import yaml" not in source
     assert "import pydantic" not in source
+    assert "import yaml" in source  # OMN-19091, documented above
+
+    for candidate in ("/opt/homebrew/bin/python3.13", "/usr/local/bin/python3.13"):
+        if not Path(candidate).exists():
+            continue
+        completed = subprocess.run(
+            [candidate, "-c", "import yaml, aiokafka"],
+            capture_output=True,
+            check=False,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(Path.home())},
+        )
+        assert completed.returncode == 0, completed.stderr.decode()
+        break
+    else:
+        pytest.skip("no brew python3.13 on this host -- installer-text half still ran")
 
 
 @pytest.mark.unit
