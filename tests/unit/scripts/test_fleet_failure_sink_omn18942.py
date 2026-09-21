@@ -156,6 +156,12 @@ def _run_reporter(
         # OMN-18944 added the third of them, whose row would otherwise land in
         # this suite's warning count and in its active-issue list.
         "OMNINODE_CI_PROBE_ENABLED": "0",
+        # OMN-18949: the reporter also reads the lane census probe from
+        # collect(), and on a runner there is no live snapshot, so it emits a
+        # WARNING row and moves this file's issue counts. These cases are about
+        # the FLEET rows; the census rows are asserted in
+        # test_lane_census_sink_omn18949.py, which switches it back on.
+        "OMNINODE_CENSUS_PROBE_ENABLED": "0",
         "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
         "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
         "SLACK_BOT_TOKEN": "x",
