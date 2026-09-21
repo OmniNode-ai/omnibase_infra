@@ -89,6 +89,16 @@ class ModelProjectionApplyFlowVerdict(BaseModel):
             "dimension, and still rendered, because unreported is not ungated."
         ),
     )
+    grain_unresolved_projections: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Projections whose contract-declared key grain could not be "
+            "resolved (OMN-19081). Graded like a mutable grain and reported "
+            "separately, because silently exempting one would hide an "
+            "accumulation behind a missing field while silently grading it "
+            "would hide that the declaration is the thing to fix."
+        ),
+    )
     total_consumed: int = Field(
         default=0, ge=0, description="Envelopes dispatched across all windows in scope"
     )

@@ -109,36 +109,6 @@ DELTA_DROP_MIN_RISING_WINDOWS: int = 2
 #: healthy projection degraded.
 DELTA_DROP_MIN_ACCUMULATION: int = 10
 
-#: The exposures whose key grain is immutable and content-addressed, for which
-#: a discarded delta is intended idempotence rather than lost data, excluded
-#: from ``projection_delta_dropped`` BY NAME.
-#:
-#: Both entries are correct to publish a fixed source coordinate.
-#: ``HandlerProjectionWorkEvents`` keys on an event id content-addressed over
-#: ``(source_topic, actor_id, emitted_at, payload)`` and
-#: ``HandlerProjectionSessionReplay`` keys on a snapshot id content-addressed
-#: per source event, so one source event owns exactly one key and the serving
-#: cache only ever compares a key against a delta derived from that same
-#: event. They are exemptions this dimension must not count, not noise to be
-#: thresholded over: a threshold wide enough to cover them is wide enough to
-#: hide the defect.
-#:
-#: Both identity forms are listed because the projection identity recorded at
-#: dispatch is the handler class name while the contract and every ticket name
-#: the node. Matching is EXACT — a substring rule here would exempt the next
-#: handler whose name happens to contain one of these.
-#:
-#: This literal list is the interim form. OMN-18908 puts a ``key_grain``
-#: declaration on each projection exposure's contract with no default, at
-#: which point this list is replaced by a read of that declaration and an
-#: undeclared grain becomes a refusal rather than an omission.
-IMMUTABLE_GRAIN_PROJECTIONS: tuple[str, ...] = (
-    "HandlerProjectionSessionReplay",
-    "HandlerProjectionWorkEvents",
-    "node_projection_session_replay",
-    "node_projection_work_events",
-)
-
 #: Cap on names rendered into a dimension detail. The detail rides every
 #: ``/health`` response and every health event; a fleet-wide breakage must not
 #: turn it into a log dump. Mirrors ``projection_liveness.MAX_NAMED_PROJECTIONS``.
@@ -152,6 +122,14 @@ OUTCOME_APPLY_FLOW_UNOBSERVED: str = "apply_flow_window_unobserved"
 
 #: The outcome token for a cumulative gauge that decreased.
 OUTCOME_DROP_GAUGE_NONMONOTONIC: str = "apply_flow_drop_gauge_nonmonotonic"
+
+#: The outcome token for a registered projection whose contract-declared key
+#: grain could not be resolved (OMN-19081). Such a projection is GRADED, never
+#: exempted -- silently exempting it would hide a real accumulation behind a
+#: missing field -- and is named under this token so a reader can tell it from
+#: one that genuinely declares a mutable grain. The remedies differ: one is a
+#: contract edit, the other is a real investigation.
+OUTCOME_KEY_GRAIN_UNRESOLVED: str = "apply_flow_key_grain_unresolved"
 
 #: The runtime health-dimension vocabulary, declared here so both statuses are
 #: produced IN it rather than as free strings a call site has to narrow. Mirrors
@@ -167,6 +145,7 @@ def evaluate_projection_apply_flow(
     windows: Sequence[tuple[ModelProjectionApplyDelta, ...]],
     registered_projections: Iterable[str],
     immutable_grain_projections: Iterable[str] = (),
+    grain_unresolved_projections: Iterable[str] = (),
 ) -> ModelProjectionApplyFlowVerdict:
     """Grade consume-versus-write and drop accumulation over the closed windows.
 
@@ -185,6 +164,11 @@ def evaluate_projection_apply_flow(
             intended idempotence. Excluded from the drop dimension only; they
             are still graded for divergence, because an immutable grain says
             nothing about whether rows land.
+        grain_unresolved_projections: Projections registered here whose
+            contract-declared grain could not be resolved. Graded exactly like
+            a mutable grain and reported under their own outcome token, so
+            neither an exemption nor an alarm is taken silently on a fact
+            nobody established.
 
     Returns:
         The verdict. It carries no status word; see the two ``*_status``
@@ -192,6 +176,7 @@ def evaluate_projection_apply_flow(
     """
     registered = tuple(sorted({p for p in registered_projections if p}))
     exempt = frozenset(p for p in immutable_grain_projections if p)
+    unresolved = frozenset(p for p in grain_unresolved_projections if p)
 
     consumed_by: dict[str, int] = dict.fromkeys(registered, 0)
     upserted_by: dict[str, int] = dict.fromkeys(registered, 0)
@@ -256,6 +241,7 @@ def evaluate_projection_apply_flow(
         drop_accumulating_projections=tuple(accumulating),
         indeterminate_drop_projections=tuple(indeterminate),
         excluded_immutable_grain=tuple(sorted(exempt & set(in_scope))),
+        grain_unresolved_projections=tuple(sorted(unresolved & set(in_scope))),
         total_consumed=sum(consumed_by.values()),
         total_upserted=sum(upserted_by.values()),
         total_refused_by_guard=sum(refused_by.values()),
@@ -381,6 +367,16 @@ def describe_projection_delta_dropped(verdict: ModelProjectionApplyFlowVerdict) 
             "delta is intended idempotence, and are excluded from this "
             f"dimension: {_name_list(verdict.excluded_immutable_grain)}]"
         )
+    unresolved = ""
+    if verdict.grain_unresolved_projections:
+        unresolved = (
+            f" ({OUTCOME_KEY_GRAIN_UNRESOLVED}: "
+            f"{len(verdict.grain_unresolved_projections)} projection(s) "
+            "declare no resolvable key grain, so they are GRADED rather than "
+            "exempted -- an exemption taken on an unestablished fact is the "
+            f"rubber stamp this reads a declaration to avoid: "
+            f"{_name_list(verdict.grain_unresolved_projections)})"
+        )
     indeterminate = ""
     if verdict.indeterminate_drop_projections:
         indeterminate = (
@@ -394,7 +390,7 @@ def describe_projection_delta_dropped(verdict: ModelProjectionApplyFlowVerdict) 
         return (
             f"No projection's discarded-delta count rose across "
             f"{verdict.observed_window_count} apply window(s)"
-            f"{indeterminate}{exempted}"
+            f"{indeterminate}{unresolved}{exempted}"
         )
     return (
         f"{len(verdict.drop_accumulating_projections)} projection(s) discarded "
@@ -402,7 +398,7 @@ def describe_projection_delta_dropped(verdict: ModelProjectionApplyFlowVerdict) 
         f"window(s) — the serving cache consumed them and kept nothing, which "
         f"reads as fresh at zero lag: "
         f"{_name_list(verdict.drop_accumulating_projections)}"
-        f"{indeterminate}{exempted}"
+        f"{indeterminate}{unresolved}{exempted}"
     )
 
 
@@ -410,10 +406,10 @@ __all__: list[str] = [
     "APPLY_DIVERGENCE_MIN_CONSUMED",
     "DELTA_DROP_MIN_ACCUMULATION",
     "DELTA_DROP_MIN_RISING_WINDOWS",
-    "IMMUTABLE_GRAIN_PROJECTIONS",
     "MAX_NAMED_PROJECTIONS",
     "OUTCOME_APPLY_FLOW_UNOBSERVED",
     "OUTCOME_DROP_GAUGE_NONMONOTONIC",
+    "OUTCOME_KEY_GRAIN_UNRESOLVED",
     "describe_projection_apply_divergence",
     "describe_projection_delta_dropped",
     "evaluate_projection_apply_flow",
