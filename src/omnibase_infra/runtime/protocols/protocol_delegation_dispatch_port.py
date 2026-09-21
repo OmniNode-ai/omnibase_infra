@@ -13,6 +13,16 @@ from uuid import UUID
 
 from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 
+#: The execution budget a caller that passes neither argument resolves to
+#: (OMN-18924). Mirrors `omnibase_infra.cli.task_class_selection`'s
+#: DEFAULT_EXECUTION_BUDGET; the two are pinned equal by
+#: tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py rather
+#: than shared by an import, because the runtime layer does not depend on the
+#: CLI layer and adding that edge to share two integers would be the wrong
+#: trade.
+DEFAULT_EXECUTION_TIMEOUT_SECONDS = 240
+DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS = 60
+
 
 class ProtocolDelegationDispatchPort(Protocol):
     async def dispatch(
@@ -25,6 +35,13 @@ class ProtocolDelegationDispatchPort(Protocol):
         source_file_path: str | None,
         source_session_id: str | None,
         wait: bool,
+        # OMN-18924: defaulted, not required. See the implementation's note --
+        # these landed as required while the deployed caller passed neither,
+        # and every dev-lane delegation terminalized `provider_error` on the
+        # resulting TypeError. Exactly the shape the OMN-18321 comment below
+        # records, one incident later.
+        execution_timeout_seconds: int = DEFAULT_EXECUTION_TIMEOUT_SECONDS,
+        terminal_delivery_margin_seconds: int = DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
         quality_contract_mode: str,
         acceptance_criteria: tuple[str, ...],
         tenant_id: str | None = None,
@@ -34,9 +51,23 @@ class ProtocolDelegationDispatchPort(Protocol):
         # TypeError on the deployed bus path was swallowed by the consumer's own
         # `except Exception` into a delegate-skill-failed terminal -- so the
         # dev-lane chain died silently for a day and wrote no FSM row at all.
-        # Parity is held mechanically by
-        # tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py,
-        # which reads the consumer's declaration rather than a list kept here.
+        # CORRECTED 2026-09-21 (OMN-18938). This comment used to say parity was
+        # "held mechanically" by
+        # tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py.
+        # That sentence was read as proof and was broader than the file: the
+        # module covered the consumer's names in both directions and nothing
+        # that started from OURS, so a keyword added here as REQUIRED was
+        # invisible to it. omnibase_infra#3882 did exactly that, every
+        # delegation on the dev lane terminalised provider_error, and the
+        # module ran 3 passed 0 failed throughout. The missing direction landed
+        # under OMN-18938; the module's own docstring now names all three and
+        # is the place to read before trusting a claim like this one.
+        #
+        # A DEFAULT ON A KEYWORD HERE IS LOAD-BEARING, not a convenience. The
+        # two repos deploy independently, so the consumer is a release behind
+        # by construction and a required keyword is broken for exactly that
+        # window. Add keywords defaulted; make one required only alongside a
+        # landed consumer that passes it.
         provenance: ModelDelegationProvenance | None = None,
         backend_id: str | None = None,
         response_contract: dict[str, object] | None = None,

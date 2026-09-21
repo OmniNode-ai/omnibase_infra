@@ -558,3 +558,182 @@ async def test_a_mis_parented_hop_grades_red_and_its_siblings_do_not(
         "one mis-parented hop turned the whole chain red, so the red above is "
         f"not evidence about that hop:\n{_describe(rows)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18916 AC4: the observed chain is legitimately LONGER than five hops
+#
+# Two causes, both measured on the .201 dev lane, both graded red before this
+# change because tier 2 compared observed index i against declared index i:
+#
+#   RETRY       the attempts ladder climbs a rung, so a second routing
+#               request is published with its OWN envelope and its own
+#               correct parent. A real hop that must be kept.
+#   REDELIVERY  the identical envelope arrives twice at adjacent offsets.
+#               One hop projected twice, which must be collapsed.
+#
+# Driven through the same real projection-and-dispatch path the OMN-18419
+# proofs above use, so what is graded is evidence this file produced rather
+# than ledger_chain rows it wrote by hand.
+# ---------------------------------------------------------------------------
+
+
+async def _publish_longer_chain_into_event_ledger(
+    *,
+    correlation_id: UUID,
+    postgres_dsn: str,
+    redeliver_instead_of_retry: bool,
+) -> dict[str, UUID]:
+    """Publish a chain longer than the declaration, one way or the other.
+
+    With ``redeliver_instead_of_retry`` the extra pair carries the SAME
+    envelope ids as the first pair, which is a redelivery. Without it the
+    extra pair carries fresh ids and correct parents, which is a retry. The
+    two shapes differ in exactly one respect, so a fix that conflated them
+    cannot pass both cases.
+    """
+    first = {topic: uuid4() for topic in _PUBLISHED_TOPICS}
+    retry_request = (
+        first[_TOPIC_ROUTING_REQUEST] if redeliver_instead_of_retry else uuid4()
+    )
+    retry_decision = (
+        first[_TOPIC_ROUTING_DECISION] if redeliver_instead_of_retry else uuid4()
+    )
+
+    # head, request, routing round 1, routing round 2, terminal off the head.
+    sequence: list[tuple[str, UUID, UUID | None]] = [
+        (_TOPIC_DELEGATE_SKILL, first[_TOPIC_DELEGATE_SKILL], None),
+        (
+            _TOPIC_DELEGATION_REQUEST,
+            first[_TOPIC_DELEGATION_REQUEST],
+            first[_TOPIC_DELEGATE_SKILL],
+        ),
+        (
+            _TOPIC_ROUTING_REQUEST,
+            first[_TOPIC_ROUTING_REQUEST],
+            first[_TOPIC_DELEGATION_REQUEST],
+        ),
+        (
+            _TOPIC_ROUTING_DECISION,
+            first[_TOPIC_ROUTING_DECISION],
+            first[_TOPIC_ROUTING_REQUEST],
+        ),
+        (_TOPIC_ROUTING_REQUEST, retry_request, first[_TOPIC_DELEGATION_REQUEST]),
+        (_TOPIC_ROUTING_DECISION, retry_decision, retry_request),
+        (_TOPIC_COMPLETED, first[_TOPIC_COMPLETED], first[_TOPIC_DELEGATE_SKILL]),
+    ]
+
+    container = MagicMock()
+    append_handler = HandlerLedgerAppend(container, postgres_dsn)
+    await append_handler.initialize({})
+    projection_handler = HandlerLedgerProjection(container)
+    bridge = IntentEffectDispatchBridge(append_handler)
+
+    base = datetime.now(UTC)
+    try:
+        for index, (topic, envelope_id, parent) in enumerate(sequence):
+            headers = ModelEventHeaders(
+                correlation_id=correlation_id,
+                message_id=envelope_id,
+                parent_message_id=parent,
+                event_type=topic,
+                source="omn18916-ac4-dispatch-proof",
+                timestamp=base + timedelta(seconds=index),
+            )
+            message = ModelEventMessage(
+                topic=topic,
+                key=str(correlation_id).encode("utf-8"),
+                value=json.dumps({"hop_index": index}).encode("utf-8"),
+                headers=headers,
+                partition=0,
+                offset=str(int(uuid4().int % (2**62))),
+            )
+            output = await projection_handler.handle(message)
+            intent = output.result
+            assert intent is not None, (
+                f"the ledger projection emitted no intent for {topic!r}; the "
+                "evidence this proof grades would not exist"
+            )
+            await bridge.execute(intent.payload, correlation_id=correlation_id)
+    finally:
+        await append_handler.shutdown()
+
+    return first
+
+
+@pytest.mark.asyncio
+async def test_a_retried_chain_grades_green_through_the_real_dispatch(
+    db_pool: asyncpg.Pool,
+    postgres_dsn: str,
+    written_correlation_ids: list[UUID],
+) -> None:
+    """AC1/AC4. Seven observed hops, every edge correct, nothing red.
+
+    On the parent commit the two hops of the second routing round and the
+    terminal after them are compared against the wrong declared positions,
+    so a chain in which nothing is wrong grades fail and skip.
+    """
+    correlation_id = uuid4()
+    written_correlation_ids.append(correlation_id)
+
+    await _publish_longer_chain_into_event_ledger(
+        correlation_id=correlation_id,
+        postgres_dsn=postgres_dsn,
+        redeliver_instead_of_retry=False,
+    )
+    await _dispatch_chain_writer(
+        correlation_id=correlation_id, postgres_dsn=postgres_dsn
+    )
+
+    rows = await _read_chain_rows(db_pool, correlation_id)
+
+    assert len(rows) == 7, (
+        "a retry is a real second attempt and must be kept as its own hop; "
+        f"collapsing it would erase an attempt that happened:\n{_describe(rows)}"
+    )
+    assert all(row["replay_green"] for row in rows), (
+        f"a causally correct retried chain graded red:\n{_describe(rows)}"
+    )
+    assert all(row["verifier_verdict"] == "pass" for row in rows), (
+        "tier 2 graded a legitimate retry as fail or skip, which is the "
+        f"positional defect this ticket removes:\n{_describe(rows)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_redelivered_hop_is_recorded_once_through_the_real_dispatch(
+    db_pool: asyncpg.Pool,
+    postgres_dsn: str,
+    written_correlation_ids: list[UUID],
+) -> None:
+    """AC2/AC4. The same envelope twice is one hop, not two.
+
+    The contrast with the retry proof above is the whole assertion: identical
+    input shape, identical hop count on the wire, and a different row count
+    in ``ledger_chain`` because the envelope ids differ in one case and not
+    the other.
+    """
+    correlation_id = uuid4()
+    written_correlation_ids.append(correlation_id)
+
+    await _publish_longer_chain_into_event_ledger(
+        correlation_id=correlation_id,
+        postgres_dsn=postgres_dsn,
+        redeliver_instead_of_retry=True,
+    )
+    await _dispatch_chain_writer(
+        correlation_id=correlation_id, postgres_dsn=postgres_dsn
+    )
+
+    rows = await _read_chain_rows(db_pool, correlation_id)
+
+    assert len(rows) == 5, (
+        "seven hops were published but two were byte-identical redeliveries, "
+        f"so five distinct envelopes were observed:\n{_describe(rows)}"
+    )
+    assert [row["hop_index"] for row in rows] == [0, 1, 2, 3, 4], (
+        "hop_index must stay dense after a collapse, or the canary's own "
+        f"ORDER BY hop_index reads the gap as a missing hop:\n{_describe(rows)}"
+    )
+    assert all(row["replay_green"] for row in rows), _describe(rows)
+    assert all(row["verifier_verdict"] == "pass" for row in rows), _describe(rows)

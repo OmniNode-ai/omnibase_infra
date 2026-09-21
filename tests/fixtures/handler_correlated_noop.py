@@ -19,7 +19,21 @@ or depend on this module.
 
 from __future__ import annotations
 
+from hashlib import sha256
+
 from pydantic import BaseModel
+
+from omnibase_core.models.delegation.wire import (
+    ModelDelegationBudgetEvidence,
+    ModelDelegationContractEvidence,
+)
+from omnibase_infra.cli.model_delegate_attempt import ModelDelegateAttempt
+from omnibase_infra.cli.model_delegate_terminal import ModelDelegateTerminal
+
+_TASK_CLASS_TIMEOUT_CEILING_SECONDS = 240
+_TERMINAL_DELIVERY_MARGIN_SECONDS = 60
+_FIXTURE_RESPONSE_CONTRACT = b"correlated-noop fixture response contract: plain_text"
+_FIXTURE_CONTRACT_SHA256 = sha256(_FIXTURE_RESPONSE_CONTRACT).hexdigest()
 
 
 class ModelCorrelatedNoopRequest(BaseModel):
@@ -28,22 +42,49 @@ class ModelCorrelatedNoopRequest(BaseModel):
     correlation_id: str = ""
     prompt: str = ""
     task_type: str = ""
+    requested_timeout_seconds: int | None = None
 
 
-class ModelCorrelatedNoopResult(BaseModel):
-    """Test-only output model paired with :class:`ModelCorrelatedNoopRequest`."""
-
-    status: str = "success"
-    correlation_id: str
-    echoed_prompt: str
+class ModelDelegateSkillFixtureTerminal(ModelDelegateTerminal):
+    """Fixture-only terminal whose concrete name declares the delegate wire role."""
 
 
 class HandlerCorrelatedNoop:
-    """Echo the request back, preserving the correlation id it arrived with."""
+    """Emit the typed completed terminal the strict delegate receipt requires."""
 
-    def handle(self, request: ModelCorrelatedNoopRequest) -> ModelCorrelatedNoopResult:
-        return ModelCorrelatedNoopResult(
-            status="success",
-            correlation_id=request.correlation_id,
-            echoed_prompt=request.prompt,
+    def handle(
+        self, request: ModelCorrelatedNoopRequest
+    ) -> ModelDelegateSkillFixtureTerminal:
+        execution_timeout_seconds = (
+            _TASK_CLASS_TIMEOUT_CEILING_SECONDS
+            if request.requested_timeout_seconds is None
+            else request.requested_timeout_seconds
+        )
+        return ModelDelegateSkillFixtureTerminal(
+            attempts=(
+                ModelDelegateAttempt(
+                    tier="fixture",
+                    backend_id="correlated-noop",
+                    model_id="fixture",
+                    quality_gate_passed=True,
+                    acceptance_decision="accept",
+                ),
+            ),
+            response=request.prompt,
+            model_name="correlated-noop-fixture",
+            provider="fixture://correlated-noop",
+            status="completed",
+            budget_evidence=ModelDelegationBudgetEvidence(
+                requested_timeout_seconds=request.requested_timeout_seconds,
+                task_class_timeout_ceiling_seconds=_TASK_CLASS_TIMEOUT_CEILING_SECONDS,
+                execution_timeout_seconds=execution_timeout_seconds,
+                terminal_delivery_margin_seconds=_TERMINAL_DELIVERY_MARGIN_SECONDS,
+            ),
+            response_contract_evidence=ModelDelegationContractEvidence(
+                conveyed=True,
+                validated=True,
+                output_shape="plain_text",
+                contract_sha256=_FIXTURE_CONTRACT_SHA256,
+                channel="fixture",
+            ),
         )

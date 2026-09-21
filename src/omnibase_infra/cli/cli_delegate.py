@@ -106,6 +106,7 @@ error) even when the hang is not asyncio-cooperative.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import json
 import logging
@@ -180,11 +181,13 @@ from omnibase_infra.cli.task_class_selection import (
     DEFAULT_TASK_TYPE,
     EnumTaskTypeResolution,
     ModelSelectableTaskClass,
+    ModelTaskClassExecutionBudget,
     ModelTaskTypeResolution,
     TaskClassContractError,
     load_selectable_task_classes,
     load_selection_fallback,
     resolve_task_class_contract_path,
+    resolve_task_class_execution_budget,
     resolve_task_type,
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
@@ -479,6 +482,106 @@ def _drift_guard_receipt_block(
     return {"drift_guard": drift_guard.as_receipt_fields()}
 
 
+def _budget_outcome_receipt_block(result: ModelDelegateTerminal) -> dict[str, object]:
+    """Copy only budget facts the terminal actually declared."""
+    if result.budget_evidence is not None:
+        return {"budget_evidence": result.budget_evidence.model_dump(mode="json")}
+    if result.budget_refusal is not None:
+        return {"budget_refusal": result.budget_refusal.model_dump(mode="json")}
+    return {}
+
+
+def _response_contract_receipt_block(
+    result: ModelDelegateTerminal,
+) -> dict[str, object]:
+    """Copy response-contract evidence and extraction facts without inference."""
+    block: dict[str, object] = {}
+    if result.response_contract_evidence is not None:
+        block["response_contract_evidence"] = (
+            result.response_contract_evidence.model_dump(mode="json")
+        )
+    if result.preamble_chars is not None:
+        block["preamble_chars"] = result.preamble_chars
+    if result.output_refusal is not None:
+        block["output_refusal"] = result.output_refusal.model_dump(mode="json")
+    return block
+
+
+def _require_completed_terminal_evidence(
+    result: ModelDelegateTerminal,
+    *,
+    require_budget_evidence: bool,
+    require_contract_evidence: bool,
+) -> None:
+    """Refuse a completed receipt that lacks evidence its request required."""
+    if result.status != "completed":
+        return
+    missing: list[str] = []
+    if require_budget_evidence and result.budget_evidence is None:
+        missing.append("budget_evidence")
+    if require_contract_evidence and result.response_contract_evidence is None:
+        missing.append("response_contract_evidence")
+    if missing:
+        raise DelegateTerminalUnresolvedError(
+            "completed delegation terminal omits required evidence: "
+            + ", ".join(missing)
+        )
+
+
+def _receipt_evidence_requirements(
+    *,
+    response_contract: dict[str, object] | None,
+) -> tuple[bool, bool]:
+    """Return which completed-terminal evidence THIS request actually demanded.
+
+    OMN-18956. The refusal below was armed with two literal ``True`` values,
+    so every completed delegation was required to carry evidence no caller
+    asked for and the deployed producer emits for neither. A run that
+    answered, passed its quality gate at 1.0 and wrote its projection row
+    still exited non-zero (dev lane, correlation
+    ``0b21b5f0-fb56-4ab6-9219-24bbfd841f35``). The check was right; the
+    question it was asked was not.
+
+    * **Contract evidence is demanded by a response contract in the request.**
+      A run that asked for no contract has no contract to evidence, and
+      refusing it asserts a requirement nobody stated.
+    * **Budget evidence is demanded by nothing a caller can pass, today.** The
+      budget comparison happens only where the BACKEND declares
+      ``max_grounded_input_tokens``, which is not knowable when this request
+      is built, so there is no honest request-side predicate to return. It is
+      returned as a value rather than dropped so the day a demand exists it
+      has one place to land, and the refusal itself stays armed and proven.
+    """
+    return (False, response_contract is not None)
+
+
+def _delegate_receipt_evidence_error(
+    receipt: object,
+    *,
+    require_budget_evidence: bool = False,
+    require_contract_evidence: bool = False,
+) -> str | None:
+    """Return the evidence defect that must turn a delegate receipt into failure."""
+    receipt_dump = getattr(receipt, "model_dump", None)
+    if not callable(receipt_dump):
+        return "delegate receipt is not a serializable typed result"
+    envelope = receipt_dump(mode="json")
+    if not isinstance(envelope, dict):
+        return "delegate receipt did not serialize to an object"
+    result = _delegation_result(envelope)
+    if result is None:
+        return "delegate receipt carries no delegation terminal"
+    try:
+        _require_completed_terminal_evidence(
+            result,
+            require_budget_evidence=require_budget_evidence,
+            require_contract_evidence=require_contract_evidence,
+        )
+    except DelegateTerminalUnresolvedError as exc:
+        return str(exc)
+    return None
+
+
 def _write_unattributed_run_files(
     *,
     envelope: dict[str, object],
@@ -526,6 +629,8 @@ def _write_unattributed_run_files(
                 "cost_usd": cost_usd,
                 "attempts": _attempt_evidence(result),
                 "receipt": envelope,
+                **_budget_outcome_receipt_block(result),
+                **_response_contract_receipt_block(result),
                 # OMN-18810: where a failed run RAN is the first question
                 # asked about it, and route attribution being fail-closed is
                 # exactly why it cannot be inferred from anything else here.
@@ -577,6 +682,8 @@ def _write_local_run_files(
     addressing: ModelDelegateRunAddressing,
     task_type_resolution: str | None = None,
     drift_guard: ProtocolDriftGuardVerdict | None = None,
+    require_budget_evidence: bool = False,
+    require_contract_evidence: bool = False,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -618,6 +725,11 @@ def _write_local_run_files(
     result = _delegation_result(envelope)
     if result is None:
         return
+    _require_completed_terminal_evidence(
+        result,
+        require_budget_evidence=require_budget_evidence,
+        require_contract_evidence=require_contract_evidence,
+    )
     accepted = result.accepted_attempt
     if accepted is None:
         # OMN-18306: a run with no accepted attempt is still a run the customer
@@ -676,6 +788,8 @@ def _write_local_run_files(
                 "routing_tier": routing_tier,
                 "status": envelope.get("status"),
                 "receipt": envelope,
+                **_budget_outcome_receipt_block(result),
+                **_response_contract_receipt_block(result),
                 # OMN-18810: the rung that answered is not the machine that
                 # ran it. Both files carry the same four addressing keys so
                 # neither can be read against the other.
@@ -1020,6 +1134,7 @@ def _write_payload(
     quality_contract_mode: str | None = None,
     response_contract: dict[str, object] | None = None,
     system_prompt: str | None = None,
+    requested_timeout_seconds: int | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -1076,11 +1191,30 @@ def _write_payload(
         payload["response_contract"] = response_contract
     if system_prompt is not None:
         payload["system_prompt"] = system_prompt
+    if requested_timeout_seconds is not None:
+        payload["requested_timeout_seconds"] = requested_timeout_seconds
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
     )
     return payload_path
+
+
+def _terminal_wait_seconds(
+    *,
+    requested_timeout_seconds: int | None,
+    execution_budget: ModelTaskClassExecutionBudget,
+) -> int:
+    """Return the effective execution window plus its declared delivery margin."""
+    execution_seconds = (
+        execution_budget.task_class_timeout_ceiling_seconds
+        if requested_timeout_seconds is None
+        else min(
+            requested_timeout_seconds,
+            execution_budget.task_class_timeout_ceiling_seconds,
+        )
+    )
+    return execution_seconds + execution_budget.terminal_delivery_margin_seconds
 
 
 class DelegateTimeoutExceededError(BaseException):
@@ -1384,10 +1518,9 @@ def _timeout_receipt(
 )
 @click.option(
     "--timeout",
-    type=int,
-    default=300,
-    show_default=True,
-    help="Max delegation time in seconds.",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Requested execution time in seconds; omitted uses the task-class ceiling.",
 )
 @click.option(
     "--verbose",
@@ -1450,7 +1583,7 @@ def delegate_command(
     lane: str | None,
     kafka_bootstrap: str | None,
     state_root: Path,
-    timeout: int,
+    timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
     omni_home: Path | None,
@@ -1518,7 +1651,7 @@ def run_delegate(
     lane: str | None = None,
     kafka_bootstrap: str | None = None,
     state_root: Path,
-    timeout: int,
+    timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
     omni_home: Path | None = None,
@@ -1594,6 +1727,9 @@ def run_delegate(
     # customer never told.
     try:
         task_class = resolve_task_class(prompt, explicit=task_type)
+        execution_budget = resolve_task_class_execution_budget(
+            resolve_task_class_contract_path(), task_type=task_class.task_type
+        )
     except TaskClassContractError as exc:
         raise click.ClickException(str(exc)) from exc
     resolved_task_type = task_class.task_type
@@ -1733,6 +1869,7 @@ def run_delegate(
             ),
             response_contract=response_contract,
             system_prompt=system_prompt,
+            requested_timeout_seconds=timeout,
             max_tokens=max_tokens,
             state_root=state_root,
             run_id=run_id,
@@ -1778,20 +1915,29 @@ def run_delegate(
             ),
         )
 
+        # OMN-18956: derive ONCE, before the receipt layer is wired, so the
+        # request and the requirement cannot drift apart between them.
+        receipt_evidence_demanded = _receipt_evidence_requirements(
+            response_contract=response_contract,
+        )
         try:
             # OMN-17516: the refusal reports the wall time actually served,
             # which routinely exceeds declared + grace because a SIGALRM
             # raised inside a blocking call only propagates at the next
             # bytecode boundary. Measured, never assumed from the bound.
             dispatch_started = time.monotonic()
-            with _hard_timeout(timeout + _HARD_TIMEOUT_GRACE_SECONDS):
+            terminal_wait_seconds = _terminal_wait_seconds(
+                requested_timeout_seconds=timeout,
+                execution_budget=execution_budget,
+            )
+            with _hard_timeout(terminal_wait_seconds + _HARD_TIMEOUT_GRACE_SECONDS):
                 return run_receipt_mode(
                     node_name=DELEGATE_NODE_NAME,
                     contract_path=contract_path,
                     input_path=payload_path,
                     state_root=state_root,
                     backend_overrides=backend_overrides,
-                    timeout=timeout,
+                    timeout=terminal_wait_seconds,
                     verbose=verbose,
                     emit_socket=emit_socket or default_emit_socket_path(),
                     # OMN-17304: a dispatched run hosts NOTHING. Without this the
@@ -1806,6 +1952,14 @@ def run_delegate(
                     # minted is what lets it refuse another run's terminal
                     # envelope instead of printing it as ours.
                     expected_correlation_id=correlation_id,
+                    # OMN-18956: ask only for the evidence THIS request
+                    # demanded. Bound here because this is the only place the
+                    # request and the receipt are both in scope.
+                    receipt_validator=functools.partial(
+                        _delegate_receipt_evidence_error,
+                        require_budget_evidence=receipt_evidence_demanded[0],
+                        require_contract_evidence=receipt_evidence_demanded[1],
+                    ),
                     receipt_callback=lambda receipt: _write_local_run_files(
                         receipt=receipt,
                         state_root=state_root,
@@ -1814,6 +1968,15 @@ def run_delegate(
                         task_type_resolution=task_class.resolution.value,
                         addressing=addressing,
                         drift_guard=drift_guard_check,
+                        # OMN-18956 residual: this is the SECOND site that
+                        # arms the same refusal, and the first fix moved only
+                        # the validator. The writer runs inside the receipt
+                        # CALLBACK, so with literals here a run still exited
+                        # non-zero after the validator had accepted it --
+                        # which is why proving the leaf was not proof of the
+                        # entry. Both now read one derivation.
+                        require_budget_evidence=receipt_evidence_demanded[0],
+                        require_contract_evidence=receipt_evidence_demanded[1],
                     ),
                 )
         except DelegateTimeoutExceededError as exc:
@@ -1842,7 +2005,7 @@ def run_delegate(
                 _timeout_receipt(
                     correlation_id=correlation_id,
                     run_id=run_id,
-                    declared_timeout=timeout,
+                    declared_timeout=terminal_wait_seconds,
                     elapsed_seconds=time.monotonic() - dispatch_started,
                     bus=bus,
                     locus_decision=locus_decision,

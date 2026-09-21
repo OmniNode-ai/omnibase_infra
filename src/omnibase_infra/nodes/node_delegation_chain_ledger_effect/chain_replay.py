@@ -82,7 +82,7 @@ absence.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Sequence, Set
 from uuid import UUID
 
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.enum_tier_two_verdict import (
@@ -120,9 +120,13 @@ def _declared_hop_for(
     places would let the two tiers disagree about what a hop IS. Tier 1 asks
     only whether the recorded causal edge closes, which is a statement about
     this hop's identity and not about where it sits.
+
+    OMN-18937: matched against every name the hop may be observed on, not
+    only its canonical one. Without this the delegation FAILURE terminal has
+    no declaration to grade against and replays red as an undeclared hop.
     """
     for candidate in declared_chain:
-        if candidate.topic == topic:
+        if topic in candidate.topics:
             return candidate
     return None
 
@@ -173,10 +177,21 @@ def _replay_one_hop(
     # envelope id, so the declared parent topic can legitimately appear more
     # than once. Matching against ANY of them is not a loosening: the edge is
     # checked against a concrete observed envelope id either way.
+    # OMN-18937: the parent is CITED by its canonical topic, but it may have
+    # been OBSERVED on one of its alternatives. Resolving the citation to the
+    # declared hop first, then matching observations against every name that
+    # hop answers to, keeps `alternatives` usable on a hop that is somebody's
+    # parent. Citing a hop that is not declared at all is already refused at
+    # parse time, so the fallback below is unreachable in a parsed topology
+    # and exists so this function is total on its own.
+    declared_parent = _declared_hop_for(declared.parent, declared_chain)
+    parent_names = (
+        declared_parent.topics if declared_parent is not None else (declared.parent,)
+    )
     candidates = tuple(
         candidate.envelope_id
         for candidate in observed
-        if candidate.topic == declared.parent
+        if candidate.topic in parent_names
     )
     if not candidates:
         return (
@@ -212,31 +227,83 @@ def _replay_one_hop(
     return True, ""
 
 
+def _declared_index_for(
+    topic: str, declared_chain: Sequence[ModelDeclaredChainHop]
+) -> int | None:
+    """The position of the declared hop this topic belongs to, or None.
+
+    Resolved over every name a hop answers to (OMN-18937 alternatives), so a
+    terminal observed on its failure topic resolves to the same declared hop
+    as one observed on its success topic.
+    """
+    for position, candidate in enumerate(declared_chain):
+        if topic in candidate.topics:
+            return position
+    return None
+
+
 def _verify_one_hop(
-    index: int,
     hop: ModelObservedHop,
     declared_chain: Sequence[ModelDeclaredChainHop],
+    first_seen_declared_indices: Set[int],
 ) -> tuple[EnumTierTwoVerdict, str]:
-    """Tier 2: does this observation match the DECLARED topology at this position?
+    """Tier 2: is this observation a declared hop, appearing in declared order?
 
     Returns ``(verdict, detail)``. SKIP always carries a detail: a SKIP with no
     stated reason is indistinguishable from a check that was never wired, and
     telling those apart is the whole job.
     """
-    if index >= len(declared_chain):
+    if not declared_chain:
         return EnumTierTwoVerdict.SKIP, _NO_DECLARATION_DETAIL
 
-    expected_topic = declared_chain[index].topic
-    if hop.topic == expected_topic:
+    # OMN-18916: matched by declared-hop IDENTITY, not by position.
+    #
+    # Position was never the right key. A declared hop legitimately occurs
+    # MORE THAN ONCE -- the attempts ladder climbs a rung and issues a second
+    # routing request with its own envelope and its own correct parent -- so
+    # the observed sequence is routinely longer than the declaration. Graded
+    # positionally, every hop after the first repeat is compared against the
+    # wrong declaration and a causally correct chain grades red. Measured on
+    # the .201 dev lane: a SUCCESSFUL delegation produced 11 observed hops
+    # against a 5-hop declaration, and 31 of 165 chains exceeded five hops.
+    #
+    # OMN-18937's ALTERNATIVES still apply: one hop may answer to more than
+    # one topic, which is how the terminal is either the success or the
+    # failure event.
+    declared_index = _declared_index_for(hop.topic, declared_chain)
+    if declared_index is None:
+        known = sorted({topic for entry in declared_chain for topic in entry.topics})
+        return (
+            EnumTierTwoVerdict.FAIL,
+            (
+                f"{hop.topic!r} is not a topic the declared chain names "
+                f"(declared: {known!r}) -- allowing a declared hop to repeat "
+                "is not allowing an undeclared hop to appear"
+            ),
+        )
+
+    # ORDER still matters, and this is where it is checked. Repeats are free,
+    # but the FIRST time each declared hop appears it must appear in declared
+    # order. Without this, tier 2 degrades into "is this topic known?" and
+    # stops being the check that catches a transposed chain -- which is the
+    # one thing tier 1 cannot catch on its own, because a transposition can
+    # still carry individually resolvable parent edges.
+    if declared_index in first_seen_declared_indices:
         return EnumTierTwoVerdict.PASS, ""
 
-    return (
-        EnumTierTwoVerdict.FAIL,
-        (
-            f"the declared chain has {expected_topic!r} at position {index}, "
-            f"but {hop.topic!r} was observed there"
-        ),
-    )
+    out_of_order = [i for i in first_seen_declared_indices if i > declared_index]
+    if out_of_order:
+        later = sorted({declared_chain[i].topic for i in out_of_order})
+        return (
+            EnumTierTwoVerdict.FAIL,
+            (
+                f"{hop.topic!r} is declared at position {declared_index}, but "
+                f"{later!r} were already observed first -- the declared hops "
+                "appeared out of order, which a repeat allowance does not excuse"
+            ),
+        )
+
+    return EnumTierTwoVerdict.PASS, ""
 
 
 def assemble_replay_and_verify(
@@ -249,6 +316,9 @@ def assemble_replay_and_verify(
     ``observed`` must already be in the order the envelopes were seen; this
     function does not reorder it, because the observed order IS the evidence
     and sorting it would erase a transposition that tier 2 exists to catch.
+    It does REMOVE exact redeliveries (OMN-18916) -- the same envelope id
+    seen more than once -- which drops no evidence, because a second copy of
+    one envelope says nothing the first did not.
 
     ``declared_chain`` is the authority for BOTH tiers: the ordered hops the
     node contracts say a delegation traverses, each naming the declared topic
@@ -263,13 +333,42 @@ def assemble_replay_and_verify(
     vacuously TRUE over an empty sequence, so it guards on the row count
     separately; a single fabricated green row here would defeat that guard.
     """
+    # OMN-18916: collapse a REDELIVERY before grading anything.
+    #
+    # A redelivery is the identical envelope arriving twice -- measured on the
+    # lane as one envelope id at two adjacent Kafka offsets. It is one hop
+    # that was projected twice, so recording it as two hops invents a hop
+    # that never happened and, graded positionally, shifted every later one.
+    #
+    # Keyed on the ENVELOPE, never on the topic. A retry carries a NEW
+    # envelope id for the same declared hop and is a real second attempt:
+    # collapsing by topic would erase it, which is the opposite error and
+    # equally wrong. First occurrence wins, so the surviving row keeps the
+    # earliest offset's evidence.
+    deduplicated: list[ModelObservedHop] = []
+    seen_envelope_ids: set[UUID] = set()
+    for candidate in observed:
+        if candidate.envelope_id in seen_envelope_ids:
+            continue
+        seen_envelope_ids.add(candidate.envelope_id)
+        deduplicated.append(candidate)
+    observed = tuple(deduplicated)
+
     rows: list[ModelLedgerChainRow] = []
+    # Which declared hops have already had their FIRST occurrence. Tier 2
+    # reads this to allow repeats while still refusing a transposition.
+    first_seen_declared_indices: set[int] = set()
 
     for index, hop in enumerate(observed):
         replay_green, replay_detail = _replay_one_hop(
             index, hop, observed, declared_chain, correlation_id
         )
-        verdict, verifier_detail = _verify_one_hop(index, hop, declared_chain)
+        verdict, verifier_detail = _verify_one_hop(
+            hop, declared_chain, first_seen_declared_indices
+        )
+        declared_index = _declared_index_for(hop.topic, declared_chain)
+        if declared_index is not None:
+            first_seen_declared_indices.add(declared_index)
 
         rows.append(
             ModelLedgerChainRow(

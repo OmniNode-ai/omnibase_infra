@@ -118,9 +118,23 @@ class TestDelegateTimeoutIsTypedOnStdout:
             cli_delegate, "_resolve_packaged_contract", lambda _name: contract_path
         )
         monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+        task_class_contract_path = tmp_path / "task_class_contract.yaml"
+        task_class_contract_path.write_text(
+            STAND_IN_TASK_CLASS_CONTRACT.read_text(encoding="utf-8").replace(
+                "terminal_delivery_margin_seconds: 60",
+                "terminal_delivery_margin_seconds: 1",
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            cli_delegate,
+            "resolve_task_class_contract_path",
+            lambda: task_class_contract_path,
+        )
         # Shrink the grace window so the bound under test is seconds, not the
-        # production ten. The window's VALUE is not the subject; that the
-        # backstop produces a typed result when it trips is.
+        # production ten. The fixture also declares a one-second delivery
+        # margin, so the complete execution + margin + grace bound stays
+        # short while preserving the production budget calculation.
         monkeypatch.setattr(cli_delegate, "_HARD_TIMEOUT_GRACE_SECONDS", 1)
         return contract_path
 
@@ -149,7 +163,10 @@ class TestDelegateTimeoutIsTypedOnStdout:
         result, elapsed = self._invoke(tmp_path)
 
         assert result.exit_code == 1, result.stderr
-        assert elapsed < 60, f"the call was not bounded at all: {elapsed}s"
+        assert 3 <= elapsed < 10, (
+            "the one-second execution window, one-second declared delivery margin, "
+            f"and one-second hard-timeout grace did not bound the call: {elapsed}s"
+        )
         assert result.stdout.strip(), (
             "timeout produced NO typed result on stdout -- a caller parsing the "
             "documented single-ModelSkillResult contract receives nothing, which "
@@ -177,9 +194,11 @@ class TestDelegateTimeoutIsTypedOnStdout:
         refusal = payload["result"]
 
         assert refusal["awaited"] == "delegation_terminal"
-        assert refusal["declared_timeout_seconds"] == 1
+        # The receipt reports the wait it actually served: one requested
+        # execution second plus this fixture's one-second delivery margin.
+        assert refusal["declared_timeout_seconds"] == 2
         assert refusal["grace_seconds"] == 1
-        assert refusal["elapsed_seconds"] >= 1
+        assert refusal["elapsed_seconds"] >= 2
         assert refusal["bus"] == "inmemory"
         assert refusal["locus"] == "in-process"
         assert refusal["terminal_topic"] == (

@@ -277,10 +277,19 @@ class TestTheMeasurementThatWasDeclined:
         assert reason
         assert "2 command(s) ahead" in reason
 
-    def test_a_refused_run_is_indeterminate_and_names_the_depth(self) -> None:
+    def test_a_refused_run_is_queued_and_names_the_depth(self) -> None:
+        """Asserted INDETERMINATE until OMN-18976; the property is unchanged.
+
+        A refused run is still never a finding about the LANE, which is what
+        this has always been for. What changed is that the refusal has its own
+        outcome instead of sharing one with an unestablished budget, because
+        INDETERMINATE mapped onto a check with ``ok: false`` and emitted a
+        terminal FAIL for a sha that was merely second in line.
+        """
         clock = _Clock(T0)
         result = _wait(clock=clock, queue=_queue(2))
-        assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+        assert result.outcome is EnumConvergenceOutcome.QUEUED
+        assert result.outcome is not EnumConvergenceOutcome.FAIL
         assert "2 command(s) ahead" in result.reason
 
     def test_the_evidence_bound_is_unchanged_and_still_the_worst_case(self) -> None:

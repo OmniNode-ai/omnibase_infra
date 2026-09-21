@@ -87,7 +87,7 @@ class TestCommandsAhead:
         _write(store, status="in_progress", completed_at=None)
         snapshot = compute_queue_snapshot(
             store,
-            ModelControlTopicLag(value=2, basis="committed"),
+            ModelControlTopicLag(value=2, basis="committed", observed_at=_T0),
             now=_T0,
         )
         assert snapshot.store_depth == 1
@@ -113,7 +113,9 @@ class TestCommandsAhead:
         _write(store, status="success", completed_at=_T0 + timedelta(minutes=30))
         _write(store, status="failed", completed_at=_T0 + timedelta(minutes=20))
         snapshot = compute_queue_snapshot(
-            store, ModelControlTopicLag(value=0, basis="committed"), now=_T0
+            store,
+            ModelControlTopicLag(value=0, basis="committed", observed_at=_T0),
+            now=_T0,
         )
         assert snapshot.commands_ahead == 0
 
@@ -160,7 +162,9 @@ class TestMeanServiceTime:
             completed_at=_T0 + timedelta(minutes=40),
         )
         snapshot = compute_queue_snapshot(
-            store, ModelControlTopicLag(value=0, basis="committed"), now=_T0
+            store,
+            ModelControlTopicLag(value=0, basis="committed", observed_at=_T0),
+            now=_T0,
         )
         assert snapshot.mean_service_time_seconds == pytest.approx(1800.0)
         assert snapshot.service_sample_size == 2
@@ -169,7 +173,9 @@ class TestMeanServiceTime:
         store = _store(tmp_path)
         _write(store, status="in_progress")
         snapshot = compute_queue_snapshot(
-            store, ModelControlTopicLag(value=1, basis="committed"), now=_T0
+            store,
+            ModelControlTopicLag(value=1, basis="committed", observed_at=_T0),
+            now=_T0,
         )
         assert snapshot.mean_service_time_seconds is None
         assert snapshot.service_sample_size == 0
@@ -220,7 +226,9 @@ class TestMeanServiceTime:
             ModelQueueSnapshot(
                 observed_at=_T0,
                 store_depth=0,
-                control_topic_lag=ModelControlTopicLag(value=0, basis="committed"),
+                control_topic_lag=ModelControlTopicLag(
+                    value=0, basis="committed", observed_at=_T0
+                ),
                 mean_service_time_seconds=900.0,
                 service_sample_size=0,
             )
@@ -232,8 +240,12 @@ class TestLagSampler:
 
     def test_the_latest_sample_wins(self) -> None:
         sampler = LagSampler()
-        sampler.record(ModelControlTopicLag(value=5, basis="committed"))
-        sampler.record(ModelControlTopicLag(value=2, basis="committed"))
+        sampler.record(
+            ModelControlTopicLag(value=5, basis="committed", observed_at=_T0)
+        )
+        sampler.record(
+            ModelControlTopicLag(value=2, basis="committed", observed_at=_T0)
+        )
         assert sampler.latest().value == 2
 
 
@@ -250,7 +262,11 @@ class TestQueueEndpoint:
             completed_at=_T0 + timedelta(minutes=32),
         )
         sampler = LagSampler()
-        sampler.record(ModelControlTopicLag(value=2, basis="committed"))
+        sampler.record(
+            ModelControlTopicLag(
+                value=2, basis="committed", observed_at=datetime.now(UTC)
+            )
+        )
         app = create_health_app(
             job_store=store,
             get_agent_state=lambda: "idle",
@@ -306,7 +322,7 @@ class TestQueueEndpoint:
             job_store=store,
             get_agent_state=lambda: "busy",
             get_control_topic_lag=lambda: ModelControlTopicLag(
-                value=0, basis="committed"
+                value=0, basis="committed", observed_at=datetime.now(UTC)
             ),
         )
         client = await aiohttp_client(app)
@@ -323,7 +339,7 @@ class TestQueueEndpoint:
             job_store=store,
             get_agent_state=lambda: "busy",
             get_control_topic_lag=lambda: ModelControlTopicLag(
-                value=1, basis="committed"
+                value=1, basis="committed", observed_at=datetime.now(UTC)
             ),
         )
         client = await aiohttp_client(app)

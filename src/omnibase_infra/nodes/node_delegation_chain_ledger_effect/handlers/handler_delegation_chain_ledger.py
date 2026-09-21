@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -88,6 +88,11 @@ def _parse_declared_topology(
     a parent naming a topic that is not a declared hop, no head at all (every
     hop caused by another is a cycle), and more than one head (two chains, not
     one).
+
+    OMN-18937: the first two refusals resolve over every name a hop answers
+    to, ``alternatives`` included. The head refusals count ENTRIES and are
+    unchanged -- an alternative is another name for a hop, never another hop,
+    so a five-entry topology with an alias still declares exactly one head.
     """
     if not isinstance(topology_raw, list) or not topology_raw:
         raise RuntimeError("chain-writer contract must declare a non-empty topology")
@@ -107,12 +112,20 @@ def _parse_declared_topology(
                 f"invalid chain_topology entry {entry!r}: {exc}"
             ) from exc
 
-    topics = [hop.topic for hop in hops]
+    # OMN-18937: resolved over every name a hop answers to, canonical and
+    # alternative alike. A topic appearing as one hop's alternative and
+    # another hop's canonical topic is the SAME ambiguity the canonical-only
+    # check was written to refuse -- `_declared_hop_for` would resolve it
+    # first-match-wins and silently grade an edge against the wrong hop. The
+    # refusal's stated reason holds identically over aliases, so it widens
+    # rather than relaxes.
+    topics = [topic for hop in hops for topic in hop.topics]
     duplicates = sorted({topic for topic in topics if topics.count(topic) > 1})
     if duplicates:
         raise RuntimeError(
-            f"chain_topology declares {duplicates!r} more than once; a parent "
-            "relation resolved by topic cannot say which occurrence it means"
+            f"chain_topology declares {duplicates!r} more than once (counting "
+            "alternatives); a parent relation resolved by topic cannot say "
+            "which occurrence it means"
         )
 
     declared = set(topics)
@@ -248,11 +261,10 @@ class HandlerDelegationChainLedger:
         await self._ensure_db_ready()
 
         observed: tuple[ModelObservedHop, ...] = ()
-        declared_topics = self._declared_topics()
         for attempt in range(self._settle_attempts):
             observed = await self._read_observed(correlation_id)
             observed_topics = {hop.topic for hop in observed}
-            if all(topic in observed_topics for topic in declared_topics):
+            if self._observation_is_settled(observed_topics):
                 break
             if attempt + 1 < self._settle_attempts and self._settle_delay_seconds:
                 await asyncio.sleep(self._settle_delay_seconds)
@@ -286,13 +298,34 @@ class HandlerDelegationChainLedger:
         )
 
     def _declared_topics(self) -> tuple[str, ...]:
-        """The declared hop topics, in declaration order.
+        """Every topic any declared hop may be observed on, in declaration order.
 
-        The read filter and the settle predicate want topics; the replay wants
-        the parent relation. Deriving the topic list here keeps the declaration
-        a single object rather than two lists free to disagree.
+        This is the READ set: the `topic = ANY($2)` filter on event_ledger and
+        the refusal message that names what was looked for. It must carry
+        every alternative, or a hop observed on its alternative is never
+        selected out of the relation and the chain is silently short a row.
+
+        The replay wants the parent relation, which is why the declaration is
+        a single object rather than lists free to disagree.
         """
-        return tuple(hop.topic for hop in self._declared_chain)
+        return tuple(topic for hop in self._declared_chain for topic in hop.topics)
+
+    def _observation_is_settled(self, observed_topics: Set[str]) -> bool:
+        """Has every declared HOP been observed, by any of its names?
+
+        OMN-18937: this is deliberately not `all(t in observed for t in
+        self._declared_topics())`. A hop with alternatives is satisfied by
+        exactly ONE of them -- a delegation terminates as either completed or
+        failed, never both -- so requiring every topic would make the settle
+        loop wait for a terminal that cannot arrive and burn its full
+        `settle_attempts x settle_delay` budget on every single dispatch,
+        success and failure alike, before writing a chain that was complete
+        on the first read.
+        """
+        return all(
+            any(topic in observed_topics for topic in hop.topics)
+            for hop in self._declared_chain
+        )
 
     async def _read_observed(
         self, correlation_id: UUID

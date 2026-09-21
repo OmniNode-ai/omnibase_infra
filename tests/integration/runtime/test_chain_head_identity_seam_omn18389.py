@@ -51,6 +51,7 @@ tell a real regression from a broken fixture.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -275,3 +276,98 @@ async def test_header_identity_is_never_invented_when_the_envelope_has_none() ->
     assert fields["correlation_id"] == envelope.correlation_id
     assert isinstance(fields["message_id"], UUID)
     assert "parent_message_id" not in fields
+
+
+# ---------------------------------------------------------------------------
+# OMN-18958: the CONSUMER half of the same seam.
+#
+# OMN-18389 above fixed hop 0's identity on the PUBLISH side. This is the
+# other end of the same wire: what the consume boundary does with that
+# identity when the body it receives is a bare contract model rather than an
+# envelope, which is exactly what `RuntimeLocal` publishes for a chain head.
+#
+# Pre-fix, the boundary synthesized an envelope and minted a SECOND id. Every
+# hop caused by the message then recorded that mint as its parent, so the
+# causal edge named an envelope that was never on the wire. Measured on the
+# .201 dev lane: head recorded `70982614-...`, both children cited
+# `53ffd454-...`, and `event_ledger` contains no such row.
+#
+# This drives a real publish through `EventBusInmemory` rather than handing
+# the boundary a constructed message, so the id being adopted is the id the
+# BUS actually put on the wire. A unit test cannot show that the two seams
+# agree; only a roundtrip can.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_consumer_adopts_the_wire_identity_the_publisher_minted() -> None:
+    """The envelope handed to dispatch must carry the wire's own message_id.
+
+    The two assertions are one claim from both ends: whatever id the bus put
+    on the wire for a headerless publish is the id the boundary dispatches
+    under. A mint on either side breaks every downstream causal edge.
+    """
+    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+        _make_event_bus_callback,
+    )
+
+    topic = "onex.cmd.omnimarket.delegate-skill.v1"
+    correlation = uuid4()
+
+    bus = EventBusInmemory(environment="test", group="omn18958")
+    await bus.start()
+
+    wire: asyncio.Queue[ModelEventMessage] = asyncio.Queue(maxsize=1)
+    dispatched: asyncio.Queue[object] = asyncio.Queue(maxsize=1)
+
+    class _StopAfterCaptureError(Exception):
+        """Ends the boundary run once the envelope is in hand."""
+
+    async def _dispatch_scoped(*args: object, **kwargs: object) -> object:
+        for candidate in args:
+            if hasattr(candidate, "envelope_id") and dispatched.empty():
+                await dispatched.put(candidate)
+        raise _StopAfterCaptureError
+
+    class _Engine:
+        async def dispatch_scoped(self, *args: object, **kwargs: object) -> object:
+            return await _dispatch_scoped(*args, **kwargs)
+
+    callback = _make_event_bus_callback(
+        topic,
+        _Engine(),  # type: ignore[arg-type]
+        result_applier=None,  # type: ignore[arg-type]
+        allowed_dispatcher_ids={"omn18958-test-dispatcher"},
+    )
+
+    async def _observe(message: ModelEventMessage) -> None:
+        if wire.empty():
+            await wire.put(message)
+        await callback(message)
+
+    await bus.subscribe(topic, group_id="omn18958", on_message=_observe)
+
+    # A BARE contract input model, headerless — the shape `RuntimeLocal`
+    # publishes for a chain head. It states a correlation id and no identity,
+    # which is what forces the boundary down the synthesis arm.
+    body = {"correlation_id": str(correlation), "prompt_text": "Say ping."}
+    await bus.publish(topic, None, json.dumps(body).encode("utf-8"), None)
+
+    observed_message = await asyncio.wait_for(wire.get(), timeout=10)
+    observed_envelope = await asyncio.wait_for(dispatched.get(), timeout=10)
+    await bus.close()
+
+    wire_message_id = observed_message.headers.message_id
+    assert wire_message_id is not None, (
+        "the bus put no message_id on the wire, so this test cannot say "
+        "whether the boundary adopted one; the fixture is wrong, not the code"
+    )
+    assert observed_envelope.envelope_id == wire_message_id, (
+        f"the boundary dispatched under {observed_envelope.envelope_id!r} for a "
+        f"message the bus published as {wire_message_id!r}. Every hop caused by "
+        "this one records the dispatched id as its parent, and that id is on no "
+        "topic and in no table, so the causal edge cannot close (OMN-18958)"
+    )
+    # The correlation half, already fixed, must still hold — a change that
+    # repaired identity by dropping lineage would be no improvement.
+    assert observed_envelope.correlation_id == correlation

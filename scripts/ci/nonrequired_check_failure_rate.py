@@ -27,19 +27,31 @@ WHAT "NON-REQUIRED" MEANS HERE, and why the naive reading is wrong
     as non-required here, and the fix is to write it down.
 
 THE ALERT PATH IS INHERITED, NOT CHOSEN
-    Annotations, the step summary, a JSON report artifact, and a best-effort
-    Slack post through the same two secrets the fleet canary already uses. No
-    new channel and no new scheduler: this rides an existing scheduled workflow.
-    A missing Slack token degrades to annotation plus artifact rather than
-    failing the monitor, for the same reason `runner_saturation_record.py` does
-    it that way -- a watcher that goes red because Slack was down stops being
-    read.
+    Annotations, the step summary, a JSON report artifact, and a Slack post
+    through the same two secrets the fleet canary already uses. No new channel
+    and no new scheduler: this rides an existing scheduled workflow.
 
-EXIT CODE IS ALWAYS 0 ON A SUCCESSFUL EVALUATION
-    Raising an alert is not this job failing. The job fails only when it could
-    not evaluate, which keeps "the alerter is broken" distinguishable from "the
-    alerter fired" -- the same distinction phase 3 exists to enforce everywhere
-    else.
+    A missing Slack credential USED to degrade to annotation plus artifact and
+    leave the run green, on the argument that a watcher which reddens because
+    Slack was down stops being read. Measured 2026-09-21: no chat secret of any
+    name exists at OmniNode-ai organisation scope or in this repository's
+    scope, so that branch was not a rare outage path -- it was the only path,
+    and every finding this job produced was delivered to nobody while the job
+    reported success. That is the defect class the ticket is about, reproduced
+    inside its own fix. The delivery path now REFUSES: findings plus no
+    destination exits non-zero with a one-line reason.
+
+    The distinction the original argument was protecting is kept exactly. A
+    transient Slack failure WITH a credential present still logs and carries
+    on, unchanged. A clean sweep with no credential still exits 0, because
+    nothing failed to reach anybody. Only "there is a finding and there is
+    nowhere to send it" is red.
+
+RAISING AN ALERT IS NOT THIS JOB FAILING
+    The job fails when it could not EVALUATE, and when it could not DELIVER a
+    finding it did raise. Both are "the alerter is broken"; neither is "the
+    alerter fired", which stays exit 0 -- the same distinction phase 3 exists
+    to enforce everywhere else.
 
 SCHEDULED RUNS, ADDED IN OMN-18322
     The reads above are all pull-request-shaped: a check-run on a head. A
@@ -301,6 +313,17 @@ def scheduled_runs_for_workflow(
     return runs
 
 
+class AlertDestinationMissingError(RuntimeError):
+    """Findings were raised and no destination credential resolves.
+
+    Carried as an exception rather than a return code so it cannot be dropped
+    at the call site by a caller that ignores the value -- which is how the
+    branch it replaces stayed invisible for as long as it did. Its message is
+    ONE line and names the credential REFERENCE only; no value of either
+    secret is ever read into it.
+    """
+
+
 def post_slack_alert(alerts: list[Any]) -> None:
     """Post through the SAME channel secret the fleet canary already uses.
 
@@ -311,8 +334,29 @@ def post_slack_alert(alerts: list[Any]) -> None:
     token = os.environ.get("SLACK_BOT_TOKEN")
     channel = os.environ.get("SLACK_CHANNEL_ID")
     if not token or not channel:
-        print("[nonrequired-checks] Slack not configured; annotation + artifact only")
-        return
+        # OMN-18942. The line this replaces said delivery happens on the `.201`
+        # system reporter instead, and returned. That sentence is true of the
+        # SCHEDULED half, which moved there behind `--no-scheduled`. It is not
+        # true of the pull-request check-run half, which still raises findings
+        # HERE and had nowhere to put them -- so the job went green having told
+        # nobody. A comment naming another surface is not a destination.
+        #
+        # Which reference is missing is named, because "not configured" sends a
+        # reader to look at both. No value is read into the message.
+        missing = ", ".join(
+            name
+            for name, present in (
+                ("SLACK_BOT_TOKEN", bool(token)),
+                ("SLACK_CHANNEL_ID", bool(channel)),
+            )
+            if not present
+        )
+        raise AlertDestinationMissingError(
+            f"{len(alerts)} non-required check finding(s) raised and no "
+            f"destination resolves: {missing} is unset or empty in this job's "
+            "environment; the findings were written to the report artifact but "
+            "delivered to nobody"
+        )
     detail = " | ".join(a.detail for a in alerts)
     payload = json.dumps(
         {"channel": channel, "text": f"*[NON-REQUIRED CHECK FAILING]* {detail}"}
@@ -404,6 +448,11 @@ def load_policy(path: Path) -> dict[str, Any]:
         "heads_observed",
         "scheduled_failure_threshold_pct",
         "scheduled_window_days",
+        # OMN-18942. The fleet repository list is a policy fact, not a run-step
+        # literal. It is REQUIRED rather than defaulted for the same reason as
+        # every key above it: a silently-defaulted list is how this alerter read
+        # three repositories for a month while reporting on "the fleet".
+        "fleet_repos",
     ):
         if key not in block:
             raise KeyError(
@@ -415,7 +464,46 @@ def load_policy(path: Path) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--owner", default="OmniNode-ai")
-    parser.add_argument("--repo", action="append", default=[], required=True)
+    parser.add_argument(
+        "--repo",
+        action="append",
+        default=[],
+        help="repeatable; mutually exclusive with --repos-from-policy",
+    )
+    parser.add_argument(
+        "--repos-from-policy",
+        action="store_true",
+        help=(
+            "read the repository list from the policy's route."
+            "nonrequired_check_alert.fleet_repos, so every caller watches the "
+            "same fleet (OMN-18942)"
+        ),
+    )
+    parser.add_argument(
+        "--no-scheduled",
+        action="store_true",
+        help=(
+            "evaluate the pull-request check-run half only, skipping the "
+            "scheduled-run sweep. The scheduled sweep has exactly ONE caller "
+            "on purpose (the `.201` system reporter): two surfaces evaluating "
+            "the same scheduled runs at different cadences into different "
+            "destinations is the divergence a shared evaluator exists to "
+            "prevent, and only one of them has somewhere to deliver "
+            "(OMN-18942)."
+        ),
+    )
+    parser.add_argument(
+        "--scheduled-only",
+        action="store_true",
+        help=(
+            "evaluate scheduled-run failure rates only, skipping the "
+            "pull-request check-run half. The check-run half reads branch "
+            "protection, which needs an Administration-scoped token; the "
+            "`.201` reporter that consumes this has no such token and no use "
+            "for pull-request heads, and requiring one there would widen a "
+            "host credential for a result that caller discards (OMN-18942)."
+        ),
+    )
     parser.add_argument("--branch", default="dev")
     parser.add_argument("--heads", type=int, default=10)
     parser.add_argument("--policy", type=Path, required=True)
@@ -426,6 +514,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     policy = load_policy(args.policy)
+    if args.scheduled_only and args.no_scheduled:
+        parser.error("--scheduled-only and --no-scheduled are mutually exclusive")
+    if args.repos_from_policy:
+        if args.repo:
+            parser.error("--repo and --repos-from-policy are mutually exclusive")
+        repos = [str(r) for r in policy["fleet_repos"]]
+    else:
+        repos = list(args.repo)
+    if not repos:
+        parser.error("no repositories selected: pass --repo or --repos-from-policy")
     threshold = int(policy["failure_threshold"])
     umbrella: dict[str, list[str]] = policy.get("umbrella_enforced_contexts") or {}
     scheduled_threshold_pct = float(policy["scheduled_failure_threshold_pct"])
@@ -439,8 +537,98 @@ def main(argv: list[str] | None = None) -> int:
     all_scheduled_alerts: list[ScheduledAlert] = []
     report: dict[str, Any] = {"schema": "nonrequired_check_report/v1", "repos": {}}
 
-    for repo in args.repo:
+    unreadable: list[str] = []
+    for repo in repos:
         slug = f"{args.owner}/{repo}"
+        try:
+            _evaluate_one_repo(
+                args=args,
+                repo=repo,
+                slug=slug,
+                token=token,
+                threshold=threshold,
+                umbrella=umbrella,
+                scheduled_threshold_pct=scheduled_threshold_pct,
+                scheduled_window_days=scheduled_window_days,
+                scheduled_since=scheduled_since,
+                all_alerts=all_alerts,
+                all_scheduled_alerts=all_scheduled_alerts,
+                report=report,
+            )
+        except Exception as exc:  # noqa: BLE001 -- see _evaluate_one_repo's docstring
+            unreadable.append(repo)
+            report["repos"][slug] = {"error": str(exc)[:400]}
+
+    render(all_alerts)
+    render_scheduled(all_scheduled_alerts)
+    for repo in unreadable:
+        print(
+            f"::warning title=Fleet repository unreadable::{args.owner}/{repo} "
+            "could not be read; its scheduled workflows were NOT evaluated"
+        )
+    args.report.write_text(
+        json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    combined_alerts: list[Any] = [*all_alerts, *all_scheduled_alerts]
+    undeliverable = False
+    if combined_alerts and not args.dry_run:
+        try:
+            post_slack_alert(combined_alerts)
+        except AlertDestinationMissingError as exc:
+            # The report artifact is written ABOVE this point, so the evidence
+            # survives the refusal: a reader gets both the red and the findings.
+            print(f"::error title=Alert destination missing::{exc}")
+            undeliverable = True
+
+    # Raising an alert is not this job failing (see the module docstring), but
+    # failing to READ a repository is: an unevaluated repository must never be
+    # indistinguishable from a clean one. The report still carries every repo
+    # that WAS evaluated, so a caller that can render the partial result --
+    # the `.201` probe does, as a named row per unreadable repo -- reads the
+    # file rather than the exit code.
+    #
+    # Failing to DELIVER a raised finding is the same class: a finding nobody
+    # receives and a sweep that found nothing are indistinguishable from
+    # outside, which is the whole defect. It is deliberately the same exit code
+    # as an unreadable repo -- both mean "do not read this run as clean" -- and
+    # the annotation above says which occurred.
+    return 1 if (unreadable or undeliverable) else 0
+
+
+def _evaluate_one_repo(
+    *,
+    args: argparse.Namespace,
+    repo: str,
+    slug: str,
+    token: str | None,
+    threshold: int,
+    umbrella: dict[str, list[str]],
+    scheduled_threshold_pct: float,
+    scheduled_window_days: int,
+    scheduled_since: str,
+    all_alerts: list[Alert],
+    all_scheduled_alerts: list[ScheduledAlert],
+    report: dict[str, Any],
+) -> None:
+    """One repository's evaluation, extracted so ONE can fail without the rest.
+
+    WHY THIS IS A FUNCTION (OMN-18942). Until this split, any read failure
+    anywhere in the loop aborted the whole sweep, so a single repository the
+    token cannot see blanked every other repository's findings. That is not
+    hypothetical twice over: OMN-18254 spent three days on exactly it -- "the
+    repo loop hits omniweb second, so omnimarket was never reached either" --
+    and it recurred on `.201` on 2026-09-20, where the host token reads twelve
+    of the thirteen fleet repositories and returns 404 on `omni_home`, the one
+    repository whose red scheduled workflow this ticket names.
+
+    The caller records the failure under `repos[slug]["error"]` and exits
+    non-zero, so an unreadable repository is loud in both directions: named in
+    the report for a renderer, and a red exit for CI.
+    """
+    required: set[str] = set()
+    pages: list[dict[str, Any]] = []
+    alerts: list[Alert] = []
+    if not args.scheduled_only:
         protection = _gh_object(
             f"repos/{slug}/branches/{args.branch}/protection/required_status_checks",
             token,
@@ -461,69 +649,56 @@ def main(argv: list[str] | None = None) -> int:
         alerts = evaluate(slug, pages, required, threshold)
         all_alerts.extend(alerts)
 
-        scheduled_report: dict[str, Any] = {}
-        for workflow in active_workflows(slug, token):
-            workflow_id = workflow.get("id")
-            workflow_path = str(workflow.get("path") or workflow.get("name") or "")
-            if not isinstance(workflow_id, int) or not workflow_path:
-                continue
-            runs = scheduled_runs_for_workflow(
-                slug, workflow_id, scheduled_since, token
+    scheduled_report: dict[str, Any] = {}
+    workflows_iter = [] if args.no_scheduled else active_workflows(slug, token)
+    for workflow in workflows_iter:
+        workflow_id = workflow.get("id")
+        workflow_path = str(workflow.get("path") or workflow.get("name") or "")
+        if not isinstance(workflow_id, int) or not workflow_path:
+            continue
+        runs = scheduled_runs_for_workflow(slug, workflow_id, scheduled_since, token)
+        scheduled_alert = evaluate_scheduled(
+            slug, workflow_path, runs, scheduled_threshold_pct
+        )
+        if runs:
+            failing = sum(
+                1
+                for run in runs
+                if isinstance(run, dict)
+                and str(run.get("conclusion") or "") in FAILING_CONCLUSIONS
             )
-            scheduled_alert = evaluate_scheduled(
-                slug, workflow_path, runs, scheduled_threshold_pct
-            )
-            if runs:
-                failing = sum(
-                    1
-                    for run in runs
-                    if isinstance(run, dict)
-                    and str(run.get("conclusion") or "") in FAILING_CONCLUSIONS
-                )
-                scheduled_report[workflow_path] = {
-                    "observed": len(runs),
-                    "failures": failing,
-                    "rate_pct": round(100.0 * failing / len(runs), 1),
-                }
-            if scheduled_alert is not None:
-                all_scheduled_alerts.append(scheduled_alert)
+            scheduled_report[workflow_path] = {
+                "observed": len(runs),
+                "failures": failing,
+                "rate_pct": round(100.0 * failing / len(runs), 1),
+            }
+        if scheduled_alert is not None:
+            all_scheduled_alerts.append(scheduled_alert)
 
-        report["repos"][slug] = {
-            "heads_observed": len(pages),
-            "required_contexts": sorted(required),
+    report["repos"][slug] = {
+        "heads_observed": len(pages),
+        "required_contexts": sorted(required),
+        "alerts": [
+            {"check": a.check, "failures": a.failures, "observed": a.observed}
+            for a in alerts
+        ],
+        "scheduled": {
+            "window_days": scheduled_window_days,
+            "threshold_pct": scheduled_threshold_pct,
+            "workflows": scheduled_report,
             "alerts": [
-                {"check": a.check, "failures": a.failures, "observed": a.observed}
-                for a in alerts
+                {
+                    "workflow": a.workflow,
+                    "failures": a.failures,
+                    "observed": a.observed,
+                    "rate_pct": a.rate_pct,
+                    "last_failure_url": a.last_failure_url,
+                }
+                for a in all_scheduled_alerts
+                if a.repo == slug
             ],
-            "scheduled": {
-                "window_days": scheduled_window_days,
-                "threshold_pct": scheduled_threshold_pct,
-                "workflows": scheduled_report,
-                "alerts": [
-                    {
-                        "workflow": a.workflow,
-                        "failures": a.failures,
-                        "observed": a.observed,
-                        "rate_pct": a.rate_pct,
-                        "last_failure_url": a.last_failure_url,
-                    }
-                    for a in all_scheduled_alerts
-                    if a.repo == slug
-                ],
-            },
-        }
-
-    render(all_alerts)
-    render_scheduled(all_scheduled_alerts)
-    args.report.write_text(
-        json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
-    )
-    combined_alerts: list[Any] = [*all_alerts, *all_scheduled_alerts]
-    if combined_alerts and not args.dry_run:
-        post_slack_alert(combined_alerts)
-
-    # Raising an alert is not this job failing. See the module docstring.
-    return 0
+        },
+    }
 
 
 if __name__ == "__main__":

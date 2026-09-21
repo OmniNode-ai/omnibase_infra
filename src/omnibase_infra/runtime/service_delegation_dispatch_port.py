@@ -21,6 +21,8 @@ from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
 )
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
+    DEFAULT_EXECUTION_TIMEOUT_SECONDS,
+    DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
     ProtocolDelegationDispatchPort,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
@@ -34,7 +36,6 @@ _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
 _PREFERRED_DELEGATION_PACKAGE = "omnimarket"
 _REQUESTER = "delegate_skill"
-_DEFAULT_TIMEOUT_SECONDS = 600.0
 
 
 @dataclass(
@@ -244,6 +245,20 @@ class RuntimeDelegationDispatchPort:
         source_file_path: str | None,
         source_session_id: str | None,
         wait: bool,
+        # OMN-18924. These arrived as REQUIRED keyword-only arguments under
+        # OMN-15504 while the caller deployed on the lane passes neither, so
+        # every delegation on the dev lane terminalized `provider_error` with
+        # a missing-argument TypeError -- the same producer-before-consumer
+        # inversion as the absent `execution_budgets` map, from the same
+        # change. Defaulted rather than required until the caller passes them:
+        # a new argument lands consumer-first or is excluded when unset.
+        #
+        # The values are the contract default, kept honest against
+        # `DEFAULT_EXECUTION_BUDGET` by
+        # `tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py`
+        # rather than by an import, because runtime does not depend on cli.
+        execution_timeout_seconds: int = DEFAULT_EXECUTION_TIMEOUT_SECONDS,
+        terminal_delivery_margin_seconds: int = DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
         output_schema_key: str | None = None,
         quality_contract_mode: str = "extend_task_class",
         acceptance_criteria: tuple[str, ...] = (),
@@ -278,12 +293,10 @@ class RuntimeDelegationDispatchPort:
                 "backend_id pin is not yet supported on the deployed bus "
                 "dispatch path (RuntimeDelegationDispatchPort)"
             )
-        if response_contract is not None:
-            raise NotImplementedError(
-                "response_contract is not yet supported on the deployed bus "
-                "dispatch path (RuntimeDelegationDispatchPort)"
-            )
-
+        if execution_timeout_seconds <= 0:
+            raise ValueError("execution_timeout_seconds must be positive")
+        if terminal_delivery_margin_seconds <= 0:
+            raise ValueError("terminal_delivery_margin_seconds must be positive")
         routes = self._resolved_routes()
         selected = _select_delegation_route(routes)
         request_payload: dict[str, object] = {
@@ -298,6 +311,12 @@ class RuntimeDelegationDispatchPort:
             "quality_contract_mode": quality_contract_mode,
             "acceptance_criteria": list(acceptance_criteria),
             "tenant_id": tenant_id,
+            "response_contract": response_contract,
+            # The selected node_delegation_orchestrator contract validates this
+            # payload as ModelDelegationRequest. Its request timeout is part of
+            # that model; the terminal delivery margin only bounds this caller's
+            # broker wait and is not a delegation request field.
+            "requested_timeout_seconds": execution_timeout_seconds,
             # OMN-18321 / OMN-18172: carried ONTO THE WIRE, not merely accepted.
             # Accepting the keyword and dropping it would trade a loud TypeError
             # for a silent classification hole -- precisely the silent-drop
@@ -321,7 +340,11 @@ class RuntimeDelegationDispatchPort:
             },
             correlation_id=correlation_id,
             response_topic=self._response_topic or selected.route.terminal_events[0],
-            timeout_seconds=_DEFAULT_TIMEOUT_SECONDS if wait else 1.0,
+            timeout_seconds=(
+                float(execution_timeout_seconds + terminal_delivery_margin_seconds)
+                if wait
+                else 1.0
+            ),
         )
         broker = RuntimePatternBBroker(
             self._event_bus,

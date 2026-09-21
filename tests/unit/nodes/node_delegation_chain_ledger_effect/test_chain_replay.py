@@ -264,9 +264,22 @@ def test_missing_hop_is_absent_from_the_chain_and_never_silently_filled() -> Non
 
     assert [row.hop for row in rows] == [TOPICS[0], TOPICS[2], TOPICS[3]]
     assert TOPICS[1] not in [row.hop for row in rows]
-    # The out-of-order arrival is a topology violation the tier-2 verifier sees.
-    assert rows[1].verifier_verdict is EnumTierTwoVerdict.FAIL
-    assert rows[-1].verifier_verdict is EnumTierTwoVerdict.FAIL
+
+    # OMN-18916: which TIER catches this moved, and the move is the point.
+    #
+    # This previously asserted tier-2 FAIL and called it "the out-of-order
+    # arrival". Nothing arrived out of order: TOPICS[0], TOPICS[2], TOPICS[3]
+    # is declared order with a hop MISSING from it. Positional grading only
+    # appeared to catch that, by comparing each survivor against the wrong
+    # declaration -- the same accident that failed every legitimate retry.
+    #
+    # Absence is a COMPLETENESS question, and tier 1 answers it directly and
+    # by name: the hop whose parent never happened cannot re-derive its edge.
+    # The canary additionally checks completeness by hop name against its own
+    # expected set. The chain still fails; it now fails for its actual reason.
+    gap = next(row for row in rows if row.hop == TOPICS[2])
+    assert not gap.replay_green
+    assert TOPICS[1] in gap.replay_detail and "not observed" in gap.replay_detail
 
 
 @pytest.mark.unit
@@ -341,8 +354,18 @@ def test_verifier_skips_the_hops_the_declaration_does_not_reach() -> None:
 
     assert rows[0].verifier_verdict is EnumTierTwoVerdict.PASS
     assert rows[1].verifier_verdict is EnumTierTwoVerdict.PASS
-    assert rows[2].verifier_verdict is EnumTierTwoVerdict.SKIP
-    assert rows[3].verifier_verdict is EnumTierTwoVerdict.SKIP
+    # OMN-18916: FAIL, not SKIP, and strictly stronger than before.
+    #
+    # The concern this test states -- "reporting PASS for a hop the
+    # declaration says nothing about would be a verdict invented rather than
+    # derived" -- is honoured either way, because FAIL is not PASS. Under
+    # identity grading a topic the declaration does not name is a topology
+    # violation outright, rather than overflow to be waved past, so the
+    # verdict hardens. A short declaration is a fixture shape; the live
+    # contract declares every hop.
+    assert rows[2].verifier_verdict is EnumTierTwoVerdict.FAIL
+    assert rows[3].verifier_verdict is EnumTierTwoVerdict.FAIL
+    assert "not a topic the declared chain names" in rows[2].verifier_detail
     # Tier 1 reads the same declaration: the two unreached hops have no parent
     # relation to re-derive, and say so.
     assert [row.replay_green for row in rows] == [True, True, False, False]
@@ -363,12 +386,27 @@ def test_empty_observation_yields_no_rows_rather_than_a_green_chain() -> None:
 
 @pytest.mark.unit
 def test_verdict_never_upgrades_a_skip_to_a_pass_under_any_ordering() -> None:
-    """Property: SKIP is never rendered as PASS, whatever the input shape."""
+    """Property: a hop the declaration does not name is never PASS.
+
+    OMN-18916 restates this property over the declaration's CONTENT rather
+    than its length, because length stopped being the key when repeats became
+    legal. The original intent -- never render an ungraded hop as a pass --
+    is unchanged and is what is asserted.
+    """
     for declared in ((), DECLARED[:1], DECLARED[:3], DECLARED):
         rows = assemble_replay_and_verify(CORRELATION, _complete_chain(), declared)
-        for index, row in enumerate(rows):
-            if index >= len(declared):
-                assert row.verifier_verdict is EnumTierTwoVerdict.SKIP
+        declared_topics = {topic for entry in declared for topic in entry.topics}
+        for row in rows:
+            if row.observed_topic not in declared_topics:
+                assert row.verifier_verdict is not EnumTierTwoVerdict.PASS, (
+                    f"{row.observed_topic!r} is not declared, yet graded PASS"
+                )
+
+    # An EMPTY declaration is still SKIP on every row, not FAIL: there is no
+    # declaration to violate, and the canary reports VERIFIER_SKIPPED, which
+    # is red. "Nothing to check, therefore fine" remains refused.
+    for row in assemble_replay_and_verify(CORRELATION, _complete_chain(), ()):
+        assert row.verifier_verdict is EnumTierTwoVerdict.SKIP
 
 
 @pytest.mark.unit
@@ -376,3 +414,324 @@ def test_a_declared_hop_may_not_name_itself_as_its_own_cause() -> None:
     """The declaration cannot ask for an edge the transport would reject."""
     with pytest.raises(ValueError, match="its own parent"):
         ModelDeclaredChainHop(topic=TOPICS[0], parent=TOPICS[0])
+
+
+# ---------------------------------------------------------------------------
+# OMN-18937: the terminal hop has TWO possible topics
+#
+# A delegation terminates as either completed or failed, never both. That is
+# one hop with an alternative name, not two hops -- and the distinction is
+# load-bearing, because tier 2 grades POSITIONALLY and the canary reads the
+# whole chain's tier-2 verdict from the LAST row. Declared as a sixth hop, a
+# failed terminal observed at index 4 would be graded against the SUCCESS
+# topic and fail the one row that decides the verdict. These tests pin the
+# alternative shape against exactly that regression.
+# ---------------------------------------------------------------------------
+
+FAILED_TERMINAL = "onex.evt.omnimarket.delegate-skill-failed.v1"
+
+# The live topology: five entries, the terminal answering to either topic.
+DECLARED_TREE_WITH_ALTERNATIVE = (
+    ModelDeclaredChainHop(topic=TOPICS[0], parent=None),
+    ModelDeclaredChainHop(topic=TOPICS[1], parent=TOPICS[0]),
+    ModelDeclaredChainHop(topic=TOPICS[2], parent=TOPICS[1]),
+    ModelDeclaredChainHop(
+        topic=TOPICS[3], parent=TOPICS[0], alternatives=(FAILED_TERMINAL,)
+    ),
+)
+
+
+def _chain_ending_in(terminal_topic: str) -> tuple[ModelObservedHop, ...]:
+    """The tree chain, terminating on whichever terminal is passed."""
+    return (
+        _hop(TOPICS[0], E0, None),
+        _hop(TOPICS[1], E1, E0),
+        _hop(TOPICS[2], E2, E1),
+        _hop(terminal_topic, E3, E0),
+    )
+
+
+@pytest.mark.parametrize("terminal", [TOPICS[3], FAILED_TERMINAL])
+def test_either_declared_terminal_replays_green_and_verifies_pass(
+    terminal: str,
+) -> None:
+    """Both terminals are the same hop, so both grade identically.
+
+    The failure terminal is the one that regressed: before OMN-18937 it had
+    no declaration at all, so tier 1 returned "no declared parent" red and
+    tier 2 graded it against the success topic.
+    """
+    rows = assemble_replay_and_verify(
+        CORRELATION, _chain_ending_in(terminal), DECLARED_TREE_WITH_ALTERNATIVE
+    )
+
+    assert len(rows) == 4
+    assert all(row.replay_green for row in rows), [
+        (row.observed_topic, row.replay_detail) for row in rows if not row.replay_green
+    ]
+    assert all(row.verifier_verdict is EnumTierTwoVerdict.PASS for row in rows), [
+        (row.observed_topic, row.verifier_detail) for row in rows
+    ]
+    # The canary reads the chain's tier-2 verdict from the LAST row only.
+    assert rows[-1].observed_topic == terminal
+    assert rows[-1].verifier_verdict is EnumTierTwoVerdict.PASS
+
+
+def test_an_undeclared_terminal_at_the_terminal_position_still_fails() -> None:
+    """Negative control: accepting two topics is not accepting any topic.
+
+    Without this, `test_either_declared_terminal_replays_green...` is also
+    satisfied by a verifier that stopped checking the terminal position.
+    """
+    rows = assemble_replay_and_verify(
+        CORRELATION,
+        _chain_ending_in("onex.evt.omnimarket.delegate-skill-abandoned.v1"),
+        DECLARED_TREE_WITH_ALTERNATIVE,
+    )
+
+    assert rows[-1].verifier_verdict is EnumTierTwoVerdict.FAIL
+    # The detail must name BOTH accepted topics: a red verdict that reports
+    # one expected topic when two were acceptable misdescribes the check.
+    assert TOPICS[3] in rows[-1].verifier_detail
+    assert FAILED_TERMINAL in rows[-1].verifier_detail
+    # Tier 1 is independent and also red -- the hop has no declaration.
+    assert not rows[-1].replay_green
+
+
+def test_a_hop_observed_on_its_alternative_can_still_be_a_parent() -> None:
+    """An alias is a name for the hop, so an edge may close against it.
+
+    Nothing in the live topology cites the terminal as a parent today. This
+    pins the semantics anyway, because a resolution that worked for leaves
+    only would be an undeclared limitation of `alternatives` rather than a
+    decision.
+    """
+    follow_on = "onex.evt.omnibase-infra.delegation-postmortem.v1"
+    declared = (
+        *DECLARED_TREE_WITH_ALTERNATIVE,
+        ModelDeclaredChainHop(topic=follow_on, parent=TOPICS[3]),
+    )
+    observed = (*_chain_ending_in(FAILED_TERMINAL), _hop(follow_on, UNRELATED, E3))
+
+    rows = assemble_replay_and_verify(CORRELATION, observed, declared)
+
+    assert rows[-1].observed_topic == follow_on
+    assert rows[-1].replay_green, rows[-1].replay_detail
+    assert rows[-1].verifier_verdict is EnumTierTwoVerdict.PASS
+
+
+def test_a_hop_may_not_name_its_own_alternative_as_its_parent() -> None:
+    """Self-causation refused through an alias too, not only by canonical name."""
+    with pytest.raises(ValueError, match="own parent"):
+        ModelDeclaredChainHop(
+            topic=TOPICS[3], parent=FAILED_TERMINAL, alternatives=(FAILED_TERMINAL,)
+        )
+
+
+@pytest.mark.parametrize(
+    ("alternatives", "expected"),
+    [
+        ((TOPICS[3],), "canonical topic"),
+        ((FAILED_TERMINAL, FAILED_TERMINAL), "repeats an alternative"),
+        (("",), "empty alternative"),
+    ],
+)
+def test_an_unmatchable_alternative_is_refused_at_declaration(
+    alternatives: tuple[str, ...], expected: str
+) -> None:
+    """A hop whose aliases cannot be resolved must refuse at construction.
+
+    Each of these would otherwise reach the replay as an ambiguity graded
+    silently: first-match-wins over a duplicate, or an empty string matching
+    no observation while looking like a declared name.
+    """
+    with pytest.raises(ValueError, match=expected):
+        ModelDeclaredChainHop(
+            topic=TOPICS[3], parent=TOPICS[0], alternatives=alternatives
+        )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18916: the observed chain is legitimately LONGER than the declaration
+#
+# Tier 2 grades positionally, so any chain longer than the declaration shifts
+# every later hop and grades a causally correct chain red. Two independent,
+# legitimate causes were both observed on the .201 dev lane:
+#
+#   RETRY       the same declared hop occurs again with a NEW envelope id,
+#               because the attempts ladder climbed a rung. Correct and
+#               expected; the declaration simply cannot express it.
+#   REDELIVERY  the IDENTICAL envelope id arrives twice at different Kafka
+#               offsets. One delivery projected twice.
+#
+# They are fixed by two separate mechanisms on purpose. A redelivery is the
+# same envelope and is collapsed; a retry is a genuinely new envelope and is
+# kept. Conflating them would either drop real hops or keep duplicate ones.
+#
+# Measured, 2026-09-21, correlation e86cb81d-ac2b-4c66-bd13-3c9a1e460ccd: a
+# SUCCESSFUL delegation produced 11 observed hops against a 5-hop declaration
+# and graded fail/skip from index 4 onward.
+# ---------------------------------------------------------------------------
+
+E4 = UUID("aaaaaaaa-0000-0000-0000-000000000004")
+E5 = UUID("aaaaaaaa-0000-0000-0000-000000000005")
+
+
+def _retried_chain() -> tuple[ModelObservedHop, ...]:
+    """The tree chain with ONE extra routing round, each hop a new envelope.
+
+    This is what the attempts ladder produces when a rung misses the quality
+    bar: a second routing request, caused by the same delegation request, and
+    its own decision. Causally correct at every edge.
+    """
+    return (
+        _hop(TOPICS[0], E0, None),
+        _hop(TOPICS[1], E1, E0),
+        _hop(TOPICS[2], E2, E1),
+        _hop(TOPICS[1], E4, E0),  # retry: new envelope, same correct parent
+        _hop(TOPICS[2], E5, E4),
+        _hop(TOPICS[3], E3, E0),  # terminal branches off the head
+    )
+
+
+def test_a_retried_hop_does_not_fail_a_causally_correct_chain() -> None:
+    """AC1. The chain is longer than the declaration and entirely correct.
+
+    Pre-fix every row from the first repeat onward grades FAIL or SKIP purely
+    because the observed index no longer lines up with the declared one.
+    """
+    rows = assemble_replay_and_verify(CORRELATION, _retried_chain(), DECLARED_TREE)
+
+    assert len(rows) == 6
+    assert all(row.replay_green for row in rows), [
+        (r.observed_topic, r.replay_detail) for r in rows if not r.replay_green
+    ]
+    failed = [
+        (r.hop_index, r.observed_topic, r.verifier_detail)
+        for r in rows
+        if r.verifier_verdict is EnumTierTwoVerdict.FAIL
+    ]
+    assert not failed, f"a causally correct retried chain graded FAIL: {failed}"
+    skipped = [
+        r.hop_index for r in rows if r.verifier_verdict is EnumTierTwoVerdict.SKIP
+    ]
+    assert not skipped, (
+        f"hops {skipped} graded SKIP because they sat past the declaration's "
+        "length; a legitimate retry must be graded, not waved through"
+    )
+
+
+def test_the_same_envelope_delivered_twice_becomes_one_hop() -> None:
+    """AC2. A redelivery is one hop observed twice, not two hops.
+
+    Distinct from the retry above: the envelope id is IDENTICAL, so there is
+    nothing new to record. Measured on the lane as adjacent Kafka offsets
+    carrying one envelope.
+    """
+    redelivered = (
+        _hop(TOPICS[0], E0, None),
+        _hop(TOPICS[1], E1, E0),
+        _hop(TOPICS[1], E1, E0),  # byte-identical redelivery
+        _hop(TOPICS[2], E2, E1),
+        _hop(TOPICS[3], E3, E0),
+    )
+    rows = assemble_replay_and_verify(CORRELATION, redelivered, DECLARED_TREE)
+
+    assert len(rows) == 4, (
+        f"expected the redelivery to collapse to 4 hops, got {len(rows)}: "
+        f"{[r.observed_topic for r in rows]}"
+    )
+    assert [r.hop_index for r in rows] == [0, 1, 2, 3], (
+        "hop_index must stay dense after a collapse, or the canary's "
+        "ORDER BY hop_index reads a gap as a missing hop"
+    )
+    assert all(row.replay_green for row in rows)
+    assert all(r.verifier_verdict is EnumTierTwoVerdict.PASS for r in rows)
+
+
+def test_a_retry_is_not_collapsed_into_the_hop_it_repeats() -> None:
+    """Control for AC2. Dedupe must key on the ENVELOPE, not the topic.
+
+    Collapsing by topic would silently drop a real second attempt, which is
+    the opposite error and just as wrong.
+    """
+    rows = assemble_replay_and_verify(CORRELATION, _retried_chain(), DECLARED_TREE)
+    routing_requests = [r for r in rows if r.observed_topic == TOPICS[1]]
+    assert len(routing_requests) == 2, (
+        "the two retry attempts carry different envelope ids and are two real "
+        "hops; collapsing them would erase an attempt that actually happened"
+    )
+
+
+def test_an_undeclared_topic_still_fails_however_long_the_chain() -> None:
+    """AC3, tier 2. Allowing repeats is not allowing anything."""
+    intruder = (*_retried_chain()[:3], _hop("onex.evt.fixture.unrelated.v1", E4, E0))
+    rows = assemble_replay_and_verify(CORRELATION, intruder, DECLARED_TREE)
+
+    assert rows[-1].verifier_verdict is EnumTierTwoVerdict.FAIL, (
+        "a topic the declaration does not name graded non-FAIL; the repeat "
+        "allowance must not become a blanket pass"
+    )
+
+
+def test_a_wrong_parent_still_fails_on_a_retried_chain() -> None:
+    """AC3, tier 1. The causal edge is what still catches a wrong chain.
+
+    Tier 2 gets more permissive by design here, so this asserts the check
+    that takes over the work: a hop whose recorded parent was never observed
+    on its declared parent topic is still red.
+    """
+    broken = (
+        _hop(TOPICS[0], E0, None),
+        _hop(TOPICS[1], E1, E0),
+        _hop(TOPICS[2], E2, E1),
+        _hop(TOPICS[1], E4, UNRELATED),  # parent never observed
+        _hop(TOPICS[2], E5, E4),
+        _hop(TOPICS[3], E3, E0),
+    )
+    rows = assemble_replay_and_verify(CORRELATION, broken, DECLARED_TREE)
+
+    offender = next(r for r in rows if r.envelope_id == E4)
+    assert not offender.replay_green, (
+        "a hop recording a parent that was never observed graded green; the "
+        "relaxation of tier 2 has been allowed to weaken tier 1"
+    )
+    assert all(r.replay_green for r in rows if r.envelope_id != E4), (
+        "one broken edge turned its neighbours red, so the failure does not "
+        "name the hop that is actually wrong"
+    )
+
+
+def test_the_ordinary_five_hop_chain_is_graded_exactly_as_before() -> None:
+    """AC3, regression floor. The common case must not move at all.
+
+    If this changes, the fix bought long-chain correctness by altering what a
+    normal chain means, which is not a trade worth making.
+    """
+    rows = assemble_replay_and_verify(CORRELATION, _complete_chain(), DECLARED)
+
+    assert len(rows) == len(_complete_chain())
+    assert all(row.replay_green for row in rows)
+    assert all(r.verifier_verdict is EnumTierTwoVerdict.PASS for r in rows)
+
+
+def test_a_transposed_skeleton_still_fails() -> None:
+    """The order check survives the repeat allowance.
+
+    Repeats are legal; arriving in the wrong order is not. The FIRST
+    occurrence of each declared hop must still appear in declared order, or
+    tier 2 stops being an order check at all and only asks whether a topic is
+    known.
+    """
+    transposed = (
+        _hop(TOPICS[0], E0, None),
+        _hop(TOPICS[2], E2, E1),  # decision before its own request
+        _hop(TOPICS[1], E1, E0),
+        _hop(TOPICS[3], E3, E0),
+    )
+    rows = assemble_replay_and_verify(CORRELATION, transposed, DECLARED_TREE)
+
+    assert any(r.verifier_verdict is EnumTierTwoVerdict.FAIL for r in rows), (
+        "a transposed chain graded green; tier 2 has been reduced to a "
+        "membership test and no longer checks order at all"
+    )

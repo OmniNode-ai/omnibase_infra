@@ -21,6 +21,7 @@ from omnibase_infra.handlers.models.model_db_query_payload import ModelDbQueryPa
 from omnibase_infra.handlers.models.model_db_query_response import ModelDbQueryResponse
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_delegation_chain_ledger import (
     HandlerDelegationChainLedger,
+    _parse_declared_topology,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
     EnumTierTwoVerdict,
@@ -453,7 +454,16 @@ def test_ledger_projection_records_every_declared_chain_topic() -> None:
     }
 
     # OMN-18419: `chain_topology` entries are declared hops, not bare topics.
-    declared_topics = [hop["topic"] for hop in chain_contract["chain_topology"]]
+    # OMN-18937: and a hop may answer to more than one topic. An ALTERNATIVE
+    # is a topic this writer really does read out of event_ledger, so leaving
+    # it out of this gate would let the delegation failure terminal be
+    # declared here and unrecorded there -- the exact by-construction empty
+    # read this test exists to refuse, one alias further along.
+    declared_topics = [
+        topic
+        for hop in chain_contract["chain_topology"]
+        for topic in (hop["topic"], *(hop.get("alternatives") or ()))
+    ]
 
     missing = [t for t in declared_topics if t not in recorded]
     assert not missing, (
@@ -466,3 +476,108 @@ def test_ledger_projection_records_every_declared_chain_topic() -> None:
         f"{undispatched!r} are subscribed but have no handler_routing entry, "
         "which is subscribed-but-never-dispatched (OMN-14594 pairing rule)"
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18937: parsing and settling a topology whose terminal has alternatives
+#
+# `_parse_declared_topology` had no direct coverage at all before this block.
+# Two of its four refusals had to widen over aliases; the other two had to
+# stay counting entries. Both halves are asserted here, because a widening
+# that also widened the head count would silently accept a two-chain
+# declaration, and a narrowing left behind would let an alias collide.
+# ---------------------------------------------------------------------------
+
+_FAILED_TERMINAL = "onex.evt.omnimarket.delegate-skill-failed.v1"
+
+
+def _topology_entry(
+    topic: str, parent: str | None, alternatives: tuple[str, ...] = ()
+) -> dict[str, object]:
+    entry: dict[str, object] = {"topic": topic, "parent": parent}
+    if alternatives:
+        entry["alternatives"] = list(alternatives)
+    return entry
+
+
+def test_a_topology_with_an_alternative_terminal_parses_and_keeps_one_head() -> None:
+    """The live shape: five entries, one head, the terminal answering to two."""
+    hops = _parse_declared_topology(
+        [
+            _topology_entry("command", None),
+            _topology_entry("terminal", "command", (_FAILED_TERMINAL,)),
+        ]
+    )
+
+    assert len(hops) == 2, "an alternative is another NAME for a hop, not a hop"
+    assert [hop.parent for hop in hops].count(None) == 1
+    assert hops[1].topics == ("terminal", _FAILED_TERMINAL)
+
+
+def test_an_alternative_colliding_with_another_hops_topic_is_refused() -> None:
+    """The duplicate refusal must see aliases, or it resolves first-match-wins.
+
+    Left counting canonical topics only, this declaration parses and
+    `_declared_hop_for` silently grades the collided topic against whichever
+    hop it reaches first -- the exact ambiguity the refusal exists to stop,
+    spelled one alias further along.
+    """
+    with pytest.raises(RuntimeError, match="more than once"):
+        _parse_declared_topology(
+            [
+                _topology_entry("command", None),
+                _topology_entry(_FAILED_TERMINAL, "command"),
+                _topology_entry("terminal", "command", (_FAILED_TERMINAL,)),
+            ]
+        )
+
+
+def test_a_parent_may_cite_an_alternative() -> None:
+    """The dangling-parent refusal must see aliases for the same reason."""
+    hops = _parse_declared_topology(
+        [
+            _topology_entry("command", None),
+            _topology_entry("terminal", "command", (_FAILED_TERMINAL,)),
+            _topology_entry("postmortem", _FAILED_TERMINAL),
+        ]
+    )
+    assert hops[2].parent == _FAILED_TERMINAL
+
+
+def test_alternatives_do_not_create_a_second_head() -> None:
+    """Head counting stays over ENTRIES: an alias is a name, not a hop."""
+    with pytest.raises(RuntimeError, match="2 heads"):
+        _parse_declared_topology(
+            [
+                _topology_entry("command", None),
+                _topology_entry("orphan", None, (_FAILED_TERMINAL,)),
+            ]
+        )
+
+
+def test_the_settle_loop_does_not_wait_for_a_terminal_that_cannot_arrive() -> None:
+    """A hop with alternatives settles on ONE of them (OMN-18937).
+
+    The settle predicate shares its declaration with the event_ledger read
+    filter, which must carry EVERY alias or an alternative is never selected
+    out of the relation. Requiring every alias to be OBSERVED instead would
+    mean a delegation -- which terminates as completed or failed, never both
+    -- never settles, and every single dispatch burns its full attempt budget
+    before writing a chain that was already complete on the first read.
+    """
+    declared = (
+        ModelDeclaredChainHop(topic="command", parent=None),
+        ModelDeclaredChainHop(
+            topic="terminal", parent="command", alternatives=(_FAILED_TERMINAL,)
+        ),
+    )
+    handler = _handler(declared_chain=declared)
+
+    # The read filter carries both names...
+    assert set(handler._declared_topics()) == {"command", "terminal", _FAILED_TERMINAL}
+    # ...and either terminal alone settles the observation.
+    assert handler._observation_is_settled({"command", "terminal"})
+    assert handler._observation_is_settled({"command", _FAILED_TERMINAL})
+    # A hop observed on NO name is still unsettled -- widening the accepted
+    # set is not the same as dropping the requirement.
+    assert not handler._observation_is_settled({"command"})

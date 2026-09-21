@@ -30,18 +30,30 @@ from scripts.ci.ci_summary_gate import (
     EXIT_SUCCESS,
     EXPECTED_EXTERNAL_CONTEXTS,
     EXTERNAL_GOOD_CONCLUSIONS,
+    EXTERNAL_SWEEP_EXCLUSIONS,
     MEASURED_NOT_ENFORCED_CONTEXTS,
     NON_VERDICT_CONCLUSIONS,
     POST_FIXTURE_WINDOW_CONTEXTS,
     SKIPPABLE_GATE_JOBS,
+    SOFT_ALLOWLIST,
     STRICT_GATE_JOBS,
+    SWEEP_EXCLUSION_MAX_DAYS,
+    SWEEP_GOOD_CONCLUSIONS,
+    SWEEP_NON_PR_EVENTS,
     JobState,
+    SweepExclusion,
+    active_sweep_exclusions,
     applicable_external_contexts,
     cancellation_is_provisional,
+    check_run_event_index,
     drop_superseded_non_verdicts,
     evaluate,
     evaluate_external_contexts,
+    evaluate_external_sweep,
     latest_check_run_by_name,
+    latest_check_run_rows,
+    resolve_check_run_event,
+    validate_sweep_exclusions,
 )
 
 pytestmark = pytest.mark.unit
@@ -57,6 +69,26 @@ pytestmark = pytest.mark.unit
 HISTORICAL_EXTERNAL_CONTEXTS: tuple[str, ...] = tuple(
     c for c in EXPECTED_EXTERNAL_CONTEXTS if c not in POST_FIXTURE_WINDOW_CONTEXTS
 )
+
+
+def _sweep_waiver(name: str) -> dict[str, SweepExclusion]:
+    """A well-formed, unexpired synthetic sweep exclusion for ``name``.
+
+    Used by the falsification controls below to isolate ONE layer at a time.
+    Never a fixture for production behaviour: EXTERNAL_SWEEP_EXCLUSIONS ships
+    empty, and TestExternalSweepExclusions pins that.
+    """
+
+    today = datetime.now(UTC).date()
+    return {
+        name: SweepExclusion(
+            reason="synthetic, test-only: isolates layer 4 from layer 5",
+            ticket="OMN-18960",
+            added=today.isoformat(),
+            expires=(today + timedelta(days=30)).isoformat(),
+        )
+    }
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -515,20 +547,44 @@ class TestExternalContextAssertion:
         assert "deploy-gate / deploy-gate" in report
 
     def test_falsification_control_tuple_entry_is_load_bearing(self) -> None:
-        """Drop the context from the tuple and the SAME payload greens.
+        """Drop the context from BOTH layers and the SAME payload greens.
 
         Without this the RED above could be passing for an unrelated reason.
+
+        OMN-18960 CHANGED THE SHAPE OF THIS CONTROL, and the change is the
+        whole point of that ticket. Until layer 5 existed, dropping the name
+        from ``EXPECTED_EXTERNAL_CONTEXTS`` alone was enough to green this
+        payload — an unregistered red was invisible. That is now asserted
+        below as a FAILURE, and isolating layer 4 takes a sweep waiver as
+        well. The control still proves the same thing: the red is attributable
+        to this context and nothing else.
         """
         remaining = tuple(
             c for c in HISTORICAL_EXTERNAL_CONTEXTS if c != "deploy-gate / deploy-gate"
         )
         assert len(remaining) == len(HISTORICAL_EXTERNAL_CONTEXTS) - 1
-        code, _ = evaluate(
+
+        # OMN-18960: un-registering the context no longer hides its red.
+        code, report = evaluate(
             _all_gates("success"),
             check_runs=_external_fixture("2555"),
             external_contexts=remaining,
         )
-        assert code == EXIT_SUCCESS
+        assert code == EXIT_FAILURE, report
+        assert "deploy-gate / deploy-gate (failure)" in report
+
+        # Isolate layer 4 by also waiving the name in layer 5.
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=_external_fixture("2555"),
+            external_contexts=remaining,
+            sweep_exclusions=_sweep_waiver("deploy-gate / deploy-gate"),
+            # An exclusion needs a clock to judge its expiry against; without
+            # one `active_sweep_exclusions` admits nothing, which is the
+            # fail-closed reading the module applies to every missing clock.
+            now=datetime.now(UTC),
+        )
+        assert code == EXIT_SUCCESS, report
 
     def test_absent_context_is_pending_never_success(self) -> None:
         """A context that never reports must not read as passing.
@@ -794,6 +850,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=_payload_missing_stand_in(),
             external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author="dependabot[bot]",
         )
         assert code == EXIT_SUCCESS, report
@@ -809,6 +871,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author="jonahgabriel",
         )
         assert code == EXIT_PENDING, report
@@ -825,6 +893,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author=None,
         )
         assert code == EXIT_PENDING
@@ -840,6 +914,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author="dependabot[bot]",
         )
         assert code == EXIT_PENDING, report
@@ -900,6 +980,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=rows,
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author="dependabot[bot]",
         )
         assert code == EXIT_FAILURE, report
@@ -1028,17 +1114,32 @@ class TestIntegrationTestRemovalGateExternalContext:
         assert ITRG_CONTEXT in report
 
     def test_falsification_control_tuple_entry_is_load_bearing(self) -> None:
-        """Drop the context from the tuple and the SAME real-red payload greens.
+        """Drop the context from BOTH layers and the SAME real-red payload greens.
 
         Without this, the FAILURE above could come from an unrelated context
         (e.g. ``verify / verify``'s early reruns) rather than from ITRG itself.
+
+        OMN-18960 changed this control's shape for the reason recorded on the
+        sibling control in ``TestExternalContextAssertion``: un-registering a
+        red context used to green it, and now does not.
         """
         remaining = tuple(c for c in HISTORICAL_EXTERNAL_CONTEXTS if c != ITRG_CONTEXT)
         assert len(remaining) == len(HISTORICAL_EXTERNAL_CONTEXTS) - 1
+
         code, report = evaluate(
             _all_gates("success"),
             check_runs=_omn15979_check_runs("2720"),
             external_contexts=remaining,
+        )
+        assert code == EXIT_FAILURE, report
+        assert f"{ITRG_CONTEXT} (failure)" in report
+
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=_omn15979_check_runs("2720"),
+            external_contexts=remaining,
+            sweep_exclusions=_sweep_waiver(ITRG_CONTEXT),
+            now=datetime.now(UTC),
         )
         assert code == EXIT_SUCCESS, report
 
@@ -1742,3 +1843,911 @@ class TestCancellationGraceFailsClosedOmn18355:
         assert frozenset({"skipped", "neutral"}) == NON_VERDICT_CONCLUSIONS
         assert "cancelled" not in NON_VERDICT_CONCLUSIONS
         assert not (NON_VERDICT_CONCLUSIONS & EXTERNAL_GOOD_CONCLUSIONS)
+
+
+# ---------------------------------------------------------------------------
+# OMN-18960 (parent OMN-18943, epic OMN-18527) — layer 5, the default-deny
+# external sweep.
+# ---------------------------------------------------------------------------
+
+SWEEP_FIXTURE = REPO_ROOT / "tests/ci/fixtures/omn18960_external_sweep_check_runs.json"
+
+
+def _ci_summary_poll_step_text() -> str:
+    """The `run:` body of the ci-summary job's poll step, read from ci.yml."""
+
+    job = _load_workflow(CI_WORKFLOW)["jobs"]["ci-summary"]
+    steps = [
+        st for st in job["steps"] if "ci_summary_gate.py" in str(st.get("run") or "")
+    ]
+    assert len(steps) == 1, f"expected one poll step, found {len(steps)}"
+    return str(steps[0]["run"])
+
+
+def _sweep_fixture() -> dict[str, Any]:
+    return json.loads(SWEEP_FIXTURE.read_text(encoding="utf-8"))
+
+
+def _sweep_head(pr: str) -> dict[str, Any]:
+    return _sweep_fixture()["pull_requests"][pr]
+
+
+def _at_merge(head: dict[str, Any]) -> list[dict[str, Any]]:
+    """The rows a PRE-MERGE poller could have seen on that head.
+
+    The filter lives here rather than in the fixture so it is readable in the
+    assertion: a row that STARTED after the merge decision was written by a
+    post-merge trigger and is structurally invisible to the gate.
+    """
+
+    merged = head["merged_at"]
+    return [r for r in head["check_runs_all"] if (r.get("started_at") or "") <= merged]
+
+
+def _row(
+    name: str,
+    conclusion: str | None = "success",
+    *,
+    status: str = "completed",
+    run_id: int | None = None,
+    completed_at: str | None = "2026-09-20T12:00:00Z",
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": abs(hash(name)) % 10_000_000,
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "started_at": "2026-09-20T11:00:00Z",
+        "completed_at": completed_at,
+        "head_sha": "a" * 40,
+    }
+    if run_id is not None:
+        row["html_url"] = (
+            f"https://github.com/OmniNode-ai/omnibase_infra/actions/runs/{run_id}/job/1"
+        )
+    return row
+
+
+NOW = datetime(2026, 9, 20, 23, 0, 0, tzinfo=UTC)
+
+
+class TestExternalDefaultDenySweep:
+    """AC-1 / AC-3 / AC-4 — a red nothing else names must fail the umbrella."""
+
+    def test_red_unregistered_context_fails_and_the_same_set_green_passes(
+        self,
+    ) -> None:
+        """THE red test. Today's behaviour is the first assertion's falsifier.
+
+        Identical payloads apart from one conclusion, so the verdict flip is
+        attributable to that row and to nothing else.
+        """
+        green_rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        red = green_rows + [_row("Some Unregistered Gate", "failure")]
+        allgreen = green_rows + [_row("Some Unregistered Gate", "success")]
+
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=red,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+        assert "Some Unregistered Gate (failure)" in report
+
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=allgreen,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+
+    def test_the_pre_change_behaviour_is_reproducible_and_is_the_defect(self) -> None:
+        """Waive the name in layer 5 and the red greens — the old fail-open.
+
+        This is the control that proves the assertion above is about layer 5
+        and not about some other part of the module having changed.
+        """
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Some Unregistered Gate", "failure"))
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            sweep_exclusions=_sweep_waiver("Some Unregistered Gate"),
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+
+    @pytest.mark.parametrize(
+        "conclusion",
+        [
+            "failure",
+            "timed_out",
+            "action_required",
+            "startup_failure",
+            "stale",
+            "skipped",
+            "neutral",
+        ],
+    )
+    def test_the_bar_is_strict_and_only_success_passes(self, conclusion: str) -> None:
+        """OMN-18979, operator ruling 2026-09-21, replacing OMN-18960's bar.
+
+        `skipped`, `neutral` and `stale` now FAIL alongside the refusals. The
+        earlier refusal-only set, shipped beside an EMPTY registry, tolerated
+        exactly what a list would without writing any of it down. The by-design
+        non-green names are named in EXTERNAL_SWEEP_EXCLUSIONS instead.
+        """
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Some Unregistered Gate", conclusion))
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+        assert f"Some Unregistered Gate ({conclusion})" in report
+
+    def test_only_success_is_in_the_good_set(self) -> None:
+        assert frozenset({"success"}) == SWEEP_GOOD_CONCLUSIONS
+
+    def test_a_success_row_passes(self) -> None:
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Some Unregistered Gate", "success"))
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+
+    def test_a_skip_inside_the_rerun_window_is_pending_not_a_quiet_pass(
+        self,
+    ) -> None:
+        """OMN-18991 changed this from SUCCESS to PENDING, deliberately.
+
+        `skipped` is in this module's supersedable set, so a skip whose
+        producer is demonstrably about to re-run is held rather than turned
+        into a terminal refusal. It used to be held by passing QUIETLY, which
+        is a hole: a replacement that never arrived was never re-examined. It
+        is now PENDING, so the poller looks again, and the same row reds with
+        a named reason once the grace closes.
+        """
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(
+            _row(
+                "Some Unregistered Gate",
+                "skipped",
+                completed_at=(NOW - timedelta(seconds=30)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+            )
+        )
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_PENDING, report
+        assert "awaiting an automatic replacement" in report
+
+    def test_an_in_run_job_is_not_double_judged_by_layer_five(self) -> None:
+        """A soft-allowlisted in-run job also appears as a check-run.
+
+        Layer 3 admitted it deliberately; layer 5 must not overturn that from
+        the other side of the same head.
+        """
+        allowlisted = sorted(SOFT_ALLOWLIST)[0]
+        jobs = _all_gates("success") + [
+            {"name": allowlisted, "status": "completed", "conclusion": "failure"}
+        ]
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row(allowlisted, "failure"))
+        code, report = evaluate(
+            jobs,
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+        assert allowlisted not in report.split("external default-deny sweep")[1]
+
+    # -- AC-3, event scoping -------------------------------------------------
+
+    def test_a_non_pull_request_event_row_is_not_swept(self) -> None:
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Nightly Thing", "failure", run_id=777))
+        runs = [{"id": 777, "event": "schedule", "name": "Nightly", "path": "x.yml"}]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            workflow_runs=runs,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+
+    def test_a_pull_request_event_row_is_swept(self) -> None:
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Nightly Thing", "failure", run_id=777))
+        runs = [
+            {"id": 777, "event": "pull_request", "name": "Nightly", "path": "x.yml"}
+        ]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            workflow_runs=runs,
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+
+    def test_an_unattributable_row_is_swept_not_exempted(self) -> None:
+        """A GitHub App row carries no run URL, and an allow list would free it.
+
+        Measured: 20 such rows in the window, all from the change-control
+        writer, plus the code-scanning producer.
+        """
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("App Written Gate", "failure"))  # no html_url at all
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            workflow_runs=[
+                {"id": 1, "event": "pull_request", "name": "n", "path": "p"}
+            ],
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+        assert "App Written Gate (failure)" in report
+
+    def test_a_row_whose_run_is_absent_from_the_index_is_swept(self) -> None:
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Unlisted Run Gate", "failure", run_id=999))
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            workflow_runs=[{"id": 1, "event": "schedule", "name": "n", "path": "p"}],
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+
+    def test_omitting_the_workflow_runs_argument_enforces_rather_than_exempts(
+        self,
+    ) -> None:
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Nightly Thing", "failure", run_id=777))
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+
+    def test_resolve_check_run_event_reads_both_url_fields_and_fails_open_to_none(
+        self,
+    ) -> None:
+        events = check_run_event_index(
+            [{"id": 42, "event": "push"}, {"id": 0, "event": "push"}, {"id": 43}]
+        )
+        assert events == {42: "push"}
+        base = "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/42/job/9"
+        assert resolve_check_run_event({"html_url": base}, events) == "push"
+        assert resolve_check_run_event({"details_url": base}, events) == "push"
+        assert (
+            resolve_check_run_event({"html_url": "https://example.test/"}, events)
+            is None
+        )
+        assert resolve_check_run_event({}, events) is None
+
+    # -- AC-4, the report ----------------------------------------------------
+
+    def test_a_clean_sweep_records_what_it_looked_at(self) -> None:
+        """Rule 16 — a sweep that finds nothing and says nothing is not evidence."""
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows += [_row("Advisory A"), _row("Advisory B")]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+        assert "external default-deny sweep: 2 unregistered context(s) judged" in report
+
+
+class TestExternalSweepExclusions:
+    """AC-2 — the exclusion registry is closed-ended or it is an allowlist."""
+
+    def test_the_registry_holds_exactly_the_ten_measured_names(self) -> None:
+        """Under the strict bar, every by-design non-green name needs an entry.
+
+        OMN-18960 shipped this empty beside a weaker conclusion set, which the
+        2026-09-21 ruling identified as a hidden allowlist. These ten are every
+        name the measurement found non-green on any head, and naming them is
+        what makes the tolerance reviewable.
+        """
+        assert set(EXTERNAL_SWEEP_EXCLUSIONS) == {
+            "verify",
+            "occ-autobind / outcome",
+            "occ-autobind / mint status",
+            "occ-companion-effect / mint status",
+            "occ-autobind-manual-replay",
+            "occ-companion-effect-manual-replay",
+            "Docker Integration Tests",
+            "Security Scan (Trivy)",
+            "Image Size Analysis",
+            "Hostile Reviewer (adversarial gate)",
+        }
+
+    def test_every_entry_carries_a_reason_an_owner_and_both_dates(self) -> None:
+        for name, entry in EXTERNAL_SWEEP_EXCLUSIONS.items():
+            assert entry.reason.strip(), name
+            assert entry.ticket.startswith("OMN-"), name
+            assert entry.added == "2026-09-21", name
+            assert entry.expires == "2026-12-20", name
+
+    def test_no_entry_overlaps_the_registered_tuple(self) -> None:
+        """A name in both would be judged by layer 4 and never reach layer 5."""
+        assert not set(EXTERNAL_SWEEP_EXCLUSIONS) & set(EXPECTED_EXTERNAL_CONTEXTS)
+
+    def test_every_shipped_entry_is_wellformed(self) -> None:
+        assert validate_sweep_exclusions(EXTERNAL_SWEEP_EXCLUSIONS) == []
+
+    def test_no_shipped_entry_has_expired(self) -> None:
+        """The calendar tripwire.
+
+        An expiry reaches a person through THIS red test rather than through a
+        wedged pull request, because `active_sweep_exclusions` drops an expired
+        entry silently and re-arms the gate. Vacuous while the registry is
+        empty, and it is the assertion that stops the registry becoming
+        open-ended the day it is not.
+        """
+        _active, expired = active_sweep_exclusions(
+            EXTERNAL_SWEEP_EXCLUSIONS, now=datetime.now(UTC)
+        )
+        assert expired == (), (
+            "expired sweep exclusion(s) "
+            f"{expired}: re-argue the entry with fresh numbers and a new date, "
+            "or delete it and let the sweep judge the name again"
+        )
+
+    @pytest.mark.parametrize(
+        ("entry", "fragment"),
+        [
+            (
+                SweepExclusion("", "OMN-1", "2026-09-20", "2026-10-20"),
+                "reason is empty",
+            ),
+            (
+                SweepExclusion("r", "see the ticket", "2026-09-20", "2026-10-20"),
+                "is not an OMN-<number> reference",
+            ),
+            (SweepExclusion("r", "OMN-1", "soon", "2026-10-20"), "added 'soon'"),
+            (SweepExclusion("r", "OMN-1", "2026-09-20", ""), "expires ''"),
+            (
+                SweepExclusion("r", "OMN-1", "2026-09-20", "2026-09-20"),
+                "is not after added",
+            ),
+            (
+                SweepExclusion("r", "OMN-1", "2026-09-20", "2027-09-20"),
+                f"exceeds the {SWEEP_EXCLUSION_MAX_DAYS}d cap",
+            ),
+        ],
+    )
+    def test_a_malformed_entry_is_refused(
+        self, entry: SweepExclusion, fragment: str
+    ) -> None:
+        findings = validate_sweep_exclusions({"X": entry})
+        assert findings, "a malformed entry must produce a finding"
+        assert any(fragment in f for f in findings), findings
+
+    def test_a_malformed_entry_fails_the_gate_rather_than_warning(self) -> None:
+        """An unreviewable exception is worse than none: it reads as considered."""
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=[_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS],
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            sweep_exclusions={"X": SweepExclusion("", "nope", "x", "y")},
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+        assert "external sweep exclusion registry REFUSED" in report
+
+    def test_an_expired_entry_stops_excluding_and_says_so(self) -> None:
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Some Unregistered Gate", "failure"))
+        expired = {
+            "Some Unregistered Gate": SweepExclusion(
+                reason="owned elsewhere",
+                ticket="OMN-18960",
+                added="2026-08-01",
+                expires="2026-09-01",
+            )
+        }
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            sweep_exclusions=expired,
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+        assert "EXPIRED (no longer excluding): Some Unregistered Gate" in report
+
+    def test_a_missing_clock_admits_nothing(self) -> None:
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Some Unregistered Gate", "failure"))
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            sweep_exclusions=_sweep_waiver("Some Unregistered Gate"),
+        )
+        assert code == EXIT_FAILURE, report
+
+    def test_an_applied_exclusion_is_named_in_the_report(self) -> None:
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Some Unregistered Gate", "failure"))
+        _code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            sweep_exclusions=_sweep_waiver("Some Unregistered Gate"),
+            now=NOW,
+        )
+        assert "exclusions applied: Some Unregistered Gate" in report
+
+
+class TestExternalSweepAgainstRealHeads:
+    """AC-5 — proven on the real pre-change tree, with the counts recorded."""
+
+    PRS = ("3894", "3893", "3892")
+
+    def test_the_fixture_is_the_real_unfiltered_head_state(self) -> None:
+        """Positive control for the fixture itself before anything is read off it."""
+        fixture = _sweep_fixture()
+        assert set(fixture["pull_requests"]) == set(self.PRS)
+        for pr in self.PRS:
+            head = _sweep_head(pr)
+            assert len(head["check_runs_all"]) > 100, pr
+            assert len(head["workflow_runs"]) > 40, pr
+            assert len(head["in_run_job_names"]) > 40, pr
+            assert len(head["head_sha"]) == 40
+
+    @pytest.mark.parametrize("pr", PRS)
+    def test_merge_time_state_is_clean_and_the_sweep_really_looked(
+        self, pr: str
+    ) -> None:
+        """Zero failures AND a non-zero population — rule 16's two halves.
+
+        A zero-failure sweep over a zero-row population would be vacuous, so
+        the count is asserted beside the verdict.
+        """
+        head = _sweep_head(pr)
+        failures, _in_flight, swept, _excluded, _prov = evaluate_external_sweep(
+            _at_merge(head),
+            expected=EXPECTED_EXTERNAL_CONTEXTS,
+            in_run_names=frozenset(head["in_run_job_names"]),
+            self_name="CI Summary",
+            exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
+            events=check_run_event_index(head["workflow_runs"]),
+            now=NOW,
+        )
+        assert failures == [], failures
+        assert len(swept) >= 30, (pr, len(swept))
+
+    @pytest.mark.parametrize("pr", PRS)
+    def test_the_registry_is_load_bearing_on_every_real_head(self, pr: str) -> None:
+        """The falsification control for the zero above.
+
+        Strip the registry and the same real head must fail. Without this, a
+        clean result could mean the sweep found nothing rather than that the
+        entries did their work.
+        """
+        head = _sweep_head(pr)
+        failures, _in_flight, _swept, _excluded, _prov = evaluate_external_sweep(
+            _at_merge(head),
+            expected=EXPECTED_EXTERNAL_CONTEXTS,
+            in_run_names=frozenset(head["in_run_job_names"]),
+            self_name="CI Summary",
+            exclusions={},
+            events=check_run_event_index(head["workflow_runs"]),
+            now=NOW,
+        )
+        assert failures, "stripping the registry changed nothing, so it is inert"
+
+    @pytest.mark.parametrize("pr", PRS)
+    def test_post_merge_state_carries_reds_the_merge_time_state_does_not(
+        self, pr: str
+    ) -> None:
+        """THE positive control for the zero above (rule 16).
+
+        The full post-merge row set for these same heads carries genuinely red
+        rows from `runtime-rebuild-trigger.yml` jobs gated on
+        `github.event.pull_request.merged == true`. They prove the sweep
+        detects a red when one is present, and they are ALSO the reason the
+        merge-time slice is the honest population: a pre-merge poller cannot
+        see a row that does not exist yet.
+        """
+        head = _sweep_head(pr)
+        failures, _in_flight, _swept, _excluded, _prov = evaluate_external_sweep(
+            head["check_runs_all"],
+            expected=EXPECTED_EXTERNAL_CONTEXTS,
+            in_run_names=frozenset(head["in_run_job_names"]),
+            self_name="CI Summary",
+            exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
+            events=check_run_event_index(head["workflow_runs"]),
+            now=NOW,
+        )
+        assert failures, "the positive control found no red — the sweep is vacuous"
+        assert any("Verify dev lane applied the redeploy" in f for f in failures), (
+            failures
+        )
+
+    def test_flipping_one_real_row_flips_the_verdict(self) -> None:
+        """A synthetic red on an otherwise-clean REAL payload, and back again."""
+        head = _sweep_head("3894")
+        rows = _at_merge(head)
+        target = "Handler Contract Compliance"
+        assert any(r["name"] == target for r in rows)
+
+        def _run(payload: list[dict[str, Any]]) -> list[str]:
+            failures, _f, _s, _e, _p = evaluate_external_sweep(
+                payload,
+                expected=EXPECTED_EXTERNAL_CONTEXTS,
+                in_run_names=frozenset(head["in_run_job_names"]),
+                self_name="CI Summary",
+                exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
+                events=check_run_event_index(head["workflow_runs"]),
+                now=NOW,
+            )
+            return failures
+
+        assert _run(rows) == []
+        flipped = [
+            {**r, "conclusion": "failure"} if r["name"] == target else r for r in rows
+        ]
+        assert _run(flipped) == [f"{target} (failure)"]
+        assert _run(rows) == []
+
+    def test_the_real_head_exercises_every_attribution_branch(self) -> None:
+        """The event index is not decoration: real heads hit all three arms."""
+        head = _sweep_head("3894")
+        events = check_run_event_index(head["workflow_runs"])
+        resolved = [
+            resolve_check_run_event(r, events)
+            for r in latest_check_run_rows(head["check_runs_all"]).values()
+        ]
+        assert "pull_request" in resolved
+        assert None in resolved, (
+            "no unattributable row — the fail-closed arm is untested"
+        )
+        assert len(events) > 40
+
+
+class TestTheSweepIsWiredIntoTheProductionPoller:
+    """The module can be perfect and the gate still ship inert.
+
+    ``tests/ci/test_gate_cli_passes_a_clock_omn17864.py`` records the incident
+    this guards against in full: a sibling port changed the gate module and not
+    that repository's poller, every unit test passed, strict type checking
+    passed, and the gate shipped COMPLETELY INERT. Layer 5 has the same shape —
+    with no ``--workflow-runs-file`` the sweep still runs, but its event
+    scoping resolves nothing, and with no CI change at all nothing would have
+    told anyone. These two assertions are the wiring.
+    """
+
+    def test_main_forwards_the_workflow_runs_file_to_evaluate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from scripts.ci import ci_summary_gate
+
+        captured: dict[str, Any] = {}
+
+        def _fake_evaluate(_jobs: object, **kwargs: object) -> tuple[int, str]:
+            captured.update(kwargs)
+            return ci_summary_gate.EXIT_PENDING, "stubbed"
+
+        monkeypatch.setattr(ci_summary_gate, "evaluate", _fake_evaluate)
+        (tmp_path / "jobs.json").write_text("[]", encoding="utf-8")
+        (tmp_path / "check_runs.json").write_text(
+            '{"check_runs": []}', encoding="utf-8"
+        )
+        (tmp_path / "workflow_runs.json").write_text(
+            '{"workflow_runs": [{"id": 7, "event": "push"}]}', encoding="utf-8"
+        )
+        ci_summary_gate.main(
+            [
+                "--jobs-file",
+                str(tmp_path / "jobs.json"),
+                "--check-runs-file",
+                str(tmp_path / "check_runs.json"),
+                "--workflow-runs-file",
+                str(tmp_path / "workflow_runs.json"),
+            ]
+        )
+        assert captured["workflow_runs"] == [{"id": 7, "event": "push"}]
+
+    def test_an_unreadable_workflow_runs_file_sweeps_rather_than_exempts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from scripts.ci import ci_summary_gate
+
+        captured: dict[str, Any] = {}
+
+        def _fake_evaluate(_jobs: object, **kwargs: object) -> tuple[int, str]:
+            captured.update(kwargs)
+            return ci_summary_gate.EXIT_PENDING, "stubbed"
+
+        monkeypatch.setattr(ci_summary_gate, "evaluate", _fake_evaluate)
+        (tmp_path / "jobs.json").write_text("[]", encoding="utf-8")
+        ci_summary_gate.main(
+            [
+                "--jobs-file",
+                str(tmp_path / "jobs.json"),
+                "--workflow-runs-file",
+                str(tmp_path / "does-not-exist.json"),
+            ]
+        )
+        assert captured["workflow_runs"] is None
+
+    def test_the_poller_fetches_the_runs_and_passes_the_flag(self) -> None:
+        """Read off ci.yml itself, so a module-only change is a RED test."""
+
+        step = _ci_summary_poll_step_text()
+        assert "actions/runs?head_sha=${HEAD_SHA}&per_page=100" in step, (
+            "the poller does not fetch the workflow runs, so layer 5 resolves "
+            "no events and every row is swept blind"
+        )
+        assert "--workflow-runs-file workflow_runs.json" in step, (
+            "the poller does not pass the workflow-runs file to the gate"
+        )
+        assert "rm -f check_runs.json workflow_runs.json" in step, (
+            "a stale workflow_runs.json from an earlier poll would attribute "
+            "rows against the wrong index"
+        )
+
+
+class TestSupersededCancellationOrdering:
+    """OMN-18979: a cancelled superseded attempt must not outrank its replacement.
+
+    Raised against the merged sweep: a superseding attempt cancels a job, the
+    head then carries both a cancelled row and a successful one for the same
+    context name, and the sweep reported the cancelled one on a pull request
+    whose tests had all passed. A rerun cleared it.
+
+    MEASURED BEFORE CHANGING ANYTHING, because the two directions named in the
+    report already behaved correctly. Across 5 recent heads carrying 8 names
+    with BOTH a cancelled and a successful row, latest-wins picked the
+    cancelled row ZERO times. The reachable hazard is narrower and is the
+    third case below: `started_at` is second-granular, so a cancellation
+    written in the same second as its replacement fell through to the
+    check-run id, which orders by CREATION and can put the cancellation last.
+    """
+
+    @staticmethod
+    def _pair(
+        first: tuple[int, str, str, str], second: tuple[int, str, str, str]
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": i,
+                "name": "Gate X",
+                "status": "completed",
+                "conclusion": c,
+                "started_at": s,
+                "completed_at": e,
+                "head_sha": "a" * 40,
+            }
+            for (i, c, s, e) in (first, second)
+        ]
+
+    def _sweep(self, rows: list[dict[str, Any]]) -> list[str]:
+        failures, _f, _s, _e, _p = evaluate_external_sweep(
+            rows,
+            expected=(),
+            in_run_names=frozenset(),
+            self_name="CI Summary",
+            exclusions={},
+            events={},
+            now=NOW,
+        )
+        return failures
+
+    def test_cancelled_then_succeeded_reads_green(self) -> None:
+        """The replacement is the verdict about the head."""
+        rows = self._pair(
+            (1, "cancelled", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "success", "2026-09-20T10:05:00Z", "2026-09-20T10:09:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "success"
+        assert self._sweep(rows) == []
+
+    def test_succeeded_then_cancelled_still_reads_red(self) -> None:
+        """The other direction must NOT be relaxed.
+
+        A cancellation that genuinely comes last is the newest thing known
+        about the head, and treating it as green because an older success
+        exists is the stale-green this module must never manufacture.
+        """
+        rows = self._pair(
+            (1, "success", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "cancelled", "2026-09-20T10:05:00Z", "2026-09-20T10:09:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "cancelled"
+        failures = self._sweep(rows)
+        assert len(failures) == 1, failures
+        # OMN-18991: a settled cancellation reports its own reason token and
+        # names the remedy, because a re-run clears it and a code change does
+        # not. A reader who cannot tell those apart hunts a defect that is
+        # not in the diff.
+        assert failures[0].startswith("Gate X (cancelled_without_replacement:")
+        assert "re-running the producer clears it" in failures[0]
+
+    def test_a_same_second_pair_is_ordered_by_completion_not_by_id(self) -> None:
+        """THE case the refinement fixes, and the red test for it.
+
+        Both rows share a `started_at`, and the cancellation carries the
+        HIGHER check-run id because ids order by creation. Under the previous
+        tie-break the cancellation won and the sweep reddened a head whose
+        replacement had already succeeded.
+        """
+        rows = self._pair(
+            (9, "cancelled", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "success", "2026-09-20T10:00:00Z", "2026-09-20T10:02:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "success"
+        assert self._sweep(rows) == []
+
+    def test_a_same_second_pair_still_reds_when_the_cancellation_completed_last(
+        self,
+    ) -> None:
+        """The mirror of the case above, so the refinement is not a blanket pass."""
+        rows = self._pair(
+            (9, "success", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "cancelled", "2026-09-20T10:00:00Z", "2026-09-20T10:02:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "cancelled"
+        failures = self._sweep(rows)
+        assert len(failures) == 1, failures
+        # OMN-18991: a settled cancellation reports its own reason token and
+        # names the remedy, because a re-run clears it and a code change does
+        # not. A reader who cannot tell those apart hunts a defect that is
+        # not in the diff.
+        assert failures[0].startswith("Gate X (cancelled_without_replacement:")
+        assert "re-running the producer clears it" in failures[0]
+
+    def test_the_refinement_changes_nothing_when_started_at_differs(self) -> None:
+        """Every case measured on this repository has distinct start times.
+
+        Pinning that keeps the change a refinement: a later id can still break
+        a full tie, and the ordering on distinct start times is untouched.
+        """
+        rows = self._pair(
+            (99, "failure", "2026-09-20T10:00:00Z", "2026-09-20T10:30:00Z"),
+            (1, "success", "2026-09-20T10:05:00Z", "2026-09-20T10:06:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "success"
+
+
+class TestLoneCancellationOnBothSidesOfTheGrace:
+    """OMN-18991, the ruling's case, and the one the field report actually hit.
+
+    MEASURED on omnibase_infra#3913, head 236f36698. Three gate contexts were
+    cancelled at 10:39:56Z by a superseding attempt. The poller's final
+    verdict landed at 10:50:36Z, forty seconds after the grace closed, and it
+    failed on those cancellations. The successful replacements started at
+    10:53:42Z, THREE MINUTES after the poller gave up. Reading that head now
+    shows six rows and resolves green under both the old ordering key and the
+    new one, which is why the report read as a collapse bug and was not one:
+    at verdict time there was ONE row per name and it was the cancellation.
+
+    The replacement took 13 minutes 45 seconds against a grace of ten. That
+    gap is reported as a measurement, not silently widened.
+
+    The ruling: inside the grace a lone cancellation is PENDING; outside it
+    reds, under a reason that names the remedy so the reader knows a re-run
+    clears it rather than a code change.
+    """
+
+    @staticmethod
+    def _lone_cancellation(age_s: int) -> list[dict[str, Any]]:
+        """One cancelled row and NO replacement, aged `age_s` seconds."""
+
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(
+            _row(
+                "Superseded Gate",
+                "cancelled",
+                completed_at=(NOW - timedelta(seconds=age_s)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+            )
+        )
+        return rows
+
+    def test_inside_the_grace_it_is_pending_and_not_a_pass(self) -> None:
+        """A replacement is demonstrably due, so the poller looks again.
+
+        PENDING rather than SUCCESS matters: passing quietly would let a
+        cancellation that is never replaced through on the next poll's
+        silence, which is the hole this closes.
+        """
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=self._lone_cancellation(CANCELLED_SUPERSESSION_GRACE_S - 60),
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_PENDING, report
+        assert "Superseded Gate" in report
+        assert "awaiting an automatic replacement" in report
+
+    def test_outside_the_grace_it_reds_under_its_own_named_reason(self) -> None:
+        """And the reason says what to do, not only what happened."""
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=self._lone_cancellation(CANCELLED_SUPERSESSION_GRACE_S + 60),
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+        assert "cancelled_without_replacement" in report
+        assert "no replacement row" in report
+        assert "re-running the producer clears it" in report
+
+    def test_the_reason_is_distinct_from_an_ordinary_refusal(self) -> None:
+        """A producer saying no and a replacement never arriving are not the same.
+
+        Reporting both as `(cancelled)` sent a reader looking for a defect in
+        a diff that had none, which is what happened on #3913.
+        """
+        _c, ordinary = evaluate(
+            _all_gates("success"),
+            check_runs=[
+                *[_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS],
+                _row("Superseded Gate", "failure"),
+            ],
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert "Superseded Gate (failure)" in ordinary
+        assert "cancelled_without_replacement" not in ordinary
+
+    def test_a_replacement_on_the_same_head_clears_it_without_a_grace(self) -> None:
+        """The #3913 head as it reads NOW: the cancellation is not lone.
+
+        Once the replacement exists, resolution picks it and the age of the
+        cancellation stops mattering at all. This is the control that keeps
+        the two mechanisms apart: ordering handles a replaced cancellation,
+        the grace handles an unreplaced one.
+        """
+        rows = self._lone_cancellation(CANCELLED_SUPERSESSION_GRACE_S + 3600)
+        rows.append(
+            _row(
+                "Superseded Gate",
+                "success",
+                completed_at=(NOW - timedelta(seconds=10)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+            )
+        )
+        # the replacement started later, as it does on a real re-run
+        rows[-1]["started_at"] = "2026-09-20T23:00:00Z"
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+        assert "cancelled_without_replacement" not in report

@@ -25,7 +25,25 @@ The generated block is delimited by HTML comments so it can be diffed in CI:
 
 CI (lane-census-staleness.yml) fails if:
   - The snapshot is older than MAX_AGE_DAYS
-  - The table in CLAUDE.md does not match what this script would generate
+  - The committed snapshot disagrees with the manifest (check_lane_census_drift.py)
+  - A manifest lane has no explicit entry in this module's port or boundary map
+
+CORRECTED 2026-09-21 (OMN-18949). The third line here until today read "the
+table in CLAUDE.md does not match what this script would generate". No such
+check existed: the workflow invoked this script with neither --check nor
+--update-claude-md, as a smoke test that it does not crash, and never compared
+its output to anything. The block lives in omni_home/CLAUDE.md, a DIFFERENT
+repository that this repo's CI does not check out, which is why the comparison
+was never built and why the docstring asserting it stood for months.
+
+--check PATH now performs that comparison for a caller who HAS both trees. What
+CI enforces in-repo is the half that needs no second checkout: every manifest
+lane must carry an explicit entry in _LANE_PORT_MAP and _LANE_BOUNDARY below.
+Those maps are the generator's own static state, separate from the manifest, so
+a lane added to the manifest and forgotten here renders an em-dash — visually
+identical to a lane that genuinely has no ports. Silence and a declared absence
+must not look the same, which is why the sentinels below are explicit values
+rather than a missing key.
 
 Usage:
   # Print the generated block to stdout:
@@ -39,6 +57,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import re
 import sys
@@ -55,6 +74,13 @@ _DEFAULT_SNAPSHOT = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
 # Lane port map — static configuration that doesn't change per census but IS
 # part of the lane definition. Kept here rather than in the manifest because
 # port assignments are infra topology constants, not census state.
+# Two explicit sentinels, so a MISSING key is always a defect and never a
+# reading. Rendered output is identical for judge today; the difference is that
+# the gate can now tell "this lane declares no runtime ports" apart from "nobody
+# has written this lane's ports down", which the em-dash alone cannot.
+_PORTS_NONE: dict[str, str] = {"main": "—", "effects": "—"}
+_PORTS_UNDECLARED: dict[str, str] = {"main": "not declared", "effects": "not declared"}
+
 _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     "dev": {"main": "8085", "effects": "8086"},
     "stability-test": {"main": "18085", "effects": "18086"},
@@ -68,7 +94,7 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # the lane manifest's pool comment, which is where a reader who meets them
     # will be. This is the lab compose lane only; production is the AWS
     # `onex-prod` namespace and has no row here in the first place.
-    "judge": {"main": "—", "effects": "—"},
+    "judge": _PORTS_NONE,
     # OMN-17143 — collaborator lane for Lakshman Patel. This block was verified free
     # on .201 by read-only `ss -ltn` on 2026-08-30 and is BOUND by that lane as of
     # 2026-09-02 (OMN-17532 — the lane is built and running). Note the near-miss: the
@@ -87,6 +113,21 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # API 23002/33002 — which are declared in the lane manifest's reserved block.
     "prepr-1": {"main": "28085", "effects": "28086"},
     "prepr-2": {"main": "38085", "effects": "38086"},
+    # OMN-18949 — both of these were ABSENT from this map and rendered an
+    # em-dash for that reason alone, which read exactly like a declared "no
+    # ports". They are declared now, and they are declared DIFFERENTLY,
+    # because they are different states.
+    #
+    # ci-bus is a broker and nothing else: its own boundary line below says it
+    # is not a runtime lane, so it has no runtime main/effects pair to name.
+    # That is a real absence.
+    "ci-bus": _PORTS_NONE,
+    # dogfood declares a runtime service in the manifest, so it plausibly has a
+    # pair — but no port block has ever been recorded for it and this lane
+    # cannot invent one by reading a compose file it has not verified on the
+    # host. UNDECLARED is the honest value and it renders as such, so a reader
+    # is told the number is missing rather than told there is none.
+    "dogfood": _PORTS_UNDECLARED,
 }
 
 _LANE_BOUNDARY: dict[str, str] = {
@@ -116,7 +157,102 @@ _LANE_BOUNDARY: dict[str, str] = {
         "ephemeral pre-PR verify slot — one branch, destroyed at end of run; "
         "never a proof lane and never sourced for stability/prod grants"
     ),
+    # OMN-18949 — absent from this map, so the lane rendered an em-dash in the
+    # one column whose whole job is to say what a lane may be used for. The
+    # text is the manifest's own dogfood comment, not a new assertion: this
+    # lane reads the boundary out of the declaration rather than deciding it.
+    "dogfood": (
+        "prospective dogfood lane (OMN-18693) — optional, not deployed; no "
+        "production or runtime evidence is asserted for it, and it is never "
+        "a proof lane"
+    ),
 }
+
+
+def undeclared_lanes(
+    manifest: dict[str, Any],
+    *,
+    port_map: dict[str, dict[str, str]] | None = None,
+    boundary: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
+    """Manifest lanes with no explicit entry in this module's static maps.
+
+    The maps are the generator's OWN state, kept deliberately out of the
+    manifest because ports and boundaries are topology constants rather than
+    census state. The cost of that split is this failure: a lane added to the
+    manifest and forgotten here still renders a row, with an em-dash in the
+    port and boundary columns — indistinguishable from a lane that genuinely
+    has neither. The generated table then reads as complete while saying
+    nothing about a lane that exists.
+
+    Returns (lane, which_map) pairs. Empty is the healthy state, and the caller
+    owes it a positive control.
+    """
+    ports = _LANE_PORT_MAP if port_map is None else port_map
+    bounds = _LANE_BOUNDARY if boundary is None else boundary
+    missing: list[tuple[str, str]] = []
+    for lane in manifest.get("lanes", {}):
+        if lane not in ports:
+            missing.append((lane, "_LANE_PORT_MAP"))
+        if lane not in bounds:
+            missing.append((lane, "_LANE_BOUNDARY"))
+    return missing
+
+
+def orphan_map_entries(
+    manifest: dict[str, Any],
+    *,
+    port_map: dict[str, dict[str, str]] | None = None,
+    boundary: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
+    """Static-map keys naming a lane the manifest no longer declares.
+
+    The other direction, and the one that produced the stale `prod` row this
+    map carried after OMN-18320 retired that lane: an entry nothing renders is
+    invisible until its port numbers are reused by something else.
+    """
+    # The maps are injectable so the OMN-18949 incident replay can drive THIS
+    # function -- the real guard -- with the maps captured out of the object
+    # store at the commit that failed, rather than a reconstruction of them.
+    # Default None means the live module state, which is what CI uses.
+    ports = _LANE_PORT_MAP if port_map is None else port_map
+    bounds = _LANE_BOUNDARY if boundary is None else boundary
+    lanes = set(manifest.get("lanes", {}))
+    orphans: list[tuple[str, str]] = []
+    for lane in ports:
+        if lane not in lanes:
+            orphans.append((lane, "_LANE_PORT_MAP"))
+    for lane in bounds:
+        if lane not in lanes:
+            orphans.append((lane, "_LANE_BOUNDARY"))
+    return orphans
+
+
+def extract_block(text: str) -> str | None:
+    """Return the GENERATED_LANE_TABLE block from a document, or None."""
+    pattern = re.compile(
+        re.escape(_BEGIN_MARKER) + r".*?" + re.escape(_END_MARKER),
+        re.DOTALL,
+    )
+    match = pattern.search(text)
+    return match.group(0) if match else None
+
+
+def comparable(block: str) -> list[str]:
+    """A block reduced to the lines a drift comparison may depend on.
+
+    The `generated:` line carries the wall-clock time of whichever run wrote
+    it, so a byte comparison between a freshly rendered block and a committed
+    one differs on EVERY run. Dropping that one line is what makes --check a
+    content comparison rather than a clock comparison; every other line,
+    including the `verified:` census timestamp, is content and is compared.
+    """
+    return [
+        line.rstrip()
+        for line in block.splitlines()
+        if not line.strip().startswith("generated:")
+    ]
+
 
 _BEGIN_MARKER = "<!-- GENERATED_LANE_TABLE BEGIN"
 _END_MARKER = "<!-- GENERATED_LANE_TABLE END -->"
@@ -283,6 +419,48 @@ def update_claude_md(claude_md_path: Path, new_block: str) -> bool:
     return True
 
 
+def _run_check(target: Path, expected_block: str) -> int:
+    """--check: exit 0 when the target's block matches, 1 on any other outcome."""
+    try:
+        content = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(
+            f"FAIL: cannot read {target}: {exc}\n"
+            "  An unreadable target is a failed check, never a passed one.",
+            file=sys.stderr,
+        )
+        return 1
+
+    found = extract_block(content)
+    if found is None:
+        print(
+            f"FAIL: no GENERATED_LANE_TABLE block in {target}.\n"
+            "  There is nothing to compare, which is a failure and not a pass.",
+            file=sys.stderr,
+        )
+        return 1
+
+    want = comparable(expected_block)
+    have = comparable(found)
+    if want == have:
+        print(f"OK: the lane block in {target} matches the manifest and snapshot")
+        return 0
+
+    print(
+        f"FAIL: the lane block in {target} is STALE against the manifest.",
+        file=sys.stderr,
+    )
+    print(
+        "  Regenerate it with --update-claude-md; do not hand-edit the block.",
+        file=sys.stderr,
+    )
+    for line in difflib.unified_diff(
+        have, want, fromfile=f"{target} (committed)", tofile="generated", lineterm=""
+    ):
+        print(f"  {line}", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate the CLAUDE.md GENERATED_LANE_TABLE block (OMN-13034)"
@@ -305,6 +483,20 @@ def main(argv: list[str] | None = None) -> int:
         metavar="CLAUDE_MD_PATH",
         help="Update the GENERATED_LANE_TABLE block in the given CLAUDE.md in-place",
     )
+    parser.add_argument(
+        "--check",
+        type=Path,
+        metavar="CLAUDE_MD_PATH",
+        help=(
+            "OMN-18949. Compare the block in the given CLAUDE.md against what "
+            "this manifest and snapshot would generate and exit 1 on any "
+            "difference, writing nothing. The `generated:` provenance line is "
+            "excluded from the comparison because it carries the writing run's "
+            "wall clock; every other line is content. An absent block, an "
+            "unreadable file and a mismatch each exit 1 -- this never passes "
+            "by finding nothing to compare"
+        ),
+    )
     args = parser.parse_args(argv)
 
     manifest = _load_manifest(args.manifest)
@@ -318,6 +510,9 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     block = generate_block(manifest, snapshot)
+
+    if args.check:
+        return _run_check(args.check, block)
 
     if args.update_claude_md:
         success = update_claude_md(args.update_claude_md, block)

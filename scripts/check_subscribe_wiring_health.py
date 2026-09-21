@@ -74,6 +74,17 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # it as the caller for chain-canary link 5; this repository scan cannot see
     # the producer contract.
     "onex.evt.omnimarket.delegate-skill-completed.v1": "Published by omnimarket node_delegate_skill_orchestrator (cross-repo); consumed by the OMN-16964 infra chain-ledger writer | owner: lakshman | expiry: 2026-12-01",
+    # OMN-18937: the OTHER terminal, from the same producer and the same
+    # declaration. node_delegate_skill_orchestrator declares BOTH under
+    # `runtime_dispatch.terminal_events` (success/failure) and publishes both;
+    # the in-repo producer mirror is src/omnibase_infra/runtime/topics.yaml
+    # (OMN-13202). This entry exists for the same cross-repo reason as the
+    # success terminal above and for no other: the publisher is real and
+    # declared, just not in a contract this scan can read. It is NOT a gap
+    # being tolerated. Both infra consumers now subscribe -- the ledger
+    # projection, which is the only writer of public.event_ledger, and the
+    # chain-ledger writer, which is dispatched BY the terminal.
+    "onex.evt.omnimarket.delegate-skill-failed.v1": "Published by omnimarket node_delegate_skill_orchestrator as its failure terminal (runtime_dispatch.terminal_events.failure), cross-repo; consumed by the OMN-18937 ledger projection and chain-ledger writer | owner: jonah | expiry: 2026-12-01",
     # Pattern B dispatch commands enter through local runtime transport / skill clients;
     # RuntimePatternBBroker consumes them but no contract-declared node publishes them.
     "onex.cmd.omnibase-infra.pattern-b-dispatch.v1": "Published by local runtime transport / runtime-backed skill clients | owner: jonah | expiry: 2026-12-01",

@@ -30,6 +30,47 @@ set -u
 : "${POSTGRES_USER:?POSTGRES_USER must be set}"
 : "${POSTGRES_DB:?POSTGRES_DB must be set}"
 
+# ---- BEGIN pre-PR verify slot fence (OMN-18892) ----
+# THIS SCRIPT PROVISIONS THE DEV LANE'S SET, AND ONLY EVER THAT.
+#
+# Every database and role name below is an UNSUFFIXED LITERAL, and both
+# role-creating helpers end their existing-role branch in an unconditional
+# `ALTER ROLE <literal> WITH LOGIN PASSWORD` (create_role, and
+# create_login_only_role). Roles are CLUSTER-WIDE objects. Running this script
+# against a SHARED server while intending to provision something other than the
+# dev set therefore does not provision that other thing -- it rewrites the dev
+# lane's role passwords for the whole cluster, and the dev lane's containers,
+# holding the old values in their environment, begin failing authentication at
+# their next reconnect. That is the hazard epic OMN-18888 named as a live sharp
+# edge for ANY second consumer of the shared server, verify slot or not.
+#
+# A caller that has set ONEX_DB_SLOT has said, in the only way this script can
+# read, that it means a slot and not the dev lane. So it is refused here rather
+# than allowed to do the opposite of what it was asked. There is no suffixing
+# path in this file on purpose: a slot's set is provisioned by
+# scripts/provision_db_slot.sh, which creates only suffixed objects and refuses
+# to alter a role that is not a member of the slot's own group role.
+#
+# In practice this refusal fires only on a HAND invocation. Postgres runs this
+# script from /docker-entrypoint-initdb.d only when the data directory is empty,
+# and a slot shares a warm volume -- so the seam a slot really reaches is
+# scripts/run-forward-migrations.sh, which carries its own fence of the same
+# name. The plan named this file as the hazard; both carry it, and only that one
+# is on a slot's path. This refusal is the defence-in-depth half.
+#
+# UNSET IS BYTE-IDENTICAL: every lane running today sets nothing and the block
+# is inert. Pinned by tests/unit/infra/test_db_slot_provisioner_omn18892.py.
+if [ -n "${ONEX_DB_SLOT:-}" ]; then
+    echo "ERROR: slot_fence_refusal: ONEX_DB_SLOT='${ONEX_DB_SLOT}' is set." >&2
+    echo "       This script provisions the UNSUFFIXED dev-lane set, and every role" >&2
+    echo "       name in it is a cluster-wide literal whose password it resets" >&2
+    echo "       unconditionally on the existing-role branch. Running it under a slot" >&2
+    echo "       token would reset the dev lane's credentials rather than provision" >&2
+    echo "       the slot. Use scripts/provision_db_slot.sh --apply instead." >&2
+    exit 3
+fi
+# ---- END pre-PR verify slot fence (OMN-18892) ----
+
 # =============================================================================
 # Configuration: database → role mapping
 # =============================================================================

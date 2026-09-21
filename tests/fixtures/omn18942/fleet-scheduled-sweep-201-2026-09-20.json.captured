@@ -1,0 +1,732 @@
+{
+  "repos": {
+    "OmniNode-ai/omni_home": {
+      "error": "gh api repos/OmniNode-ai/omni_home/actions/workflows?per_page=100 failed: gh: Not Found (HTTP 404)"
+    },
+    "OmniNode-ai/omnibase_compat": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/ci.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/security-scan.yml": {
+            "failures": 0,
+            "observed": 8,
+            "rate_pct": 0.0
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omnibase_core": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [
+          {
+            "failures": 2,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_core/actions/runs/35496778613",
+            "observed": 7,
+            "rate_pct": 28.571428571428573,
+            "workflow": ".github/workflows/ci.yml"
+          },
+          {
+            "failures": 1,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_core/actions/runs/34821430223",
+            "observed": 1,
+            "rate_pct": 100.0,
+            "workflow": ".github/workflows/handshake-policy-gate.yml"
+          }
+        ],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/ci.yml": {
+            "failures": 2,
+            "observed": 7,
+            "rate_pct": 28.6
+          },
+          ".github/workflows/cross-repo-validation.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/handshake-policy-gate.yml": {
+            "failures": 1,
+            "observed": 1,
+            "rate_pct": 100.0
+          },
+          ".github/workflows/security-scan.yml": {
+            "failures": 0,
+            "observed": 1,
+            "rate_pct": 0.0
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omnibase_infra": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [
+          {
+            "failures": 81,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35552591110",
+            "observed": 85,
+            "rate_pct": 95.29411764705883,
+            "workflow": ".github/workflows/chain-canary.yml"
+          },
+          {
+            "failures": 69,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35486608892",
+            "observed": 332,
+            "rate_pct": 20.783132530120483,
+            "workflow": ".github/workflows/dev-candidate-delivery-liveness.yml"
+          },
+          {
+            "failures": 321,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35546036947",
+            "observed": 559,
+            "rate_pct": 57.42397137745975,
+            "workflow": ".github/workflows/dev-lane-liveness.yml"
+          },
+          {
+            "failures": 95,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35544749069",
+            "observed": 171,
+            "rate_pct": 55.55555555555556,
+            "workflow": ".github/workflows/dev-lane-staleness.yml"
+          },
+          {
+            "failures": 242,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35555228217",
+            "observed": 333,
+            "rate_pct": 72.67267267267268,
+            "workflow": ".github/workflows/dlq-depth-monitor.yml"
+          },
+          {
+            "failures": 165,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35554798382",
+            "observed": 171,
+            "rate_pct": 96.49122807017544,
+            "workflow": ".github/workflows/msk-bastion-canary.yml"
+          },
+          {
+            "failures": 7,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35489215087",
+            "observed": 7,
+            "rate_pct": 100.0,
+            "workflow": ".github/workflows/nightly-integration.yml"
+          },
+          {
+            "failures": 4,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35552977879",
+            "observed": 8,
+            "rate_pct": 50.0,
+            "workflow": ".github/workflows/nightly-tests.yml"
+          },
+          {
+            "failures": 519,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35411312687",
+            "observed": 754,
+            "rate_pct": 68.83289124668435,
+            "workflow": ".github/workflows/pr-ci-zombie-detector.yml"
+          },
+          {
+            "failures": 27,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35549807209",
+            "observed": 29,
+            "rate_pct": 93.10344827586206,
+            "workflow": ".github/workflows/release-drift-monitor.yml"
+          }
+        ],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/arm64-verify-runner-proof.yml": {
+            "failures": 0,
+            "observed": 4,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/baselines-scheduler.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/branch-protection-audit.yml": {
+            "failures": 3,
+            "observed": 43,
+            "rate_pct": 7.0
+          },
+          ".github/workflows/chain-canary.yml": {
+            "failures": 81,
+            "observed": 85,
+            "rate_pct": 95.3
+          },
+          ".github/workflows/ci-bus-overlay-binding.yml": {
+            "failures": 0,
+            "observed": 86,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/contract-topic-graph.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/dep-provenance-lineage-live-canary.yml": {
+            "failures": 0,
+            "observed": 29,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/dependabot-runner-image-lock-refresh.yml": {
+            "failures": 0,
+            "observed": 334,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/dev-baseline-publisher.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/dev-candidate-delivery-liveness.yml": {
+            "failures": 69,
+            "observed": 332,
+            "rate_pct": 20.8
+          },
+          ".github/workflows/dev-lane-liveness.yml": {
+            "failures": 321,
+            "observed": 559,
+            "rate_pct": 57.4
+          },
+          ".github/workflows/dev-lane-staleness.yml": {
+            "failures": 95,
+            "observed": 171,
+            "rate_pct": 55.6
+          },
+          ".github/workflows/dlq-depth-monitor.yml": {
+            "failures": 242,
+            "observed": 333,
+            "rate_pct": 72.7
+          },
+          ".github/workflows/evidence-autoclose-sweep.yml": {
+            "failures": 3,
+            "observed": 148,
+            "rate_pct": 2.0
+          },
+          ".github/workflows/in-progress-probe-hygiene.yml": {
+            "failures": 0,
+            "observed": 29,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/lane-census-refresh.yml": {
+            "failures": 0,
+            "observed": 13,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/linear-demotion-guard-armed.yml": {
+            "failures": 0,
+            "observed": 29,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/linear-done-guard-armed.yml": {
+            "failures": 0,
+            "observed": 29,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/merge-queue-bypass-audit.yml": {
+            "failures": 0,
+            "observed": 29,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/msk-bastion-canary.yml": {
+            "failures": 165,
+            "observed": 171,
+            "rate_pct": 96.5
+          },
+          ".github/workflows/nightly-integration.yml": {
+            "failures": 7,
+            "observed": 7,
+            "rate_pct": 100.0
+          },
+          ".github/workflows/nightly-tests.yml": {
+            "failures": 4,
+            "observed": 8,
+            "rate_pct": 50.0
+          },
+          ".github/workflows/omnimarket-contract-pin-refresh.yml": {
+            "failures": 0,
+            "observed": 29,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/pr-ci-zombie-detector.yml": {
+            "failures": 519,
+            "observed": 754,
+            "rate_pct": 68.8
+          },
+          ".github/workflows/release-drift-monitor.yml": {
+            "failures": 27,
+            "observed": 29,
+            "rate_pct": 93.1
+          },
+          ".github/workflows/release-train-nightly.yml": {
+            "failures": 0,
+            "observed": 3,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/runner-broker-dispatch-wedge-rerun.yml": {
+            "failures": 0,
+            "observed": 686,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/runner-fleet-canary.yml": {
+            "failures": 8,
+            "observed": 617,
+            "rate_pct": 1.3
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omnibase_spi": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/security-scan.yml": {
+            "failures": 0,
+            "observed": 1,
+            "rate_pct": 0.0
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omniclaude": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [
+          {
+            "failures": 7,
+            "last_failure_url": "https://github.com/OmniNode-ai/omniclaude/actions/runs/35494855194",
+            "observed": 7,
+            "rate_pct": 100.0,
+            "workflow": ".github/workflows/public-repo-hygiene-audit.yml"
+          },
+          {
+            "failures": 129,
+            "last_failure_url": "https://github.com/OmniNode-ai/omniclaude/actions/runs/35441865666",
+            "observed": 171,
+            "rate_pct": 75.43859649122807,
+            "workflow": ".github/workflows/required-check-manifest-reconcile.yml"
+          }
+        ],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/auto-merge-stale-poller.yml": {
+            "failures": 0,
+            "observed": 612,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/occ-companion-merge-heal.yml": {
+            "failures": 0,
+            "observed": 182,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/public-repo-hygiene-audit.yml": {
+            "failures": 7,
+            "observed": 7,
+            "rate_pct": 100.0
+          },
+          ".github/workflows/required-check-manifest-reconcile.yml": {
+            "failures": 129,
+            "observed": 171,
+            "rate_pct": 75.4
+          },
+          ".github/workflows/required-check-skip-guard-caller.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/security-scan.yml": {
+            "failures": 0,
+            "observed": 8,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/sibling-lock-refresh.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omnidash": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/security-scan.yml": {
+            "failures": 0,
+            "observed": 1,
+            "rate_pct": 0.0
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omniintelligence": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/security-scan.yml": {
+            "failures": 0,
+            "observed": 1,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/sibling-lock-refresh.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omnimarket": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [
+          {
+            "failures": 6,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnimarket/actions/runs/35497333302",
+            "observed": 7,
+            "rate_pct": 85.71428571428571,
+            "workflow": ".github/workflows/delegation-regression-nightly.yml"
+          },
+          {
+            "failures": 1,
+            "last_failure_url": "https://github.com/OmniNode-ai/omnimarket/actions/runs/35300292715",
+            "observed": 4,
+            "rate_pct": 25.0,
+            "workflow": ".github/workflows/nightly-full-suite.yml"
+          }
+        ],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/delegation-regression-nightly.yml": {
+            "failures": 6,
+            "observed": 7,
+            "rate_pct": 85.7
+          },
+          ".github/workflows/nightly-full-suite.yml": {
+            "failures": 1,
+            "observed": 4,
+            "rate_pct": 25.0
+          },
+          ".github/workflows/occ-behavior-proof-backfill.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/required-check-skip-guard-caller.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/security-scan.yml": {
+            "failures": 0,
+            "observed": 8,
+            "rate_pct": 0.0
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omnimemory": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/security-scan.yml": {
+            "failures": 0,
+            "observed": 1,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/sibling-lock-refresh.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omninode_infra": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [
+          {
+            "failures": 6,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/35461353733",
+            "observed": 29,
+            "rate_pct": 20.689655172413794,
+            "workflow": ".github/workflows/customer-plane-reachability-probe.yml"
+          },
+          {
+            "failures": 4,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/35464290106",
+            "observed": 14,
+            "rate_pct": 28.571428571428573,
+            "workflow": ".github/workflows/m3-inpod-secret-chain.yml"
+          },
+          {
+            "failures": 2,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/35427756198",
+            "observed": 14,
+            "rate_pct": 14.285714285714286,
+            "workflow": ".github/workflows/m3-secret-exposure-chain.yml"
+          },
+          {
+            "failures": 14,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/35525596053",
+            "observed": 14,
+            "rate_pct": 100.0,
+            "workflow": ".github/workflows/m3-tenant-attribution-chain.yml"
+          },
+          {
+            "failures": 41,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/35555339100",
+            "observed": 53,
+            "rate_pct": 77.35849056603773,
+            "workflow": ".github/workflows/plans-board-reconciliation.yml"
+          },
+          {
+            "failures": 1,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/35321027869",
+            "observed": 1,
+            "rate_pct": 100.0,
+            "workflow": ".github/workflows/promotion-pr-opener.yml"
+          },
+          {
+            "failures": 57,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/35227248907",
+            "observed": 232,
+            "rate_pct": 24.56896551724138,
+            "workflow": ".github/workflows/publish-beta-board.yml"
+          },
+          {
+            "failures": 253,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/35396851246",
+            "observed": 482,
+            "rate_pct": 52.489626556016596,
+            "workflow": ".github/workflows/publish-plans-board.yml"
+          },
+          {
+            "failures": 6,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/35511660398",
+            "observed": 6,
+            "rate_pct": 100.0,
+            "workflow": ".github/workflows/publish-unshipped-board.yml"
+          },
+          {
+            "failures": 4,
+            "last_failure_url": "https://github.com/OmniNode-ai/omninode_infra/actions/runs/34938316362",
+            "observed": 29,
+            "rate_pct": 13.793103448275861,
+            "workflow": ".github/workflows/staging-green-bar.yml"
+          }
+        ],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/build-and-push-onex-api.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/customer-plane-reachability-probe.yml": {
+            "failures": 6,
+            "observed": 29,
+            "rate_pct": 20.7
+          },
+          ".github/workflows/host-sysctls-gate.yml": {
+            "failures": 3,
+            "observed": 170,
+            "rate_pct": 1.8
+          },
+          ".github/workflows/lab-store-mirror-parity.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/m3-inpod-secret-chain.yml": {
+            "failures": 4,
+            "observed": 14,
+            "rate_pct": 28.6
+          },
+          ".github/workflows/m3-provider-key-verdict.yml": {
+            "failures": 0,
+            "observed": 12,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/m3-secret-exposure-chain.yml": {
+            "failures": 2,
+            "observed": 14,
+            "rate_pct": 14.3
+          },
+          ".github/workflows/m3-tenant-attribution-chain.yml": {
+            "failures": 14,
+            "observed": 14,
+            "rate_pct": 100.0
+          },
+          ".github/workflows/plans-board-reconciliation.yml": {
+            "failures": 41,
+            "observed": 53,
+            "rate_pct": 77.4
+          },
+          ".github/workflows/promotion-pr-opener.yml": {
+            "failures": 1,
+            "observed": 1,
+            "rate_pct": 100.0
+          },
+          ".github/workflows/publish-beta-board.yml": {
+            "failures": 57,
+            "observed": 232,
+            "rate_pct": 24.6
+          },
+          ".github/workflows/publish-plans-board.yml": {
+            "failures": 253,
+            "observed": 482,
+            "rate_pct": 52.5
+          },
+          ".github/workflows/publish-unshipped-board.yml": {
+            "failures": 6,
+            "observed": 6,
+            "rate_pct": 100.0
+          },
+          ".github/workflows/refresh-plan-lifecycle.yml": {
+            "failures": 0,
+            "observed": 6,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/staging-green-bar.yml": {
+            "failures": 4,
+            "observed": 29,
+            "rate_pct": 13.8
+          }
+        }
+      }
+    },
+    "OmniNode-ai/omniweb": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [
+          {
+            "failures": 12,
+            "last_failure_url": "https://github.com/OmniNode-ai/omniweb/actions/runs/35411221791",
+            "observed": 29,
+            "rate_pct": 41.37931034482759,
+            "workflow": ".github/workflows/m3-customer-pass-chain.yml"
+          },
+          {
+            "failures": 10,
+            "last_failure_url": "https://github.com/OmniNode-ai/omniweb/actions/runs/35529875588",
+            "observed": 29,
+            "rate_pct": 34.48275862068966,
+            "workflow": ".github/workflows/m3-signon-walk-chain.yml"
+          }
+        ],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/m3-customer-pass-chain.yml": {
+            "failures": 12,
+            "observed": 29,
+            "rate_pct": 41.4
+          },
+          ".github/workflows/m3-key-lifecycle-chain.yml": {
+            "failures": 1,
+            "observed": 29,
+            "rate_pct": 3.4
+          },
+          ".github/workflows/m3-signon-walk-chain.yml": {
+            "failures": 10,
+            "observed": 29,
+            "rate_pct": 34.5
+          },
+          ".github/workflows/openapi-drift.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          }
+        }
+      }
+    },
+    "OmniNode-ai/onex_change_control": {
+      "alerts": [],
+      "heads_observed": 0,
+      "required_contexts": [],
+      "scheduled": {
+        "alerts": [
+          {
+            "failures": 7,
+            "last_failure_url": "https://github.com/OmniNode-ai/onex_change_control/actions/runs/35510430406",
+            "observed": 7,
+            "rate_pct": 100.0,
+            "workflow": ".github/workflows/staleness-monitor.yml"
+          }
+        ],
+        "threshold_pct": 10.0,
+        "window_days": 7,
+        "workflows": {
+          ".github/workflows/release-staleness-gate.yml": {
+            "failures": 0,
+            "observed": 7,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/security-scan.yml": {
+            "failures": 0,
+            "observed": 1,
+            "rate_pct": 0.0
+          },
+          ".github/workflows/staleness-monitor.yml": {
+            "failures": 7,
+            "observed": 7,
+            "rate_pct": 100.0
+          }
+        }
+      }
+    }
+  },
+  "schema": "nonrequired_check_report/v1"
+}

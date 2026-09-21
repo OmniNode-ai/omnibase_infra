@@ -7,7 +7,7 @@ runtime_profiles:
   - effects
 contract_version:
   major: 1
-  minor: 1
+  minor: 2
   patch: 0
 node_version: "0.2.0"
 description: >
@@ -20,10 +20,35 @@ input_model:
 event_bus:
   subscribe_topics:
     - "onex.evt.omnimarket.delegate-skill-completed.v1"
+    # OMN-18937: the OTHER terminal. This writer is dispatched BY the terminal
+    # event, so subscribed to the success terminal alone it never ran at all
+    # for a FAILED delegation and public.ledger_chain held nothing for it --
+    # not an incomplete chain, no chain. Paired with its handler_routing entry
+    # below per the OMN-14594 rule, and declared as an ALTERNATIVE of the
+    # terminal hop in chain_topology below rather than as a sixth hop.
+    - "onex.evt.omnimarket.delegate-skill-failed.v1"
 handler_routing:
   routing_strategy: "topic_match"
   handlers:
     - topic: "onex.evt.omnimarket.delegate-skill-completed.v1"
+      operation: "delegation_chain.record"
+      message_category: "event"
+      handler_type: "delegation_chain_ledger"
+      event_model:
+        name: "ModelDelegationTerminalPayload"
+        module: "omnibase_infra.nodes.node_delegation_chain_ledger_effect.models"
+      handler:
+        name: "HandlerDelegationChainLedger"
+        module: "omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_delegation_chain_ledger"
+      supported_operations:
+        - "delegation_chain.record"
+    # OMN-18937: the failure terminal, paired with its subscription above.
+    # Same handler and same operation: the chain evidence comes from the
+    # enclosing envelope and from event_ledger, never from the terminal
+    # body, so a terminal carrying an error instead of a result needs no
+    # separate path. ModelDelegationTerminalPayload is `extra="allow"` with
+    # only `correlation_id` required, which a failed terminal carries.
+    - topic: "onex.evt.omnimarket.delegate-skill-failed.v1"
       operation: "delegation_chain.record"
       message_category: "event"
       handler_type: "delegation_chain_ledger"
@@ -68,8 +93,22 @@ chain_topology:
   - topic: "onex.evt.omnibase-infra.routing-decision.v1"
     parent: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
   # The branch. Observed last in time, caused by the head.
+  #
+  # OMN-18937: ONE hop, two possible topics. A delegation terminates as
+  # either completed or failed and never both, so the failure terminal is an
+  # ALTERNATIVE name for this hop rather than a sixth hop. A sixth entry was
+  # rejected on two independent grounds: tier 2 grades positionally, so on a
+  # failed delegation the terminal sits at index 4 and would be graded
+  # against `...-completed`, failing the one row the canary reads its
+  # chain-wide verdict from; and every count of declared hops -- the
+  # chain-canary workflow's EXPECTED_LEDGER_HOPS among them -- would read
+  # five-of-six on every successful run forever. The declaration stays FIVE
+  # entries and `topic` stays the canonical name a `parent` citation and a
+  # position count resolve against.
   - topic: "onex.evt.omnimarket.delegate-skill-completed.v1"
     parent: "onex.cmd.omnimarket.delegate-skill.v1"
+    alternatives:
+      - "onex.evt.omnimarket.delegate-skill-failed.v1"
 writer:
   settle_attempts: 20
   settle_delay_ms: 250
@@ -93,9 +132,9 @@ metadata:
   description: "Evidence-derived writer for OMN-16025 chain-canary link 5."
   author: "OmniNode Team"
   created: "2026-09-13"
-  updated: "2026-09-16"
+  updated: "2026-09-20"
   ticket: "OMN-16964"
-  note: "OMN-18390: output_model dropped -- nothing consumed ModelLedgerChainWriteResult and the node has no publish_topics, so every declared output dead-lettered. OMN-18398: contract 1.0.1 records the refusal semantics above. The evidence this node reads is written only by node_ledger_projection_compute, whose subscription carried none of the four chain_topology topics below -- so the read was empty by construction and public.ledger_chain held zero rows on the .201 dev lane while this node reported success on every dispatch. That node's contract 1.3.0 now records and dispatches all four. OMN-18419: contract 1.1.0 turns chain_topology from an ordered list of topics into an ordered list of hops that each declare their parent topic, because the chain is a tree -- delegate-skill-completed branches off the head -- while the replay re-derived a line and graded the correct edge red. The same revision declares the delegation-request.v1 hop, which was always on the wire and never in the declaration."
+  note: "OMN-18390: output_model dropped -- nothing consumed ModelLedgerChainWriteResult and the node has no publish_topics, so every declared output dead-lettered. OMN-18398: contract 1.0.1 records the refusal semantics above. The evidence this node reads is written only by node_ledger_projection_compute, whose subscription carried none of the four chain_topology topics below -- so the read was empty by construction and public.ledger_chain held zero rows on the .201 dev lane while this node reported success on every dispatch. That node's contract 1.3.0 now records and dispatches all four. OMN-18419: contract 1.1.0 turns chain_topology from an ordered list of topics into an ordered list of hops that each declare their parent topic, because the chain is a tree -- delegate-skill-completed branches off the head -- while the replay re-derived a line and graded the correct edge red. The same revision declares the delegation-request.v1 hop, which was always on the wire and never in the declaration. OMN-18937: contract 1.2.0 subscribes and dispatches the delegation FAILURE terminal and declares it as an ALTERNATIVE of the terminal hop. Subscribed to the success terminal only, this writer was never dispatched at all for a failed delegation, so ledger_chain held no chain for it rather than an incomplete one -- and node_ledger_projection_compute did not record that terminal either, so even a dispatched writer would have read an empty relation. Both halves are fixed together; a producer-derived gate (tests/unit/nodes/test_delegation_terminal_topics_projected_omn18937.py) now derives the terminal set from the OMN-13202 producer mirror and refuses a consumer that covers less than the producer emits."
   tags:
     - "effect"
     - "delegation"

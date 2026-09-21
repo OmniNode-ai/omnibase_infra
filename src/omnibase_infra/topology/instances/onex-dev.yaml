@@ -87,6 +87,8 @@ databases:
             objects:
               - ci_attempt_outcome
               - consumer_flow_windows
+              - delegate_skill_command_claims
+              - dod_verify_runs
               - lab_lane_health
               - live_events
               - log_entries

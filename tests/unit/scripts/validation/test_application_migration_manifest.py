@@ -735,14 +735,57 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # file, so it is a second declaration here rather than an edit to the
     # first -- the same shape as node_projection_runner_fleet's pair above.
     #
-    # 200 -> 202 for OMN-18903 (decision 2 of epic OMN-18850), which adds TWO
-    # node-owned migrations: 0000_create_ci_attempt_outcome.sql, the read model
-    # holding one row per (repository, pull request, head commit, check, run
-    # attempt) with its cause code, and 0001_grant_omninode_runtime_ci_attempt_
-    # outcome.sql, which ISSUES the grants the topology only declares. Two
-    # declarations rather than one for the same reason as every pair above: the
-    # create runs as the migration role and the grant names the runtime role.
-    assert len(result.declarations) == 202
+    # 200 -> 202 for OMN-18900 (decision 3 of the 2026-09-20 decision-workflow
+    # eval plan), which adds TWO node-owned migrations in the same shape:
+    # 0000_create_dod_verify_runs.sql, one durable row per
+    # definition-of-done verification run keyed on ticket, correlation id and
+    # completion time, and 0001_grant_omninode_runtime_dod_verify_runs.sql,
+    # which ISSUES the grants the topology only declares -- the table half and
+    # the BIGSERIAL cursor's own standalone sequence, both asserted.
+    #
+    # 202 -> 203 for OMN-19031, which adds ONE node-owned migration:
+    # node_projection_consumer_flow/0005_add_node_id_ingest_index.sql. It
+    # indexes (node_id, ingest_sequence DESC) on
+    # omninode_internal.consumer_flow_windows, the predicate
+    # ConsumerFlowProjectionWriter runs once per heartbeat event. No index
+    # covered node_id, so the plan was a Parallel Seq Scan; measured on
+    # onex-dev at 10,352,358 rows / 5,842 MB it took 38.8s against the asyncpg
+    # pool's command_timeout of 30, and the writer wrote nothing for seven
+    # days. The ordinal is 0005 rather than the source tree's own next free
+    # 0002 because THIS tree carries four files the node tree does not, and
+    # 0002_reconcile_consumer_flow_window_shapes.sql is the one that does
+    # ADD COLUMN IF NOT EXISTS node_id UUID -- files apply in sort order, so a
+    # 0002 index would sort before the reconcile that guarantees its column.
+    #
+    # 203 -> 205 for OMN-18993 (blocking child of OMN-18887), which vendors TWO
+    # node-owned migrations in the pair shape used above for
+    # node_projection_lab_lane_health and node_projection_dod_verdict:
+    # node_delegate_skill_orchestrator/0001_delegate_skill_command_claims.sql,
+    # the durable correlation-keyed claim that stops a redelivered
+    # delegate-skill command from re-running the inference and billing it
+    # twice, and 0001_grant_omninode_runtime_delegate_skill_command_claims.sql,
+    # which ISSUES the grants the topology only declares. The grant rides in
+    # the owning node's own lineage rather than a shared file, so it is a
+    # second declaration here rather than an edit to the first.
+    #
+    # Domain omninode_internal, not tenant: per-node control state carrying no
+    # row-level security, so a tenant posture would assert an isolation the
+    # schema does not enforce. Vendored into omnibase_infra FIRST per the
+    # node-migration-vendor-parity ordering, ahead of omnimarket#2744.
+    #
+    # 205 -> 207 for OMN-18903 (decision 2 of epic OMN-18850), which vendors
+    # TWO node-owned migrations in the same pair shape as every pair above:
+    # node_projection_ci_attempt_outcome/0000_create_ci_attempt_outcome.sql,
+    # the read model holding one row per (repository, pull request, head
+    # commit, check, run attempt) with its cause code, and
+    # 0001_grant_omninode_runtime_ci_attempt_outcome.sql, which ISSUES the
+    # grants the topology only declares. Two declarations rather than one for
+    # the same reason as every pair above: the create runs as the migration
+    # role and the grant names the runtime role.
+    #
+    # Vendored into omnibase_infra FIRST per the node-migration
+    # vendor-parity ordering, ahead of omnimarket#2730.
+    assert len(result.declarations) == 207
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

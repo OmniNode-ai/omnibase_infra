@@ -215,8 +215,18 @@ class TestTheRefusalStillExplainsItself:
         assert "1360s mean service time" in reason
         assert str(WINDOW) in reason
 
-    def test_a_refused_run_is_indeterminate_not_a_fail(self) -> None:
-        """Unchanged, and the property that keeps this off the lane's record."""
+    def test_a_refused_run_is_queued_not_a_fail(self) -> None:
+        """The property that keeps this off the lane's record, sharpened.
+
+        This asserted ``INDETERMINATE`` until OMN-18976. The property it exists
+        for -- a refused run is never a finding about the LANE -- is unchanged
+        and is still asserted below; what changed is that the refusal now has
+        its own outcome instead of sharing one with "we could not establish the
+        budget". They needed separating because ``INDETERMINATE`` maps onto a
+        lab-pass check with ``ok: false``, so this branch was emitting a
+        terminal FAIL receipt and rule 24(b) was refusing a sha whose only
+        fault was being second in line. ``QUEUED`` emits no receipt at all.
+        """
         clock = _Clock(T0)
 
         def read_lane() -> LaneRevision:
@@ -252,7 +262,10 @@ class TestTheRefusalStillExplainsItself:
             sleep=clock.sleep,
             resolve_queue=lambda: _queue(2, 1360.5),
         )
-        assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+        assert result.outcome is EnumConvergenceOutcome.QUEUED
+        # The original property, restated so it cannot be lost in the rename:
+        # a queue this run cannot outlast is never a finding about the lane.
+        assert result.outcome is not EnumConvergenceOutcome.FAIL
         assert "2 command(s) ahead" in result.reason
         # And it cost the runner nothing: the refusal is answered up front.
         assert result.waited.total_seconds() == 0

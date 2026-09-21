@@ -177,7 +177,11 @@ _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.ci.lab_pass_receipt import read_lane_generation
+from scripts.ci.lab_pass_receipt import (
+    read_agent_loaded_code_sha,
+    read_lane_generation,
+    resolve_lane_binding,
+)
 
 DEFAULT_REPO = "OmniNode-ai/omnibase_infra"
 DEFAULT_BRANCH = "dev"
@@ -201,6 +205,15 @@ DEFAULT_MAX_AGE = timedelta(hours=2)
 # a 3-minute margin for bus hops and the compose recreate.
 DEFAULT_CONVERGENCE_WAIT = timedelta(minutes=25)
 DEFAULT_POLL_INTERVAL = timedelta(seconds=60)
+
+#: How old the agent's control-topic lag sample may be and still size a wait
+#: (OMN-18990). Matches ``MAX_LAG_SAMPLE_AGE_SECONDS`` in the agent's own
+#: ``queue_depth`` module, and is enforced here as well because this is the
+#: reader that does the arithmetic. Measured 2026-09-21: a sample taken before
+#: the running rebuild started reported ``commands_ahead=0`` while two commands
+#: waited, sized a 1560s bound from it, and gave up 16 minutes before the agent
+#: reached the command.
+MAX_QUEUE_LAG_AGE_SECONDS: Final[float] = 120.0
 
 # Values docker/Dockerfile.runtime or a non-workspace build can leave in the
 # label. Treated as "unknown", never as "matches".
@@ -585,17 +598,52 @@ class EnumConvergenceOutcome(StrEnum):
     expired. Nothing has been shown about the lane. It still exits non-zero and
     still leaves the receipt non-PASS, so rule 24(b) stays closed; it changes
     what the receipt says, not what it permits.
+
+    ``QUEUED`` is a statement about the QUEUE, and it is the one outcome that
+    emits NO RECEIPT (OMN-18976). The wait never started, because the deploy
+    agent holds commands ahead of this one and the horizon is longer than this
+    window can outlast -- the refusal :func:`queue_exceeds_bound` already
+    returns, whose own text ends "this asserts nothing about the lane".
+
+    Why it cannot be ``INDETERMINATE``. That value maps onto a lab-pass check
+    with ``ok: false``, and the receipt verdict rule is "PASS iff every check
+    passed", so a queued merge was emitted as a terminal ``FAIL`` and rule
+    24(b) refused a sha whose only fault was being second in line. Measured on
+    the .201 dev lane over two consecutive merges, each probed while the lane
+    still carried the PREVIOUS sha: artifact 10622202672 (``22a0ca18``, lane at
+    ``08db8946``) and artifact 10623436027 (``4277d6e9``, lane at
+    ``22a0ca18``), both FAIL on this check alone. Under a steady merge rate the
+    queue never drains inside one verify window, so that was the normal outcome
+    for a busy period, not an edge case.
+
+    Why NO receipt rather than a fourth check outcome. :class:`EnumLabPassResult`
+    is deliberately two-valued and states the contract: an in-flight or
+    indeterminate lab pass emits no receipt at all rather than a ``PENDING``
+    one, so the gate's "absent" branch and its "not yet passing" branch are the
+    same branch and both fail closed. A merge whose turn has not come is in
+    flight. **Nothing opens** -- the sha is still refused -- but the refusal is
+    now recoverable by a later convergence instead of being contradicted
+    forever by a FAIL artifact that says the lane misbehaved.
     """
 
     OK = "ok"
     FAIL = "fail"
     INDETERMINATE = "indeterminate"
+    QUEUED = "queued"
 
 
 #: The exit code the convergence mode returns for an unestablished budget.
 #: Distinct from 1 so a caller reading only the exit status can still tell the
 #: two apart, and non-zero so nothing treats it as a pass.
 EXIT_INDETERMINATE: Final[int] = 3
+
+#: The exit code the convergence mode returns when the wait never started,
+#: because the deploy agent's queue ahead of this command is longer than this
+#: window can outlast (OMN-18976). Distinct from ``EXIT_INDETERMINATE`` because
+#: the two call for different handling: an indeterminate run still writes a
+#: receipt saying it learnt nothing, and a queued one writes NO receipt at all.
+#: Non-zero, so nothing reads it as a pass.
+EXIT_QUEUED: Final[int] = 4
 
 _CORRELATION_ID_RE: Final = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -792,6 +840,12 @@ def convergence_check_outcome(outcome: EnumConvergenceOutcome) -> Any:
 
     Lives here rather than in the workflow's shell, because a mapping written
     in a ``run:`` block is a mapping nothing tests.
+
+    ``QUEUED`` maps to ``None``, which means NO CHECK AND THEREFORE NO RECEIPT
+    (OMN-18976). It is the only outcome that does. Every other value maps onto
+    a check exactly as it did before, and ``KeyError`` on an unknown outcome is
+    deliberate: a fifth verdict must decide this question rather than inherit
+    an answer.
     """
     from scripts.ci.lab_pass_receipt import EnumLabPassCheckOutcome
 
@@ -799,6 +853,7 @@ def convergence_check_outcome(outcome: EnumConvergenceOutcome) -> Any:
         EnumConvergenceOutcome.OK: EnumLabPassCheckOutcome.PASS,
         EnumConvergenceOutcome.FAIL: EnumLabPassCheckOutcome.FAIL,
         EnumConvergenceOutcome.INDETERMINATE: EnumLabPassCheckOutcome.INDETERMINATE,
+        EnumConvergenceOutcome.QUEUED: None,
     }[outcome]
 
 
@@ -1039,6 +1094,36 @@ class ModelQueueFacts:
         )
 
 
+def _stale_lag_reason(payload: dict[str, object], url: str) -> str:
+    """Why this ``/queue`` payload's count is too old to size a wait from.
+
+    Empty string when it is current, or when the agent serves no age at all.
+    An ABSENT age is a deploy agent that predates OMN-18990 and is handled as
+    it was before -- the previous behaviour, by name. A PRESENT age beyond the
+    bound is a measurement this reader can see is out of date, and treating
+    those two as the same value is the collapse being repaired.
+    """
+    raw_age = payload.get("control_topic_lag_age_seconds")
+    if raw_age is None:
+        return ""
+    if isinstance(raw_age, bool) or not isinstance(raw_age, (int, float)):
+        return (
+            f"{url} returned control_topic_lag_age_seconds={raw_age!r}, which "
+            "is not an age, so the count's currency cannot be established"
+        )
+    if raw_age <= MAX_QUEUE_LAG_AGE_SECONDS:
+        return ""
+    observed = payload.get("control_topic_lag_observed_at")
+    return (
+        f"{url} reports commands_ahead={payload.get('commands_ahead')!r} from a "
+        f"lag sample observed {float(raw_age):.0f}s ago (at {observed}), beyond "
+        f"the {MAX_QUEUE_LAG_AGE_SECONDS:.0f}s bound. The agent samples its "
+        "control-topic lag when it polls and does not poll while a rebuild "
+        "runs, so this describes the queue before that rebuild started. An "
+        "unread queue is not an empty one"
+    )
+
+
 def read_agent_queue(
     agent_url: str,
     *,
@@ -1097,6 +1182,16 @@ def read_agent_queue(
             f"{url} returned commands_ahead={ahead!r}, which is not a count",
             source=url,
         )
+    # OMN-18990. The agent's lag half is a cache written by its consumer's
+    # poll, and its run loop does not poll while a rebuild executes. A count
+    # older than the bound describes the queue as it was before the running
+    # rebuild started, which is the one moment this reader asks about. Refused
+    # here as well as at the agent because THIS is the reader that sizes a
+    # wait from it, and a deploy agent that predates the age field serves none
+    # -- absent is handled below, and is not the same as stale.
+    stale = _stale_lag_reason(payload, url)
+    if stale:
+        return ModelQueueFacts.unread(stale, source=url)
     raw_mean = payload.get("mean_service_time_seconds")
     mean = (
         float(raw_mean)
@@ -1217,6 +1312,11 @@ class ModelConvergenceResult:
     #: because a PASS that does not say what the queue looked like cannot be
     #: used to check that a later non-PASS was really the queue's doing.
     queue: ModelQueueFacts | None = None
+    #: OMN-18976. The revision the lane was ALREADY at when this run started.
+    #: With the revision it converged at, it bounds the set of merges that were
+    #: queued behind this one -- see :func:`reemission_window`, which is the
+    #: only consumer and which refuses to produce a window without both ends.
+    initial_revision: str = ""
 
 
 def run_convergence_wait(
@@ -1263,6 +1363,9 @@ def run_convergence_wait(
 
     lane = read_lane()
     ancestry = resolve_ancestry(lane.revision)
+    # OMN-18976. The lane's revision BEFORE this run's rebuild landed. Read
+    # once, here, because every later read may already have converged.
+    initial_revision = lane.revision
 
     queue = (
         resolve_queue()
@@ -1299,8 +1402,17 @@ def run_convergence_wait(
         )
         if refusal:
             now = clock()
+            # OMN-18976. QUEUED, not INDETERMINATE. The refusal above ends
+            # "this asserts nothing about the lane", and INDETERMINATE maps
+            # onto a check with ``ok: false``, so this branch was emitting a
+            # terminal FAIL receipt and rule 24(b) was refusing a sha whose
+            # only fault was being behind another deploy. QUEUED emits no
+            # receipt at all, which is what EnumLabPassResult's own contract
+            # says an in-flight pass does, and the gate's absent branch keeps
+            # the sha refused exactly as before.
             return ModelConvergenceResult(
-                outcome=EnumConvergenceOutcome.INDETERMINATE,
+                initial_revision=initial_revision,
+                outcome=EnumConvergenceOutcome.QUEUED,
                 reason=refusal,
                 lane=lane,
                 ancestry=ancestry,
@@ -1342,6 +1454,7 @@ def run_convergence_wait(
     waited = now - started
     if _converged(lane, ancestry):
         return ModelConvergenceResult(
+            initial_revision=initial_revision,
             outcome=EnumConvergenceOutcome.OK,
             reason="",
             lane=lane,
@@ -1353,6 +1466,7 @@ def run_convergence_wait(
         )
     if not budget.established:
         return ModelConvergenceResult(
+            initial_revision=initial_revision,
             outcome=EnumConvergenceOutcome.INDETERMINATE,
             reason=budget.unresolved_reason,
             lane=lane,
@@ -1364,6 +1478,7 @@ def run_convergence_wait(
         )
     if budget.exhausted(now):
         return ModelConvergenceResult(
+            initial_revision=initial_revision,
             outcome=EnumConvergenceOutcome.FAIL,
             reason="",
             lane=lane,
@@ -1374,6 +1489,7 @@ def run_convergence_wait(
             queue=queue,
         )
     return ModelConvergenceResult(
+        initial_revision=initial_revision,
         outcome=EnumConvergenceOutcome.INDETERMINATE,
         reason=budget.shortfall_reason(now),
         lane=lane,
@@ -1516,6 +1632,61 @@ def parse_docker_inspect(payload: Any) -> LaneRevision:
 
 def _gh(args: list[str]) -> Any:
     return json.loads(_run(["gh", *args]))
+
+
+def _contains_on_branch(repo: str, branch: str, candidate: str, observed: str) -> bool:
+    """Does ``observed`` carry ``candidate``, on the tracked branch?
+
+    OMN-18988. Containment ONLY, and the two directions are not symmetric: a
+    revision that is an ANCESTOR of the candidate is running code OLDER than
+    it, which is the OMN-18388 distinction this must not widen away. An
+    unresolvable comparison is not containment.
+    """
+    if candidate == observed:
+        return True
+    try:
+        ancestry = read_ancestry(repo, branch, candidate, observed)
+    except Exception:  # noqa: BLE001 - unresolvable is not containment
+        return False
+    return bool(
+        ancestry.observed_on_branch and ancestry.relation in _CONTAINING_RELATIONS
+    )
+
+
+def read_contained_commits(repo: str, previous: str, converged: str) -> tuple[str, ...]:
+    """The commits ``converged`` has that ``previous`` does not, oldest first.
+
+    OMN-18976. Feeds :func:`reemission_window`, which bounds them further. Uses
+    ``compare/{previous}...{converged}`` for the same reason
+    :func:`read_divergence` does: ``actions/checkout`` fetches depth 1, so a
+    local ``git rev-list`` here would silently report an empty window and this
+    guard would emit nothing while believing it had looked.
+
+    UNREADABLE IS EMPTY, DELIBERATELY. Every failure returns ``()``, which
+    re-emits nothing and leaves the delivery gate refusing those shas exactly
+    as it does today. The alternative -- guessing a window -- writes receipts
+    for merges nothing observed, and a wrong PASS is the one outcome this
+    ticket must not introduce while removing a wrong FAIL.
+
+    The comparison's ``commits`` array is capped at 250 entries by GitHub. That
+    is not a limit worth working around: a window of 250 merges is not a deploy
+    queue, it is a lane that stopped converging, and the receipts those shas
+    are missing are not this function's problem to manufacture.
+    """
+    try:
+        payload = _gh(["api", f"repos/{repo}/compare/{previous}...{converged}"])
+    except Exception as exc:  # noqa: BLE001 - an unreadable compare IS the answer
+        print(f"::warning::re-emission window unreadable: {exc}")
+        return ()
+    commits = payload.get("commits")
+    if not isinstance(commits, list):
+        return ()
+    shas: list[str] = []
+    for entry in commits:
+        sha = entry.get("sha") if isinstance(entry, dict) else None
+        if isinstance(sha, str) and _SHA_RE.match(sha):
+            shas.append(sha)
+    return tuple(shas)
 
 
 def read_divergence(repo: str, branch: str, deployed_revision: str) -> Divergence:
@@ -2025,6 +2196,53 @@ def _supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
     )
 
 
+def reemission_window(
+    *,
+    previous_revision: str,
+    converged_revision: str,
+    resolve_contained: Callable[[str, str], tuple[str, ...]],
+) -> tuple[str, ...]:
+    """The merge shas this convergence may answer for, and no others.
+
+    OMN-18976 part two. A merge queued behind another deploy emits no receipt
+    of its own, so only a LATER run can answer for it. This names which later
+    run, and for which shas.
+
+    A verify run reads the lane twice: at ``previous_revision`` when it starts
+    and at ``converged_revision`` when it converges. Every merge that landed
+    strictly between those two was queued behind this one -- its own verify run
+    found the lane still at the earlier revision and exited without a receipt.
+    That set is the window.
+
+    IT IS NOT "EVERY ANCESTOR OF X", and the distinction is the whole bound.
+    The lane has been running for weeks and contains thousands of shas it never
+    individually converged on; emitting for those would manufacture receipts
+    for merges this run observed nothing about. ``P..X`` is a queue, not a
+    history.
+
+    ``converged_revision`` is excluded because its own run is writing its own
+    receipt in this same job, and two artifacts of one name from one job is a
+    race rather than a re-emission.
+
+    EVERY UNRESOLVED CASE YIELDS NOTHING, which is fail-closed here: emitting
+    no receipt leaves the delivery gate refusing those shas, exactly as it does
+    today. Emitting one on a guess would not be recoverable.
+    """
+    if not previous_revision or not converged_revision:
+        return ()
+    if previous_revision == converged_revision:
+        return ()
+    contained = resolve_contained(previous_revision, converged_revision)
+    window: list[str] = []
+    for sha in contained:
+        if sha in (converged_revision, previous_revision):
+            continue
+        if sha in window:
+            continue
+        window.append(sha)
+    return tuple(window)
+
+
 def _write_output(name: str, value: str) -> None:
     """Publish one single-line value to the calling step's outputs."""
     path = os.environ.get("GITHUB_OUTPUT")
@@ -2125,7 +2343,106 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
     # OUTPUT rather than the step's exit status because the status has two
     # values and this has three; the workflow still falls back to the status
     # when the step died before writing anything.
-    _write_output("verdict", convergence_check_outcome(result.outcome).value)
+    #
+    # OMN-18976: a QUEUED verdict maps to NO check, so the verdict output
+    # carries the convergence outcome's own name and `emit_receipt` tells the
+    # workflow not to write a receipt at all. Publishing both, rather than
+    # making the emit step re-derive one from the other, keeps the decision in
+    # the module that made it -- a mapping written in a `run:` block is a
+    # mapping nothing tests.
+    check_outcome = convergence_check_outcome(result.outcome)
+    _write_output(
+        "verdict",
+        result.outcome.value if check_outcome is None else check_outcome.value,
+    )
+    _write_output("emit_receipt", "false" if check_outcome is None else "true")
+
+    # OMN-18976 part two. On a convergence, name the merges that were queued
+    # BEHIND this one and therefore emitted no receipt of their own, so the
+    # emit step can answer for them with the probes it is about to take against
+    # the very image that contains them.
+    #
+    # Only on OK. A run that did not converge has observed nothing it could
+    # attest to on anybody else's behalf, and a run that was itself queued is
+    # the thing being answered for, not the answerer.
+    reemit: tuple[str, ...] = ()
+    if result.outcome is EnumConvergenceOutcome.OK:
+        reemit = reemission_window(
+            previous_revision=result.initial_revision,
+            converged_revision=lane.revision,
+            resolve_contained=lambda previous, converged: read_contained_commits(
+                args.repo, previous, converged
+            ),
+        )
+        if reemit:
+            print(
+                f"::notice::re-emitting for {len(reemit)} sha(s) queued behind "
+                f"this one between {result.initial_revision[:12]} and "
+                f"{lane.revision[:12]}"
+            )
+    # JSON array of OBJECTS, because the consumer is a matrix job and the legs
+    # are not interchangeable: `strategy.matrix` takes `fromJSON(...)`, an
+    # EMPTY array skips the job entirely, and a dynamic number of artifact
+    # uploads cannot be expressed any other way since `uses:` steps cannot be
+    # looped.
+    #
+    # The LOWER ENDPOINT rides along with `endpoint: true` (OMN-18988). It is
+    # the revision the lane was ALREADY on, so it is not in the window proper
+    # -- but it is exactly where a receipt that failed on a binding class sits
+    # once the lane has moved past it, which is the 430ff3434 shape. It is
+    # bounded rather than a widening: the leg refuses an endpoint that has NO
+    # receipt, because the lane's prior revision may be a commit this lane
+    # never watched, and it refuses one whose receipt failed on anything that
+    # is a statement about the lane.
+    # THE BINDING IS RESOLVED HERE, IN THIS JOB, and that is a deliberate
+    # placement rather than a convenience (OMN-18988).
+    #
+    # A re-emitted receipt must not INHERIT the converged run's binding: the
+    # case this exists for is a run that could not bind its own observation.
+    # So the lane is re-read, across three surfaces. But the job that reads it
+    # cannot be a new one on the verify runner -- that runner is ONE container
+    # and OMN-18408 makes its label single-purpose precisely so an unreviewed
+    # addition cannot reintroduce starvation on it. This job already holds the
+    # lane, already has the credential, and is already serialised by that
+    # runner, so it does the reading and hands the consumer a fact rather than
+    # an errand.
+    #
+    # A candidate that cannot be bound is OMITTED and named in the log. It is
+    # not silently dropped and it is not passed on as a guess: no binding
+    # means no receipt, and the delivery gate keeps refusing that sha exactly
+    # as it does today.
+    candidates: list[dict[str, object]] = []
+    if result.outcome is EnumConvergenceOutcome.OK:
+        pending: list[tuple[str, bool]] = [(sha, False) for sha in reemit]
+        if result.initial_revision:
+            pending.append((result.initial_revision, True))
+        for sha, endpoint in pending:
+            binding = resolve_lane_binding(
+                sha=sha,
+                container_revision=lane.revision or None,
+                agent_loaded_code_sha=read_agent_loaded_code_sha(args.agent_url)
+                or None,
+                ready_version_revision=None,
+                contains=lambda candidate, observed: _contains_on_branch(
+                    args.repo, args.branch, candidate, observed
+                ),
+            )
+            if binding is None:
+                print(
+                    f"::notice::re-emission candidate {sha[:12]} omitted: no "
+                    "surface established that the lane runs code containing "
+                    "it, so no receipt will be written and the delivery gate "
+                    "keeps refusing it"
+                )
+                continue
+            candidates.append(
+                {
+                    "sha": sha,
+                    "endpoint": endpoint,
+                    "converged_via": binding.converged_via,
+                }
+            )
+    _write_output("reemit_candidates", json.dumps(candidates))
 
     # OMN-18143. Read AFTER the wait, because the agent folds a command when it
     # DEQUEUES it, which is normally after this guard started watching. The
@@ -2196,6 +2513,13 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
     if result.outcome is EnumConvergenceOutcome.OK:
         print(f"[ok] {evidence}")
         return 0
+    if result.outcome is EnumConvergenceOutcome.QUEUED:
+        # OMN-18976. Not a finding about anything: this merge's turn has not
+        # come. No receipt is written, so the gate's absent branch keeps the
+        # sha refused and a later convergence can still answer for it, instead
+        # of a FAIL artifact asserting forever that the lane misbehaved.
+        print(f"::notice::{evidence}")
+        return EXIT_QUEUED
     if result.outcome is EnumConvergenceOutcome.INDETERMINATE:
         print(f"::warning::{evidence}")
         return EXIT_INDETERMINATE
