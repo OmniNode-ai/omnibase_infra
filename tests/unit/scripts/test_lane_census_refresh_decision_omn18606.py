@@ -394,7 +394,7 @@ def test_the_leg_writes_only_the_census_file() -> None:
 def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
     tmp_path: Path,
 ) -> None:
-    """Drive the real decision CLI over the REAL committed census and a fixture.
+    """Drive the real decision CLI over a fixture pair, on a synthetic clock.
 
     This is the collect-decide-report chain the workflow runs, with the collect
     step replaced by a fixture so it needs no docker socket, no runner and no
@@ -402,50 +402,55 @@ def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
     files, which is what makes it a test of the RULE and not of the clock:
 
       * `--refresh-after-days 0` forces the aging branch  -> refresh, PR opens
-      * the default 3-day threshold on a census minutes old -> no-op, no PR
+      * the default 3-day threshold on a recent census    -> no-op, no PR
 
     The second is the one that matters operationally. It is also exactly how the
     leg is meant to be dispatched for a live proof once the host is reachable:
     `workflow_dispatch` with `refresh_after_days: 0`.
 
-    CORRECTED 2026-09-21 (OMN-18949). The steady case read the REAL committed
-    snapshot for BOTH sides, so the docstring's claim that this tests the rule
-    and not the clock was false of it: the assertion held only while that file
-    was under three days old, and it went red on the third day after each
-    refresh. It is the same defect the sibling test one function down records
-    in its own docstring -- "true the day it was written and false forever
-    about a week later" -- reached by a different route. The steady case now
-    uses a committed-side FIXTURE with a recent timestamp, which is what makes
-    it a test of the threshold. The forced case still reads the real file, so
-    the real artifact staying parseable is still asserted.
+    OMN-18980. Both documents are fixtures with SYNTHETIC timestamps, and the
+    committed one is no longer the live file in the repository. It was, and the
+    shape of the committed census is still taken from it so the fixture cannot
+    drift from the real document -- but its `emitted_at` was the real one, so
+    the steady case asserted "recent" against a file whose age nobody in this
+    test controls. It expired on 2026-09-21 when the committed census turned
+    three days old, and it reddened `Tests (Split 12/15)` on EVERY open pull
+    request in the repository, cascading to the tests gate, the ratchet and the
+    summary.
+
+    That is worse than a stale fixture, because of WHEN it fires. The threshold
+    is three days precisely so a refresh opened at day three has four days to be
+    reviewed and land before the seven-day age gate goes red. This test made
+    that window unusable: the repository goes red at day three, the same moment
+    the bot opens its refresh, so nothing can merge during the margin --
+    including the refresh pull request itself. The race the threshold exists to
+    avoid was being reintroduced by the test that proves the leg.
     """
     committed_path = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
-    committed = json.loads(committed_path.read_text(encoding="utf-8"))
+    committed = dict(json.loads(committed_path.read_text(encoding="utf-8")))
+
+    # A synthetic committed census: the real document's shape, a controlled age.
+    # One day old, so it is unambiguously inside a 3-day threshold and
+    # unambiguously outside a 0-day one, whatever day this test runs on.
+    now = datetime.now(UTC)
+    committed["emitted_at"] = (now - timedelta(days=1)).isoformat()
+    fixture_committed_path = tmp_path / "census-committed.json"
+    fixture_committed_path.write_text(json.dumps(committed), encoding="utf-8")
+    committed_path = fixture_committed_path
 
     # A fixture candidate: same fleet (same alert_key), collected "now".
     candidate = dict(committed)
-    candidate["emitted_at"] = datetime.now(UTC).isoformat()
+    candidate["emitted_at"] = now.isoformat()
     candidate_path = tmp_path / "census-candidate.json"
     candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
 
-    # A committed-side fixture, same fleet, recent but an hour BEHIND the
-    # candidate. Both halves matter: recent keeps it inside the three-day
-    # threshold, and older keeps the candidate strictly newer, which the
-    # decision requires before it will consider the age question at all.
-    recent_committed = dict(committed)
-    recent_committed["emitted_at"] = (
-        datetime.now(UTC) - timedelta(hours=1)
-    ).isoformat()
-    recent_committed_path = tmp_path / "census-committed-recent.json"
-    recent_committed_path.write_text(json.dumps(recent_committed), encoding="utf-8")
-
-    def _decide(days: str, committed_arg: Path = committed_path) -> dict[str, Any]:
+    def _decide(days: str) -> dict[str, Any]:
         result = subprocess.run(
             [
                 sys.executable,
                 str(_MODULE),
                 "--committed",
-                str(committed_arg),
+                str(committed_path),
                 "--candidate",
                 str(candidate_path),
                 "--refresh-after-days",
@@ -466,12 +471,62 @@ def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
     )
     assert forced["reason"] == REASON_AGING
 
-    steady = _decide("3", recent_committed_path)
+    steady = _decide("3")
     assert steady["refresh"] is False, (
         "the committed census is recent and the fixture describes the same "
         f"fleet, so the leg must stay quiet; got {steady}"
     )
     assert steady["reason"] == REASON_FRESH_AND_UNCHANGED
+
+
+def test_a_census_aged_past_the_threshold_still_asks_for_a_refresh(
+    tmp_path: Path,
+) -> None:
+    """The other direction, on the same synthetic clock (OMN-18980).
+
+    Making the steady case immune to wall-clock time would, on its own, let a
+    module that NEVER ages out pass every assertion here -- the `_decide("0")`
+    arm forces the branch through the threshold rather than through elapsed
+    time, so it cannot tell the two apart. This case ages the fixture instead
+    of forcing the threshold, so the aging branch is still proven by a real
+    elapsed interval and the rule stays pinned in both directions.
+    """
+    committed_path = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
+    committed = dict(json.loads(committed_path.read_text(encoding="utf-8")))
+
+    now = datetime.now(UTC)
+    committed["emitted_at"] = (now - timedelta(days=9)).isoformat()
+    aged_path = tmp_path / "census-committed-aged.json"
+    aged_path.write_text(json.dumps(committed), encoding="utf-8")
+
+    candidate = dict(committed)
+    candidate["emitted_at"] = now.isoformat()
+    candidate_path = tmp_path / "census-candidate.json"
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_MODULE),
+            "--committed",
+            str(aged_path),
+            "--candidate",
+            str(candidate_path),
+            "--refresh-after-days",
+            "3",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    decision: dict[str, Any] = json.loads(result.stdout)
+
+    assert decision["refresh"] is True, (
+        "a census nine days old against a three-day threshold must ask for a "
+        f"refresh; got {decision}"
+    )
+    assert decision["reason"] == REASON_AGING
 
 
 def test_the_bot_pr_binds_to_the_ticket_that_owns_the_leg() -> None:
