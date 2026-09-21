@@ -9,9 +9,11 @@ development lane, and no gate anywhere refusing on it. The one CI job touching
 the census reads the snapshot's AGE and the manifest's agreement with the
 compose files; neither reads the findings.
 
-These cases pin the gate's contract, including the two it must NOT have: it
-does not require zero drift, and it does not report a clean verdict over an
-input it could not read.
+These cases pin the gate's contract. The first shipped implementation
+deliberately omitted the drift-count assertion AC-1 names, so a snapshot
+carrying five findings exited zero; the cases below pin it back on, keep every
+committed-file-consistency finding that was already there, and keep the rule
+that an input the gate could not read is never a clean verdict.
 """
 
 from __future__ import annotations
@@ -94,22 +96,49 @@ def test_a_container_adopted_into_the_manifest_and_left_in_the_snapshot_is_drift
         ["dev"],
         [{"lane": "dev", "kind": "unexpected_container", "container": "onex-api"}],
     )
-    assert _kinds(_run(m, s)) == ["stale_unexpected_container"]
+    assert _kinds(_run(m, s)) == ["nonzero_drift_count", "stale_unexpected_container"]
 
 
-def test_a_genuinely_undeclared_container_is_NOT_drift() -> None:
-    """The gate's most important negative.
+def test_a_single_drift_item_refuses_AC1() -> None:
+    """AC-1, as its own falsifier states it. THE red test.
 
-    Live drift on a mutable lane is a normal reportable state. A gate that
-    refused every pull request over it would be switched off within a day, and
-    this is the assertion that keeps it from becoming one.
+    A genuinely undeclared container -- live drift, nothing stale about it --
+    is one drift item. Measured against the merged implementation on
+    2026-09-21 this input exited ZERO, as did the committed tree's five. The
+    ticket names "a green tree carrying five drift items" as the red test, so
+    one item must already be red.
     """
     m = _manifest(dev=_lane("omninode-runtime"))
     s = _snapshot(
         ["dev"],
         [{"lane": "dev", "kind": "unexpected_container", "container": "onex-api"}],
     )
-    assert _run(m, s) == []
+    assert s["drift_count"] == 1
+    assert _kinds(_run(m, s)) == ["nonzero_drift_count"]
+
+
+def test_the_drift_count_refusal_names_the_lane_and_the_remedy() -> None:
+    """A refusal a reader cannot act on is a refusal that gets switched off."""
+    m = _manifest(dev=_lane("omninode-runtime"))
+    s = _snapshot(
+        ["dev"],
+        [{"lane": "dev", "kind": "unexpected_container", "container": "onex-api"}],
+    )
+    (finding,) = _run(m, s)
+    assert finding.lane == "dev"
+    assert "1 drift item" in finding.detail
+    assert "Declare the container" in finding.detail
+    assert "refreshing the snapshot" in finding.detail
+
+
+def test_a_snapshot_claiming_drift_it_does_not_carry_still_refuses() -> None:
+    """The count and the list are read independently, so neither alone can lie."""
+    m = _manifest(dev=_lane("omninode-runtime"))
+    s = _snapshot(["dev"], [])
+    s["drift_count"] = 4
+    kinds = _kinds(_run(m, s))
+    assert "nonzero_drift_count" in kinds
+    assert "finding_count_mismatch" in kinds
 
 
 def test_a_container_absent_finding_outliving_its_declaration_is_drift() -> None:
@@ -118,7 +147,7 @@ def test_a_container_absent_finding_outliving_its_declaration_is_drift() -> None
         ["dev"],
         [{"lane": "dev", "kind": "container_absent", "container": "retired-worker"}],
     )
-    assert _kinds(_run(m, s)) == ["stale_container_absent"]
+    assert _kinds(_run(m, s)) == ["nonzero_drift_count", "stale_container_absent"]
 
 
 def test_a_container_absent_finding_for_a_still_declared_container_is_NOT_drift() -> (
@@ -129,7 +158,7 @@ def test_a_container_absent_finding_for_a_still_declared_container_is_NOT_drift(
         ["dev"],
         [{"lane": "dev", "kind": "container_absent", "container": "omninode-runtime"}],
     )
-    assert _run(m, s) == []
+    assert _kinds(_run(m, s)) == ["nonzero_drift_count"]
 
 
 # ---------------------------------------------------------------------------
@@ -150,14 +179,14 @@ def test_a_finding_against_an_undeclared_lane_is_reported_once_not_twice() -> No
         ["dev"],
         [{"lane": "ghost", "kind": "unexpected_container", "container": "x"}],
     )
-    assert _kinds(_run(m, s)) == ["snapshot_lane_unknown"]
+    assert _kinds(_run(m, s)) == ["nonzero_drift_count", "snapshot_lane_unknown"]
 
 
 def test_a_snapshot_that_miscounts_its_own_findings_is_drift() -> None:
     m = _manifest(dev=_lane("omninode-runtime"))
     s = _snapshot(["dev"], [])
     s["drift_count"] = 3
-    assert _kinds(_run(m, s)) == ["finding_count_mismatch"]
+    assert _kinds(_run(m, s)) == ["nonzero_drift_count", "finding_count_mismatch"]
 
 
 # ---------------------------------------------------------------------------
@@ -260,8 +289,34 @@ def test_a_snapshot_that_observed_nothing_exits_two(tmp_path: Path) -> None:
     assert main(["--manifest", str(manifest), "--snapshot", str(snapshot)]) == 2
 
 
+def test_drift_zero_with_a_manifest_mismatch_is_still_refused() -> None:
+    """NEGATIVE CONTROL for the AC-1 change.
+
+    The drift-count assertion is additive, not a replacement. A snapshot with
+    ZERO drift that still contradicts the manifest must refuse for the reason
+    it already did, with no nonzero_drift_count row -- otherwise the new rule
+    has quietly become the only rule and the consistency half is dead code.
+    """
+    m = _manifest(dev=_lane("omninode-runtime"))
+    s = _snapshot(["dev", "retired-lane"], [])
+    assert s["drift_count"] == 0
+    assert _kinds(_run(m, s)) == ["snapshot_lane_unknown"]
+
+
+def test_a_clean_pair_still_passes() -> None:
+    """POSITIVE CONTROL: the gate is not simply always red now."""
+    m = _manifest(dev=_lane("omninode-runtime"))
+    s = _snapshot(["dev"], [])
+    assert _run(m, s) == []
+
+
 def test_the_committed_tree_passes_the_gate() -> None:
-    """The gate is armed against the real files, not only against fixtures."""
+    """The gate is armed against the real files, not only against fixtures.
+
+    This is also the AC-1 falsifier read the other way: it holds only while
+    the committed snapshot reports zero drift, so the five dev-lane items the
+    ticket names cannot return without turning this red.
+    """
     assert main([]) == 0
 
 
