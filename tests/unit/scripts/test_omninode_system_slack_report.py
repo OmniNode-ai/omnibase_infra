@@ -390,6 +390,11 @@ def _run(
             # above; the fleet rows are asserted in
             # test_fleet_failure_sink_omn18942.py, which switches it back on.
             "OMNINODE_FLEET_PROBE_ENABLED": "0",
+            # OMN-18949: and the fourth. `collect()` also reads the lane census
+            # probe, which resolves a live snapshot path on the lab host. Same
+            # reasoning as the three rows above; the census rows are asserted in
+            # test_lane_census_sink_omn18949.py, which switches it back on.
+            "OMNINODE_CENSUS_PROBE_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1844,6 +1849,11 @@ def _run_alert(
             # above; the fleet rows are asserted in
             # test_fleet_failure_sink_omn18942.py, which switches it back on.
             "OMNINODE_FLEET_PROBE_ENABLED": "0",
+            # OMN-18949: and the fourth. `collect()` also reads the lane census
+            # probe, which resolves a live snapshot path on the lab host. Same
+            # reasoning as the three rows above; the census rows are asserted in
+            # test_lane_census_sink_omn18949.py, which switches it back on.
+            "OMNINODE_CENSUS_PROBE_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1947,6 +1957,8 @@ class _AlertTicker:
                 # above; the fleet rows are asserted in
                 # test_fleet_failure_sink_omn18942.py, which switches it back on.
                 "OMNINODE_FLEET_PROBE_ENABLED": "0",
+                # OMN-18949: and the fourth, for the same reason.
+                "OMNINODE_CENSUS_PROBE_ENABLED": "0",
             }
         )
         env.update(self.extra_env)
