@@ -5,9 +5,29 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def _declared_pins() -> dict[str, str]:
+    """Return {distribution: exact version} for every ``==`` project dependency.
+
+    Parsed from the dependency table rather than matched as a substring of the
+    file: ``pyproject.toml`` carries explanatory comments that quote old pins
+    verbatim, so a substring assertion is satisfied by prose and keeps passing
+    after the pin it names has moved (OMN-18918).
+    """
+
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pins: dict[str, str] = {}
+    for spec in data["project"]["dependencies"]:
+        if "==" not in spec:
+            continue
+        name, _, version = spec.partition("==")
+        pins[name.strip()] = version.strip()
+    return pins
 
 
 def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
@@ -20,14 +40,22 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     OMN-14600 refresh: the proven runtime advances to core 0.46.8 while keeping
     the PyPI-sourced reproducible lock.
+
+    OMN-18918 refresh: the proven runtime advances to core 0.47.20 / spi 0.23.5,
+    the first published releases carrying the optional keyword-only ``delivery``
+    parameter this runtime forwards source delivery coordinates through. The
+    pins are read from the parsed dependency table -- the previous substring
+    form matched a commented-out example of the retired 0.46.8 pin and so kept
+    reporting green across every advance since.
     """
 
-    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    pins = _declared_pins()
 
-    # The proven runtime now pins the published PyPI releases (exact versions).
-    assert "omnibase-core==0.46.8" in pyproject
-    assert "omnibase-spi==0.23.3" in pyproject
+    # The proven runtime pins the published PyPI releases (exact versions).
+    assert pins["omnibase-core"] == "0.47.20"
+    assert pins["omnibase-spi"] == "0.23.5"
 
     # The retired git-rev overrides must be gone from both manifest and lock:
     # the OMN-13762 core rev and the OMN-12549 seam core/spi revs.
