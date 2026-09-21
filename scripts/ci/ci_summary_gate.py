@@ -1882,6 +1882,46 @@ def resolve_check_run_event(
     return None
 
 
+# OMN-18991 — the reason token a settled cancellation reports under.
+#
+# It is distinct from every other refusal on purpose. A cancellation that
+# outlived its grace is not the producer saying no; it is a replacement that
+# never arrived, and the remedy is a re-run rather than a code change. A
+# reader who cannot tell those apart re-reads a diff looking for a defect that
+# is not there. MEASURED on omnibase_infra#3913, head 236f36698: three gate
+# contexts were cancelled at 10:39:56Z by a superseding attempt, the poller's
+# final verdict landed at 10:50:36Z, forty seconds after
+# CANCELLED_SUPERSESSION_GRACE_S closed, and the successful replacements
+# started at 10:53:42Z -- 13 minutes 45 seconds after the cancellation,
+# against a grace of ten. The head reads green now. Nothing was wrong with it
+# then either, which is why the reason names a re-run rather than a defect.
+CANCELLED_WITHOUT_REPLACEMENT: str = "cancelled_without_replacement"
+
+
+def _sweep_failure_reason(name: str, state: JobState, now: datetime | None) -> str:
+    """One refusal line, naming the remedy when the remedy is a re-run.
+
+    Every other conclusion reports as ``<name> (<conclusion>)``. A settled
+    cancellation reports its own token plus how long past the grace it is, so
+    the line says what to do rather than only what happened.
+    """
+
+    if state.conclusion != "cancelled":
+        return f"{name} ({state.conclusion})"
+    completed = _parse_timestamp(state.completed_at)
+    if completed is None or now is None:
+        return (
+            f"{name} ({CANCELLED_WITHOUT_REPLACEMENT}: no replacement row on this "
+            f"head and no readable completion time; re-run the producer)"
+        )
+    age_s = int((now - completed).total_seconds())
+    return (
+        f"{name} ({CANCELLED_WITHOUT_REPLACEMENT}: cancelled {age_s}s ago, past the "
+        f"{CANCELLED_SUPERSESSION_GRACE_S}s re-run grace, and no replacement row "
+        f"exists on this head; re-running the producer clears it)"
+    )
+
+
 def evaluate_external_sweep(
     check_runs: list[dict[str, object]] | None,
     *,
@@ -1891,17 +1931,19 @@ def evaluate_external_sweep(
     exclusions: dict[str, SweepExclusion],
     events: dict[int, str],
     now: datetime | None,
-) -> tuple[list[str], list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
     """Layer 5 — default-deny over every check-run nothing else accounts for.
 
-    Returns ``(failures, in_flight, swept, excluded)``:
+    Returns ``(failures, in_flight, swept, excluded, provisional)``:
 
-    * ``failures`` — ``"<name> (<conclusion>)"`` for each refusal. These FAIL
-      the umbrella.
+    * ``failures`` — one line per refusal. These FAIL the umbrella.
     * ``in_flight`` — swept names still running. REPORTING ONLY; see below.
     * ``swept`` — every name this layer judged, so a clean run records what it
       looked at instead of printing nothing (rule 16).
     * ``excluded`` — swept-population names an active registry entry admitted.
+    * ``provisional`` — swept names whose replacement is demonstrably due
+      inside the re-run grace. These hold the verdict at PENDING; they are
+      NOT a quiet pass, and they red as soon as the grace closes.
 
     WHY ``in_flight`` DOES NOT HOLD THE VERDICT AT PENDING, stated rather than
     left to be discovered. Every other layer's PENDING is backed by a presence
@@ -1920,13 +1962,14 @@ def evaluate_external_sweep(
     """
 
     if check_runs is None:
-        return [], [], [], []
+        return [], [], [], [], []
     accounted = frozenset(expected) | in_run_names | {self_name}
     active, _expired = active_sweep_exclusions(exclusions, now=now)
     failures: list[str] = []
     in_flight: list[str] = []
     swept: list[str] = []
     excluded: list[str] = []
+    provisional: list[str] = []
     for name, raw in sorted(latest_check_run_rows(check_runs).items()):
         if name in accounted:
             continue
@@ -1940,12 +1983,18 @@ def evaluate_external_sweep(
         if state.status != "completed":
             in_flight.append(name)
             continue
-        if (
-            state.conclusion not in SWEEP_GOOD_CONCLUSIONS
-            and not verdict_is_provisional(state, now)
-        ):
-            failures.append(f"{name} ({state.conclusion})")
-    return failures, in_flight, swept, excluded
+        if state.conclusion in SWEEP_GOOD_CONCLUSIONS:
+            continue
+        if verdict_is_provisional(state, now):
+            # OMN-18991: PENDING, not a quiet pass. A replacement is
+            # demonstrably due, so the poller looks again; when the grace
+            # closes this same row reds through the branch below. Bounded by
+            # the grace, and the caller's deadline still converts a sustained
+            # PENDING into FAILURE, so nothing here can hold a head open.
+            provisional.append(name)
+            continue
+        failures.append(_sweep_failure_reason(name, state, now))
+    return failures, in_flight, swept, excluded, provisional
 
 
 def _is_allowlisted(name: str, allowlist: frozenset[str]) -> bool:
@@ -2104,6 +2153,7 @@ def evaluate(
         ext_sweep_in_flight,
         ext_sweep_names,
         ext_sweep_excluded,
+        ext_sweep_provisional,
     ) = (
         evaluate_external_sweep(
             check_runs,
@@ -2115,7 +2165,7 @@ def evaluate(
             now=now,
         )
         if sweep_external
-        else ([], [], [], [])
+        else ([], [], [], [], [])
     )
 
     all_failures = (
@@ -2128,7 +2178,13 @@ def evaluate(
         # exception is worse than none: it reads as a considered decision.
         + [f"malformed sweep exclusion: {f}" for f in exclusion_findings]
     )
-    all_unresolved = gate_missing_or_pending + external_unresolved
+    # OMN-18991: a swept row inside its re-run grace holds the verdict at
+    # PENDING rather than passing quietly. Bounded by the grace, after which
+    # the same row reds with a named reason, and the caller's deadline still
+    # converts a sustained PENDING into FAILURE.
+    all_unresolved = (
+        gate_missing_or_pending + external_unresolved + ext_sweep_provisional
+    )
 
     def _verdict(label: str) -> str:
         return _report(
@@ -2153,6 +2209,7 @@ def evaluate(
             sweep_expired=list(expired_exclusions),
             sweep_findings=exclusion_findings,
             sweep_external=sweep_external,
+            sweep_provisional=ext_sweep_provisional,
         )
 
     if all_failures:
@@ -2185,6 +2242,7 @@ def _report(
     sweep_expired: list[str] | None = None,
     sweep_findings: list[str] | None = None,
     sweep_external: bool = True,
+    sweep_provisional: list[str] | None = None,
 ) -> str:
     lines = [f"CI Summary verdict: {verdict}", f"  jobs observed: {len(latest)}"]
     # OMN-16661: make the relaxation visible in the job summary. A reviewer must
@@ -2270,6 +2328,12 @@ def _report(
         lines.append(
             "  external sweep exclusions EXPIRED (no longer excluding): "
             + ", ".join(sorted(sweep_expired))
+        )
+    if sweep_provisional:
+        lines.append(
+            "  external sweep rows awaiting an automatic replacement "
+            "(cancelled or failed inside the re-run grace; PENDING, re-polled): "
+            + ", ".join(sorted(sweep_provisional))
         )
     if sweep_in_flight:
         lines.append(
