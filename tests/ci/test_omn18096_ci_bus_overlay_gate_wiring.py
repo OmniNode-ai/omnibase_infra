@@ -39,6 +39,7 @@ carry ``continue-on-error`` or swallow a non-zero exit with ``|| true``.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,7 @@ from scripts.ci.ci_summary_gate import (
     POST_FIXTURE_WINDOW_CONTEXTS,
     SKIPPABLE_GATE_JOBS,
     STRICT_GATE_JOBS,
+    SweepExclusion,
     evaluate,
 )
 
@@ -312,13 +314,39 @@ class TestTheRegistrationIsLoadBearingAtRuntime:
         Without this case the two above would also hold if some other surface
         happened to catch the failure, and the tuple entry could be deleted with
         every test still green.
+
+        OMN-18960 CHANGED THIS CONTROL'S SHAPE, and that change is the ticket.
+        Un-registering a red context used to green it — which was the hole the
+        layer-5 default-deny sweep closes. Isolating layer 4 now also takes a
+        sweep waiver; the control still proves the red is attributable to this
+        context and to nothing else.
         """
         payload = [dict(row) for row in _complete_external_payload()]
         for row in payload:
             if row["name"] == GATE_CONTEXT:
                 row["conclusion"] = "failure"
         without = tuple(c for c in EXPECTED_EXTERNAL_CONTEXTS if c != GATE_CONTEXT)
+
+        # OMN-18960: un-registering the context no longer hides its red.
         code, report = evaluate(
             _all_gates_success(), check_runs=payload, external_contexts=without
+        )
+        assert code == EXIT_FAILURE, report
+        assert f"{GATE_CONTEXT} (failure)" in report
+
+        today = datetime.now(UTC).date()
+        code, report = evaluate(
+            _all_gates_success(),
+            check_runs=payload,
+            external_contexts=without,
+            sweep_exclusions={
+                GATE_CONTEXT: SweepExclusion(
+                    reason="synthetic, test-only: isolates layer 4 from layer 5",
+                    ticket="OMN-18960",
+                    added=today.isoformat(),
+                    expires=(today + timedelta(days=30)).isoformat(),
+                )
+            },
+            now=datetime.now(UTC),
         )
         assert code == EXIT_SUCCESS, report

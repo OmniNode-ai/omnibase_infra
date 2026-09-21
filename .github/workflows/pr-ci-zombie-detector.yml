@@ -225,6 +225,40 @@ jobs:
           fi
           echo "onexbot App token minted."
 
+      # THE SCHEDULED-RUN SWEEP MOVED OFF THIS JOB (OMN-18942).
+      #
+      # `--no-scheduled` leaves this job doing the pull-request check-run half
+      # only. The scheduled-run half it gained in OMN-18322 now runs in exactly
+      # one place, the `.201` system reporter, via
+      # scripts/omninode-fleet-failure-probe.py -- the SAME evaluator and the
+      # SAME policy thresholds, so nothing about what counts as a failing
+      # workflow is duplicated.
+      #
+      # Three measured reasons, not a preference:
+      #
+      #  1. DESTINATION. No chat secret of any name exists at organisation or
+      #     repository scope, so the scheduled findings produced here have been
+      #     delivered to nobody since the day they shipped -- fifteen named
+      #     red workflows every ten minutes into an annotation. The reporter
+      #     holds a working bot token and already posts to the channel.
+      #  2. CADENCE. Fifteen findings every ten minutes is ~2,160 annotations a
+      #     day, which is muted on day one even with a destination. The
+      #     reporter pages a key ONCE when it confirms, re-surfaces a standing
+      #     one every six hours, and posts a resolution when it clears.
+      #  3. COST. The fleet-wide sweep is one API call per active workflow per
+      #     repository and measured 434s over the thirteen-repository fleet on
+      #     2026-09-20. This job's timeout is 10 minutes and its cadence is 10
+      #     minutes; the reporter refreshes it hourly in a detached child.
+      #
+      # WHY THE REPO LIST HERE IS STILL THREE LITERALS AND NOT `fleet_repos`.
+      # The check-run half is BRANCH-scoped -- it reads
+      # `branches/dev/protection/required_status_checks` -- and `omni_home`,
+      # which is in the fleet list, has no `dev` branch at all (default
+      # `main`, read live 2026-09-20). Pointing this half at the fleet list
+      # would 404 on the first such repo and take the whole sweep down, which
+      # is precisely the failure OMN-18254 spent three days on. Per-repo branch
+      # resolution is the fix and is deliberately a separate change. The fleet
+      # list governs the scheduled half, which is branch-agnostic.
       - name: Evaluate non-required check failure rates
         env:
           # Cross-repo reads (omniweb is private) need Checks on a private
@@ -246,6 +280,7 @@ jobs:
             --repo omnibase_infra \
             --repo omniweb \
             --repo omnimarket \
+            --no-scheduled \
             --policy config/runner_routing_policy.yaml \
             --report nonrequired-check-report.json
 

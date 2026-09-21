@@ -4736,7 +4736,11 @@ def _make_projection_dispatch_callback(
             # readiness endpoint (OMN-18905). Injecting nothing preserves
             # that old behaviour exactly, which is why the absence is
             # LOGGED: silence here is what made the original defect take a
-            # live trace to find.
+            # live trace to find. Measured on the .201 dev lane before this
+            # landed, and carried over from the superseded OMN-18955 arm:
+            # 6,210,195 lifetime drops on the consumer-flow exposure, with
+            # the readiness endpoint answering 503 because it correctly
+            # refused to call a discarding cache healthy.
             if delivery is not None:
                 input_data["_partition"] = delivery.partition
                 input_data["_offset"] = delivery.offset
@@ -7575,11 +7579,12 @@ def _make_event_bus_callback(
             if flow_counters is None or consumer_group is None:
                 await _dispatch_with_bounded_retry(envelope, message)
             else:
-                # OMN-16777: an envelope reaching this line HAS been handed to
-                # dispatch. Counted before the call, not after, so a handler
-                # that hangs or dies still shows the message as taken in --
-                # counting only successful dispatches would reproduce exactly
-                # the "green because nothing was measured" defect.
+                # OMN-16777: an envelope reaching this line HAS been handed
+                # to dispatch. Counted before the call, not after, so a
+                # handler that hangs or dies still shows the message as
+                # taken in -- counting only successful dispatches would
+                # reproduce exactly the "green because nothing was
+                # measured" defect.
                 flow_counters.record_in(consumer_group, topic)
                 with active_flow_key(consumer_group, topic):
                     await _dispatch_with_bounded_retry(envelope, message)
@@ -7768,18 +7773,20 @@ def _make_raw_event_projection_callback(
             if flow_counters is None or consumer_group is None:
                 await _dispatch_and_apply_raw_projection(envelope)
             else:
-                # OMN-17214: counted before the call for the same reason the
-                # sibling branch counts before its call -- an envelope reaching
-                # this line HAS been handed to dispatch, so a handler that hangs
-                # or dies still shows the message as taken in. Counting only
-                # completed dispatches would reproduce the "green because
-                # nothing was measured" defect this seam exists to close.
+                # OMN-17214: counted before the call for the same reason
+                # the sibling branch counts before its call -- an envelope
+                # reaching this line HAS been handed to dispatch, so a
+                # handler that hangs or dies still shows the message as
+                # taken in. Counting only completed dispatches would
+                # reproduce the "green because nothing was measured" defect
+                # this seam exists to close.
                 flow_counters.record_in(consumer_group, topic)
-                # The applier's publish loop records ``messages_out`` against
-                # this task-local key (``record_active_out``), so the apply()
-                # call has to run INSIDE the binding -- outside it, a projection
-                # that publishes is counted as producing nothing and reads
-                # STALLED while it is demonstrably producing.
+                # The applier's publish loop records ``messages_out``
+                # against this task-local key (``record_active_out``), so
+                # the apply() call has to run INSIDE the binding --
+                # outside it, a projection that publishes is counted as
+                # producing nothing and reads STALLED while it is
+                # demonstrably producing.
                 with active_flow_key(consumer_group, topic):
                     await _dispatch_and_apply_raw_projection(envelope)
         except Exception as exc:  # noqa: BLE001 — consumer boundary; log and continue

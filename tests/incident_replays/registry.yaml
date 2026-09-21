@@ -168,6 +168,23 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn18942-fleet-failure-findings-delivered-to-nowhere
+    guard: scripts/omninode-fleet-failure-probe.py
+    incident: OMN-18942
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn18942.py::test_the_same_probe_stays_silent_on_the_workflows_that_are_fine
+    artifact:
+      fixture: tests/fixtures/omn18942/fleet-scheduled-sweep-201-2026-09-20.json.captured
+      sha256: 5dff47a214fdef2d90276986dcee3265e7e584be8006e0c0d862f9a05ee7cf4e
+    capture:
+      method: host-file
+      source: host-file:192.168.86.201:/tmp/omn18942-verify/capture-report.json
+      captured_at: '2026-09-20T22:53:00Z'
+      captured_by: lane replay (OMN-18942)
+    test: tests/ci/test_incident_replay_omn18942.py::test_the_real_probe_names_every_never_green_surface_on_the_captured_fleet
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A FLEET OF RED VERIFICATION SURFACES THAT REACHES NOBODY. The evaluator behind these bytes has been correct and running every ten minutes since OMN-18322; its last log line on every run is that chat is not configured, and the 2026-09-20 silent-gates review measured why -- no chat secret of any name exists at GitHub Actions organisation scope or in any repository scope, ten org secrets and eight in this repository and not a bot token, a channel identifier or a webhook among them. So twenty-nine above-threshold scheduled workflows, five of which have not succeeded ONCE in the trailing seven-day window, were named into an annotation on a job nobody opens. The detection was never the defect; the hop was, and this probe is the hop. THE ARTIFACT IS NOT A RECONSTRUCTION -- it is the byte-for-byte report the shared evaluator wrote on the .201 host at 22:53Z, as root, out of the host env file, over the thirteen-repository fleet list declared in config/runner_routing_policy.yaml, re-fetchable by re-running the same command there. It carries repository names, workflow paths, run counts and public run URLs only; no token, no identity and no address appear in it. THE SAME CAPTURE PROVES A SECOND INCIDENT, which is why one fixture is enough for both. OmniNode-ai/omni_home is present with an error rather than a result, because the host token reads twelve of the thirteen fleet repositories and returns HTTP 404 on the registry repository -- the one whose scheduled-gap detector had failed 12 of 12 daily runs since 2026-09-09 and which this ticket names by hand. Before the per-repository split, that single 404 aborted the whole sweep and the first live run on .201 produced NO rows for ANY repository, recorded verbatim in that run's refresh log as a RuntimeError naming the workflows endpoint and the 404. That is the OMN-18254 failure recurring on a second surface, in its own words -- the repo loop hits omniweb second, so omnimarket was never reached either, one private repo took the whole sweep down. THE DISCRIMINATOR IS LOAD-BEARING AND NOT A FORMALITY: a probe that emitted a row for every workflow it saw would replay this incident perfectly and be useless, because seventy-four rows every fifteen minutes is a channel nobody reads, which is this ticket own third defect -- roughly 2,160 annotations a day, muted on day one. The same function is therefore driven over the SAME bytes and required to produce exactly thirty rows, twenty-nine findings plus the one unreadable repository, and nothing for the other forty-five workflows that ran and were fine; the test asserts 74 > 29 in the fixture itself so the comparison cannot be vacuous. A second narrow assertion pins the other direction from the same bytes: the capture contains a workflow that fired once in the window and failed, and it must stay a WARNING, because a rate with no denominator is not evidence of a dead surface and escalating it would page on a workflow that has run once all week. A third pins the fixture sha256, since a reformatted artifact is no longer the artifact that failed. NO MODIFICATIONS: the file is the exact bytes scp'd off the host, 23441 bytes.
   - id: omn18781-two-integration-suites-collected-and-never-executed
     guard: scripts/ci/skip_count_ratchet.py
     incident: OMN-18781

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import inspect
 import logging
+import pathlib
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -330,3 +332,104 @@ def test_the_real_engine_is_recognised_by_the_probe() -> None:
     )
 
     assert _engine_type_accepts_delivery(MessageDispatchEngine) is True
+
+
+# ---------------------------------------------------------------------------
+# OMN-18918 / OMN-18955: exactly ONE mechanism may write the coordinates.
+#
+# Both tickets fixed the same defect at the same seam, independently. #3900
+# landed a task-local context channel; this change landed the typed parameter
+# the operator ruled for on 2026-09-20. When the two were merged, the result
+# auto-merged CLEAN and carried BOTH injections, writing the same two payload
+# keys about sixty lines apart -- last writer wins, no conflict marker, no
+# failing test. The contextvar arm is deleted here and this is the test that
+# refuses its return, by ANY route rather than by name.
+# ---------------------------------------------------------------------------
+
+_INJECTION_SITE = (
+    pathlib.Path(__file__).resolve().parents[3]
+    / "src"
+    / "omnibase_infra"
+    / "runtime"
+    / "auto_wiring"
+    / "handler_wiring.py"
+)
+_RUNTIME_DIR = _INJECTION_SITE.parents[1]
+
+
+def _assignments_to(key: str) -> list[str]:
+    """Every line in the wiring that assigns the given injected payload key."""
+    pattern = re.compile(rf'^\s*input_data\[["\']{re.escape(key)}["\']\]\s*=')
+    return [
+        line
+        for line in _INJECTION_SITE.read_text(encoding="utf-8").splitlines()
+        if pattern.match(line)
+    ]
+
+
+@pytest.mark.parametrize("key", ["_partition", "_offset"])
+def test_exactly_one_source_writes_each_coordinate_key(key: str) -> None:
+    """Two writers for one key is the silent failure, not a redundancy."""
+    assignments = _assignments_to(key)
+
+    assert len(assignments) == 1, (
+        f"{len(assignments)} assignments to input_data[{key!r}] in "
+        f"{_INJECTION_SITE.name}: {assignments}. A second writer does not "
+        "conflict and does not fail -- the later one silently wins. If a new "
+        "source is genuinely needed, delete the old one in the same change."
+    )
+
+
+def test_the_single_assignment_is_the_typed_delivery_one() -> None:
+    """The positive control: the pattern above still matches something real.
+
+    A test asserting 'exactly one' passes just as happily at one as it would
+    at zero if the pattern rotted, and a zero would mean the injection was
+    deleted entirely -- the original OMN-18905 defect, restored. So the one
+    match is read, not merely counted.
+    """
+    partition_line = _assignments_to("_partition")[0]
+    offset_line = _assignments_to("_offset")[0]
+
+    assert "delivery.partition" in partition_line
+    assert "delivery.offset" in offset_line
+
+
+def test_no_ambient_source_coordinate_channel_survives_anywhere_in_runtime() -> None:
+    """The retired mechanism is gone by SUBSTANCE, not by import name.
+
+    Deleting the two helpers is not enough on its own: the channel could come
+    back as a differently-named ContextVar and this seam would be back to two
+    sources with nothing noticing. The check is over the whole runtime package
+    rather than the one module the helpers lived in.
+    """
+    offenders = sorted(
+        str(path.relative_to(_RUNTIME_DIR))
+        for path in _RUNTIME_DIR.rglob("*.py")
+        if "source_coordinate" in path.read_text(encoding="utf-8")
+    )
+
+    assert offenders == [], (
+        "a source-coordinate context channel is present again in "
+        f"{offenders}. The coordinates travel as ModelMessageDeliveryContext "
+        "on the dispatch call (operator ruling, 2026-09-20); ambient state "
+        "beside it gives the seam two writers for one field."
+    )
+
+
+def test_the_channels_that_legitimately_live_there_are_untouched() -> None:
+    """Second positive control, bounding the deletion above.
+
+    `dispatch_envelope_context` predates OMN-18955 and carries two channels
+    this change has no business removing. Asserting they survive is what makes
+    the assertion above a scalpel rather than a claim that the module is
+    empty.
+    """
+    from omnibase_infra.runtime import dispatch_envelope_context as channels
+
+    assert hasattr(channels, "bind_dispatch_envelope")
+    assert hasattr(channels, "current_dispatch_envelope")
+    assert hasattr(channels, "bind_projection_tenant_authority")
+    assert hasattr(channels, "current_projection_tenant_authority")
+    assert not hasattr(channels, "bind_source_coordinate")
+    assert not hasattr(channels, "current_source_coordinate")

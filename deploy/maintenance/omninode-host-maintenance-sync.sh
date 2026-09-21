@@ -158,6 +158,28 @@ MANIFEST=(
   # resolve and is therefore deliberately absent.
   "deploy/maintenance/omninode-runner-tree-converge.sh|/data/maintenance/bin/omninode-runner-tree-converge.sh|0755"
   "deploy/maintenance/cron.d/omninode-runner-tree-converge|/etc/cron.d/omninode-runner-tree-converge|0644"
+  # OMN-18942. The fleet failure probe and the three artifacts it reads. NO new
+  # cron unit appears here, deliberately: the probe is called from the system
+  # reporter's own `collect()` and rides its */15 tick, so the reason these are
+  # listed is the reason the first entry is -- a probe merged but never
+  # installed is a blind detector, the OMN-15525 condition.
+  #
+  # The two Python modules are SHARED, not copies. The failure-rate evaluator
+  # is the same file the GitHub Actions job runs, so the host and CI cannot
+  # diverge on what counts as a failing scheduled workflow; the lab-pass
+  # receipt module is the same reader the delivery gate uses, so the host and
+  # the gate cannot diverge on what counts as a passing receipt. A second
+  # implementation of either would be a second thing to keep true.
+  #
+  # The sync installs every entry FLAT into /data/maintenance/bin, which is why
+  # the probe resolves its companions from `scripts/ci/` in the repo and from
+  # its own directory on the host rather than assuming one layout.
+  "scripts/omninode-fleet-failure-probe.py|/data/maintenance/bin/omninode-fleet-failure-probe.py|0755"
+  "scripts/ci/nonrequired_check_failure_rate.py|/data/maintenance/bin/nonrequired_check_failure_rate.py|0755"
+  "scripts/ci/lab_pass_receipt.py|/data/maintenance/bin/lab_pass_receipt.py|0755"
+  # The declared fleet repository list and failure thresholds. It is data the
+  # probe reads, not a script, so it is installed 0644.
+  "config/runner_routing_policy.yaml|/data/maintenance/bin/runner_routing_policy.yaml|0644"
 )
 
 # Optional manifest override: a file of `relpath|hostpath|mode` lines, blank and
