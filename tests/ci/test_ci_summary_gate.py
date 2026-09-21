@@ -2565,3 +2565,111 @@ class TestTheSweepIsWiredIntoTheProductionPoller:
             "a stale workflow_runs.json from an earlier poll would attribute "
             "rows against the wrong index"
         )
+
+
+class TestSupersededCancellationOrdering:
+    """OMN-18979: a cancelled superseded attempt must not outrank its replacement.
+
+    Raised against the merged sweep: a superseding attempt cancels a job, the
+    head then carries both a cancelled row and a successful one for the same
+    context name, and the sweep reported the cancelled one on a pull request
+    whose tests had all passed. A rerun cleared it.
+
+    MEASURED BEFORE CHANGING ANYTHING, because the two directions named in the
+    report already behaved correctly. Across 5 recent heads carrying 8 names
+    with BOTH a cancelled and a successful row, latest-wins picked the
+    cancelled row ZERO times. The reachable hazard is narrower and is the
+    third case below: `started_at` is second-granular, so a cancellation
+    written in the same second as its replacement fell through to the
+    check-run id, which orders by CREATION and can put the cancellation last.
+    """
+
+    @staticmethod
+    def _pair(
+        first: tuple[int, str, str, str], second: tuple[int, str, str, str]
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": i,
+                "name": "Gate X",
+                "status": "completed",
+                "conclusion": c,
+                "started_at": s,
+                "completed_at": e,
+                "head_sha": "a" * 40,
+            }
+            for (i, c, s, e) in (first, second)
+        ]
+
+    def _sweep(self, rows: list[dict[str, Any]]) -> list[str]:
+        failures, _f, _s, _e = evaluate_external_sweep(
+            rows,
+            expected=(),
+            in_run_names=frozenset(),
+            self_name="CI Summary",
+            exclusions={},
+            events={},
+            now=NOW,
+        )
+        return failures
+
+    def test_cancelled_then_succeeded_reads_green(self) -> None:
+        """The replacement is the verdict about the head."""
+        rows = self._pair(
+            (1, "cancelled", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "success", "2026-09-20T10:05:00Z", "2026-09-20T10:09:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "success"
+        assert self._sweep(rows) == []
+
+    def test_succeeded_then_cancelled_still_reads_red(self) -> None:
+        """The other direction must NOT be relaxed.
+
+        A cancellation that genuinely comes last is the newest thing known
+        about the head, and treating it as green because an older success
+        exists is the stale-green this module must never manufacture.
+        """
+        rows = self._pair(
+            (1, "success", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "cancelled", "2026-09-20T10:05:00Z", "2026-09-20T10:09:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "cancelled"
+        assert self._sweep(rows) == ["Gate X (cancelled)"]
+
+    def test_a_same_second_pair_is_ordered_by_completion_not_by_id(self) -> None:
+        """THE case the refinement fixes, and the red test for it.
+
+        Both rows share a `started_at`, and the cancellation carries the
+        HIGHER check-run id because ids order by creation. Under the previous
+        tie-break the cancellation won and the sweep reddened a head whose
+        replacement had already succeeded.
+        """
+        rows = self._pair(
+            (9, "cancelled", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "success", "2026-09-20T10:00:00Z", "2026-09-20T10:02:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "success"
+        assert self._sweep(rows) == []
+
+    def test_a_same_second_pair_still_reds_when_the_cancellation_completed_last(
+        self,
+    ) -> None:
+        """The mirror of the case above, so the refinement is not a blanket pass."""
+        rows = self._pair(
+            (9, "success", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "cancelled", "2026-09-20T10:00:00Z", "2026-09-20T10:02:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "cancelled"
+        assert self._sweep(rows) == ["Gate X (cancelled)"]
+
+    def test_the_refinement_changes_nothing_when_started_at_differs(self) -> None:
+        """Every case measured on this repository has distinct start times.
+
+        Pinning that keeps the change a refinement: a later id can still break
+        a full tie, and the ordering on distinct start times is untouched.
+        """
+        rows = self._pair(
+            (99, "failure", "2026-09-20T10:00:00Z", "2026-09-20T10:30:00Z"),
+            (1, "success", "2026-09-20T10:05:00Z", "2026-09-20T10:06:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "success"

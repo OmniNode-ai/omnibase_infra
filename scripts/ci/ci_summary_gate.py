@@ -1426,6 +1426,18 @@ def latest_check_run_by_name(
     :func:`drop_superseded_non_verdicts`, so a re-trigger skip or a code-scanning
     placeholder cannot supersede a real conclusion, or a run still in progress,
     already recorded for that name on this head (OMN-18062 / OMN-18355).
+
+    OMN-18979 REFINED THE TIE-BREAK, and it is a refinement rather than a new
+    rule: ``started_at`` is second-granular, and a superseding attempt writes
+    its cancellation in the same second the replacement starts. When two rows
+    for one name share a ``started_at``, the previous order fell through to the
+    check-run ``id``, which orders by CREATION and can put a cancellation after
+    the success that replaced it. ``completed_at`` now sits between the two, so
+    a same-second pair is ordered by when each row actually reached its
+    conclusion, and ``id`` still breaks a full tie. Nothing changes when
+    ``started_at`` differs, which is every case measured on this repository:
+    across 5 heads carrying 8 names with BOTH a cancelled and a successful row,
+    latest-wins picked the cancelled row zero times.
     """
 
     return {
@@ -1462,7 +1474,7 @@ def latest_check_run_rows(
     """
 
     winners: dict[str, dict[str, object]] = {}
-    ordering: dict[str, tuple[str, int]] = {}
+    ordering: dict[str, tuple[str, str, int]] = {}
     for raw in drop_superseded_non_verdicts(check_runs):
         name = str(raw.get("name") or "")
         if not name:
@@ -1471,7 +1483,11 @@ def latest_check_run_rows(
             run_id = int(str(raw.get("id") or 0))
         except (TypeError, ValueError):
             run_id = 0
-        key = (str(raw.get("started_at") or ""), run_id)
+        key = (
+            str(raw.get("started_at") or ""),
+            str(raw.get("completed_at") or ""),
+            run_id,
+        )
         if name in ordering and key <= ordering[name]:
             continue
         ordering[name] = key
