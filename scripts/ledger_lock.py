@@ -5,9 +5,9 @@
 
 Multiple agents or processes claiming work in the same ledger file need a
 mutex so a "claim, then mutate" write from one writer never interleaves with
-another writer's. This script acquires a per-ledger-path lock (an atomically
-created lock directory, which works on macOS without flock(1) and needs no
-third-party dependencies) and then performs exactly one of:
+another writer's. This script acquires a per-ledger-path lock (a lock
+directory published by a single rename, which works on macOS without flock(1)
+and needs no third-party dependencies) and then performs exactly one of:
 
   * ``--append TEXT`` / ``--append-file PATH`` (``-`` for stdin): append the
     text, durably (fsync'd), to the ledger. Before writing, the payload is
@@ -107,6 +107,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 from contextlib import suppress
@@ -117,6 +118,24 @@ from typing import Any
 DEFAULT_TIMEOUT_SECONDS = 300.0
 POLL_SECONDS = 0.5
 DEFAULT_DEDUP_WINDOW = 20
+
+# How long an ANONYMOUS lock -- a lock directory carrying no readable
+# metadata.json -- is honoured before any acquirer may reclaim it (OMN-16729).
+#
+# Under the atomic acquisition below, a holder's metadata is renamed into
+# place together with the lock, so a live holder is named from the lock's
+# first instant. An anonymous lock is therefore either (a) a holder running
+# the pre-OMN-16729 two-step publish that died between its mkdir and its
+# sidecar write, or (b) such a holder still inside that window, which is one
+# filesystem write wide. Five minutes is four orders of magnitude more than
+# (b) needs and bounds (a), which previously stranded the whole fleet until a
+# human broke the lock by hand -- twice on 2026-09-21, for 26 and 20 minutes.
+ANONYMOUS_STALE_SECONDS = 300.0
+
+# Prefix for the private directory an acquirer populates before renaming it
+# onto the lock path. Distinct from any lock name, so a staging directory is
+# never mistaken for a lock.
+STAGING_PREFIX = ".acquiring-"
 
 # Where lock directories live for a given ledger. By default, co-located
 # with the ledger file itself (so no shared root needs to be agreed on
@@ -240,17 +259,47 @@ def read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
-def write_metadata(lock_dir: Path, ledger: Path, command: list[str] | None) -> None:
+def lane_hint() -> str | None:
+    """The lane this holder belongs to, if the environment names one.
+
+    A pid and a host identify a process; they do not tell whoever finds a
+    stuck lock which lane to go and ask. The lane is best-effort and may be
+    absent -- it is a courtesy for the human reading a timeout, never a
+    thing the lock protocol depends on.
+    """
+    for variable in ("ONEX_LANE", "LEDGER_LANE", "CLAUDE_AGENT_NAME"):
+        value = os.environ.get(variable, "").strip()
+        if value:
+            return value
+    return None
+
+
+def write_metadata(
+    lock_dir: Path,
+    ledger: Path,
+    command: list[str] | None,
+    *,
+    into: Path | None = None,
+) -> None:
+    """Write the holder sidecar describing `lock_dir`.
+
+    `into` is where the file physically lands, defaulting to `lock_dir`
+    itself. Acquisition passes a staging directory instead, so the sidecar is
+    complete before the lock becomes visible under its real name; the
+    recorded `lock_dir` is the real one either way.
+    """
+    destination = lock_dir if into is None else into
     metadata = {
         "ledger": str(ledger),
         "lock_dir": str(lock_dir),
         "pid": os.getpid(),
         "host": socket.gethostname(),
+        "lane": lane_hint(),
         "cwd": str(Path.cwd()),
         "command": command,
         "acquired_at": utc_now(),
     }
-    (lock_dir / "metadata.json").write_text(
+    (destination / "metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -268,34 +317,66 @@ def process_is_alive(pid: Any) -> bool:
     return True
 
 
-def maybe_break_stale_lock(lock_dir: Path, stale_after: float | None) -> str | None:
+def lock_age_seconds(lock_dir: Path) -> float | None:
+    """Age of `lock_dir` in seconds, or None when it cannot be measured."""
+    try:
+        return time.time() - lock_dir.stat().st_mtime
+    except OSError:
+        return None
+
+
+def maybe_break_stale_lock(
+    lock_dir: Path,
+    stale_after: float | None,
+    *,
+    anonymous_stale_after: float | None = ANONYMOUS_STALE_SECONDS,
+) -> str | None:
     """Break `lock_dir` if it is provably stale, returning a message if so.
 
-    Two independent conditions can make a lock stale:
+    Three independent conditions can make a lock stale:
+
+      * it is ANONYMOUS -- no readable metadata.json -- and older than
+        `anonymous_stale_after`. Under atomic acquisition a live holder has
+        metadata from the instant its lock exists, so an anonymous lock past
+        that bound cannot have a holder that will ever name itself. It is
+        the debris of a pre-OMN-16729 holder that died between its `mkdir`
+        and its sidecar write, and nothing else clears it: the dead-pid rule
+        below needs a pid to check, and the age rule below is skipped
+        whenever `--stale-after` is not passed, which is the default.
+        Passing None restores the old, unbounded behaviour.
       * it was written by a process on THIS host that has since died --
         always broken, regardless of `stale_after`.
       * it is older than `stale_after` (if given) -- broken regardless of
         which host wrote it, since a cross-host liveness check is not
         possible.
+
+    A NAMED holder is unaffected by the first rule at any age. Age alone
+    still never breaks a named lock without an explicit `stale_after`.
     """
     metadata = read_json(lock_dir / "metadata.json")
+
+    if not metadata and anonymous_stale_after is not None:
+        age = lock_age_seconds(lock_dir)
+        if age is not None and age >= anonymous_stale_after:
+            shutil.rmtree(lock_dir, ignore_errors=True)
+            return f"removed anonymous lock (no holder metadata) age={age:.0f}s"
+
     host = metadata.get("host")
     pid = metadata.get("pid")
     current_host = socket.gethostname()
 
     if host == current_host and not process_is_alive(pid):
-        shutil.rmtree(lock_dir)
+        shutil.rmtree(lock_dir, ignore_errors=True)
         return f"removed dead same-host lock pid={pid}"
 
     if stale_after is None:
         return None
 
-    try:
-        age = time.time() - lock_dir.stat().st_mtime
-    except OSError:
+    age = lock_age_seconds(lock_dir)
+    if age is None:
         return None
     if age >= stale_after:
-        shutil.rmtree(lock_dir)
+        shutil.rmtree(lock_dir, ignore_errors=True)
         return f"removed stale lock age={age:.0f}s"
     return None
 
@@ -307,38 +388,105 @@ class LedgerLock:
         timeout: float,
         stale_after: float | None,
         command: list[str] | None,
+        *,
+        anonymous_stale_after: float | None = ANONYMOUS_STALE_SECONDS,
     ) -> None:
         self.ledger = ledger
         self.timeout = timeout
         self.stale_after = stale_after
         self.command = command
+        self.anonymous_stale_after = anonymous_stale_after
         self.lock_dir = lock_path_for(ledger)
         self.acquired = False
+
+    def _claim(self, staging: Path) -> bool:
+        """Publish the fully-populated `staging` directory as the lock.
+
+        Returns True when this process now holds the lock.
+
+        The publish is a single rename, so the lock is never visible without
+        its holder metadata -- that two-step window is the whole of OMN-16729.
+        `acquired_at` is refreshed on every attempt so a waiter that spins for
+        four minutes does not later claim it took the lock when it started
+        waiting.
+
+        The existence check before the rename is load-bearing, not an
+        optimization: POSIX rename REPLACES an existing EMPTY directory, and
+        an empty directory is exactly the shape a pre-OMN-16729 holder has
+        between its mkdir and its sidecar write. Skipping the check would let
+        this process silently steal a lock from such a holder. A rename onto
+        a lock written by this code cannot replace anything, because that
+        lock always holds metadata.json and rename refuses a non-empty
+        target.
+        """
+        write_metadata(self.lock_dir, self.ledger, self.command, into=staging)
+        if self.lock_dir.exists():
+            return False
+        try:
+            staging.rename(self.lock_dir)
+        except OSError:
+            # Lost the race, or the target appeared between the check and
+            # here. Either way someone else holds it; go back and wait.
+            return False
+        return True
 
     def acquire(self) -> None:
         self.lock_dir.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.timeout
-        while True:
-            try:
-                self.lock_dir.mkdir()
-                self.acquired = True
-                write_metadata(self.lock_dir, self.ledger, self.command)
-                return
-            except FileExistsError:
-                message = maybe_break_stale_lock(self.lock_dir, self.stale_after)
+        staging = Path(
+            tempfile.mkdtemp(prefix=STAGING_PREFIX, dir=self.lock_dir.parent)
+        )
+        try:
+            while True:
+                if self._claim(staging):
+                    self.acquired = True
+                    return
+                message = maybe_break_stale_lock(
+                    self.lock_dir,
+                    self.stale_after,
+                    anonymous_stale_after=self.anonymous_stale_after,
+                )
                 if message:
                     print(f"ledger_lock: {message}: {self.lock_dir}", file=sys.stderr)
                     continue
                 if self.timeout == 0 or time.monotonic() >= deadline:
-                    metadata = read_json(self.lock_dir / "metadata.json")
-                    holder = metadata.get("pid", "unknown")
-                    host = metadata.get("host", "unknown-host")
-                    acquired_at = metadata.get("acquired_at", "unknown-time")
-                    raise TimeoutError(
-                        f"timed out waiting for {self.ledger}; held by pid={holder} "
-                        f"host={host} since {acquired_at}; lock={self.lock_dir}"
-                    )
+                    raise TimeoutError(self.describe_holder())
                 time.sleep(POLL_SECONDS)
+        finally:
+            # A staging directory outlives this call only if it became the
+            # lock. Anything else -- a timeout, a metadata write that raised,
+            # a KeyboardInterrupt -- takes it with it, so a failed acquire
+            # leaves no litter and, above all, no anonymous lock.
+            if not self.acquired:
+                shutil.rmtree(staging, ignore_errors=True)
+
+    def describe_holder(self) -> str:
+        """The timeout message, naming whoever is to be chased.
+
+        Before OMN-16729 an anonymous lock produced `pid=unknown
+        host=unknown-host since unknown-time`, which named no one and gave a
+        waiting lane nothing to act on. Metadata is now guaranteed for a live
+        holder, and when it is genuinely absent the age is reported instead,
+        because age is what decides whether the lock is reclaimable.
+        """
+        metadata = read_json(self.lock_dir / "metadata.json")
+        age = lock_age_seconds(self.lock_dir)
+        age_text = "unknown age" if age is None else f"age={age:.0f}s"
+        if not metadata:
+            return (
+                f"timed out waiting for {self.ledger}; lock has NO holder metadata "
+                f"({age_text}), so it is anonymous debris and becomes reclaimable "
+                f"at {ANONYMOUS_STALE_SECONDS:.0f}s; lock={self.lock_dir}"
+            )
+        lane = metadata.get("lane")
+        lane_text = "" if not lane else f" lane={lane}"
+        return (
+            f"timed out waiting for {self.ledger}; held by "
+            f"pid={metadata.get('pid', 'unknown')} "
+            f"host={metadata.get('host', 'unknown-host')}{lane_text} since "
+            f"{metadata.get('acquired_at', 'unknown-time')} ({age_text}); "
+            f"lock={self.lock_dir}"
+        )
 
     def release(self) -> None:
         if self.acquired:
@@ -3957,6 +4105,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="break locks older than this duration; dead same-host pids are always cleaned up",
     )
+    parser.add_argument(
+        "--anonymous-stale-after",
+        type=parse_duration,
+        default=ANONYMOUS_STALE_SECONDS,
+        help=(
+            "break a lock carrying NO holder metadata once it is older than this "
+            "duration (default: 5m). Such a lock cannot have a live holder, because "
+            "acquisition publishes the metadata and the lock in one rename; pass 0 "
+            "to reclaim on sight, or a very large value to restore the pre-OMN-16729 "
+            "behaviour of never reclaiming it"
+        ),
+    )
     parser.add_argument("--append", help="append this text while holding the lock")
     parser.add_argument(
         "--append-file",
@@ -4436,7 +4596,13 @@ def main(argv: list[str] | None = None) -> int:
         payload = payload_to_write
 
     try:
-        with LedgerLock(args.ledger, args.timeout, args.stale_after, command or None):
+        with LedgerLock(
+            args.ledger,
+            args.timeout,
+            args.stale_after,
+            command or None,
+            anonymous_stale_after=args.anonymous_stale_after,
+        ):
             if args.roll_section:
                 return run_roll_section(args)
             if payload is not None:

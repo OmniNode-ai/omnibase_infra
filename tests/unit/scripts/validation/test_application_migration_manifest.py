@@ -742,7 +742,21 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # completion time, and 0001_grant_omninode_runtime_dod_verify_runs.sql,
     # which ISSUES the grants the topology only declares -- the table half and
     # the BIGSERIAL cursor's own standalone sequence, both asserted.
-    assert len(result.declarations) == 202
+    #
+    # 202 -> 203 for OMN-19031, which adds ONE node-owned migration:
+    # node_projection_consumer_flow/0005_add_node_id_ingest_index.sql. It
+    # indexes (node_id, ingest_sequence DESC) on
+    # omninode_internal.consumer_flow_windows, the predicate
+    # ConsumerFlowProjectionWriter runs once per heartbeat event. No index
+    # covered node_id, so the plan was a Parallel Seq Scan; measured on
+    # onex-dev at 10,352,358 rows / 5,842 MB it took 38.8s against the asyncpg
+    # pool's command_timeout of 30, and the writer wrote nothing for seven
+    # days. The ordinal is 0005 rather than the source tree's own next free
+    # 0002 because THIS tree carries four files the node tree does not, and
+    # 0002_reconcile_consumer_flow_window_shapes.sql is the one that does
+    # ADD COLUMN IF NOT EXISTS node_id UUID -- files apply in sort order, so a
+    # 0002 index would sort before the reconcile that guarantees its column.
+    assert len(result.declarations) == 203
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

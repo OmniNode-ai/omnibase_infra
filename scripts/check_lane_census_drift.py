@@ -21,13 +21,30 @@ that script with neither a comparison flag nor an output path, purely to prove
 it does not crash. The generated block lives in ``omni_home/CLAUDE.md``, a
 different repository this repo's CI does not check out.
 
-WHAT THIS GATE ASSERTS, AND WHAT IT DELIBERATELY DOES NOT
----------------------------------------------------------
-It does **not** assert ``drift_count == 0``. Live drift on a mutable lane is a
-normal, reportable state and a gate that refused every PR over it would be
-turned off within a day. What it asserts is that the two COMMITTED artifacts
-still describe the same world, and that the generator can render every lane
-either of them names:
+WHAT THIS GATE ASSERTS
+----------------------
+It asserts ``drift_count == 0`` (OMN-18949 AC-1), and it asserts that the two
+COMMITTED artifacts still describe the same world.
+
+The first of those was dropped when this file first shipped. The merged
+implementation stated in its own docstring that it "deliberately does NOT
+require drift_count to be zero", on the argument that live drift on a mutable
+lane is a normal reportable state and a gate refusing every PR over it would be
+switched off within a day. That argument is real, but it is an argument for
+resolving drift, not for a gate the ticket's own falsifier says must be red:
+AC-1 names "a green tree carrying five drift items" as the red test, and the
+tree was green with exactly five. Narrowing it left nothing refusing on drift
+at all, which is the condition the ticket was filed about. There is deliberately
+NO flag to switch the drift-count assertion off -- an opt-out reachable from a
+workflow file is the same silence with a longer name.
+
+The escape from a permanently-red gate is the one the ticket names: declare the
+container in the manifest, or file it. Both are declaration changes, which is
+also what AC-3 requires before a drift count may legitimately fall.
+
+The findings, in a fixed order:
+
+0. ``nonzero_drift_count`` -- the snapshot reports live drift. **This is AC-1.**
 
 1. ``snapshot_lane_unknown`` — the snapshot checked, or filed a finding
    against, a lane the manifest does not declare.
@@ -123,6 +140,37 @@ def evaluate(
     findings: list[Finding] = []
     per_lane = declared_containers(manifest)
     lanes = set(per_lane)
+
+    # 0. AC-1. A snapshot that reports live drift refuses, whatever the two
+    #    committed files say about each other. Read from BOTH the declared
+    #    count and the finding list, so a snapshot that carries findings while
+    #    claiming zero -- or claims a count while carrying none -- still
+    #    refuses here rather than only tripping the count-mismatch rule below.
+    snapshot_findings_early = snapshot.get("findings", [])
+    reported_count = snapshot.get("drift_count")
+    observed_drift = max(
+        reported_count if isinstance(reported_count, int) else 0,
+        len(snapshot_findings_early),
+    )
+    if observed_drift:
+        lanes_with_drift = sorted(
+            {f.get("lane", "") for f in snapshot_findings_early if f.get("lane")}
+        )
+        findings.append(
+            Finding(
+                kind="nonzero_drift_count",
+                lane=", ".join(lanes_with_drift) or "(unattributed)",
+                subject="drift_count",
+                detail=(
+                    f"the census reports {observed_drift} drift item(s); live lane "
+                    "topology has moved away from the declared state and nothing "
+                    "downstream refuses on it. Declare the container(s) in the lane "
+                    "manifest, or remove them from the lane -- do NOT lower the count "
+                    "by refreshing the snapshot, which heals the number without "
+                    "changing anything it describes"
+                ),
+            )
+        )
 
     # 1. a lane the snapshot names and the manifest does not declare
     for lane in snapshot.get("lanes_checked", []):
@@ -333,9 +381,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  [{f.kind}] lane={f.lane} subject={f.subject}")
         print(f"      {f.detail}")
     print(
-        "\nThis gate does NOT require drift_count to be zero -- live drift on a mutable "
-        "lane is a normal reportable state. It requires the two COMMITTED files to "
-        "describe the same world. Refresh the snapshot, or correct the manifest."
+        "\nThis gate requires drift_count to be ZERO (OMN-18949 AC-1) and requires the "
+        "two COMMITTED files to describe the same world. A nonzero_drift_count finding "
+        "is resolved by declaring the container in the manifest or removing it from the "
+        "lane, never by refreshing the snapshot. Any other finding is resolved by "
+        "refreshing the snapshot or correcting the manifest."
     )
     return 1
 

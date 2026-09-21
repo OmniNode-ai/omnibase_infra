@@ -189,20 +189,59 @@ def test_a_fresh_agreeing_census_reports_ok_and_raises_no_issue(tmp_path: Path) 
 def test_live_drift_is_reported_and_reaches_the_active_issues_list(
     tmp_path: Path,
 ) -> None:
-    """A warning that does not reach the issues list is a row nobody reads."""
+    """A row that does not reach the issues list is a row nobody reads.
+
+    Since OMN-18949 armed AC-1 this is CRITICAL rather than WARNING: a
+    non-zero drift count refuses, and the reporter inherits that verdict from
+    the same checker CI runs instead of grading it a second way. The
+    containers named here are deliberately ones the committed manifest does
+    NOT declare, so this is plain live drift and not a stale finding.
+    """
     snap = _snapshot(
         tmp_path,
         emitted=_fresh(),
         findings=[
-            {"lane": "dev", "kind": "unexpected_container", "container": "onex-api"},
+            {
+                "lane": "dev",
+                "kind": "unexpected_container",
+                "container": "some-undeclared-container",
+            },
             {"lane": "dev", "kind": "unexpected_container", "container": "some-other"},
         ],
     )
     report = _run(tmp_path, OMNINODE_CENSUS_LIVE_SNAPSHOT=str(snap))
     section = _census_section(report)
     assert "2 drift item(s)" in section and "dev" in section
+    assert "declare it in the lane manifest" in section
     issues = report.split("*Active issues*", 1)[1]
-    assert "census" in issues and "WARNING" in issues
+    assert "census" in issues and "CRITICAL" in issues
+
+
+def test_live_drift_and_a_manifest_contradiction_are_different_rows(
+    tmp_path: Path,
+) -> None:
+    """The two defects have different remedies, so they may not share a key.
+
+    Collapsing them would report "the census contradicts the manifest" for a
+    lane that is merely running something undeclared, and the de-duplication
+    state for one would suppress the other.
+    """
+    snap = _snapshot(
+        tmp_path,
+        emitted=_fresh(),
+        findings=[
+            {
+                "lane": "dev",
+                "kind": "unexpected_container",
+                "container": "some-undeclared-container",
+            }
+        ],
+    )
+    drift_only = _census_section(
+        _run(tmp_path, OMNINODE_CENSUS_LIVE_SNAPSHOT=str(snap))
+    )
+    assert "`drift`" in drift_only
+    assert "contradicts the committed manifest" not in drift_only
 
 
 def test_a_live_census_contradicting_the_manifest_is_CRITICAL(tmp_path: Path) -> None:

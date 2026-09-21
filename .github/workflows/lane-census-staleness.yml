@@ -14,19 +14,23 @@
 #      A census older than 7 days means the .201 timer stopped or the snapshot
 #      was never committed — either is a documentation failure.
 #
-#   2. CENSUS-VS-MANIFEST DRIFT (OMN-18949): the committed snapshot and the
-#      committed manifest must describe the same world. A finding reporting a
-#      container as undeclared that the manifest now declares, a snapshot that
-#      miscounts its own findings, a lane one file knows and the other does
-#      not, and a manifest lane the table generator has no entry for are each
-#      a hard failure. It deliberately does NOT require drift_count to be
-#      zero: live drift on a mutable lane is a normal reportable state, and a
-#      gate refusing every PR over it would be switched off within a day.
+#   2. CENSUS DRIFT (OMN-18949): the committed snapshot must report ZERO
+#      drift (AC-1), and the committed snapshot and manifest must describe the
+#      same world. A non-zero drift_count, a finding reporting a container as
+#      undeclared that the manifest now declares, a snapshot that miscounts its
+#      own findings, a lane one file knows and the other does not, and a
+#      manifest lane the table generator has no entry for are each a hard
+#      failure.
 #
-#      Until this step existed, NOTHING refused on census drift at all. The
-#      committed snapshot carried five findings, severity warning, and the
-#      only surface that read them rendered the prose string
-#      "5 drift item(s) — see census" into a doctrine file.
+#      The drift_count assertion was in the ticket and not in the first merged
+#      implementation, which said in its own comment that it "deliberately does
+#      NOT require drift_count to be zero". Measured 2026-09-21: the committed
+#      tree carried five drift items and this step exited 0, which is precisely
+#      the falsifier AC-1 names as its red test. The five were undeclared
+#      containers the dev lane genuinely runs; they are declared in the manifest
+#      now, which is the remedy the ticket names and the only one that lowers a
+#      drift count legitimately (AC-3 forbids lowering it by refreshing the
+#      snapshot).
 #
 #   3. ENV-VS-LIVE DRIFT (E-5 / OMN-13018): lane-manifest.yaml compose_project
 #      names, network declarations, and bootstrap server config must agree with
@@ -113,10 +117,11 @@ jobs:
       - name: Check census-vs-manifest drift (OMN-18949)
         run: |
           echo "================================================================"
-          echo "Census-vs-Manifest Drift Gate — OMN-18949"
-          echo "The committed snapshot and the committed manifest must describe"
-          echo "the same world. A non-zero drift_count is NOT a failure; a"
-          echo "finding that contradicts the manifest is."
+          echo "Census Drift Gate — OMN-18949"
+          echo "A non-zero drift_count IS a failure (AC-1), and so is a finding"
+          echo "that contradicts the manifest. Declare the container in the lane"
+          echo "manifest or remove it from the lane; refreshing the snapshot to"
+          echo "lower the count is the one remedy that is not a remedy."
           echo "================================================================"
           uv run python scripts/check_lane_census_drift.py \
             --manifest deploy/lane-census/lane-manifest.yaml \
