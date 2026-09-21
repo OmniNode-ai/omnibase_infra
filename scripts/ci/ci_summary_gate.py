@@ -469,6 +469,15 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     "Duplication Sweep",
     "Stale TODO Gate",
     "dispatcher-route-coverage",
+    # OMN-18938. Registered so its ABSENCE is a failure, not a pass. This gate
+    # ran as an unregistered, path-filtered job through the fleet-wide outage of
+    # 2026-09-20 that it exists to catch: omnibase_infra#3882 made two dispatch
+    # keywords REQUIRED, the deployed consumer passed neither, every delegation
+    # on the dev lane terminalised provider_error, and the module reported 3
+    # passed 0 failed. The default-deny sweep below would now catch it RED, but
+    # a job that never runs is never red -- which is why presence is asserted
+    # here and the job moved to an unfiltered trigger in the same change.
+    "consumer-kwarg-parity",
     "CodeQL",
     "required-check-skip-guard / check-skip-vectors",
     # OMN-15979: the "Integration Test Removal Gate" job (OMN-8732,
@@ -693,6 +702,14 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         # so no merged PR in either fixture window could have produced this
         # check-run. Comes out at the next fixture re-capture.
         "kb-doc-gate / kb-doc-gate",
+        # OMN-18938: the parity job moves to its own unfiltered workflow in
+        # this same PR, so it reports on every pull request from here on, but
+        # no merged PR in either fixture window (#2546...#2567, #2705...#2720)
+        # ran it under that trigger. Excluded from the HISTORICAL REPLAY only
+        # -- TestPostFixtureWindowContexts proves it still blocks when absent
+        # from a live payload, which is the assertion that matters. Comes out
+        # at the next fixture re-capture.
+        "consumer-kwarg-parity",
         # OMN-18096: the producer workflow landed 2026-09-09 in #3371, so no
         # merged PR in either fixture window could have produced this check-run.
         # Comes out at the next fixture re-capture.
