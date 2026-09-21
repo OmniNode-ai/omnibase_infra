@@ -96,6 +96,12 @@ def _log_zero_row_outcome(
     shape asserted here is pinned against the real source by
     ``test_the_emit_site_still_branches_on_the_refusal_count`` below, so a
     change to one without the other is a red test rather than a stale mirror.
+
+    The BEHAVIOURAL proof is not here. ``tests/integration/runtime/
+    test_omn18992_guard_refused_zero_rows_integration.py`` drives the real
+    callback from ``_make_projection_dispatch_callback`` and reads the records
+    the runtime itself emitted; these cases cover the extractor edges the
+    integration test would need a case each to reach.
     """
     logger = logging.getLogger("omn18992-replay")
     rows_upserted = _extract_rows_upserted(result)
