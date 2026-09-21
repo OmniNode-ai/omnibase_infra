@@ -2,10 +2,12 @@
 
 ### Release
 - Cut omnibase-infra from dev at 0.38.51 by the scheduled release train.
-- 14 release-relevant commit(s) merged since v0.38.36.
+- 16 release-relevant commit(s) merged since v0.38.36.
 - Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
 
 ### Included Since v0.38.36
+- chore(OMN-18993): vendor and declare the delegate-skill command-claims migration (#3918)
+- feat(OMN-18910): grade whether a projection is writing, not only moving (#3932)
 - fix(OMN-18992): tell a guard-refused zero apart from a writer that wrote nothing (#3919)
 - fix(OMN-18938): add the parity direction that starts from our own signature, and make its absence a failure (#3917)
 - fix(OMN-18916): grade the chain by declared hop identity, not by position (#3905)
