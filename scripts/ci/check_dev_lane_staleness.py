@@ -202,6 +202,15 @@ DEFAULT_MAX_AGE = timedelta(hours=2)
 DEFAULT_CONVERGENCE_WAIT = timedelta(minutes=25)
 DEFAULT_POLL_INTERVAL = timedelta(seconds=60)
 
+#: How old the agent's control-topic lag sample may be and still size a wait
+#: (OMN-18990). Matches ``MAX_LAG_SAMPLE_AGE_SECONDS`` in the agent's own
+#: ``queue_depth`` module, and is enforced here as well because this is the
+#: reader that does the arithmetic. Measured 2026-09-21: a sample taken before
+#: the running rebuild started reported ``commands_ahead=0`` while two commands
+#: waited, sized a 1560s bound from it, and gave up 16 minutes before the agent
+#: reached the command.
+MAX_QUEUE_LAG_AGE_SECONDS: Final[float] = 120.0
+
 # Values docker/Dockerfile.runtime or a non-workspace build can leave in the
 # label. Treated as "unknown", never as "matches".
 SENTINEL_REVISIONS = frozenset({"", "unknown", "none", "null", "dev", "HEAD"})
@@ -1039,6 +1048,36 @@ class ModelQueueFacts:
         )
 
 
+def _stale_lag_reason(payload: dict[str, object], url: str) -> str:
+    """Why this ``/queue`` payload's count is too old to size a wait from.
+
+    Empty string when it is current, or when the agent serves no age at all.
+    An ABSENT age is a deploy agent that predates OMN-18990 and is handled as
+    it was before -- the previous behaviour, by name. A PRESENT age beyond the
+    bound is a measurement this reader can see is out of date, and treating
+    those two as the same value is the collapse being repaired.
+    """
+    raw_age = payload.get("control_topic_lag_age_seconds")
+    if raw_age is None:
+        return ""
+    if isinstance(raw_age, bool) or not isinstance(raw_age, (int, float)):
+        return (
+            f"{url} returned control_topic_lag_age_seconds={raw_age!r}, which "
+            "is not an age, so the count's currency cannot be established"
+        )
+    if raw_age <= MAX_QUEUE_LAG_AGE_SECONDS:
+        return ""
+    observed = payload.get("control_topic_lag_observed_at")
+    return (
+        f"{url} reports commands_ahead={payload.get('commands_ahead')!r} from a "
+        f"lag sample observed {float(raw_age):.0f}s ago (at {observed}), beyond "
+        f"the {MAX_QUEUE_LAG_AGE_SECONDS:.0f}s bound. The agent samples its "
+        "control-topic lag when it polls and does not poll while a rebuild "
+        "runs, so this describes the queue before that rebuild started. An "
+        "unread queue is not an empty one"
+    )
+
+
 def read_agent_queue(
     agent_url: str,
     *,
@@ -1097,6 +1136,16 @@ def read_agent_queue(
             f"{url} returned commands_ahead={ahead!r}, which is not a count",
             source=url,
         )
+    # OMN-18990. The agent's lag half is a cache written by its consumer's
+    # poll, and its run loop does not poll while a rebuild executes. A count
+    # older than the bound describes the queue as it was before the running
+    # rebuild started, which is the one moment this reader asks about. Refused
+    # here as well as at the agent because THIS is the reader that sizes a
+    # wait from it, and a deploy agent that predates the age field serves none
+    # -- absent is handled below, and is not the same as stale.
+    stale = _stale_lag_reason(payload, url)
+    if stale:
+        return ModelQueueFacts.unread(stale, source=url)
     raw_mean = payload.get("mean_service_time_seconds")
     mean = (
         float(raw_mean)

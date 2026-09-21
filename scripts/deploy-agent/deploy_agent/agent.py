@@ -29,6 +29,7 @@ from deploy_agent.coalesce import GitAncestryResolver, ModelSupersession
 from deploy_agent.consumer import DeployConsumer
 from deploy_agent.events import (
     TOPIC_REBUILD_REJECTED,
+    TOPIC_REBUILD_REQUESTED,
     DeployInProgressError,
     EnumOnexApiDeliveryResult,
     EnumRejectionReason,
@@ -58,6 +59,10 @@ from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lab_overlay import (
     DEFAULT_APPLY_BUDGET_SECONDS,
     LabOverlayApplier,
+)
+from deploy_agent.lag_refresher import (
+    DEFAULT_REFRESH_INTERVAL_SECONDS,
+    LagRefresher,
 )
 from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
@@ -373,6 +378,20 @@ class DeployAgent:
             on_rejected=self._publish_rejection_notice,
         )
 
+        # Step 6b: keep the lag sample current DURING a rebuild (OMN-18990).
+        # The loop below is serial -- poll, then execute -- so the consumer's
+        # own sampler, which only writes from inside `poll_and_accept`, goes
+        # untouched for the whole 20-40 minutes of a command. That is exactly
+        # when later merges queue, so `/queue` reported a pre-rebuild zero as
+        # this moment's count. This refresher owns a separate, group-less
+        # client and never touches the one above.
+        lag_refresher = LagRefresher(
+            self._kafka_config,
+            self._lag_sampler,
+            TOPIC_REBUILD_REQUESTED,
+        )
+        lag_refresh_task = asyncio.create_task(self._refresh_lag_forever(lag_refresher))
+
         # Handle signals
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -403,6 +422,8 @@ class DeployAgent:
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
+            lag_refresh_task.cancel()
+            lag_refresher.close()
             consumer.close()
             # Stopped before the site goes away: once the socket is closed the
             # probe reads nothing and the last verdict would be overwritten with
@@ -417,6 +438,28 @@ class DeployAgent:
             # result goes missing.
             self._job_pool.shutdown(wait=True)
             logger.info("Deploy agent stopped")
+
+    async def _refresh_lag_forever(self, refresher: LagRefresher) -> None:
+        """Sample the control-topic lag on a timer, off the polling client.
+
+        Offloaded like every other blocking call in this class: the round trip
+        is short next to a rebuild and long next to the 2s bound the receipt
+        reader needs from the health surface.
+
+        Never lets a failed observation end the task. A refresher that stopped
+        on its first transient error would leave the sampler ageing silently,
+        which is the shape of the defect rather than a repair of it -- and the
+        staleness bound one layer down is what turns that into an unreadable
+        answer instead of a stale number.
+        """
+        while not self._shutdown:
+            try:
+                await self._offload(refresher.refresh)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - never fatal to the agent
+                logger.debug("lag refresh task iteration failed: %s", exc)
+            await asyncio.sleep(DEFAULT_REFRESH_INTERVAL_SECONDS)
 
     def _converge_deps_before_consuming(self) -> bool:
         """Bring a half-recreated lane's deps up before the consumer is built.
