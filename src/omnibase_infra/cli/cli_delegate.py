@@ -106,6 +106,7 @@ error) even when the hang is not asyncio-cooperative.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import json
 import logging
@@ -527,7 +528,39 @@ def _require_completed_terminal_evidence(
         )
 
 
-def _delegate_receipt_evidence_error(receipt: object) -> str | None:
+def _receipt_evidence_requirements(
+    *,
+    response_contract: dict[str, object] | None,
+) -> tuple[bool, bool]:
+    """Return which completed-terminal evidence THIS request actually demanded.
+
+    OMN-18956. The refusal below was armed with two literal ``True`` values,
+    so every completed delegation was required to carry evidence no caller
+    asked for and the deployed producer emits for neither. A run that
+    answered, passed its quality gate at 1.0 and wrote its projection row
+    still exited non-zero (dev lane, correlation
+    ``0b21b5f0-fb56-4ab6-9219-24bbfd841f35``). The check was right; the
+    question it was asked was not.
+
+    * **Contract evidence is demanded by a response contract in the request.**
+      A run that asked for no contract has no contract to evidence, and
+      refusing it asserts a requirement nobody stated.
+    * **Budget evidence is demanded by nothing a caller can pass, today.** The
+      budget comparison happens only where the BACKEND declares
+      ``max_grounded_input_tokens``, which is not knowable when this request
+      is built, so there is no honest request-side predicate to return. It is
+      returned as a value rather than dropped so the day a demand exists it
+      has one place to land, and the refusal itself stays armed and proven.
+    """
+    return (False, response_contract is not None)
+
+
+def _delegate_receipt_evidence_error(
+    receipt: object,
+    *,
+    require_budget_evidence: bool = False,
+    require_contract_evidence: bool = False,
+) -> str | None:
     """Return the evidence defect that must turn a delegate receipt into failure."""
     receipt_dump = getattr(receipt, "model_dump", None)
     if not callable(receipt_dump):
@@ -541,8 +574,8 @@ def _delegate_receipt_evidence_error(receipt: object) -> str | None:
     try:
         _require_completed_terminal_evidence(
             result,
-            require_budget_evidence=True,
-            require_contract_evidence=True,
+            require_budget_evidence=require_budget_evidence,
+            require_contract_evidence=require_contract_evidence,
         )
     except DelegateTerminalUnresolvedError as exc:
         return str(exc)
@@ -1882,6 +1915,11 @@ def run_delegate(
             ),
         )
 
+        # OMN-18956: derive ONCE, before the receipt layer is wired, so the
+        # request and the requirement cannot drift apart between them.
+        receipt_evidence_demanded = _receipt_evidence_requirements(
+            response_contract=response_contract,
+        )
         try:
             # OMN-17516: the refusal reports the wall time actually served,
             # which routinely exceeds declared + grace because a SIGALRM
@@ -1914,7 +1952,14 @@ def run_delegate(
                     # minted is what lets it refuse another run's terminal
                     # envelope instead of printing it as ours.
                     expected_correlation_id=correlation_id,
-                    receipt_validator=_delegate_receipt_evidence_error,
+                    # OMN-18956: ask only for the evidence THIS request
+                    # demanded. Bound here because this is the only place the
+                    # request and the receipt are both in scope.
+                    receipt_validator=functools.partial(
+                        _delegate_receipt_evidence_error,
+                        require_budget_evidence=receipt_evidence_demanded[0],
+                        require_contract_evidence=receipt_evidence_demanded[1],
+                    ),
                     receipt_callback=lambda receipt: _write_local_run_files(
                         receipt=receipt,
                         state_root=state_root,
@@ -1923,8 +1968,15 @@ def run_delegate(
                         task_type_resolution=task_class.resolution.value,
                         addressing=addressing,
                         drift_guard=drift_guard_check,
-                        require_budget_evidence=True,
-                        require_contract_evidence=True,
+                        # OMN-18956 residual: this is the SECOND site that
+                        # arms the same refusal, and the first fix moved only
+                        # the validator. The writer runs inside the receipt
+                        # CALLBACK, so with literals here a run still exited
+                        # non-zero after the validator had accepted it --
+                        # which is why proving the leaf was not proof of the
+                        # entry. Both now read one derivation.
+                        require_budget_evidence=receipt_evidence_demanded[0],
+                        require_contract_evidence=receipt_evidence_demanded[1],
                     ),
                 )
         except DelegateTimeoutExceededError as exc:

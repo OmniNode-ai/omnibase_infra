@@ -911,6 +911,395 @@ check_runner_tree_converge() {
   printf 'runner-tree|OK|converge|%s, last clean convergence %sh ago\n' "$verdict" "$age_hours"
 }
 
+# OMN-18942: surface FLEET failures -- red scheduled workflows across every
+# repository that has one, and the rule 24(b) lab-pass state of the `dev` head.
+#
+# WHY IT LIVES HERE. The 2026-09-20 silent-gates review measured that no chat
+# secret of any name exists at GitHub Actions organisation scope or in any
+# repository scope. The fleet's only failure-rate alerter (OMN-18254 /
+# OMN-18322) therefore runs correctly every ten minutes, names fifteen
+# continuously-red scheduled workflows, and its last log line is that Slack is
+# not configured. The mechanism was never broken; it had no destination.
+#
+# This host has one. Folding the findings in here rather than minting a Slack
+# credential into GitHub Actions is the net-negative-surface rule -- the same
+# argument `check_ci_required_contexts` and `check_runner_tree_converge` above
+# are here on. They inherit this script's Slack poster, its per-key
+# state-change de-duplication, its hysteresis, its resolved-notification and
+# its */15 cron. No new cron unit, no new Slack app, no new credential, and no
+# fourth copy of a bot token that already works.
+#
+# The probe emits `fleet|STATUS|key|detail` rows, read by `row_status()` at
+# column 2 and de-duplicated by `row_key()` as `fleet|<key>`. Every "could not
+# look" outcome is a row naming the reason -- an unreadable source is never an
+# empty green, because an absent finding set and an unevaluated finding set are
+# the two states this whole family exists to tell apart.
+check_fleet_failures() {
+  # Installed side by side in /data/maintenance/bin by the host maintenance
+  # sync, so `dirname $0` resolves it on the host. In the repo it lives under
+  # scripts/ beside the required-context probe, for the same reason.
+  local probe="${OMNINODE_FLEET_PROBE_SCRIPT:-$(dirname "$0")/omninode-fleet-failure-probe.py}"
+  local python_bin="${OMNINODE_FLEET_PROBE_PYTHON:-python3}"
+
+  if [[ "${OMNINODE_FLEET_PROBE_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$probe" ]]; then
+    printf 'fleet|WARNING|probe|probe script missing or unreadable at %s\n' "$probe"
+    return 0
+  fi
+  if ! command -v "$python_bin" >/dev/null 2>&1; then
+    printf 'fleet|WARNING|probe|%s not found; fleet failure probe did not run\n' "$python_bin"
+    return 0
+  fi
+
+  local out
+  # The expensive sweep refreshes in a DETACHED child, so this call is a cache
+  # read plus a handful of artifact queries and is bounded well under a tick.
+  if ! out=$(timeout "${OMNINODE_FLEET_PROBE_TIMEOUT:-300}" "$python_bin" "$probe" 2>/dev/null); then
+    printf 'fleet|WARNING|probe|probe exited non-zero or timed out; fleet failure state unknown\n'
+    return 0
+  fi
+  if [[ -z "$out" ]]; then
+    printf 'fleet|WARNING|probe|probe produced no rows; fleet failure state unknown\n'
+    return 0
+  fi
+  printf '%s\n' "$out"
+}
+
+# OMN-18944: the production Postgres backup must be proven to EXIST and be FRESH.
+#
+# WHY IT LIVES HERE. `omninode_infra`'s nightly backup CronJob carries a bounded
+# failed-job history limit and nothing else. No alert rule covers CronJob
+# failure, and the alert-rule files that repo does carry are applied by no
+# workflow at all, so a failed nightly backup and a successful one were the same
+# event from outside the cluster. Folding the read into this reporter rather
+# than building a second alerter is the net-negative-surface rule -- it inherits
+# this script's Slack poster, its per-key state-change de-duplication, its
+# resolved-notification and its */15 cron. No new cron unit, no second Slack
+# integration. Same argument as the two checks above.
+#
+# WHY IT READS A WORKFLOW RUN AND NOT THE BUCKET. The verdict itself is
+# artifact-based: `scripts/check_postgres_backup_freshness.py` reads the newest
+# backup OBJECT per cluster and database out of S3 and fails on absent, stale or
+# empty. But that read needs AWS credentials, and this host has neither an `aws`
+# CLI nor any AWS credential -- measured 2026-09-21, no `~/.aws`, zero AWS names
+# in the env file against 111 keys as a positive control. The probe therefore
+# runs where the credential already is, in GitHub Actions on a four-hourly
+# schedule, and this function reads its conclusion with the GitHub token this
+# host already holds. Nothing new is minted.
+#
+# WHY A MISSING RUN IS CRITICAL AND A MISSING TOKEN IS NOT. The failure this
+# whole ticket is about is a check that quietly stops reaching anybody, so a
+# gate that has not run inside its window is exactly the condition worth a
+# human, not a lesser one -- and it is the only way "the workflow was deleted"
+# and "the workflow is failing" become distinguishable from here. A missing
+# token or an unreachable API is a different thing: we could not look, which
+# must not render as "nothing wrong" but is not evidence the backup is gone.
+# That asymmetry is the same one `check_ci_required_contexts` draws.
+check_postgres_backup_freshness() {
+  local repo="${OMNINODE_BACKUP_GATE_REPO:-OmniNode-ai/omninode_infra}"
+  local workflow="${OMNINODE_BACKUP_GATE_WORKFLOW:-postgres-backup-freshness-gate.yml}"
+  local branch="${OMNINODE_BACKUP_GATE_BRANCH:-dev}"
+  # The gate runs every 4h. Nine hours tolerates one missed run (runner queue,
+  # jitter) and goes red on two, which is a real absence rather than a blip.
+  local stale_hours="${OMNINODE_BACKUP_GATE_STALE_HOURS:-9}"
+
+  if [[ "${OMNINODE_BACKUP_GATE_CHECK_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    printf 'backup|WARNING|postgres-freshness|jq not found; backup freshness state unknown\n'
+    return 0
+  fi
+
+  local token="${GH_PAT:-${GITHUB_TOKEN:-}}"
+  if [[ -z "$token" ]]; then
+    printf 'backup|WARNING|postgres-freshness|neither GH_PAT nor GITHUB_TOKEN is set; backup freshness state unknown\n'
+    return 0
+  fi
+
+  # Declared as a seam so the tests drive the parsing and threshold logic
+  # against recorded payloads. A seam that only ever resolves to the real
+  # command on the host would mean the tests exercised the "could not look"
+  # branch while believing they had tested the verdict rules.
+  local fetch_cmd="${OMNINODE_BACKUP_GATE_FETCH_CMD:-}"
+  local body
+  if [[ -n "$fetch_cmd" ]]; then
+    body=$($fetch_cmd 2>/dev/null) || body=""
+  else
+    body=$(curl -sS --max-time "${OMNINODE_BACKUP_GATE_TIMEOUT:-20}" \
+      -H "Authorization: Bearer ${token}" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "https://api.github.com/repos/${repo}/actions/workflows/${workflow}/runs?branch=${branch}&per_page=10" \
+      2>/dev/null) || body=""
+  fi
+
+  if [[ -z "$body" ]]; then
+    printf 'backup|WARNING|postgres-freshness|could not reach the GitHub API for %s; backup freshness state unknown\n' "$workflow"
+    return 0
+  fi
+
+  # A 404 means the workflow file is gone from the default branch. That is the
+  # gate being DELETED, which is the loudest version of the exact failure this
+  # row exists for, so it is reported as an absence rather than folded into the
+  # generic "could not parse" branch -- the two have different remedies and
+  # only one of them is somebody removing the check.
+  local api_message
+  api_message=$(jq -r 'if type=="object" then (.message // "") else "" end' <<<"$body" 2>/dev/null) || api_message=""
+  if [[ "$api_message" == "Not Found" ]]; then
+    printf 'backup|CRITICAL|postgres-freshness|workflow %s does not exist on %s in %s; the production backup freshness gate has been removed and nothing is checking the backup\n' \
+      "$workflow" "$branch" "$repo"
+    return 0
+  fi
+
+  local total
+  total=$(jq -r 'if type=="object" and has("total_count") then .total_count else "unparseable" end' <<<"$body" 2>/dev/null) || total="unparseable"
+  if [[ "$total" == "unparseable" ]]; then
+    printf 'backup|WARNING|postgres-freshness|GitHub API response for %s was not parseable (%s); backup freshness state unknown\n' \
+      "$workflow" "${api_message:-no message}"
+    return 0
+  fi
+
+  # Scheduled and dispatched runs only. A pull_request run of this workflow
+  # exercises the gate's own unit tests and makes no claim about the live
+  # backup, so counting one as a verdict would let a green PR paper over a
+  # cluster that stopped backing up.
+  local run conclusion status started html_url
+  run=$(jq -c '[.workflow_runs[]? | select(.event=="schedule" or .event=="workflow_dispatch")] | sort_by(.run_started_at) | last // empty' <<<"$body" 2>/dev/null) || run=""
+  if [[ -z "$run" || "$run" == "null" ]]; then
+    printf 'backup|CRITICAL|postgres-freshness|%s has NO scheduled run on %s; the production backup is unverified and nothing is checking it\n' \
+      "$workflow" "$branch"
+    return 0
+  fi
+
+  conclusion=$(jq -r '.conclusion // "none"' <<<"$run")
+  status=$(jq -r '.status // "unknown"' <<<"$run")
+  started=$(jq -r '.run_started_at // ""' <<<"$run")
+  html_url=$(jq -r '.html_url // ""' <<<"$run")
+
+  local started_epoch now_epoch age_hours
+  # GNU first, BSD second -- the host is Linux and only the GNU form runs there,
+  # but these tests run on macOS, and a parse that only succeeded on the host
+  # would mean every test took the "could not read the timestamp" branch.
+  started_epoch=$(date -u -d "$started" +%s 2>/dev/null) \
+    || started_epoch=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$started" +%s 2>/dev/null) \
+    || started_epoch=""
+  if [[ -z "$started_epoch" ]]; then
+    printf 'backup|WARNING|postgres-freshness|latest run timestamp %s could not be read; backup freshness state unknown\n' "$started"
+    return 0
+  fi
+  now_epoch=$(date -u +%s)
+  age_hours=$(( (now_epoch - started_epoch) / 3600 ))
+
+  # A run still in flight is not a verdict. Age it anyway: a job wedged for
+  # longer than the staleness window is the same silence as one that never ran.
+  if [[ "$status" != "completed" ]]; then
+    if (( age_hours >= stale_hours )); then
+      printf 'backup|CRITICAL|postgres-freshness|the freshness gate has been %s for %sh; the production backup is unverified — %s\n' \
+        "$status" "$age_hours" "$html_url"
+      return 0
+    fi
+    printf 'backup|OK|postgres-freshness|freshness gate %s, started %sh ago\n' "$status" "$age_hours"
+    return 0
+  fi
+
+  if (( age_hours >= stale_hours )); then
+    printf 'backup|CRITICAL|postgres-freshness|the freshness gate last ran %sh ago (bar %sh); the production backup is unverified and the gate itself may have stopped — %s\n' \
+      "$age_hours" "$stale_hours" "$html_url"
+    return 0
+  fi
+
+  if [[ "$conclusion" != "success" ]]; then
+    printf 'backup|CRITICAL|postgres-freshness|the production Postgres backup FAILED its freshness check (%s, %sh ago): a backup is absent, stale or empty in s3 — %s\n' \
+      "$conclusion" "$age_hours" "$html_url"
+    return 0
+  fi
+
+  # The OK row names the gate and the branch that answered. The digest section
+  # this lands in is what a person reads at 08:00, and "verified" with no
+  # subject cannot be told apart from a row asserting something it never
+  # measured -- which is the failure mode this whole check exists to remove.
+  printf 'backup|OK|postgres-freshness|every declared cluster has a fresh Postgres backup, verified %sh ago by %s on %s\n' \
+    "$age_hours" "$workflow" "$branch"
+}
+
+# OMN-18949: surface LANE CENSUS drift -- the live hourly census on this host
+# against the committed lane manifest.
+#
+# WHY IT LIVES HERE. Nothing refused on census drift anywhere. The hourly timer
+# on this host writes a snapshot; the committed snapshot in the repository
+# carried five findings and severity warning; the only surface that read either
+# rendered the prose string "N drift item(s) -- see census" into a doctrine
+# file, where the next refresh normalised it away. The CI gate added by the
+# same ticket catches the two COMMITTED files disagreeing, which is a different
+# question from the LIVE lane topology having moved -- CI cannot see this
+# host's docker daemon at all.
+#
+# "More than one tick" is not implemented here and must not be: CONFIRM_TICKS
+# above already requires a key to hold the same status for two consecutive
+# ticks before it pages, and CLEAR_TICKS absorbs the flap on the way back. A
+# second, private counter in this function would be a second answer to a
+# question the state machine already answers, and the two would disagree.
+#
+# Rows are `census|STATUS|key|detail`, read by `row_status()` at column 2 and
+# de-duplicated by `row_key()` as `census|<key>`. Every "could not look"
+# outcome is a row naming the reason: an unreadable census is never an empty
+# green, because an absent finding set and an unevaluated one are the two
+# states this family exists to tell apart.
+# WHOSE HOME (OMN-18949, second defect, measured 2026-09-21).
+#
+# The paths below resolved through `$HOME` and this reporter runs from
+# /etc/cron.d as ROOT, so `$HOME` is /root. Neither
+# /root/.local/state/onex/census-snapshot.json nor
+# /root/Code/omni_home/omnibase_infra exists on .201. Measured that day: eight
+# consecutive ticks emitted `census|WARNING|snapshot|no live census ...; the
+# hourly lane-census timer may have stopped` while the real snapshot was
+# twenty minutes old and carried five findings. The census leg shipped by this
+# ticket therefore delivered a FALSE reason to the channel and never once
+# reported the drift it was added to report -- the reporting half was as blind
+# as the gate half.
+#
+# The census is written by a systemd USER unit
+# (deploy/lane-census/onex-disk-gc.service.d/20-lane-census.conf, whose
+# ExecStart uses `%h`), so it lands in the census OWNER's home, not the
+# caller's. Resolve that owner through getent rather than assuming the two are
+# the same account. The repository root is the deployed checkout, the same
+# /data tree this script already reads its env file and writes its logs under.
+_census_owner_home() {
+  local home
+  home=$(getent passwd "${OMNINODE_CENSUS_OWNER:-jonah}" 2>/dev/null | cut -d: -f6)
+  printf '%s' "${home:-$HOME}"
+}
+
+check_census_drift() {
+  local live manifest checker python_bin repo owner_home
+  owner_home=$(_census_owner_home)
+  repo="${OMNINODE_REPO_ROOT:-/data/omninode/omnibase_infra}"
+  live="${OMNINODE_CENSUS_LIVE_SNAPSHOT:-}"
+  if [[ -z "$live" ]]; then
+    # The invoking user's own census wins when it exists (a human running this
+    # by hand reads their own host state); otherwise the owner's.
+    if [[ -r "$HOME/.local/state/onex/census-snapshot.json" ]]; then
+      live="$HOME/.local/state/onex/census-snapshot.json"
+    else
+      live="$owner_home/.local/state/onex/census-snapshot.json"
+    fi
+  fi
+  manifest="${OMNINODE_CENSUS_MANIFEST:-$repo/deploy/lane-census/lane-manifest.yaml}"
+  checker="${OMNINODE_CENSUS_CHECKER:-$repo/scripts/check_lane_census_drift.py}"
+  python_bin="${OMNINODE_CENSUS_PYTHON:-python3}"
+
+  if [[ "${OMNINODE_CENSUS_PROBE_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$live" ]]; then
+    printf 'census|WARNING|snapshot|no live census at %s; the hourly lane-census timer may have stopped\n' "$live"
+    return 0
+  fi
+  if [[ ! -r "$manifest" ]]; then
+    printf 'census|WARNING|manifest|lane manifest unreadable at %s; live census cannot be judged\n' "$manifest"
+    return 0
+  fi
+
+  # Staleness first. A snapshot that stopped being written keeps reporting the
+  # last topology it saw, which reads as a healthy census indefinitely -- the
+  # exact failure the age gate exists for on the committed copy, and one this
+  # host had no reader for on the live copy.
+  local emitted age_h stale_h
+  stale_h="${OMNINODE_CENSUS_STALE_HOURS:-6}"
+  emitted=$("$python_bin" - "$live" <<'PY' 2>/dev/null || true
+import datetime as dt, json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    t = dt.datetime.fromisoformat(d["emitted_at"])
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=dt.timezone.utc)
+    print(int((dt.datetime.now(dt.timezone.utc) - t).total_seconds() // 3600))
+except Exception:
+    pass
+PY
+)
+  if [[ -z "$emitted" ]]; then
+    printf 'census|WARNING|snapshot|live census at %s has no readable emitted_at; its age is unknown\n' "$live"
+    return 0
+  fi
+  age_h="$emitted"
+  if (( age_h >= stale_h )); then
+    printf 'census|WARNING|snapshot|live census is %sh old (>= %sh); the hourly timer has stopped writing\n' "$age_h" "$stale_h"
+    return 0
+  fi
+
+  # Agreement with the manifest, evaluated by the SAME module the CI gate runs,
+  # pointed at the live snapshot instead of the committed one. A second
+  # implementation here would be a second verdict that could disagree with CI's.
+  local json rc errfile err
+  if [[ -r "$checker" ]] && command -v "$python_bin" >/dev/null 2>&1; then
+    # stderr is CAPTURED, not discarded (CLAUDE.md rule 16). A suppressed error
+    # here returns an empty result that reads exactly like a clean census, and
+    # the reason it failed is the only thing that makes the row actionable --
+    # "exit 1" and "no module named yaml" are the same row without it. The
+    # interpreter is overridable because this checker needs PyYAML and the
+    # host's bare python3 may not have it.
+    errfile=$(mktemp)
+    json=$(timeout "${OMNINODE_CENSUS_PROBE_TIMEOUT:-60}" "$python_bin" "$checker" \
+             --manifest "$manifest" --snapshot "$live" --json 2>"$errfile")
+    rc=$?
+    err=$(tail -n1 "$errfile" 2>/dev/null | tr -d '\r' | cut -c1-160)
+    rm -f "$errfile"
+    if (( rc == 2 )) || [[ -z "$json" ]]; then
+      printf 'census|WARNING|manifest|drift checker could not evaluate the live census (exit %s)%s\n' \
+        "$rc" "${err:+: $err}"
+      return 0
+    fi
+    if (( rc == 1 )); then
+      # OMN-18949: the checker now refuses on a non-zero drift count as well as
+      # on the two committed files contradicting each other, so its exit code
+      # alone no longer says WHICH happened. Split them back apart here: they
+      # are different defects with different remedies, and collapsing both into
+      # the `manifest` row would report "the census contradicts the manifest"
+      # for a lane that is merely running something undeclared. The `drift` row
+      # keeps its own key so its de-duplication and its resolution notice stay
+      # independent of the contradiction row's.
+      local summary drift_only
+      drift_only=$("$python_bin" -c 'import json,sys; f=json.load(sys.stdin)["findings"]; print("yes" if f and all(x["kind"]=="nonzero_drift_count" for x in f) else "no")' <<<"$json" 2>/dev/null)
+      if [[ "$drift_only" == "yes" ]]; then
+        summary=$("$python_bin" -c 'import json,sys; f=json.load(sys.stdin)["findings"]; print("; ".join("%s on lane(s) %s" % (x["detail"].split(";")[0], x["lane"]) for x in f[:2]))' <<<"$json" 2>/dev/null)
+        printf 'census|CRITICAL|drift|%s (census %sh old); declare it in the lane manifest or remove it from the lane\n' \
+          "${summary:-the live census reports drift}" "$age_h"
+        return 0
+      fi
+      summary=$("$python_bin" -c 'import json,sys; d=json.load(sys.stdin); f=d["findings"]; print("%d disagreement(s): %s" % (len(f), "; ".join("%s on %s (%s)" % (x["kind"], x["lane"], x["subject"]) for x in f[:3])))' <<<"$json" 2>/dev/null)
+      printf 'census|CRITICAL|manifest|the LIVE census contradicts the committed manifest -- %s\n' "${summary:-unparseable checker output}"
+      return 0
+    fi
+  else
+    printf 'census|WARNING|manifest|drift checker missing or unreadable at %s\n' "$checker"
+    return 0
+  fi
+
+  # Live topology drift. Since OMN-18949 armed the drift-count assertion the
+  # checker above refuses on this and emits the CRITICAL `drift` row, so in
+  # practice the checker path owns the non-zero case. This block stays as the
+  # fallback for the one reachable gap -- the checker present but the count
+  # read failing -- and as the surface that emits the OK row, because a census
+  # that is clean must say so rather than say nothing.
+  local drift lanes
+  drift=$("$python_bin" -c 'import json,sys; print(len(json.load(open(sys.argv[1])).get("findings",[])))' "$live" 2>/dev/null || echo "")
+  if [[ -z "$drift" ]]; then
+    printf 'census|WARNING|drift|live census findings unreadable; drift state unknown\n'
+    return 0
+  fi
+  if (( drift > 0 )); then
+    lanes=$("$python_bin" -c 'import json,sys; print(",".join(sorted({f.get("lane","?") for f in json.load(open(sys.argv[1])).get("findings",[])})))' "$live" 2>/dev/null || echo "?")
+    printf 'census|WARNING|drift|%s drift item(s) on lane(s) %s, census %sh old\n' "$drift" "$lanes" "$age_h"
+    return 0
+  fi
+  printf 'census|OK|drift|no lane drift; census %sh old and agrees with the manifest\n' "$age_h"
+}
+
 collect() {
   local now host root data root_status data_status running unhealthy restarting dead created
   local dangling named_dangling anonymous_dangling docker_status docker_detail
@@ -1010,6 +1399,9 @@ collect() {
     check_http web-3003 "http://${PROBE_HOST}:3003/" ''
     check_ci_required_contexts
     check_runner_tree_converge
+    check_fleet_failures
+    check_postgres_backup_freshness
+    check_census_drift
   }
 }
 
@@ -1161,8 +1553,19 @@ rm -f "$current_keys_file" "$prev_state_file"
 
 # Atomic swap: a crash mid-write must not leave a truncated state file that
 # reads as "no issues known" and re-pages everything.
-printf '%s\n' "$decisions" | awk -F'\t' -v OFS='\t' '$1=="STATE" { $1=""; sub(/^\t/, ""); print }' >"${state_file}.tmp"
-mv -f "${state_file}.tmp" "$state_file"
+#
+# NOT IN dry-run (OMN-18942). The decisions above are computed in every mode,
+# but only `alert` posts. Persisting them from a dry run therefore records
+# `notified=1` for keys NOBODY WAS TOLD ABOUT, and the next real tick reads
+# that as "already paged" and stays silent -- so the documented way to inspect
+# this reporter would silently swallow the first alert for every standing
+# issue. Found while building the fleet failure sink, whose own proof
+# procedure is a dry run on the host. A dry run must be able to look at the
+# state machine without changing it.
+if [[ "$MODE" != "dry-run" ]]; then
+  printf '%s\n' "$decisions" | awk -F'\t' -v OFS='\t' '$1=="STATE" { $1=""; sub(/^\t/, ""); print }' >"${state_file}.tmp"
+  mv -f "${state_file}.tmp" "$state_file"
+fi
 
 new_keys=$(awk -F'\t' '$1=="NEW"       { print $2 " (" $3 ")" }' <<<"$decisions")
 renotify_keys=$(awk -F'\t' '$1=="RENOTIFY"  { print $2 " (" $3 ")" }' <<<"$decisions")
@@ -1170,7 +1573,7 @@ recovered_keys=$(awk -F'\t' '$1=="RECOVERED" { print $2 }' <<<"$decisions")
 
 format_digest() {
   local title="$1"
-  local lines endpoint_lines ci_lines tree_lines issue_lines
+  local lines endpoint_lines ci_lines tree_lines fleet_lines backup_lines census_lines issue_lines
   lines=$(awk -F'|' '$1=="disk" {printf "- `%s`: %s, %s, %s (%s)\n", $3, $4, $5, $6, $2} $1=="docker" {printf "- Docker `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   # STARTING is rendered here with the rest (OMN-18435). A booting lane that
   # vanished from this section would be the BLIND direction of monitor failure,
@@ -1187,9 +1590,26 @@ format_digest() {
   # an absent section that reads as healthy.
   tree_lines=$(awk -F'|' '$1=="runner-tree" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   [[ -n "$tree_lines" ]] || tree_lines="- No runner clone-tree verdict this tick"
+  # OMN-18942. Same reasoning as the two heartbeats above: the fleet section
+  # renders even when clean, so "swept thirteen repos and found nothing" and
+  # "the sweep never ran" are distinguishable in the digest rather than both
+  # rendering as an absent section a reader takes for health.
+  fleet_lines=$(awk -F'|' '$1=="fleet" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$fleet_lines" ]] || fleet_lines="- No fleet failure rows this tick"
+  # OMN-18944. Same reasoning again, and it matters most here: the digest
+  # must distinguish "every cluster has a fresh backup" from "nothing looked
+  # at the backup", because those two were the SAME rendering for the entire
+  # life of the backup CronJob and that is the defect this row closes.
+  backup_lines=$(awk -F'|' '$1=="backup" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$backup_lines" ]] || backup_lines="- No backup freshness verdict this tick"
+  # OMN-18949. Same reasoning as the sinks above: a section that prints nothing
+  # when the probe did not run is indistinguishable from one printing nothing
+  # because there is nothing wrong.
+  census_lines=$(awk -F'|' '$1=="census" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$census_lines" ]] || census_lines="- No lane census rows this tick"
   # `next` keeps the three row shapes mutually exclusive so a `ci` row cannot
   # also be rendered by the generic column-2 branch below it.
-  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
+  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree" || $1=="fleet" || $1=="backup" || $1=="census") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
   if [[ -z "$issue_lines" ]]; then
     issue_lines="- No active warning/critical checks"
   fi
@@ -1206,6 +1626,12 @@ $endpoint_lines
 $ci_lines
 *Runner clone tree*
 $tree_lines
+*Fleet failures*
+$fleet_lines
+*Production database backup*
+$backup_lines
+*Lane census*
+$census_lines
 *Active issues*
 $issue_lines
 MSG

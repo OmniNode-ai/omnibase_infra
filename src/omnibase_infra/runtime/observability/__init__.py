@@ -20,17 +20,27 @@ from omnibase_infra.runtime.observability.consumer_flow_counters import (
     record_produced_topic,
     reset_consumer_flow_counters,
 )
+from omnibase_infra.runtime.observability.projection_apply_counters import (
+    RETAINED_APPLY_WINDOW_COUNT,
+    ProjectionApplyCounters,
+    get_projection_apply_counters,
+    reset_projection_apply_counters_for_test,
+)
 
 __all__ = [
+    "RETAINED_APPLY_WINDOW_COUNT",
     "RETAINED_FLOW_WINDOW_COUNT",
     "ConsumerFlowCounters",
+    "ProjectionApplyCounters",
     "RetainedFlowWindows",
     "active_flow_key",
     "get_consumer_flow_counters",
+    "get_projection_apply_counters",
     "record_active_dlq",
     "record_active_error",
     "record_active_out",
     "record_flow_output",
     "record_produced_topic",
     "reset_consumer_flow_counters",
+    "reset_projection_apply_counters_for_test",
 ]

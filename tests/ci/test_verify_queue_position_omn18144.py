@@ -170,11 +170,15 @@ def _wait(
 class TestTheMeasuredTimeline:
     """The 2026-09-18 run, replayed."""
 
-    def test_a_merge_third_in_line_is_indeterminate_naming_the_depth(self) -> None:
+    def test_a_merge_third_in_line_is_queued_naming_the_depth(self) -> None:
+        """Asserted INDETERMINATE until OMN-18976. See the sibling test below:
+        the point has always been that this is not a FAIL, and that is now
+        asserted directly rather than via the shared outcome."""
         clock = _Clock(T0)
         result = _wait(clock=clock, queue=_queue(2))
 
-        assert result.outcome is EnumConvergenceOutcome.INDETERMINATE
+        assert result.outcome is EnumConvergenceOutcome.QUEUED
+        assert result.outcome is not EnumConvergenceOutcome.FAIL
         assert "2 command(s) ahead" in result.reason
         assert "number 3 in line" in result.reason
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -131,6 +132,19 @@ class _SilentProducer(_CapturingProducer):
                 "payload": json.loads(value.decode("utf-8")),
             }
         )
+
+
+def _runs_on_expression(workflow_source: str, job_name: str) -> str:
+    """Return one job's ``runs-on`` as a single string.
+
+    ``yaml.safe_load`` drops comments, so the result is operative code by
+    construction and needs no second pass through ``_code_lines``. A list form
+    is joined so a membership test reads the same either way.
+    """
+    runs_on = yaml.safe_load(workflow_source)["jobs"][job_name]["runs-on"]
+    if isinstance(runs_on, list):
+        return " ".join(str(label) for label in runs_on)
+    return str(runs_on)
 
 
 def _code_lines(source: str) -> str:
@@ -327,24 +341,55 @@ def test_workflow_passes_triggering_lane_and_ref_not_origin_main() -> None:
 
 @pytest.mark.unit
 def test_workflow_pins_the_publisher_to_the_lan_fleet() -> None:
-    """The trusted arm must NOT read the shared trusted-CI runner seam."""
+    """The publisher rides its own knob, never the shared trusted-CI seam."""
     workflow = (
         REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
     ).read_text()
     code = _code_lines(workflow)
+    publisher = _runs_on_expression(workflow, "trigger-rebuild")
 
     # A dedicated knob, deliberately left unset so the self-hosted literal wins.
-    assert "vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON" in code
-    assert '\'["self-hosted","omnibase-ci"]\'' in code
+    assert "vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON" in publisher
+    assert '\'["self-hosted","omnibase-ci"]\'' in publisher
     # The shared seam is what moved this LAN-bound publisher onto hosted compute.
-    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" not in code
-    # Fork PRs still route to hosted compute — untrusted code never reaches the
-    # fleet — and that arm is still gated on the fork predicate.
-    assert "vars.OMNI_PUBLIC_PR_RUNS_ON_JSON" in code
-    assert "head.repo.full_name != github.repository" in code
+    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" not in publisher
+    # Fork PRs still route to hosted compute, untrusted code never reaches the
+    # fleet, and that arm is still gated on the fork predicate.
+    assert "vars.OMNI_PUBLIC_PR_RUNS_ON_JSON" in publisher
+    assert "head.repo.full_name != github.repository" in publisher
     # The runner class reaches the script so it can refuse by name.
     assert "runner.environment" in code
     assert "--runner-environment" in code
+
+
+@pytest.mark.unit
+def test_no_lan_bound_job_reads_the_shared_trusted_ci_seam() -> None:
+    """OMN-17888 stated per job rather than per file.
+
+    The defect was a LAN-bound job resolving its placement from a seam that
+    org scope had retargeted to hosted compute. That property belongs to the
+    jobs that need the fleet, so it is asserted over those jobs by name instead
+    of as a substring search of the whole file. OMN-18988 added a re-emitter
+    that downloads two artifacts, re-keys one and uploads it: it touches no
+    lane and has no reason to occupy the fleet, so the shared hosted seam is
+    the correct selector for it and is not the regression this guards.
+    """
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
+    ).read_text()
+    job_names = list(yaml.safe_load(workflow)["jobs"])
+
+    lan_bound = [
+        name
+        for name in job_names
+        if "self-hosted" in _runs_on_expression(workflow, name)
+    ]
+    # A census that came back empty would make every assertion below vacuous.
+    assert lan_bound, "no LAN-bound job found; the guard would pass vacuously"
+
+    for name in lan_bound:
+        expression = _runs_on_expression(workflow, name)
+        assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" not in expression, name
 
 
 @pytest.mark.unit

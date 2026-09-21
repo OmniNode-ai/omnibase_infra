@@ -1,0 +1,128 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-18938 — the cross-repo dispatch keyword parity gate, on its own trigger.
+#
+# This job used to live in delegation-seam-gate.yml, whose `on:` block carries a
+# `paths:` filter. That filter is the wrong trigger for THIS job, and the
+# comment beside it in that file already said so: the drift this gate catches is
+# introduced in the OTHER repository and changes no file here, so on a pull
+# request that touches none of those paths the job never runs and its context
+# never appears. A gate that is absent looks exactly like a gate that passed.
+#
+# Listing the parity test's own filename in that filter did not fix it. That
+# makes the gate fire when somebody edits the gate, which is the one occasion it
+# is least needed.
+#
+# So: no `paths:` here, deliberately. It runs on every pull request to main and
+# dev, and its context is registered in EXPECTED_EXTERNAL_CONTEXTS in
+# scripts/ci/ci_summary_gate.py, which asserts the name is PRESENT and green on
+# the head. Those two facts are one mechanism and neither half works alone —
+# registering a context that does not report on every pull request wedges the
+# branch, and an unregistered one can simply go missing.
+#
+# Cost: a sparse checkout of a single consumer file and a five-test module.
+
+name: Delegation Consumer Keyword Parity
+
+on:
+  pull_request:
+    branches: [main, dev]
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: delegation-consumer-kwarg-parity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.6.14"
+  CACHE_VERSION: "0.6.0"
+  # Force inmemory event bus (no Kafka in CI); the seam drives RuntimeDispatch over the
+  # in-process InMemoryTransport — it never touches a broker.
+  ONEX_EVENT_BUS_TYPE: "inmemory"
+  # Dummy value for MixinLlmHttpTransport import paths pulled in transitively; no LLM
+  # calls happen in the seam test.
+  LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
+
+jobs:
+  consumer-kwarg-parity:
+    name: consumer-kwarg-parity
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted; public forks use ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Skip on merge_group
+        if: github.event_name == 'merge_group'
+        run: |
+          echo "::notice::consumer-kwarg-parity short-circuits on merge_group (proven on the PR run)."
+          exit 0
+
+      - name: Checkout code
+        if: github.event_name != 'merge_group'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Only the one consumer file. A full clone of the consumer repo would make
+      # this job a network-heavy dependency of a merge gate, which is the failure
+      # the sibling-compat check (OMN-12563) was disabled for.
+      - name: Fetch the OmniMarket delegation consumer protocol
+        if: github.event_name != 'merge_group'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .delegation-consumer
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Python and uv
+        if: github.event_name != 'merge_group'
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      # The checkout above either produced the file or it did not, and the test
+      # itself FAILS on an unresolvable source rather than skipping. This step
+      # exists so the failure names the missing checkout instead of surfacing as
+      # a puzzling assertion inside a test.
+      - name: Confirm the consumer source is present
+        if: github.event_name != 'merge_group'
+        run: |
+          set -euo pipefail
+          consumer=".delegation-consumer/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py"
+          if [ ! -f "$consumer" ]; then
+            echo "::error::the OmniMarket consumer sparse checkout produced no $consumer."
+            echo "This gate has NOT passed; it has not run. Fix the checkout rather than"
+            echo "relaxing the check — a parity gate that cannot see the consumer reports"
+            echo "green exactly where the drift lands."
+            exit 1
+          fi
+          wc -l "$consumer"
+
+      - name: Assert keyword parity with the deployed consumer
+        if: github.event_name != 'merge_group'
+        env:
+          ONEX_DELEGATION_CONSUMER_SOURCE: .delegation-consumer/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py
+        run: |
+          uv run pytest \
+            tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py \
+            tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -v

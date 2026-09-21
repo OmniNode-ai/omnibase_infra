@@ -101,6 +101,28 @@ UNSERVICED_TERMINAL_STATUSES: Final = frozenset({"superseded"})
 #: rebuilds on this lane.
 DEFAULT_SERVICE_SAMPLE_SIZE: Final = 10
 
+#: How old a control-topic lag sample may be and still be served as a number
+#: (OMN-18990).
+#:
+#: The lag was sampled ONLY inside ``poll_and_accept`` until this bound
+#: existed, and this agent's run loop does not poll while it executes a
+#: command. So for the whole 20-40 minutes of a rebuild the endpoint served
+#: the sample taken BEFORE that rebuild started, as a confident integer, with
+#: nothing on the wire saying how old it was. That window is exactly the window
+#: in which later merges publish commands and queue up: the measurement was
+#: blind during the only period it exists to measure.
+#:
+#: Measured 2026-09-21. Receipt ``lab-pass-receipt-compose-dev-430ff3434cc3...``
+#: (artifact 10632895303) reported ``commands_ahead=0`` at 09:18:50Z while two
+#: commands sat unconsumed, derived a 1560s wait bound from that zero, and gave
+#: up at 0h26m. The agent accepted the receipt's own command at 10:01:09Z,
+#: 42m21s after the probe began and 5m30s after the receipt was written.
+#:
+#: 120s is two of the refresher's own intervals, so a single missed refresh
+#: does not flip a healthy agent to unreadable, and a refresher that has died
+#: is caught within two minutes rather than being believed for half an hour.
+MAX_LAG_SAMPLE_AGE_SECONDS: Final = 120.0
+
 
 class ModelControlTopicLag(BaseModel):
     """Records on the control topic this agent has not dealt with, or why unknown.
@@ -135,6 +157,16 @@ class ModelControlTopicLag(BaseModel):
         if self.value is not None and not self.basis:
             msg = (
                 "a lag with a value must name the offset basis it was measured against"
+            )
+            raise ValueError(msg)
+        # OMN-18990. A count whose age cannot be established is not a count.
+        # The staleness bound one class down is only enforceable if every
+        # valued sample says when it was taken, and the failure this repairs
+        # was a half-hour-old zero that looked exactly like a fresh one.
+        if self.value is not None and self.observed_at is None:
+            msg = (
+                "a lag with a value must carry the time it was observed; "
+                "an undateable count cannot be shown to be current"
             )
             raise ValueError(msg)
         return self
@@ -182,14 +214,61 @@ class ModelQueueSnapshot(BaseModel):
         return self
 
     @property
+    def lag_age_seconds(self) -> float | None:
+        """Seconds between the lag sample and this snapshot, or ``None``.
+
+        ``None`` only where the lag carries no value at all; a valued lag is
+        required by its own model to carry an observation time.
+        """
+        observed = self.control_topic_lag.observed_at
+        if observed is None:
+            return None
+        return (self.observed_at - observed).total_seconds()
+
+    @property
+    def lag_staleness_reason(self) -> str:
+        """Why this lag sample is too old to serve as a count, or ``""``.
+
+        OMN-18990. The sampler is a cache written by the consumer's poll, and
+        the run loop does not poll while a rebuild executes. An old sample is
+        an UNREAD queue, not an empty one -- the same collapse this module's
+        docstring refuses for an unreadable half, seen a second time from the
+        time axis rather than the readability one.
+        """
+        if self.control_topic_lag.value is None:
+            # Already unreadable, and it carries its own reason. Two reasons
+            # for one absence would make the payload ambiguous about which
+            # applied.
+            return ""
+        age = self.lag_age_seconds
+        if age is None:  # pragma: no cover - the model forbids this pairing
+            return (
+                "this lag sample carries no observation time, so its age "
+                "cannot be established and it is not treated as current"
+            )
+        if age > MAX_LAG_SAMPLE_AGE_SECONDS:
+            return (
+                f"this lag sample was observed {age:.0f}s ago, beyond the "
+                f"{MAX_LAG_SAMPLE_AGE_SECONDS:.0f}s bound, so it describes the "
+                "queue as it was and not as it is -- an unread queue, which is "
+                "not an empty one"
+            )
+        return ""
+
+    @property
     def commands_ahead(self) -> int | None:
         """Commands a newly published one must wait behind, or ``None`` if unknown.
 
         Unknown when the lag half could not be read: the store half alone
         cannot see an unconsumed command, and reporting it as the total would
         under-count exactly the case this endpoint exists for.
+
+        Unknown ALSO when the lag half is stale (OMN-18990). A sample taken
+        before the running rebuild started answers a question about a different
+        moment, and serving it as this moment's count is how a zero survived
+        two queued commands.
         """
-        if self.control_topic_lag.value is None:
+        if self.control_topic_lag.value is None or self.lag_staleness_reason:
             return None
         return self.store_depth + self.control_topic_lag.value
 
@@ -200,8 +279,22 @@ class ModelQueueSnapshot(BaseModel):
             "in_flight_correlation_id": self.in_flight_correlation_id,
             "store_depth": self.store_depth,
             "control_topic_lag": self.control_topic_lag.value,
-            "control_topic_lag_reason": self.control_topic_lag.reason,
+            # OMN-18990. Exactly one of the two reasons is ever non-empty, so
+            # a reader never has to decide which absence it is looking at.
+            "control_topic_lag_reason": (
+                self.control_topic_lag.reason or self.lag_staleness_reason
+            ),
             "control_topic_lag_basis": self.control_topic_lag.basis,
+            # The sample's OWN time, not the snapshot's. The snapshot is always
+            # fresh -- it is built per request -- so a reader that had only
+            # `observed_at` above saw a current timestamp beside a half-hour-old
+            # count and had no way to tell.
+            "control_topic_lag_observed_at": (
+                self.control_topic_lag.observed_at.isoformat()
+                if self.control_topic_lag.observed_at is not None
+                else None
+            ),
+            "control_topic_lag_age_seconds": self.lag_age_seconds,
             "commands_ahead": self.commands_ahead,
             "mean_service_time_seconds": self.mean_service_time_seconds,
             "service_sample_size": self.service_sample_size,

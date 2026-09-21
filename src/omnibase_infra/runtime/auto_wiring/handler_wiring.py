@@ -73,6 +73,9 @@ from omnibase_core.models.core.model_deployment_topology import ModelDeploymentT
 from omnibase_core.models.core.model_deployment_topology_database import (
     ModelDeploymentTopologyDatabase,
 )
+from omnibase_core.models.dispatch.model_message_delivery_context import (
+    ModelMessageDeliveryContext,
+)
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.projection import build_upsert_plan
 from omnibase_core.models.resolver.model_handler_resolver_context import (
@@ -160,6 +163,10 @@ from omnibase_infra.runtime.contract_terminal_events import (
     declared_failure_terminal_topics,
     envelope_terminal_payload,
     load_terminal_event_topics,
+)
+from omnibase_infra.runtime.delivery_context import (
+    delivery_context_from_message,
+    engine_type_accepts_delivery,
 )
 from omnibase_infra.runtime.dispatch_envelope_context import (
     bind_dispatch_envelope,
@@ -1506,6 +1513,58 @@ def _ingress_correlation_id(message: object) -> UUID | None:
             pass
 
     coerced = _coerce_uuid_or_none(getattr(message, "correlation_id", None))
+    return coerced if isinstance(coerced, _UUID) else None
+
+
+def _ingress_message_id(message: object) -> UUID | None:
+    """Recover the ingress ENVELOPE id from a message's TRANSPORT surface.
+
+    OMN-18958, the identity half of the OMN-14498 lesson directly above.
+
+    A publisher that sends a bare contract model rather than an envelope
+    states its identity only in the wire header. The consume boundary then
+    synthesizes an envelope, and if it MINTS an id there, that mint is what
+    every hop caused by this message records as its parent -- a valid id with
+    no lineage, on no topic and in no table, so the causal edge can never
+    close. Measured on the .201 dev lane: the chain head recorded
+    ``70982614-...`` while both its children named ``53ffd454-...``, which
+    ``event_ledger`` does not contain.
+
+    Mirrors ``_ingress_correlation_id`` field for field, deliberately: the
+    two ids ride the same three transport shapes, and a second way of reading
+    the same surface is a second thing to keep in agreement.
+
+    Returns ``None`` when the transport states no identity, leaving the
+    caller to fall back to the body and then to minting. Never raises: a
+    malformed header must not take down the consume boundary.
+    """
+    from uuid import UUID as _UUID
+
+    headers = getattr(message, "headers", None)
+
+    header_id = getattr(headers, "message_id", None)
+    coerced = _coerce_uuid_or_none(header_id)
+    if isinstance(coerced, _UUID):
+        return coerced
+
+    if headers is not None and not isinstance(headers, (str, bytes)):
+        try:
+            for entry in headers:
+                key, value = entry
+                if key != "message_id":
+                    continue
+                decoded = (
+                    value.decode("utf-8", errors="replace")
+                    if isinstance(value, bytes)
+                    else value
+                )
+                coerced = _coerce_uuid_or_none(decoded)
+                if isinstance(coerced, _UUID):
+                    return coerced
+        except (TypeError, ValueError):
+            pass
+
+    coerced = _coerce_uuid_or_none(getattr(message, "envelope_id", None))
     return coerced if isinstance(coerced, _UUID) else None
 
 
@@ -3959,6 +4018,132 @@ def _bind_handler_owned_projection_database(
     bind(db_urls[binding_refs[0]])
 
 
+#: OMN-18992. The optional field a projection handler uses to say "I wrote
+#: nothing ON PURPOSE, and here is how many rows an ordering guard refused".
+#: Optional by construction: a handler omitting it is read exactly as it is
+#: today, which is what makes this consumer-first across the repo boundary.
+ROWS_REFUSED_KEY: Final[str] = "rows_refused_by_ordering_guard"
+
+
+#: OMN-18910. The optional field a projection writer uses to report its
+#: CUMULATIVE count of deltas it discarded since process start. A gauge, not a
+#: per-call delta, because the graded fact is whether it RISES across windows:
+#: one discard is legitimate idempotence and a high flat count is a measured
+#: steady state, so a per-call increment could not tell those from loss.
+#:
+#: Optional on exactly the terms ``ROWS_REFUSED_KEY`` is, and for the same
+#: reason: a writer that omits it behaves precisely as it does today, which is
+#: what makes this consumer-first across the repository boundary. The producer
+#: half is an ``omnimarket`` change and is NOT in this ticket.
+#:
+#: This is NOT the projection-api's snapshot-cache drop counter. That gauge
+#: lives in a different container, is unreachable from this process, and is
+#: already graded where it belongs -- the serving cache reads itself stale on a
+#: drop streak, landed under OMN-18905 / omnimarket#2728. Do not add a second
+#: reading of it here.
+DELTAS_DROPPED_TOTAL_KEY: Final[str] = "deltas_dropped_total"
+
+
+def _extract_deltas_dropped_total(result: object) -> int | None:
+    """The writer's cumulative discarded-delta gauge, or ``None`` if unreported.
+
+    OMN-18910. ``None`` and ``0`` are different facts and must stay that way:
+    zero is a writer saying "I have discarded nothing", while ``None`` is a
+    writer that does not report at all, and recording the second as the first
+    would publish a measured clean series over a projection nobody is
+    measuring.
+    """
+    if isinstance(result, dict) and DELTAS_DROPPED_TOTAL_KEY in result:
+        try:
+            total = int(result[DELTAS_DROPPED_TOTAL_KEY])
+        except (TypeError, ValueError):
+            return None
+        return total if total >= 0 else None
+    return None
+
+
+def _extract_rows_refused(result: object) -> int:
+    """Rows a projection handler DECLINED to write, as its own count.
+
+    OMN-18992. A zero-row return has two causes the runtime cannot tell apart,
+    and it has been logging both as the same ERROR.
+
+    The first is a writer that silently wrote nothing -- a real defect, and the
+    one the error line exists to surface. The second is an ordering guard doing
+    its job: the consumer-flow writer's upsert carries
+    ``OR ingest_sequence <= EXCLUDED.ingest_sequence`` on its conflict arm and a
+    ``RETURNING`` clause, so a redelivered or out-of-order message is refused by
+    SQL and legitimately returns no rows. That guard is deliberate -- a
+    read-compare-write would race under concurrent consumers and let an older
+    redelivery win -- and it fires routinely.
+
+    Measured on the .201 dev lane at revision 430ff3434, 33 minutes: 26 zero-row
+    ERROR lines, of which 4 were this guard on a writer that was serving 500
+    rows and updating every few seconds while it emitted them. An ERROR that
+    fires on correct behaviour trains people to skip the class, so the real
+    defect it exists to surface stops being visible. That is the failure this
+    separates.
+
+    A writer that does not report refusals returns 0 here and is treated
+    exactly as it is today, which is what lets this land in ``omnibase_infra``
+    before any writer in ``omnimarket`` sends the field. The consumer tolerates
+    the absence; the producer follows.
+    """
+    if isinstance(result, dict) and ROWS_REFUSED_KEY in result:
+        try:
+            refused = int(result[ROWS_REFUSED_KEY])
+        except (TypeError, ValueError):
+            return 0
+        return refused if refused > 0 else 0
+    return 0
+
+
+def _record_projection_apply(
+    *,
+    handler_instance: object,
+    topic: str | None,
+    rows_upserted: int,
+    rows_refused: int,
+    deltas_dropped_total: int | None = None,
+) -> None:
+    """Record one projection dispatch on the process apply accumulator.
+
+    OMN-18910. Best-effort and deliberately swallowing: this is an
+    observability side-effect on the hot dispatch path, and a counter that can
+    take down a projection write is a worse defect than the one it exists to
+    detect. A failure here is logged at DEBUG and the dispatch continues -- the
+    health dimension it feeds fails CLOSED on the resulting absence, so a
+    counter that stopped recording shows up as an unobserved window rather
+    than as a clean one.
+
+    The projection identity is the handler class name, which is what every
+    other projection log line on this path already names, so an operator
+    reading a DEGRADED dimension can grep for the same token.
+    """
+    if not topic:
+        return
+    try:
+        from omnibase_infra.runtime.observability import (
+            get_projection_apply_counters,
+        )
+
+        counters = get_projection_apply_counters()
+        projection = type(handler_instance).__name__
+        counters.record_apply(
+            projection,
+            topic,
+            consumed=1,
+            upserted=max(rows_upserted, 0),
+            refused_by_guard=max(rows_refused, 0),
+        )
+        if deltas_dropped_total is not None:
+            counters.record_drop_total(projection, topic, deltas_dropped_total)
+    except Exception:  # noqa: BLE001 -- never fail a write over a counter
+        logger.debug(
+            "Projection apply counters unavailable for topic=%s", topic, exc_info=True
+        )
+
+
 def _extract_rows_upserted(result: object) -> int:
     """Extract the rows-written count from a projection handler's return value.
 
@@ -4555,6 +4740,13 @@ def _make_projection_dispatch_callback(
     guarantee: a malformed inbound event whose ``ValidationError`` escapes the
     handler is now durably captured on the bus on the REAL dispatch path, not
     only when a handler happens to catch it internally.
+
+    OMN-18910: every projection wired here is REGISTERED on the process apply
+    accumulator before any traffic, so a projection that attaches and then
+    takes nothing still emits a row every window. Registering at wiring time
+    rather than on first dispatch is the whole point -- a consumer that stopped
+    taking anything would otherwise vanish from the dimension that exists to
+    notice exactly that.
     """
     sinks = sinks or ProjectionDispatchSinks()
     secret_resolver = sinks.secret_resolver
@@ -4563,6 +4755,31 @@ def _make_projection_dispatch_callback(
     dlq_topics = list(sinks.dlq_topics)
     handler_name = type(handler_instance).__name__
     is_projection_runner = _is_standalone_projection_runner(handler_instance)
+    # OMN-18910. Registered before any traffic, for the reason in the
+    # docstring above: scope comes from what was wired, never from what was
+    # observed. Wrapped because an observability registration must never be
+    # the thing that stops a projection from being wired at all.
+    try:
+        from omnibase_infra.runtime.observability import (
+            get_projection_apply_counters,
+        )
+
+        apply_counters = get_projection_apply_counters()
+        for subscribe_topic in subscribe_topics:
+            apply_counters.register(handler_name, subscribe_topic)
+    except Exception:  # noqa: BLE001 -- never fail wiring over a counter
+        logger.debug(
+            "Projection apply counters unavailable at wiring for handler=%s",
+            handler_name,
+            exc_info=True,
+        )
+    # OMN-18918. Only a writer the SHARED runtime dispatches in-process can
+    # be deprived of coordinates by this seam; a standalone runner reads its
+    # own records and never comes through here. Scoping the refusal to that
+    # set is what keeps it from firing on every pure fold.
+    is_inprocess_projection_writer = bool(
+        getattr(handler_instance, PROJECTION_INPROCESS_DISPATCH_ATTR, False)
+    )
     if is_projection_runner:
         # OMN-17448. The callback below returns None for this handler, by
         # design (OMN-15905) -- but the kernel still SUBSCRIBES the contract's
@@ -4614,6 +4831,8 @@ def _make_projection_dispatch_callback(
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
+        *,
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> ModelDispatchResult | None:
         if is_projection_runner:
             logger.debug(
@@ -4658,6 +4877,39 @@ def _make_projection_dispatch_callback(
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             input_data["_topic"] = topic
+            # OMN-18918. The source message's own coordinates, injected only
+            # when the consume loop could actually determine them. A writer
+            # reads these to stamp the snapshot delta it publishes, and the
+            # serving cache uses that offset to tell a newer fact from a
+            # redelivery of an older one.
+            #
+            # FAIL CLOSED rather than default. Every in-process writer
+            # already falls back to 0 when the keys are absent, and a
+            # constant 0 never exceeds itself, so the cache refused every
+            # delta after the first for a given key and each key froze on
+            # its first value -- at zero consumer lag, behind a green
+            # readiness endpoint (OMN-18905). Injecting nothing preserves
+            # that old behaviour exactly, which is why the absence is
+            # LOGGED: silence here is what made the original defect take a
+            # live trace to find. Measured on the .201 dev lane before this
+            # landed, and carried over from the superseded OMN-18955 arm:
+            # 6,210,195 lifetime drops on the consumer-flow exposure, with
+            # the readiness endpoint answering 503 because it correctly
+            # refused to call a discarding cache healthy.
+            if delivery is not None:
+                input_data["_partition"] = delivery.partition
+                input_data["_offset"] = delivery.offset
+            elif is_inprocess_projection_writer:
+                logger.error(
+                    "Projection writer dispatched with no delivery context: "
+                    "handler=%s topic=%s. Its snapshot deltas will carry a "
+                    "fixed source offset, and the serving cache will discard "
+                    "every delta after the first for each key (OMN-18905). "
+                    "The consume loop could not determine the message's "
+                    "partition and offset; it does not invent them.",
+                    handler_name,
+                    topic,
+                )
             envelope_id = _extract_projection_envelope_id(typed_envelope)
             if envelope_id is not None:
                 # Preserve the UUID at the transport boundary. Projection
@@ -4719,6 +4971,20 @@ def _make_projection_dispatch_callback(
             # rows so the failure surfaces instead of being masked.
             rows_upserted = _extract_rows_upserted(result)
             projected = rows_upserted >= 1
+            # OMN-18910. The one seam that knows, at the same instant, that an
+            # event was CONSUMED and whether a row LANDED. Every other health
+            # signal reads one or the other: lag says a consumer is moving, the
+            # DLQ ratio says it is not erroring, attachment says it is
+            # subscribed. None of them says it wrote. Recorded here, before any
+            # of the branches below, so a refusal, an early return and a
+            # success are all counted rather than only the paths that log.
+            _record_projection_apply(
+                handler_instance=handler_instance,
+                topic=topic,
+                rows_upserted=rows_upserted,
+                rows_refused=_extract_rows_refused(result),
+                deltas_dropped_total=_extract_deltas_dropped_total(result),
+            )
             if projected:
                 logger.debug(
                     "Projection handler completed: topic=%s event_type=%s "
@@ -4729,15 +4995,34 @@ def _make_projection_dispatch_callback(
                     result,
                 )
             else:
-                logger.error(
-                    "Projection handler wrote zero rows (no terminal emitted): "
-                    "handler=%s topic=%s event_type=%s rows_upserted=%s result=%s",
-                    type(handler_instance).__name__,
-                    topic or "unknown",
-                    event_type,
-                    rows_upserted,
-                    result,
-                )
+                # OMN-18992. A zero-row return has two causes and this used to
+                # log both the same way. A writer that silently wrote nothing
+                # is the defect the ERROR exists to surface; an ordering guard
+                # refusing a redelivery is correct behaviour and fires
+                # routinely. Logging the second as ERROR trains people to skip
+                # the class, at which point the first stops being visible --
+                # which is the whole point of having the line.
+                rows_refused = _extract_rows_refused(result)
+                if rows_refused > 0:
+                    logger.info(
+                        "Projection handler wrote zero rows, refused by the "
+                        "ordering guard (expected, no terminal owed): "
+                        "handler=%s topic=%s event_type=%s rows_refused=%s",
+                        type(handler_instance).__name__,
+                        topic or "unknown",
+                        event_type,
+                        rows_refused,
+                    )
+                else:
+                    logger.error(
+                        "Projection handler wrote zero rows (no terminal emitted): "
+                        "handler=%s topic=%s event_type=%s rows_upserted=%s result=%s",
+                        type(handler_instance).__name__,
+                        topic or "unknown",
+                        event_type,
+                        rows_upserted,
+                        result,
+                    )
         except TypeError as exc:
             logger.error(
                 "Projection handler TypeError (likely missing _db or _event_type): "
@@ -6617,8 +6902,36 @@ async def _dispatch_to_contract_scope(
     topic: str,
     envelope: ModelEventEnvelope[object],
     allowed_dispatcher_ids: frozenset[str],
+    delivery: ModelMessageDeliveryContext | None = None,
 ) -> ModelDispatchResult:
-    """Dispatch through the engine while preserving callback ownership."""
+    """Dispatch through the engine while preserving callback ownership.
+
+    OMN-18918. ``delivery`` carries the source record's own coordinates from
+    whichever consume boundary called this. THIS is the path the in-process
+    projection writers take -- the five writers the OMN-18905 defect is about
+    declare ``db_tables`` and no ``consumer_purpose``, which routes them to
+    the two callbacks above rather than to ``EventBusSubcontractWiring``. A
+    live subscription readback on the .201 dev lane measured that seam
+    dispatching 104 calls across four topics, none of them a projection
+    source, so a typed path that reached only the other protocol would inject
+    nothing for exactly the writers it was built for and log the absence on
+    every message while the exposures stayed frozen. Found in second-actor
+    review before merge rather than on the lane afterwards.
+
+    The engine is probed before the keyword is passed, for the same reason
+    the other seam probes: ``delivery`` is optional on the protocol, so an
+    engine predating it is valid and would raise ``TypeError`` on an
+    unconditional keyword.
+    """
+    if delivery is not None and engine_type_accepts_delivery(
+        type(dispatch_engine), "dispatch_scoped"
+    ):
+        return await dispatch_engine.dispatch_scoped(
+            topic,
+            envelope,
+            allowed_dispatcher_ids=allowed_dispatcher_ids,
+            delivery=delivery,
+        )
     return await dispatch_engine.dispatch_scoped(
         topic,
         envelope,
@@ -6895,6 +7208,7 @@ def _make_event_bus_callback(
                     topic,
                     envelope,
                     dispatcher_scope,
+                    delivery_context_from_message(message, topic),
                 )
                 if result_applier is not None and result is not None:
                     try:
@@ -7417,8 +7731,32 @@ def _make_event_bus_callback(
                         data.get("correlation_id") if isinstance(data, dict) else None
                     )
                     corr = _coerce_uuid_or_none(raw_corr) or uuid4()
+                    # OMN-18958: ADOPT the identity the wire states; do not
+                    # mint a rival. `ModelEventEnvelope.envelope_id` defaults
+                    # to uuid4, so omitting this argument silently produced a
+                    # SECOND id for a message that already had one -- and that
+                    # second id is what every hop caused by this message
+                    # records as its parent, via the one shared
+                    # `current_dispatch_envelope()` contextvar. The result is
+                    # an edge no reader can resolve, because the parent it
+                    # names was never on the wire.
+                    #
+                    # Same precedence as `correlation_id` immediately above
+                    # and as the comment at the top of this block states:
+                    # ingress header -> body -> mint. A body that states its
+                    # own id is the authoritative in-band value; minting
+                    # survives only where there is nothing to adopt.
+                    raw_env_id = (
+                        data.get("envelope_id") if isinstance(data, dict) else None
+                    )
+                    env_id = (
+                        _ingress_message_id(message)
+                        or _coerce_uuid_or_none(raw_env_id)
+                        or uuid4()
+                    )
                     derived = _derive_event_type_from_topic(topic)
                     envelope = ModelEventEnvelope[object](
+                        envelope_id=env_id,
                         payload=data,
                         correlation_id=corr,
                         envelope_timestamp=datetime.now(UTC),
@@ -7458,11 +7796,12 @@ def _make_event_bus_callback(
             if flow_counters is None or consumer_group is None:
                 await _dispatch_with_bounded_retry(envelope, message)
             else:
-                # OMN-16777: an envelope reaching this line HAS been handed to
-                # dispatch. Counted before the call, not after, so a handler
-                # that hangs or dies still shows the message as taken in --
-                # counting only successful dispatches would reproduce exactly
-                # the "green because nothing was measured" defect.
+                # OMN-16777: an envelope reaching this line HAS been handed
+                # to dispatch. Counted before the call, not after, so a
+                # handler that hangs or dies still shows the message as
+                # taken in -- counting only successful dispatches would
+                # reproduce exactly the "green because nothing was
+                # measured" defect.
                 flow_counters.record_in(consumer_group, topic)
                 with active_flow_key(consumer_group, topic):
                     await _dispatch_with_bounded_retry(envelope, message)
@@ -7614,12 +7953,14 @@ def _make_raw_event_projection_callback(
 
     async def _dispatch_and_apply_raw_projection(
         envelope: ModelEventEnvelope[object],
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> None:
         result = await _dispatch_to_contract_scope(
             scoped_dispatch_engine,
             topic,
             envelope,
             dispatcher_scope,
+            delivery,
         )
         if result is not None:
             # OMN-16831: same reason as the sibling boundary above -- the
@@ -7649,22 +7990,30 @@ def _make_raw_event_projection_callback(
                 tenant_id=_tenant_id_from_raw_message(raw_message),
             )
             if flow_counters is None or consumer_group is None:
-                await _dispatch_and_apply_raw_projection(envelope)
+                await _dispatch_and_apply_raw_projection(
+                    envelope,
+                    delivery_context_from_message(raw_message, topic),
+                )
             else:
-                # OMN-17214: counted before the call for the same reason the
-                # sibling branch counts before its call -- an envelope reaching
-                # this line HAS been handed to dispatch, so a handler that hangs
-                # or dies still shows the message as taken in. Counting only
-                # completed dispatches would reproduce the "green because
-                # nothing was measured" defect this seam exists to close.
+                # OMN-17214: counted before the call for the same reason
+                # the sibling branch counts before its call -- an envelope
+                # reaching this line HAS been handed to dispatch, so a
+                # handler that hangs or dies still shows the message as
+                # taken in. Counting only completed dispatches would
+                # reproduce the "green because nothing was measured" defect
+                # this seam exists to close.
                 flow_counters.record_in(consumer_group, topic)
-                # The applier's publish loop records ``messages_out`` against
-                # this task-local key (``record_active_out``), so the apply()
-                # call has to run INSIDE the binding -- outside it, a projection
-                # that publishes is counted as producing nothing and reads
-                # STALLED while it is demonstrably producing.
+                # The applier's publish loop records ``messages_out``
+                # against this task-local key (``record_active_out``), so
+                # the apply() call has to run INSIDE the binding --
+                # outside it, a projection that publishes is counted as
+                # producing nothing and reads STALLED while it is
+                # demonstrably producing.
                 with active_flow_key(consumer_group, topic):
-                    await _dispatch_and_apply_raw_projection(envelope)
+                    await _dispatch_and_apply_raw_projection(
+                        envelope,
+                        delivery_context_from_message(raw_message, topic),
+                    )
         except Exception as exc:  # noqa: BLE001 — consumer boundary; log and continue
             if flow_counters is not None and consumer_group is not None:
                 flow_counters.record_error(consumer_group, topic)

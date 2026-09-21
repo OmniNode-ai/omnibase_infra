@@ -1,6 +1,18 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""In-process typed context channels for one materialized dispatch."""
+"""In-process typed context channels for one materialized dispatch.
+
+A SOURCE-COORDINATE CHANNEL DOES NOT BELONG HERE, and one was removed from this
+module under OMN-18918 rather than left beside its replacement. The source
+message's partition and offset reach a projection writer as an explicit
+``ModelMessageDeliveryContext`` on ``ProtocolDispatchEngine.dispatch``, threaded
+from the consume loop that holds the record -- not as ambient task-local state.
+The operator ruled for the typed parameter over the context channel on
+2026-09-20, on the ground that partition and offset are facts about a DELIVERY
+and the protocol should say what it carries. Two mechanisms writing the same two
+payload keys is the failure that ruling exists to prevent: the later writer wins
+silently and no test sees it.
+"""
 
 from __future__ import annotations
 

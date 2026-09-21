@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Durable lab alarm — macOS LaunchAgent (OMN-18867).
+
+  This is a TEMPLATE. Do not install it by hand and do not commit a rendered
+  copy: the rendered plist carries this machine's absolute paths, which
+  CLAUDE.md Operating Rule 6 forbids in source. Render and install with
+
+      bash scripts/launchd/install-lab-alarm.sh
+
+  which resolves $OMNI_HOME and the brew interpreter and writes the result to
+  ~/Library/LaunchAgents/.
+
+  Why the interpreter is a literal path: launchd executes with a restricted
+  PATH and does not run a login shell, so `python3` and `$(brew --prefix)`
+  both fail here. CLAUDE.md Operating Rule 11. The alarm is stdlib-only for
+  the same reason — a timer whose value is that it keeps running unattended
+  must not depend on a virtual environment staying healthy.
+
+  launchd DOES fire on this Mac. The standing claim that it does not was
+  corrected under OMN-17173: the earlier ticks had been bootout'd, not failed.
+  Before believing this agent runs, check BOTH a non-zero PID column in
+  `launchctl list` AND a fresh entry in the log below — a loaded-but-bootout'd
+  job looks installed and does nothing. The installer prints that readback.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.omninode.lab-alarm</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@BREW_PYTHON@</string>
+        <string>@OMNI_HOME@/omnibase_infra/scripts/lab_alarm.py</string>
+        <string>--config</string>
+        <string>@OMNI_HOME@/omnibase_infra/config/lab_alarm.json</string>
+        <string>--state-dir</string>
+        <string>@OMNI_HOME@/.onex_state/lab-alarm</string>
+        <string>--ledger</string>
+        <string>@OMNI_HOME@/docs/tracking/ROLLING_WORK_LEDGER.md</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>OMNI_HOME</key>
+        <string>@OMNI_HOME@</string>
+        <!-- launchd does not inherit a shell PATH; docker and gh must be findable -->
+        <key>PATH</key>
+        <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Hourly, at :25. A Minute-only StartCalendarInterval matches every
+         hour by launchd's own documented semantics, so there is deliberately
+         no Hour key here — adding one would turn this into a daily job that
+         still looks hourly. Hourly is the bound the ticket is buying: it
+         turns a nine-day detection time into about an hour, and the lag
+         condition needs two samples straddling real time, which a tighter
+         interval would not give it. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>25</integer>
+    </dict>
+
+    <!-- Deliberately NOT RunAtLoad: installing the agent must not fire an
+         evaluation as a side effect, so the first run is taken by hand and is
+         attributable. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Deliberately NOT KeepAlive: this is a periodic reader, not a daemon.
+         KeepAlive would restart it the instant it exits, sampling lag
+         continuously and destroying the two-samples-straddling-real-time
+         property the growth condition rests on. -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>@OMNI_HOME@/.onex_state/lab-alarm/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>@OMNI_HOME@/.onex_state/lab-alarm/launchd.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,499 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# lane-manifest.yaml — Versioned DESIRED-STATE census for the .201 runtime lanes (OMN-13011).
+#
+# verified: 2026-06-17T13:00:00Z via bash scripts/lane-census-check.sh --json on 192.168.86.201
+# verified: 2026-07-03 via docker compose -f docker/docker-compose.infra.yml -f docker/docker-compose.<lane>.yml config (OMN-13815 compose-derived container_name parity); running-state basis: live .201 `docker inspect` evidence in OMN-13815 (2026-07-02) confirming these consumers run under the omnibase-infra-stability-test project.
+# verified: 2026-07-03 via LANE_MANIFEST=deploy/lane-census/lane-manifest.yaml python3 scripts/lane_census_plan.py fed the live .201 docker inventory (docker ps -a / docker network ls over ssh, read-only) — migration-gate keepalive reclassification clears the oneshot_stuck false-positive on the healthy stability-test and judge lanes (OMN-13772).
+# verified: 2026-08-30 via read-only ssh jonah@192.168.86.201 `ss -ltn` + `docker ps --format '{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.Ports}}'` (OMN-17143): confirms the four governed lanes' live port bindings AND that the newly reserved collaborator block 58085/58086/45436/46379/55092/55644/53002/58080 has no listener. The reserved
+#   `lakshman` lane below is declared-but-not-built: zero containers, no compose file, optional: true.
+# verified: 2026-08-31 via read-only ssh jonah@192.168.86.201 `ss -ltn` (no listener on any of
+#   58085/58086/45436/46379/55092/55644/53002/58080), `docker ps -a --filter
+#   label=com.docker.compose.project=omnibase-infra-lakshman` (zero containers) and
+#   `docker network ls | grep lakshman` (no network) — OMN-17150. The reserved block is STILL
+#   free and the lane is STILL unbuilt at the moment this PR declares its services. This PR is
+#   the REPO-side enablement only (compose file, lane Literal, topology profile, renderer);
+#   bring-up remains the lane owner's Task 0 and was deliberately not performed.
+# verified: 2026-09-13 via read-only host diagnostics `docker compose -p omnibase-infra-prod ps -a`
+#   (zero rows), `docker network ls --filter name=omnibase-infra-prod` (zero) and a per-project
+#   `docker ps -a` count diff showing omnibase-infra 31, omnibase-infra-stability-test 19,
+#   omnibase-infra-judge 7 and omnibase-infra-lakshman 7 byte-unchanged across the window —
+#   OMN-18320. The `prod` lane block is REMOVED from this file because the compose project it
+#   described no longer exists on the host: it was shut down on 2026-09-13 under an operator
+#   consent row, releasing 249 GB. This is the lab compose lane only. Production is the AWS
+#   `onex-prod` namespace and is untouched, as are the OMN-13418 prod-promotion gate, the
+#   OMN-15243 no-raw-prod-bypass signature set and the OMN-15218 attribution interlock
+#   (`scripts/preflight_lane_deploy_attribution.py` GOVERNED_LANES), all of which stay exactly
+#   as committed. `docker/docker-compose.prod.yml` is also retained: this change removes the
+#   lane from the DESIRED-STATE census, not the ability to describe it.
+# verified: 2026-09-02 via read-only ssh jonah@192.168.86.201 `docker ps -a --filter
+#   label=com.docker.compose.project=omnibase-infra-lakshman --format '{{.Names}}|{{.Status}}|{{.Image}}|{{.Ports}}'`,
+#   `docker network ls | grep lakshman`, `ss -ltn` and `curl -s http://localhost:58085/health` — OMN-17532.
+#   SUPERSEDES the 2026-08-30 and 2026-08-31 lines above where they say the lakshman lane is
+#   unbuilt with zero containers. It IS BUILT and RUNNING as of this line: 7 containers up
+#   (6 `service` + the `migration-gate` keepalive, all reporting `(healthy)`) plus the 3
+#   run-to-completion oneshots Exited (0) — exactly the 10 entries declared below, no more and
+#   no fewer. Network `omnibase-infra-lakshman-network` exists. Every port in the reserved block
+#   now has a listener and it is this lane's: 58085 runtime main, 58086 runtime effects,
+#   45436 postgres, 46379 valkey, 55092 redpanda kafka (external), 55644 redpanda admin,
+#   53002 projection-api. 58080 (keycloak) is still unbound — this lane runs no keycloak, which
+#   matches the compose file, so the reservation of that port stands unused by design.
+#   `GET :58085/health` returns HTTP 200 with `version: 0.38.17`, `environment: lakshman`,
+#   `bootstrap_servers: redpanda:9092` (lane-internal), `status: degraded`. The DEGRADED value is
+#   the projection_write_path dimension only — 14 of 37 declared projections are subscribed here
+#   but dispatch nothing in-process (the standalone-runner shape, the OMN-17448 class), which is a
+#   lane-content observation, NOT lane-census drift: no container is absent, extra or mis-tagged
+#   and `lane_census_plan.py` reports zero findings for this lane on the same inventory.
+# verified: 2026-09-03T12:56Z via read-only ssh jonah@192.168.86.201 `docker ps -a --filter
+#   label=com.docker.compose.project=<project> --format '{{.Names}}\t{{.Status}}'` for both
+#   `omnibase-infra-stability-test` and `omnibase-infra` — OMN-17562, the attestation for the
+#   ten projection-writer service entries this PR adds below.
+#   STATE AT THIS LINE, stated as the baseline these declarations are ahead of:
+#   stability-test runs 12 containers (9 up + 3 oneshots Exited (0)) and ZERO projection
+#   writers; `omninode-stability-test-runtime` and `-runtime-effects` are `Up 22 hours
+#   (unhealthy)`. The dev lane runs `omnimarket-projection-delegation-writer` and
+#   `omnimarket-projection-tenant-registry-writer`, both `Up 22 hours (healthy)`, and no other
+#   writer. So: of the sixteen writer service entries declared below, six exist on a lane
+#   today (2 on dev) and ten do not yet.
+#   THAT GAP IS DELIBERATE AND IS THE POINT. This file is the DESIRED-state authority; the
+#   compose overlays in the same commit declare the services, and the next
+#   `lane-census-check.sh` run on .201 is what turns the gap into visible drift instead of
+#   silence. The census reporting ten `container_absent` findings after this merges is the
+#   gate working, not a regression — it clears when the lanes are refreshed through the
+#   sanctioned attributed paths (`scripts/deploy-runtime.sh --execute`,
+#   `scripts/runtime_build/refresh_stability_lane.sh --execute`). Declaring the desired state
+#   FIRST is the same discipline the lakshman reservation above used, and it is the opposite
+#   of the failure this file exists for: a running-but-undeclared container is invisible,
+#   whereas a declared-but-absent one is loud.
+#   NOT REGENERATED IN THIS COMMIT: the CLAUDE.md GENERATED_LANE_TABLE block.
+#   `generate_claude_lane_block.py` derives its per-lane count from THIS file and its drift
+#   verdict from the checked-in `census-snapshot.json` (taken 2026-09-02, before these
+#   services existed), so regenerating now would publish `14 running (census clean)` for a
+#   lane on which six of those fourteen do not exist. That is precisely the phantom-lane
+#   claim retro B-6 made unwritable. The block regenerates truthfully from the next census
+#   after the lanes are refreshed.
+# (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
+#
+# THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
+# actual lane state:
+#   - volume config drift (OMN-12945 family)
+#   - WORKER_REPLICAS silent zero (OMN-12988 / OMN-12990)
+#   - 2026-06-11: prod runtime containers + broker network silently absent for
+#     hours during demo prep, with ZERO alert.
+#
+# This file is the single source of truth for what each lane MUST look like in
+# steady state. scripts/lane_census_plan.py reads it and diffs it against the
+# live `docker ps` / `docker network ls` inventory; scripts/lane-census-check.sh
+# drives the reconcile, emits a typed bus event, and fails fast (non-zero) on any
+# drift. Nothing about lane shape is hardcoded in the scripts — it all lives here.
+#
+# Maintenance: the container_name and network values below are derived from the
+# canonical compose lane files (docker/docker-compose.<lane>.yml `container_name`
+# fields and the `networks:` block). When a lane gains/loses a container or
+# renames its network, update BOTH the compose file and this manifest in the same
+# PR. tests/unit/scripts/test_lane_census_manifest_parity.py asserts the manifest
+# stays in lock-step with the compose files so the manifest can never silently
+# drift away from the lane it is supposed to police.
+#
+# Container kinds:
+#   service  — long-running; MUST be in `docker ps` Running state. Absence = drift.
+#   oneshot  — run-to-completion migration/init container; expected to have Exited
+#              (0). It is NOT drift for a oneshot to be absent (compose removes it)
+#              or Exited; it IS drift for a oneshot to be Running-stuck or Exited
+#              non-zero. Tracked, not required-running.
+#   keepalive — long-running healthcheck sentinel (migration-gate): the compose
+#              entrypoint is `while true; do sleep 3600; done` with a continuous
+#              healthcheck, so Running is its healthy steady state — NEVER
+#              oneshot_stuck. Like oneshot, absence/Exited(0) is not drift and
+#              Exited non-zero IS drift (OMN-13772 census false-positive fix).
+#
+# replicas: the REQUIRED running count for a service container. 1 unless a lane
+# explicitly scales out. A service whose replicas resolve to 0 is itself drift
+# (the WORKER_REPLICAS silent-zero regression): declaring replicas: 0 here is
+# forbidden by the parity test.
+#
+# image_tag_pattern: a regex every running container's image tag must match for
+# the lane. Guards against a lane silently running a stale/wrong generation. The
+# special token "${RUNTIME_TAG}" is resolved at check time from the deploy-agent
+# resolved runtime version; absence of a resolved tag relaxes the check to the
+# default pattern (never a hard failure on an unresolvable tag — that is a
+# separate signal, not a census drift).
+schema_version: "1.0.0"
+# Default image-tag pattern applied to a lane that does not override it.
+default_image_tag_pattern: '.+'
+lanes:
+  stability-test:
+    compose_file: docker/docker-compose.stability-test.yml
+    compose_project: omnibase-infra-stability-test
+    network: omnibase-infra-stability-test-network
+    image_tag_pattern: '.+'
+    services:
+      - name: omnibase-infra-stability-test-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-stability-test-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-stability-test-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-stability-test-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-stability-test-keycloak
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-stability-test-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-stability-test-migration-gate
+        kind: keepalive
+      - name: omnibase-infra-stability-test-intelligence-migration
+        kind: oneshot
+      - name: omninode-stability-test-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-stability-test-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-api
+        kind: service
+        replicas: 1
+      # The worker that OMN-12988 / OMN-12990 silently scaled to 0. Declared
+      # replicas: 1 here so its absence (replicas 0 => no container) is loud drift.
+      - name: omninode-stability-test-runtime-worker
+        kind: service
+        replicas: 1
+      # OMN-17562: the standalone projection writers on the PROOF lane.
+      #
+      # This lane ran ZERO of them while the throwaway dev lane ran two, so the
+      # surface `stability-proven` is resolved from for every live prod-promotion
+      # grant (OMN-15243) had the WEAKER write path of the two. The shared kernel
+      # subscribes each of these contracts' topics and dispatches nothing
+      # (OMN-15905 / OMN-16874), so without a dedicated process every message is
+      # consumed, acked and destroyed with no DLQ record and no ERROR log.
+      #
+      # `kind: service, replicas: 1` and NOT `profile_gated`: unlike the four
+      # OMN-16803 entries above, these ARE members of this lane's `runtime`
+      # profile and refresh_stability_lane.sh builds and recreates them, so an
+      # absent container here is real drift, not an expected absence.
+      - name: omnimarket-stability-test-projection-tenant-registry-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-registration-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-savings-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-tenant-credentials-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-stability-test-projection-live-events-writer
+        kind: service
+        replicas: 1
+      # OMN-18114: the TENANT-domain projection CARRIER. Not one of the writers
+      # above -- it is the runtime kernel under RUNTIME_PROFILE=tenant-projection,
+      # the only process that owns the eight omnimarket contracts declaring
+      # `runtime_profiles: [tenant-projection]`. Those eight are dropped from
+      # `main` and `effects` by filter_manifest_for_runtime_profile, so before
+      # this container existed they were discovered on this lane and subscribed
+      # by nothing.
+      - name: omnimarket-stability-test-tenant-projection-writer
+        kind: service
+        replicas: 1
+      # OMN-16803: these four are `profile_gated` — EXPECTED ABSENT on this lane.
+      #
+      # docker-compose.stability-test.yml sets `profiles: !override
+      # ["stability-test-disabled"]` on each of them, so they are NOT members of
+      # this lane's `runtime` profile. Verified live on .201 (2026-08-28):
+      #   docker compose -p omnibase-infra-stability-test \
+      #     -f docker-compose.infra.yml -f docker-compose.stability-test.yml \
+      #     --profile runtime config --services
+      # returns 12 services and none of these four. A `--profile runtime up -d`
+      # therefore cannot start them, by construction.
+      #
+      # They were declared `kind: service, replicas: 1` by OMN-13815 on
+      # 2026-07-02 evidence, when deploy-runtime.sh's warm `--restart` named the
+      # full RUNTIME_SERVICES set explicitly (naming a service on the CLI
+      # bypasses profile filtering, so they did run). OMN-14873 then scoped the
+      # stability refresh down to the 4 core services via
+      # RUNTIME_BUILD_SERVICES_OVERRIDE, deliberately, because a workspace-mode
+      # build of these four is still broken by the open OMN-14262 BUILD_SOURCE
+      # selector mismatch. From that point on nothing starts them here.
+      #
+      # Leaving them as `kind: service` made the census report four permanent
+      # false `container_absent` criticals and understated the lane's real
+      # health, which is how a genuinely degraded lane (OMN-16803: runtime-effects
+      # + runtime-worker + migration-gate actually missing) read as
+      # indistinguishable noise for a month. `profile_gated` states the truth:
+      # absent is correct; PRESENT is the drift.
+      #
+      # Re-declare these `kind: service` only when OMN-14262 is closed AND the
+      # compose profile override is removed in the same PR — the parity ratchet
+      # in tests/unit/scripts/test_lane_census_manifest_parity.py enforces that
+      # pairing mechanically.
+      - name: omninode-stability-test-agent-actions-consumer
+        kind: profile_gated
+      - name: omninode-stability-test-skill-lifecycle-consumer
+        kind: profile_gated
+      - name: omnibase-stability-test-intelligence-api
+        kind: profile_gated
+      - name: omninode-stability-test-contract-resolver
+        kind: profile_gated
+  judge:
+    compose_file: docker/docker-compose.judge.yml
+    compose_project: omnibase-infra-judge
+    network: omnibase-infra-judge-network
+    image_tag_pattern: '.+'
+    services:
+      - name: omnibase-infra-judge-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-judge-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-judge-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-judge-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-judge-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-judge-migration-gate
+        kind: keepalive
+      - name: omnibase-infra-judge-intelligence-migration
+        kind: oneshot
+      - name: omninode-judge-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-judge-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-judge-projection-api
+        kind: service
+        replicas: 1
+  # The dev lane (compose project `omnibase-infra`, the default infra stack) uses
+  # generated compose with non-prefixed container names; its census is the
+  # deploy-agent RUNTIME-scope verifier (OMN-12988). The lane manifest treats dev
+  # as OPTIONAL (reconcile-when-present): dev is a developer lane that is legitimately
+  # down most of the time, so its absence is not a steady-state regression. When dev
+  # IS up, the listed services must be running. This avoids a noisy false-positive
+  # ticket every time a developer stops their local stack.
+  dev:
+    compose_file: docker/docker-compose.generated.yml
+    compose_project: omnibase-infra
+    network: omnibase-infra_default
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omninode-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-runtime-effects
+        kind: service
+        replicas: 1
+      # OMN-17448: the standalone projection writers. Declared here so the lane
+      # map states what the dev lane actually runs -- while these were absent,
+      # every *ProjectionRunner node on this lane consumed to LAG 0 and wrote
+      # nothing, and no census, health surface or lane document said so.
+      # `optional: true` on this lane still holds: an entirely-down dev lane is
+      # not drift. When dev IS up, these must be running.
+      # OMN-17562 completed the set: all six the onex-dev cluster runs as
+      # Deployments now run here as compose services. A writer declared in the
+      # overlay but absent from this file is invisible to the census, which is
+      # how "undocumented-but-running" (and its mirror, "declared-but-never-
+      # started") both hide.
+      - name: omnimarket-projection-tenant-registry-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-registration-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-savings-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-tenant-credentials-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-projection-live-events-writer
+        kind: service
+        replicas: 1
+      # OMN-18114: the TENANT-domain projection CARRIER. Not one of the writers
+      # above -- it is the runtime kernel under RUNTIME_PROFILE=tenant-projection,
+      # the only process that owns the eight omnimarket contracts declaring
+      # `runtime_profiles: [tenant-projection]`. Those eight are dropped from
+      # `main` and `effects` by filter_manifest_for_runtime_profile, so before
+      # this container existed they were discovered on this lane and subscribed
+      # by nothing.
+      - name: omnimarket-tenant-projection-writer
+        kind: service
+        replicas: 1
+  # OMN-17143: COLLABORATOR lane for Lakshman Patel (operator decision
+  # 2026-08-30). It ENTERED this file as a pure RESERVATION — no compose file,
+  # no containers — declared here first, deliberately, so the port block and the
+  # compose project name were claimed in the desired-state authority BEFORE
+  # anything was stood up. The compose file landed in OMN-17150 and the lane was
+  # brought up on 2026-09-02 (see the OMN-17532 note below); it is a running
+  # lane now, and the reservation-era wording is kept only as the reason the
+  # port block looks the way it does.
+  # The failure mode this prevents is a collaborator picking ports ad hoc and
+  # displacing a governed lane (the OMN-13581 cross-lane displacement class) or
+  # standing up an undocumented-but-running project (the OMN-13034 judge-lane
+  # class, where undocumented-but-running is the dangerous direction).
+  #
+  # optional: true — same semantics as dev: an optional lane that is entirely
+  # down is NOT drift (scripts/lane_census_plan.py). A reserved-but-unbuilt lane
+  # must not emit a census ticket every tick. Once ANY declared service is
+  # running the lane is reconciled normally.
+  #
+  # RESERVED PORT BLOCK — every port below was verified FREE on 192.168.86.201
+  # by read-only `ss -ltn` on 2026-08-30 (see the verified: line at the top of
+  # this file). As of the 2026-09-02 verified: line every one of them except
+  # 58080 is now BOUND, and bound by this lane — the reservation was consumed
+  # exactly as written, with no ad-hoc port drift. The obvious-looking
+  # 48085/48086 block is NOT free: it is the
+  # judge lane's runtime main/effects (docker/runtime-policy.env
+  # JUDGE_RUNTIME_MAIN_PORT / JUDGE_RUNTIME_EFFECTS_PORT). 49092 was the prod
+  # broker's external Kafka port until that lane was retired on 2026-09-13
+  # (OMN-18320); keep it reserved until stale references to the removed lab
+  # compose lane are gone from the tree.
+  #
+  #   runtime main       58085
+  #   runtime effects    58086
+  #   postgres           45436
+  #   valkey             46379
+  #   redpanda kafka     55092   (external; container-internal stays 19092)
+  #   redpanda admin     55644
+  #   projection-api     53002
+  #   keycloak           58080   (only if the lane ever runs one)
+  #
+  # BOUNDARY. This is a collaborator lane owned by Lakshman and mutable by him.
+  # It is NOT a proof lane: no synthetic integration evidence, no golden-chain
+  # receipt, and no `stability-proven` digest may be sourced from it, and it is
+  # never a premise for a prod-promotion grant (OMN-13418 / OMN-12/13 gate
+  # family). It is deliberately NOT in the OMN-15243 stability-class lane set
+  # for the no-raw-prod-bypass gate, because it is not stability-class — adding
+  # it there would wrongly imply grants can resolve against it.
+  #
+  # OMN-17150 (2026-08-31): the compose file landed, so this entry graduates from
+  # a bare reservation to a declared lane. Both halves of the reservation's own
+  # instruction were done in that PR: the concrete `services:` list below is
+  # sourced from docker/docker-compose.lakshman.yml's `container_name` fields,
+  # and "lakshman" was added to _COMPOSE_LANES in
+  # tests/unit/scripts/test_lane_census_manifest_parity.py so the parity ratchet
+  # now polices this lane exactly as it polices stability-test/prod/judge.
+  #
+  # OMN-17532 (2026-09-02): THE LANE IS NOW BUILT AND RUNNING. The 2026-08-31
+  # revision of this block said "declared but NOT built"; that sentence was true
+  # when written and is false now, which is the phantom-lane direction this file
+  # exists to prevent — so it is corrected here rather than left to age. Live
+  # state at the verified: line above: 7 containers up and healthy (the 6
+  # `service` entries below plus the `migration-gate` keepalive), the 3 oneshots
+  # Exited (0), the declared network present, all 7 declared ports bound, and
+  # `GET :58085/health` -> 200 / version 0.38.17 / environment `lakshman`.
+  # Bring-up was performed by the lane owner, not by this PR — this PR mutates
+  # no lane, it only stops the manifest lying about one.
+  #
+  # STILL `optional: true`, and that is not a leftover either. `optional` does
+  # not mean "unbuilt"; it means an ENTIRELY-down lane is not drift
+  # (scripts/lane_census_plan.py). That is the right posture for a collaborator
+  # lane the owner may stop at any time, and it costs nothing now that the lane
+  # is up: the planner reconciles a present lane normally either way, so a
+  # PARTIAL bring-up here is drift today — verified on the same inventory that
+  # produced the committed census-snapshot.json, which reports zero findings for
+  # this lane.
+  #
+  # No worker service, matching the judge lane's shape: the compose file runs
+  # main + effects + projection-api only. The runtime-policy contract still pins
+  # a worker replica count for contract completeness; that is a contract-shape
+  # requirement, not a declaration that a worker container exists here.
+  lakshman:
+    compose_file: docker/docker-compose.lakshman.yml
+    compose_project: omnibase-infra-lakshman
+    network: omnibase-infra-lakshman-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omnibase-infra-lakshman-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-lakshman-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-lakshman-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-lakshman-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-lakshman-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-lakshman-migration-gate
+        kind: keepalive
+      - name: omnibase-infra-lakshman-intelligence-migration
+        kind: oneshot
+      - name: omninode-lakshman-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-lakshman-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-lakshman-projection-api
+        kind: service
+        replicas: 1
+# ---------------------------------------------------------------------------
+# hook_edge — which lane the Claude Code hook edge publishes to (OMN-17204)
+# ---------------------------------------------------------------------------
+# NOT read by lane_census_plan.py (which consumes `lanes:` and
+# `default_image_tag_pattern:` only). This block exists so an audit reads the
+# hook edge's lane FROM THE LANE MAP instead of re-deriving it from the
+# sourcing order of ~/.omnibase/.env against ~/.claude/settings.json — which is
+# how it was previously "known", and which produced three separate wrong
+# conclusions from one undeclared fact: OMN-16162 was flipped Done -> Backlog
+# on a probe against the wrong lane, OMN-16996 was filed ("hooks report publish
+# SUCCESS while zero events reach the broker") and later falsified for the same
+# reason, and beta/GOAL.md row 0's hook clause named a lane that could never
+# have produced a row.
+#
+# Authority is the omniclaude contract named below, not this block: duplicating
+# the endpoint here would recreate the two-sources-one-fact problem this closes.
+# This is a pointer plus the one thing the lane map is uniquely able to state —
+# which lane network the relay must be attached to for the pairing to close.
+#
+# verified: 2026-08-30 via read-only ssh jonah@192.168.86.201
+#   `docker inspect omninode-gateway-forwarder --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'`
+#   -> `omnibase-infra-network` (dev lane) only, and
+#   `docker network ls --format '{{.Name}}' | grep omnibase-infra`
+#   -> confirms `omnibase-infra-stability-test-network` exists and is distinct.
+#   Publisher side proven the same session, 2026-08-30T15:50:34Z: the shipped
+#   session_start_bus_mirror.sh was invoked with KAFKA_BOOTSTRAP_SERVERS
+#   deliberately preset to the DEV lane (192.168.86.201:19092) and still landed  # onex-allow-internal-ip: forensic quote of the env value the contract overrode; not a configurable endpoint
+#   its record on the STABILITY lane -- marker `OMN17204LaneProof-1788105033`
+#   read back via `rpk topic consume onex.evt.omniclaude.session-started.v1
+#   -o -20 -n 100` inside each lane's redpanda container: 8 hits on
+#   omnibase-infra-stability-test-redpanda, 0 on omnibase-infra-redpanda.
+#   That is the contract beating the env var, measured rather than asserted.
+hook_edge:
+  # The single authority for this fact. Read it, do not re-derive it.
+  contract: omniclaude/plugins/onex/hooks/contracts/hook_edge_lane.yaml
+  publish_lane: stability-test
+  # The relay that bridges a local .201 broker to the cloud MSK relay must be
+  # attached to the publish lane's network, or nothing the hook edge writes can
+  # ever reach the cloud gateway.
+  relay_container: omninode-gateway-forwarder
+  relay_required_network: omnibase-infra-stability-test-network
+  # OPEN, and deliberately not closed here: the live forwarder is attached to
+  # `omnibase-infra-network` (dev). That is the INSTANCE defect, owned by
+  # OMN-17034 — either the forwarder gains a stability-lane leg with its own
+  # tenant identity, or the publish lane is repointed. OMN-17204 is the RULE:
+  # it makes the mismatch a check failure with a named cause instead of a zero
+  # row count someone has to interpret. Repointing the publisher silently would
+  # also move hook rows off the lane the .201 projection (OMN-16994/16993)
+  # reads, which is a behaviour ruling OMN-17034 has to make explicitly.
+  live_state: mismatch
+  live_state_owner: OMN-17034
