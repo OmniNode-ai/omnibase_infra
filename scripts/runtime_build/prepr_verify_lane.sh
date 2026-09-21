@@ -441,6 +441,43 @@ print(f"remapped {len(out)} slot credentials onto their canonical names", file=s
 PYREMAP
 
 # -----------------------------------------------------------------------------
+# 6a. THE OPERATOR ENVIRONMENT, SOURCED FIRST SO THE SLOT'S VALUES WIN.
+#
+# Same two files scripts/deploy-runtime.sh and refresh_dev_lane.sh source, in
+# the same order, under `set -a`: the rendered runtime policy and the operator
+# env file. Compose then reads the process environment, and no `--env-file` is
+# passed -- the stale-snapshot copy that used to live at docker/.env was
+# removed for good reasons and is not reintroduced here.
+#
+# ORDER IS LOAD-BEARING and is the reason this block sits BEFORE the slot
+# exports rather than after. The operator env file on the lab host sets
+# KAFKA_ENVIRONMENT to the dev lane's own token; sourcing it after the slot's
+# exports would overwrite the slot's namespace with the dev lane's and put
+# every slot service in the dev lane's consumer groups. The render gate in
+# step 9 re-reads the result rather than trusting this ordering, because an
+# ordering argument in a comment is not a control.
+# -----------------------------------------------------------------------------
+OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
+if [[ ! -r "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
+    fail "${EXIT_USAGE}" \
+        "the operator env file is missing or unreadable at
+  ${OMNIBASE_OPERATOR_ENV_FILE}
+  The compose overlay resolves the shared broker, database and Keycloak
+  credentials from it and every one of them is spelled fail-closed, so a slot
+  cannot be brought up without it. Set OMNIBASE_OPERATOR_ENV_FILE to a readable
+  path, as the deploy path does."
+fi
+RUNTIME_POLICY_ENV="${STAGING_ROOT}/repo/docker/runtime-policy.env"
+set -a
+if [[ -r "${RUNTIME_POLICY_ENV}" ]]; then
+    # shellcheck disable=SC1090
+    source "${RUNTIME_POLICY_ENV}"
+fi
+# shellcheck disable=SC1090
+source "${OMNIBASE_OPERATOR_ENV_FILE}"
+set +a
+
+# -----------------------------------------------------------------------------
 # 7. THE SLOT ENVIRONMENT, PASSED AS REAL PROCESS ENVIRONMENT.
 #
 # NOT through --env-file alone, and this is a live defect rather than a
