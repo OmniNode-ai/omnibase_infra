@@ -58,6 +58,8 @@ BATCH_ARRAYS = (
 )
 
 BLOCKING_CONDITION = "service_healthy"
+RUNTIME_SERVICE = "omninode-runtime"
+GENERATED_COMPOSE_NAME = "docker-compose.generated.yml"
 
 
 def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object:
@@ -202,6 +204,56 @@ def test_deploy_script_still_recreates_the_batch_in_one_call() -> None:
     assert '"${lane_services[@]}"' in body, (
         "restart_services() no longer passes the whole lane service array to "
         "one compose call; re-reason the OMN-18843 ratchet."
+    )
+
+
+@pytest.mark.unit
+def test_no_compose_file_anywhere_gates_a_consumer_on_the_runtime_health() -> None:
+    """The fleet-wide form, and the reason this file has three assertions.
+
+    The dev-lane ratchet above reads only the dev restart batch, and that is a
+    real blind spot: it passed on a tree where three OTHER lane composes still
+    carried the identical edge. ``docker-compose.dogfood.yml`` is a complete
+    STANDALONE definition that deliberately does not include the base infra
+    file, and ``judge`` and ``lakshman`` each declare their own; the catalog
+    additionally declared it on two more services. Five sites, invisible to a
+    dev-batch ratchet, each with a main runtime carrying a 30-minute
+    start_period. Found by taking the proof to the dogfood surface, not by CI.
+
+    The invariant is a property of the dependency, not of a lane: a container
+    that consumes from the bus must not be held in ``State=created`` behind the
+    main runtime's healthcheck, because the batch that recreates it recreates
+    the main runtime at the same moment. Expressed as ``service_started`` the
+    edge still orders the pair and still inherits the main runtime's own
+    preconditions transitively.
+    """
+    findings: list[str] = []
+    for path in sorted(DOCKER_DIR.glob("docker-compose*.yml")):
+        if path.name == GENERATED_COMPOSE_NAME:
+            # Generated, gitignored, and rebuilt from the catalog the assertion
+            # below covers. Reading it here would grade a build artifact whose
+            # content depends on which bundle was generated last.
+            continue
+        for name, config in _load_services(path).items():
+            condition = _depends_on(config).get(RUNTIME_SERVICE)
+            if condition == BLOCKING_CONDITION:
+                findings.append(f"{path.name}: {name} -> {RUNTIME_SERVICE}")
+
+    for path in sorted(CATALOG_SERVICES_DIR.glob("*.yaml")):
+        catalog = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for entry in (catalog or {}).get("depends_on") or []:
+            if (
+                entry.get("service") == RUNTIME_SERVICE
+                and entry.get("condition") == BLOCKING_CONDITION
+            ):
+                findings.append(f"catalog/{path.name}: -> {RUNTIME_SERVICE}")
+
+    assert not findings, (
+        "A service gates on the main runtime's health. Compose holds it in "
+        "State=created for the whole healthcheck window, and every lane's main "
+        "runtime carries a 1800 s start_period, so a force-recreate naming both "
+        "strands this container's consumer groups for minutes (OMN-18843). Use "
+        "service_started. Findings: " + "; ".join(findings)
     )
 
 

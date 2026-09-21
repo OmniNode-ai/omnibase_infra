@@ -519,9 +519,19 @@ services:
   runtime-effects:
     !!merge <<: *runtime-base
     container_name: omninode-lakshman-runtime-effects
+    # OMN-18843: service_started, NOT service_healthy. A bus consumer must not
+    # wait on the main runtime's HEALTH to start. Compose holds the dependent in
+    # State=created for the whole healthcheck window, and this lane's main
+    # runtime carries a 30-minute start_period, so a force-recreate that names
+    # both services strands this container's consumer groups for minutes. The
+    # delegate-skill command consumer lives here, and the measured outage on the
+    # .201 dev lane was 5 min 48 s. service_started still inherits the main
+    # runtime's own preconditions transitively and still orders it first; only
+    # the health wait is dropped. Full reasoning: runtime-effects in
+    # docker/docker-compose.infra.yml.
     depends_on:
       omninode-runtime:
-        condition: service_healthy
+        condition: service_started
       redpanda:
         condition: service_healthy
     environment:
