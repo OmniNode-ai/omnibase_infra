@@ -457,17 +457,32 @@ jobs:
       # delegation golden chain "all need database or broker access this job
       # does not have". That was true of the `omnibase-deploy` runner and is
       # false of the `omnibase-verify` runner OMN-18602 moved this job to, so
-      # all three are wired in the steps above and
-      # scripts/ci/lab_pass_receipt.py's PROBES_NOT_YET_WIRED is now empty.
+      # the first two are wired in the steps above.
+      #
+      # TWO of the three, not three. The delegation check was wired the same
+      # day and REVERTED within the hour, so
+      # scripts/ci/lab_pass_receipt.py's PROBES_NOT_YET_WIRED still names it
+      # and is NOT empty. An earlier revision of this comment said it was, and
+      # that sentence outlived the revert by a day: the executable state was
+      # right and the prose beside it claimed coverage the receipt does not
+      # carry, which is the OMN-18864 silent-coverage shape reproduced in a
+      # comment. `test_the_workflow_prose_agrees_with_the_unwired_set` now
+      # reads this file against that constant, so the claim and the tuple
+      # cannot drift apart again.
+      #
+      # WHY IT WAS REVERTED, so the next reader does not redo it: the check was
+      # bound to a chain-canary dispatch fired inline from this job. The canary
+      # is a separately owned surface whose scheduled runs were already red
+      # (OMN-18872), and this job sits on the delivery critical path, so the
+      # binding failed compose-dev receipts for healthy shas and blocked the
+      # release train under rule 24(b). Re-wiring it means the canary emitting
+      # its OWN sha-keyed receipt and this job READING it, never dispatching.
       #
       # It is still not a hand-run integration pass. Rule 24(d) applies: the
       # lag check covers the lane's STANDALONE writer groups, derived from its
       # compose file, and not the contract auto-wired groups, which need a live
-      # manifest read this job does not do. The delegation check is bound to
-      # "a delegation reached a terminal for its own correlation", NOT to a
-      # complete five-link chain proof, because link 5 has no leg in any probe
-      # today (OMN-16964). Widening either means adding the probe AND the check
-      # name in one change -- never the name alone.
+      # manifest read this job does not do. Widening the set means adding the
+      # probe AND the check name in one change -- never the name alone.
       #
       # Rule 24(d) also applies and is not worked around here: the compose dev
       # lane has no onex-api and no RLS, so it cannot exercise tenant-scoped
