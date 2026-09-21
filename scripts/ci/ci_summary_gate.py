@@ -77,6 +77,29 @@ always reaches a terminal state.
    ``deploy-gate / deploy-gate`` = **failure** on the same head SHA. The
    required context was green because the failing check was in another run.
 
+5. **Default-deny EXTERNAL sweep (OMN-18960).** Check 4 is a whitelist
+   LOOKUP: it walks the expected tuple and asks the head for each name. It
+   never walks the head's check-run list the other way, so a check-run whose
+   name is not in that tuple was read by nothing — it could conclude
+   ``failure`` and this module would not see it. Measured over the 16 dev PRs
+   merged 2026-09-20T12:56:06Z → 2026-09-21T00:06:35Z: **40-55 such names per
+   head, 70 distinct across the window, against a tuple of 26.**
+
+   This check takes the head's check-runs, subtracts this run's own job names
+   (checks 1-3 own those), the expected tuple (check 4 owns those), this
+   poller's own context, and rows attributable to a NON-pull-request event,
+   and fails on any remainder that concluded a refusal. A name is admitted
+   only through :data:`EXTERNAL_SWEEP_EXCLUSIONS`, whose entries each carry a
+   reason, an owning ticket, a date and an ABSOLUTE expiry — all four
+   validated, a malformed entry failing the gate, and an expired entry
+   silently ceasing to exclude so the gate re-arms by itself.
+
+   Its bar is narrower than check 4's and deliberately so: ``skipped`` and
+   ``neutral`` are NOT failures here, because 9 of those 70 names are never
+   green in the window by design. The strict absent/skipped/neutral bar is
+   bought by REGISTERING a name in :data:`EXPECTED_EXTERNAL_CONTEXTS`. This
+   check's contract is: **nothing red slipped past unseen.**
+
 Exit codes: ``0`` success, ``1`` failure, ``2`` pending.
 """
 
@@ -84,9 +107,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 # The poller's own job — excluded to avoid self-deadlock.
 SELF_JOB_NAME = "CI Summary"
@@ -931,6 +955,143 @@ CANCELLED_SUPERSESSION_GRACE_S: int = 600
 # inside the window where a replacement is demonstrably on its way.
 EXTERNAL_FAILURE_SUPERSESSION_GRACE_S: int = 1200
 
+# ---------------------------------------------------------------------------
+# OMN-18960 (parent OMN-18943, epic OMN-18527) — LAYER 5: the default-deny
+# external sweep.
+#
+# Layers 1-3 sweep THIS RUN's job list default-deny. Layer 4 asserts a
+# hand-maintained tuple of cross-workflow contexts. Between them sat the hole
+# this layer closes: layer 4 is a pure WHITELIST LOOKUP — it iterates
+# `for context in expected:` and calls `latest.get(context)`, and never walks
+# the head's check-run list the other way. A check-run present on the head
+# whose name is not in that tuple was never read at all. It could conclude
+# `failure` and this module would not see it, on a repository whose `dev`
+# requires exactly one context, so that tuple IS the whole external surface.
+#
+# MEASURED, 16 dev PRs merged 2026-09-20T12:56:06Z -> 2026-09-21T00:06:35Z,
+# scoped to check-runs that had STARTED at or before each merge decision
+# (rows created by post-merge triggers are structurally invisible to a
+# pre-merge poller and counting them would overstate the population):
+#
+#   * 40-55 unregistered external check-run names per head, 70 distinct
+#     across the window, against an EXPECTED_EXTERNAL_CONTEXTS of 26.
+#   * 0 of 16 heads carried a NON-GREEN unregistered context at merge time.
+#   * POSITIVE CONTROL for that zero (rule 16): the same sweep over the
+#     POST-merge head state finds 8 of 16 heads carrying a red unregistered
+#     context, so the pipeline detects a red when one is present. Those reds
+#     are `Verify dev lane applied the redeploy` and
+#     `Verify the k3s onex-lab overlay applied the merged sha`, emitted by
+#     runtime-rebuild-trigger.yml jobs gated on
+#     `github.event.pull_request.merged == true`.
+#   * Event attribution of the swept population: 693 `pull_request`,
+#     48 `dynamic`, 20 non-Actions app rows, 1 `push`. That single push row
+#     is why event scoping is part of the mechanism and not an optimisation.
+#
+# WHY `skipped` AND `neutral` ARE NOT FAILURES HERE, which is a measurement
+# rather than a concession: 9 of the 70 names are NEVER green in the window —
+# `verify`, `auto-tag`, `occ-autobind-manual-replay`,
+# `occ-companion-effect-manual-replay`, `Docker Integration Tests`,
+# `Image Size Analysis`, `Security Scan (Trivy)` always `skipped`, and
+# `occ-autobind / outcome`, `occ-autobind / mint status`,
+# `occ-companion-effect / mint status` always `neutral`. Failing on those
+# conclusions would wedge every pull request on this repository on day one,
+# and a gate that is reverted within the hour enforces nothing.
+#
+# The strict bar for a name IS available and is bought by REGISTERING it in
+# EXPECTED_EXTERNAL_CONTEXTS, where absent / skipped / cancelled / neutral all
+# already fail closed. This layer's contract is narrower and is stated so it
+# cannot be mistaken for the other one: **nothing RED slipped past unseen**.
+# ---------------------------------------------------------------------------
+
+# Events whose check-runs are NOT a verdict on the pull request being gated.
+#
+# POLARITY IS DELIBERATE: this is a DENY list of non-PR events, not an ALLOW
+# list of PR events. A row whose event cannot be resolved — a non-Actions app
+# such as code scanning or the change-control writer, a run absent from the
+# supplied index, an unparseable URL, or no index supplied at all — is SWEPT.
+# An allow list would silently exempt every one of those.
+SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(
+    {
+        "push",
+        "schedule",
+        "workflow_dispatch",
+        "release",
+        "deployment",
+        "deployment_status",
+        "repository_dispatch",
+        "create",
+        "delete",
+        "fork",
+        "page_build",
+        "public",
+        "registry_package",
+        "watch",
+    }
+)
+
+# Conclusions that are a REFUSAL by the producer. `stale` is a real GitHub
+# check-run conclusion, not a synonym for old. `cancelled` is included and is
+# then handed to the existing OMN-18355 grace, so a superseded run that was
+# stopped mid-flight still waits rather than failing on the poll that sees it.
+#
+# `success`, `skipped` and `neutral` are absent for the measured reason above.
+SWEEP_FAILING_CONCLUSIONS: frozenset[str] = frozenset(
+    {
+        "failure",
+        "timed_out",
+        "action_required",
+        "startup_failure",
+        "stale",
+        "cancelled",
+    }
+)
+
+
+@dataclass(frozen=True)
+class SweepExclusion:
+    """One dated, ticketed, EXPIRING admission to the layer-5 sweep.
+
+    All four fields are load-bearing and all four are validated:
+
+    * ``reason`` — why this name may go red without blocking. Free text, but
+      it may not be empty; an entry nobody argued for is refused.
+    * ``ticket`` — the ``OMN-<number>`` that owns removing it. An exclusion
+      with no owner is an allowlist entry wearing a costume.
+    * ``added`` — the day it was argued, so its age is readable.
+    * ``expires`` — an ABSOLUTE date, never a duration. On and after that date
+      the entry stops excluding and the name is swept again. That is what
+      makes this list closed-ended: an exclusion nobody renews re-arms the
+      gate by itself, rather than outliving the defect it was written for.
+    """
+
+    reason: str
+    ticket: str
+    added: str
+    expires: str
+
+
+# The longest window a single entry may claim. An exclusion that needs longer
+# than a quarter is not a temporary exception, it is a decision to stop
+# enforcing, and it belongs in a re-argued MEASURED_NOT_ENFORCED_CONTEXTS entry
+# where the numbers are recorded, not here.
+SWEEP_EXCLUSION_MAX_DAYS: int = 90
+
+EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {}
+# EMPTY BY CONSTRUCTION as of OMN-18960, and that is the MEASUREMENT, not an
+# omission and not an oversight. Over the 16-PR merge-time window recorded
+# above, ZERO heads carried a non-green unregistered external context, so
+# landing this layer wedges nothing and needs no day-one exception. An entry
+# here would therefore be admitting a defect somebody has decided not to fix
+# yet — which is exactly what the four fields make legible.
+#
+# The MECHANISM is retained and tested against a synthetic registry
+# (tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions) so the
+# falsification control survives the empty state, on the same reasoning
+# ACTOR_CONDITIONAL_CONTEXTS records above.
+
+_SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")
+_SWEEP_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 EXIT_PENDING = 2
@@ -1133,7 +1294,40 @@ def latest_check_run_by_name(
     already recorded for that name on this head (OMN-18062 / OMN-18355).
     """
 
-    latest: dict[str, JobState] = {}
+    return {
+        name: _state_from_check_run(name, raw)
+        for name, raw in latest_check_run_rows(check_runs).items()
+    }
+
+
+def _state_from_check_run(name: str, raw: dict[str, object]) -> JobState:
+    """Project one raw check-run row onto the shared :class:`JobState`."""
+
+    conclusion = raw.get("conclusion")
+    completed_at = raw.get("completed_at")
+    return JobState(
+        name=name,
+        status=str(raw.get("status") or ""),
+        conclusion=None if conclusion is None else str(conclusion),
+        run_attempt=1,
+        completed_at=None if completed_at is None else str(completed_at),
+    )
+
+
+def latest_check_run_rows(
+    check_runs: list[dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    """The RAW winning row per context name, under latest-wins resolution.
+
+    :func:`latest_check_run_by_name` projects these onto :class:`JobState`,
+    which drops the producer URL. The OMN-18960 sweep needs that URL to resolve
+    which workflow run — and therefore which EVENT — wrote the row, so the
+    ordering lives here and both callers read the same winner. Duplicating the
+    ordering would let layer 4 and layer 5 disagree about which row is current,
+    which is the one way a red could be judged by neither.
+    """
+
+    winners: dict[str, dict[str, object]] = {}
     ordering: dict[str, tuple[str, int]] = {}
     for raw in drop_superseded_non_verdicts(check_runs):
         name = str(raw.get("name") or "")
@@ -1146,17 +1340,9 @@ def latest_check_run_by_name(
         key = (str(raw.get("started_at") or ""), run_id)
         if name in ordering and key <= ordering[name]:
             continue
-        conclusion = raw.get("conclusion")
         ordering[name] = key
-        completed_at = raw.get("completed_at")
-        latest[name] = JobState(
-            name=name,
-            status=str(raw.get("status") or ""),
-            conclusion=None if conclusion is None else str(conclusion),
-            run_attempt=1,
-            completed_at=None if completed_at is None else str(completed_at),
-        )
-    return latest
+        winners[name] = raw
+    return winners
 
 
 def _parse_timestamp(raw: str | None) -> datetime | None:
@@ -1397,6 +1583,205 @@ def provisional_cancellations(
     )
 
 
+def _parse_exclusion_date(raw: str) -> date | None:
+    """Parse a ``YYYY-MM-DD`` exclusion date, or ``None`` if unreadable."""
+
+    if not _SWEEP_DATE_RE.match((raw or "").strip()):
+        return None
+    try:
+        return date.fromisoformat(raw.strip())
+    except ValueError:
+        return None
+
+
+def validate_sweep_exclusions(
+    exclusions: dict[str, SweepExclusion],
+) -> list[str]:
+    """Refusal reasons for malformed :data:`EXTERNAL_SWEEP_EXCLUSIONS` entries.
+
+    A non-empty return FAILS the gate. That is the point: an exclusion nobody
+    could have reviewed is worse than no exclusion, because it reads as a
+    considered decision. The four fields are checked for PRESENCE and SHAPE
+    only — no check here can tell whether a reason is a good one.
+
+    Expiry is deliberately NOT a finding. An entry past its date is not
+    malformed, it is spent: :func:`active_sweep_exclusions` drops it and the
+    name is swept again, so the gate RE-ARMS rather than breaking. The repo's
+    own suite carries the other half, a test that fails the moment a live entry
+    expires, so the calendar reaches a person through a red test rather than
+    through a wedged pull request.
+    """
+
+    findings: list[str] = []
+    for name, entry in sorted(exclusions.items()):
+        if not isinstance(entry, SweepExclusion):
+            findings.append(f"{name}: not a SweepExclusion instance")
+            continue
+        if not entry.reason.strip():
+            findings.append(f"{name}: reason is empty")
+        if not _SWEEP_TICKET_RE.match(entry.ticket.strip()):
+            findings.append(
+                f"{name}: ticket {entry.ticket!r} is not an OMN-<number> reference"
+            )
+        added = _parse_exclusion_date(entry.added)
+        expires = _parse_exclusion_date(entry.expires)
+        if added is None:
+            findings.append(f"{name}: added {entry.added!r} is not a YYYY-MM-DD date")
+        if expires is None:
+            findings.append(
+                f"{name}: expires {entry.expires!r} is not a YYYY-MM-DD date"
+            )
+        if added is not None and expires is not None:
+            if expires <= added:
+                findings.append(
+                    f"{name}: expires {entry.expires} is not after added {entry.added}"
+                )
+            elif (expires - added).days > SWEEP_EXCLUSION_MAX_DAYS:
+                findings.append(
+                    f"{name}: window {(expires - added).days}d exceeds the "
+                    f"{SWEEP_EXCLUSION_MAX_DAYS}d cap"
+                )
+    return findings
+
+
+def active_sweep_exclusions(
+    exclusions: dict[str, SweepExclusion],
+    *,
+    now: datetime | None,
+) -> tuple[frozenset[str], tuple[str, ...]]:
+    """Return ``(names still excluding, names whose entry has expired)``.
+
+    An entry excludes on every day STRICTLY BEFORE its ``expires`` date, and
+    stops on that date. ``now is None`` excludes NOTHING — a caller with no
+    clock cannot judge an expiry, and the fail-closed answer to that is to
+    enforce, which is the same rule :func:`cancellation_is_provisional` applies
+    to a missing clock.
+    """
+
+    if now is None:
+        return frozenset(), tuple(sorted(exclusions))
+    today = now.date()
+    active: set[str] = set()
+    expired: list[str] = []
+    for name, entry in exclusions.items():
+        expires = _parse_exclusion_date(getattr(entry, "expires", ""))
+        if expires is None or today >= expires:
+            expired.append(name)
+        else:
+            active.add(name)
+    return frozenset(active), tuple(sorted(expired))
+
+
+_RUN_ID_RE = re.compile(r"/actions/runs/(\d+)(?:/|$)")
+
+
+def check_run_event_index(
+    workflow_runs: list[dict[str, object]] | None,
+) -> dict[int, str]:
+    """Map workflow-run id -> triggering event, from ``actions/runs?head_sha=``.
+
+    ``None`` or an empty list yields an empty index, under which
+    :func:`resolve_check_run_event` resolves every row to ``None`` and the
+    sweep judges all of them. A forgotten argument therefore ENFORCES rather
+    than exempting, which is the same property ``--pr-author`` has.
+    """
+
+    index: dict[int, str] = {}
+    for raw in workflow_runs or []:
+        try:
+            run_id = int(str(raw.get("id") or 0))
+        except (TypeError, ValueError):
+            continue
+        event = str(raw.get("event") or "")
+        if run_id and event:
+            index[run_id] = event
+    return index
+
+
+def resolve_check_run_event(
+    raw: dict[str, object],
+    events: dict[int, str],
+) -> str | None:
+    """The event that produced this check-run, or ``None`` when unresolvable.
+
+    ``None`` is the fail-closed answer: the caller sweeps the row. Rows written
+    by a GitHub App rather than Actions — code scanning, the change-control
+    writer — carry no run URL and land here by construction, and they are
+    exactly the rows an allow list would have exempted for free.
+    """
+
+    for key in ("html_url", "details_url"):
+        match = _RUN_ID_RE.search(str(raw.get(key) or ""))
+        if match:
+            return events.get(int(match.group(1)))
+    return None
+
+
+def evaluate_external_sweep(
+    check_runs: list[dict[str, object]] | None,
+    *,
+    expected: tuple[str, ...],
+    in_run_names: frozenset[str],
+    self_name: str,
+    exclusions: dict[str, SweepExclusion],
+    events: dict[int, str],
+    now: datetime | None,
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """Layer 5 — default-deny over every check-run nothing else accounts for.
+
+    Returns ``(failures, in_flight, swept, excluded)``:
+
+    * ``failures`` — ``"<name> (<conclusion>)"`` for each refusal. These FAIL
+      the umbrella.
+    * ``in_flight`` — swept names still running. REPORTING ONLY; see below.
+    * ``swept`` — every name this layer judged, so a clean run records what it
+      looked at instead of printing nothing (rule 16).
+    * ``excluded`` — swept-population names an active registry entry admitted.
+
+    WHY ``in_flight`` DOES NOT HOLD THE VERDICT AT PENDING, stated rather than
+    left to be discovered. Every other layer's PENDING is backed by a presence
+    PROMISE: a gate job is unconditional in ci.yml, an expected external
+    context was measured reporting on 16 of 16 heads. An unregistered row
+    carries no such promise, so waiting on one means the poller's 90-minute
+    deadline — and therefore a FAILURE on the sole required context — can be
+    spent on a job that never terminalizes. This repository has already paid
+    for that shape once: the needs-gated CI Summary this module replaced
+    wedged pull requests indefinitely under self-hosted fleet saturation.
+    RESIDUAL, and it is real: a row that goes red AFTER the poller's last poll
+    is not seen. It is bounded by the poller running until every in-run gate
+    and every expected external context has completed, which is the long pole
+    in practice, and the remedy for a name that matters is to REGISTER it in
+    EXPECTED_EXTERNAL_CONTEXTS, where presence is asserted.
+    """
+
+    if check_runs is None:
+        return [], [], [], []
+    accounted = frozenset(expected) | in_run_names | {self_name}
+    active, _expired = active_sweep_exclusions(exclusions, now=now)
+    failures: list[str] = []
+    in_flight: list[str] = []
+    swept: list[str] = []
+    excluded: list[str] = []
+    for name, raw in sorted(latest_check_run_rows(check_runs).items()):
+        if name in accounted:
+            continue
+        if resolve_check_run_event(raw, events) in SWEEP_NON_PR_EVENTS:
+            continue
+        if name in active:
+            excluded.append(name)
+            continue
+        swept.append(name)
+        state = _state_from_check_run(name, raw)
+        if state.status != "completed":
+            in_flight.append(name)
+            continue
+        if state.conclusion in SWEEP_FAILING_CONCLUSIONS and not verdict_is_provisional(
+            state, now
+        ):
+            failures.append(f"{name} ({state.conclusion})")
+    return failures, in_flight, swept, excluded
+
+
 def _is_allowlisted(name: str, allowlist: frozenset[str]) -> bool:
     """Prefix-aware allowlist check.
 
@@ -1425,6 +1810,8 @@ def evaluate(
     docs_only_marker: str = DOCS_ONLY_MARKER_JOB,
     docs_only_gates: tuple[str, ...] = DOCS_ONLY_SKIPPABLE_GATE_JOBS,
     now: datetime | None = None,
+    sweep_exclusions: dict[str, SweepExclusion] | None = None,
+    workflow_runs: list[dict[str, object]] | None = None,
 ) -> tuple[int, str]:
     """Return ``(exit_code, human_report)`` for the current job snapshot.
 
@@ -1440,6 +1827,11 @@ def evaluate(
     ``now`` is the observation time for the OMN-18355 cancellation grace.
     ``None`` is the strict, pre-OMN-18355 reading: a cancelled external context
     fails on the poll that observes it.
+
+    ``workflow_runs`` is the ``actions/runs?head_sha=`` payload the OMN-18960
+    layer-5 sweep resolves each check-run's triggering EVENT from. Omitting it
+    resolves every row's event to ``None``, which the sweep judges — a
+    forgotten argument enforces rather than exempting.
     """
 
     external_contexts = applicable_external_contexts(external_contexts, pr_author)
@@ -1520,8 +1912,40 @@ def evaluate(
         check_runs, external_contexts, now
     )
 
+    # (5) OMN-18960 default-deny external sweep: every check-run on the head
+    #     that layers 1-4 do not account for. `latest` is keyed by this run's
+    #     own job names, so subtracting it is what keeps layer 5 from
+    #     re-judging a job layer 3 already allowlisted.
+    if sweep_exclusions is None:
+        sweep_exclusions = EXTERNAL_SWEEP_EXCLUSIONS
+    exclusion_findings = validate_sweep_exclusions(sweep_exclusions)
+    _active_exclusions, expired_exclusions = active_sweep_exclusions(
+        sweep_exclusions, now=now
+    )
+    (
+        ext_sweep_failures,
+        ext_sweep_in_flight,
+        ext_sweep_names,
+        ext_sweep_excluded,
+    ) = evaluate_external_sweep(
+        check_runs,
+        expected=external_contexts,
+        in_run_names=frozenset(latest),
+        self_name=self_name,
+        exclusions=sweep_exclusions,
+        events=check_run_event_index(workflow_runs),
+        now=now,
+    )
+
     all_failures = (
-        strict_failures + skippable_failures + sweep_failures + external_failures
+        strict_failures
+        + skippable_failures
+        + sweep_failures
+        + external_failures
+        + ext_sweep_failures
+        # A malformed exclusion entry fails the gate outright. An unreviewable
+        # exception is worse than none: it reads as a considered decision.
+        + [f"malformed sweep exclusion: {f}" for f in exclusion_findings]
     )
     all_unresolved = gate_missing_or_pending + external_unresolved
 
@@ -1541,6 +1965,12 @@ def evaluate(
             external_provisional,
             docs_only=docs_only,
             relaxed=relaxed,
+            sweep_names=ext_sweep_names,
+            sweep_external_failures=ext_sweep_failures,
+            sweep_in_flight=ext_sweep_in_flight,
+            sweep_excluded=ext_sweep_excluded,
+            sweep_expired=list(expired_exclusions),
+            sweep_findings=exclusion_findings,
         )
 
     if all_failures:
@@ -1566,6 +1996,12 @@ def _report(
     *,
     docs_only: bool = False,
     relaxed: frozenset[str] = frozenset(),
+    sweep_names: list[str] | None = None,
+    sweep_external_failures: list[str] | None = None,
+    sweep_in_flight: list[str] | None = None,
+    sweep_excluded: list[str] | None = None,
+    sweep_expired: list[str] | None = None,
+    sweep_findings: list[str] | None = None,
 ) -> str:
     lines = [f"CI Summary verdict: {verdict}", f"  jobs observed: {len(latest)}"]
     # OMN-16661: make the relaxation visible in the job summary. A reviewer must
@@ -1629,6 +2065,36 @@ def _report(
                 "(cancelled, or failed inside the re-run grace): "
                 + ", ".join(external_provisional)
             )
+    # OMN-18960 layer 5. The count is printed on EVERY verdict, including a
+    # clean one: a sweep that finds nothing and says nothing is
+    # indistinguishable from a sweep that did not run (rule 16).
+    lines.append(
+        "  external default-deny sweep: "
+        f"{len(sweep_names or [])} unregistered context(s) judged"
+    )
+    if sweep_external_failures:
+        lines.append(
+            "  external sweep failures (red, and named by NOTHING else): "
+            + ", ".join(sweep_external_failures)
+        )
+    if sweep_excluded:
+        lines.append(
+            "  external sweep exclusions applied: " + ", ".join(sorted(sweep_excluded))
+        )
+    if sweep_expired:
+        lines.append(
+            "  external sweep exclusions EXPIRED (no longer excluding): "
+            + ", ".join(sorted(sweep_expired))
+        )
+    if sweep_in_flight:
+        lines.append(
+            "  external sweep rows still running (reported, not waited on): "
+            + ", ".join(sorted(sweep_in_flight))
+        )
+    if sweep_findings:
+        lines.append(
+            "  external sweep exclusion registry REFUSED: " + "; ".join(sweep_findings)
+        )
     return "\n".join(lines)
 
 
@@ -1678,6 +2144,27 @@ def _load_check_runs(path: str | None) -> list[dict[str, object]] | None:
     return [row for row in data if isinstance(row, dict)]
 
 
+def _load_workflow_runs(path: str | None) -> list[dict[str, object]] | None:
+    """Load ``actions/runs?head_sha=`` rows for the OMN-18960 event scoping.
+
+    ``None`` on a missing or unreadable file, which resolves every row's event
+    to ``None`` and therefore SWEEPS every row. Unreadable is the stricter
+    reading here, not the looser one, so a failed fetch cannot exempt anything.
+    """
+
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(payload, dict):
+        runs = payload.get("workflow_runs")
+        return runs if isinstance(runs, list) else None
+    return payload if isinstance(payload, list) else None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1713,6 +2200,15 @@ def main(argv: list[str] | None = None) -> int:
         "enforces rather than silently skips.",
     )
     parser.add_argument(
+        "--workflow-runs-file",
+        default=None,
+        help="Path to the head SHA's actions/runs JSON, used ONLY to resolve "
+        "which EVENT produced each check-run so the OMN-18960 default-deny "
+        "sweep can skip non-pull-request rows. A missing/unreadable file "
+        "resolves every event as unknown, which SWEEPS every row — the "
+        "stricter reading, so a failed fetch cannot exempt anything.",
+    )
+    parser.add_argument(
         "--pr-author",
         default=None,
         help="Login of the PR author. Drops ONLY the ACTOR_CONDITIONAL_CONTEXTS "
@@ -1732,6 +2228,7 @@ def main(argv: list[str] | None = None) -> int:
         check_runs=_load_check_runs(args.check_runs_file),
         external_contexts=external_contexts,
         pr_author=args.pr_author,
+        workflow_runs=_load_workflow_runs(args.workflow_runs_file),
         # The poller runs this module once per poll, so wall-clock IS the
         # observation time for the OMN-18355 cancellation grace. It is not a
         # caller-supplied input: there is no flag for it, so it cannot be
