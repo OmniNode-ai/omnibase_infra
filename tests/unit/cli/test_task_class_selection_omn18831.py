@@ -157,13 +157,18 @@ _PROSE_ROWS: tuple[tuple[str, str, str], ...] = (
         "document",
         "'assertion' in its ordinary English sense",
     ),
-    # OMN-19017. Both rows are the captured prompts, abridged to the sentences
-    # that carry the phrase, from correlations
-    # 04ac362b-8d9d-4208-b251-73a9a090d2a7 and
+    # OMN-19017. The first two rows are the captured prompts VERBATIM, from
+    # correlations 04ac362b-8d9d-4208-b251-73a9a090d2a7 and
     # e811f3e5-1ccf-42be-9d88-707ed1923430. Each asked for a list described in
     # words, each was claimed by the bare phrase "test cases" at priority 40,
     # and each was then refused by a class that requires the answer to compile
     # as Python -- deterministically, on every rung, four lanes in one hour.
+    #
+    # This comment said "abridged" until the abridgement was measured and
+    # found to change its own answer; see the note on the first row. The
+    # correction is left visible rather than silently reworded, because a
+    # comment that describes the code as it USED to be is the drift these
+    # rows exist to catch.
     (
         # VERBATIM from the receipt, not abridged. An earlier draft of this
         # row shortened the middle and the shortened form routed to `test`,
