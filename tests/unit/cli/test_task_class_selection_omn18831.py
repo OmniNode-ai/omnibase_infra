@@ -77,7 +77,7 @@ _MIRROR = (
 #: is the fix. A digest matching on both sides is what makes the falsifier
 #: table below a statement about production rather than about a fixture.
 PRODUCTION_SELECTION_DIGEST = (
-    "00071489afc6ad44768687b8dd0d8c69d5e15baaf800562e888375aba868b089"
+    "6d43ffef9e8aef89eba02b61da356adec3e74ef53e439a6a819cfa14aaa85819"
 )
 
 #: The opening sentence is quoted verbatim from the run's own stderr. The
@@ -157,9 +157,67 @@ _PROSE_ROWS: tuple[tuple[str, str, str], ...] = (
         "document",
         "'assertion' in its ordinary English sense",
     ),
+    # OMN-19017. Both rows are the captured prompts, abridged to the sentences
+    # that carry the phrase, from correlations
+    # 04ac362b-8d9d-4208-b251-73a9a090d2a7 and
+    # e811f3e5-1ccf-42be-9d88-707ed1923430. Each asked for a list described in
+    # words, each was claimed by the bare phrase "test cases" at priority 40,
+    # and each was then refused by a class that requires the answer to compile
+    # as Python -- deterministically, on every rung, four lanes in one hour.
+    (
+        # VERBATIM from the receipt, not abridged. An earlier draft of this
+        # row shortened the middle and the shortened form routed to `test`,
+        # because dropping words moved "binding-class" to within the
+        # qualifier window of "test cases" and the qualifier `class` matches
+        # inside that hyphenated compound. The abridgement changed the answer,
+        # which is the whole reason a captured prompt is quoted rather than
+        # summarised. The residual it exposed is pinned as its own row below.
+        "Enumerate test cases for one rule. A CI receipt may be re-emitted "
+        "only when every one of its failing checks is binding-class, meaning "
+        "the run could not bind its observation to the thing under test "
+        "rather than the thing under test being unhealthy. Binding-class: "
+        "convergence unestablished, probe read a different container "
+        "generation. Not binding-class: readiness failed, migrations "
+        "missing, consumer lag over bound. List the test cases that "
+        "distinguish these two, including the ones most likely to be "
+        "forgotten.",
+        "document",
+        "OMN-19017: 'test cases' asking for prose, no code term near it",
+    ),
+    (
+        "Enumerate RED test cases for a stale-cache defect in a Kafka deploy "
+        "agent. Context: the agent has one serial loop and lag sampling "
+        "happens only inside the first half of it.",
+        "document",
+        "OMN-19017: the second captured prompt, same shape",
+    ),
+    (
+        "List the test cases most likely to be forgotten for this rule.",
+        "document",
+        "OMN-19017: the shortest form of the same request",
+    ),
 )
 
 _CODE_AND_TEST_ROWS: tuple[tuple[str, str, str], ...] = (
+    # OMN-19017 positive controls. Each carries the newly gated phrase WITH a
+    # qualifier, so each must still route to the code class. Without these the
+    # prose rows above would also pass if the phrase had simply been deleted,
+    # which is the failure mode a word-sense fix has to rule out.
+    (
+        "Add test cases to the pytest module for the trailing comma bug.",
+        "test",
+        "OMN-19017: 'test cases' qualified by 'pytest'/'module'",
+    ),
+    (
+        "Write test cases for the function that parses the header.",
+        "test",
+        "OMN-19017: 'test cases' qualified by 'function'",
+    ),
+    (
+        "Extend the test cases and the fixture that covers retries.",
+        "test",
+        "OMN-19017: 'test cases' qualified by 'fixture'",
+    ),
     (
         "Write a parser for the lane manifest file.",
         "code_generation",
@@ -299,6 +357,66 @@ class TestTheProseRequestsAreNoLongerClaimed:
             _VERBATIM_OPENING, explicit=None, classes=production
         )
         assert resolution.task_type not in {"code_generation", "test", "refactor"}
+
+    def test_a_hyphenated_compound_still_qualifies_the_gated_phrase(
+        self, production: tuple[ModelSelectableTaskClass, ...]
+    ) -> None:
+        """KNOWN RESIDUAL, pinned deliberately so it is visible, not latent.
+
+        A qualifier is matched on word boundaries, and a hyphen is a word
+        boundary, so the qualifier ``class`` matches inside ``binding-class``.
+        A prose request carrying such a compound within the qualifier window
+        of ``test cases`` is therefore still claimed by the code-floored
+        class, even though nothing about it is a code request.
+
+        This is NOT introduced by OMN-19017. The same matching rule already
+        governed ``assertion``/``assertions`` under OMN-18831. What OMN-19017
+        changes is the exposure: ``test cases`` is a far more common phrase
+        than ``assertion``, so the pre-existing imprecision now has more
+        surface to act on.
+
+        It is asserted in its CURRENT direction rather than the desired one.
+        A test asserting the behaviour we want, over code that does not do it,
+        is a failing test, and a skipped test is one nobody reads. Pinned this
+        way, the day the matcher learns that a hyphenated compound is not the
+        qualifier, this test goes red and names its own successor.
+
+        Both captured prompts pass anyway, because in each the nearest such
+        compound falls outside the window. That is proximity rather than
+        design, and this row is what stops that distinction being lost.
+        """
+        leaking = (
+            "Enumerate the test cases that distinguish a binding-class "
+            "failure from an unhealthy one."
+        )
+
+        resolution = resolve_task_type(leaking, explicit=None, classes=production)
+
+        assert resolution.task_type == "test", (
+            "the residual this row pins has been fixed; the qualifier no "
+            "longer matches inside a hyphenated compound. Delete this test "
+            "and move the prompt into the prose rows, where it belongs: "
+            f"{resolution.reason}"
+        )
+
+    def test_the_same_request_without_the_compound_is_prose(
+        self, production: tuple[ModelSelectableTaskClass, ...]
+    ) -> None:
+        """The control that proves the row above is about the compound.
+
+        One word different. Without it there is no qualifier in the window
+        and the request routes to prose, which is what isolates the cause to
+        the hyphenated compound rather than to the sentence, its length or
+        its shape.
+        """
+        resolution = resolve_task_type(
+            "Enumerate the test cases that distinguish a binding failure "
+            "from an unhealthy one.",
+            explicit=None,
+            classes=production,
+        )
+
+        assert resolution.task_type == "document", resolution.reason
 
     def test_the_two_word_difference_no_longer_changes_the_class(
         self, production: tuple[ModelSelectableTaskClass, ...]
