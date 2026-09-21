@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-09-21T22:07:06.582228+00:00",
+  "lane": "omn18693-cycle-break",
+  "proof": {
+    "artifact_path": "nodes/node_projection_delegation/0044_restore_delegation_shadow_comparisons.sql",
+    "current_normalized_sha256": "29671875155c8d8cfa53e41be04e6b787ffbd30e66b7e10ebf5f1c53dfda43d6",
+    "manifest_checksum": "70d54d1b955080dbb6dedfc1ec0038abec0da497e27c4ff9d0f4aee348bd2b01",
+    "reason": "revision 74da69763 and the working tree differ only in SQL comments and whitespace: both normalise to 29671875155c8d8cfa53e41be04e6b787ffbd30e66b7e10ebf5f1c53dfda43d6, so the two revisions are the same program and cannot produce different schemas",
+    "recorded_blob": "edc9ad1f80e5cf96868194462f956cde513b905a",
+    "recorded_checksum": "3a1089294056fafeebbe5fdbe1c0910d3dc178b37d9402e2f37c19a32161c298",
+    "recorded_commit": "74da69763547848b94b2db745f8b92740728d7e7",
+    "recorded_normalized_sha256": "29671875155c8d8cfa53e41be04e6b787ffbd30e66b7e10ebf5f1c53dfda43d6",
+    "verdict": "comment_only_equivalent",
+    "version": "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql"
+  },
+  "ticket": "OMN-17139",
+  "tool": "prove_migration_revision_equivalence.py",
+  "tool_version": "1"
+}
