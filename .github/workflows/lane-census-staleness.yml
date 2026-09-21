@@ -14,7 +14,21 @@
 #      A census older than 7 days means the .201 timer stopped or the snapshot
 #      was never committed — either is a documentation failure.
 #
-#   2. ENV-VS-LIVE DRIFT (E-5 / OMN-13018): lane-manifest.yaml compose_project
+#   2. CENSUS-VS-MANIFEST DRIFT (OMN-18949): the committed snapshot and the
+#      committed manifest must describe the same world. A finding reporting a
+#      container as undeclared that the manifest now declares, a snapshot that
+#      miscounts its own findings, a lane one file knows and the other does
+#      not, and a manifest lane the table generator has no entry for are each
+#      a hard failure. It deliberately does NOT require drift_count to be
+#      zero: live drift on a mutable lane is a normal reportable state, and a
+#      gate refusing every PR over it would be switched off within a day.
+#
+#      Until this step existed, NOTHING refused on census drift at all. The
+#      committed snapshot carried five findings, severity warning, and the
+#      only surface that read them rendered the prose string
+#      "5 drift item(s) — see census" into a doctrine file.
+#
+#   3. ENV-VS-LIVE DRIFT (E-5 / OMN-13018): lane-manifest.yaml compose_project
 #      names, network declarations, and bootstrap server config must agree with
 #      what the compose files actually declare. Divergence means the manifest
 #      is policing the wrong lane.
@@ -31,6 +45,7 @@ on:
       - "deploy/lane-census/**"
       - "docker/docker-compose*.yml"
       - "scripts/check_lane_census_age.py"
+      - "scripts/check_lane_census_drift.py"
       - "scripts/check_lane_env_drift.py"
       - "scripts/generate_claude_lane_block.py"
   pull_request:
@@ -39,6 +54,7 @@ on:
       - "deploy/lane-census/**"
       - "docker/docker-compose*.yml"
       - "scripts/check_lane_census_age.py"
+      - "scripts/check_lane_census_drift.py"
       - "scripts/check_lane_env_drift.py"
       - "scripts/generate_claude_lane_block.py"
   workflow_dispatch:
@@ -94,6 +110,18 @@ jobs:
             --max-age-days "${MAX_AGE_DAYS}" \
             --snapshot deploy/lane-census/census-snapshot.json
 
+      - name: Check census-vs-manifest drift (OMN-18949)
+        run: |
+          echo "================================================================"
+          echo "Census-vs-Manifest Drift Gate — OMN-18949"
+          echo "The committed snapshot and the committed manifest must describe"
+          echo "the same world. A non-zero drift_count is NOT a failure; a"
+          echo "finding that contradicts the manifest is."
+          echo "================================================================"
+          uv run python scripts/check_lane_census_drift.py \
+            --manifest deploy/lane-census/lane-manifest.yaml \
+            --snapshot deploy/lane-census/census-snapshot.json
+
       - name: Check E-5 env-vs-manifest drift (OMN-13018)
         run: |
           echo "================================================================"
@@ -104,12 +132,39 @@ jobs:
             --manifest deploy/lane-census/lane-manifest.yaml \
             --compose-dir docker/
 
-      - name: Verify lane table generator runs without error
+      - name: Verify the lane table generator renders every declared lane
         run: |
           echo "================================================================"
-          echo "Lane Table Generator Smoke Test — OMN-13034"
-          echo "generate_claude_lane_block.py must produce valid output."
+          echo "Lane Table Generator — OMN-13034, hardened by OMN-18949"
+          echo "This step was a bare smoke test: it ran the generator and"
+          echo "compared its output to nothing, while the module's docstring"
+          echo "claimed CI failed when CLAUDE.md drifted. It never did."
+          echo "The drift step above now asserts the generator has an explicit"
+          echo "entry for every manifest lane, which is the half of that claim"
+          echo "this repository can enforce without checking out another one."
           echo "================================================================"
           uv run python scripts/generate_claude_lane_block.py \
             --manifest deploy/lane-census/lane-manifest.yaml \
-            --snapshot deploy/lane-census/census-snapshot.json
+            --snapshot deploy/lane-census/census-snapshot.json > /tmp/lane-block.md
+          echo "--- rendered block ---"
+          cat /tmp/lane-block.md
+          # One row per declared lane, counted from the manifest rather than
+          # from the output, so a generator that silently dropped a lane fails
+          # here instead of rendering a shorter table that still looks whole.
+          declared=$(uv run python -c "import yaml,sys; print(len(yaml.safe_load(open('deploy/lane-census/lane-manifest.yaml'))['lanes']))")
+          rendered=$(grep -c '^| [a-z]' /tmp/lane-block.md || true)
+          echo "declared lanes: ${declared}  rendered rows: ${rendered}"
+          if [ "${declared}" -ne "${rendered}" ]; then
+            echo "FAIL: the generated table has ${rendered} row(s) for ${declared} declared lane(s)." >&2
+            exit 1
+          fi
+
+      # RESIDUAL, stated rather than implied (OMN-18949). The generated block
+      # itself lives in omni_home/CLAUDE.md, a DIFFERENT repository this job
+      # does not check out, so `--check` is NOT run against it here. Closing
+      # that half needs a token with contents:read on that repository, and
+      # making a path-filtered PR gate depend on a cross-repo fetch trades one
+      # silent failure for an availability risk on unrelated pull requests.
+      # The comparison exists and is unit-tested (`--check <path>`); the
+      # scheduled surface that should run it is the 6-hourly refresh workflow,
+      # which already mints an app token. Not done here, and not claimed.
