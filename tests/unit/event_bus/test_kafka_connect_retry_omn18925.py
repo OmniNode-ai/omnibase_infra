@@ -344,6 +344,89 @@ class TestUnreachableBrokerFailsFastAndTyped:
         assert elapsed < policy.total_bound_seconds
 
 
+class TestAPermanentFailureIsNotRetried:
+    """A broker that has answered "no" is not asked again.
+
+    The retry loop exists for a broker that is not answering YET. An
+    authentication rejection is the broker answering clearly, and the same
+    answer arrives every time, so retrying it only delays the report -- by
+    the full bound in the worst case, which would turn an instant "your
+    credentials are wrong" into a two-minute wait before the identical
+    message.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_auth_rejection_raises_on_the_first_attempt(self) -> None:
+        from aiokafka.errors import AuthenticationFailedError
+
+        calls = 0
+
+        async def _connect() -> None:
+            nonlocal calls
+            calls += 1
+            raise AuthenticationFailedError("bad credentials")
+
+        with pytest.raises(AuthenticationFailedError):
+            await connect_with_bounded_retry(
+                policy=ModelKafkaConnectRetryPolicy(attempt_timeout_seconds=1.0),
+                connect=_connect,
+                cleanup=AsyncMock(),
+                target="broker:19092",
+            )
+
+        assert calls == 1, (
+            "an authentication rejection was retried; the same answer comes "
+            "back every time, so the only effect is to delay the report"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_failed_attempt_is_still_cleaned_up(self) -> None:
+        """Raising early must not skip teardown, or it leaks a socket."""
+        from aiokafka.errors import AuthenticationFailedError
+
+        cleanup = AsyncMock()
+
+        async def _connect() -> None:
+            raise AuthenticationFailedError("bad credentials")
+
+        with pytest.raises(AuthenticationFailedError):
+            await connect_with_bounded_retry(
+                policy=ModelKafkaConnectRetryPolicy(attempt_timeout_seconds=1.0),
+                connect=_connect,
+                cleanup=cleanup,
+                target="broker:19092",
+            )
+
+        cleanup.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_transient_failure_is_still_retried(self) -> None:
+        """The positive control, and the one that keeps the set narrow.
+
+        Without this, widening the permanent set until it swallowed the
+        transient cases would pass every test above while removing the whole
+        feature. A connection refused is exactly what the retry is for.
+        """
+        from aiokafka.errors import KafkaConnectionError
+
+        calls = 0
+
+        async def _connect() -> None:
+            nonlocal calls
+            calls += 1
+            raise KafkaConnectionError("connection refused")
+
+        with pytest.raises(KafkaConnectionError):
+            await connect_with_bounded_retry(
+                policy=ModelKafkaConnectRetryPolicy(attempt_timeout_seconds=1.0),
+                connect=_connect,
+                cleanup=AsyncMock(),
+                target="broker:19092",
+            )
+
+        assert calls == 4, "a refused connection is the case the retry exists for"
+
+
 class TestRetryHelperBoundaries:
     """Properties of the shared helper that neither call site should re-derive."""
 
