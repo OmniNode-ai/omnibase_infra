@@ -516,6 +516,10 @@ def _require_completed_terminal_evidence(
     """Refuse a completed receipt that lacks evidence its request required."""
     if result.status != "completed":
         return
+    if result.operational_outcome == "terminal_construction_failed":
+        raise DelegateTerminalUnresolvedError(
+            "completed delegation terminal cannot carry terminal_construction_failed"
+        )
     missing: list[str] = []
     if require_budget_evidence and result.budget_evidence is None:
         missing.append("budget_evidence")
@@ -621,7 +625,10 @@ def _write_unattributed_run_files(
                 "route_attributed": False,
                 "route_unattributed": unattributed,
                 "status": envelope.get("status"),
+                "operational_outcome": result.operational_outcome,
+                "content_verdict": result.content_verdict,
                 "terminal_failure_cause": result.terminal_failure_cause,
+                "terminal_failure_reason": result.terminal_failure_reason,
                 "failure_reason": result.error_message,
                 "quality_gates_failed": list(result.quality_gates_failed),
                 "quality_gate_passed": result.quality_gate_passed,

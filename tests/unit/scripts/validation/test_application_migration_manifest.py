@@ -772,7 +772,11 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # row-level security, so a tenant posture would assert an isolation the
     # schema does not enforce. Vendored into omnibase_infra FIRST per the
     # node-migration-vendor-parity ordering, ahead of omnimarket#2744.
-    assert len(result.declarations) == 205
+    # 205 -> 206 for OMN-19013: the append-only delegation quality-reader
+    # correction must be a first-class vendored application migration. Its
+    # exact source bytes and manifest binding are pinned separately by
+    # test_omn19013_terminal_construction_vendor.py.
+    assert len(result.declarations) == 206
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
