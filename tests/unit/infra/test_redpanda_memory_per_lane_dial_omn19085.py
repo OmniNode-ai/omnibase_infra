@@ -120,3 +120,61 @@ def test_no_two_lanes_share_a_memory_dial() -> None:
             "docker-compose.judge.yml",
         ]
     }
+
+
+@pytest.mark.unit
+def test_stability_test_fully_overrides_the_base_command() -> None:
+    """The dev lane's dial lives in the BASE file, so this override is load-bearing.
+
+    ``docker-compose.infra.yml`` is not the dev lane's alone: the stability-test
+    lane composes it too, as ``infra.yml`` + ``stability-test.yml`` (read from
+    the live container's ``com.docker.compose.project.config_files`` label on
+    2026-09-21). The dev lane's reservation is declared in the base file because
+    Compose REPLACES a ``command`` list wholesale rather than merging it, so an
+    overlay cannot change one flag without restating all of them -- and a second
+    copy of the broker's advertise addresses is a worse hazard than this test.
+
+    What keeps the base-file change off the stability-test lane is that
+    ``stability-test.yml`` declares its own ``command`` with Compose's
+    ``!override`` tag. If that tag or that command block is ever removed, the
+    stability-test broker would silently inherit the dev lane's reservation --
+    exactly the cross-lane coupling OMN-19085 exists to remove. Assert it, so
+    the removal is a red test rather than a surprise on the next recreate.
+    """
+    raw = (_DOCKER_DIR / "docker-compose.stability-test.yml").read_text(
+        encoding="utf-8"
+    )
+    compose = yaml.load(raw, Loader=_ComposeLoader)  # noqa: S506
+    redpanda = compose["services"]["redpanda"]
+
+    assert "command" in redpanda, (
+        "stability-test.yml no longer declares its own redpanda command; it would "
+        "now inherit the dev lane's reservation from docker-compose.infra.yml"
+    )
+    assert "!override" in raw.split("  redpanda:", 1)[1].split("command:", 1)[1][:40], (
+        "stability-test.yml's redpanda command lost its !override tag; Compose "
+        "would merge rather than replace and the base file's value could leak in"
+    )
+    assert _memory_arg(_DOCKER_DIR / "docker-compose.stability-test.yml") == (
+        "${REDPANDA_MEMORY:-8G}"
+    )
+
+
+@pytest.mark.unit
+def test_dev_dial_needs_no_operator_env_edit() -> None:
+    """Applying the change must not require editing an untracked file on the host.
+
+    The value that was live before this ticket came from the host-global operator
+    env file, which is in no manifest and no tracked file. The point of carrying
+    the dev value as a Compose DEFAULT is that a recreate picks it up with nothing
+    edited on the host, so assert the dev lane's dial actually has a default
+    rather than being another undeclared variable.
+    """
+    value = _memory_arg(_DOCKER_DIR / "docker-compose.infra.yml")
+
+    assert ":-" in value, (
+        "the dev dial has no default, so it would need a host env edit"
+    )
+    assert not value.startswith("${DEV_REDPANDA_MEMORY:?"), (
+        "the dev dial is declared required; it must carry a default instead"
+    )
