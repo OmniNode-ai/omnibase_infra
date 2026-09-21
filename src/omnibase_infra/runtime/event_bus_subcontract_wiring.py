@@ -125,6 +125,7 @@ from omnibase_infra.models.event_bus import (
 )
 from omnibase_infra.observability.wiring_health import MixinConsumptionCounter
 from omnibase_infra.protocols import ProtocolIdempotencyStore
+from omnibase_infra.runtime.dispatch_envelope_context import bind_source_coordinate
 from omnibase_infra.topics import TopicResolver, create_topic_resolver
 from omnibase_infra.utils import compute_consumer_group_id
 from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
@@ -898,7 +899,15 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     correlation_id,
                     self._node_name,
                 )
-                result = await self._dispatch_engine.dispatch(topic, envelope)
+                # OMN-18955: bind the SOURCE record's coordinates around
+                # dispatch here too. This is a SECOND consumer boundary onto
+                # the SAME dispatch engine, so a projection wired through the
+                # runtime host reaches the same dispatcher -- and a binding
+                # installed only in handler_wiring would leave this path
+                # injecting nothing, which reads as the defect being only
+                # partly fixed and is the easiest half of this change to miss.
+                with bind_source_coordinate(message):
+                    result = await self._dispatch_engine.dispatch(topic, envelope)
                 self._logger.info(
                     "[WIRING-CALLBACK] Dispatch complete: topic=%s, "
                     "correlation_id=%s, result_type=%s, node=%s",
