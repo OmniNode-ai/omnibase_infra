@@ -1,0 +1,477 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# ============================================================================
+# The ephemeral pre-PR verify SLOT overlay (OMN-18893, epic OMN-18888)
+# ============================================================================
+#
+# Layered THIRD, over docker-compose.infra.yml and docker-compose.dev-lane.yml,
+# by scripts/runtime_build/prepr_verify_lane.sh and by nothing else. It is the
+# only compose file in this directory that no lane deploy path can reach:
+# `resolve_lane_overlay_filename` in scripts/runtime_build/compose_files.sh has
+# no `prepr-*` arm, so its fail-closed default refuses a pool project outright
+# and scripts/deploy-runtime.sh cannot be pointed at a slot. That refusal is
+# the point of a separate entrypoint (rule 24(e)) and is pinned by a test.
+#
+# WHY AN OVERLAY AND NOT A STANDALONE FILE
+# ----------------------------------------
+# docker-compose.dogfood.yml is standalone, and that is right for a lane with
+# its own dependency servers. A slot has none: it reuses the dev lane's
+# Postgres, Redpanda, Valkey and Keycloak by service hostname on the dev lane's
+# network, and its twelve services must be byte-for-byte the dev lane's
+# services with the per-slot namespace applied. Copying 1,700 lines to change
+# a port and a prefix would guarantee the copy drifts from the original, and
+# the drift would be invisible: a slot that verified a branch against a stale
+# copy of the lane definition is a false pass, which is the one failure this
+# whole epic exists to prevent. So the definition is inherited and only what
+# MUST differ per slot is spelled here.
+#
+# THE THREE THINGS THIS FILE IS RESPONSIBLE FOR
+# ---------------------------------------------
+# 1. FENCING. Every service that is not one of the slot's twelve is moved onto
+#    an unreachable compose profile. This is not tidiness. postgres, redpanda,
+#    valkey, keycloak, infisical, redpanda-partition-cap, redpanda-scram-user
+#    and redpanda-sasl-enable carry NO profile in the files below, so a bare
+#    `docker compose -p omnibase-infra-prepr-1 up` would try to CREATE each of
+#    them under its hardcoded dev container_name. That is exactly the OMN-13581
+#    failure that left the stability lane broker-less for three days: compose
+#    collides with the live dev broker, gets a Docker hash prefix, lands in
+#    `created`, and the dev lane's own correctly-named broker is destroyed.
+#    A profile fence stops it mechanically rather than relying on every caller
+#    naming services explicitly (the entrypoint does that too; both, not either).
+#
+# 2. VOLUME ISOLATION, and this is the sharpest edge in the whole design.
+#    Every named volume in docker-compose.infra.yml declares a GLOBAL
+#    `name:` -- `runtime_logs` is `omninode-runtime-logs` on the Docker host,
+#    not a project-scoped volume. A slot inheriting those names would WRITE
+#    INTO the dev lane's volumes, and `docker compose -p <slot> down -v` at
+#    teardown would DESTROY them. Compose removes containers by project label,
+#    so the dev lane's containers are safe from a slot's `down`; its volumes
+#    are not, because the volume is addressed by that global name. Every volume
+#    the slot's services mount is therefore redeclared below with the slot in
+#    its name, and a test asserts that no volume name the slot uses collides
+#    with a dev-lane one.
+#
+# 3. NAMESPACING. A topic prefix (OMN-18891), a database-name suffix with the
+#    slot's own principals (OMN-18892), a consumer-group environment token, a
+#    Valkey logical index, slot ports and slot container names. Every value
+#    comes from scripts/runtime_build/prepr_slot_policy.py -- the one table --
+#    and every one is spelled `:?` here, with no default. An unset value aborts
+#    the compose invocation instead of silently starting a slot on the dev
+#    lane's namespace, which would be a runtime that looks isolated and is not.
+#
+# WHAT IS DELIBERATELY NOT HERE
+# -----------------------------
+# No dependency server, no volume for one, and no `external: false` network.
+# The network is joined, never created. A slot creates nothing the dev lane
+# depends on, so a slot's teardown can remove its whole project and its own
+# volumes without reaching anything shared.
+#
+# A slot is a premise for NOTHING: outside GOVERNED_LANES and
+# GRANT_INTERLOCK_LANES, sourcing no `stability-proven` digest, never part of a
+# promotion's evidence chain.
+# ---------------------------------------------------------------------------
+# Per-slot data-plane addresses.
+#
+# Spelled once and merged, rather than repeated per service, because the
+# failure mode of repetition here is a single service left pointing at an
+# unsuffixed database as the SUPERUSER -- which is what the inherited
+# x-runtime-env resolves to, since docker-compose.infra.yml's
+# OMNIBASE_INFRA_DB_URL, OMNIINTELLIGENCE_DB_URL, OMNIDASH_ANALYTICS_DB_URL and
+# OMNIMEMORY_DB_URL all interpolate ${POSTGRES_USER:-postgres}. A slot
+# connecting as the superuser would reach every dev database and would be
+# exempt from the forced row-level security on the tenant tables, so the
+# isolation OMN-18892 built would be inert. Every DSN below therefore names a
+# slot principal explicitly, and none of them interpolates POSTGRES_USER.
+#
+# The role names are the ones scripts/provision_db_slot.sh derives
+# (`<name>_<slot>`). The PASSWORD variables are the canonical, unsuffixed
+# spellings: the entrypoint reads the provisioner's own env file, which writes
+# `<ROLE_UPPER>_PASSWORD` for the DERIVED role, and remaps each onto the
+# canonical name before invoking compose. That remap is what lets one overlay
+# serve both slots -- a file spelling ROLE_OMNIDASH_PREPR1_PASSWORD could not.
+# ---------------------------------------------------------------------------
+x-prepr-slot-db-env: &prepr_slot_db_env
+  OMNIBASE_INFRA_DB_URL: "postgresql://role_omnibase_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set - the slot token prepr_slot_policy.py derives every namespaced name from; an unset value would point this slot at the dev lane's own databases}:${ROLE_OMNIBASE_PASSWORD:?ROLE_OMNIBASE_PASSWORD must be set - the slot's own role_omnibase_<slot> credential, remapped from the provisioner env file by prepr_verify_lane.sh}@postgres:5432/omnibase_infra_${ONEX_DB_SLOT}"
+  OMNIINTELLIGENCE_DB_URL: "postgresql://role_omniintelligence_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}:${ROLE_OMNIINTELLIGENCE_PASSWORD:?ROLE_OMNIINTELLIGENCE_PASSWORD must be set - the slot's own role_omniintelligence_<slot> credential}@postgres:5432/omniintelligence_${ONEX_DB_SLOT}"
+  OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set - the slot's own role_omnidash_<slot> credential; the slot connects to its own omnidash_analytics_<slot> as a non-BYPASSRLS role, never as the postgres superuser}@postgres:5432/omnidash_analytics_${ONEX_DB_SLOT}"
+  OMNIMEMORY_DB_URL: "postgresql://role_omnimemory_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}:${ROLE_OMNIMEMORY_PASSWORD:?ROLE_OMNIMEMORY_PASSWORD must be set - the slot's own role_omnimemory_<slot> credential}@postgres:5432/omnimemory_${ONEX_DB_SLOT}"
+  # The internal-projection identity (OMN-16843/OMN-18109), slot-suffixed. Same
+  # database as the analytics DSN above and a DIFFERENT principal on purpose:
+  # the analytics role's writes to omninode_internal are refused, so collapsing
+  # these two would produce a projection that reads healthy and stores nothing.
+  OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set - the slot's own omninode_runtime_<slot> credential}@postgres:5432/omnidash_analytics_${ONEX_DB_SLOT}"
+  # The tenant-projection identity (OMN-15425), slot-suffixed. Non-BYPASSRLS
+  # and non-owning, which is what keeps FORCE ROW LEVEL SECURITY on the tenant
+  # tables enforced against the connection the database actually sees.
+  ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set - the slot's own tenant_projection_writer_<slot> credential}@postgres:5432/omnidash_analytics_${ONEX_DB_SLOT}"
+  # POSTGRES_USER is overridden here as well as in every DSN above, because the
+  # runtime's HandlerRegistrationStoragePostgres reads the discrete
+  # POSTGRES_* variables directly rather than a DSN (OMN-9060). Leaving it at
+  # the inherited `postgres` default would give that one handler a superuser
+  # connection on a slot whose every other connection is fenced.
+  POSTGRES_USER: "role_omnibase_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+  POSTGRES_PASSWORD: "${ROLE_OMNIBASE_PASSWORD:?ROLE_OMNIBASE_PASSWORD must be set}"
+  POSTGRES_DB: "omnibase_infra_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+  POSTGRES_HOST: postgres
+# ---------------------------------------------------------------------------
+# Per-slot transport namespace.
+#
+# KAFKA_TOPIC_NAMESPACE is the OMN-18891 surface: one prefix applied at the
+# resolver seam, at every direct broker-client construction, and stripped back
+# to the canonical name at the consume boundary before any comparison or
+# lookup. KAFKA_ENVIRONMENT is the free half -- compute_consumer_group_id
+# composes {env}.{service}.{node}.{purpose}.{version}, so a distinct token
+# yields a disjoint consumer group for every node with no code change at all.
+#
+# Both are needed and neither substitutes for the other. A disjoint group on
+# shared topic names is the worst of both worlds: the slot receives a full copy
+# of every event the dev lane produces and acts on it, and publishes its own
+# events onto the topics the dev lane consumes.
+# ---------------------------------------------------------------------------
+x-prepr-slot-bus-env: &prepr_slot_bus_env
+  KAFKA_TOPIC_NAMESPACE: "${KAFKA_TOPIC_NAMESPACE:?KAFKA_TOPIC_NAMESPACE must be set - the OMN-18891 per-slot topic prefix; unset means this slot publishes onto the dev lane's own topics}"
+  KAFKA_ENVIRONMENT: "${KAFKA_ENVIRONMENT:?KAFKA_ENVIRONMENT must be set - the per-slot consumer-group environment token}"
+  # Shared server, per-slot logical index. VALKEY_DB is a recognised transport
+  # config key (src/omnibase_infra/runtime/config_discovery/transport_config_map.py).
+  VALKEY_DB: "${PREPR_VALKEY_DB_INDEX:?PREPR_VALKEY_DB_INDEX must be set}"
+# Everything a slot service needs that is neither a DSN nor a bus address.
+x-prepr-slot-marker-env: &prepr_slot_marker_env
+  # Read by nothing in the runtime; present so `docker inspect` on a container
+  # answers "which slot is this" without consulting the compose project name,
+  # which a container copied or renamed by hand would no longer carry.
+  ONEX_PREPR_SLOT: "${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}"
+  ONEX_DB_SLOT: "${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+# The fence. A service carrying this profile is excluded from every `up` the
+# entrypoint issues, because the entrypoint enables `prepr` and never this.
+# Spelled as an anchor so the fence cannot be applied inconsistently, and so a
+# reader can see the whole fenced set by searching for one token.
+x-prepr-fenced: &prepr_fenced
+  profiles: !override ["prepr-never-start-a-shared-dependency"]
+services:
+  # =========================================================================
+  # THE FENCE: every service that is NOT one of the slot's twelve.
+  #
+  # Each entry replaces the service's `profiles` list with the unreachable one
+  # above. Compose merges a scalar/sequence override by REPLACEMENT, so the
+  # inherited ["runtime", "full"] (or the absence of any profile, which is the
+  # dangerous case) is gone.
+  #
+  # The shared dependency servers come first because they are the ones that
+  # carry no profile at all in the inherited files and would therefore start
+  # on a bare `up`.
+  # =========================================================================
+  postgres: *prepr_fenced
+  redpanda: *prepr_fenced
+  redpanda-partition-cap: *prepr_fenced
+  redpanda-scram-user: *prepr_fenced
+  redpanda-sasl-enable: *prepr_fenced
+  valkey: *prepr_fenced
+  keycloak: *prepr_fenced
+  infisical: *prepr_fenced
+  omnibase-infra-memgraph: *prepr_fenced
+  phoenix: *prepr_fenced
+  # autoheal restarts containers carrying `autoheal=true` across the WHOLE
+  # Docker daemon, not within a project. A second copy on a slot would race the
+  # dev lane's own autoheal over the dev lane's containers.
+  autoheal: *prepr_fenced
+  # The migration gate and the intelligence one-shots gate the DEV databases.
+  # A slot's databases are migrated by the forward-migration one-shot below,
+  # under its own profile, against the suffixed names.
+  migration-gate: *prepr_fenced
+  intelligence-migration: *prepr_fenced
+  intelligence-api: *prepr_fenced
+  cloud-migration: *prepr_fenced
+  cloud-migration-files: *prepr_fenced
+  # Auxiliary consumers. Out of the slot's declared twelve (OMN-18890), so they
+  # are fenced rather than namespaced: a service the lane manifest does not
+  # declare must not be running in a slot, or the census cannot reconcile it.
+  omninode-contract-resolver: *prepr_fenced
+  agent-actions-consumer: *prepr_fenced
+  skill-lifecycle-consumer: *prepr_fenced
+  context-audit-consumer: *prepr_fenced
+  infra-routing-decisions-consumer: *prepr_fenced
+  # =========================================================================
+  # The slot's forward migration. Its own profile, `prepr-migrate`, so it runs
+  # as an explicit one-shot step of the entrypoint and never as part of a
+  # bring-up. It is not one of the manifest's twelve because it is not a
+  # running service: it exits, and the census counts running containers.
+  #
+  # ONEX_DB_SLOT is what makes the runner target the suffixed databases and
+  # skip all four cluster-wide role seams (OMN-18892). Without it this one-shot
+  # would run the initialiser's existing-role branch against the shared server
+  # and reset every managed role's password cluster-wide, taking the dev lane's
+  # authentication down at its next reconnect.
+  # =========================================================================
+  forward-migration:
+    profiles: !override ["prepr-migrate"]
+    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-forward-migration"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_marker_env]
+  # =========================================================================
+  # THE SLOT'S TWELVE. Names, ports, volumes and namespace only -- every other
+  # property is inherited, which is the whole reason this is an overlay.
+  #
+  # `depends_on: []` on every one of them. Two reasons, and both are hard:
+  # compose refuses to start a service whose depends_on target is disabled by a
+  # profile (which every dependency now is), and a slot must not wait on, or
+  # be able to restart, a dev-lane container.
+  # =========================================================================
+  omninode-runtime:
+    profiles: !override ["prepr"]
+    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime"
+    depends_on: !override []
+    ports: !override
+      - "${PREPR_RUNTIME_MAIN_PORT:?PREPR_RUNTIME_MAIN_PORT must be set - the slot's reserved runtime port from prepr_slot_policy.py}:8085"
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      # Distinct from the dev lane's `onex-runtime-main`, so the two never
+      # share a group even on a topic the namespace somehow failed to move.
+      # Belt and braces with KAFKA_ENVIRONMENT, deliberately.
+      ONEX_GROUP_ID: "prepr-${ONEX_PREPR_SLOT}-runtime-main"
+    volumes: !override
+      - prepr_runtime_logs:/app/logs
+      - prepr_runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=runtime-main"
+      - "com.omninode.layer=runtime"
+      # NOT `autoheal=true`. The dev lane's autoheal watches the whole daemon
+      # and would restart a slot container it knows nothing about, which would
+      # turn a branch defect into an intermittent one.
+  runtime-effects:
+    profiles: !override ["prepr"]
+    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-effects"
+    depends_on: !override []
+    ports: !override
+      - "${PREPR_RUNTIME_EFFECTS_PORT:?PREPR_RUNTIME_EFFECTS_PORT must be set}:8086"
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      ONEX_GROUP_ID: "prepr-${ONEX_PREPR_SLOT}-runtime-effects"
+    volumes: !override
+      - prepr_effects_logs:/app/logs
+      - prepr_effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
+      - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/omniinfra/.codex/auth.json:ro
+      - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/omniinfra/.claude:ro
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=runtime-effects"
+      - "com.omninode.layer=runtime"
+  runtime-worker:
+    profiles: !override ["prepr"]
+    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-worker"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      ONEX_GROUP_ID: "prepr-${ONEX_PREPR_SLOT}-runtime-worker"
+    volumes: !override
+      - prepr_worker_logs:/app/logs
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=runtime-worker"
+      - "com.omninode.layer=runtime"
+  projection-api:
+    profiles: !override ["prepr"]
+    container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-api"
+    depends_on: !override []
+    ports: !override
+      - "${PREPR_PROJECTION_API_PORT:?PREPR_PROJECTION_API_PORT must be set}:3002"
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=projection-api"
+      - "com.omninode.layer=runtime"
+  tenant-projection-writer:
+    profiles: !override ["prepr"]
+    container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-tenant-projection-writer"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      ONEX_GROUP_ID: "prepr-${ONEX_PREPR_SLOT}-tenant-projection"
+    volumes: !override
+      - prepr_tenant_projection_logs:/app/logs
+      - prepr_tenant_projection_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=tenant-projection-writer"
+      - "com.omninode.layer=runtime"
+  # -------------------------------------------------------------------------
+  # The six standalone projection writers.
+  #
+  # Each inherits its command, its projection-runtime-binding bind mount and
+  # its health port from the dev-lane overlay, and overrides exactly three
+  # things: its container name, its DSNs, and its KAFKA_CONSUMER_GROUP.
+  #
+  # The consumer group is the one that MUST be overridden and is the one a
+  # namespace does not move for free: these groups are spelled as LITERALS in
+  # the dev-lane overlay, not composed by compute_consumer_group_id, so
+  # KAFKA_ENVIRONMENT does not touch them. A slot inheriting the literal would
+  # join the dev lane's own writer group and the partitions would be SPLIT
+  # between the dev writer and the slot writer -- half the dev lane's rows
+  # would silently stop landing, and the symptom would appear on the dev lane
+  # rather than on the slot. That is the single most damaging thing a slot
+  # could do to the shared surface, and it is one string per writer.
+  # -------------------------------------------------------------------------
+  projection-tenant-registry-writer:
+    profiles: !override ["prepr"]
+    container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-tenant-registry-writer"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      KAFKA_CONSUMER_GROUP: "prepr${ONEX_PREPR_SLOT}.omnimarket-projections.tenant-registry-writer.consume.v1"
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=projection-tenant-registry-writer"
+      - "com.omninode.layer=runtime"
+  projection-delegation-writer:
+    profiles: !override ["prepr"]
+    container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-delegation-writer"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      KAFKA_CONSUMER_GROUP: "prepr${ONEX_PREPR_SLOT}.omnimarket-projections.delegation-writer.consume.v1"
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=projection-delegation-writer"
+      - "com.omninode.layer=runtime"
+  projection-registration-writer:
+    profiles: !override ["prepr"]
+    container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-registration-writer"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      KAFKA_CONSUMER_GROUP: "prepr${ONEX_PREPR_SLOT}.omnimarket-projections.registration-writer.consume.v1"
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=projection-registration-writer"
+      - "com.omninode.layer=runtime"
+  projection-savings-writer:
+    profiles: !override ["prepr"]
+    container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-savings-writer"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      KAFKA_CONSUMER_GROUP: "prepr${ONEX_PREPR_SLOT}.omnimarket-projections.savings-writer.consume.v1"
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=projection-savings-writer"
+      - "com.omninode.layer=runtime"
+  projection-tenant-credentials-writer:
+    profiles: !override ["prepr"]
+    container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-tenant-credentials-writer"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      KAFKA_CONSUMER_GROUP: "prepr${ONEX_PREPR_SLOT}.omnimarket-projections.tenant-credentials-writer.consume.v1"
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=projection-tenant-credentials-writer"
+      - "com.omninode.layer=runtime"
+  projection-live-events-writer:
+    profiles: !override ["prepr"]
+    container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-live-events-writer"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      KAFKA_CONSUMER_GROUP: "prepr${ONEX_PREPR_SLOT}.omnimarket-projections.live-events-writer.consume.v1"
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=projection-live-events-writer"
+      - "com.omninode.layer=runtime"
+  # -------------------------------------------------------------------------
+  # The slot's own gateway API.
+  #
+  # It carries its own profile, `prepr-gateway`, which the entrypoint enables
+  # only under `--with-gateway`, and that default is OFF for a reason that is
+  # not caution.
+  #
+  # onex-api is IMAGE-REFERENCED (${ONEX_API_IMAGE}), not lane-built: it is a
+  # self-contained application in the omninode_infra clone with no omnibase
+  # wheel, so a slot cannot build it from the branch under test the way it
+  # builds the runtime family. OMN-18891 added the topic-namespace surface to
+  # that application, but whether the TAG on this host carries that surface is
+  # a property of when the image was last built, not of the branch. A tag
+  # predating OMN-18891 reads KAFKA_TOPIC_NAMESPACE and does nothing with it,
+  # so the container would publish UNPREFIXED into the dev lane's topics
+  # through exactly the path the isolation exists to protect.
+  #
+  # Pinning and rebuilding that image is Task 5 (OMN-18894), which is also the
+  # task that mints the slot's tenant and submits the chain canary through
+  # this port. Until then the honest state is: declared, namespaced, and not
+  # started. The slot descriptor records `gateway_started` either way, so a
+  # receipt can never imply a gateway proof that did not run.
+  # -------------------------------------------------------------------------
+  onex-api:
+    profiles: !override ["prepr-gateway"]
+    container_name: "onex-api-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}"
+    depends_on: !override []
+    ports: !override
+      - "${PREPR_GATEWAY_PORT:?PREPR_GATEWAY_PORT must be set}:8000"
+    environment:
+      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      OMNINODE_CLOUD_DB_URL: "postgresql://role_omninode_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}:${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set - the slot's own role_omninode_<slot> credential}@postgres:5432/omninode_cloud_${ONEX_DB_SLOT}"
+      # Shared Valkey server, the slot's own logical index. The dev lane's URL
+      # carries no index and therefore uses 0, so no slot index collides with
+      # it as long as the policy table starts at 1 -- which it does, and a test
+      # asserts it.
+      WORKFLOW_RATE_LIMIT_VALKEY_URL: "redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}@valkey:6379/${PREPR_VALKEY_DB_INDEX:?PREPR_VALKEY_DB_INDEX must be set}"
+      ONEX_API_BASE_URL: "http://onex-api-prepr-${ONEX_PREPR_SLOT}:8000"
+    volumes: !override
+      - ${ONEX_PREPR_TENANT_STATE_DIR:?ONEX_PREPR_TENANT_STATE_DIR must name a per-slot host directory this slot may write its own tenant credential into - prepr_verify_lane.sh creates it; it is NOT the dev lane's ONEX_LAB_TENANT_STATE_DIR, because two lanes writing one credential file is two lanes sharing a tenant}:/var/lib/onex-lab-tenant
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+      - "com.omninode.service=onex-api"
+      - "com.omninode.layer=gateway"
+# ---------------------------------------------------------------------------
+# The network is JOINED, never created.
+#
+# `external: true` is what makes this true mechanically. Without it compose
+# would create `omnibase-infra-network` if absent -- and the dangerous case is
+# not absence, it is a slot brought up while the dev lane is down, creating the
+# network with its own settings and owning it, so the dev lane's next bring-up
+# attaches to a network a slot made and a slot's teardown can remove.
+# ---------------------------------------------------------------------------
+networks:
+  omnibase-infra-network:
+    name: omnibase-infra-network
+    external: true
+# ---------------------------------------------------------------------------
+# Slot-scoped volumes. See point 2 of this file's header: the inherited names
+# are GLOBAL Docker volume names shared with the running dev lane, and a slot
+# teardown with `-v` would destroy them.
+#
+# Only the volumes the slot's twelve services actually mount are redeclared.
+# The rest stay as they are and are never created, because every service that
+# would have mounted one is fenced.
+# ---------------------------------------------------------------------------
+volumes:
+  prepr_runtime_logs:
+    name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-logs"
+  prepr_runtime_data:
+    name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-data"
+  prepr_effects_logs:
+    name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-effects-logs"
+  prepr_effects_data:
+    name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-effects-data"
+  prepr_worker_logs:
+    name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-worker-logs"
+  prepr_tenant_projection_logs:
+    name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-tenant-projection-logs"
+  prepr_tenant_projection_data:
+    name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-tenant-projection-data"

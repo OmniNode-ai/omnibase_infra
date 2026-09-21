@@ -110,6 +110,48 @@ GOVERNED_LANES: frozenset[str] = frozenset({"stability-test", "prod", "judge"})
 #: whose rebuild invalidates the "stability-proven" premise of a live grant.
 GRANT_INTERLOCK_LANES: frozenset[str] = frozenset({"stability-test"})
 
+#: The ephemeral pre-PR verify pool (OMN-18893, epic OMN-18888).
+#:
+#: Spelled as a literal rather than imported from
+#: ``scripts/runtime_build/prepr_slot_policy.py``, which is the one declaration
+#: of which slots exist. The import would be the tidier expression and it is
+#: the wrong trade here: this module is the LIVE attribution gate for the
+#: stability lane, and an import across ``scripts/`` into ``scripts/runtime_build/``
+#: needs sys.path manipulation at import time, so a syntax error or a missing
+#: file in the new pool module would take the stability gate down with it. A
+#: new, ephemeral surface must not be able to break an existing governed one.
+#:
+#: The duplication is pinned instead:
+#: ``tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py`` asserts
+#: this set equals ``prepr_slot_policy.POOL_LANE_NAMES``, so adding a slot
+#: there and not here is a red test rather than a slot that builds without a
+#: stated reason.
+#:
+#: These lanes are in :data:`REASON_REQUIRED_LANES` and deliberately in NEITHER
+#: :data:`GOVERNED_LANES` nor :data:`GRANT_INTERLOCK_LANES`, and the asymmetry
+#: is the whole point rather than an oversight:
+#:
+#: * A slot build is a mutation of a shared host, so it owes a stated reason
+#:   exactly as a stability rebuild does. That is the OMN-15218 requirement and
+#:   it is about attribution, not about promotion.
+#: * A slot is a premise for NOTHING. It promotes nothing, sources no
+#:   `stability-proven` digest and never appears in a promotion's evidence
+#:   chain, so no rebuild of one can erode a live prod grant -- which is the
+#:   only thing the interlock protects. Extending the interlock here would
+#:   additionally gate an ordinary branch build on resolving the change-control
+#:   repository at `@main`, making a pre-PR check fail when a governance
+#:   surface is unreachable. That is a worse gate than none: it would push
+#:   branch authors off the sanctioned entrypoint.
+#: * GOVERNED_LANES carries promotion-class meaning elsewhere, and
+#:   tests/unit/scripts/test_prepr_pool_lane_census_omn18890.py asserts the pool
+#:   stays out of it. Widening that set to get the reason requirement would
+#:   have silently given a slot stability-class semantics.
+POOL_LANES: frozenset[str] = frozenset({"prepr-1", "prepr-2"})
+
+#: Lanes that must declare WHY a deploy is happening. The union, and the set
+#: the reason check actually reads.
+REASON_REQUIRED_LANES: frozenset[str] = GOVERNED_LANES | POOL_LANES
+
 #: The grant registry path inside the ``onex_change_control`` repo.
 GRANTS_REPO_RELPATH = "grants/prod_promotion_grants.yaml"
 
@@ -582,7 +624,10 @@ def build_record(
     ack = apply_acknowledgement(grant_block, ack_tokens)
 
     refusals: list[str] = []
-    attribution_required = lane in GOVERNED_LANES
+    # REASON_REQUIRED_LANES, not GOVERNED_LANES: the pre-PR pool owes a stated
+    # reason (it mutates a shared host) without being promotion-class (it is a
+    # premise for nothing). See the constants block for why those are separate.
+    attribution_required = lane in REASON_REQUIRED_LANES
 
     if attribution_required and not reason:
         refusals.append(
