@@ -987,20 +987,12 @@ EXTERNAL_FAILURE_SUPERSESSION_GRACE_S: int = 1200
 #     48 `dynamic`, 20 non-Actions app rows, 1 `push`. That single push row
 #     is why event scoping is part of the mechanism and not an optimisation.
 #
-# WHY `skipped` AND `neutral` ARE NOT FAILURES HERE, which is a measurement
-# rather than a concession: 9 of the 70 names are NEVER green in the window —
-# `verify`, `auto-tag`, `occ-autobind-manual-replay`,
-# `occ-companion-effect-manual-replay`, `Docker Integration Tests`,
-# `Image Size Analysis`, `Security Scan (Trivy)` always `skipped`, and
-# `occ-autobind / outcome`, `occ-autobind / mint status`,
-# `occ-companion-effect / mint status` always `neutral`. Failing on those
-# conclusions would wedge every pull request on this repository on day one,
-# and a gate that is reverted within the hour enforces nothing.
-#
-# The strict bar for a name IS available and is bought by REGISTERING it in
-# EXPECTED_EXTERNAL_CONTEXTS, where absent / skipped / cancelled / neutral all
-# already fail closed. This layer's contract is narrower and is stated so it
-# cannot be mistaken for the other one: **nothing RED slipped past unseen**.
+# EVERY NAME THAT IS NON-GREEN BY DESIGN IS REGISTERED BELOW, with a reason,
+# an owner, a date and an expiry. Ten of the seventy qualify: a fork-only
+# verification job, three jobs restricted to the main branch or to a non-pull-
+# request event, two manual re-publish entrypoints, three App-written
+# placeholder rows, and one adversarial gate that does succeed when it runs
+# and skips on some pull-request shapes.
 # ---------------------------------------------------------------------------
 
 # Events whose check-runs are NOT a verdict on the pull request being gated.
@@ -1013,6 +1005,12 @@ EXTERNAL_FAILURE_SUPERSESSION_GRACE_S: int = 1200
 SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(
     {
         "push",
+        # OMN-18970 adversarial review: a queue run's rows are a verdict about
+        # a queue commit, not about this pull request. The sweep only runs on
+        # `pull_request` today so this cannot currently fire, and it is listed
+        # anyway because the deny list is the place a reader looks to learn
+        # which events are not pull-request verdicts.
+        "merge_group",
         "schedule",
         "workflow_dispatch",
         "release",
@@ -1029,22 +1027,24 @@ SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(
     }
 )
 
-# Conclusions that are a REFUSAL by the producer. `stale` is a real GitHub
-# check-run conclusion, not a synonym for old. `cancelled` is included and is
-# then handed to the existing OMN-18355 grace, so a superseded run that was
-# stopped mid-flight still waits rather than failing on the poll that sees it.
+# The STRICT bar, and it is the same one layer 4 holds its own tuple to: the
+# ONLY conclusion that passes is `success`.
 #
-# `success`, `skipped` and `neutral` are absent for the measured reason above.
-SWEEP_FAILING_CONCLUSIONS: frozenset[str] = frozenset(
-    {
-        "failure",
-        "timed_out",
-        "action_required",
-        "startup_failure",
-        "stale",
-        "cancelled",
-    }
-)
+# OMN-18979, operator ruling 2026-09-21, firm, and it REPLACES the
+# refusal-only set OMN-18960 shipped here. That set failed on a refusal and
+# let `skipped` and `neutral` through, argued from the measurement that nine
+# of the seventy names are never green by design, and it shipped with an
+# EMPTY registry. The ruling is that the combination is a HIDDEN ALLOWLIST: a
+# weaker default beside an empty list tolerates exactly what a list would,
+# without writing any of it down, and writing it down is the point. The
+# honest form is this bar plus a POPULATED registry where every tolerance
+# carries a reason, an owner, a date and an expiry.
+#
+# The bar changed and the graces did not. A `cancelled` or `skipped` row still
+# passes through `verdict_is_provisional` first, so a producer that is
+# demonstrably about to re-run is PENDING rather than refused on the poll that
+# observes it.
+SWEEP_GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success"})
 
 
 @dataclass(frozen=True)
@@ -1076,18 +1076,152 @@ class SweepExclusion:
 # where the numbers are recorded, not here.
 SWEEP_EXCLUSION_MAX_DAYS: int = 90
 
-EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {}
-# EMPTY BY CONSTRUCTION as of OMN-18960, and that is the MEASUREMENT, not an
-# omission and not an oversight. Over the 16-PR merge-time window recorded
-# above, ZERO heads carried a non-green unregistered external context, so
-# landing this layer wedges nothing and needs no day-one exception. An entry
-# here would therefore be admitting a defect somebody has decided not to fix
-# yet — which is exactly what the four fields make legible.
+# TEN ENTRIES, one per name the measurement found non-green on ANY head over
+# the 16-PR window recorded above. OMN-18960 shipped this dict EMPTY beside a
+# weaker conclusion set; OMN-18979 replaced that pairing with the strict bar
+# and these entries, so every tolerance is now a named, dated, owned decision
+# rather than a silent one buried in a frozenset.
 #
-# The MECHANISM is retained and tested against a synthetic registry
-# (tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions) so the
-# falsification control survives the empty state, on the same reasoning
-# ACTOR_CONDITIONAL_CONTEXTS records above.
+# They all expire on 2026-12-20, ninety days out, INCLUDING the ones whose
+# mechanism looks structural — a fork-only job, a main-branch-only job, a
+# manual-dispatch entrypoint. The cap is not a prediction that the mechanism
+# will change. It is what forces a premise that has held for a quarter to be
+# re-read by a person, which is the whole difference between this list and an
+# allowlist.
+EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
+    "verify": SweepExclusion(
+        reason=(
+            "The check run verify was skipped on all sixteen measured heads and never "
+            "concluded success. The job configuration includes a condition that "
+            "requires the pull request head repository to be a fork. Because the "
+            "internal pull requests do not satisfy this fork condition, the job skips "
+            "execution without producing a result. Excluding this name prevents the "
+            "gate from failing on a check that is logically inapplicable to internal "
+            "merges."
+        ),
+        ticket="OMN-18979",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+    "occ-autobind / outcome": SweepExclusion(
+        reason=(
+            "The check run occ-autobind / outcome was neutral on all sixteen heads "
+            "and never concluded success. This status row is written by a GitHub App "
+            "rather than by GitHub Actions and serves as a placeholder rather than a "
+            "substantive verdict. The context also records that this specific check "
+            "prints an incorrect label on its own success path. Without this "
+            "exclusion the gate would treat the neutral placeholder as a failure and "
+            "block the merge."
+        ),
+        ticket="OMN-18939",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+    "occ-autobind-manual-replay": SweepExclusion(
+        reason=(
+            "The check run occ-autobind-manual-replay was skipped on all sixteen "
+            "heads and never concluded success. The job is gated to the manual "
+            "workflow_dispatch event which is not triggered by pull request activity. "
+            "Consequently the job skips when the gate evaluates the pull request "
+            "head. This exclusion allows the gate to ignore a manual re-publish "
+            "entrypoint that does not run in this context."
+        ),
+        ticket="OMN-18979",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+    "occ-companion-effect-manual-replay": SweepExclusion(
+        reason=(
+            "The check run occ-companion-effect-manual-replay was skipped on all "
+            "sixteen heads and never concluded success. This job follows the same "
+            "pattern as the previous entry and is restricted to the manual dispatch "
+            "event. It functions as a manual re-publish entrypoint that does not "
+            "execute on pull request triggers. The gate must exclude this name to "
+            "avoid failing on a check that is inactive for the current event type."
+        ),
+        ticket="OMN-18979",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+    "Docker Integration Tests": SweepExclusion(
+        reason=(
+            "The check run Docker Integration Tests was skipped on the seven heads "
+            "where it appeared and never concluded success. The job carries a "
+            "condition requiring the event to not be a pull request. Since the gate "
+            "judges pull request heads specifically the condition is false and the "
+            "job skips. Excluding this entry prevents the gate from treating the "
+            "inapplicable integration test suite as a blocking failure."
+        ),
+        ticket="OMN-18979",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+    "Security Scan (Trivy)": SweepExclusion(
+        reason=(
+            "The check run Security Scan (Trivy) was skipped on the seven heads where "
+            "it appeared and never concluded success. The job configuration requires "
+            "the git reference to be the main branch for execution. On a pull request "
+            "head this reference condition is not met so the job skips. This "
+            "exclusion ensures the gate does not block merges due to a security scan "
+            "that is restricted to the main branch."
+        ),
+        ticket="OMN-18979",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+    "Image Size Analysis": SweepExclusion(
+        reason=(
+            "The check run Image Size Analysis was skipped on the seven heads where "
+            "it appeared and never concluded success. The job shares the same "
+            "mechanism as the security scan and requires the git reference to be the "
+            "main branch. It therefore skips on pull request heads where the "
+            "reference does not match the main branch. The gate excludes this name to "
+            "avoid failing on an analysis job that only runs on the main branch."
+        ),
+        ticket="OMN-18979",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+    "occ-autobind / mint status": SweepExclusion(
+        reason=(
+            "The check run occ-autobind / mint status was neutral on three of the "
+            "sixteen heads and never concluded success. This status row is written by "
+            "a GitHub App and its neutral conclusion acts as a placeholder rather "
+            "than a verdict. The placeholder status does not reflect a failure of the "
+            "head code. Excluding this entry prevents the gate from interpreting the "
+            "neutral placeholder as a blocking condition."
+        ),
+        ticket="OMN-18939",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+    "occ-companion-effect / mint status": SweepExclusion(
+        reason=(
+            "The check run occ-companion-effect / mint status was neutral on one of "
+            "the sixteen heads and never concluded success. It belongs to the same "
+            "producer family and placeholder mechanism as the autobind mint status. "
+            "The neutral conclusion is a placeholder and not a substantive assessment "
+            "of the pull request. This exclusion allows the gate to ignore the "
+            "placeholder status without blocking the merge."
+        ),
+        ticket="OMN-18939",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+    "Hostile Reviewer (adversarial gate)": SweepExclusion(
+        reason=(
+            "The check run Hostile Reviewer (adversarial gate) succeeded on thirteen "
+            "heads and skipped on three. This entry differs from the others because "
+            "the check does reach success when it runs. It skips on some pull request "
+            "shapes due to a condition involving the draft state and base branch. The "
+            "exclusion covers only the skip case to prevent the gate from failing "
+            "when the check is conditionally inactive."
+        ),
+        ticket="OMN-18979",
+        added="2026-09-21",
+        expires="2026-12-20",
+    ),
+}
 
 _SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")
 _SWEEP_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -1775,8 +1909,9 @@ def evaluate_external_sweep(
         if state.status != "completed":
             in_flight.append(name)
             continue
-        if state.conclusion in SWEEP_FAILING_CONCLUSIONS and not verdict_is_provisional(
-            state, now
+        if (
+            state.conclusion not in SWEEP_GOOD_CONCLUSIONS
+            and not verdict_is_provisional(state, now)
         ):
             failures.append(f"{name} ({state.conclusion})")
     return failures, in_flight, swept, excluded
@@ -1810,6 +1945,7 @@ def evaluate(
     docs_only_marker: str = DOCS_ONLY_MARKER_JOB,
     docs_only_gates: tuple[str, ...] = DOCS_ONLY_SKIPPABLE_GATE_JOBS,
     now: datetime | None = None,
+    sweep_external: bool = True,
     sweep_exclusions: dict[str, SweepExclusion] | None = None,
     workflow_runs: list[dict[str, object]] | None = None,
 ) -> tuple[int, str]:
@@ -1832,6 +1968,12 @@ def evaluate(
     layer-5 sweep resolves each check-run's triggering EVENT from. Omitting it
     resolves every row's event to ``None``, which the sweep judges — a
     forgotten argument enforces rather than exempting.
+
+    ``sweep_external`` defaults to TRUE, so a caller that forgets it ENFORCES
+    layer 5 rather than skipping it. It exists for one purpose: a test that
+    means to exercise layer 4 in isolation can turn layer 5 off and say so,
+    instead of the two layers' verdicts being tangled in one assertion. The
+    production caller never passes it.
     """
 
     external_contexts = applicable_external_contexts(external_contexts, pr_author)
@@ -1918,23 +2060,31 @@ def evaluate(
     #     re-judging a job layer 3 already allowlisted.
     if sweep_exclusions is None:
         sweep_exclusions = EXTERNAL_SWEEP_EXCLUSIONS
-    exclusion_findings = validate_sweep_exclusions(sweep_exclusions)
-    _active_exclusions, expired_exclusions = active_sweep_exclusions(
-        sweep_exclusions, now=now
+    exclusion_findings = (
+        validate_sweep_exclusions(sweep_exclusions) if sweep_external else []
+    )
+    _active_exclusions, expired_exclusions = (
+        active_sweep_exclusions(sweep_exclusions, now=now)
+        if sweep_external
+        else (frozenset(), ())
     )
     (
         ext_sweep_failures,
         ext_sweep_in_flight,
         ext_sweep_names,
         ext_sweep_excluded,
-    ) = evaluate_external_sweep(
-        check_runs,
-        expected=external_contexts,
-        in_run_names=frozenset(latest),
-        self_name=self_name,
-        exclusions=sweep_exclusions,
-        events=check_run_event_index(workflow_runs),
-        now=now,
+    ) = (
+        evaluate_external_sweep(
+            check_runs,
+            expected=external_contexts,
+            in_run_names=frozenset(latest),
+            self_name=self_name,
+            exclusions=sweep_exclusions,
+            events=check_run_event_index(workflow_runs),
+            now=now,
+        )
+        if sweep_external
+        else ([], [], [], [])
     )
 
     all_failures = (
@@ -1971,6 +2121,7 @@ def evaluate(
             sweep_excluded=ext_sweep_excluded,
             sweep_expired=list(expired_exclusions),
             sweep_findings=exclusion_findings,
+            sweep_external=sweep_external,
         )
 
     if all_failures:
@@ -2002,6 +2153,7 @@ def _report(
     sweep_excluded: list[str] | None = None,
     sweep_expired: list[str] | None = None,
     sweep_findings: list[str] | None = None,
+    sweep_external: bool = True,
 ) -> str:
     lines = [f"CI Summary verdict: {verdict}", f"  jobs observed: {len(latest)}"]
     # OMN-16661: make the relaxation visible in the job summary. A reviewer must
@@ -2068,6 +2220,8 @@ def _report(
     # OMN-18960 layer 5. The count is printed on EVERY verdict, including a
     # clean one: a sweep that finds nothing and says nothing is
     # indistinguishable from a sweep that did not run (rule 16).
+    if not sweep_external:
+        return "\n".join(lines)
     lines.append(
         "  external default-deny sweep: "
         f"{len(sweep_names or [])} unregistered context(s) judged"
