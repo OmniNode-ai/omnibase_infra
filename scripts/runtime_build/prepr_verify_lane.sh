@@ -267,6 +267,8 @@ TICKET_DIR="$(dirname "${WORKTREE}")"
 declare -A SIBLING_SRC=()
 declare -A SIBLING_COMMIT=()
 declare -A SIBLING_ORIGIN=()
+declare -A SIBLING_BRANCH=()
+declare -A SIBLING_DIRTY=()
 for repo in "${SIBLING_REPOS[@]}"; do
     if [[ -d "${TICKET_DIR}/${repo}/.git" || -f "${TICKET_DIR}/${repo}/.git" ]]; then
         SIBLING_SRC["${repo}"]="${TICKET_DIR}/${repo}"
@@ -279,13 +281,19 @@ for repo in "${SIBLING_REPOS[@]}"; do
     fi
     src="${SIBLING_SRC[${repo}]}"
     SIBLING_COMMIT["${repo}"]="$(git -C "${src}" rev-parse HEAD)"
+    SIBLING_BRANCH["${repo}"]="$(git -C "${src}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+    if [[ -n "$(git -C "${src}" status --porcelain)" ]]; then
+        SIBLING_DIRTY["${repo}"]="true"
+    else
+        SIBLING_DIRTY["${repo}"]="false"
+    fi
     # A dirty SIBLING is recorded, not refused. The receipt's clean-tree
     # assertion is about the TARGET, whose commit the gate keys on; a sibling
     # is vendored content and its dirt is a provenance fact the descriptor must
     # carry rather than a reason to block a branch that did not cause it.
-    if [[ -n "$(git -C "${src}" status --porcelain)" ]]; then
+    if [[ "${SIBLING_DIRTY[${repo}]}" == "true" ]]; then
         SIBLING_ORIGIN["${repo}"]="${SIBLING_ORIGIN[${repo}]}+dirty"
-        log "WARNING: sibling ${repo} at ${src} is DIRTY; recording it as such on the descriptor."
+        log "WARNING: sibling ${repo} at ${src} is DIRTY; recording it as such on the descriptor and in the build provenance manifest."
     fi
     log "sibling ${repo} <- ${src} @ ${SIBLING_COMMIT[${repo}]} (${SIBLING_ORIGIN[${repo}]})"
 done
@@ -397,6 +405,45 @@ snapshot_digest() {
     ( cd "$1" && find . -type f -not -path './workspace/sibling-repos/*' -print0 \
         | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1 )
 }
+# -----------------------------------------------------------------------------
+# The two staging manifests the BUILD reads, written here because this script
+# does not call stage_workspace.sh.
+#
+# Dockerfile.runtime COPYs workspace/sibling-vcs-provenance.json and
+# workspace/sibling-pin-comparison.json unconditionally, and both are tracked
+# PLACEHOLDERS in the repository that the staging step is expected to
+# overwrite. A snapshot carrying the committed placeholder builds all the way
+# to the provenance step and then fails closed with "Per-repo VCS provenance
+# has no sibling entries; the staged tree is unverifiable" -- the gate doing
+# its job, measured on the first live build here.
+#
+# So the facts this script already captured are written into the snapshot in
+# the shape the in-image verifier reads. This is not a second source of truth:
+# it is the SAME per-sibling commit, branch and dirty flag that go onto the
+# slot descriptor, so the descriptor and the image's own
+# /app/build-provenance.json cannot disagree about what was vendored.
+#
+# Each sibling also gets the .build-sha marker, because rsync drops .git and
+# without it the staged tree has no recoverable commit at all (OMN-12987).
+# -----------------------------------------------------------------------------
+for repo in "${SIBLING_REPOS[@]}"; do
+    printf '%s\n' "${SIBLING_COMMIT[${repo}]}" \
+        > "${STAGING_ROOT}/repo/workspace/sibling-repos/${repo}/.build-sha"
+done
+
+{
+    printf '{\n  "siblings": {\n'
+    _sep=""
+    for repo in "${SIBLING_REPOS[@]}"; do
+        printf '%s    "%s": {"vcs_ref": "%s", "vcs_dirty": %s, "vcs_branch": "%s"}' \
+            "${_sep}" "${repo}" "${SIBLING_COMMIT[${repo}]}" \
+            "${SIBLING_DIRTY[${repo}]}" "${SIBLING_BRANCH[${repo}]}"
+        _sep=",
+"
+    done
+    printf '\n  }\n}\n'
+} > "${STAGING_ROOT}/repo/workspace/sibling-vcs-provenance.json"
+
 TARGET_SNAPSHOT_DIGEST="$(snapshot_digest "${STAGING_ROOT}/repo")"
 declare -A SIBLING_SNAPSHOT_DIGEST=()
 for repo in "${SIBLING_REPOS[@]}"; do
