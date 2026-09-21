@@ -83,6 +83,8 @@ Related:
 
 from __future__ import annotations
 
+import functools
+import inspect
 import json
 import logging
 from collections import OrderedDict
@@ -95,6 +97,9 @@ import yaml
 from pydantic import ValidationError
 
 from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
+from omnibase_core.models.dispatch.model_message_delivery_context import (
+    ModelMessageDeliveryContext,
+)
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
@@ -112,6 +117,9 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.event_bus.models.model_event_message import (
+    ModelEventMessage,
+)
 from omnibase_infra.event_bus.topic_constants import (
     get_dlq_topic_for_original,
     is_dlq_topic,
@@ -125,6 +133,10 @@ from omnibase_infra.models.event_bus import (
 )
 from omnibase_infra.observability.wiring_health import MixinConsumptionCounter
 from omnibase_infra.protocols import ProtocolIdempotencyStore
+from omnibase_infra.runtime.delivery_context import (
+    delivery_context_from_message,
+    engine_type_accepts_delivery,
+)
 from omnibase_infra.topics import TopicResolver, create_topic_resolver
 from omnibase_infra.utils import compute_consumer_group_id
 from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
@@ -898,7 +910,31 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     correlation_id,
                     self._node_name,
                 )
-                result = await self._dispatch_engine.dispatch(topic, envelope)
+                # OMN-18918. The delivery coordinates this consumer actually
+                # read the message at. They are facts about THIS DELIVERY, not
+                # about the event, which is why they travel beside the
+                # envelope rather than inside it: the same event redelivered
+                # at another offset is the same event.
+                #
+                # Built here because here is the only place that has them --
+                # this loop commits this very offset a few lines above. A
+                # missing coordinate yields None rather than a zero, because
+                # a fabricated offset is indistinguishable downstream from a
+                # real one, and that indistinguishability IS the OMN-18905
+                # defect: every projection writer published at offset 0, the
+                # serving cache refused every delta whose offset did not
+                # exceed the cached one, and each key froze on its first
+                # value.
+                delivery_kwargs = (
+                    {"delivery": delivery_context_from_message(message, topic)}
+                    if engine_type_accepts_delivery(
+                        type(self._dispatch_engine), "dispatch"
+                    )
+                    else {}
+                )
+                result = await self._dispatch_engine.dispatch(
+                    topic, envelope, **delivery_kwargs
+                )
                 self._logger.info(
                     "[WIRING-CALLBACK] Dispatch complete: topic=%s, "
                     "correlation_id=%s, result_type=%s, node=%s",

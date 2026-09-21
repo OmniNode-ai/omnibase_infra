@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.46"
+version = "0.38.48"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -32,8 +32,8 @@ dependencies = [
     # OMN-17802: bumped to the PyPI-published core release carrying core #1439
     # (terminal delegation classes) and core #1440 (runtime_fanout_resolver,
     # OMN-14403). No git-rev override is active for merge.
-    "omnibase-core==0.47.18",
-    "omnibase-spi==0.23.3",
+    "omnibase-core==0.47.20",
+    "omnibase-spi==0.23.5",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.7",
     # ============================================================================
@@ -240,8 +240,8 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-core==0.47.18",
-    "omnibase-spi==0.23.3",
+    "omnibase-core==0.47.20",
+    "omnibase-spi==0.23.5",
     "omnibase-compat==0.5.7",
 ]
 
