@@ -62,7 +62,8 @@ def _shipped_contract_or_skip() -> Path:
         if installed.is_file():
             return installed
 
-    pinned = Path(".proof-dependencies/omnimarket") / "src" / "omnimarket"
+    repo_root = Path(__file__).resolve().parents[3]
+    pinned = repo_root / ".proof-dependencies" / "omnimarket" / "src" / "omnimarket"
     if (pinned / _CONTRACT_RELATIVE).is_file():
         return pinned / _CONTRACT_RELATIVE
 
