@@ -545,17 +545,34 @@ log "snapshot staged; target content digest ${TARGET_SNAPSHOT_DIGEST:0:16}..."
 # Provider and forge credentials are UNSET before the operator env is read,
 # never afterwards, and never "corrected" in the env file (OMN-19076).
 #
-# The compose files this slot layers interpolate these names, and compose
-# resolves an interpolation from the OS environment BEFORE the env file. So a
-# login shell that exports a live provider or forge credential wins over the
-# file, and the value is baked into the slot's containers. That is the same
-# precedence this entrypoint already fights over the consumer-group token,
-# arriving as a credential exposure instead of an isolation defect.
+# The compose files this slot layers interpolate these names, so a value in
+# the environment when compose runs is baked into the slot's containers.
 #
-# It has to be an unset here rather than a default in the file, because the
-# file LOSES. Unsetting restores the file as the only source, so a slot gets
-# whatever the operator env declares and nothing the invoking shell happens
-# to be carrying.
+# MEASURED, four arms, because the first version of this comment asserted a
+# mechanism that was wrong. With a shell exporting a value and the operator
+# env file setting one:
+#
+#   unset BEFORE the source -> the file's value.        Correct.
+#   unset AFTER the source  -> nothing at all.          Strips the FILE's
+#                                                       value too, so the
+#                                                       wrong order breaks
+#                                                       the slot rather than
+#                                                       leaking.
+#   no unset, file sets it  -> the file's value.        `set -a; source`
+#                                                       ASSIGNS, so it
+#                                                       overwrites the
+#                                                       shell. No leak here.
+#   no unset, file does NOT -> the SHELL's value.       The only leak shape,
+#                                                       and what this exists
+#                                                       for.
+#
+# So the scrub covers the names the operator env does not itself set, and the
+# ordering matters because the wrong order strips the ones it does.
+#
+# This is NOT the same mechanism as compose's own --env-file losing to an
+# ambient value, which is real and is what the consumer-group token defect
+# was. That file is read by compose; this one is assigned into the
+# environment. Conflating the two is what produced the wrong claim.
 #
 # Measured against the three layered files, with a positive control, because
 # the first two readings of this were false zeroes from a broken matcher:

@@ -934,12 +934,29 @@ def _scrub_list() -> list[str]:
 
 
 def test_the_entrypoint_scrubs_credentials_before_reading_the_operator_env() -> None:
-    """Order is the whole control: an unset after the source achieves nothing.
+    """The unset must precede the source, and the reason is not the obvious one.
 
-    Compose resolves an interpolation from the OS environment before the env
-    file, so a login shell exporting a live credential beats the file. The
-    remedy cannot be a default in the file, because the file loses. It has to
-    be an unset, and it has to happen first.
+    Measured, because the first version of this docstring asserted a mechanism
+    that turned out to be wrong. Four arms, a shell exporting a value and a
+    file setting one:
+
+    * unset BEFORE the source -> the file's value. Correct.
+    * unset AFTER the source  -> UNSET. It strips the file's value too, not
+      merely the shell's, so the wrong order breaks the slot by removing
+      configuration it legitimately needs. It does NOT leave the shell's
+      value behind, which is what this test previously claimed.
+    * no unset, file sets the name -> the file's value. ``set -a; source``
+      ASSIGNS, so it overwrites what the shell exported and there is no leak
+      here at all.
+    * no unset, file does NOT set the name -> the SHELL's value. This is the
+      only leak shape, and it is the one the scrub exists for.
+
+    So the scrub matters for names the operator env does not itself set, and
+    the ordering matters because the wrong order strips the ones it does. Note
+    this is a different mechanism from compose's own ``--env-file``, which is
+    read by compose rather than assigned into the environment and therefore
+    genuinely loses to an ambient value; conflating the two is what produced
+    the wrong claim.
     """
     body = _entrypoint_code()
     assert "PREPR_SCRUBBED_CREDENTIAL_VARS" in body
@@ -947,8 +964,9 @@ def test_the_entrypoint_scrubs_credentials_before_reading_the_operator_env() -> 
     source_at = body.index('source "${OMNIBASE_OPERATOR_ENV_FILE}"')
     assert scrub_at < source_at, (
         "the credential scrub runs AFTER the operator env is sourced. In that "
-        "order it removes the file's own values and leaves the shell's, which "
-        "is worse than not scrubbing at all."
+        "order it strips the operator env's OWN values as well, leaving the "
+        "slot without configuration it legitimately needs. Measured, not "
+        "reasoned: an unset after the source resolves to nothing at all."
     )
 
 
