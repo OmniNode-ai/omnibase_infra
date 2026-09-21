@@ -27,19 +27,31 @@ WHAT "NON-REQUIRED" MEANS HERE, and why the naive reading is wrong
     as non-required here, and the fix is to write it down.
 
 THE ALERT PATH IS INHERITED, NOT CHOSEN
-    Annotations, the step summary, a JSON report artifact, and a best-effort
-    Slack post through the same two secrets the fleet canary already uses. No
-    new channel and no new scheduler: this rides an existing scheduled workflow.
-    A missing Slack token degrades to annotation plus artifact rather than
-    failing the monitor, for the same reason `runner_saturation_record.py` does
-    it that way -- a watcher that goes red because Slack was down stops being
-    read.
+    Annotations, the step summary, a JSON report artifact, and a Slack post
+    through the same two secrets the fleet canary already uses. No new channel
+    and no new scheduler: this rides an existing scheduled workflow.
 
-EXIT CODE IS ALWAYS 0 ON A SUCCESSFUL EVALUATION
-    Raising an alert is not this job failing. The job fails only when it could
-    not evaluate, which keeps "the alerter is broken" distinguishable from "the
-    alerter fired" -- the same distinction phase 3 exists to enforce everywhere
-    else.
+    A missing Slack credential USED to degrade to annotation plus artifact and
+    leave the run green, on the argument that a watcher which reddens because
+    Slack was down stops being read. Measured 2026-09-21: no chat secret of any
+    name exists at OmniNode-ai organisation scope or in this repository's
+    scope, so that branch was not a rare outage path -- it was the only path,
+    and every finding this job produced was delivered to nobody while the job
+    reported success. That is the defect class the ticket is about, reproduced
+    inside its own fix. The delivery path now REFUSES: findings plus no
+    destination exits non-zero with a one-line reason.
+
+    The distinction the original argument was protecting is kept exactly. A
+    transient Slack failure WITH a credential present still logs and carries
+    on, unchanged. A clean sweep with no credential still exits 0, because
+    nothing failed to reach anybody. Only "there is a finding and there is
+    nowhere to send it" is red.
+
+RAISING AN ALERT IS NOT THIS JOB FAILING
+    The job fails when it could not EVALUATE, and when it could not DELIVER a
+    finding it did raise. Both are "the alerter is broken"; neither is "the
+    alerter fired", which stays exit 0 -- the same distinction phase 3 exists
+    to enforce everywhere else.
 
 SCHEDULED RUNS, ADDED IN OMN-18322
     The reads above are all pull-request-shaped: a check-run on a head. A
@@ -301,6 +313,17 @@ def scheduled_runs_for_workflow(
     return runs
 
 
+class AlertDestinationMissingError(RuntimeError):
+    """Findings were raised and no destination credential resolves.
+
+    Carried as an exception rather than a return code so it cannot be dropped
+    at the call site by a caller that ignores the value -- which is how the
+    branch it replaces stayed invisible for as long as it did. Its message is
+    ONE line and names the credential REFERENCE only; no value of either
+    secret is ever read into it.
+    """
+
+
 def post_slack_alert(alerts: list[Any]) -> None:
     """Post through the SAME channel secret the fleet canary already uses.
 
@@ -311,20 +334,29 @@ def post_slack_alert(alerts: list[Any]) -> None:
     token = os.environ.get("SLACK_BOT_TOKEN")
     channel = os.environ.get("SLACK_CHANNEL_ID")
     if not token or not channel:
-        # OMN-18942: this is NOT the fleet going dark. No chat secret exists at
-        # organisation or repository scope and deliberately none is being added
-        # -- a fourth copy of a token that already works elsewhere. The
-        # delivering surface for these same findings is the `.201` system
-        # reporter, which runs this evaluator hourly through
-        # scripts/omninode-fleet-failure-probe.py and posts with the bot token
-        # that host already holds. Say where delivery happens, so this line is
-        # not read as "nobody is being told".
-        print(
-            "[nonrequired-checks] Slack not configured here; annotation + "
-            "artifact only. Delivery of these findings is the .201 system "
-            "reporter (omninode-fleet-failure-probe.py, OMN-18942), not this job."
+        # OMN-18942. The line this replaces said delivery happens on the `.201`
+        # system reporter instead, and returned. That sentence is true of the
+        # SCHEDULED half, which moved there behind `--no-scheduled`. It is not
+        # true of the pull-request check-run half, which still raises findings
+        # HERE and had nowhere to put them -- so the job went green having told
+        # nobody. A comment naming another surface is not a destination.
+        #
+        # Which reference is missing is named, because "not configured" sends a
+        # reader to look at both. No value is read into the message.
+        missing = ", ".join(
+            name
+            for name, present in (
+                ("SLACK_BOT_TOKEN", bool(token)),
+                ("SLACK_CHANNEL_ID", bool(channel)),
+            )
+            if not present
         )
-        return
+        raise AlertDestinationMissingError(
+            f"{len(alerts)} non-required check finding(s) raised and no "
+            f"destination resolves: {missing} is unset or empty in this job's "
+            "environment; the findings were written to the report artifact but "
+            "delivered to nobody"
+        )
     detail = " | ".join(a.detail for a in alerts)
     payload = json.dumps(
         {"channel": channel, "text": f"*[NON-REQUIRED CHECK FAILING]* {detail}"}
@@ -538,8 +570,15 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
     )
     combined_alerts: list[Any] = [*all_alerts, *all_scheduled_alerts]
+    undeliverable = False
     if combined_alerts and not args.dry_run:
-        post_slack_alert(combined_alerts)
+        try:
+            post_slack_alert(combined_alerts)
+        except AlertDestinationMissingError as exc:
+            # The report artifact is written ABOVE this point, so the evidence
+            # survives the refusal: a reader gets both the red and the findings.
+            print(f"::error title=Alert destination missing::{exc}")
+            undeliverable = True
 
     # Raising an alert is not this job failing (see the module docstring), but
     # failing to READ a repository is: an unevaluated repository must never be
@@ -547,7 +586,13 @@ def main(argv: list[str] | None = None) -> int:
     # that WAS evaluated, so a caller that can render the partial result --
     # the `.201` probe does, as a named row per unreadable repo -- reads the
     # file rather than the exit code.
-    return 1 if unreadable else 0
+    #
+    # Failing to DELIVER a raised finding is the same class: a finding nobody
+    # receives and a sweep that found nothing are indistinguishable from
+    # outside, which is the whole defect. It is deliberately the same exit code
+    # as an unreadable repo -- both mean "do not read this run as clean" -- and
+    # the annotation above says which occurred.
+    return 1 if (unreadable or undeliverable) else 0
 
 
 def _evaluate_one_repo(
