@@ -114,11 +114,12 @@ BASELINE="${MIGRATION_DIR}/scripts/00_baseline_schema.sql"
 # shellcheck source=/dev/null
 . "$LIB"
 
+# There is ONE connection helper here, and that is deliberate (OMN-18953). A second
+# one connecting `-d postgres` used to exist for the catalog enumeration below; it is
+# deleted rather than left unused, because a helper kept for a caller that no longer
+# needs it is how the assumption comes back.
 psql_db() {
   psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"
-}
-psql_server() {
-  psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 "$@"
 }
 
 echo "== omninode_cloud migration (compose dev lane) =="
@@ -153,7 +154,18 @@ done
 # The manifest's `requires_database` condition is evaluated against the set of
 # databases that actually exist on THIS server, read live -- not against a list.
 # manifest_verdict takes them comma-separated.
-EXISTING_DATABASES="$(psql_server -tAc 'SELECT datname FROM pg_database WHERE NOT datistemplate' | paste -sd, -)"
+#
+# READ THROUGH psql_db, NOT THROUGH A MAINTENANCE-DATABASE CONNECTION (OMN-18953).
+# pg_database is a SHARED catalog: every database in the cluster sees the same rows,
+# so this returns the identical set from ${DB_NAME}, which the readiness loop above
+# has just proven reachable. Connecting `-d postgres` for it was a five-hour outage on
+# the .201 dev lane: OMN-18892 revoked PUBLIC's CONNECT on the maintenance database,
+# ${DB_USER} is not a superuser and holds none of its own, so this line died with
+# `permission denied for database "postgres"`, `set -e` killed the runner, and the
+# deploy agent's fail-closed preflight then refused six consecutive rebuilds.
+# The revocation is correct and stays; granting CONNECT back would not survive
+# anyway, because that seam re-asserts it on every bring-up.
+EXISTING_DATABASES="$(psql_db -tAc 'SELECT datname FROM pg_database WHERE NOT datistemplate' | paste -sd, -)"
 echo "   databases on this server: ${EXISTING_DATABASES}"
 
 manifest_assert_complete "$MANIFEST" "$MIGRATION_DIR"
