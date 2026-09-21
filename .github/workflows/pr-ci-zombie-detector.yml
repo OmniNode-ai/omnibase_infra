@@ -269,8 +269,16 @@ jobs:
           # the mint, and an empty result is not evidence of absence.
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # Same channel the fleet canary and the saturation monitor already
-          # alert to -- inherited, not chosen here. Absent tokens degrade to
-          # annotation plus artifact.
+          # alert to -- inherited, not chosen here.
+          #
+          # OMN-18942 follow-up: an absent token no longer degrades to
+          # annotation plus artifact. Measured 2026-09-21, no chat secret of
+          # any name exists at organisation or repository scope, so that
+          # "degrade" was not a rare outage path but the only path, and every
+          # finding this step raised was delivered to nobody while the step
+          # reported success. The evaluator now exits non-zero with a one-line
+          # reason when it has findings and no destination. A clean sweep is
+          # unaffected, and so is a run where the secrets do resolve.
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
         run: |
