@@ -773,7 +773,18 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # schema does not enforce. Vendored into omnibase_infra FIRST per the
     # node-migration-vendor-parity ordering, ahead of omnimarket#2744.
     #
-    # 205 -> 207 for OMN-18903 (decision 2 of epic OMN-18850), which vendors
+    # 205 -> 207 for OMN-18999 (surface 2 of 4 under OMN-18946), which vendors
+    # TWO node-owned migrations in the same pair shape as OMN-18900 directly
+    # above: 0000_create_prod_promotion_gate_decisions.sql, one durable row per
+    # prod-promotion-gate evaluation keyed on the redeploy run, so that a
+    # refusal leaves a queryable row instead of only a return value, and
+    # 0001_grant_omninode_runtime_prod_promotion_gate_decisions.sql, which
+    # ISSUES the grants the topology only declares -- the table half and the
+    # BIGSERIAL cursor's own standalone sequence, both asserted. The grant
+    # rides in the owning node's own lineage, so it is a second declaration
+    # here rather than an edit to the first.
+    #
+    # 207 -> 209 for OMN-18903 (decision 2 of epic OMN-18850), which vendors
     # TWO node-owned migrations in the same pair shape as every pair above:
     # node_projection_ci_attempt_outcome/0000_create_ci_attempt_outcome.sql,
     # the read model holding one row per (repository, pull request, head
@@ -785,7 +796,7 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     #
     # Vendored into omnibase_infra FIRST per the node-migration
     # vendor-parity ordering, ahead of omnimarket#2730.
-    assert len(result.declarations) == 207
+    assert len(result.declarations) == 209
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

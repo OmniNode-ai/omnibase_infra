@@ -83,6 +83,7 @@ databases:
               - live_events
               - log_entries
               - open_obligations
+              - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness
               - runtime_error_fingerprints
@@ -367,5 +368,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 275e0ce1555024d73611b3e0d87c70769cab0f460b39b5916237922c24a4b311
+  sha256: bd70ba91704f69b3ebeeed58febe60cfdbbe0a55c44cd236b80b08aeebfe29e3
 topology_instance: local

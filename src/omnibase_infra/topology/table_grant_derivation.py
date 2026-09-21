@@ -350,6 +350,43 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="delegate_skill_claim",
         ),
     ),
+    # OMN-18999: the same infra-first window, for
+    # prod_promotion_gate_decisions -- one durable row per prod-promotion-gate
+    # evaluation, carrying the typed refusal code, the authorization grant, the
+    # requested digest and the evaluation time. This repository vendors the
+    # create and grant migrations BEFORE omnimarket lands the node package that
+    # declares the relation in its contract, because omnimarket's
+    # node-migration-vendor-parity-gate refuses a node migration with no
+    # vendored counterpart here. So for one window the shipped topology
+    # instances declare a relation the PINNED contracts cannot derive.
+    #
+    # Regenerating instead of bridging would DELETE that declaration while the
+    # vendored migration still grants it, tripping the OMN-18768 reverse
+    # ratchet and refusing the projection binding at boot. This entry is the
+    # remedy the OMN-18863 failure text names, and it is SELF-EXPIRING: it is
+    # registered in _INTERIM_ENTRIES in
+    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes red
+    # on the pin advance that makes it redundant and says to delete it.
+    #
+    # Retired by: omnimarket#2753 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:prod_promotion_gate_decisions",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_prod_promotion_gate/"
+            "0000_create_prod_promotion_gate_decisions.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="prod_promotion_gate_decisions",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_prod_promotion_gate/"
+                "0000_create_prod_promotion_gate_decisions.sql"
+            ),
+            access="write",
+            role="prod_promotion_gate",
+        ),
+    ),
     #
     # OMN-18903: ci_attempt_outcome, the per-attempt continuous-integration
     # outcome read model, in exactly the window this manifest exists for. The
