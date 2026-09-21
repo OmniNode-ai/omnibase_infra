@@ -10,8 +10,8 @@ resolution-markers = [
 [manifest]
 overrides = [
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", specifier = "==0.47.18" },
-    { name = "omnibase-spi", specifier = "==0.23.3" },
+    { name = "omnibase-core", specifier = "==0.47.20" },
+    { name = "omnibase-spi", specifier = "==0.23.5" },
 ]
 
 [[package]]
@@ -2217,7 +2217,7 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.47.18"
+version = "0.47.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blake3" },
@@ -2234,9 +2234,9 @@ dependencies = [
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2b/4f/1ce8fd6681dd4b27a220817451b441edc5b6627884dc46159d74b574abb1/omnibase_core-0.47.18.tar.gz", hash = "sha256:c2624561e6d5fa10aca6553e3af2354b7016bce21912197d473f2bab05d72a29", size = 9630304, upload-time = "2026-09-19T19:10:51.446Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/12/c0/7a32a0471896a429350317aac008efa6a23d4d3df5597b5ffaa8bed24e9b/omnibase_core-0.47.20.tar.gz", hash = "sha256:83d9bafe5e5f8aca925164023b8c190a2b96baaebaaf09d02fabbd76b6d6a8bc", size = 9675505, upload-time = "2026-09-20T22:33:22.258Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/5e/7216b726c101d49733cbc7bc1436101cbf463de1f7456044b229a736cbca/omnibase_core-0.47.18-py3-none-any.whl", hash = "sha256:df04d0ff3d3a184dce0846bab65ba5582af8d6ad2eea7385f4fea7cdfc7c2488", size = 6896567, upload-time = "2026-09-19T19:10:49.22Z" },
+    { url = "https://files.pythonhosted.org/packages/48/b7/b121670a1a955a435e11b8ae5119fe1b34c99d9111c69d01420a0e2d76fb/omnibase_core-0.47.20-py3-none-any.whl", hash = "sha256:8311e34f055734e09d426c3f59eba665c243b44c34034b08b41a2b8dc19ad4d2", size = 6900303, upload-time = "2026-09-20T22:33:19.914Z" },
 ]
 
 [[package]]
@@ -2343,8 +2343,8 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25.0,<3.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", specifier = "==0.47.18" },
-    { name = "omnibase-spi", specifier = "==0.23.3" },
+    { name = "omnibase-core", specifier = "==0.47.20" },
+    { name = "omnibase-spi", specifier = "==0.23.5" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.66" },
@@ -2402,16 +2402,16 @@ dev = [
 
 [[package]]
 name = "omnibase-spi"
-version = "0.23.3"
+version = "0.23.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "omnibase-core" },
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/da/03b89a9dbdb1cff7bf0347e32040c467d266ed5e6928bd350a6bc7056139/omnibase_spi-0.23.3.tar.gz", hash = "sha256:c75a03bc087ff28f2490f7ff2d37f17f9f92b862c2b06b799b11c586cdc9279e", size = 1319844, upload-time = "2026-08-30T12:09:57.616Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e9/a9/28d8987ac0c255a0757df9739885a0a84dd417a75bf87aa1095ad5b963af/omnibase_spi-0.23.5.tar.gz", hash = "sha256:1b498740b81ef38f429aaa80e304d3b70e6d3cb5fea29029b617a39d0cdfe121", size = 1286800, upload-time = "2026-09-20T23:49:44.192Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/9b/852e966c6024622f2775974fee0a8b1628dc45b62864e29eb845ee2bf1bf/omnibase_spi-0.23.3-py3-none-any.whl", hash = "sha256:60bc58a91d83297c0b207d6d2c42c25280ee007e4cdce60cda2243744d520c3a", size = 744645, upload-time = "2026-08-30T12:09:56.042Z" },
+    { url = "https://files.pythonhosted.org/packages/09/d6/0c48ba1ca4d7765819eb1123bb0a43cecb9e8153e49b3c8335e58f164e29/omnibase_spi-0.23.5-py3-none-any.whl", hash = "sha256:42991ff1223de123ea98774c27cc51ff20364189a552d1c0b0d1540cff1596c7", size = 737808, upload-time = "2026-09-20T23:49:42.567Z" },
 ]
 
 [[package]]

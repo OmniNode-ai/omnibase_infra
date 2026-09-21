@@ -73,6 +73,9 @@ from omnibase_core.models.core.model_deployment_topology import ModelDeploymentT
 from omnibase_core.models.core.model_deployment_topology_database import (
     ModelDeploymentTopologyDatabase,
 )
+from omnibase_core.models.dispatch.model_message_delivery_context import (
+    ModelMessageDeliveryContext,
+)
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.projection import build_upsert_plan
 from omnibase_core.models.resolver.model_handler_resolver_context import (
@@ -4563,6 +4566,13 @@ def _make_projection_dispatch_callback(
     dlq_topics = list(sinks.dlq_topics)
     handler_name = type(handler_instance).__name__
     is_projection_runner = _is_standalone_projection_runner(handler_instance)
+    # OMN-18918. Only a writer the SHARED runtime dispatches in-process can
+    # be deprived of coordinates by this seam; a standalone runner reads its
+    # own records and never comes through here. Scoping the refusal to that
+    # set is what keeps it from firing on every pure fold.
+    is_inprocess_projection_writer = bool(
+        getattr(handler_instance, PROJECTION_INPROCESS_DISPATCH_ATTR, False)
+    )
     if is_projection_runner:
         # OMN-17448. The callback below returns None for this handler, by
         # design (OMN-15905) -- but the kernel still SUBSCRIBES the contract's
@@ -4614,6 +4624,8 @@ def _make_projection_dispatch_callback(
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
+        *,
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> ModelDispatchResult | None:
         if is_projection_runner:
             logger.debug(
@@ -4658,6 +4670,35 @@ def _make_projection_dispatch_callback(
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             input_data["_topic"] = topic
+            # OMN-18918. The source message's own coordinates, injected only
+            # when the consume loop could actually determine them. A writer
+            # reads these to stamp the snapshot delta it publishes, and the
+            # serving cache uses that offset to tell a newer fact from a
+            # redelivery of an older one.
+            #
+            # FAIL CLOSED rather than default. Every in-process writer
+            # already falls back to 0 when the keys are absent, and a
+            # constant 0 never exceeds itself, so the cache refused every
+            # delta after the first for a given key and each key froze on
+            # its first value -- at zero consumer lag, behind a green
+            # readiness endpoint (OMN-18905). Injecting nothing preserves
+            # that old behaviour exactly, which is why the absence is
+            # LOGGED: silence here is what made the original defect take a
+            # live trace to find.
+            if delivery is not None:
+                input_data["_partition"] = delivery.partition
+                input_data["_offset"] = delivery.offset
+            elif is_inprocess_projection_writer:
+                logger.error(
+                    "Projection writer dispatched with no delivery context: "
+                    "handler=%s topic=%s. Its snapshot deltas will carry a "
+                    "fixed source offset, and the serving cache will discard "
+                    "every delta after the first for each key (OMN-18905). "
+                    "The consume loop could not determine the message's "
+                    "partition and offset; it does not invent them.",
+                    handler_name,
+                    topic,
+                )
             envelope_id = _extract_projection_envelope_id(typed_envelope)
             if envelope_id is not None:
                 # Preserve the UUID at the transport boundary. Projection

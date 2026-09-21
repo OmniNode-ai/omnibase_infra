@@ -132,6 +132,7 @@ from __future__ import annotations
 __all__ = ["MessageDispatchEngine", "coerce_message_category"]
 
 import asyncio
+import functools
 import inspect
 import logging
 import threading
@@ -147,6 +148,9 @@ from pydantic import ValidationError
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
+from omnibase_core.models.dispatch.model_message_delivery_context import (
+    ModelMessageDeliveryContext,
+)
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType, PrimitiveValue
@@ -436,6 +440,7 @@ class DispatchEntryInternal:
 
     __slots__ = (
         "accepts_context",
+        "accepts_delivery",
         "category",
         "dispatcher",
         "dispatcher_id",
@@ -454,6 +459,7 @@ class DispatchEntryInternal:
         message_types: set[str] | None,
         node_kind: EnumNodeKind | None = None,
         accepts_context: bool = False,
+        accepts_delivery: bool = False,
         operation_bindings: ModelOperationBindingsSubcontract | None = None,
         payload_type_matcher: Callable[[object], bool] | None = None,
         owner_contract_name: str | None = None,
@@ -464,6 +470,8 @@ class DispatchEntryInternal:
         self.message_types = message_types  # None means "all types"
         self.node_kind = node_kind  # None means no context injection
         self.accepts_context = accepts_context  # Cached: dispatcher has 2+ params
+        # OMN-18918. Cached: dispatcher declares a keyword-only `delivery`.
+        self.accepts_delivery = accepts_delivery
         self.operation_bindings = (
             operation_bindings  # Declarative bindings for this dispatcher
         )
@@ -946,6 +954,7 @@ class MessageDispatchEngine:
             )
 
         accepts_context = self._dispatcher_accepts_context(dispatcher)
+        accepts_delivery = self._dispatcher_accepts_delivery(dispatcher)
         entry = DispatchEntryInternal(
             dispatcher_id=dispatcher_id,
             dispatcher=dispatcher,
@@ -953,6 +962,7 @@ class MessageDispatchEngine:
             message_types=message_types,
             node_kind=node_kind,
             accepts_context=accepts_context,
+            accepts_delivery=accepts_delivery,
             operation_bindings=operation_bindings,
             payload_type_matcher=payload_type_matcher,
             owner_contract_name=owner_contract_name,
@@ -1174,6 +1184,7 @@ class MessageDispatchEngine:
         envelope: ModelEventEnvelope[object],
         *,
         allowed_dispatcher_ids: Collection[str] | None = None,
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> ModelDispatchResult:
         """
         Dispatch a message to matching dispatchers.
@@ -1537,7 +1548,7 @@ class MessageDispatchEngine:
 
             try:
                 result = await self._execute_dispatcher(
-                    dispatcher_entry, envelope, topic
+                    dispatcher_entry, envelope, topic, delivery
                 )
                 dispatcher_duration_ms = (
                     time.perf_counter() - dispatcher_start_time
@@ -1908,6 +1919,7 @@ class MessageDispatchEngine:
         topic: str,
         envelope: ModelEventEnvelope[object],
         tx: object,
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> ModelDispatchResult:
         """Dispatch an event envelope with database transaction context.
 
@@ -2012,7 +2024,7 @@ class MessageDispatchEngine:
         # TODO(OMN-5731): Pass tx to handlers via dispatch context when needed
         _ = tx  # Explicitly acknowledge tx parameter for future use
 
-        return await self.dispatch(topic=topic, envelope=envelope)
+        return await self.dispatch(topic=topic, envelope=envelope, delivery=delivery)
 
     def _find_matching_dispatchers(
         self,
@@ -2172,6 +2184,7 @@ class MessageDispatchEngine:
         entry: DispatchEntryInternal,
         envelope: ModelEventEnvelope[object],
         topic: str,
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> DispatcherOutput:
         """
         Execute a dispatcher (sync or async).
@@ -2315,16 +2328,27 @@ class MessageDispatchEngine:
         # Bind the original typed envelope beside it only for transport identity
         # (for example envelope_id). Tenant authentication uses a separate,
         # cryptographically verified capability and never derives from this model.
+        # OMN-18918. Passed only to a dispatcher that declared it, so a
+        # dispatcher that did not is called with the exact argument list it
+        # is called with today. `delivery` describes THIS delivery -- the
+        # topic, partition and offset this copy was read at -- and is
+        # separate from the envelope, which is the producer's truth about
+        # the event itself.
+        delivery_kwargs: dict[str, object] = (
+            {"delivery": delivery} if entry.accepts_delivery else {}
+        )
         with bind_dispatch_envelope(envelope):
             if inspect.iscoroutinefunction(dispatcher):
                 if context is not None:
                     # NOTE: Dispatcher signature varies - context param may be optional.
                     # Return type depends on dispatcher implementation (dict or model).
                     # Why: Runtime factory dispatch accepts this dynamic constructor shape.
-                    return await dispatcher(envelope_for_handler, context)  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
+                    return await dispatcher(
+                        envelope_for_handler, context, **delivery_kwargs
+                    )  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
                 # NOTE: Return type depends on dispatcher implementation (dict or model).
                 # Why: Dispatcher boundary returns adapter output whose concrete type is runtime-defined.
-                return await dispatcher(envelope_for_handler)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
+                return await dispatcher(envelope_for_handler, **delivery_kwargs)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
             else:
                 # Sync dispatcher execution via ThreadPoolExecutor
                 # -----------------------------------------------
@@ -2346,8 +2370,12 @@ class MessageDispatchEngine:
                     execution_context = copy_context()
 
                     def _invoke_sync_dispatcher_with_context() -> DispatcherOutput:
+                        # OMN-18918: functools.partial rather than a second
+                        # closure, because Context.run takes no keyword
+                        # arguments of its own -- passing `delivery=` to it
+                        # directly would be swallowed as one of ITS kwargs.
                         return execution_context.run(
-                            sync_ctx_dispatcher,
+                            functools.partial(sync_ctx_dispatcher, **delivery_kwargs),
                             payload_for_sync,
                             context,
                         )
@@ -2364,8 +2392,10 @@ class MessageDispatchEngine:
                     execution_context = copy_context()
 
                     def _invoke_sync_dispatcher() -> DispatcherOutput:
+                        # See the note above: Context.run consumes keyword
+                        # arguments itself, so the delivery is bound first.
                         return execution_context.run(
-                            sync_dispatcher,
+                            functools.partial(sync_dispatcher, **delivery_kwargs),
                             payload_for_sync,
                         )
 
@@ -2441,6 +2471,37 @@ class MessageDispatchEngine:
             dispatcher_id=entry.dispatcher_id,
         )
 
+    def _dispatcher_accepts_delivery(
+        self,
+        dispatcher: Callable[..., object],
+    ) -> bool:
+        """Does this dispatcher declare a keyword-only ``delivery`` parameter?
+
+        OMN-18918. Deliberately narrower than the context check below: it
+        matches the NAME and requires KEYWORD_ONLY, rather than counting
+        parameters. A positional match would be ambiguous with the envelope
+        and the context, and a count-based one is exactly the looseness that
+        makes the context check fragile.
+
+        Inspected once at registration and cached, like ``accepts_context``;
+        no signature inspection happens on the dispatch hot path.
+
+        Typed ``Callable[..., object]`` rather than the dispatcher union its
+        sibling uses: this only ever inspects a signature, so the narrower
+        union would buy no safety, and the repo's non-optional-union ratchet
+        is a real budget rather than a style preference.
+
+        An uninspectable dispatcher returns False, so it is called exactly as
+        it is today. Unknown refuses, which here means "changes nothing".
+        """
+        try:
+            parameter = inspect.signature(dispatcher).parameters.get("delivery")
+        except (ValueError, TypeError):
+            return False
+        return (
+            parameter is not None and parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        )
+
     def _dispatcher_accepts_context(
         self,
         dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
@@ -2476,7 +2537,26 @@ class MessageDispatchEngine:
         """
         try:
             sig = inspect.signature(dispatcher)
-            params = list(sig.parameters.values())
+            # OMN-18918: POSITIONAL parameters only. A context is passed
+            # POSITIONALLY below (`dispatcher(envelope, context)`), so a
+            # keyword-only parameter can never be the context and must not be
+            # counted as one. Before this filter, adding any keyword-only
+            # parameter -- such as the `delivery` this ticket introduces --
+            # pushed a one-positional-parameter dispatcher over the 2+ test
+            # and made the engine try to pass a context positionally into a
+            # slot that does not exist. That surfaces as a TypeError only for
+            # dispatchers whose node_kind is set, so it would have been
+            # invisible on the projection path that motivated the change and
+            # loud somewhere unrelated.
+            params = [
+                param
+                for param in sig.parameters.values()
+                if param.kind
+                in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                )
+            ]
             # Dispatcher with context has 2+ parameters: (envelope, context, ...)
             # Dispatcher without context has 1 parameter: (envelope)
             #

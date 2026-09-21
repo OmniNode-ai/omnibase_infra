@@ -95,6 +95,9 @@ import yaml
 from pydantic import ValidationError
 
 from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
+from omnibase_core.models.dispatch.model_message_delivery_context import (
+    ModelMessageDeliveryContext,
+)
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
@@ -111,6 +114,9 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
+)
+from omnibase_infra.event_bus.models.model_event_message import (
+    ModelEventMessage,
 )
 from omnibase_infra.event_bus.topic_constants import (
     get_dlq_topic_for_original,
@@ -175,6 +181,55 @@ def validate_topic(topic: str, deny_patterns: tuple[str, ...] = ()) -> None:
                 f"(matched deny pattern: {pattern})",
                 context=context,
             )
+
+
+def _delivery_context_from_message(
+    message: ProtocolEventMessage, topic: str
+) -> ModelMessageDeliveryContext | None:
+    """Build the delivery coordinates for one consumed message, or ``None``.
+
+    OMN-18918. ``ProtocolEventMessage`` in ``omnibase_core`` -- the type this
+    loop is written against -- declares ``topic``, ``key``, ``value``,
+    ``headers``, ``ack`` and ``nack``, and NO delivery coordinates at all.
+    The concrete object the Kafka bus delivers is
+    ``omnibase_infra``'s ``ModelEventMessage``, which does carry them
+    (``event_bus_kafka.py`` builds it straight from the consumed record), so
+    this narrows to that model rather than widening a shared protocol in a
+    lower layer for one consumer. An implementation that is not that model --
+    the in-memory bus, a test double -- yields ``None`` and is handled by the
+    same refusal as a missing coordinate.
+
+    Both fields are optional on that model and the offset is text, so either
+    one absent, or an offset that does not parse as a non-negative integer,
+    yields ``None``.
+
+    ``None`` rather than a zero, deliberately. A fabricated coordinate is
+    indistinguishable downstream from a measured one, and that is precisely
+    the defect this ticket exists to end: every in-process projection writer
+    published its snapshot deltas at offset 0, the serving cache refuses a
+    delta whose offset does not exceed the one it holds for that key, and so
+    each key froze on its first value -- at zero consumer lag, behind a green
+    readiness endpoint (OMN-18905). A consumer that cannot say where a
+    message came from must say nothing, and the projection seam refuses
+    loudly rather than inventing a coordinate.
+
+    No broker timestamp: the protocol does not carry one, and the model's
+    field is optional for exactly this reason rather than being defaulted to
+    a clock reading here.
+    """
+    if not isinstance(message, ModelEventMessage):
+        return None
+    partition = message.partition
+    raw_offset = message.offset
+    if partition is None or raw_offset is None:
+        return None
+    try:
+        offset = int(raw_offset)
+    except (TypeError, ValueError):
+        return None
+    if offset < 0 or partition < 0:
+        return None
+    return ModelMessageDeliveryContext(topic=topic, partition=partition, offset=offset)
 
 
 class EventBusSubcontractWiring(MixinConsumptionCounter):
@@ -898,7 +953,25 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     correlation_id,
                     self._node_name,
                 )
-                result = await self._dispatch_engine.dispatch(topic, envelope)
+                # OMN-18918. The delivery coordinates this consumer actually
+                # read the message at. They are facts about THIS DELIVERY, not
+                # about the event, which is why they travel beside the
+                # envelope rather than inside it: the same event redelivered
+                # at another offset is the same event.
+                #
+                # Built here because here is the only place that has them --
+                # this loop commits this very offset a few lines above. A
+                # missing coordinate yields None rather than a zero, because
+                # a fabricated offset is indistinguishable downstream from a
+                # real one, and that indistinguishability IS the OMN-18905
+                # defect: every projection writer published at offset 0, the
+                # serving cache refused every delta whose offset did not
+                # exceed the cached one, and each key froze on its first
+                # value.
+                delivery = _delivery_context_from_message(message, topic)
+                result = await self._dispatch_engine.dispatch(
+                    topic, envelope, delivery=delivery
+                )
                 self._logger.info(
                     "[WIRING-CALLBACK] Dispatch complete: topic=%s, "
                     "correlation_id=%s, result_type=%s, node=%s",
