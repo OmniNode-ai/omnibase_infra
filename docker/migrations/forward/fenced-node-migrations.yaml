@@ -821,3 +821,7 @@ fenced_node_migrations:
   # construction -- the vendored bytes here were copied from it.
   - id: "node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
     ticket: "OMN-14894"
+  - id: "node:node_projection_delegation:0043z_preflight_delegation_shadow_comparisons.sql"
+    ticket: "OMN-18987"
+  - id: "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql"
+    ticket: "OMN-18987"
