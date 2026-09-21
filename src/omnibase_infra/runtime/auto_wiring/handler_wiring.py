@@ -73,6 +73,9 @@ from omnibase_core.models.core.model_deployment_topology import ModelDeploymentT
 from omnibase_core.models.core.model_deployment_topology_database import (
     ModelDeploymentTopologyDatabase,
 )
+from omnibase_core.models.dispatch.model_message_delivery_context import (
+    ModelMessageDeliveryContext,
+)
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.projection import build_upsert_plan
 from omnibase_core.models.resolver.model_handler_resolver_context import (
@@ -161,12 +164,14 @@ from omnibase_infra.runtime.contract_terminal_events import (
     envelope_terminal_payload,
     load_terminal_event_topics,
 )
+from omnibase_infra.runtime.delivery_context import (
+    delivery_context_from_message,
+    engine_type_accepts_delivery,
+)
 from omnibase_infra.runtime.dispatch_envelope_context import (
     bind_dispatch_envelope,
-    bind_source_coordinate,
     current_dispatch_envelope,
     current_projection_tenant_authority,
-    current_source_coordinate,
 )
 from omnibase_infra.runtime.health.projection_liveness import (
     select_projection_contracts,
@@ -4617,6 +4622,13 @@ def _make_projection_dispatch_callback(
     dlq_topics = list(sinks.dlq_topics)
     handler_name = type(handler_instance).__name__
     is_projection_runner = _is_standalone_projection_runner(handler_instance)
+    # OMN-18918. Only a writer the SHARED runtime dispatches in-process can
+    # be deprived of coordinates by this seam; a standalone runner reads its
+    # own records and never comes through here. Scoping the refusal to that
+    # set is what keeps it from firing on every pure fold.
+    is_inprocess_projection_writer = bool(
+        getattr(handler_instance, PROJECTION_INPROCESS_DISPATCH_ATTR, False)
+    )
     if is_projection_runner:
         # OMN-17448. The callback below returns None for this handler, by
         # design (OMN-15905) -- but the kernel still SUBSCRIBES the contract's
@@ -4668,6 +4680,8 @@ def _make_projection_dispatch_callback(
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
+        *,
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> ModelDispatchResult | None:
         if is_projection_runner:
             logger.debug(
@@ -4712,6 +4726,39 @@ def _make_projection_dispatch_callback(
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             input_data["_topic"] = topic
+            # OMN-18918. The source message's own coordinates, injected only
+            # when the consume loop could actually determine them. A writer
+            # reads these to stamp the snapshot delta it publishes, and the
+            # serving cache uses that offset to tell a newer fact from a
+            # redelivery of an older one.
+            #
+            # FAIL CLOSED rather than default. Every in-process writer
+            # already falls back to 0 when the keys are absent, and a
+            # constant 0 never exceeds itself, so the cache refused every
+            # delta after the first for a given key and each key froze on
+            # its first value -- at zero consumer lag, behind a green
+            # readiness endpoint (OMN-18905). Injecting nothing preserves
+            # that old behaviour exactly, which is why the absence is
+            # LOGGED: silence here is what made the original defect take a
+            # live trace to find. Measured on the .201 dev lane before this
+            # landed, and carried over from the superseded OMN-18955 arm:
+            # 6,210,195 lifetime drops on the consumer-flow exposure, with
+            # the readiness endpoint answering 503 because it correctly
+            # refused to call a discarding cache healthy.
+            if delivery is not None:
+                input_data["_partition"] = delivery.partition
+                input_data["_offset"] = delivery.offset
+            elif is_inprocess_projection_writer:
+                logger.error(
+                    "Projection writer dispatched with no delivery context: "
+                    "handler=%s topic=%s. Its snapshot deltas will carry a "
+                    "fixed source offset, and the serving cache will discard "
+                    "every delta after the first for each key (OMN-18905). "
+                    "The consume loop could not determine the message's "
+                    "partition and offset; it does not invent them.",
+                    handler_name,
+                    topic,
+                )
             envelope_id = _extract_projection_envelope_id(typed_envelope)
             if envelope_id is not None:
                 # Preserve the UUID at the transport boundary. Projection
@@ -4738,32 +4785,6 @@ def _make_projection_dispatch_callback(
                 # submitted it, and under FORCE ROW LEVEL SECURITY that row then
                 # makes the real writer's conflict-update unwritable.
                 input_data["_tenant_id"] = envelope_tenant
-            source_coordinate = current_source_coordinate()
-            if source_coordinate is not None:
-                # OMN-18955 (producer half of OMN-18905). The SOURCE record's
-                # own Kafka coordinates, bound by the consume boundary that
-                # still holds the record -- they are not on the envelope,
-                # which declares no such field and forbids extras.
-                #
-                # A projection writer builds its snapshot-delta MessageMeta
-                # from these two keys. Without them it published every delta
-                # at partition 0 / offset 0, and the consuming SnapshotCache
-                # drops a delta whose source_offset does not exceed the cached
-                # one for the same source topic and partition -- so every
-                # delta after the FIRST for a key was discarded as a replay,
-                # first writer wins forever, and the exposure froze while
-                # sitting at lag zero. Measured on the .201 dev lane before
-                # this change: 6,210,195 lifetime drops on consumer-flow, and
-                # a readiness endpoint answering 503 because it correctly
-                # refuses to call a discarding cache healthy.
-                #
-                # Injected ONLY as a pair and only when the transport reported
-                # both, on the same terms as the timestamp and tenant above.
-                # An absent key leaves the writer with no coordinate, which is
-                # the correct terminal state for a record that has none -- a
-                # defaulted zero is the defect itself.
-                input_data["_partition"] = source_coordinate[0]
-                input_data["_offset"] = source_coordinate[1]
 
             def _invoke_projection_handler() -> object:
                 # OMN-16874: the runtime does NOT pre-connect a handler-owned DB
@@ -6697,8 +6718,36 @@ async def _dispatch_to_contract_scope(
     topic: str,
     envelope: ModelEventEnvelope[object],
     allowed_dispatcher_ids: frozenset[str],
+    delivery: ModelMessageDeliveryContext | None = None,
 ) -> ModelDispatchResult:
-    """Dispatch through the engine while preserving callback ownership."""
+    """Dispatch through the engine while preserving callback ownership.
+
+    OMN-18918. ``delivery`` carries the source record's own coordinates from
+    whichever consume boundary called this. THIS is the path the in-process
+    projection writers take -- the five writers the OMN-18905 defect is about
+    declare ``db_tables`` and no ``consumer_purpose``, which routes them to
+    the two callbacks above rather than to ``EventBusSubcontractWiring``. A
+    live subscription readback on the .201 dev lane measured that seam
+    dispatching 104 calls across four topics, none of them a projection
+    source, so a typed path that reached only the other protocol would inject
+    nothing for exactly the writers it was built for and log the absence on
+    every message while the exposures stayed frozen. Found in second-actor
+    review before merge rather than on the lane afterwards.
+
+    The engine is probed before the keyword is passed, for the same reason
+    the other seam probes: ``delivery`` is optional on the protocol, so an
+    engine predating it is valid and would raise ``TypeError`` on an
+    unconditional keyword.
+    """
+    if delivery is not None and engine_type_accepts_delivery(
+        type(dispatch_engine), "dispatch_scoped"
+    ):
+        return await dispatch_engine.dispatch_scoped(
+            topic,
+            envelope,
+            allowed_dispatcher_ids=allowed_dispatcher_ids,
+            delivery=delivery,
+        )
     return await dispatch_engine.dispatch_scoped(
         topic,
         envelope,
@@ -6975,6 +7024,7 @@ def _make_event_bus_callback(
                     topic,
                     envelope,
                     dispatcher_scope,
+                    delivery_context_from_message(message, topic),
                 )
                 if result_applier is not None and result is not None:
                     try:
@@ -7559,26 +7609,18 @@ def _make_event_bus_callback(
                 envelope = message
             if envelope.correlation_id is not None:
                 correlation_id = envelope.correlation_id
-            # OMN-18955: bind the SOURCE record's coordinates around dispatch.
-            # This frame is the last one that still holds the record -- the
-            # envelope above was rebuilt from ``message.value`` alone, which is
-            # exactly where partition and offset used to be lost. Bound on BOTH
-            # branches and outside the flow-counter gate, because a projection
-            # writer needs the coordinates whether or not this lane happens to
-            # be counting flow.
-            with bind_source_coordinate(message):
-                if flow_counters is None or consumer_group is None:
+            if flow_counters is None or consumer_group is None:
+                await _dispatch_with_bounded_retry(envelope, message)
+            else:
+                # OMN-16777: an envelope reaching this line HAS been handed
+                # to dispatch. Counted before the call, not after, so a
+                # handler that hangs or dies still shows the message as
+                # taken in -- counting only successful dispatches would
+                # reproduce exactly the "green because nothing was
+                # measured" defect.
+                flow_counters.record_in(consumer_group, topic)
+                with active_flow_key(consumer_group, topic):
                     await _dispatch_with_bounded_retry(envelope, message)
-                else:
-                    # OMN-16777: an envelope reaching this line HAS been handed
-                    # to dispatch. Counted before the call, not after, so a
-                    # handler that hangs or dies still shows the message as
-                    # taken in -- counting only successful dispatches would
-                    # reproduce exactly the "green because nothing was
-                    # measured" defect.
-                    flow_counters.record_in(consumer_group, topic)
-                    with active_flow_key(consumer_group, topic):
-                        await _dispatch_with_bounded_retry(envelope, message)
         except ProjectionNotMaterializedError:
             # OMN-17379: propagate unconditionally, for the same reason
             # BoundaryApplyPublishError does. Routing it through
@@ -7727,12 +7769,14 @@ def _make_raw_event_projection_callback(
 
     async def _dispatch_and_apply_raw_projection(
         envelope: ModelEventEnvelope[object],
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> None:
         result = await _dispatch_to_contract_scope(
             scoped_dispatch_engine,
             topic,
             envelope,
             dispatcher_scope,
+            delivery,
         )
         if result is not None:
             # OMN-16831: same reason as the sibling boundary above -- the
@@ -7761,32 +7805,31 @@ def _make_raw_event_projection_callback(
                 source_tool=raw_message.headers.source,
                 tenant_id=_tenant_id_from_raw_message(raw_message),
             )
-            # OMN-18955: the same source-coordinate binding as the sibling
-            # branch. No contract declares both `consumer_purpose: projection`
-            # and `db_tables` today, so nothing reaches this path AND needs the
-            # coordinates right now -- it is bound here anyway, because the day
-            # one does, the failure is a silently frozen exposure rather than
-            # an error, and that is the class this whole change removes.
-            with bind_source_coordinate(raw_message):
-                if flow_counters is None or consumer_group is None:
-                    await _dispatch_and_apply_raw_projection(envelope)
-                else:
-                    # OMN-17214: counted before the call for the same reason
-                    # the sibling branch counts before its call -- an envelope
-                    # reaching this line HAS been handed to dispatch, so a
-                    # handler that hangs or dies still shows the message as
-                    # taken in. Counting only completed dispatches would
-                    # reproduce the "green because nothing was measured" defect
-                    # this seam exists to close.
-                    flow_counters.record_in(consumer_group, topic)
-                    # The applier's publish loop records ``messages_out``
-                    # against this task-local key (``record_active_out``), so
-                    # the apply() call has to run INSIDE the binding --
-                    # outside it, a projection that publishes is counted as
-                    # producing nothing and reads STALLED while it is
-                    # demonstrably producing.
-                    with active_flow_key(consumer_group, topic):
-                        await _dispatch_and_apply_raw_projection(envelope)
+            if flow_counters is None or consumer_group is None:
+                await _dispatch_and_apply_raw_projection(
+                    envelope,
+                    delivery_context_from_message(raw_message, topic),
+                )
+            else:
+                # OMN-17214: counted before the call for the same reason
+                # the sibling branch counts before its call -- an envelope
+                # reaching this line HAS been handed to dispatch, so a
+                # handler that hangs or dies still shows the message as
+                # taken in. Counting only completed dispatches would
+                # reproduce the "green because nothing was measured" defect
+                # this seam exists to close.
+                flow_counters.record_in(consumer_group, topic)
+                # The applier's publish loop records ``messages_out``
+                # against this task-local key (``record_active_out``), so
+                # the apply() call has to run INSIDE the binding --
+                # outside it, a projection that publishes is counted as
+                # producing nothing and reads STALLED while it is
+                # demonstrably producing.
+                with active_flow_key(consumer_group, topic):
+                    await _dispatch_and_apply_raw_projection(
+                        envelope,
+                        delivery_context_from_message(raw_message, topic),
+                    )
         except Exception as exc:  # noqa: BLE001 — consumer boundary; log and continue
             if flow_counters is not None and consumer_group is not None:
                 flow_counters.record_error(consumer_group, topic)

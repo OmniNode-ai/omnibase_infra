@@ -151,10 +151,13 @@ def _run_reporter(
         "OMNINODE_ALERT_LOCK_FILE": str(tmp_path / "lock"),
         "OMNINODE_INFRA_REPO_ROOT": str(REPO_ROOT),
         "OMNINODE_RUNTIME_POLICY_ENV": str(RUNTIME_POLICY_ENV),
-        # The two neighbouring probes acquire network dependencies this suite
-        # has no business on; their own rows are asserted in their own suites.
+        # The neighbouring probes acquire network dependencies this suite has
+        # no business on; their own rows are asserted in their own suites.
+        # OMN-18944 added the third of them, whose row would otherwise land in
+        # this suite's warning count and in its active-issue list.
         "OMNINODE_CI_PROBE_ENABLED": "0",
         "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
+        "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
         "SLACK_BOT_TOKEN": "x",
         "SLACK_CHANNEL_ID": "C-TEST",
     }

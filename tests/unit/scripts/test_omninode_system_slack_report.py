@@ -390,6 +390,12 @@ def _run(
             # above; the fleet rows are asserted in
             # test_fleet_failure_sink_omn18942.py, which switches it back on.
             "OMNINODE_FLEET_PROBE_ENABLED": "0",
+            # OMN-18944: and the fourth. `collect()` also reads the backup freshness
+            # gate's latest run, which queries GitHub. Same reasoning as the three
+            # rows above; the backup rows are asserted in
+            # tests/scripts/test_postgres_backup_freshness_row_omn18944.py, which
+            # drives the check through its fetch seam against recorded payloads.
+            "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1844,6 +1850,12 @@ def _run_alert(
             # above; the fleet rows are asserted in
             # test_fleet_failure_sink_omn18942.py, which switches it back on.
             "OMNINODE_FLEET_PROBE_ENABLED": "0",
+            # OMN-18944: and the fourth. `collect()` also reads the backup freshness
+            # gate's latest run, which queries GitHub. Same reasoning as the three
+            # rows above; the backup rows are asserted in
+            # tests/scripts/test_postgres_backup_freshness_row_omn18944.py, which
+            # drives the check through its fetch seam against recorded payloads.
+            "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1947,6 +1959,12 @@ class _AlertTicker:
                 # above; the fleet rows are asserted in
                 # test_fleet_failure_sink_omn18942.py, which switches it back on.
                 "OMNINODE_FLEET_PROBE_ENABLED": "0",
+                # OMN-18944: and the fourth. `collect()` also reads the backup freshness
+                # gate's latest run, which queries GitHub. Same reasoning as the three
+                # rows above; the backup rows are asserted in
+                # tests/scripts/test_postgres_backup_freshness_row_omn18944.py, which
+                # drives the check through its fetch seam against recorded payloads.
+                "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
             }
         )
         env.update(self.extra_env)
