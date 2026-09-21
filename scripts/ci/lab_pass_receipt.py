@@ -2791,6 +2791,122 @@ def build_receipt(
     )
 
 
+#: The checks whose failure means THE RUN could not bind its observation, rather
+#: than the lane being unhealthy (OMN-18988). Membership alone is not the test:
+#: see :func:`is_binding_only_failure`, which reads ``deployed_revision``'s
+#: OUTCOME, because the same check also carries the lane's own convergence
+#: failure and those two must never be collapsed.
+BINDING_CLASS_CHECKS: Final[frozenset[str]] = frozenset(
+    {"deployed_revision", "probe_generation_bound"}
+)
+
+
+def is_binding_only_failure(receipt: ModelLabPassReceipt) -> bool:
+    """May this FAIL receipt be answered for by a later run?
+
+    Yes only when EVERY failing check is binding-class: the run could not bind
+    its observation to the thing under test, rather than the thing under test
+    being unhealthy.
+
+    WHY THIS EXISTS. Measured on ``430ff3434``: ``deployed_revision``
+    INDETERMINATE with ``commands_ahead`` ZERO, because the deploy agent
+    answered HTTP 404 for the run's own correlation id and the lane's budget
+    never started; plus ``probe_generation_bound``, because the probe read a
+    different container generation than convergence verified. The lane had
+    converged and was running the sha. Neither failure says anything about the
+    lane, and frozen as FAIL both are inherited by every merge behind them.
+
+    THE LINE THIS DRAWS, and it is the whole function. A receipt whose health
+    checks genuinely failed is NEVER re-emittable: turning a real finding into
+    a PASS is strictly worse than the wrong FAIL this removes. So:
+
+    * ``deployed_revision`` counts ONLY with outcome ``INDETERMINATE``. The same
+      check with outcome ``FAIL`` is the lane having had its whole budget and
+      not converged -- a statement about the lane. Keying on the check NAME
+      alone would collapse the two, which is the easiest way to get this wrong.
+    * ``probe_generation_bound`` is binding by construction: its failure says
+      the reads were about a different container generation, never that the
+      lane is unwell.
+    * ONE non-binding failure poisons the whole receipt. There is no partial
+      re-emission.
+    """
+    if receipt.result is not EnumLabPassResult.FAIL:
+        return False
+    failing = [c for c in receipt.checks if not c.ok]
+    if not failing:
+        return False
+    for check in failing:
+        if check.name not in BINDING_CLASS_CHECKS:
+            return False
+        if (
+            check.name == "deployed_revision"
+            and check.outcome is not EnumLabPassCheckOutcome.INDETERMINATE
+        ):
+            return False
+    return True
+
+
+@dataclass(frozen=True)
+class ModelLaneBinding:
+    """Which surface established that the lane runs code containing a sha."""
+
+    sha: str
+    surface: str
+    observed: str
+
+    @property
+    def converged_via(self) -> str:
+        """The provenance string a re-emitted receipt carries.
+
+        It names the SURFACE as well as the revision, because "the lane was on
+        something containing this" and "the container label said so" are
+        different strengths of claim, and a reader of a re-emitted PASS is
+        entitled to know which one they have.
+        """
+        return f"{self.observed} via {self.surface}"
+
+
+def resolve_lane_binding(
+    *,
+    sha: str,
+    container_revision: str | None,
+    agent_loaded_code_sha: str | None,
+    ready_version_revision: str | None,
+    contains: Callable[[str, str], bool],
+) -> ModelLaneBinding | None:
+    """Establish, from the lane itself, that it runs code containing ``sha``.
+
+    OMN-18988. A re-emission cannot INHERIT the converged run's binding: that
+    run's receipt failed precisely because it could not bind its own
+    observation. So the binding is re-established here, against the live lane,
+    across three independent surfaces read in descending directness:
+
+    1. the container's own revision label,
+    2. the deploy agent's recorded ``loaded_code_sha``,
+    3. the runtime's ``/ready`` version.
+
+    THE FIRST SURFACE TO ESTABLISH CONTAINMENT WINS, and a surface that merely
+    ANSWERS does not veto the others. That asymmetry is deliberate: a container
+    label can lag a restart while the agent has already recorded the new code,
+    so treating a readable-but-non-containing surface as a refusal would make
+    the common case unbindable.
+
+    ALL THREE SILENT IS A REFUSAL, and so is all three answering without
+    containment. Nothing bound means nothing may be claimed; emitting on a
+    guess is the fabrication this whole change exists to avoid.
+    """
+    for surface, observed in (
+        ("container-revision", container_revision),
+        ("agent-loaded-code-sha", agent_loaded_code_sha),
+        ("ready-version", ready_version_revision),
+    ):
+        if not observed:
+            continue
+        if contains(sha, observed):
+            return ModelLaneBinding(sha=sha, surface=surface, observed=observed)
+    return None
+
+
 def reemit_receipt(source: ModelLabPassReceipt, sha: str) -> ModelLabPassReceipt:
     """Re-key a converged receipt onto a sha that was queued behind it.
 
