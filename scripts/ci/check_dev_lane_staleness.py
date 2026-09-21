@@ -594,17 +594,52 @@ class EnumConvergenceOutcome(StrEnum):
     expired. Nothing has been shown about the lane. It still exits non-zero and
     still leaves the receipt non-PASS, so rule 24(b) stays closed; it changes
     what the receipt says, not what it permits.
+
+    ``QUEUED`` is a statement about the QUEUE, and it is the one outcome that
+    emits NO RECEIPT (OMN-18976). The wait never started, because the deploy
+    agent holds commands ahead of this one and the horizon is longer than this
+    window can outlast -- the refusal :func:`queue_exceeds_bound` already
+    returns, whose own text ends "this asserts nothing about the lane".
+
+    Why it cannot be ``INDETERMINATE``. That value maps onto a lab-pass check
+    with ``ok: false``, and the receipt verdict rule is "PASS iff every check
+    passed", so a queued merge was emitted as a terminal ``FAIL`` and rule
+    24(b) refused a sha whose only fault was being second in line. Measured on
+    the .201 dev lane over two consecutive merges, each probed while the lane
+    still carried the PREVIOUS sha: artifact 10622202672 (``22a0ca18``, lane at
+    ``08db8946``) and artifact 10623436027 (``4277d6e9``, lane at
+    ``22a0ca18``), both FAIL on this check alone. Under a steady merge rate the
+    queue never drains inside one verify window, so that was the normal outcome
+    for a busy period, not an edge case.
+
+    Why NO receipt rather than a fourth check outcome. :class:`EnumLabPassResult`
+    is deliberately two-valued and states the contract: an in-flight or
+    indeterminate lab pass emits no receipt at all rather than a ``PENDING``
+    one, so the gate's "absent" branch and its "not yet passing" branch are the
+    same branch and both fail closed. A merge whose turn has not come is in
+    flight. **Nothing opens** -- the sha is still refused -- but the refusal is
+    now recoverable by a later convergence instead of being contradicted
+    forever by a FAIL artifact that says the lane misbehaved.
     """
 
     OK = "ok"
     FAIL = "fail"
     INDETERMINATE = "indeterminate"
+    QUEUED = "queued"
 
 
 #: The exit code the convergence mode returns for an unestablished budget.
 #: Distinct from 1 so a caller reading only the exit status can still tell the
 #: two apart, and non-zero so nothing treats it as a pass.
 EXIT_INDETERMINATE: Final[int] = 3
+
+#: The exit code the convergence mode returns when the wait never started,
+#: because the deploy agent's queue ahead of this command is longer than this
+#: window can outlast (OMN-18976). Distinct from ``EXIT_INDETERMINATE`` because
+#: the two call for different handling: an indeterminate run still writes a
+#: receipt saying it learnt nothing, and a queued one writes NO receipt at all.
+#: Non-zero, so nothing reads it as a pass.
+EXIT_QUEUED: Final[int] = 4
 
 _CORRELATION_ID_RE: Final = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -801,6 +836,12 @@ def convergence_check_outcome(outcome: EnumConvergenceOutcome) -> Any:
 
     Lives here rather than in the workflow's shell, because a mapping written
     in a ``run:`` block is a mapping nothing tests.
+
+    ``QUEUED`` maps to ``None``, which means NO CHECK AND THEREFORE NO RECEIPT
+    (OMN-18976). It is the only outcome that does. Every other value maps onto
+    a check exactly as it did before, and ``KeyError`` on an unknown outcome is
+    deliberate: a fifth verdict must decide this question rather than inherit
+    an answer.
     """
     from scripts.ci.lab_pass_receipt import EnumLabPassCheckOutcome
 
@@ -808,6 +849,7 @@ def convergence_check_outcome(outcome: EnumConvergenceOutcome) -> Any:
         EnumConvergenceOutcome.OK: EnumLabPassCheckOutcome.PASS,
         EnumConvergenceOutcome.FAIL: EnumLabPassCheckOutcome.FAIL,
         EnumConvergenceOutcome.INDETERMINATE: EnumLabPassCheckOutcome.INDETERMINATE,
+        EnumConvergenceOutcome.QUEUED: None,
     }[outcome]
 
 
@@ -1348,8 +1390,16 @@ def run_convergence_wait(
         )
         if refusal:
             now = clock()
+            # OMN-18976. QUEUED, not INDETERMINATE. The refusal above ends
+            # "this asserts nothing about the lane", and INDETERMINATE maps
+            # onto a check with ``ok: false``, so this branch was emitting a
+            # terminal FAIL receipt and rule 24(b) was refusing a sha whose
+            # only fault was being behind another deploy. QUEUED emits no
+            # receipt at all, which is what EnumLabPassResult's own contract
+            # says an in-flight pass does, and the gate's absent branch keeps
+            # the sha refused exactly as before.
             return ModelConvergenceResult(
-                outcome=EnumConvergenceOutcome.INDETERMINATE,
+                outcome=EnumConvergenceOutcome.QUEUED,
                 reason=refusal,
                 lane=lane,
                 ancestry=ancestry,
@@ -2174,7 +2224,19 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
     # OUTPUT rather than the step's exit status because the status has two
     # values and this has three; the workflow still falls back to the status
     # when the step died before writing anything.
-    _write_output("verdict", convergence_check_outcome(result.outcome).value)
+    #
+    # OMN-18976: a QUEUED verdict maps to NO check, so the verdict output
+    # carries the convergence outcome's own name and `emit_receipt` tells the
+    # workflow not to write a receipt at all. Publishing both, rather than
+    # making the emit step re-derive one from the other, keeps the decision in
+    # the module that made it -- a mapping written in a `run:` block is a
+    # mapping nothing tests.
+    check_outcome = convergence_check_outcome(result.outcome)
+    _write_output(
+        "verdict",
+        result.outcome.value if check_outcome is None else check_outcome.value,
+    )
+    _write_output("emit_receipt", "false" if check_outcome is None else "true")
 
     # OMN-18143. Read AFTER the wait, because the agent folds a command when it
     # DEQUEUES it, which is normally after this guard started watching. The
@@ -2245,6 +2307,13 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
     if result.outcome is EnumConvergenceOutcome.OK:
         print(f"[ok] {evidence}")
         return 0
+    if result.outcome is EnumConvergenceOutcome.QUEUED:
+        # OMN-18976. Not a finding about anything: this merge's turn has not
+        # come. No receipt is written, so the gate's absent branch keeps the
+        # sha refused and a later convergence can still answer for it, instead
+        # of a FAIL artifact asserting forever that the lane misbehaved.
+        print(f"::notice::{evidence}")
+        return EXIT_QUEUED
     if result.outcome is EnumConvergenceOutcome.INDETERMINATE:
         print(f"::warning::{evidence}")
         return EXIT_INDETERMINATE

@@ -762,8 +762,28 @@ jobs:
       # it: a FAILED lab pass is the record the gate needs in order to tell
       # "it failed" apart from "nobody ran it". The emit step exits non-zero on
       # a FAIL receipt, so the failure stays visible on this run.
+      #
+      # THE ONE EXCEPTION, OMN-18976: a merge whose turn in the deploy agent's
+      # queue has not come writes NO receipt. The guard publishes
+      # `emit_receipt: false` for exactly that verdict and nothing else, and
+      # the condition below reads that output rather than re-deriving it here,
+      # because a mapping written in a `run:` block is a mapping nothing tests.
+      #
+      # This does NOT re-open the "it failed" versus "nobody ran it" ambiguity
+      # the always() exists for. Those are both statements about a run that
+      # HAPPENED; a queued merge is one that has not started, and
+      # EnumLabPassResult's own contract is that an in-flight pass emits no
+      # receipt rather than a PENDING one. Nothing opens either: the delivery
+      # gate's absent branch and its not-yet-passing branch are the same
+      # branch, and both fail closed. What changes is that the refusal stays
+      # recoverable by a later convergence instead of being contradicted
+      # forever by a FAIL artifact claiming the lane misbehaved.
+      #
+      # An empty value emits, deliberately. A guard that died before writing
+      # any output has not earned the suppression, and the old behaviour —
+      # write the receipt — is the safe side of that ambiguity.
       - name: Emit the compose-dev lab-pass receipt
-        if: always()
+        if: always() && steps.converge.outputs.emit_receipt != 'false'
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
           # OMN-18573. The receipt's typed agent_command_id, which every
