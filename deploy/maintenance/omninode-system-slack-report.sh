@@ -911,6 +911,62 @@ check_runner_tree_converge() {
   printf 'runner-tree|OK|converge|%s, last clean convergence %sh ago\n' "$verdict" "$age_hours"
 }
 
+# OMN-18942: surface FLEET failures -- red scheduled workflows across every
+# repository that has one, and the rule 24(b) lab-pass state of the `dev` head.
+#
+# WHY IT LIVES HERE. The 2026-09-20 silent-gates review measured that no chat
+# secret of any name exists at GitHub Actions organisation scope or in any
+# repository scope. The fleet's only failure-rate alerter (OMN-18254 /
+# OMN-18322) therefore runs correctly every ten minutes, names fifteen
+# continuously-red scheduled workflows, and its last log line is that Slack is
+# not configured. The mechanism was never broken; it had no destination.
+#
+# This host has one. Folding the findings in here rather than minting a Slack
+# credential into GitHub Actions is the net-negative-surface rule -- the same
+# argument `check_ci_required_contexts` and `check_runner_tree_converge` above
+# are here on. They inherit this script's Slack poster, its per-key
+# state-change de-duplication, its hysteresis, its resolved-notification and
+# its */15 cron. No new cron unit, no new Slack app, no new credential, and no
+# fourth copy of a bot token that already works.
+#
+# The probe emits `fleet|STATUS|key|detail` rows, read by `row_status()` at
+# column 2 and de-duplicated by `row_key()` as `fleet|<key>`. Every "could not
+# look" outcome is a row naming the reason -- an unreadable source is never an
+# empty green, because an absent finding set and an unevaluated finding set are
+# the two states this whole family exists to tell apart.
+check_fleet_failures() {
+  # Installed side by side in /data/maintenance/bin by the host maintenance
+  # sync, so `dirname $0` resolves it on the host. In the repo it lives under
+  # scripts/ beside the required-context probe, for the same reason.
+  local probe="${OMNINODE_FLEET_PROBE_SCRIPT:-$(dirname "$0")/omninode-fleet-failure-probe.py}"
+  local python_bin="${OMNINODE_FLEET_PROBE_PYTHON:-python3}"
+
+  if [[ "${OMNINODE_FLEET_PROBE_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$probe" ]]; then
+    printf 'fleet|WARNING|probe|probe script missing or unreadable at %s\n' "$probe"
+    return 0
+  fi
+  if ! command -v "$python_bin" >/dev/null 2>&1; then
+    printf 'fleet|WARNING|probe|%s not found; fleet failure probe did not run\n' "$python_bin"
+    return 0
+  fi
+
+  local out
+  # The expensive sweep refreshes in a DETACHED child, so this call is a cache
+  # read plus a handful of artifact queries and is bounded well under a tick.
+  if ! out=$(timeout "${OMNINODE_FLEET_PROBE_TIMEOUT:-300}" "$python_bin" "$probe" 2>/dev/null); then
+    printf 'fleet|WARNING|probe|probe exited non-zero or timed out; fleet failure state unknown\n'
+    return 0
+  fi
+  if [[ -z "$out" ]]; then
+    printf 'fleet|WARNING|probe|probe produced no rows; fleet failure state unknown\n'
+    return 0
+  fi
+  printf '%s\n' "$out"
+}
+
 collect() {
   local now host root data root_status data_status running unhealthy restarting dead created
   local dangling named_dangling anonymous_dangling docker_status docker_detail
@@ -1010,6 +1066,7 @@ collect() {
     check_http web-3003 "http://${PROBE_HOST}:3003/" ''
     check_ci_required_contexts
     check_runner_tree_converge
+    check_fleet_failures
   }
 }
 
@@ -1161,8 +1218,19 @@ rm -f "$current_keys_file" "$prev_state_file"
 
 # Atomic swap: a crash mid-write must not leave a truncated state file that
 # reads as "no issues known" and re-pages everything.
-printf '%s\n' "$decisions" | awk -F'\t' -v OFS='\t' '$1=="STATE" { $1=""; sub(/^\t/, ""); print }' >"${state_file}.tmp"
-mv -f "${state_file}.tmp" "$state_file"
+#
+# NOT IN dry-run (OMN-18942). The decisions above are computed in every mode,
+# but only `alert` posts. Persisting them from a dry run therefore records
+# `notified=1` for keys NOBODY WAS TOLD ABOUT, and the next real tick reads
+# that as "already paged" and stays silent -- so the documented way to inspect
+# this reporter would silently swallow the first alert for every standing
+# issue. Found while building the fleet failure sink, whose own proof
+# procedure is a dry run on the host. A dry run must be able to look at the
+# state machine without changing it.
+if [[ "$MODE" != "dry-run" ]]; then
+  printf '%s\n' "$decisions" | awk -F'\t' -v OFS='\t' '$1=="STATE" { $1=""; sub(/^\t/, ""); print }' >"${state_file}.tmp"
+  mv -f "${state_file}.tmp" "$state_file"
+fi
 
 new_keys=$(awk -F'\t' '$1=="NEW"       { print $2 " (" $3 ")" }' <<<"$decisions")
 renotify_keys=$(awk -F'\t' '$1=="RENOTIFY"  { print $2 " (" $3 ")" }' <<<"$decisions")
@@ -1170,7 +1238,7 @@ recovered_keys=$(awk -F'\t' '$1=="RECOVERED" { print $2 }' <<<"$decisions")
 
 format_digest() {
   local title="$1"
-  local lines endpoint_lines ci_lines tree_lines issue_lines
+  local lines endpoint_lines ci_lines tree_lines fleet_lines issue_lines
   lines=$(awk -F'|' '$1=="disk" {printf "- `%s`: %s, %s, %s (%s)\n", $3, $4, $5, $6, $2} $1=="docker" {printf "- Docker `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   # STARTING is rendered here with the rest (OMN-18435). A booting lane that
   # vanished from this section would be the BLIND direction of monitor failure,
@@ -1187,9 +1255,15 @@ format_digest() {
   # an absent section that reads as healthy.
   tree_lines=$(awk -F'|' '$1=="runner-tree" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   [[ -n "$tree_lines" ]] || tree_lines="- No runner clone-tree verdict this tick"
+  # OMN-18942. Same reasoning as the two heartbeats above: the fleet section
+  # renders even when clean, so "swept thirteen repos and found nothing" and
+  # "the sweep never ran" are distinguishable in the digest rather than both
+  # rendering as an absent section a reader takes for health.
+  fleet_lines=$(awk -F'|' '$1=="fleet" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$fleet_lines" ]] || fleet_lines="- No fleet failure rows this tick"
   # `next` keeps the three row shapes mutually exclusive so a `ci` row cannot
   # also be rendered by the generic column-2 branch below it.
-  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
+  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree" || $1=="fleet") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
   if [[ -z "$issue_lines" ]]; then
     issue_lines="- No active warning/critical checks"
   fi
@@ -1206,6 +1280,8 @@ $endpoint_lines
 $ci_lines
 *Runner clone tree*
 $tree_lines
+*Fleet failures*
+$fleet_lines
 *Active issues*
 $issue_lines
 MSG

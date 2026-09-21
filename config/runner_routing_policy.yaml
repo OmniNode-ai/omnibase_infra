@@ -920,6 +920,47 @@ route:
     # clear a sample size worth a percentage, short enough that the alert
     # reflects current behavior rather than an outage that was fixed weeks ago.
     scheduled_window_days: 7
+    # THE FLEET REPOSITORY LIST, DECLARED ONCE (OMN-18942).
+    #
+    # Until this key existed the list was three repository names written as
+    # literals into the run step of `.github/workflows/pr-ci-zombie-detector.yml`,
+    # and the 2026-09-20 silent-gates review measured what that cost: the
+    # registry repository's cross-repo drift detector had failed 12 of 12 daily
+    # runs since 2026-09-09 and was outside the fleet's only alerter BY
+    # CONSTRUCTION, so no amount of it being red could ever reach anybody.
+    #
+    # DERIVED, NOT HAND-LISTED. Every canonical-registry repository that
+    # declares at least one scheduled workflow. Re-derive rather than edit from
+    # memory, from a checkout of the registry:
+    #
+    #   for r in <registry repos>; do
+    #     grep -rlE '^\s*schedule:' "$r/.github/workflows" | wc -l
+    #   done
+    #
+    # Measured 2026-09-20: omnibase_infra 32, omninode_infra 14, omniclaude 7,
+    # omnimarket 5, omnibase_core 4, omniweb 4, omni_home 3,
+    # onex_change_control 3, omnibase_compat 2, omniintelligence 2,
+    # omnimemory 2, omnibase_spi 1, omnidash 1. `knowledge-base` declares none
+    # and is therefore absent -- absent because it has nothing to watch, not
+    # because anybody decided not to watch it.
+    #
+    # Being in this list is what makes a repository's scheduled surface
+    # governed, the same posture as the maintenance-sync MANIFEST and the
+    # required-context probe's own repo set.
+    fleet_repos:
+      - omnibase_core
+      - omnibase_compat
+      - omnibase_infra
+      - omnibase_spi
+      - omniclaude
+      - omnidash
+      - omniintelligence
+      - omnimarket
+      - omnimemory
+      - omni_home
+      - omninode_infra
+      - omniweb
+      - onex_change_control
     # ABSENT FROM required_status_checks IS NOT THE SAME AS UNENFORCED.
     # omnibase_infra requires exactly ONE context on dev - the CI Summary
     # umbrella - whose poller fails on any job in its own run that concludes
