@@ -1823,6 +1823,17 @@ class TestCancellationGraceFailsClosedOmn18355:
 SWEEP_FIXTURE = REPO_ROOT / "tests/ci/fixtures/omn18960_external_sweep_check_runs.json"
 
 
+def _ci_summary_poll_step_text() -> str:
+    """The `run:` body of the ci-summary job's poll step, read from ci.yml."""
+
+    job = _load_workflow(CI_WORKFLOW)["jobs"]["ci-summary"]
+    steps = [
+        st for st in job["steps"] if "ci_summary_gate.py" in str(st.get("run") or "")
+    ]
+    assert len(steps) == 1, f"expected one poll step, found {len(steps)}"
+    return str(steps[0]["run"])
+
+
 def _sweep_fixture() -> dict[str, Any]:
     return json.loads(SWEEP_FIXTURE.read_text(encoding="utf-8"))
 
@@ -2366,3 +2377,86 @@ class TestExternalSweepAgainstRealHeads:
             "no unattributable row — the fail-closed arm is untested"
         )
         assert len(events) > 40
+
+
+class TestTheSweepIsWiredIntoTheProductionPoller:
+    """The module can be perfect and the gate still ship inert.
+
+    ``tests/ci/test_gate_cli_passes_a_clock_omn17864.py`` records the incident
+    this guards against in full: a sibling port changed the gate module and not
+    that repository's poller, every unit test passed, strict type checking
+    passed, and the gate shipped COMPLETELY INERT. Layer 5 has the same shape —
+    with no ``--workflow-runs-file`` the sweep still runs, but its event
+    scoping resolves nothing, and with no CI change at all nothing would have
+    told anyone. These two assertions are the wiring.
+    """
+
+    def test_main_forwards_the_workflow_runs_file_to_evaluate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from scripts.ci import ci_summary_gate
+
+        captured: dict[str, Any] = {}
+
+        def _fake_evaluate(_jobs: object, **kwargs: object) -> tuple[int, str]:
+            captured.update(kwargs)
+            return ci_summary_gate.EXIT_PENDING, "stubbed"
+
+        monkeypatch.setattr(ci_summary_gate, "evaluate", _fake_evaluate)
+        (tmp_path / "jobs.json").write_text("[]", encoding="utf-8")
+        (tmp_path / "check_runs.json").write_text(
+            '{"check_runs": []}', encoding="utf-8"
+        )
+        (tmp_path / "workflow_runs.json").write_text(
+            '{"workflow_runs": [{"id": 7, "event": "push"}]}', encoding="utf-8"
+        )
+        ci_summary_gate.main(
+            [
+                "--jobs-file",
+                str(tmp_path / "jobs.json"),
+                "--check-runs-file",
+                str(tmp_path / "check_runs.json"),
+                "--workflow-runs-file",
+                str(tmp_path / "workflow_runs.json"),
+            ]
+        )
+        assert captured["workflow_runs"] == [{"id": 7, "event": "push"}]
+
+    def test_an_unreadable_workflow_runs_file_sweeps_rather_than_exempts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from scripts.ci import ci_summary_gate
+
+        captured: dict[str, Any] = {}
+
+        def _fake_evaluate(_jobs: object, **kwargs: object) -> tuple[int, str]:
+            captured.update(kwargs)
+            return ci_summary_gate.EXIT_PENDING, "stubbed"
+
+        monkeypatch.setattr(ci_summary_gate, "evaluate", _fake_evaluate)
+        (tmp_path / "jobs.json").write_text("[]", encoding="utf-8")
+        ci_summary_gate.main(
+            [
+                "--jobs-file",
+                str(tmp_path / "jobs.json"),
+                "--workflow-runs-file",
+                str(tmp_path / "does-not-exist.json"),
+            ]
+        )
+        assert captured["workflow_runs"] is None
+
+    def test_the_poller_fetches_the_runs_and_passes_the_flag(self) -> None:
+        """Read off ci.yml itself, so a module-only change is a RED test."""
+
+        step = _ci_summary_poll_step_text()
+        assert "actions/runs?head_sha=${HEAD_SHA}&per_page=100" in step, (
+            "the poller does not fetch the workflow runs, so layer 5 resolves "
+            "no events and every row is swept blind"
+        )
+        assert "--workflow-runs-file workflow_runs.json" in step, (
+            "the poller does not pass the workflow-runs file to the gate"
+        )
+        assert "rm -f check_runs.json workflow_runs.json" in step, (
+            "a stale workflow_runs.json from an earlier poll would attribute "
+            "rows against the wrong index"
+        )
