@@ -69,6 +69,7 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     # its onex-api image. A third claim about a third repository's commits; the
     # three artifact names cannot collide because each carries its own sha.
     "lab-pass-receipt-compose-dev-onex-api",
+    "lab-pass-receipt-compose-dev-reemitted",
     # OMN-18268: the same lane, keyed by a SIBLING repository's merged sha.
     "lab-pass-receipt-compose-dev-sibling",
     "lab-pass-receipt-onex-lab",

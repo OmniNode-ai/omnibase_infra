@@ -2005,12 +2005,17 @@ class TestExternalDefaultDenySweep:
         )
         assert code == EXIT_SUCCESS, report
 
-    def test_a_skip_inside_the_rerun_window_still_waits(self) -> None:
-        """The bar changed; the graces did not.
+    def test_a_skip_inside_the_rerun_window_is_pending_not_a_quiet_pass(
+        self,
+    ) -> None:
+        """OMN-18991 changed this from SUCCESS to PENDING, deliberately.
 
         `skipped` is in this module's supersedable set, so a skip whose
-        producer is demonstrably about to re-run is still held rather than
-        turned into a terminal refusal by the stricter bar.
+        producer is demonstrably about to re-run is held rather than turned
+        into a terminal refusal. It used to be held by passing QUIETLY, which
+        is a hole: a replacement that never arrived was never re-examined. It
+        is now PENDING, so the poller looks again, and the same row reds with
+        a named reason once the grace closes.
         """
         rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
         rows.append(
@@ -2028,63 +2033,8 @@ class TestExternalDefaultDenySweep:
             external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
             now=NOW,
         )
-        assert code == EXIT_SUCCESS, report
-
-    def test_a_cancelled_row_waits_inside_the_grace_and_fails_outside_it(self) -> None:
-        """Layer 5 reuses the OMN-18355 grace rather than inventing a second one."""
-        inside = _row(
-            "Some Unregistered Gate",
-            "cancelled",
-            completed_at=(NOW - timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        )
-        outside = _row(
-            "Some Unregistered Gate",
-            "cancelled",
-            completed_at=(NOW - timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        )
-        base = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
-        assert (
-            evaluate(
-                _all_gates("success"),
-                check_runs=base + [inside],
-                external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
-                now=NOW,
-            )[0]
-            == EXIT_SUCCESS
-        )
-        assert (
-            evaluate(
-                _all_gates("success"),
-                check_runs=base + [outside],
-                external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
-                now=NOW,
-            )[0]
-            == EXIT_FAILURE
-        )
-
-    def test_a_still_running_row_is_reported_and_does_not_hold_the_verdict(
-        self,
-    ) -> None:
-        """The documented residual, pinned so a later change has to argue with it."""
-        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
-        rows.append(
-            _row(
-                "Some Unregistered Gate",
-                None,
-                status="in_progress",
-                completed_at=None,
-            )
-        )
-        code, report = evaluate(
-            _all_gates("success"),
-            check_runs=rows,
-            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
-            now=NOW,
-        )
-        assert code == EXIT_SUCCESS, report
-        assert (
-            "still running (reported, not waited on): Some Unregistered Gate" in report
-        )
+        assert code == EXIT_PENDING, report
+        assert "awaiting an automatic replacement" in report
 
     def test_an_in_run_job_is_not_double_judged_by_layer_five(self) -> None:
         """A soft-allowlisted in-run job also appears as a check-run.
@@ -2383,7 +2333,7 @@ class TestExternalSweepAgainstRealHeads:
         the count is asserted beside the verdict.
         """
         head = _sweep_head(pr)
-        failures, _in_flight, swept, _excluded = evaluate_external_sweep(
+        failures, _in_flight, swept, _excluded, _prov = evaluate_external_sweep(
             _at_merge(head),
             expected=EXPECTED_EXTERNAL_CONTEXTS,
             in_run_names=frozenset(head["in_run_job_names"]),
@@ -2404,7 +2354,7 @@ class TestExternalSweepAgainstRealHeads:
         entries did their work.
         """
         head = _sweep_head(pr)
-        failures, _in_flight, _swept, _excluded = evaluate_external_sweep(
+        failures, _in_flight, _swept, _excluded, _prov = evaluate_external_sweep(
             _at_merge(head),
             expected=EXPECTED_EXTERNAL_CONTEXTS,
             in_run_names=frozenset(head["in_run_job_names"]),
@@ -2429,7 +2379,7 @@ class TestExternalSweepAgainstRealHeads:
         see a row that does not exist yet.
         """
         head = _sweep_head(pr)
-        failures, _in_flight, _swept, _excluded = evaluate_external_sweep(
+        failures, _in_flight, _swept, _excluded, _prov = evaluate_external_sweep(
             head["check_runs_all"],
             expected=EXPECTED_EXTERNAL_CONTEXTS,
             in_run_names=frozenset(head["in_run_job_names"]),
@@ -2451,7 +2401,7 @@ class TestExternalSweepAgainstRealHeads:
         assert any(r["name"] == target for r in rows)
 
         def _run(payload: list[dict[str, Any]]) -> list[str]:
-            failures, _f, _s, _e = evaluate_external_sweep(
+            failures, _f, _s, _e, _p = evaluate_external_sweep(
                 payload,
                 expected=EXPECTED_EXTERNAL_CONTEXTS,
                 in_run_names=frozenset(head["in_run_job_names"]),
@@ -2565,3 +2515,239 @@ class TestTheSweepIsWiredIntoTheProductionPoller:
             "a stale workflow_runs.json from an earlier poll would attribute "
             "rows against the wrong index"
         )
+
+
+class TestSupersededCancellationOrdering:
+    """OMN-18979: a cancelled superseded attempt must not outrank its replacement.
+
+    Raised against the merged sweep: a superseding attempt cancels a job, the
+    head then carries both a cancelled row and a successful one for the same
+    context name, and the sweep reported the cancelled one on a pull request
+    whose tests had all passed. A rerun cleared it.
+
+    MEASURED BEFORE CHANGING ANYTHING, because the two directions named in the
+    report already behaved correctly. Across 5 recent heads carrying 8 names
+    with BOTH a cancelled and a successful row, latest-wins picked the
+    cancelled row ZERO times. The reachable hazard is narrower and is the
+    third case below: `started_at` is second-granular, so a cancellation
+    written in the same second as its replacement fell through to the
+    check-run id, which orders by CREATION and can put the cancellation last.
+    """
+
+    @staticmethod
+    def _pair(
+        first: tuple[int, str, str, str], second: tuple[int, str, str, str]
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": i,
+                "name": "Gate X",
+                "status": "completed",
+                "conclusion": c,
+                "started_at": s,
+                "completed_at": e,
+                "head_sha": "a" * 40,
+            }
+            for (i, c, s, e) in (first, second)
+        ]
+
+    def _sweep(self, rows: list[dict[str, Any]]) -> list[str]:
+        failures, _f, _s, _e, _p = evaluate_external_sweep(
+            rows,
+            expected=(),
+            in_run_names=frozenset(),
+            self_name="CI Summary",
+            exclusions={},
+            events={},
+            now=NOW,
+        )
+        return failures
+
+    def test_cancelled_then_succeeded_reads_green(self) -> None:
+        """The replacement is the verdict about the head."""
+        rows = self._pair(
+            (1, "cancelled", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "success", "2026-09-20T10:05:00Z", "2026-09-20T10:09:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "success"
+        assert self._sweep(rows) == []
+
+    def test_succeeded_then_cancelled_still_reads_red(self) -> None:
+        """The other direction must NOT be relaxed.
+
+        A cancellation that genuinely comes last is the newest thing known
+        about the head, and treating it as green because an older success
+        exists is the stale-green this module must never manufacture.
+        """
+        rows = self._pair(
+            (1, "success", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "cancelled", "2026-09-20T10:05:00Z", "2026-09-20T10:09:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "cancelled"
+        failures = self._sweep(rows)
+        assert len(failures) == 1, failures
+        # OMN-18991: a settled cancellation reports its own reason token and
+        # names the remedy, because a re-run clears it and a code change does
+        # not. A reader who cannot tell those apart hunts a defect that is
+        # not in the diff.
+        assert failures[0].startswith("Gate X (cancelled_without_replacement:")
+        assert "re-running the producer clears it" in failures[0]
+
+    def test_a_same_second_pair_is_ordered_by_completion_not_by_id(self) -> None:
+        """THE case the refinement fixes, and the red test for it.
+
+        Both rows share a `started_at`, and the cancellation carries the
+        HIGHER check-run id because ids order by creation. Under the previous
+        tie-break the cancellation won and the sweep reddened a head whose
+        replacement had already succeeded.
+        """
+        rows = self._pair(
+            (9, "cancelled", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "success", "2026-09-20T10:00:00Z", "2026-09-20T10:02:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "success"
+        assert self._sweep(rows) == []
+
+    def test_a_same_second_pair_still_reds_when_the_cancellation_completed_last(
+        self,
+    ) -> None:
+        """The mirror of the case above, so the refinement is not a blanket pass."""
+        rows = self._pair(
+            (9, "success", "2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"),
+            (2, "cancelled", "2026-09-20T10:00:00Z", "2026-09-20T10:02:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "cancelled"
+        failures = self._sweep(rows)
+        assert len(failures) == 1, failures
+        # OMN-18991: a settled cancellation reports its own reason token and
+        # names the remedy, because a re-run clears it and a code change does
+        # not. A reader who cannot tell those apart hunts a defect that is
+        # not in the diff.
+        assert failures[0].startswith("Gate X (cancelled_without_replacement:")
+        assert "re-running the producer clears it" in failures[0]
+
+    def test_the_refinement_changes_nothing_when_started_at_differs(self) -> None:
+        """Every case measured on this repository has distinct start times.
+
+        Pinning that keeps the change a refinement: a later id can still break
+        a full tie, and the ordering on distinct start times is untouched.
+        """
+        rows = self._pair(
+            (99, "failure", "2026-09-20T10:00:00Z", "2026-09-20T10:30:00Z"),
+            (1, "success", "2026-09-20T10:05:00Z", "2026-09-20T10:06:00Z"),
+        )
+        assert latest_check_run_rows(rows)["Gate X"]["conclusion"] == "success"
+
+
+class TestLoneCancellationOnBothSidesOfTheGrace:
+    """OMN-18991, the ruling's case, and the one the field report actually hit.
+
+    MEASURED on omnibase_infra#3913, head 236f36698. Three gate contexts were
+    cancelled at 10:39:56Z by a superseding attempt. The poller's final
+    verdict landed at 10:50:36Z, forty seconds after the grace closed, and it
+    failed on those cancellations. The successful replacements started at
+    10:53:42Z, THREE MINUTES after the poller gave up. Reading that head now
+    shows six rows and resolves green under both the old ordering key and the
+    new one, which is why the report read as a collapse bug and was not one:
+    at verdict time there was ONE row per name and it was the cancellation.
+
+    The replacement took 13 minutes 45 seconds against a grace of ten. That
+    gap is reported as a measurement, not silently widened.
+
+    The ruling: inside the grace a lone cancellation is PENDING; outside it
+    reds, under a reason that names the remedy so the reader knows a re-run
+    clears it rather than a code change.
+    """
+
+    @staticmethod
+    def _lone_cancellation(age_s: int) -> list[dict[str, Any]]:
+        """One cancelled row and NO replacement, aged `age_s` seconds."""
+
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(
+            _row(
+                "Superseded Gate",
+                "cancelled",
+                completed_at=(NOW - timedelta(seconds=age_s)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+            )
+        )
+        return rows
+
+    def test_inside_the_grace_it_is_pending_and_not_a_pass(self) -> None:
+        """A replacement is demonstrably due, so the poller looks again.
+
+        PENDING rather than SUCCESS matters: passing quietly would let a
+        cancellation that is never replaced through on the next poll's
+        silence, which is the hole this closes.
+        """
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=self._lone_cancellation(CANCELLED_SUPERSESSION_GRACE_S - 60),
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_PENDING, report
+        assert "Superseded Gate" in report
+        assert "awaiting an automatic replacement" in report
+
+    def test_outside_the_grace_it_reds_under_its_own_named_reason(self) -> None:
+        """And the reason says what to do, not only what happened."""
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=self._lone_cancellation(CANCELLED_SUPERSESSION_GRACE_S + 60),
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, report
+        assert "cancelled_without_replacement" in report
+        assert "no replacement row" in report
+        assert "re-running the producer clears it" in report
+
+    def test_the_reason_is_distinct_from_an_ordinary_refusal(self) -> None:
+        """A producer saying no and a replacement never arriving are not the same.
+
+        Reporting both as `(cancelled)` sent a reader looking for a defect in
+        a diff that had none, which is what happened on #3913.
+        """
+        _c, ordinary = evaluate(
+            _all_gates("success"),
+            check_runs=[
+                *[_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS],
+                _row("Superseded Gate", "failure"),
+            ],
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert "Superseded Gate (failure)" in ordinary
+        assert "cancelled_without_replacement" not in ordinary
+
+    def test_a_replacement_on_the_same_head_clears_it_without_a_grace(self) -> None:
+        """The #3913 head as it reads NOW: the cancellation is not lone.
+
+        Once the replacement exists, resolution picks it and the age of the
+        cancellation stops mattering at all. This is the control that keeps
+        the two mechanisms apart: ordering handles a replaced cancellation,
+        the grace handles an unreplaced one.
+        """
+        rows = self._lone_cancellation(CANCELLED_SUPERSESSION_GRACE_S + 3600)
+        rows.append(
+            _row(
+                "Superseded Gate",
+                "success",
+                completed_at=(NOW - timedelta(seconds=10)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+            )
+        )
+        # the replacement started later, as it does on a real re-run
+        rows[-1]["started_at"] = "2026-09-20T23:00:00Z"
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+        assert "cancelled_without_replacement" not in report

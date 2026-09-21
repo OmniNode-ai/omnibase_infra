@@ -424,8 +424,13 @@ class TestTheServiceTimeSample:
                     superseded_by_correlation_id=uuid4(),
                 ),
             )
+        from datetime import UTC, datetime
+
         snapshot = compute_queue_snapshot(
-            store, ModelControlTopicLag(value=0, basis="committed")
+            store,
+            ModelControlTopicLag(
+                value=0, basis="committed", observed_at=datetime.now(UTC)
+            ),
         )
         assert snapshot.mean_service_time_seconds == pytest.approx(1800.0)
         assert snapshot.service_sample_size == 1

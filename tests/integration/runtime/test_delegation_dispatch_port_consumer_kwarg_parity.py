@@ -1,6 +1,43 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Keyword parity between the OmniMarket consumer protocol and the runtime port.
+"""Keyword parity between the OmniMarket consumer and the runtime port.
+
+THERE ARE THREE DIRECTIONS AND EACH NEEDS ITS OWN ASSERTION (OMN-18938).
+"Parity" reads like one property and is not. Naming only some of them is how
+this module was green through a fleet-wide outage in the exact seam it covers,
+while the protocol beside it cited this file as mechanical proof.
+
+    1. Everything the consumer DECLARES, this repo must accept.
+       ``test_runtime_port_accepts_every_keyword_the_consumer_declares``.
+       Catches OMN-18321: a keyword added on the consumer side alone.
+    2. Everything the consumer DEFAULTS must stay optional here.
+       ``test_consumer_optional_keywords_are_optional_on_the_runtime_port``.
+       Catches the inverse drift on a name both sides already know.
+    3. Everything this repo REQUIRES, the consumer must actually PASS.
+       ``test_every_required_keyword_is_one_the_consumer_passes``.
+       Catches OMN-18924/OMN-15504, and NOTHING ELSE DOES.
+
+Direction 3 was missing until OMN-18938, and its absence is not a gap in
+coverage so much as a gap in shape. Directions 1 and 2 both take the consumer's
+own names as their starting set, so a name the consumer has never heard of is
+outside the domain of both -- direction 2 looks the closest and still misses it,
+because its filter only considers names the consumer already declares. A
+newly-REQUIRED keyword on this side is by definition a name the consumer does
+not mention, so it fell through a check written to be exactly about this.
+
+WHAT THAT COST. ``omnibase_infra#3882`` added two required keyword-only
+arguments to ``dispatch()``; the deployed consumer passed neither. Every
+delegation on the dev lane terminalised ``provider_error`` with
+``RuntimeDelegationDispatchPort.dispatch() missing 2 required keyword-only
+arguments``, chain canary correlation ``b267d3bd-0f60-466e-8c8a-e7c60446e1f0``
+at 19:44Z on 2026-09-20. This module ran 3 passed, 0 failed against that tree.
+
+DIRECTION 3 READS THE CALL SITE, NOT THE PROTOCOL, and that distinction is the
+assertion rather than an implementation detail. The consumer's protocol is what
+it INTENDS; the ``dispatch(`` call in its handler is what actually executes and
+what raises the ``TypeError``. A consumer can declare a keyword in its protocol
+and not pass it, which is the failure verbatim.
+
 
 OMN-18321. On 2026-09-12 OMN-18172 (``omnimarket#2494``, squash ``849fdae6``)
 added a ``provenance`` keyword to the consumer protocol
@@ -227,4 +264,102 @@ def test_consumer_optional_keywords_are_optional_on_the_runtime_port() -> None:
         f"{required_here} carry a default in {source.name}'s {_CONSUMER_PROTOCOL} "
         "but are required by RuntimeDelegationDispatchPort.dispatch. A consumer "
         "that omits one raises TypeError on the deployed bus path (OMN-18321)."
+    )
+
+
+_CONSUMER_CALL_ATTRIBUTE = "_dispatch_port"
+
+
+def _consumer_passed_keywords(source: Path) -> set[str]:
+    """Keyword names the consumer's handler actually PASSES at its call site.
+
+    Deliberately NOT the same input as ``_consumer_declared_keywords``. The
+    protocol declaration states intent; this states what runs. A newly-required
+    keyword on our side raises ``TypeError`` against what the handler passes,
+    whatever its protocol says.
+
+    Finds every ``<something>._dispatch_port.dispatch(...)`` call and unions
+    their keywords. A ``**kwargs`` splat at a call site makes the passed set
+    unknowable by reading, so it FAILS rather than returning a set it cannot
+    stand behind -- the same fail-closed posture as an unresolvable source.
+    """
+    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    passed: set[str] = set()
+    found = False
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not isinstance(func, ast.Attribute) or func.attr != _CONSUMER_METHOD:
+            continue
+        inner = func.value
+        if (
+            not isinstance(inner, ast.Attribute)
+            or inner.attr != _CONSUMER_CALL_ATTRIBUTE
+        ):
+            continue
+        found = True
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                raise AssertionError(
+                    f"{source} splats **kwargs into its {_CONSUMER_METHOD}() call, "
+                    "so the keywords it passes cannot be read statically and this "
+                    "direction cannot be proven. Pass them explicitly, or move "
+                    "this check to something that can see the runtime call."
+                )
+            passed.add(keyword.arg)
+
+    if not found:
+        raise AssertionError(
+            f"{source} contains no self.{_CONSUMER_CALL_ATTRIBUTE}."
+            f"{_CONSUMER_METHOD}(...) call. The consumer's call site moved or was "
+            "renamed; repoint this check in the same change rather than deleting "
+            "it -- an empty result here is indistinguishable from parity."
+        )
+    return passed
+
+
+@pytest.mark.parametrize(
+    "dispatch_method",
+    [
+        pytest.param(ProtocolDelegationDispatchPort.dispatch, id="protocol"),
+        pytest.param(RuntimeDelegationDispatchPort.dispatch, id="implementation"),
+    ],
+)
+def test_every_required_keyword_is_one_the_consumer_passes(
+    dispatch_method: object,
+) -> None:
+    """Direction 3. Nothing here may be required that the consumer does not pass.
+
+    The only direction that can see a keyword added as REQUIRED on this side,
+    because it starts from THIS repo's parameter list instead of the consumer's.
+    Both directions above start from the consumer's names, so a name the
+    consumer has never heard of is outside their domain entirely.
+
+    The remedy when this fails is a defaulted keyword, not a consumer edit: the
+    two repos deploy independently, so a required argument is broken for as long
+    as the consumer is one release behind, which is always.
+    """
+    source = _resolve_consumer_source()
+    passed = _consumer_passed_keywords(source)
+
+    parameters = inspect.signature(dispatch_method).parameters  # type: ignore[arg-type]
+    unmet = sorted(
+        name
+        for name, parameter in parameters.items()
+        if parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        and parameter.default is inspect.Parameter.empty
+        and name not in passed
+    )
+
+    assert not unmet, (
+        f"{dispatch_method.__qualname__} REQUIRES {unmet}, which "  # type: ignore[attr-defined]
+        f"{source.name} does not pass at its dispatch call site. On the deployed "
+        "bus path this raises TypeError: dispatch() missing required keyword-only "
+        "arguments, the consumer swallows it into a failed terminal, and every "
+        "delegation on the lane dies with provider_error (OMN-18924, chain canary "
+        "b267d3bd-0f60-466e-8c8a-e7c60446e1f0). Give the keyword a default here "
+        "rather than requiring the consumer to catch up -- the two repos deploy "
+        "independently and the consumer is behind by construction."
     )

@@ -23,11 +23,20 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 555
+    max_skips: 557
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
       measured_by: OMN-18776
+      amendments:
+        - measured_at: '2026-09-21'
+          measured_by: OMN-18916
+          delta: 2
+          reason: >-
+            Two integration proofs added beside the OMN-18419 pair already in this list, for the same reason and in the same file. They write event_ledger and ledger_chain, so the main splits have no database to run them against and collect them as skips. They are not unexecuted: the integration-guard job runs them against loopback Postgres and fails closed there, so an absent database cannot be taken for a pass. Counted here rather than left to grow silently.
+          node_ids:
+            - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_redelivered_hop_is_recorded_once_through_the_real_dispatch
+            - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_retried_chain_grades_green_through_the_real_dispatch
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -308,6 +317,8 @@ suites:
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_0034_still_refuses_a_non_member_and_names_the_other_predicate
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_usage_and_set_are_independent_predicates
       - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_mis_parented_hop_grades_red_and_its_siblings_do_not
+      - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_redelivered_hop_is_recorded_once_through_the_real_dispatch
+      - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_retried_chain_grades_green_through_the_real_dispatch
       - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_declared_tree_grades_green_through_the_real_dispatch
       - tests.integration.nodes.test_gate_binding_conjunct_omn18414.TestTheGuardTranscriptionMatchesTheDeclaration::test_the_two_copies_are_byte_identical
       - tests.integration.nodes.test_node_reward_binder_effect.TestRewardBinderKafkaIntegration::test_events_published_to_correct_topics

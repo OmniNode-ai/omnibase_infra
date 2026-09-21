@@ -1126,6 +1126,180 @@ check_postgres_backup_freshness() {
     "$age_hours" "$workflow" "$branch"
 }
 
+# OMN-18949: surface LANE CENSUS drift -- the live hourly census on this host
+# against the committed lane manifest.
+#
+# WHY IT LIVES HERE. Nothing refused on census drift anywhere. The hourly timer
+# on this host writes a snapshot; the committed snapshot in the repository
+# carried five findings and severity warning; the only surface that read either
+# rendered the prose string "N drift item(s) -- see census" into a doctrine
+# file, where the next refresh normalised it away. The CI gate added by the
+# same ticket catches the two COMMITTED files disagreeing, which is a different
+# question from the LIVE lane topology having moved -- CI cannot see this
+# host's docker daemon at all.
+#
+# "More than one tick" is not implemented here and must not be: CONFIRM_TICKS
+# above already requires a key to hold the same status for two consecutive
+# ticks before it pages, and CLEAR_TICKS absorbs the flap on the way back. A
+# second, private counter in this function would be a second answer to a
+# question the state machine already answers, and the two would disagree.
+#
+# Rows are `census|STATUS|key|detail`, read by `row_status()` at column 2 and
+# de-duplicated by `row_key()` as `census|<key>`. Every "could not look"
+# outcome is a row naming the reason: an unreadable census is never an empty
+# green, because an absent finding set and an unevaluated one are the two
+# states this family exists to tell apart.
+# WHOSE HOME (OMN-18949, second defect, measured 2026-09-21).
+#
+# The paths below resolved through `$HOME` and this reporter runs from
+# /etc/cron.d as ROOT, so `$HOME` is /root. Neither
+# /root/.local/state/onex/census-snapshot.json nor
+# /root/Code/omni_home/omnibase_infra exists on .201. Measured that day: eight
+# consecutive ticks emitted `census|WARNING|snapshot|no live census ...; the
+# hourly lane-census timer may have stopped` while the real snapshot was
+# twenty minutes old and carried five findings. The census leg shipped by this
+# ticket therefore delivered a FALSE reason to the channel and never once
+# reported the drift it was added to report -- the reporting half was as blind
+# as the gate half.
+#
+# The census is written by a systemd USER unit
+# (deploy/lane-census/onex-disk-gc.service.d/20-lane-census.conf, whose
+# ExecStart uses `%h`), so it lands in the census OWNER's home, not the
+# caller's. Resolve that owner through getent rather than assuming the two are
+# the same account. The repository root is the deployed checkout, the same
+# /data tree this script already reads its env file and writes its logs under.
+_census_owner_home() {
+  local home
+  home=$(getent passwd "${OMNINODE_CENSUS_OWNER:-jonah}" 2>/dev/null | cut -d: -f6)
+  printf '%s' "${home:-$HOME}"
+}
+
+check_census_drift() {
+  local live manifest checker python_bin repo owner_home
+  owner_home=$(_census_owner_home)
+  repo="${OMNINODE_REPO_ROOT:-/data/omninode/omnibase_infra}"
+  live="${OMNINODE_CENSUS_LIVE_SNAPSHOT:-}"
+  if [[ -z "$live" ]]; then
+    # The invoking user's own census wins when it exists (a human running this
+    # by hand reads their own host state); otherwise the owner's.
+    if [[ -r "$HOME/.local/state/onex/census-snapshot.json" ]]; then
+      live="$HOME/.local/state/onex/census-snapshot.json"
+    else
+      live="$owner_home/.local/state/onex/census-snapshot.json"
+    fi
+  fi
+  manifest="${OMNINODE_CENSUS_MANIFEST:-$repo/deploy/lane-census/lane-manifest.yaml}"
+  checker="${OMNINODE_CENSUS_CHECKER:-$repo/scripts/check_lane_census_drift.py}"
+  python_bin="${OMNINODE_CENSUS_PYTHON:-python3}"
+
+  if [[ "${OMNINODE_CENSUS_PROBE_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$live" ]]; then
+    printf 'census|WARNING|snapshot|no live census at %s; the hourly lane-census timer may have stopped\n' "$live"
+    return 0
+  fi
+  if [[ ! -r "$manifest" ]]; then
+    printf 'census|WARNING|manifest|lane manifest unreadable at %s; live census cannot be judged\n' "$manifest"
+    return 0
+  fi
+
+  # Staleness first. A snapshot that stopped being written keeps reporting the
+  # last topology it saw, which reads as a healthy census indefinitely -- the
+  # exact failure the age gate exists for on the committed copy, and one this
+  # host had no reader for on the live copy.
+  local emitted age_h stale_h
+  stale_h="${OMNINODE_CENSUS_STALE_HOURS:-6}"
+  emitted=$("$python_bin" - "$live" <<'PY' 2>/dev/null || true
+import datetime as dt, json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    t = dt.datetime.fromisoformat(d["emitted_at"])
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=dt.timezone.utc)
+    print(int((dt.datetime.now(dt.timezone.utc) - t).total_seconds() // 3600))
+except Exception:
+    pass
+PY
+)
+  if [[ -z "$emitted" ]]; then
+    printf 'census|WARNING|snapshot|live census at %s has no readable emitted_at; its age is unknown\n' "$live"
+    return 0
+  fi
+  age_h="$emitted"
+  if (( age_h >= stale_h )); then
+    printf 'census|WARNING|snapshot|live census is %sh old (>= %sh); the hourly timer has stopped writing\n' "$age_h" "$stale_h"
+    return 0
+  fi
+
+  # Agreement with the manifest, evaluated by the SAME module the CI gate runs,
+  # pointed at the live snapshot instead of the committed one. A second
+  # implementation here would be a second verdict that could disagree with CI's.
+  local json rc errfile err
+  if [[ -r "$checker" ]] && command -v "$python_bin" >/dev/null 2>&1; then
+    # stderr is CAPTURED, not discarded (CLAUDE.md rule 16). A suppressed error
+    # here returns an empty result that reads exactly like a clean census, and
+    # the reason it failed is the only thing that makes the row actionable --
+    # "exit 1" and "no module named yaml" are the same row without it. The
+    # interpreter is overridable because this checker needs PyYAML and the
+    # host's bare python3 may not have it.
+    errfile=$(mktemp)
+    json=$(timeout "${OMNINODE_CENSUS_PROBE_TIMEOUT:-60}" "$python_bin" "$checker" \
+             --manifest "$manifest" --snapshot "$live" --json 2>"$errfile")
+    rc=$?
+    err=$(tail -n1 "$errfile" 2>/dev/null | tr -d '\r' | cut -c1-160)
+    rm -f "$errfile"
+    if (( rc == 2 )) || [[ -z "$json" ]]; then
+      printf 'census|WARNING|manifest|drift checker could not evaluate the live census (exit %s)%s\n' \
+        "$rc" "${err:+: $err}"
+      return 0
+    fi
+    if (( rc == 1 )); then
+      # OMN-18949: the checker now refuses on a non-zero drift count as well as
+      # on the two committed files contradicting each other, so its exit code
+      # alone no longer says WHICH happened. Split them back apart here: they
+      # are different defects with different remedies, and collapsing both into
+      # the `manifest` row would report "the census contradicts the manifest"
+      # for a lane that is merely running something undeclared. The `drift` row
+      # keeps its own key so its de-duplication and its resolution notice stay
+      # independent of the contradiction row's.
+      local summary drift_only
+      drift_only=$("$python_bin" -c 'import json,sys; f=json.load(sys.stdin)["findings"]; print("yes" if f and all(x["kind"]=="nonzero_drift_count" for x in f) else "no")' <<<"$json" 2>/dev/null)
+      if [[ "$drift_only" == "yes" ]]; then
+        summary=$("$python_bin" -c 'import json,sys; f=json.load(sys.stdin)["findings"]; print("; ".join("%s on lane(s) %s" % (x["detail"].split(";")[0], x["lane"]) for x in f[:2]))' <<<"$json" 2>/dev/null)
+        printf 'census|CRITICAL|drift|%s (census %sh old); declare it in the lane manifest or remove it from the lane\n' \
+          "${summary:-the live census reports drift}" "$age_h"
+        return 0
+      fi
+      summary=$("$python_bin" -c 'import json,sys; d=json.load(sys.stdin); f=d["findings"]; print("%d disagreement(s): %s" % (len(f), "; ".join("%s on %s (%s)" % (x["kind"], x["lane"], x["subject"]) for x in f[:3])))' <<<"$json" 2>/dev/null)
+      printf 'census|CRITICAL|manifest|the LIVE census contradicts the committed manifest -- %s\n' "${summary:-unparseable checker output}"
+      return 0
+    fi
+  else
+    printf 'census|WARNING|manifest|drift checker missing or unreadable at %s\n' "$checker"
+    return 0
+  fi
+
+  # Live topology drift. Since OMN-18949 armed the drift-count assertion the
+  # checker above refuses on this and emits the CRITICAL `drift` row, so in
+  # practice the checker path owns the non-zero case. This block stays as the
+  # fallback for the one reachable gap -- the checker present but the count
+  # read failing -- and as the surface that emits the OK row, because a census
+  # that is clean must say so rather than say nothing.
+  local drift lanes
+  drift=$("$python_bin" -c 'import json,sys; print(len(json.load(open(sys.argv[1])).get("findings",[])))' "$live" 2>/dev/null || echo "")
+  if [[ -z "$drift" ]]; then
+    printf 'census|WARNING|drift|live census findings unreadable; drift state unknown\n'
+    return 0
+  fi
+  if (( drift > 0 )); then
+    lanes=$("$python_bin" -c 'import json,sys; print(",".join(sorted({f.get("lane","?") for f in json.load(open(sys.argv[1])).get("findings",[])})))' "$live" 2>/dev/null || echo "?")
+    printf 'census|WARNING|drift|%s drift item(s) on lane(s) %s, census %sh old\n' "$drift" "$lanes" "$age_h"
+    return 0
+  fi
+  printf 'census|OK|drift|no lane drift; census %sh old and agrees with the manifest\n' "$age_h"
+}
+
 collect() {
   local now host root data root_status data_status running unhealthy restarting dead created
   local dangling named_dangling anonymous_dangling docker_status docker_detail
@@ -1227,6 +1401,7 @@ collect() {
     check_runner_tree_converge
     check_fleet_failures
     check_postgres_backup_freshness
+    check_census_drift
   }
 }
 
@@ -1398,7 +1573,7 @@ recovered_keys=$(awk -F'\t' '$1=="RECOVERED" { print $2 }' <<<"$decisions")
 
 format_digest() {
   local title="$1"
-  local lines endpoint_lines ci_lines tree_lines fleet_lines issue_lines
+  local lines endpoint_lines ci_lines tree_lines fleet_lines backup_lines census_lines issue_lines
   lines=$(awk -F'|' '$1=="disk" {printf "- `%s`: %s, %s, %s (%s)\n", $3, $4, $5, $6, $2} $1=="docker" {printf "- Docker `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   # STARTING is rendered here with the rest (OMN-18435). A booting lane that
   # vanished from this section would be the BLIND direction of monitor failure,
@@ -1427,9 +1602,14 @@ format_digest() {
   # life of the backup CronJob and that is the defect this row closes.
   backup_lines=$(awk -F'|' '$1=="backup" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   [[ -n "$backup_lines" ]] || backup_lines="- No backup freshness verdict this tick"
+  # OMN-18949. Same reasoning as the sinks above: a section that prints nothing
+  # when the probe did not run is indistinguishable from one printing nothing
+  # because there is nothing wrong.
+  census_lines=$(awk -F'|' '$1=="census" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$census_lines" ]] || census_lines="- No lane census rows this tick"
   # `next` keeps the three row shapes mutually exclusive so a `ci` row cannot
   # also be rendered by the generic column-2 branch below it.
-  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree" || $1=="fleet" || $1=="backup") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
+  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree" || $1=="fleet" || $1=="backup" || $1=="census") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
   if [[ -z "$issue_lines" ]]; then
     issue_lines="- No active warning/critical checks"
   fi
@@ -1450,6 +1630,8 @@ $tree_lines
 $fleet_lines
 *Production database backup*
 $backup_lines
+*Lane census*
+$census_lines
 *Active issues*
 $issue_lines
 MSG
