@@ -5,6 +5,21 @@
 -- relation in public until OMN-15359. New rows therefore need an explicit UUID
 -- tenant identity and the canonical FORCE-RLS posture. A historical table with
 -- rows cannot be attributed safely: this migration fails before changing it.
+--
+-- RLS POLICY IS FAIL-CLOSED, NOT A BYPASS
+--   `current_setting('app.tenant_id', true)` returns NULL, never an empty
+--   string or a default, when the GUC is unset (`missing_ok=true` only
+--   suppresses the "unrecognized configuration parameter" error; it does not
+--   invent a value). `tenant_id = NULL` evaluates to NULL/unknown, and under
+--   USING/WITH CHECK a non-true predicate excludes the row -- an unset GUC
+--   denies every read and write, it does not admit them. A malformed
+--   (non-UUID-shaped) GUC value fails the `::uuid` cast and raises instead of
+--   silently coercing. Both paths fail closed. This is the same predicate
+--   shape used and documented the same way in
+--   node_canary_score_reducer/migrations/0003_capability_scores_tenant_id_to_uuid.sql,
+--   node_hook_event_capture/migrations/0002_hook_events_tenant_rls.sql, and
+--   node_projection_cost_summary/migrations/0002_llm_cost_aggregates_tenant_id_and_rls.sql
+--   -- not a one-off.
 
 BEGIN;
 
