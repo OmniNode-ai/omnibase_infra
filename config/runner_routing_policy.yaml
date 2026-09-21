@@ -1016,6 +1016,8 @@ route:
         - Deploy Agent Tests (OMN-15378) / deploy-agent-tests
         - deploy-gate / deploy-gate
         - dispatcher-route-coverage
+        # OMN-18938: the cross-repo dispatch keyword parity gate.
+        - consumer-kwarg-parity
         - Duplication Sweep
         - Effect-Assertion Gate (RT-5)
         - Event Chain Gate

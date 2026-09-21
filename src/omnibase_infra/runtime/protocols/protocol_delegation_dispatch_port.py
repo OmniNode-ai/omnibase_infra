@@ -51,9 +51,23 @@ class ProtocolDelegationDispatchPort(Protocol):
         # TypeError on the deployed bus path was swallowed by the consumer's own
         # `except Exception` into a delegate-skill-failed terminal -- so the
         # dev-lane chain died silently for a day and wrote no FSM row at all.
-        # Parity is held mechanically by
-        # tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py,
-        # which reads the consumer's declaration rather than a list kept here.
+        # CORRECTED 2026-09-21 (OMN-18938). This comment used to say parity was
+        # "held mechanically" by
+        # tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py.
+        # That sentence was read as proof and was broader than the file: the
+        # module covered the consumer's names in both directions and nothing
+        # that started from OURS, so a keyword added here as REQUIRED was
+        # invisible to it. omnibase_infra#3882 did exactly that, every
+        # delegation on the dev lane terminalised provider_error, and the
+        # module ran 3 passed 0 failed throughout. The missing direction landed
+        # under OMN-18938; the module's own docstring now names all three and
+        # is the place to read before trusting a claim like this one.
+        #
+        # A DEFAULT ON A KEYWORD HERE IS LOAD-BEARING, not a convenience. The
+        # two repos deploy independently, so the consumer is a release behind
+        # by construction and a required keyword is broken for exactly that
+        # window. Add keywords defaulted; make one required only alongside a
+        # landed consumer that passes it.
         provenance: ModelDelegationProvenance | None = None,
         backend_id: str | None = None,
         response_contract: dict[str, object] | None = None,
