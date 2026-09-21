@@ -1037,6 +1037,14 @@ jobs:
   # A FAILING convergence re-emits a FAILURE, deliberately. Every sha in the
   # window inherits whatever the converged run found; a re-emission that
   # upgraded to PASS would be the worst possible outcome of this ticket.
+  # advisory-ok: OMN-18988 post-merge EMITTER, not a pull-request verification. It
+  # runs after the code has landed and after the lane converged, and it writes
+  # evidence rather than judging any. What it produces IS gating: the delivery
+  # gate refuses a sha whose receipt is absent or non-PASS, so a failure here
+  # withholds a receipt and the sha stays refused. Making the job itself
+  # merge-blocking would gate a pull request on a rebuild that has not happened
+  # when that pull request is reviewed -- the sibling verify job in this same
+  # workflow is post-merge for the same reason.
   reemit-queued-receipts:
     name: Re-emit receipts for shas queued behind this merge
     needs: [trigger-rebuild, verify-lane-converged]
