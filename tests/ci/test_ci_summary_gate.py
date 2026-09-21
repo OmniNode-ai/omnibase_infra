@@ -38,7 +38,7 @@ from scripts.ci.ci_summary_gate import (
     SOFT_ALLOWLIST,
     STRICT_GATE_JOBS,
     SWEEP_EXCLUSION_MAX_DAYS,
-    SWEEP_FAILING_CONCLUSIONS,
+    SWEEP_GOOD_CONCLUSIONS,
     SWEEP_NON_PR_EVENTS,
     JobState,
     SweepExclusion,
@@ -850,6 +850,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=_payload_missing_stand_in(),
             external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author="dependabot[bot]",
         )
         assert code == EXIT_SUCCESS, report
@@ -865,6 +871,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author="jonahgabriel",
         )
         assert code == EXIT_PENDING, report
@@ -881,6 +893,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author=None,
         )
         assert code == EXIT_PENDING
@@ -896,6 +914,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=_payload_missing_stand_in(),
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author="dependabot[bot]",
         )
         assert code == EXIT_PENDING, report
@@ -956,6 +980,12 @@ class TestActorConditionalExternalContexts:
             _all_gates("success"),
             check_runs=rows,
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            # OMN-18979: this class exercises the LAYER 4 actor rule, on a
+            # 2026-08 fixture that predates the layer-5 measurement window
+            # and carries by-design-skipped names the shipped registry does
+            # not cover. Layer 5 is turned off explicitly so the assertion
+            # below is about the actor rule and nothing else.
+            sweep_external=False,
             pr_author="dependabot[bot]",
         )
         assert code == EXIT_FAILURE, report
@@ -1931,9 +1961,25 @@ class TestExternalDefaultDenySweep:
         assert code == EXIT_SUCCESS, report
 
     @pytest.mark.parametrize(
-        "conclusion", sorted(SWEEP_FAILING_CONCLUSIONS - {"cancelled"})
+        "conclusion",
+        [
+            "failure",
+            "timed_out",
+            "action_required",
+            "startup_failure",
+            "stale",
+            "skipped",
+            "neutral",
+        ],
     )
-    def test_every_refusal_conclusion_fails(self, conclusion: str) -> None:
+    def test_the_bar_is_strict_and_only_success_passes(self, conclusion: str) -> None:
+        """OMN-18979, operator ruling 2026-09-21, replacing OMN-18960's bar.
+
+        `skipped`, `neutral` and `stale` now FAIL alongside the refusals. The
+        earlier refusal-only set, shipped beside an EMPTY registry, tolerated
+        exactly what a list would without writing any of it down. The by-design
+        non-green names are named in EXTERNAL_SWEEP_EXCLUSIONS instead.
+        """
         rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
         rows.append(_row("Some Unregistered Gate", conclusion))
         code, report = evaluate(
@@ -1945,20 +1991,37 @@ class TestExternalDefaultDenySweep:
         assert code == EXIT_FAILURE, report
         assert f"Some Unregistered Gate ({conclusion})" in report
 
-    @pytest.mark.parametrize("conclusion", ["success", "skipped", "neutral"])
-    def test_measured_always_non_green_conclusions_do_not_fail(
-        self, conclusion: str
-    ) -> None:
-        """9 of the 70 names in the measured window are never green by design.
+    def test_only_success_is_in_the_good_set(self) -> None:
+        assert frozenset({"success"}) == SWEEP_GOOD_CONCLUSIONS
 
-        `verify`, `auto-tag`, the two manual-replay jobs and three docker jobs
-        are always `skipped`; the three change-control mint/outcome rows are
-        always `neutral`. Failing on those conclusions wedges every pull
-        request on this repository, so the sweep's bar is "nothing RED slipped
-        past" and the strict bar is bought by registering the name instead.
+    def test_a_success_row_passes(self) -> None:
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row("Some Unregistered Gate", "success"))
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+
+    def test_a_skip_inside_the_rerun_window_still_waits(self) -> None:
+        """The bar changed; the graces did not.
+
+        `skipped` is in this module's supersedable set, so a skip whose
+        producer is demonstrably about to re-run is still held rather than
+        turned into a terminal refusal by the stricter bar.
         """
         rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
-        rows.append(_row("Some Unregistered Gate", conclusion))
+        rows.append(
+            _row(
+                "Some Unregistered Gate",
+                "skipped",
+                completed_at=(NOW - timedelta(seconds=30)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+            )
+        )
         code, report = evaluate(
             _all_gates("success"),
             check_runs=rows,
@@ -2154,14 +2217,37 @@ class TestExternalDefaultDenySweep:
 class TestExternalSweepExclusions:
     """AC-2 — the exclusion registry is closed-ended or it is an allowlist."""
 
-    def test_the_shipped_registry_is_empty_by_construction(self) -> None:
-        """Landing this layer needed no day-one exception, and that is measured.
+    def test_the_registry_holds_exactly_the_ten_measured_names(self) -> None:
+        """Under the strict bar, every by-design non-green name needs an entry.
 
-        Over the 16 dev PRs merged 2026-09-20T12:56:06Z -> 2026-09-21T00:06:35Z,
-        ZERO heads carried a non-green unregistered external context at merge
-        time. An entry here would be a defect somebody has decided not to fix.
+        OMN-18960 shipped this empty beside a weaker conclusion set, which the
+        2026-09-21 ruling identified as a hidden allowlist. These ten are every
+        name the measurement found non-green on any head, and naming them is
+        what makes the tolerance reviewable.
         """
-        assert EXTERNAL_SWEEP_EXCLUSIONS == {}
+        assert set(EXTERNAL_SWEEP_EXCLUSIONS) == {
+            "verify",
+            "occ-autobind / outcome",
+            "occ-autobind / mint status",
+            "occ-companion-effect / mint status",
+            "occ-autobind-manual-replay",
+            "occ-companion-effect-manual-replay",
+            "Docker Integration Tests",
+            "Security Scan (Trivy)",
+            "Image Size Analysis",
+            "Hostile Reviewer (adversarial gate)",
+        }
+
+    def test_every_entry_carries_a_reason_an_owner_and_both_dates(self) -> None:
+        for name, entry in EXTERNAL_SWEEP_EXCLUSIONS.items():
+            assert entry.reason.strip(), name
+            assert entry.ticket.startswith("OMN-"), name
+            assert entry.added == "2026-09-21", name
+            assert entry.expires == "2026-12-20", name
+
+    def test_no_entry_overlaps_the_registered_tuple(self) -> None:
+        """A name in both would be judged by layer 4 and never reach layer 5."""
+        assert not set(EXTERNAL_SWEEP_EXCLUSIONS) & set(EXPECTED_EXTERNAL_CONTEXTS)
 
     def test_every_shipped_entry_is_wellformed(self) -> None:
         assert validate_sweep_exclusions(EXTERNAL_SWEEP_EXCLUSIONS) == []
@@ -2297,7 +2383,7 @@ class TestExternalSweepAgainstRealHeads:
         the count is asserted beside the verdict.
         """
         head = _sweep_head(pr)
-        failures, _in_flight, swept, excluded = evaluate_external_sweep(
+        failures, _in_flight, swept, _excluded = evaluate_external_sweep(
             _at_merge(head),
             expected=EXPECTED_EXTERNAL_CONTEXTS,
             in_run_names=frozenset(head["in_run_job_names"]),
@@ -2307,8 +2393,27 @@ class TestExternalSweepAgainstRealHeads:
             now=NOW,
         )
         assert failures == [], failures
-        assert excluded == []
-        assert len(swept) >= 40, (pr, len(swept))
+        assert len(swept) >= 30, (pr, len(swept))
+
+    @pytest.mark.parametrize("pr", PRS)
+    def test_the_registry_is_load_bearing_on_every_real_head(self, pr: str) -> None:
+        """The falsification control for the zero above.
+
+        Strip the registry and the same real head must fail. Without this, a
+        clean result could mean the sweep found nothing rather than that the
+        entries did their work.
+        """
+        head = _sweep_head(pr)
+        failures, _in_flight, _swept, _excluded = evaluate_external_sweep(
+            _at_merge(head),
+            expected=EXPECTED_EXTERNAL_CONTEXTS,
+            in_run_names=frozenset(head["in_run_job_names"]),
+            self_name="CI Summary",
+            exclusions={},
+            events=check_run_event_index(head["workflow_runs"]),
+            now=NOW,
+        )
+        assert failures, "stripping the registry changed nothing, so it is inert"
 
     @pytest.mark.parametrize("pr", PRS)
     def test_post_merge_state_carries_reds_the_merge_time_state_does_not(
