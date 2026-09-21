@@ -58,9 +58,44 @@ from omnibase_infra.topology.table_grant_derivation import (
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_PINNED_CONTRACTS = (
-    _REPO_ROOT / ".proof-dependencies" / "omnimarket" / "src" / "omnimarket" / "nodes"
-)
+_PROOF_DEPENDENCIES = _REPO_ROOT / ".proof-dependencies"
+_CONTRACTS_SUFFIX = ("src", "omnimarket", "nodes")
+
+
+def _pinned_contracts_root(proof_dependencies: Path) -> Path:
+    """Return the checkout that holds the PINNED contracts, not the trailer tree.
+
+    OMN-18863 gave the enforcement job a SECOND omnimarket checkout, and this
+    module was reading the wrong one. On a pull request whose body carries the
+    ``Node-Migration-Source-*`` trailers, ``.proof-dependencies/omnimarket`` is
+    the trailer-named BRANCH -- the open source pull request, which by
+    construction declares the very relation the bridge exists to cover -- while
+    ``.proof-dependencies/omnimarket-pin`` is the committed pin the push to
+    ``dev`` will derive from. On ``dev`` and on an untrailered pull request the
+    mirror is not checked out at all and the single tree IS the pin.
+
+    Reading the trailer tree made this assertion demand the deletion of a
+    bridge that ``scripts/ci/assert_push_side_derivation.py`` simultaneously
+    demands exists: measured on omnibase_infra#3918 against omnimarket#2744
+    head ``d7edd16efd28``, where the pin ``f5776c4b45b8`` declares 73 relations
+    including NEITHER ``dod_verify_runs`` nor ``delegate_skill_command_claims``
+    and the trailer tree declares 75 including both. Deleting either entry to
+    satisfy this module failed the push-side check, whose refusal text is an
+    instruction to add back exactly what was removed. Two required assertions
+    in one job, pointing opposite ways, on every trailered vendoring pull
+    request -- which is the only kind of pull request either one is for.
+
+    Preferring the mirror restores the question this module documents: has the
+    PIN caught up, so that the bridge contributes nothing. A trailer tree that
+    is ahead is expected and is not an expiry.
+    """
+    mirror = proof_dependencies.joinpath("omnimarket-pin", *_CONTRACTS_SUFFIX)
+    if mirror.is_dir():
+        return mirror
+    return proof_dependencies.joinpath("omnimarket", *_CONTRACTS_SUFFIX)
+
+
+_PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 
 # Relations this repo declares by hand during an infra-first window, each with
 # the omnimarket pull request whose merge plus pin advance retires it.
@@ -72,11 +107,13 @@ _PINNED_CONTRACTS = (
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
     "dod_verify_runs": "omnimarket#2722",
+    "delegate_skill_command_claims": "omnimarket#2744",
 }
 
 _SKIP_REASON = (
-    "requires the pinned omnimarket checkout at .proof-dependencies/omnimarket, "
-    "which the OMN-15361 enforcement job provides and a bare local run does not"
+    "requires the pinned omnimarket checkout at .proof-dependencies/omnimarket-pin "
+    "(or .proof-dependencies/omnimarket when the job took only one), which the "
+    "OMN-15361 enforcement job provides and a bare local run does not"
 )
 
 
@@ -110,6 +147,47 @@ class TestTheMapMatchesTheManifest:
             "LEGACY_MIGRATION_TABLE_DECLARATIONS entry. Either the bridge was "
             "deleted and the map was not, or the name is misspelled"
         )
+
+
+class TestTheRootIsThePinAndNotTheTrailerTree:
+    """Runs everywhere. Builds both checkout layouts, so it needs no foreign tree.
+
+    Without these the selection above is unobserved: the wrong choice reads
+    green on ``dev``, where only one checkout exists, and only misfires on a
+    trailered pull request, where nothing was asserting which tree it read.
+    """
+
+    def _layout(self, root: Path, *names: str) -> Path:
+        for name in names:
+            root.joinpath(name, *_CONTRACTS_SUFFIX).mkdir(parents=True)
+        return root
+
+    def test_the_mirror_wins_when_the_job_took_both(self, tmp_path: Path) -> None:
+        """The trailered case, and the one that was wrong."""
+        root = self._layout(tmp_path, "omnimarket", "omnimarket-pin")
+        assert _pinned_contracts_root(root) == root.joinpath(
+            "omnimarket-pin", *_CONTRACTS_SUFFIX
+        )
+
+    def test_the_single_checkout_is_the_pin_when_no_mirror_exists(
+        self, tmp_path: Path
+    ) -> None:
+        """``dev`` and untrailered pull requests, where the one tree IS the pin."""
+        root = self._layout(tmp_path, "omnimarket")
+        assert _pinned_contracts_root(root) == root.joinpath(
+            "omnimarket", *_CONTRACTS_SUFFIX
+        )
+
+    def test_neither_checkout_yields_a_missing_path_rather_than_a_guess(
+        self, tmp_path: Path
+    ) -> None:
+        """A bare local run must skip, not silently assert against nothing.
+
+        The skip decorator keys on ``is_dir()``, so the contract this holds is
+        that the resolver returns a path that does not exist rather than one
+        that happens to.
+        """
+        assert not _pinned_contracts_root(tmp_path).is_dir()
 
 
 @pytest.mark.skipif(not _PINNED_CONTRACTS.is_dir(), reason=_SKIP_REASON)
