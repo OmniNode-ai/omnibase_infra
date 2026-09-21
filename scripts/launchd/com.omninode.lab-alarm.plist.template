@@ -48,6 +48,22 @@
         <!-- launchd does not inherit a shell PATH; docker and gh must be findable -->
         <key>PATH</key>
         <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- config/lab_alarm.json expands ${ONEX_INFRA_HOST} and
+             ${ONEX_RUNTIME_SSH_HOST} at load and RAISES rather than probe an
+             empty address if either is unset. Both are normally exported
+             from a shell profile (~/.zshrc), which launchd never sources, so
+             an agent installed without these two keys crashes at config
+             load on every real fire -- proven live, OMN-18867 AC1 install,
+             2026-09-21: a manual run from an interactive shell succeeded on
+             the operator's inherited env while `launchctl kickstart` on the
+             installed-but-missing-these-keys plist died before evaluating
+             any condition. install-lab-alarm.sh reads both from the
+             installing operator's environment, the same required-and-
+             refuse-if-unset pattern as OMNI_HOME. -->
+        <key>ONEX_INFRA_HOST</key>
+        <string>@ONEX_INFRA_HOST@</string>
+        <key>ONEX_RUNTIME_SSH_HOST</key>
+        <string>@ONEX_RUNTIME_SSH_HOST@</string>
     </dict>
 
     <!-- Hourly, at :25. A Minute-only StartCalendarInterval matches every
