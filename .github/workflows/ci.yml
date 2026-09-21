@@ -3894,8 +3894,15 @@ jobs:
     # success/failure within a bounded deadline.
     #
     # DEFAULT-DENY, FAIL-CLOSED: green ONLY when every strict + skippable
-    # aggregate gate is present+good, no non-allowlisted job failed, AND every
-    # declared EXTERNAL context on the PR head is present+success. The auditable
+    # aggregate gate is present+good, no non-allowlisted job failed, every
+    # declared EXTERNAL context on the PR head is present+success, AND
+    # (OMN-18960) no UNREGISTERED check-run on that head is red. That last
+    # layer closes the hole the layer above it left: the external assertion is
+    # a whitelist lookup, so a check-run whose name nobody remembered to add
+    # was read by nothing -- measured at 40-55 such names per head over the 16
+    # dev PRs merged 2026-09-20T12:56Z -> 2026-09-21T00:06Z, against a tuple of
+    # 26. Its exclusion registry ships EMPTY, because zero of those 16 heads
+    # carried a red unregistered context at merge time. The auditable
     # gating set + soft-allowlist live in scripts/ci/ci_summary_gate.py
     # (unit-tested in tests/ci/test_ci_summary_gate.py); it reproduces the exact
     # strictness of the old needs-based condition (13 strict `== success` gates,
@@ -3999,7 +4006,7 @@ jobs:
             # file is REMOVED, not left stale: the gate reads an absent file as
             # "no external context observed" → PENDING → fail-closed at the
             # deadline. It must never resolve green off a stale or partial file.
-            rm -f check_runs.json
+            rm -f check_runs.json workflow_runs.json
             if [ "${EVENT_NAME}" = "pull_request" ]; then
               if ! gh api --paginate \
                   "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
@@ -4009,9 +4016,23 @@ jobs:
                 sleep "${POLL_INTERVAL_SECONDS}"
                 continue
               fi
+              # OMN-18960: the workflow runs on this same head, read ONLY to
+              # resolve which EVENT wrote each check-run so the default-deny
+              # sweep can skip non-pull-request rows. A failed fetch leaves the
+              # file ABSENT, under which every row's event is unknown and every
+              # row is SWEPT -- the stricter reading, so a transient API error
+              # can never exempt a check from the sweep. It therefore does NOT
+              # `continue` the poll loop the way the two fetches above do.
+              if ! gh api --paginate \
+                  "repos/${GH_REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+                  --jq '.workflow_runs[]' | jq -s '.' > workflow_runs.json; then
+                echo "workflow-runs fetch failed (attempt ${attempt}); sweeping every row (fail-closed)"
+                rm -f workflow_runs.json
+              fi
             fi
             python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" \
               --check-runs-file check_runs.json --event-name "${EVENT_NAME}" \
+              --workflow-runs-file workflow_runs.json \
               --pr-author "${PR_AUTHOR:-}"
             rc=$?
             case "${rc}" in
