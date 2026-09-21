@@ -239,7 +239,7 @@ jobs:
     # matrix job and an EMPTY array skips it entirely, which is what should
     # happen when nothing was queued.
     outputs:
-      reemit_shas: ${{ steps.converge.outputs.reemit_shas }}
+      reemit_candidates: ${{ steps.converge.outputs.reemit_candidates }}
     # Only when a command was actually published, and only for the dev lane. A
     # no-op trigger run has nothing to wait for, and merges to main target the
     # stability-test lane, which this guard deliberately does not read.
@@ -1052,8 +1052,8 @@ jobs:
     needs: [trigger-rebuild, verify-lane-converged]
     if: >-
       needs.verify-lane-converged.result == 'success' &&
-      needs.verify-lane-converged.outputs.reemit_shas != '' &&
-      needs.verify-lane-converged.outputs.reemit_shas != '[]'
+      needs.verify-lane-converged.outputs.reemit_candidates != '' &&
+      needs.verify-lane-converged.outputs.reemit_candidates != '[]'
     # Hosted: this job reads two artifacts and writes a third. It touches no
     # lane, so it has no reason to occupy the fleet, and the fork-aware
     # selector is the repository's policy rather than a literal.
@@ -1069,12 +1069,15 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      # The candidate's EXISTING receipt is read through the artifacts API, to
+      # decide on its failure class rather than assume it has none.
+      actions: read
     strategy:
-      # Every sha is independent; one failing re-emission must not withhold
+      # Every candidate is independent; one failing re-emission must not withhold
       # the others, each of which is a separate sha's only receipt.
       fail-fast: false
       matrix:
-        sha: ${{ fromJSON(needs.verify-lane-converged.outputs.reemit_shas) }}
+        candidate: ${{ fromJSON(needs.verify-lane-converged.outputs.reemit_candidates) }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1097,24 +1100,83 @@ jobs:
           # would upload each other's receipt.
           LAB_PASS_WORK="${RUNNER_TEMP}/lab-pass-reemit-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${REEMIT_SHA}"
           rm -rf "${LAB_PASS_WORK}"
-          mkdir -p "${LAB_PASS_WORK}/receipt" "${LAB_PASS_WORK}/converged"
+          mkdir -p "${LAB_PASS_WORK}/receipt" "${LAB_PASS_WORK}/converged" "${LAB_PASS_WORK}/existing"
           echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
           echo "LAB_PASS_SOURCE_DIR=${LAB_PASS_WORK}/converged" >> "$GITHUB_ENV"
+          echo "LAB_PASS_EXISTING_DIR=${LAB_PASS_WORK}/existing" >> "$GITHUB_ENV"
         env:
-          REEMIT_SHA: ${{ matrix.sha }}
+          REEMIT_SHA: ${{ matrix.candidate.sha }}
       - name: Download the converged receipt
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.1.8
         with:
           name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.source_sha }}
           path: ${{ env.LAB_PASS_SOURCE_DIR }}
-      - name: Re-key it onto the queued sha
+      # A candidate may ALREADY have a receipt. Absent is the queued-ahead
+      # case; present decides on its own failure CLASS. A missing artifact must
+      # not fail this step, so the REST query is used rather than
+      # download-artifact, which errors when the name is absent.
+      - name: Fetch the candidate's existing receipt, if it has one
         env:
-          REEMIT_SHA: ${{ matrix.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REEMIT_SHA: ${{ matrix.candidate.sha }}
+        run: |
+          set -euo pipefail
+          NAME="lab-pass-receipt-compose-dev-${REEMIT_SHA}"
+          ID=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${NAME}" \
+                 --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .id // empty')
+          if [ -z "${ID}" ]; then
+            echo "no existing receipt for ${REEMIT_SHA}"
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ID}/zip" \
+            > "${LAB_PASS_EXISTING_DIR}/receipt.zip"
+          unzip -o -q "${LAB_PASS_EXISTING_DIR}/receipt.zip" -d "${LAB_PASS_EXISTING_DIR}"
+          echo "read existing receipt for ${REEMIT_SHA} (artifact ${ID})"
+      - name: Decide whether this candidate may be answered for
+        id: eligible
+        env:
+          REEMIT_SHA: ${{ matrix.candidate.sha }}
+          IS_ENDPOINT: ${{ matrix.candidate.endpoint }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ -f "${LAB_PASS_EXISTING_DIR}/receipt.json" ]; then
+            ARGS+=(--existing "${LAB_PASS_EXISTING_DIR}/receipt.json")
+          fi
+          if [ "${IS_ENDPOINT}" = "true" ]; then
+            ARGS+=(--endpoint)
+          fi
+          DECISION=$(uv run python scripts/ci/lab_pass_receipt.py reemit-eligible "${ARGS[@]}")
+          echo "decision: ${DECISION}"
+          echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Re-emission candidate ${REEMIT_SHA}"
+            echo ""
+            echo "- decision: ${DECISION}"
+          } >> "$GITHUB_STEP_SUMMARY"
+        # The binding is established by the VERIFY job, which holds the lane.
+        # A candidate it could not bind is omitted there and named in its log,
+        # so an empty value arriving here is a contract violation, not a skip.
+      - name: Refuse a candidate that arrived with no binding
+        if: startsWith(steps.eligible.outputs.decision, 'reemit:') && matrix.candidate.converged_via == ''
+        env:
+          REEMIT_SHA: ${{ matrix.candidate.sha }}
+        run: |
+          set -euo pipefail
+          echo "- binding: **MISSING**; no receipt written" >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::candidate ${REEMIT_SHA} carries no binding; refusing to write a receipt"
+          exit 1
+      - name: Re-key it onto this candidate
+        if: startsWith(steps.eligible.outputs.decision, 'reemit:') && matrix.candidate.converged_via != ''
+        env:
+          REEMIT_SHA: ${{ matrix.candidate.sha }}
+          CONVERGED_VIA: ${{ matrix.candidate.converged_via }}
         run: |
           set -euo pipefail
           uv run python scripts/ci/lab_pass_receipt.py reemit \
             --from "${LAB_PASS_SOURCE_DIR}/receipt.json" \
             --sha "${REEMIT_SHA}" \
+            --converged-via "${CONVERGED_VIA}" \
             --out "${LAB_PASS_DIR}/receipt.json"
           uv run python scripts/ci/lab_pass_receipt.py verify \
             --path "${LAB_PASS_DIR}/receipt.json" \
@@ -1124,21 +1186,25 @@ jobs:
       # a zero-byte receipt would satisfy it. This asserts the file is real
       # before the upload claims it is evidence.
       - name: Assert the re-emitted receipt exists and is non-empty
-        # always(), so a failed re-key cannot skip the assertion and leave the
-        # uploader claiming evidence for a file nothing checked.
-        if: always()
+        # always() WITHIN the re-emitting branch, so a failed re-key cannot
+        # skip the assertion and leave the uploader claiming evidence for a
+        # file nothing checked. A candidate that was skipped writes nothing and
+        # uploads nothing, which is the correct no-op.
+        if: always() && startsWith(steps.eligible.outputs.decision, 'reemit:') && matrix.candidate.converged_via != ''
         run: |
           set -euo pipefail
           python3 scripts/ci/assert_evidence_artifact.py \
             --artifact lab-pass-receipt-compose-dev-reemitted \
             --require "${LAB_PASS_DIR}/receipt.json"
       - name: Upload the re-emitted receipt
+        if: startsWith(steps.eligible.outputs.decision, 'reemit:') && matrix.candidate.converged_via != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          # Same key the gate queries by, for the QUEUED sha. The gate reads
-          # the newest artifact of a name, so this supersedes nothing and
-          # races nothing: the queued sha has no receipt at all until now.
-          name: lab-pass-receipt-compose-dev-${{ matrix.sha }}
+          # Same key the gate queries by, for the CANDIDATE sha. The gate
+          # reads the NEWEST artifact of a name, so a candidate that already
+          # carried a binding-FAIL receipt is superseded rather than
+          # duplicated, and a queued candidate that had none simply gains one.
+          name: lab-pass-receipt-compose-dev-${{ matrix.candidate.sha }}
           path: ${{ env.LAB_PASS_DIR }}
           retention-days: 90
           if-no-files-found: error

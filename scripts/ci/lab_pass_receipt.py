@@ -2907,7 +2907,56 @@ def resolve_lane_binding(
     return None
 
 
-def reemit_receipt(source: ModelLabPassReceipt, sha: str) -> ModelLabPassReceipt:
+def read_agent_loaded_code_sha(agent_url: str, timeout_seconds: float = 10.0) -> str:
+    """The code sha the deploy agent RECORDED for what it last loaded.
+
+    OMN-18988, surface two of three. Empty on any failure: an unreachable agent
+    is one surface declining to answer, never a refusal on its own, because the
+    caller has two more to try. A refusal is all three staying silent.
+    """
+    if not agent_url:
+        return ""
+    try:
+        with urllib.request.urlopen(  # noqa: S310
+            f"{agent_url.rstrip('/')}/health", timeout=timeout_seconds
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001 - a silent surface is data, not an error
+        return ""
+    value = payload.get("loaded_code_sha") if isinstance(payload, dict) else None
+    return value if isinstance(value, str) and _SHA_RE.match(value) else ""
+
+
+def read_ready_revision(ready_url: str, timeout_seconds: float = 10.0) -> str:
+    """The revision the runtime reports for itself on ``/ready``.
+
+    OMN-18988, surface three of three, and the weakest: it reports a package
+    VERSION rather than a commit on most shapes, so it answers only when the
+    runtime carries an explicit revision. Empty on anything else, on the same
+    terms as the surface above.
+    """
+    if not ready_url:
+        return ""
+    try:
+        with urllib.request.urlopen(  # noqa: S310
+            ready_url, timeout=timeout_seconds
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001 - a silent surface is data, not an error
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    details = payload.get("details")
+    for candidate in (payload, details if isinstance(details, dict) else {}):
+        value = candidate.get("revision")
+        if isinstance(value, str) and _SHA_RE.match(value):
+            return value
+    return ""
+
+
+def reemit_receipt(
+    source: ModelLabPassReceipt, sha: str, converged_via: str = ""
+) -> ModelLabPassReceipt:
     """Re-key a converged receipt onto a sha that was queued behind it.
 
     OMN-18976 part two. The queued sha's own verify run emitted nothing, so a
@@ -2952,7 +3001,12 @@ def reemit_receipt(source: ModelLabPassReceipt, sha: str) -> ModelLabPassReceipt
         checks=source.checks,
         agent_command_id=source.agent_command_id,
         node_inventory=source.node_inventory,
-        converged_via=source.sha,
+        # OMN-18988: the caller supplies this when it re-established the
+        # binding against the live lane, so it names the SURFACE that answered
+        # and not merely the sha. Defaulting to the source sha keeps the
+        # queued-ahead path, where the converged run bound its own observation
+        # and the source sha IS the provenance.
+        converged_via=converged_via or source.sha,
     )
 
 
@@ -3562,7 +3616,38 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="the queued sha this receipt is being written for",
     )
+    reemit.add_argument(
+        "--converged-via",
+        default="",
+        dest="reemit_converged_via",
+        help=(
+            "OMN-18988. The provenance string from `bind-lane`, naming the sha "
+            "AND the surface that established the lane runs code containing "
+            "--sha. Omitted on the queued-ahead path, where the converged run "
+            "bound its own observation and its sha is the provenance."
+        ),
+    )
     reemit.add_argument("--out", required=True, type=Path)
+
+    elig = sub.add_parser(
+        "reemit-eligible",
+        help="decide whether a candidate sha may be answered for",
+    )
+    elig.add_argument(
+        "--existing",
+        type=Path,
+        default=None,
+        help="the candidate's existing receipt, or omitted when it has none",
+    )
+    elig.add_argument(
+        "--endpoint",
+        action="store_true",
+        help=(
+            "this candidate is the window's LOWER endpoint, the revision the "
+            "lane was already on. An endpoint with no receipt is skipped: it "
+            "may not be a merge this lane ever watched."
+        ),
+    )
 
     gate = sub.add_parser("gate", help="fail closed unless a PASS receipt exists")
     gate.add_argument("--sha", required=True)
@@ -3793,12 +3878,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "verify":
         return verify_emitted(args.path, args.sha, EnumLabLane(args.lane), sys.stdout)
 
+    if args.command == "reemit-eligible":
+        # Prints one word, because the workflow branches on it and a decision
+        # a shell has to parse out of prose is a decision nothing tests.
+        existing = args.existing
+        if existing is None or not existing.is_file():
+            if args.endpoint:
+                print("skip:endpoint-has-no-receipt")
+                return 0
+            print("reemit:absent")
+            return 0
+        try:
+            receipt = ModelLabPassReceipt.from_json(
+                existing.read_text(encoding="utf-8")
+            )
+        except (ValueError, TypeError, KeyError, OSError) as exc:
+            # Unreadable is NOT eligible. A receipt nobody can parse might be a
+            # real FAIL, and guessing in the permissive direction is the one
+            # mistake this feature must not make.
+            print(f"skip:unreadable-existing-receipt: {exc}")
+            return 0
+        if receipt.result is EnumLabPassResult.PASS:
+            print("skip:already-passing")
+            return 0
+        if is_binding_only_failure(receipt):
+            print("reemit:binding-failure")
+            return 0
+        failed = sorted(c.name for c in receipt.checks if not c.ok)
+        print(f"skip:health-failure {failed}")
+        return 0
     if args.command == "reemit":
         try:
             source = ModelLabPassReceipt.from_json(
                 args.source.read_text(encoding="utf-8")
             )
-            receipt = reemit_receipt(source, args.sha)
+            receipt = reemit_receipt(source, args.sha, args.reemit_converged_via)
         except (ValueError, TypeError, KeyError, OSError) as exc:
             print(f"::error::refusing to re-emit: {exc}", file=sys.stderr)
             return 1

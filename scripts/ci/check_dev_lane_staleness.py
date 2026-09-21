@@ -177,7 +177,11 @@ _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.ci.lab_pass_receipt import read_lane_generation
+from scripts.ci.lab_pass_receipt import (
+    read_agent_loaded_code_sha,
+    read_lane_generation,
+    resolve_lane_binding,
+)
 
 DEFAULT_REPO = "OmniNode-ai/omnibase_infra"
 DEFAULT_BRANCH = "dev"
@@ -1581,6 +1585,25 @@ def _gh(args: list[str]) -> Any:
     return json.loads(_run(["gh", *args]))
 
 
+def _contains_on_branch(repo: str, branch: str, candidate: str, observed: str) -> bool:
+    """Does ``observed`` carry ``candidate``, on the tracked branch?
+
+    OMN-18988. Containment ONLY, and the two directions are not symmetric: a
+    revision that is an ANCESTOR of the candidate is running code OLDER than
+    it, which is the OMN-18388 distinction this must not widen away. An
+    unresolvable comparison is not containment.
+    """
+    if candidate == observed:
+        return True
+    try:
+        ancestry = read_ancestry(repo, branch, candidate, observed)
+    except Exception:  # noqa: BLE001 - unresolvable is not containment
+        return False
+    return bool(
+        ancestry.observed_on_branch and ancestry.relation in _CONTAINING_RELATIONS
+    )
+
+
 def read_contained_commits(repo: str, previous: str, converged: str) -> tuple[str, ...]:
     """The commits ``converged`` has that ``previous`` does not, oldest first.
 
@@ -2308,12 +2331,69 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
                 f"this one between {result.initial_revision[:12]} and "
                 f"{lane.revision[:12]}"
             )
-    # JSON, not a space-separated list, because the consumer is a matrix job:
-    # `strategy.matrix` takes `fromJSON(...)` and an EMPTY array skips the job
-    # entirely, which is the behaviour wanted when nothing was queued. A
-    # dynamic number of artifact uploads cannot be expressed any other way --
-    # `uses:` steps cannot be looped.
-    _write_output("reemit_shas", json.dumps(list(reemit)))
+    # JSON array of OBJECTS, because the consumer is a matrix job and the legs
+    # are not interchangeable: `strategy.matrix` takes `fromJSON(...)`, an
+    # EMPTY array skips the job entirely, and a dynamic number of artifact
+    # uploads cannot be expressed any other way since `uses:` steps cannot be
+    # looped.
+    #
+    # The LOWER ENDPOINT rides along with `endpoint: true` (OMN-18988). It is
+    # the revision the lane was ALREADY on, so it is not in the window proper
+    # -- but it is exactly where a receipt that failed on a binding class sits
+    # once the lane has moved past it, which is the 430ff3434 shape. It is
+    # bounded rather than a widening: the leg refuses an endpoint that has NO
+    # receipt, because the lane's prior revision may be a commit this lane
+    # never watched, and it refuses one whose receipt failed on anything that
+    # is a statement about the lane.
+    # THE BINDING IS RESOLVED HERE, IN THIS JOB, and that is a deliberate
+    # placement rather than a convenience (OMN-18988).
+    #
+    # A re-emitted receipt must not INHERIT the converged run's binding: the
+    # case this exists for is a run that could not bind its own observation.
+    # So the lane is re-read, across three surfaces. But the job that reads it
+    # cannot be a new one on the verify runner -- that runner is ONE container
+    # and OMN-18408 makes its label single-purpose precisely so an unreviewed
+    # addition cannot reintroduce starvation on it. This job already holds the
+    # lane, already has the credential, and is already serialised by that
+    # runner, so it does the reading and hands the consumer a fact rather than
+    # an errand.
+    #
+    # A candidate that cannot be bound is OMITTED and named in the log. It is
+    # not silently dropped and it is not passed on as a guess: no binding
+    # means no receipt, and the delivery gate keeps refusing that sha exactly
+    # as it does today.
+    candidates: list[dict[str, object]] = []
+    if result.outcome is EnumConvergenceOutcome.OK:
+        pending: list[tuple[str, bool]] = [(sha, False) for sha in reemit]
+        if result.initial_revision:
+            pending.append((result.initial_revision, True))
+        for sha, endpoint in pending:
+            binding = resolve_lane_binding(
+                sha=sha,
+                container_revision=lane.revision or None,
+                agent_loaded_code_sha=read_agent_loaded_code_sha(args.agent_url)
+                or None,
+                ready_version_revision=None,
+                contains=lambda candidate, observed: _contains_on_branch(
+                    args.repo, args.branch, candidate, observed
+                ),
+            )
+            if binding is None:
+                print(
+                    f"::notice::re-emission candidate {sha[:12]} omitted: no "
+                    "surface established that the lane runs code containing "
+                    "it, so no receipt will be written and the delivery gate "
+                    "keeps refusing it"
+                )
+                continue
+            candidates.append(
+                {
+                    "sha": sha,
+                    "endpoint": endpoint,
+                    "converged_via": binding.converged_via,
+                }
+            )
+    _write_output("reemit_candidates", json.dumps(candidates))
 
     # OMN-18143. Read AFTER the wait, because the agent folds a command when it
     # DEQUEUES it, which is normally after this guard started watching. The

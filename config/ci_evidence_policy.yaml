@@ -121,11 +121,11 @@ evidence_artifacts:
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: reemit-queued-receipts
     producer_step: "Upload the re-emitted receipt"
-    artifact_name: lab-pass-receipt-compose-dev-${{ matrix.sha }}
+    artifact_name: lab-pass-receipt-compose-dev-${{ matrix.candidate.sha }}
     required_paths:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
-      The .201 compose dev lane's lab pass for a merge that was QUEUED behind another deploy and emitted no receipt of its own (OMN-18976). Its evidence is the converged run's own probes, re-keyed rather than re-taken, because those reads were made against the image that contains this sha. Carries converged_via so it is tellable apart from a receipt the sha's own run wrote.
+      The .201 compose dev lane's lab pass for a merge the converged image contains but whose own run could not answer for it (OMN-18976, OMN-18988): either it was QUEUED behind another deploy and emitted no receipt, or its receipt FAILED on binding-class checks alone, which records that the run could not bind its observation rather than that the lane was unhealthy. Its evidence is the converged run's own probes, re-keyed rather than re-taken, because those reads were made against the image that contains this sha. Carries converged_via naming the lane surface that bound it, so it is tellable apart from a receipt the sha's own run wrote. A receipt whose health checks genuinely failed is never re-emitted.
   - id: lab-pass-receipt-compose-dev-sibling
     workflow: .github/workflows/runtime-rebuild-trigger-reusable.yml
     job: verify-sibling-converged

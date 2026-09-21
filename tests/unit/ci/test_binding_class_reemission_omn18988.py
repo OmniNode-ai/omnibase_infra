@@ -260,3 +260,74 @@ class TestTheBindingIsReEstablishedAcrossThreeSurfaces:
         assert binding is not None
         # converged_via must say WHICH surface answered, not merely that one did.
         assert binding.converged_via == f"{_X} via container-revision"
+
+
+class TestTheEligibilityDecisionIsOneWord:
+    """The workflow branches on this, so it is asserted rather than eyeballed."""
+
+    @staticmethod
+    def _run(tmp_path, receipt=None, endpoint: bool = False) -> str:
+        import contextlib
+        import io
+
+        from scripts.ci.lab_pass_receipt import main
+
+        argv = ["reemit-eligible"]
+        if receipt is not None:
+            path = tmp_path / "existing.json"
+            path.write_text(receipt.to_json(indent=2), encoding="utf-8")
+            argv += ["--existing", str(path)]
+        if endpoint:
+            argv.append("--endpoint")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            main(argv)
+        return out.getvalue().strip()
+
+    def test_an_absent_receipt_in_the_window_is_re_emitted(self, tmp_path) -> None:
+        assert self._run(tmp_path) == "reemit:absent"
+
+    def test_an_absent_receipt_at_the_ENDPOINT_is_skipped(self, tmp_path) -> None:
+        # The bound that keeps the lower endpoint from widening into ancestry:
+        # the lane's prior revision may not be a merge this lane ever watched,
+        # so it is answerable only when it already has a binding-FAIL receipt.
+        assert self._run(tmp_path, endpoint=True) == "skip:endpoint-has-no-receipt"
+
+    def test_a_binding_failure_is_re_emitted(self, tmp_path) -> None:
+        receipt = _receipt(_indeterminate("deployed_revision"), _ok("ready_main"))
+        assert self._run(tmp_path, receipt) == "reemit:binding-failure"
+
+    def test_a_binding_failure_at_the_endpoint_is_re_emitted(self, tmp_path) -> None:
+        # The 430ff3434 shape: the lane's current revision, receipt already
+        # written and binding-FAIL. This is the case the widening exists for.
+        receipt = _receipt(
+            _indeterminate("deployed_revision"), _failed("probe_generation_bound")
+        )
+        assert self._run(tmp_path, receipt, endpoint=True) == "reemit:binding-failure"
+
+    def test_a_passing_receipt_is_skipped(self, tmp_path) -> None:
+        assert (
+            self._run(tmp_path, _receipt(_ok("ready_main"))) == "skip:already-passing"
+        )
+
+    def test_a_health_failure_is_skipped_and_names_the_checks(self, tmp_path) -> None:
+        receipt = _receipt(_failed("ready_main"), _failed("migrations_applied"))
+        decision = self._run(tmp_path, receipt)
+        assert decision.startswith("skip:health-failure")
+        assert "ready_main" in decision
+        assert "migrations_applied" in decision
+
+    def test_an_unreadable_receipt_is_skipped_not_re_emitted(self, tmp_path) -> None:
+        # Guessing permissively on a receipt nobody can parse is the one
+        # mistake this feature must not make: it might be a real FAIL.
+        path = tmp_path / "existing.json"
+        path.write_text("{not json", encoding="utf-8")
+        import contextlib
+        import io
+
+        from scripts.ci.lab_pass_receipt import main
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            main(["reemit-eligible", "--existing", str(path)])
+        assert out.getvalue().strip().startswith("skip:unreadable-existing-receipt")
