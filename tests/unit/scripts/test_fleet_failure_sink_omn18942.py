@@ -490,6 +490,125 @@ def _evaluator(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _load_evaluator() -> Any:
+    """Import the evaluator by path: its directory is not a package."""
+    spec = importlib.util.spec_from_file_location(
+        "nonrequired_check_failure_rate", EVALUATOR
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+evaluator_module = _load_evaluator()
+
+
+# ---------------------------------------------------------------------------
+# The destination must exist, or the job must say so in its exit code.
+#
+# Measured 2026-09-21, live: no chat secret of any name exists at OmniNode-ai
+# organisation scope or in omnibase_infra / omninode_infra repository scope.
+# This job reaches post_slack_alert ONLY when it has findings to deliver, and
+# with no credential it printed a line and returned, leaving the run green. A
+# finding that reaches nobody while the job reports success is the exact defect
+# class this ticket was filed about, reproduced by its own fix.
+#
+# The asymmetry that stays: raising an alert is still not this job failing.
+# What fails is having an alert and no destination for it.
+# ---------------------------------------------------------------------------
+
+
+class _Alertish:
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+
+
+def test_findings_with_no_destination_credential_refuse(monkeypatch) -> None:
+    """RED test. An undeliverable finding may not exit zero."""
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("SLACK_CHANNEL_ID", raising=False)
+    with pytest.raises(evaluator_module.AlertDestinationMissingError) as excinfo:
+        evaluator_module.post_slack_alert([_Alertish("omnibase_infra never green")])
+    assert "SLACK_BOT_TOKEN" in str(excinfo.value)
+
+
+def test_an_empty_destination_credential_is_treated_as_absent(monkeypatch) -> None:
+    """A secret that resolves to the empty string is the same hole as no secret."""
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "")
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C123")
+    with pytest.raises(evaluator_module.AlertDestinationMissingError):
+        evaluator_module.post_slack_alert([_Alertish("x")])
+
+
+def test_a_missing_channel_refuses_as_loudly_as_a_missing_token(monkeypatch) -> None:
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-not-a-real-token")
+    monkeypatch.delenv("SLACK_CHANNEL_ID", raising=False)
+    with pytest.raises(evaluator_module.AlertDestinationMissingError) as excinfo:
+        evaluator_module.post_slack_alert([_Alertish("x")])
+    assert "SLACK_CHANNEL_ID" in str(excinfo.value)
+
+
+def test_the_refusal_reason_is_one_line(monkeypatch) -> None:
+    """A multi-line reason in an ::error:: annotation is truncated to noise."""
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("SLACK_CHANNEL_ID", raising=False)
+    with pytest.raises(evaluator_module.AlertDestinationMissingError) as excinfo:
+        evaluator_module.post_slack_alert([_Alertish("x")])
+    assert "\n" not in str(excinfo.value)
+
+
+def test_the_refusal_names_no_credential_value(monkeypatch) -> None:
+    """NEGATIVE CONTROL: the reason names the reference, never the secret."""
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-a-real-looking-value")
+    monkeypatch.delenv("SLACK_CHANNEL_ID", raising=False)
+    with pytest.raises(evaluator_module.AlertDestinationMissingError) as excinfo:
+        evaluator_module.post_slack_alert([_Alertish("x")])
+    assert "xoxb-a-real-looking-value" not in str(excinfo.value)
+
+
+def test_a_present_credential_is_unchanged(monkeypatch) -> None:
+    """POSITIVE CONTROL: with a destination, the post path runs as before.
+
+    The refusal must be reachable ONLY through the absent-credential branch;
+    if it fired with both values present, the change would have converted a
+    silent success into a permanent red.
+    """
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-not-a-real-token")
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C123")
+    posted: list[Any] = []
+    monkeypatch.setattr(
+        evaluator_module.urllib.request,
+        "urlopen",
+        lambda request, timeout=10: posted.append(request) or _NullResponse(),
+    )
+    evaluator_module.post_slack_alert([_Alertish("x")])
+    assert len(posted) == 1
+
+
+class _NullResponse:
+    def __enter__(self) -> _NullResponse:
+        return self
+
+    def __exit__(self, *_: Any) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return b"{}"
+
+
+def test_no_findings_means_no_destination_is_required() -> None:
+    """The call site only delivers when there is something to deliver.
+
+    A clean sweep with no chat secret is not a silent failure -- nothing
+    failed to reach anybody -- so the guard must sit on the delivery path and
+    not on the evaluation path.
+    """
+    source = EVALUATOR.read_text()
+    assert "if combined_alerts and not args.dry_run:" in source
+
+
 def test_selecting_no_repositories_is_an_error_not_an_empty_sweep() -> None:
     """An empty repo list would exit 0 having looked at nothing."""
     result = _evaluator("--policy", str(POLICY), "--report", "/dev/null")

@@ -757,3 +757,66 @@ def test_the_deriver_is_invoked_from_the_repository_root() -> None:
     assert "declared-groups.txt" in executable
     assert "--consumer-groups-file" in executable
     assert "steps.groups.outputs.groups" not in executable
+
+
+def unwired_claim_disagreement(
+    workflow_text: str, unwired: tuple[str, ...]
+) -> str | None:
+    """Return the disagreement between the job's prose and the unwired set.
+
+    Rule 15 says judge the executable text and not the prose about it, and
+    :func:`test_the_deriver_is_invoked_from_the_repository_root` above strips
+    comments for exactly that reason. This function is the narrow exception,
+    and the reason it earns one is measured rather than argued: the revert of
+    `delegation_golden_chain` left the constant correct and left this job's
+    comment asserting the list was empty, and that sentence survived a day of
+    readers because every test here reads the constant and none read the claim
+    beside it. A coverage claim nobody checks is the same defect as a check
+    nobody runs, which is what OMN-18864 is about.
+
+    It checks ONE thing and makes no attempt to parse English: an emptiness
+    claim about the list cannot stand while the list is not empty.
+    """
+    claims_empty = "PROBES_NOT_YET_WIRED is now empty" in workflow_text
+    if claims_empty and unwired:
+        return (
+            "the workflow states PROBES_NOT_YET_WIRED is now empty while it names "
+            f"{', '.join(unwired)}"
+        )
+    return None
+
+
+def test_the_workflow_prose_agrees_with_the_unwired_set() -> None:
+    """The job may not claim coverage the receipt does not carry.
+
+    Falsifier: the emitting job asserts the unwired list is empty while a
+    check name sits on it, which is what shipped on 2026-09-20 and what no
+    test here could see.
+    """
+    workflow = Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
+        encoding="utf-8"
+    )
+    assert unwired_claim_disagreement(workflow, PROBES_NOT_YET_WIRED) is None
+
+
+def test_the_prose_check_catches_the_drift_it_exists_for() -> None:
+    """Negative control: without it the assertion above proves nothing.
+
+    The check is one substring, so a check that had quietly stopped matching
+    would look exactly like a workflow in agreement with the constant.
+    """
+    drifted = "# scripts/ci/lab_pass_receipt.py's PROBES_NOT_YET_WIRED is now empty.\n"
+    assert (
+        unwired_claim_disagreement(drifted, (DELEGATION_GOLDEN_CHAIN_CHECK,))
+        is not None
+    )
+    # And it stays silent in the two states that are NOT the defect: an
+    # emptiness claim with a genuinely empty list, and a non-empty list with
+    # no claim about it.
+    assert unwired_claim_disagreement(drifted, ()) is None
+    assert (
+        unwired_claim_disagreement(
+            "# nothing said here\n", (DELEGATION_GOLDEN_CHAIN_CHECK,)
+        )
+        is None
+    )
