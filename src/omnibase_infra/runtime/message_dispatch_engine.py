@@ -1899,6 +1899,7 @@ class MessageDispatchEngine:
         envelope: ModelEventEnvelope[object],
         *,
         allowed_dispatcher_ids: Collection[str],
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> ModelDispatchResult:
         """Dispatch through an explicit, non-empty contract-owned scope.
 
@@ -1911,6 +1912,7 @@ class MessageDispatchEngine:
             topic,
             envelope,
             allowed_dispatcher_ids=allowed_dispatcher_ids,
+            delivery=delivery,
         )
 
     async def dispatch_with_transaction(

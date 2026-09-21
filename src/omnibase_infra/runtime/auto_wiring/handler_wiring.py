@@ -164,6 +164,10 @@ from omnibase_infra.runtime.contract_terminal_events import (
     envelope_terminal_payload,
     load_terminal_event_topics,
 )
+from omnibase_infra.runtime.delivery_context import (
+    delivery_context_from_message,
+    engine_type_accepts_delivery,
+)
 from omnibase_infra.runtime.dispatch_envelope_context import (
     bind_dispatch_envelope,
     current_dispatch_envelope,
@@ -6714,8 +6718,36 @@ async def _dispatch_to_contract_scope(
     topic: str,
     envelope: ModelEventEnvelope[object],
     allowed_dispatcher_ids: frozenset[str],
+    delivery: ModelMessageDeliveryContext | None = None,
 ) -> ModelDispatchResult:
-    """Dispatch through the engine while preserving callback ownership."""
+    """Dispatch through the engine while preserving callback ownership.
+
+    OMN-18918. ``delivery`` carries the source record's own coordinates from
+    whichever consume boundary called this. THIS is the path the in-process
+    projection writers take -- the five writers the OMN-18905 defect is about
+    declare ``db_tables`` and no ``consumer_purpose``, which routes them to
+    the two callbacks above rather than to ``EventBusSubcontractWiring``. A
+    live subscription readback on the .201 dev lane measured that seam
+    dispatching 104 calls across four topics, none of them a projection
+    source, so a typed path that reached only the other protocol would inject
+    nothing for exactly the writers it was built for and log the absence on
+    every message while the exposures stayed frozen. Found in second-actor
+    review before merge rather than on the lane afterwards.
+
+    The engine is probed before the keyword is passed, for the same reason
+    the other seam probes: ``delivery`` is optional on the protocol, so an
+    engine predating it is valid and would raise ``TypeError`` on an
+    unconditional keyword.
+    """
+    if delivery is not None and engine_type_accepts_delivery(
+        type(dispatch_engine), "dispatch_scoped"
+    ):
+        return await dispatch_engine.dispatch_scoped(
+            topic,
+            envelope,
+            allowed_dispatcher_ids=allowed_dispatcher_ids,
+            delivery=delivery,
+        )
     return await dispatch_engine.dispatch_scoped(
         topic,
         envelope,
@@ -6992,6 +7024,7 @@ def _make_event_bus_callback(
                     topic,
                     envelope,
                     dispatcher_scope,
+                    delivery_context_from_message(message, topic),
                 )
                 if result_applier is not None and result is not None:
                     try:
@@ -7736,12 +7769,14 @@ def _make_raw_event_projection_callback(
 
     async def _dispatch_and_apply_raw_projection(
         envelope: ModelEventEnvelope[object],
+        delivery: ModelMessageDeliveryContext | None = None,
     ) -> None:
         result = await _dispatch_to_contract_scope(
             scoped_dispatch_engine,
             topic,
             envelope,
             dispatcher_scope,
+            delivery,
         )
         if result is not None:
             # OMN-16831: same reason as the sibling boundary above -- the
@@ -7771,7 +7806,10 @@ def _make_raw_event_projection_callback(
                 tenant_id=_tenant_id_from_raw_message(raw_message),
             )
             if flow_counters is None or consumer_group is None:
-                await _dispatch_and_apply_raw_projection(envelope)
+                await _dispatch_and_apply_raw_projection(
+                    envelope,
+                    delivery_context_from_message(raw_message, topic),
+                )
             else:
                 # OMN-17214: counted before the call for the same reason
                 # the sibling branch counts before its call -- an envelope
@@ -7788,7 +7826,10 @@ def _make_raw_event_projection_callback(
                 # producing nothing and reads STALLED while it is
                 # demonstrably producing.
                 with active_flow_key(consumer_group, topic):
-                    await _dispatch_and_apply_raw_projection(envelope)
+                    await _dispatch_and_apply_raw_projection(
+                        envelope,
+                        delivery_context_from_message(raw_message, topic),
+                    )
         except Exception as exc:  # noqa: BLE001 — consumer boundary; log and continue
             if flow_counters is not None and consumer_group is not None:
                 flow_counters.record_error(consumer_group, topic)

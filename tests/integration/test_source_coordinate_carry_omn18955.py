@@ -49,8 +49,8 @@ import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
-from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-    _delivery_context_from_message,
+from omnibase_infra.runtime.delivery_context import (
+    delivery_context_from_message,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -129,7 +129,7 @@ class TestTheCoordinateReachesTheProjectionSite:
         # build in the frame holding the record, hand it to dispatch as an
         # argument.
         contexts = [
-            _delivery_context_from_message(message, _TOPIC) for message in received
+            delivery_context_from_message(message, _TOPIC) for message in received
         ]
 
         assert all(context is not None for context in contexts)
@@ -160,11 +160,11 @@ class TestTheCoordinateReachesTheProjectionSite:
         finally:
             await bus.shutdown()
 
-        assert _delivery_context_from_message(received[0], _TOPIC) is not None
+        assert delivery_context_from_message(received[0], _TOPIC) is not None
 
         bare = received[0].model_copy(update={"partition": None, "offset": None})
         assert isinstance(bare, ModelEventMessage)
-        assert _delivery_context_from_message(bare, _TOPIC) is None
+        assert delivery_context_from_message(bare, _TOPIC) is None
 
     async def test_one_records_coordinates_cannot_reach_another(self) -> None:
         # The leak property, and the reason it is now cheap to hold. Under the
@@ -183,12 +183,12 @@ class TestTheCoordinateReachesTheProjectionSite:
         finally:
             await bus.shutdown()
 
-        first = _delivery_context_from_message(received[0], _TOPIC)
-        second = _delivery_context_from_message(received[1], _TOPIC)
+        first = delivery_context_from_message(received[0], _TOPIC)
+        second = delivery_context_from_message(received[1], _TOPIC)
 
         assert first is not None and second is not None
         assert first != second
         assert first.offset != second.offset
         # Rebuilding the first record's context after the second one exists
         # returns the first record's own coordinates, unchanged.
-        assert _delivery_context_from_message(received[0], _TOPIC) == first
+        assert delivery_context_from_message(received[0], _TOPIC) == first

@@ -27,8 +27,8 @@ from omnibase_core.models.dispatch.model_message_delivery_context import (
 )
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
-from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-    _delivery_context_from_message,
+from omnibase_infra.runtime.delivery_context import (
+    delivery_context_from_message,
 )
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
@@ -58,7 +58,7 @@ class TestDeliveryContextFromMessage:
     """The consume loop's half: build coordinates, or refuse to."""
 
     def test_a_complete_message_yields_its_coordinates(self) -> None:
-        context = _delivery_context_from_message(_message(), _TOPIC)
+        context = delivery_context_from_message(_message(), _TOPIC)
 
         assert context is not None
         assert (context.topic, context.partition, context.offset) == (
@@ -88,9 +88,7 @@ class TestDeliveryContextFromMessage:
         and that indistinguishability IS the defect. Refusing lets the seam
         log rather than silently publish a constant.
         """
-        assert _delivery_context_from_message(_message(**overrides), _TOPIC) is None, (
-            why
-        )
+        assert delivery_context_from_message(_message(**overrides), _TOPIC) is None, why
 
     def test_a_message_that_is_not_the_concrete_model_yields_none(self) -> None:
         """core's ProtocolEventMessage declares no coordinates at all.
@@ -105,7 +103,7 @@ class TestDeliveryContextFromMessage:
             key = None
             value = b"{}"
 
-        assert _delivery_context_from_message(BareMessage(), _TOPIC) is None  # type: ignore[arg-type]
+        assert delivery_context_from_message(BareMessage(), _TOPIC) is None  # type: ignore[arg-type]
 
 
 class TestDispatcherDeliveryInspection:
@@ -270,68 +268,68 @@ class _NoDispatchAttribute:
 
 
 def test_a_legacy_engine_is_not_passed_the_keyword() -> None:
-    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-        _engine_type_accepts_delivery,
+    from omnibase_infra.runtime.delivery_context import (
+        engine_type_accepts_delivery,
     )
 
-    assert _engine_type_accepts_delivery(_LegacyEngine) is False
+    assert engine_type_accepts_delivery(_LegacyEngine, "dispatch") is False
 
 
 def test_a_declaring_engine_is_passed_the_keyword() -> None:
-    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-        _engine_type_accepts_delivery,
+    from omnibase_infra.runtime.delivery_context import (
+        engine_type_accepts_delivery,
     )
 
-    assert _engine_type_accepts_delivery(_ModernEngine) is True
+    assert engine_type_accepts_delivery(_ModernEngine, "dispatch") is True
 
 
 def test_a_positional_delivery_parameter_is_refused() -> None:
     """Name alone is not enough; a positional match would be ambiguous."""
-    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-        _engine_type_accepts_delivery,
+    from omnibase_infra.runtime.delivery_context import (
+        engine_type_accepts_delivery,
     )
 
-    assert _engine_type_accepts_delivery(_PositionalDeliveryEngine) is False
+    assert engine_type_accepts_delivery(_PositionalDeliveryEngine, "dispatch") is False
 
 
 def test_a_kwargs_only_engine_is_refused() -> None:
     """It would not raise, but it declared nothing -- unknown refuses."""
-    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-        _engine_type_accepts_delivery,
+    from omnibase_infra.runtime.delivery_context import (
+        engine_type_accepts_delivery,
     )
 
-    assert _engine_type_accepts_delivery(_KwargsOnlyEngine) is False
+    assert engine_type_accepts_delivery(_KwargsOnlyEngine, "dispatch") is False
 
 
 def test_an_object_with_no_dispatch_is_refused_rather_than_raising() -> None:
-    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-        _engine_type_accepts_delivery,
+    from omnibase_infra.runtime.delivery_context import (
+        engine_type_accepts_delivery,
     )
 
-    assert _engine_type_accepts_delivery(_NoDispatchAttribute) is False
+    assert engine_type_accepts_delivery(_NoDispatchAttribute, "dispatch") is False
 
 
 def test_the_probe_is_cached_per_engine_class() -> None:
     """The signature is a property of the type; it must not run per message."""
-    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-        _engine_type_accepts_delivery,
+    from omnibase_infra.runtime.delivery_context import (
+        engine_type_accepts_delivery,
     )
 
-    _engine_type_accepts_delivery(_ModernEngine)
-    before = _engine_type_accepts_delivery.cache_info().hits
+    engine_type_accepts_delivery(_ModernEngine, "dispatch")
+    before = engine_type_accepts_delivery.cache_info().hits
     for _ in range(5):
-        _engine_type_accepts_delivery(_ModernEngine)
+        engine_type_accepts_delivery(_ModernEngine, "dispatch")
 
-    assert _engine_type_accepts_delivery.cache_info().hits == before + 5
+    assert engine_type_accepts_delivery.cache_info().hits == before + 5
 
 
 def test_the_real_engine_is_recognised_by_the_probe() -> None:
     """The positive control: the engine actually wired in declares it."""
-    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-        _engine_type_accepts_delivery,
+    from omnibase_infra.runtime.delivery_context import (
+        engine_type_accepts_delivery,
     )
 
-    assert _engine_type_accepts_delivery(MessageDispatchEngine) is True
+    assert engine_type_accepts_delivery(MessageDispatchEngine, "dispatch") is True
 
 
 # ---------------------------------------------------------------------------
@@ -433,3 +431,72 @@ def test_the_channels_that_legitimately_live_there_are_untouched() -> None:
     assert hasattr(channels, "current_projection_tenant_authority")
     assert not hasattr(channels, "bind_source_coordinate")
     assert not hasattr(channels, "current_source_coordinate")
+
+
+# ---------------------------------------------------------------------------
+# OMN-18918: THREE consume boundaries, not one.
+#
+# The first cut of this change supplied a delivery context at the subcontract
+# seam only. The in-process projection writers -- the surfaces the OMN-18905
+# defect is actually about -- do not arrive there; they reach handler_wiring's
+# two callbacks, which dispatch through a different protocol. Every test
+# passed, and on the lane it would have injected nothing for exactly those
+# writers. Caught in second-actor review, not by a test.
+#
+# So the boundary COUNT is asserted, not just the mechanism at one of them.
+# ---------------------------------------------------------------------------
+
+_SUBCONTRACT_WIRING = _INJECTION_SITE.parents[1] / "event_bus_subcontract_wiring.py"
+
+
+def _builder_call_count(path: pathlib.Path) -> int:
+    return len(
+        re.findall(
+            r"\bdelivery_context_from_message\(", path.read_text(encoding="utf-8")
+        )
+    )
+
+
+def test_every_consume_boundary_builds_a_delivery_context() -> None:
+    """One builder call per boundary: two here, one at the subcontract seam."""
+    handler_wiring_calls = _builder_call_count(_INJECTION_SITE)
+    subcontract_calls = _builder_call_count(_SUBCONTRACT_WIRING)
+
+    # Three calls for two boundaries: the event-bus callback has one, and the
+    # raw projection callback has two because it dispatches on both arms of
+    # its flow-counter branch. The retired context-channel arm bound on both
+    # arms too, and for the stated reason -- a projection writer needs the
+    # coordinates whether or not this lane happens to be counting flow.
+    assert handler_wiring_calls == 3, (
+        f"{handler_wiring_calls} builder calls in {_INJECTION_SITE.name}; expected 3 "
+        "(event-bus callback: 1; raw projection callback: 2, one per arm of its "
+        "flow-counter branch). A boundary that stops building a context does not "
+        "fail -- it injects nothing and the exposure freezes at zero consumer lag."
+    )
+    assert subcontract_calls == 1, (
+        f"{subcontract_calls} builder calls in {_SUBCONTRACT_WIRING.name}; expected 1."
+    )
+
+
+def test_the_builder_and_the_probe_have_exactly_one_home() -> None:
+    """Three callers, one definition -- the reason the module exists.
+
+    Two of the three boundaries previously had no access to the builder at
+    all because it lived inside the third one's module. Copying it per
+    boundary is how they drift apart; this asserts they cannot.
+    """
+    runtime_dir = _INJECTION_SITE.parents[1]
+    definitions = sorted(
+        str(path.relative_to(runtime_dir))
+        for path in runtime_dir.rglob("*.py")
+        if re.search(
+            r"^def delivery_context_from_message\(",
+            path.read_text(encoding="utf-8"),
+            re.M,
+        )
+    )
+
+    assert definitions == ["delivery_context.py"], (
+        f"delivery_context_from_message is defined in {definitions}; it must have "
+        "exactly one home, because three consume boundaries call it."
+    )

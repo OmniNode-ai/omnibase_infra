@@ -133,6 +133,10 @@ from omnibase_infra.models.event_bus import (
 )
 from omnibase_infra.observability.wiring_health import MixinConsumptionCounter
 from omnibase_infra.protocols import ProtocolIdempotencyStore
+from omnibase_infra.runtime.delivery_context import (
+    delivery_context_from_message,
+    engine_type_accepts_delivery,
+)
 from omnibase_infra.topics import TopicResolver, create_topic_resolver
 from omnibase_infra.utils import compute_consumer_group_id
 from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
@@ -183,86 +187,6 @@ def validate_topic(topic: str, deny_patterns: tuple[str, ...] = ()) -> None:
                 f"(matched deny pattern: {pattern})",
                 context=context,
             )
-
-
-@functools.lru_cache(maxsize=128)
-def _engine_type_accepts_delivery(engine_type: type) -> bool:
-    """Does this dispatch engine's ``dispatch`` declare keyword-only ``delivery``?
-
-    OMN-18918. ``delivery`` is OPTIONAL on ``ProtocolDispatchEngine``, which
-    means every implementor written before it -- in this repo, in a consumer
-    repo, and in a test double -- is still a valid implementor and still has
-    a two-parameter ``dispatch``. A caller that passes the keyword
-    unconditionally converts that optionality into a ``TypeError`` at the
-    first message, which is a consumer break dressed as an additive change.
-    Two engines in this repo's own test suite fail exactly that way.
-
-    So the caller probes, the same way the engine probes its dispatchers. The
-    name must match AND be keyword-only: a positional match would be
-    ambiguous with ``topic`` and ``envelope``.
-
-    Cached on the engine CLASS, not the instance -- the signature is a
-    property of the type, and the probe must not run per message.
-
-    An uninspectable engine returns False and is called exactly as it is
-    today. Unknown refuses, which here means "changes nothing".
-    """
-    try:
-        parameter = inspect.signature(engine_type.dispatch).parameters.get(  # type: ignore[attr-defined]
-            "delivery"
-        )
-    except (ValueError, TypeError, AttributeError):
-        return False
-    return parameter is not None and parameter.kind is inspect.Parameter.KEYWORD_ONLY
-
-
-def _delivery_context_from_message(
-    message: ProtocolEventMessage, topic: str
-) -> ModelMessageDeliveryContext | None:
-    """Build the delivery coordinates for one consumed message, or ``None``.
-
-    OMN-18918. ``ProtocolEventMessage`` in ``omnibase_core`` -- the type this
-    loop is written against -- declares ``topic``, ``key``, ``value``,
-    ``headers``, ``ack`` and ``nack``, and NO delivery coordinates at all.
-    The concrete object the Kafka bus delivers is
-    ``omnibase_infra``'s ``ModelEventMessage``, which does carry them
-    (``event_bus_kafka.py`` builds it straight from the consumed record), so
-    this narrows to that model rather than widening a shared protocol in a
-    lower layer for one consumer. An implementation that is not that model --
-    the in-memory bus, a test double -- yields ``None`` and is handled by the
-    same refusal as a missing coordinate.
-
-    Both fields are optional on that model and the offset is text, so either
-    one absent, or an offset that does not parse as a non-negative integer,
-    yields ``None``.
-
-    ``None`` rather than a zero, deliberately. A fabricated coordinate is
-    indistinguishable downstream from a measured one, and that is precisely
-    the defect this ticket exists to end: every in-process projection writer
-    published its snapshot deltas at offset 0, the serving cache refuses a
-    delta whose offset does not exceed the one it holds for that key, and so
-    each key froze on its first value -- at zero consumer lag, behind a green
-    readiness endpoint (OMN-18905). A consumer that cannot say where a
-    message came from must say nothing, and the projection seam refuses
-    loudly rather than inventing a coordinate.
-
-    No broker timestamp: the protocol does not carry one, and the model's
-    field is optional for exactly this reason rather than being defaulted to
-    a clock reading here.
-    """
-    if not isinstance(message, ModelEventMessage):
-        return None
-    partition = message.partition
-    raw_offset = message.offset
-    if partition is None or raw_offset is None:
-        return None
-    try:
-        offset = int(raw_offset)
-    except (TypeError, ValueError):
-        return None
-    if offset < 0 or partition < 0:
-        return None
-    return ModelMessageDeliveryContext(topic=topic, partition=partition, offset=offset)
 
 
 class EventBusSubcontractWiring(MixinConsumptionCounter):
@@ -1002,8 +926,10 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 # exceed the cached one, and each key froze on its first
                 # value.
                 delivery_kwargs = (
-                    {"delivery": _delivery_context_from_message(message, topic)}
-                    if _engine_type_accepts_delivery(type(self._dispatch_engine))
+                    {"delivery": delivery_context_from_message(message, topic)}
+                    if engine_type_accepts_delivery(
+                        type(self._dispatch_engine), "dispatch"
+                    )
                     else {}
                 )
                 result = await self._dispatch_engine.dispatch(
