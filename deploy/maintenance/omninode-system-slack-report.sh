@@ -911,6 +911,160 @@ check_runner_tree_converge() {
   printf 'runner-tree|OK|converge|%s, last clean convergence %sh ago\n' "$verdict" "$age_hours"
 }
 
+# OMN-18944: the production Postgres backup must be proven to EXIST and be FRESH.
+#
+# WHY IT LIVES HERE. `omninode_infra`'s nightly backup CronJob carries a bounded
+# failed-job history limit and nothing else. No alert rule covers CronJob
+# failure, and the alert-rule files that repo does carry are applied by no
+# workflow at all, so a failed nightly backup and a successful one were the same
+# event from outside the cluster. Folding the read into this reporter rather
+# than building a second alerter is the net-negative-surface rule -- it inherits
+# this script's Slack poster, its per-key state-change de-duplication, its
+# resolved-notification and its */15 cron. No new cron unit, no second Slack
+# integration. Same argument as the two checks above.
+#
+# WHY IT READS A WORKFLOW RUN AND NOT THE BUCKET. The verdict itself is
+# artifact-based: `scripts/check_postgres_backup_freshness.py` reads the newest
+# backup OBJECT per cluster and database out of S3 and fails on absent, stale or
+# empty. But that read needs AWS credentials, and this host has neither an `aws`
+# CLI nor any AWS credential -- measured 2026-09-21, no `~/.aws`, zero AWS names
+# in the env file against 175 keys as a positive control. The probe therefore
+# runs where the credential already is, in GitHub Actions on a four-hourly
+# schedule, and this function reads its conclusion with the GitHub token this
+# host already holds. Nothing new is minted.
+#
+# WHY A MISSING RUN IS CRITICAL AND A MISSING TOKEN IS NOT. The failure this
+# whole ticket is about is a check that quietly stops reaching anybody, so a
+# gate that has not run inside its window is exactly the condition worth a
+# human, not a lesser one -- and it is the only way "the workflow was deleted"
+# and "the workflow is failing" become distinguishable from here. A missing
+# token or an unreachable API is a different thing: we could not look, which
+# must not render as "nothing wrong" but is not evidence the backup is gone.
+# That asymmetry is the same one `check_ci_required_contexts` draws.
+check_postgres_backup_freshness() {
+  local repo="${OMNINODE_BACKUP_GATE_REPO:-OmniNode-ai/omninode_infra}"
+  local workflow="${OMNINODE_BACKUP_GATE_WORKFLOW:-postgres-backup-freshness-gate.yml}"
+  local branch="${OMNINODE_BACKUP_GATE_BRANCH:-dev}"
+  # The gate runs every 4h. Nine hours tolerates one missed run (runner queue,
+  # jitter) and goes red on two, which is a real absence rather than a blip.
+  local stale_hours="${OMNINODE_BACKUP_GATE_STALE_HOURS:-9}"
+
+  if [[ "${OMNINODE_BACKUP_GATE_CHECK_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    printf 'backup|WARNING|postgres-freshness|jq not found; backup freshness state unknown\n'
+    return 0
+  fi
+
+  local token="${GH_PAT:-${GITHUB_TOKEN:-}}"
+  if [[ -z "$token" ]]; then
+    printf 'backup|WARNING|postgres-freshness|neither GH_PAT nor GITHUB_TOKEN is set; backup freshness state unknown\n'
+    return 0
+  fi
+
+  # Declared as a seam so the tests drive the parsing and threshold logic
+  # against recorded payloads. A seam that only ever resolves to the real
+  # command on the host would mean the tests exercised the "could not look"
+  # branch while believing they had tested the verdict rules.
+  local fetch_cmd="${OMNINODE_BACKUP_GATE_FETCH_CMD:-}"
+  local body
+  if [[ -n "$fetch_cmd" ]]; then
+    body=$($fetch_cmd 2>/dev/null) || body=""
+  else
+    body=$(curl -sS --max-time "${OMNINODE_BACKUP_GATE_TIMEOUT:-20}" \
+      -H "Authorization: Bearer ${token}" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "https://api.github.com/repos/${repo}/actions/workflows/${workflow}/runs?branch=${branch}&per_page=10" \
+      2>/dev/null) || body=""
+  fi
+
+  if [[ -z "$body" ]]; then
+    printf 'backup|WARNING|postgres-freshness|could not reach the GitHub API for %s; backup freshness state unknown\n' "$workflow"
+    return 0
+  fi
+
+  # A 404 means the workflow file is gone from the default branch. That is the
+  # gate being DELETED, which is the loudest version of the exact failure this
+  # row exists for, so it is reported as an absence rather than folded into the
+  # generic "could not parse" branch -- the two have different remedies and
+  # only one of them is somebody removing the check.
+  local api_message
+  api_message=$(jq -r 'if type=="object" then (.message // "") else "" end' <<<"$body" 2>/dev/null) || api_message=""
+  if [[ "$api_message" == "Not Found" ]]; then
+    printf 'backup|CRITICAL|postgres-freshness|workflow %s does not exist on %s in %s; the production backup freshness gate has been removed and nothing is checking the backup\n' \
+      "$workflow" "$branch" "$repo"
+    return 0
+  fi
+
+  local total
+  total=$(jq -r 'if type=="object" and has("total_count") then .total_count else "unparseable" end' <<<"$body" 2>/dev/null) || total="unparseable"
+  if [[ "$total" == "unparseable" ]]; then
+    printf 'backup|WARNING|postgres-freshness|GitHub API response for %s was not parseable (%s); backup freshness state unknown\n' \
+      "$workflow" "${api_message:-no message}"
+    return 0
+  fi
+
+  # Scheduled and dispatched runs only. A pull_request run of this workflow
+  # exercises the gate's own unit tests and makes no claim about the live
+  # backup, so counting one as a verdict would let a green PR paper over a
+  # cluster that stopped backing up.
+  local run conclusion status started html_url
+  run=$(jq -c '[.workflow_runs[]? | select(.event=="schedule" or .event=="workflow_dispatch")] | sort_by(.run_started_at) | last // empty' <<<"$body" 2>/dev/null) || run=""
+  if [[ -z "$run" || "$run" == "null" ]]; then
+    printf 'backup|CRITICAL|postgres-freshness|%s has NO scheduled run on %s; the production backup is unverified and nothing is checking it\n' \
+      "$workflow" "$branch"
+    return 0
+  fi
+
+  conclusion=$(jq -r '.conclusion // "none"' <<<"$run")
+  status=$(jq -r '.status // "unknown"' <<<"$run")
+  started=$(jq -r '.run_started_at // ""' <<<"$run")
+  html_url=$(jq -r '.html_url // ""' <<<"$run")
+
+  local started_epoch now_epoch age_hours
+  # GNU first, BSD second -- the host is Linux and only the GNU form runs there,
+  # but these tests run on macOS, and a parse that only succeeded on the host
+  # would mean every test took the "could not read the timestamp" branch.
+  started_epoch=$(date -u -d "$started" +%s 2>/dev/null) \
+    || started_epoch=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$started" +%s 2>/dev/null) \
+    || started_epoch=""
+  if [[ -z "$started_epoch" ]]; then
+    printf 'backup|WARNING|postgres-freshness|latest run timestamp %s could not be read; backup freshness state unknown\n' "$started"
+    return 0
+  fi
+  now_epoch=$(date -u +%s)
+  age_hours=$(( (now_epoch - started_epoch) / 3600 ))
+
+  # A run still in flight is not a verdict. Age it anyway: a job wedged for
+  # longer than the staleness window is the same silence as one that never ran.
+  if [[ "$status" != "completed" ]]; then
+    if (( age_hours >= stale_hours )); then
+      printf 'backup|CRITICAL|postgres-freshness|the freshness gate has been %s for %sh; the production backup is unverified — %s\n' \
+        "$status" "$age_hours" "$html_url"
+      return 0
+    fi
+    printf 'backup|OK|postgres-freshness|freshness gate %s, started %sh ago\n' "$status" "$age_hours"
+    return 0
+  fi
+
+  if (( age_hours >= stale_hours )); then
+    printf 'backup|CRITICAL|postgres-freshness|the freshness gate last ran %sh ago (bar %sh); the production backup is unverified and the gate itself may have stopped — %s\n' \
+      "$age_hours" "$stale_hours" "$html_url"
+    return 0
+  fi
+
+  if [[ "$conclusion" != "success" ]]; then
+    printf 'backup|CRITICAL|postgres-freshness|the production Postgres backup FAILED its freshness check (%s, %sh ago): a backup is absent, stale or empty in s3 — %s\n' \
+      "$conclusion" "$age_hours" "$html_url"
+    return 0
+  fi
+
+  printf 'backup|OK|postgres-freshness|every declared cluster has a fresh Postgres backup, verified %sh ago\n' "$age_hours"
+}
+
 collect() {
   local now host root data root_status data_status running unhealthy restarting dead created
   local dangling named_dangling anonymous_dangling docker_status docker_detail
@@ -1010,6 +1164,7 @@ collect() {
     check_http web-3003 "http://${PROBE_HOST}:3003/" ''
     check_ci_required_contexts
     check_runner_tree_converge
+    check_postgres_backup_freshness
   }
 }
 
@@ -1187,9 +1342,15 @@ format_digest() {
   # an absent section that reads as healthy.
   tree_lines=$(awk -F'|' '$1=="runner-tree" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   [[ -n "$tree_lines" ]] || tree_lines="- No runner clone-tree verdict this tick"
-  # `next` keeps the three row shapes mutually exclusive so a `ci` row cannot
-  # also be rendered by the generic column-2 branch below it.
-  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
+  # OMN-18944. Same reasoning again, and it matters most here: the digest must
+  # distinguish "every cluster has a fresh backup" from "nothing looked at the
+  # backup", because those two were the SAME rendering for the entire life of
+  # the backup CronJob and that is the defect this row closes.
+  backup_lines=$(awk -F'|' '$1=="backup" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$backup_lines" ]] || backup_lines="- No backup freshness verdict this tick"
+  # `next` keeps the row shapes mutually exclusive so a domain row cannot also
+  # be rendered by the generic column-2 branch below it.
+  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree" || $1=="backup") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
   if [[ -z "$issue_lines" ]]; then
     issue_lines="- No active warning/critical checks"
   fi
@@ -1206,6 +1367,8 @@ $endpoint_lines
 $ci_lines
 *Runner clone tree*
 $tree_lines
+*Production database backup*
+$backup_lines
 *Active issues*
 $issue_lines
 MSG

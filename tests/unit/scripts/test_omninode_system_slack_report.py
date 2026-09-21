@@ -385,6 +385,13 @@ def _run(
             # the collector's own rows are asserted in the OMN-18567 block
             # at the end of this file, which switches it back on.
             "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
+            # OMN-18944: same reasoning again. The reporter also reads the
+            # backup freshness gate's latest run from collect(). These tests
+            # must not acquire a GitHub network dependency; that check's own
+            # rows are asserted in
+            # tests/scripts/test_postgres_backup_freshness_row_omn18944.py,
+            # which drives it through its fetch seam against recorded payloads.
+            "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1834,6 +1841,13 @@ def _run_alert(
             # the collector's own rows are asserted in the OMN-18567 block
             # at the end of this file, which switches it back on.
             "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
+            # OMN-18944: same reasoning again. The reporter also reads the
+            # backup freshness gate's latest run from collect(). These tests
+            # must not acquire a GitHub network dependency; that check's own
+            # rows are asserted in
+            # tests/scripts/test_postgres_backup_freshness_row_omn18944.py,
+            # which drives it through its fetch seam against recorded payloads.
+            "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1932,6 +1946,13 @@ class _AlertTicker:
                 # the collector's own rows are asserted in the OMN-18567 block
                 # at the end of this file, which switches it back on.
                 "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
+                # OMN-18944: same reasoning again. The reporter also reads the
+                # backup freshness gate's latest run from collect(). These tests
+                # must not acquire a GitHub network dependency; that check's own
+                # rows are asserted in
+                # tests/scripts/test_postgres_backup_freshness_row_omn18944.py,
+                # which drives it through its fetch seam against recorded payloads.
+                "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
             }
         )
         env.update(self.extra_env)
@@ -2556,7 +2577,13 @@ def _runner_tree_rows(
             "OMNINODE_RUNNER_TREE_STATE_FILE": str(status_file),
         },
     )
-    section = report.split("*Runner clone tree*", 1)[1].split("*Active issues*", 1)[0]
+    # OMN-18944 inserted the backup freshness section after this one, so the
+    # runner-tree section now ends at that header rather than at *Active
+    # issues*. Slicing to the next header rather than to the end of the digest
+    # is what keeps this assertion about the runner-tree rows only.
+    section = report.split("*Runner clone tree*", 1)[1].split(
+        "*Production database backup*", 1
+    )[0]
     issues = report.split("*Active issues*", 1)[1]
     rows = [
         line.strip() for line in section.splitlines() if line.strip().startswith("- ")
