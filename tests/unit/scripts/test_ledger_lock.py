@@ -18,6 +18,8 @@ import re
 import socket
 import subprocess
 import sys
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -659,3 +661,181 @@ def test_claim_tokens_order_by_lock_protected_offset(tmp_path: Path) -> None:
     second = MOD.parse_claim_token_line(later_append_earlier_clock.stdout)
     assert first is not None and second is not None
     assert first.offset < second.offset
+
+
+# --------------------------------------------------------------------------
+# OMN-16729 -- an acquired lock always carries its holder's metadata
+# --------------------------------------------------------------------------
+#
+# The lock was published in two steps: ``mkdir`` made it visible to every
+# other acquirer, and ``write_metadata`` named its holder afterwards. A holder
+# that died in between -- a SIGKILL, a lost terminal, an OSError on the write
+# -- left a directory with no metadata.json, and that lock was unbreakable by
+# construction:
+#
+#   * the dead-same-host rule reads ``metadata["host"]`` and ``["pid"]``, and
+#     an absent file yields ``{}``, so neither matches and the rule never
+#     fires;
+#   * the age rule is skipped entirely when ``--stale-after`` is not passed,
+#     which is the documented default every lane uses.
+#
+# So the lock stranded until a human noticed, and the timeout it produced said
+# ``held by pid=unknown host=unknown-host since unknown-time`` -- naming no one
+# to chase. Twice on 2026-09-21: 26 minutes (commented on OMN-16729 at 11:44Z)
+# and 20 minutes (reclaimed 15:31:55Z, lock age 1226s).
+#
+# Two independent repairs, tested separately here, because each has to hold on
+# its own:
+#
+#   1. acquisition is atomic -- the metadata is written into a private staging
+#      directory that is then renamed onto the lock path, so the lock either
+#      has metadata or does not exist, and the death window is gone;
+#   2. an anonymous lock is bounded -- a lock with no metadata that is older
+#      than ANONYMOUS_STALE_SECONDS is reclaimable by definition, because a
+#      live holder under (1) would have had metadata from its first instant.
+#      This is what clears locks left by holders running the OLD code.
+#
+# A NAMED holder's behaviour is deliberately unchanged: age alone still never
+# breaks it without an explicit --stale-after.
+
+
+def _anonymous_lock(lock_dir: Path, *, age_seconds: float) -> None:
+    """Exactly what a holder that died between mkdir and the sidecar leaves:
+    a lock directory, no metadata.json, aged by ``age_seconds``."""
+    lock_dir.mkdir(parents=True)
+    stamp = time.time() - age_seconds
+    os.utime(lock_dir, (stamp, stamp))
+
+
+def test_death_between_mkdir_and_metadata_strands_old_shape_and_is_reclaimed(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    lock_dir = MOD.lock_path_for(ledger)
+    _anonymous_lock(lock_dir, age_seconds=MOD.ANONYMOUS_STALE_SECONDS + 60)
+
+    # The OLD behaviour, reproduced by switching the bound off: nothing breaks
+    # this lock, at any age, for as long as the process lives.
+    assert (
+        MOD.maybe_break_stale_lock(
+            lock_dir, stale_after=None, anonymous_stale_after=None
+        )
+        is None
+    )
+    assert lock_dir.exists(), "old behaviour: the anonymous lock strands"
+
+    # The NEW behaviour, with the default bound: reclaimed, and said so.
+    message = MOD.maybe_break_stale_lock(lock_dir, stale_after=None)
+    assert message is not None
+    assert "anonymous" in message
+    assert not lock_dir.exists()
+
+    # End to end: a waiter carrying only the defaults now acquires, where
+    # before it would have spun to its timeout.
+    _anonymous_lock(lock_dir, age_seconds=MOD.ANONYMOUS_STALE_SECONDS + 60)
+    lock = MOD.LedgerLock(ledger, timeout=5.0, stale_after=None, command=None)
+    with lock:
+        assert lock.acquired is True
+        assert (
+            json.loads((lock.lock_dir / "metadata.json").read_text("utf-8"))["pid"]
+            == os.getpid()
+        )
+
+
+def test_anonymous_lock_within_the_bound_is_left_alone(tmp_path: Path) -> None:
+    """The bound is a bound, not an unconditional sweep: a just-created
+    anonymous lock may still belong to a holder mid-acquire on the old code,
+    so it is waited on, not broken."""
+    lock_dir = tmp_path / "lock"
+    _anonymous_lock(lock_dir, age_seconds=1.0)
+    assert MOD.maybe_break_stale_lock(lock_dir, stale_after=None) is None
+    assert lock_dir.exists()
+
+
+def test_live_named_holder_is_never_broken_by_default_reclaim(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.md"
+    holder = MOD.LedgerLock(ledger, timeout=1.0, stale_after=None, command=None)
+    holder.acquire()
+    try:
+        metadata = json.loads((holder.lock_dir / "metadata.json").read_text("utf-8"))
+        assert metadata["pid"] == os.getpid()
+        assert metadata["host"] == socket.gethostname()
+        assert metadata["acquired_at"]
+
+        # Age it far past the anonymous bound. A NAMED holder that is alive is
+        # still not reclaimable: the bound applies to anonymity, not to age.
+        stamp = time.time() - (MOD.ANONYMOUS_STALE_SECONDS * 10)
+        os.utime(holder.lock_dir, (stamp, stamp))
+
+        assert MOD.maybe_break_stale_lock(holder.lock_dir, stale_after=None) is None
+        assert holder.lock_dir.exists()
+
+        waiter = MOD.LedgerLock(ledger, timeout=0.0, stale_after=None, command=None)
+        with pytest.raises(TimeoutError) as raised:
+            waiter.acquire()
+        # The timeout now names someone to chase.
+        assert f"pid={os.getpid()}" in str(raised.value)
+        assert holder.lock_dir.exists()
+    finally:
+        holder.release()
+
+
+def test_two_concurrent_acquirers_get_exactly_one_lock(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.md"
+    workers = 8
+    barrier = threading.Barrier(workers)
+    tally = threading.Lock()
+    winners: list[Any] = []
+    losers: list[int] = []
+
+    def contend() -> None:
+        lock = MOD.LedgerLock(ledger, timeout=0.0, stale_after=None, command=None)
+        barrier.wait()
+        try:
+            lock.acquire()
+        except TimeoutError:
+            with tally:
+                losers.append(1)
+            return
+        with tally:
+            winners.append(lock)
+
+    threads = [threading.Thread(target=contend) for _ in range(workers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert len(winners) == 1, f"expected exactly one holder, got {len(winners)}"
+    assert len(losers) == workers - 1
+
+    held = winners[0]
+    assert held.lock_dir.exists()
+    # The losers left no staging directories behind: the lock root holds the
+    # one lock and nothing else.
+    assert sorted(p.name for p in MOD.lock_root_for(ledger).iterdir()) == [
+        held.lock_dir.name
+    ]
+    held.release()
+    assert not held.lock_dir.exists()
+
+
+def test_acquire_leaves_no_anonymous_lock_when_metadata_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The death window, forced. Under the old two-step publish this left a
+    visible, metadata-less lock; under an atomic publish the failure happens
+    in staging and the lock path is never created."""
+    ledger = tmp_path / "ledger.md"
+
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(MOD, "write_metadata", explode)
+    lock = MOD.LedgerLock(ledger, timeout=0.0, stale_after=None, command=None)
+    with pytest.raises(OSError):
+        lock.acquire()
+
+    assert lock.acquired is False
+    assert not lock.lock_dir.exists(), "a failed acquire published an anonymous lock"
+    assert list(MOD.lock_root_for(ledger).iterdir()) == []
