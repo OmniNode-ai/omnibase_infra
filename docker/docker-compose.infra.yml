@@ -622,7 +622,29 @@ services:
       - --advertise-rpc-addr redpanda:33145
       - --mode dev-container
       - --smp 1
-      - --memory ${REDPANDA_MEMORY:-8G}
+      # OMN-19085: the dev lane reads its OWN dial, not the shared
+      # REDPANDA_MEMORY. Three lanes -- dev (this file), stability-test
+      # (docker-compose.stability-test.yml) and judge (docker-compose.judge.yml)
+      # -- all read REDPANDA_MEMORY, and the value that actually takes effect
+      # comes from the host-global operator env file that deploy-runtime.sh
+      # resolves via OMNIBASE_OPERATOR_ENV_FILE. So there was no way to change
+      # the dev broker's reservation without also changing the other two at
+      # their next recreate. lakshman, dogfood, prod and ci-bus already have
+      # their own variables; dev did not, and now does.
+      #
+      # The value is also a fix, not just a rename. The operator env set 24G,
+      # which is not in version control and appears in no required-env manifest,
+      # so nothing declared or enforced it. On a 91 GB host running four brokers
+      # that reserved 52 GB between them while holding 2.9 GB resident, and the
+      # kernel paged the unused arena out: 22.7 GB of this broker alone sat in
+      # swap (OMN-19077). Carrying the value here as a default closes the
+      # undeclared-env gap for this lane.
+      #
+      # Sized against a control on the same host rather than guessed: the judge
+      # broker serves 1537 partitions on 2G, and this one carries 1756, so 12G
+      # is a deliberately conservative first step. 12G -> 8G is a later ticket,
+      # gated on a 24h soak. Raise it back by setting DEV_REDPANDA_MEMORY.
+      - --memory ${DEV_REDPANDA_MEMORY:-12G}
       # OMN-5176: --admin-addr removed — rpk wraps it into redpanda.yaml but
       # the actual binary rejects the flag, causing a crash-loop on recreate.
       # Admin API defaults to 0.0.0.0:9644 in dev-container mode; port mapping
