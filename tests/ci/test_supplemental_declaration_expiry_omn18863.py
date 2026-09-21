@@ -108,6 +108,7 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 _INTERIM_ENTRIES: dict[str, str] = {
     "dod_verify_runs": "omnimarket#2722",
     "delegate_skill_command_claims": "omnimarket#2744",
+    "prod_promotion_gate_decisions": "omnimarket#2753",
 }
 
 _SKIP_REASON = (
