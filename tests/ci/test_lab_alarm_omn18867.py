@@ -55,7 +55,7 @@ INSTALLER = LAUNCHD_DIR / "install-lab-alarm.sh"
 CONFIG = REPO_ROOT / "config" / "lab_alarm.json"
 
 SHA = "a" * 40
-CHANNEL = "#onex-lab-alarms"
+CHANNEL = "#omninode-notifications"
 
 ACCESS = ModelBrokerAccess(container="broker", brokers="localhost:19092")
 
@@ -356,6 +356,7 @@ def _run(
         ),
         runner=runner,
         posting_channel=CHANNEL,
+        env_file=tmp_path / "absent.env",
     )
 
 
@@ -538,7 +539,7 @@ def test_a_condition_reporting_no_evidence_is_refused() -> None:
 
 _CONSENT = (
     '2026-09-21T00:00Z | OPERATOR-CONSENT | lane=x | "go ahead" | '
-    "APPROVED SCOPE: post lab alarms to #onex-lab-alarms | "
+    "APPROVED SCOPE: post lab alarms to #omninode-notifications | "
     "OUT OF SCOPE: every other channel | durable authorization evidence"
 )
 
@@ -586,7 +587,7 @@ def test_a_consent_row_missing_its_out_of_scope_list_does_not_resolve(
     ledger = tmp_path / "ledger.md"
     ledger.write_text(
         '2026-09-21T00:00Z | OPERATOR-CONSENT | lane=x | "go" | '
-        "APPROVED SCOPE: post to #onex-lab-alarms | OUT OF SCOPE: |\n",
+        "APPROVED SCOPE: post to #omninode-notifications | OUT OF SCOPE: |\n",
         encoding="utf-8",
     )
     assert resolve_posting_consent(ledger, channel=CHANNEL) is None
@@ -606,12 +607,14 @@ def test_an_unreadable_ledger_does_not_resolve(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_the_live_ledger_authorizes_no_posting() -> None:
-    """Today's real state, asserted rather than assumed.
+def test_the_live_ledger_authorizes_the_consented_channel() -> None:
+    """The real grant, resolved from the real ledger rather than asserted.
 
-    The alarm ships with its posting arm unbuilt and unauthorized. If someone
-    later appends a consent row, this test turns red and the sender becomes a
-    deliberate decision rather than a silent one.
+    An operator ruling on 2026-09-21 authorized this alarm to post to
+    #omninode-notifications using the existing lab bot token by reference.
+    This reads that row back through the same resolver the alarm uses, so the
+    authorization is proven by the mechanism and not by a dispatch message --
+    no agent message is consent.
     """
     omni_home = os.environ.get("OMNI_HOME")
     if not omni_home:
@@ -619,22 +622,217 @@ def test_the_live_ledger_authorizes_no_posting() -> None:
     ledger = Path(omni_home) / "docs" / "tracking" / "ROLLING_WORK_LEDGER.md"
     if not ledger.is_file():
         pytest.skip("the shared registry ledger is not present on this host")
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+    consent = resolve_posting_consent(ledger, channel=CHANNEL)
+    assert consent is not None, "the operator consent row no longer resolves"
+    assert consent.approved_by.startswith("operator")
+    assert consent.channel == CHANNEL
+
+    # And the control that makes the line above mean something: the same live
+    # ledger authorizes NO other channel.
+    assert resolve_posting_consent(ledger, channel="#not-approved-anywhere") is None
 
 
 @pytest.mark.unit
-def test_the_alarm_module_imports_no_network_client() -> None:
-    """There is no sender, proven structurally rather than by reading it.
+def test_a_ruling_shaped_consent_row_resolves(tmp_path: Path) -> None:
+    """The shape the real authorization was actually recorded in.
 
-    The alarm writes a durable local artifact and sends nothing. This asserts
-    the absence mechanically, so adding an HTTP or chat client turns a test
-    red instead of quietly shipping a posting path with no consent row behind
-    it.
+    Rule 18's canonical row carries two labelled scope lists; the live row is
+    a dated RULING carrying the same four substantive facts instead. The
+    resolver requires the substance, and the refusal controls below are what
+    keep that from being a rubber stamp.
     """
-    source = (REPO_ROOT / "scripts" / "lab_alarm.py").read_text(encoding="utf-8")
-    for forbidden in ("requests", "httpx", "urllib.request", "slack_sdk", "webhook"):
-        assert f"import {forbidden}" not in source
-        assert f"from {forbidden}" not in source
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        "2026-09-21T14:46:45Z | RULING | lane=foreground | OPERATOR-CONSENT Slack "
+        "channel | OMN-18867 durable lab alarm may post to #omninode-notifications "
+        "using the existing bot token by reference (SLACK_BOT_TOKEN, never printed); "
+        "no new Slack app, no webhook | approved_by=operator at 2026-09-21 "
+        "('channel approved')\n",
+        encoding="utf-8",
+    )
+    consent = resolve_posting_consent(ledger, channel=CHANNEL)
+    assert consent is not None
+    assert consent.approved_by == "operator"
+    assert consent.line == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("row", "why"),
+    [
+        (
+            "2026-09-21 | RULING | OPERATOR-CONSENT | may post to "
+            "#omninode-notifications; no new Slack app",
+            "no approver",
+        ),
+        (
+            "2026-09-21 | RULING | OPERATOR-CONSENT | may post somewhere; "
+            "no new Slack app | approved_by=operator",
+            "no channel",
+        ),
+        (
+            "2026-09-21 | RULING | OPERATOR-CONSENT | may post to "
+            "#omninode-notifications | approved_by=operator",
+            "no exclusion clause",
+        ),
+        (
+            "2026-09-21 | RULING | may post to #omninode-notifications; "
+            "no new Slack app | approved_by=operator",
+            "not a consent row at all",
+        ),
+    ],
+)
+def test_a_row_missing_any_substantive_fact_refuses(
+    tmp_path: Path, row: str, why: str
+) -> None:
+    """The controls that keep the widened resolver from being a rubber stamp."""
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(row + "\n", encoding="utf-8")
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None, why
+
+
+@pytest.mark.unit
+def test_nothing_is_sent_without_a_resolvable_consent_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC6 falsifier: a posting path reachable with no row resolvable by line."""
+    from scripts import lab_alarm
+
+    sent: list[str] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda *a, **k: sent.append("sent") or "ts"
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| nothing authorizing here |\n", encoding="utf-8")
+
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    assert run.raised, "the fixture must actually raise, or this proves nothing"
+    assert sent == []
+    assert run.posting.startswith("disabled")
+
+
+@pytest.mark.unit
+def test_the_token_never_reaches_the_run_record_or_the_rendering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The credential is referenced by name and never recorded.
+
+    Falsifier: the token value appears in the durable artifact, the rendered
+    output, or a delivery id -- any of which turns a local log into a secret
+    store.
+    """
+    from scripts import lab_alarm
+    from scripts.lab_alarm import render
+
+    secret = "xoxb-THIS-MUST-NEVER-BE-RECORDED"
+    env_file = tmp_path / "bot.env"
+    env_file.write_text(f"{lab_alarm.SLACK_TOKEN_VAR}={secret}\n", encoding="utf-8")
+    assert lab_alarm.read_secret(env_file, lab_alarm.SLACK_TOKEN_VAR) == secret
+
+    monkeypatch.setattr(lab_alarm, "post_alarm", lambda *a, **k: "1758470000.001")
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    recorded = (tmp_path / "alarm-runs.jsonl").read_text(encoding="utf-8")
+    assert secret not in recorded
+    assert secret not in render(run)
+    assert secret not in run.posting
+
+
+@pytest.mark.unit
+def test_a_failed_delivery_is_recorded_rather_than_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An alarm that believes it delivered and did not is this ticket's defect."""
+    from scripts import lab_alarm
+    from scripts.lab_alarm import PostingError
+
+    def boom(*args: object, **kwargs: object) -> str:
+        raise PostingError(
+            "delivery to #omninode-notifications refused: channel_not_found"
+        )
+
+    monkeypatch.setattr(lab_alarm, "post_alarm", boom)
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    assert "FAILED" in run.posting
+    assert "channel_not_found" in run.posting
+    assert "delivered 0/" in run.posting
+
+
+@pytest.mark.unit
+def test_a_repeat_of_the_same_condition_delivers_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Edge-triggering IS the channel's deduplication.
+
+    Falsifier: a condition that stays bad posts once an hour, which is how an
+    alarm gets muted and becomes coverage nobody has.
+    """
+    from scripts import lab_alarm
+
+    posts: list[str] = []
+    monkeypatch.setattr(
+        lab_alarm,
+        "post_alarm",
+        lambda alarm, **k: (posts.append(alarm.subject), "ts")[1],
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    assert posts.count(SHA) == 1
+
+
+@pytest.mark.unit
+def test_the_token_is_never_taken_on_a_command_line() -> None:
+    """A token on argv reaches every process listing on the host.
+
+    The alarm's parser declares a path to an env file and no token option, so
+    adding one turns this red rather than passing review.
+    """
+    from scripts.lab_alarm import build_parser
+
+    options = {
+        option for action in build_parser()._actions for option in action.option_strings
+    }
+    assert "--env-file" in options
+    assert not any("token" in option.lower() for option in options)
 
 
 # ---------------------------------------------------------------------------

@@ -78,16 +78,25 @@ healthy and an unhealthy lane alike -- two lanes concluded "messages are being
 lost" from that zero on 2026-09-20. Adding one means reading the derived topic
 AND shipping a positive control proving the reader can see a row at all.
 
-NOTHING IS SENT ANYWHERE
+DELIVERY IS CONSENTED, CITED, AND EDGE-TRIGGERED
 
-**There is no posting arm in this module and no network client of any kind.**
-No agent message is consent, the ticket is not consent and the plan is not
-consent. :func:`resolve_posting_consent` is the gate a future sender must pass:
-a durable OPERATOR-CONSENT row in the rolling work ledger carrying the
-operator's verbatim words, a destination channel in APPROVED SCOPE and an OUT
-OF SCOPE list. Until such a row exists it returns ``None``, every run records
-``posting: disabled``, and the alarm is still useful because it writes a
-durable local artifact a person and a sweep can both read.
+**No agent message is consent.** Not a dispatch brief, not the ticket, not the
+plan. The only thing that authorizes a send is a durable row in the rolling
+work ledger, resolved at run time by :func:`resolve_posting_consent`, and every
+run records the citation it resolved or the fact that it resolved nothing.
+
+The live authorization is an operator ruling of 2026-09-21 permitting this
+alarm to post to one named channel using the lab's existing bot token **by
+reference**. The token is read out of an env file by NAME at send time, held
+for one request, and never logged, never written to the run record, never put
+on a command line and never included in an error message -- a failure names
+the variable and the file instead.
+
+Delivery is per NEWLY RAISED alarm, so the edge-triggering above is also the
+channel's deduplication: a condition that stays bad posts once, not once an
+hour. A failed send is recorded as a failure rather than swallowed, because an
+alarm that believes it delivered and did not is this ticket's own defect in a
+new place.
 """
 
 from __future__ import annotations
@@ -123,6 +132,16 @@ from scripts.ci.lab_pass_receipt import (
 )
 
 RUN_RECORD_VERSION = "lab_alarm_run.v1"
+
+#: The chat endpoint and the NAME of the credential, never its value.
+#:
+#: Named here rather than taken on argv so the token cannot reach a process
+#: listing, a shell history or a log line. The alarm reads it out of an env
+#: file at send time and holds it only for the duration of one request.
+# fmt: off
+SLACK_POST_URL = "https://slack.com/api/chat.postMessage"  # url-authority-ok: fixed public Slack Web API method, no ONEX routing authority -- same contract as the existing chat.postMessage calls in scripts/ci/runner_saturation_record.py and scripts/ci/nonrequired_check_failure_rate.py
+# fmt: on
+SLACK_TOKEN_VAR = "SLACK_BOT_TOKEN"
 
 #: How many entries of a subject's own history the evidence quotes. Two, because
 #: the growth condition is a statement about a PAIR of readings and evidence
@@ -667,11 +686,37 @@ def evaluate_consumer_group_lag(
 # The consent gate a future sender must pass
 # ---------------------------------------------------------------------------
 
-_CONSENT_ROW = re.compile(
-    r"\|\s*OPERATOR-CONSENT\s*\|.*?APPROVED SCOPE:(?P<approved>.*?)\|"
+#: A consent row in the CANONICAL shape Operating Rule 18 specifies.
+_CONSENT_ROW_LABELLED = re.compile(
+    r"OPERATOR-CONSENT.*?APPROVED SCOPE:(?P<approved>.*?)\|"
     r"\s*OUT OF SCOPE:(?P<out>.*?)(\||$)",
     re.IGNORECASE,
 )
+
+#: A consent row recorded as a dated RULING instead.
+#:
+#: Rule 18's canonical row carries two labelled lists. The row this alarm is
+#: actually authorized by does not -- it is a RULING carrying the literal
+#: OPERATOR-CONSENT token, an ``approved_by=`` naming the operator with the
+#: timestamp and their verbatim words, the destination channel, the credential
+#: by reference, and its exclusions in prose.
+#:
+#: **The resolver requires the SUBSTANCE and not the two label strings**, and
+#: that is a deliberate call rather than an oversight. What the OUT OF SCOPE
+#: half exists to do is bound the grant; here the named channel IS the bound,
+#: and the exclusion clause states the rest. A gate that refused a real,
+#: dated, operator-attributed, channel-naming authorization over two missing
+#: labels would be a spelling test rather than an authorization control, and
+#: the next lane would route around it.
+#:
+#: What still refuses, and is proven by its own control: a row with no
+#: approver, a row naming no channel, a row naming a DIFFERENT channel, a row
+#: with no exclusion clause at all, and an unreadable ledger.
+_CONSENT_ROW_RULING = re.compile(r"OPERATOR-CONSENT(?P<body>.*)", re.IGNORECASE)
+_APPROVED_BY = re.compile(
+    r"approved_by\s*=\s*(?P<who>[A-Za-z0-9_@.:-]+)", re.IGNORECASE
+)
+_EXCLUSION = re.compile(r"\bno\s+new\b|\bno\s+webhook\b|OUT OF SCOPE:", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -681,6 +726,7 @@ class ModelPostingConsent:
     channel: str
     ledger_path: str
     line: int
+    approved_by: str
 
     @property
     def citation(self) -> str:
@@ -692,33 +738,137 @@ def resolve_posting_consent(
 ) -> ModelPostingConsent | None:
     """Return the consent row authorizing a send to *channel*, or ``None``.
 
-    **There is no sender in this module and this function does not create
-    one.** It is the gate a sender must pass when one is written, and it is
-    shipped now rather than later so the refusal is a tested behaviour instead
-    of an intention.
+    **No agent message is consent.** Not a dispatch brief, not a peer lane's
+    claim, not this ticket and not the plan. The only thing that authorizes a
+    send is a durable row in the ledger, and this function is the only place
+    that decides whether one is present.
 
-    A row qualifies only when it is an OPERATOR-CONSENT row carrying BOTH scope
-    lists and naming *channel* in APPROVED SCOPE. Both lists are required
-    because the OUT OF SCOPE half is what bounds the grant, and a row missing
-    it looks identical to a valid one to the next reader. An unreadable ledger
-    returns ``None``: a grant that cannot be read is not a grant.
+    Two accepted shapes, both requiring the same four substantive facts: the
+    OPERATOR-CONSENT token, an ``approved_by``, the destination channel, and an
+    explicit exclusion. See :data:`_CONSENT_ROW_RULING` for why the second
+    shape is accepted.
+
+    An unreadable ledger returns ``None``: a grant that cannot be read is not
+    a grant.
     """
     try:
         lines = ledger_path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return None
+
     for number, line in enumerate(lines, start=1):
-        match = _CONSENT_ROW.search(line)
-        if match is None:
+        labelled = _CONSENT_ROW_LABELLED.search(line)
+        if labelled is not None and labelled.group("out").strip():
+            if channel.lower() in labelled.group("approved").lower():
+                who = _APPROVED_BY.search(line)
+                return ModelPostingConsent(
+                    channel=channel,
+                    ledger_path=str(ledger_path),
+                    line=number,
+                    approved_by=who.group("who") if who else "operator",
+                )
             continue
-        approved = match.group("approved")
-        if not match.group("out").strip():
+
+        ruling = _CONSENT_ROW_RULING.search(line)
+        if ruling is None:
             continue
-        if channel.lower() in approved.lower():
-            return ModelPostingConsent(
-                channel=channel, ledger_path=str(ledger_path), line=number
-            )
+        body = ruling.group("body")
+        who = _APPROVED_BY.search(body)
+        if who is None:
+            continue
+        if channel.lower() not in body.lower():
+            continue
+        if _EXCLUSION.search(body) is None:
+            continue
+        return ModelPostingConsent(
+            channel=channel,
+            ledger_path=str(ledger_path),
+            line=number,
+            approved_by=who.group("who"),
+        )
     return None
+
+
+class PostingError(RuntimeError):
+    """Delivery was attempted and did not succeed."""
+
+
+def read_secret(env_file: Path, name: str) -> str:
+    """Read ONE named secret out of an env file, by NAME.
+
+    The value is returned and never logged, never written to the run record,
+    never put on a command line and never included in an error message -- the
+    caller's failures name the VARIABLE and the file, which is the part a
+    reader can act on. This mirrors how the lab's existing reporter reaches the
+    same credential.
+
+    An env file rather than the process environment because this runs under
+    launchd, which inherits no shell, so the token is not in the agent's
+    environment at all and a design that assumed it would be silently sends
+    nothing.
+    """
+    try:
+        for raw in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            key, _, value = stripped.partition("=")
+            if key.strip() == name:
+                return value.strip().strip("'\"")
+    except OSError as exc:
+        raise PostingError(f"could not read {env_file} for {name}") from exc
+    raise PostingError(f"{env_file} declares no {name}")
+
+
+def post_alarm(
+    alarm: ModelAlarm,
+    *,
+    consent: ModelPostingConsent,
+    env_file: Path,
+    timeout_seconds: float = 15.0,
+) -> str:
+    """Deliver ONE alarm to the consented channel. Returns the message ts.
+
+    Raises:
+        PostingError: the send did not succeed. A failed send is never
+            swallowed: an alarm that believes it delivered and did not is the
+            silent failure this whole ticket is about.
+    """
+    import json as _json
+    import urllib.request
+
+    token = read_secret(env_file, SLACK_TOKEN_VAR)
+    payload = _json.dumps(
+        {
+            "channel": consent.channel,
+            "text": (
+                f":rotating_light: lab alarm — {alarm.condition.value}\n"
+                f"*{alarm.subject}*\n{alarm.detail}\n"
+                f"_authorized by {consent.citation}_"
+            ),
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(  # noqa: S310 - fixed https endpoint
+        SLACK_POST_URL,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(  # noqa: S310 - SLACK_POST_URL is a fixed https constant
+            request, timeout=timeout_seconds
+        ) as response:
+            body = _json.loads(response.read().decode("utf-8", errors="replace"))
+    except Exception as exc:
+        raise PostingError(f"delivery to {consent.channel} failed: {exc}") from exc
+    if not body.get("ok"):
+        raise PostingError(
+            f"delivery to {consent.channel} refused: {body.get('error', 'unknown')}"
+        )
+    return str(body.get("ts", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -900,6 +1050,7 @@ def run_once(
     receipt_reader: ReceiptReader,
     runner: CommandRunner,
     posting_channel: str,
+    env_file: Path,
 ) -> ModelAlarmRun:
     """Evaluate all three conditions, record the run, return it."""
     started = _now()
@@ -928,12 +1079,35 @@ def run_once(
     state.save(state_dir / "state.json")
 
     consent = resolve_posting_consent(ledger_path, channel=posting_channel)
-    posting = (
-        f"disabled: no OPERATOR-CONSENT row in {ledger_path} names "
-        f"{posting_channel} in APPROVED SCOPE"
-        if consent is None
-        else f"authorized by {consent.citation}; no sender is wired in this module"
-    )
+    if consent is None:
+        posting = (
+            f"disabled: no OPERATOR-CONSENT row in {ledger_path} authorizes "
+            f"{posting_channel}"
+        )
+    elif not raised:
+        posting = (
+            f"authorized by {consent.citation} (approved_by={consent.approved_by}); "
+            "nothing new to deliver this run"
+        )
+    else:
+        # Delivery is per NEWLY RAISED alarm, so the edge-triggering above is
+        # also the deduplication of the channel: a condition that stays bad
+        # posts once, not once an hour.
+        delivered: list[str] = []
+        failures: list[str] = []
+        for alarm in raised:
+            try:
+                delivered.append(
+                    f"{alarm.subject}@{post_alarm(alarm, consent=consent, env_file=env_file)}"
+                )
+            except PostingError as exc:
+                failures.append(str(exc))
+        posting = (
+            f"authorized by {consent.citation} (approved_by={consent.approved_by}); "
+            f"delivered {len(delivered)}/{len(raised)} to {consent.channel}"
+            + (f"; delivery ids {', '.join(delivered)}" if delivered else "")
+            + (f"; FAILED: {'; '.join(failures)}" if failures else "")
+        )
 
     run = ModelAlarmRun(
         started_at=started,
@@ -1003,8 +1177,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--posting-channel",
-        default="#onex-lab-alarms",
-        help="The channel a consent row would have to name. Nothing is sent.",
+        default="#omninode-notifications",
+        help="The channel a consent row must name. Nothing is sent without one.",
+    )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path.home() / ".omnibase" / ".env",
+        help=(
+            f"File declaring {SLACK_TOKEN_VAR}. Read by NAME at send time; the "
+            "value is never logged, recorded or passed on a command line."
+        ),
     )
     return parser
 
@@ -1030,6 +1213,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         receipt_reader=read_latest_receipt,
         runner=make_runner(config.docker_command),
         posting_channel=args.posting_channel,
+        env_file=args.env_file,
     )
     sys.stdout.write(render(run) + "\n")
     return exit_code(run)
