@@ -534,6 +534,19 @@ class ModelLabPassReceipt:
     #: why ``RECEIPT_VERSION`` is unchanged: no existing field moved, and a
     #: bump would have made the gate refuse every receipt already in flight.
     node_inventory: tuple[ModelNodeInventoryTriple, ...] = ()
+    #: OMN-18976. The sha whose convergence produced this receipt, when that is
+    #: NOT ``sha`` itself. Empty on a receipt written by the sha's own run,
+    #: which is every receipt written before this change and most written after.
+    #:
+    #: A merge queued behind another deploy emits no receipt of its own; a
+    #: later run that converges on a revision CONTAINING it answers on its
+    #: behalf, with probes taken against that very image. Both are honest
+    #: evidence and they are not the same evidence, so the difference is
+    #: recorded rather than left for a reader to infer from timestamps. It is
+    #: written to the wire only when non-empty, on the same terms as
+    #: ``node_inventory``, so ``RECEIPT_VERSION`` is unchanged and every
+    #: receipt already in flight still parses byte-identically.
+    converged_via: str = ""
     receipt_version: str = RECEIPT_VERSION
 
     def __post_init__(self) -> None:
@@ -672,6 +685,7 @@ class ModelLabPassReceipt:
                     if self.node_inventory
                     else {}
                 ),
+                **({"converged_via": self.converged_via} if self.converged_via else {}),
             },
             indent=indent,
         )
@@ -702,7 +716,7 @@ class ModelLabPassReceipt:
         # OMN-18708: present only on receipts whose emitter probed the lane's
         # introspection manifest, so it is known-but-optional rather than
         # required. Absent means "not probed", which is a real answer.
-        optional = {"node_inventory"}
+        optional = {"node_inventory", "converged_via"}
         unknown = sorted(set(payload) - known - optional)
         if unknown:
             msg = f"unknown receipt field(s) {unknown}"
@@ -733,6 +747,7 @@ class ModelLabPassReceipt:
                 if "node_inventory" in payload
                 else ()
             ),
+            converged_via=str(payload.get("converged_via", "")),
         )
 
 
@@ -2751,6 +2766,7 @@ def build_receipt(
     checks: Sequence[ModelLabPassCheck],
     agent_command_id: str | None,
     node_inventory: Sequence[ModelNodeInventoryTriple] = (),
+    converged_via: str = "",
 ) -> ModelLabPassReceipt:
     """Build a receipt whose verdict is DERIVED from its checks.
 
@@ -2771,6 +2787,56 @@ def build_receipt(
         checks=tuple(checks),
         agent_command_id=agent_command_id,
         node_inventory=tuple(node_inventory),
+        converged_via=converged_via,
+    )
+
+
+def reemit_receipt(source: ModelLabPassReceipt, sha: str) -> ModelLabPassReceipt:
+    """Re-key a converged receipt onto a sha that was queued behind it.
+
+    OMN-18976 part two. The queued sha's own verify run emitted nothing, so a
+    later run that converged on a revision CONTAINING it answers on its behalf.
+
+    THE EVIDENCE IS COPIED, NOT RE-TAKEN, and that is the point. The probes on
+    ``source`` were read against the image the lane converged to, and that
+    image contains ``sha`` -- so they are exactly the reads a lab pass for
+    ``sha`` would have made, taken at the only moment they could be. Re-probing
+    here would read a LATER lane state and attribute it to this sha, which is
+    the weaker claim.
+
+    ``converged_via`` records whose convergence this was, so the two kinds of
+    receipt stay tellable apart. A receipt that merely said PASS would lose
+    the distinction between "its own run watched this land" and "a later run
+    subsumed it", and those are different evidence.
+
+    REFUSALS. Re-keying onto the source's own sha is a caller error, not a
+    no-op: it would race two artifacts of one name from one job. Re-keying a
+    receipt that is itself a re-emission is refused too -- provenance that
+    chains is provenance nobody can read.
+    """
+    if sha == source.sha:
+        msg = (
+            f"refusing to re-emit {source.sha} onto itself; its own run wrote "
+            "that receipt"
+        )
+        raise ValueError(msg)
+    if source.converged_via:
+        msg = (
+            f"refusing to re-emit from a receipt that is itself a re-emission "
+            f"(converged_via={source.converged_via}); re-emit from the "
+            "converged run's own receipt"
+        )
+        raise ValueError(msg)
+    return ModelLabPassReceipt(
+        sha=sha,
+        lane=source.lane,
+        started_at=source.started_at,
+        finished_at=source.finished_at,
+        result=source.result,
+        checks=source.checks,
+        agent_command_id=source.agent_command_id,
+        node_inventory=source.node_inventory,
+        converged_via=source.sha,
     )
 
 
@@ -3339,6 +3405,17 @@ def build_parser() -> argparse.ArgumentParser:
             "none (no command was published); a non-uuid is refused."
         ),
     )
+    emit.add_argument(
+        "--converged-via",
+        default="",
+        help=(
+            "OMN-18976. The sha whose convergence produced this receipt, when "
+            "that is not --sha itself. Set only when answering for a merge "
+            "that was queued behind another deploy and emitted no receipt of "
+            "its own; the probes must have been taken against an image "
+            "containing --sha, which a containing revision is."
+        ),
+    )
     emit.add_argument("--out", required=True, type=Path)
     emit.add_argument(
         "--event-out",
@@ -3352,6 +3429,24 @@ def build_parser() -> argparse.ArgumentParser:
             "publish failure must never fail a lab pass that genuinely ran."
         ),
     )
+
+    reemit = sub.add_parser(
+        "reemit",
+        help="re-key a converged receipt onto a sha that was queued behind it",
+    )
+    reemit.add_argument(
+        "--from",
+        dest="source",
+        required=True,
+        type=Path,
+        help="the receipt written by the run that converged",
+    )
+    reemit.add_argument(
+        "--sha",
+        required=True,
+        help="the queued sha this receipt is being written for",
+    )
+    reemit.add_argument("--out", required=True, type=Path)
 
     gate = sub.add_parser("gate", help="fail closed unless a PASS receipt exists")
     gate.add_argument("--sha", required=True)
@@ -3555,6 +3650,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 checks=checks,
                 agent_command_id=parse_agent_command_id(args.agent_command_id),
                 node_inventory=load_node_inventory_json(args.node_inventory_json),
+                converged_via=args.converged_via,
             )
         except (ValueError, TypeError, KeyError, OSError) as exc:
             print(
@@ -3581,6 +3677,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "verify":
         return verify_emitted(args.path, args.sha, EnumLabLane(args.lane), sys.stdout)
 
+    if args.command == "reemit":
+        try:
+            source = ModelLabPassReceipt.from_json(
+                args.source.read_text(encoding="utf-8")
+            )
+            receipt = reemit_receipt(source, args.sha)
+        except (ValueError, TypeError, KeyError, OSError) as exc:
+            print(f"::error::refusing to re-emit: {exc}", file=sys.stderr)
+            return 1
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(receipt.to_json(indent=2), encoding="utf-8")
+        print(
+            f"re-emitted {receipt.result.value} for {receipt.sha} "
+            f"via {receipt.converged_via}"
+        )
+        return 0
     if args.command == "gate":
         lanes = (
             [EnumLabLane(value) for value in args.lane]

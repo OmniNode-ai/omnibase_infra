@@ -117,6 +117,15 @@ evidence_artifacts:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
       The .201 compose dev lane's lab pass for the merged sha (rule 24(a)).
+  - id: lab-pass-receipt-compose-dev-reemitted
+    workflow: .github/workflows/runtime-rebuild-trigger.yml
+    job: reemit-queued-receipts
+    producer_step: "Upload the re-emitted receipt"
+    artifact_name: lab-pass-receipt-compose-dev-${{ matrix.sha }}
+    required_paths:
+      - ${LAB_PASS_DIR}/receipt.json
+    rationale: >-
+      The .201 compose dev lane's lab pass for a merge that was QUEUED behind another deploy and emitted no receipt of its own (OMN-18976). Its evidence is the converged run's own probes, re-keyed rather than re-taken, because those reads were made against the image that contains this sha. Carries converged_via so it is tellable apart from a receipt the sha's own run wrote.
   - id: lab-pass-receipt-compose-dev-sibling
     workflow: .github/workflows/runtime-rebuild-trigger-reusable.yml
     job: verify-sibling-converged

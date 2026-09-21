@@ -1259,6 +1259,11 @@ class ModelConvergenceResult:
     #: because a PASS that does not say what the queue looked like cannot be
     #: used to check that a later non-PASS was really the queue's doing.
     queue: ModelQueueFacts | None = None
+    #: OMN-18976. The revision the lane was ALREADY at when this run started.
+    #: With the revision it converged at, it bounds the set of merges that were
+    #: queued behind this one -- see :func:`reemission_window`, which is the
+    #: only consumer and which refuses to produce a window without both ends.
+    initial_revision: str = ""
 
 
 def run_convergence_wait(
@@ -1305,6 +1310,9 @@ def run_convergence_wait(
 
     lane = read_lane()
     ancestry = resolve_ancestry(lane.revision)
+    # OMN-18976. The lane's revision BEFORE this run's rebuild landed. Read
+    # once, here, because every later read may already have converged.
+    initial_revision = lane.revision
 
     queue = (
         resolve_queue()
@@ -1350,6 +1358,7 @@ def run_convergence_wait(
             # says an in-flight pass does, and the gate's absent branch keeps
             # the sha refused exactly as before.
             return ModelConvergenceResult(
+                initial_revision=initial_revision,
                 outcome=EnumConvergenceOutcome.QUEUED,
                 reason=refusal,
                 lane=lane,
@@ -1392,6 +1401,7 @@ def run_convergence_wait(
     waited = now - started
     if _converged(lane, ancestry):
         return ModelConvergenceResult(
+            initial_revision=initial_revision,
             outcome=EnumConvergenceOutcome.OK,
             reason="",
             lane=lane,
@@ -1403,6 +1413,7 @@ def run_convergence_wait(
         )
     if not budget.established:
         return ModelConvergenceResult(
+            initial_revision=initial_revision,
             outcome=EnumConvergenceOutcome.INDETERMINATE,
             reason=budget.unresolved_reason,
             lane=lane,
@@ -1414,6 +1425,7 @@ def run_convergence_wait(
         )
     if budget.exhausted(now):
         return ModelConvergenceResult(
+            initial_revision=initial_revision,
             outcome=EnumConvergenceOutcome.FAIL,
             reason="",
             lane=lane,
@@ -1424,6 +1436,7 @@ def run_convergence_wait(
             queue=queue,
         )
     return ModelConvergenceResult(
+        initial_revision=initial_revision,
         outcome=EnumConvergenceOutcome.INDETERMINATE,
         reason=budget.shortfall_reason(now),
         lane=lane,
@@ -1566,6 +1579,42 @@ def parse_docker_inspect(payload: Any) -> LaneRevision:
 
 def _gh(args: list[str]) -> Any:
     return json.loads(_run(["gh", *args]))
+
+
+def read_contained_commits(repo: str, previous: str, converged: str) -> tuple[str, ...]:
+    """The commits ``converged`` has that ``previous`` does not, oldest first.
+
+    OMN-18976. Feeds :func:`reemission_window`, which bounds them further. Uses
+    ``compare/{previous}...{converged}`` for the same reason
+    :func:`read_divergence` does: ``actions/checkout`` fetches depth 1, so a
+    local ``git rev-list`` here would silently report an empty window and this
+    guard would emit nothing while believing it had looked.
+
+    UNREADABLE IS EMPTY, DELIBERATELY. Every failure returns ``()``, which
+    re-emits nothing and leaves the delivery gate refusing those shas exactly
+    as it does today. The alternative -- guessing a window -- writes receipts
+    for merges nothing observed, and a wrong PASS is the one outcome this
+    ticket must not introduce while removing a wrong FAIL.
+
+    The comparison's ``commits`` array is capped at 250 entries by GitHub. That
+    is not a limit worth working around: a window of 250 merges is not a deploy
+    queue, it is a lane that stopped converging, and the receipts those shas
+    are missing are not this function's problem to manufacture.
+    """
+    try:
+        payload = _gh(["api", f"repos/{repo}/compare/{previous}...{converged}"])
+    except Exception as exc:  # noqa: BLE001 - an unreadable compare IS the answer
+        print(f"::warning::re-emission window unreadable: {exc}")
+        return ()
+    commits = payload.get("commits")
+    if not isinstance(commits, list):
+        return ()
+    shas: list[str] = []
+    for entry in commits:
+        sha = entry.get("sha") if isinstance(entry, dict) else None
+        if isinstance(sha, str) and _SHA_RE.match(sha):
+            shas.append(sha)
+    return tuple(shas)
 
 
 def read_divergence(repo: str, branch: str, deployed_revision: str) -> Divergence:
@@ -2075,6 +2124,53 @@ def _supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
     )
 
 
+def reemission_window(
+    *,
+    previous_revision: str,
+    converged_revision: str,
+    resolve_contained: Callable[[str, str], tuple[str, ...]],
+) -> tuple[str, ...]:
+    """The merge shas this convergence may answer for, and no others.
+
+    OMN-18976 part two. A merge queued behind another deploy emits no receipt
+    of its own, so only a LATER run can answer for it. This names which later
+    run, and for which shas.
+
+    A verify run reads the lane twice: at ``previous_revision`` when it starts
+    and at ``converged_revision`` when it converges. Every merge that landed
+    strictly between those two was queued behind this one -- its own verify run
+    found the lane still at the earlier revision and exited without a receipt.
+    That set is the window.
+
+    IT IS NOT "EVERY ANCESTOR OF X", and the distinction is the whole bound.
+    The lane has been running for weeks and contains thousands of shas it never
+    individually converged on; emitting for those would manufacture receipts
+    for merges this run observed nothing about. ``P..X`` is a queue, not a
+    history.
+
+    ``converged_revision`` is excluded because its own run is writing its own
+    receipt in this same job, and two artifacts of one name from one job is a
+    race rather than a re-emission.
+
+    EVERY UNRESOLVED CASE YIELDS NOTHING, which is fail-closed here: emitting
+    no receipt leaves the delivery gate refusing those shas, exactly as it does
+    today. Emitting one on a guess would not be recoverable.
+    """
+    if not previous_revision or not converged_revision:
+        return ()
+    if previous_revision == converged_revision:
+        return ()
+    contained = resolve_contained(previous_revision, converged_revision)
+    window: list[str] = []
+    for sha in contained:
+        if sha in (converged_revision, previous_revision):
+            continue
+        if sha in window:
+            continue
+        window.append(sha)
+    return tuple(window)
+
+
 def _write_output(name: str, value: str) -> None:
     """Publish one single-line value to the calling step's outputs."""
     path = os.environ.get("GITHUB_OUTPUT")
@@ -2188,6 +2284,36 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         result.outcome.value if check_outcome is None else check_outcome.value,
     )
     _write_output("emit_receipt", "false" if check_outcome is None else "true")
+
+    # OMN-18976 part two. On a convergence, name the merges that were queued
+    # BEHIND this one and therefore emitted no receipt of their own, so the
+    # emit step can answer for them with the probes it is about to take against
+    # the very image that contains them.
+    #
+    # Only on OK. A run that did not converge has observed nothing it could
+    # attest to on anybody else's behalf, and a run that was itself queued is
+    # the thing being answered for, not the answerer.
+    reemit: tuple[str, ...] = ()
+    if result.outcome is EnumConvergenceOutcome.OK:
+        reemit = reemission_window(
+            previous_revision=result.initial_revision,
+            converged_revision=lane.revision,
+            resolve_contained=lambda previous, converged: read_contained_commits(
+                args.repo, previous, converged
+            ),
+        )
+        if reemit:
+            print(
+                f"::notice::re-emitting for {len(reemit)} sha(s) queued behind "
+                f"this one between {result.initial_revision[:12]} and "
+                f"{lane.revision[:12]}"
+            )
+    # JSON, not a space-separated list, because the consumer is a matrix job:
+    # `strategy.matrix` takes `fromJSON(...)` and an EMPTY array skips the job
+    # entirely, which is the behaviour wanted when nothing was queued. A
+    # dynamic number of artifact uploads cannot be expressed any other way --
+    # `uses:` steps cannot be looped.
+    _write_output("reemit_shas", json.dumps(list(reemit)))
 
     # OMN-18143. Read AFTER the wait, because the agent folds a command when it
     # DEQUEUES it, which is normally after this guard started watching. The
