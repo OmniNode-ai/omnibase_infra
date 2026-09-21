@@ -217,3 +217,116 @@ def test_the_public_dispatch_declares_delivery_keyword_only() -> None:
 
     assert delivery.kind is inspect.Parameter.KEYWORD_ONLY
     assert delivery.default is None
+
+
+# ---------------------------------------------------------------------------
+# OMN-18918: the CALLER-side probe at the wiring -> dispatch-engine seam.
+#
+# ``delivery`` is optional on ``ProtocolDispatchEngine``, so every engine
+# written before it is still a valid implementor with a two-parameter
+# ``dispatch``. Passing the keyword unconditionally turns that optionality
+# into a TypeError on the first message. Both engines in this repo's own
+# remote-agent integration test failed exactly that way before the probe
+# existed (tests/integration/nodes/
+# test_node_remote_agent_invoke_effect_integration.py), which is the RED
+# proof for the consumer class; these cases pin the probe's own edges.
+# ---------------------------------------------------------------------------
+
+
+class _LegacyEngine:
+    """An engine written before the parameter existed."""
+
+    async def dispatch(self, topic: str, envelope: object) -> None: ...
+
+
+class _ModernEngine:
+    """An engine that declares it, keyword-only, as the protocol does."""
+
+    async def dispatch(
+        self, topic: str, envelope: object, *, delivery: object | None = None
+    ) -> None: ...
+
+
+class _PositionalDeliveryEngine:
+    """Declares the name positionally -- ambiguous with topic/envelope."""
+
+    async def dispatch(
+        self, topic: str, envelope: object, delivery: object | None = None
+    ) -> None: ...
+
+
+class _KwargsOnlyEngine:
+    """Swallows anything, but declares nothing."""
+
+    async def dispatch(
+        self, topic: str, envelope: object, **kwargs: object
+    ) -> None: ...
+
+
+class _NoDispatchAttribute:
+    """Not an engine at all."""
+
+
+def test_a_legacy_engine_is_not_passed_the_keyword() -> None:
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        _engine_type_accepts_delivery,
+    )
+
+    assert _engine_type_accepts_delivery(_LegacyEngine) is False
+
+
+def test_a_declaring_engine_is_passed_the_keyword() -> None:
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        _engine_type_accepts_delivery,
+    )
+
+    assert _engine_type_accepts_delivery(_ModernEngine) is True
+
+
+def test_a_positional_delivery_parameter_is_refused() -> None:
+    """Name alone is not enough; a positional match would be ambiguous."""
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        _engine_type_accepts_delivery,
+    )
+
+    assert _engine_type_accepts_delivery(_PositionalDeliveryEngine) is False
+
+
+def test_a_kwargs_only_engine_is_refused() -> None:
+    """It would not raise, but it declared nothing -- unknown refuses."""
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        _engine_type_accepts_delivery,
+    )
+
+    assert _engine_type_accepts_delivery(_KwargsOnlyEngine) is False
+
+
+def test_an_object_with_no_dispatch_is_refused_rather_than_raising() -> None:
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        _engine_type_accepts_delivery,
+    )
+
+    assert _engine_type_accepts_delivery(_NoDispatchAttribute) is False
+
+
+def test_the_probe_is_cached_per_engine_class() -> None:
+    """The signature is a property of the type; it must not run per message."""
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        _engine_type_accepts_delivery,
+    )
+
+    _engine_type_accepts_delivery(_ModernEngine)
+    before = _engine_type_accepts_delivery.cache_info().hits
+    for _ in range(5):
+        _engine_type_accepts_delivery(_ModernEngine)
+
+    assert _engine_type_accepts_delivery.cache_info().hits == before + 5
+
+
+def test_the_real_engine_is_recognised_by_the_probe() -> None:
+    """The positive control: the engine actually wired in declares it."""
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        _engine_type_accepts_delivery,
+    )
+
+    assert _engine_type_accepts_delivery(MessageDispatchEngine) is True

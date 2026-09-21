@@ -83,6 +83,8 @@ Related:
 
 from __future__ import annotations
 
+import functools
+import inspect
 import json
 import logging
 from collections import OrderedDict
@@ -181,6 +183,37 @@ def validate_topic(topic: str, deny_patterns: tuple[str, ...] = ()) -> None:
                 f"(matched deny pattern: {pattern})",
                 context=context,
             )
+
+
+@functools.lru_cache(maxsize=128)
+def _engine_type_accepts_delivery(engine_type: type) -> bool:
+    """Does this dispatch engine's ``dispatch`` declare keyword-only ``delivery``?
+
+    OMN-18918. ``delivery`` is OPTIONAL on ``ProtocolDispatchEngine``, which
+    means every implementor written before it -- in this repo, in a consumer
+    repo, and in a test double -- is still a valid implementor and still has
+    a two-parameter ``dispatch``. A caller that passes the keyword
+    unconditionally converts that optionality into a ``TypeError`` at the
+    first message, which is a consumer break dressed as an additive change.
+    Two engines in this repo's own test suite fail exactly that way.
+
+    So the caller probes, the same way the engine probes its dispatchers. The
+    name must match AND be keyword-only: a positional match would be
+    ambiguous with ``topic`` and ``envelope``.
+
+    Cached on the engine CLASS, not the instance -- the signature is a
+    property of the type, and the probe must not run per message.
+
+    An uninspectable engine returns False and is called exactly as it is
+    today. Unknown refuses, which here means "changes nothing".
+    """
+    try:
+        parameter = inspect.signature(engine_type.dispatch).parameters.get(  # type: ignore[attr-defined]
+            "delivery"
+        )
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return parameter is not None and parameter.kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def _delivery_context_from_message(
@@ -968,9 +1001,13 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 # serving cache refused every delta whose offset did not
                 # exceed the cached one, and each key froze on its first
                 # value.
-                delivery = _delivery_context_from_message(message, topic)
+                delivery_kwargs = (
+                    {"delivery": _delivery_context_from_message(message, topic)}
+                    if _engine_type_accepts_delivery(type(self._dispatch_engine))
+                    else {}
+                )
                 result = await self._dispatch_engine.dispatch(
-                    topic, envelope, delivery=delivery
+                    topic, envelope, **delivery_kwargs
                 )
                 self._logger.info(
                     "[WIRING-CALLBACK] Dispatch complete: topic=%s, "
