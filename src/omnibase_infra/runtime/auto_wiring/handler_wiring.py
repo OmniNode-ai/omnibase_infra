@@ -4018,6 +4018,49 @@ def _bind_handler_owned_projection_database(
     bind(db_urls[binding_refs[0]])
 
 
+#: OMN-18992. The optional field a projection handler uses to say "I wrote
+#: nothing ON PURPOSE, and here is how many rows an ordering guard refused".
+#: Optional by construction: a handler omitting it is read exactly as it is
+#: today, which is what makes this consumer-first across the repo boundary.
+ROWS_REFUSED_KEY: Final[str] = "rows_refused_by_ordering_guard"
+
+
+def _extract_rows_refused(result: object) -> int:
+    """Rows a projection handler DECLINED to write, as its own count.
+
+    OMN-18992. A zero-row return has two causes the runtime cannot tell apart,
+    and it has been logging both as the same ERROR.
+
+    The first is a writer that silently wrote nothing -- a real defect, and the
+    one the error line exists to surface. The second is an ordering guard doing
+    its job: the consumer-flow writer's upsert carries
+    ``OR ingest_sequence <= EXCLUDED.ingest_sequence`` on its conflict arm and a
+    ``RETURNING`` clause, so a redelivered or out-of-order message is refused by
+    SQL and legitimately returns no rows. That guard is deliberate -- a
+    read-compare-write would race under concurrent consumers and let an older
+    redelivery win -- and it fires routinely.
+
+    Measured on the .201 dev lane at revision 430ff3434, 33 minutes: 26 zero-row
+    ERROR lines, of which 4 were this guard on a writer that was serving 500
+    rows and updating every few seconds while it emitted them. An ERROR that
+    fires on correct behaviour trains people to skip the class, so the real
+    defect it exists to surface stops being visible. That is the failure this
+    separates.
+
+    A writer that does not report refusals returns 0 here and is treated
+    exactly as it is today, which is what lets this land in ``omnibase_infra``
+    before any writer in ``omnimarket`` sends the field. The consumer tolerates
+    the absence; the producer follows.
+    """
+    if isinstance(result, dict) and ROWS_REFUSED_KEY in result:
+        try:
+            refused = int(result[ROWS_REFUSED_KEY])
+        except (TypeError, ValueError):
+            return 0
+        return refused if refused > 0 else 0
+    return 0
+
+
 def _extract_rows_upserted(result: object) -> int:
     """Extract the rows-written count from a projection handler's return value.
 
@@ -4830,15 +4873,34 @@ def _make_projection_dispatch_callback(
                     result,
                 )
             else:
-                logger.error(
-                    "Projection handler wrote zero rows (no terminal emitted): "
-                    "handler=%s topic=%s event_type=%s rows_upserted=%s result=%s",
-                    type(handler_instance).__name__,
-                    topic or "unknown",
-                    event_type,
-                    rows_upserted,
-                    result,
-                )
+                # OMN-18992. A zero-row return has two causes and this used to
+                # log both the same way. A writer that silently wrote nothing
+                # is the defect the ERROR exists to surface; an ordering guard
+                # refusing a redelivery is correct behaviour and fires
+                # routinely. Logging the second as ERROR trains people to skip
+                # the class, at which point the first stops being visible --
+                # which is the whole point of having the line.
+                rows_refused = _extract_rows_refused(result)
+                if rows_refused > 0:
+                    logger.info(
+                        "Projection handler wrote zero rows, refused by the "
+                        "ordering guard (expected, no terminal owed): "
+                        "handler=%s topic=%s event_type=%s rows_refused=%s",
+                        type(handler_instance).__name__,
+                        topic or "unknown",
+                        event_type,
+                        rows_refused,
+                    )
+                else:
+                    logger.error(
+                        "Projection handler wrote zero rows (no terminal emitted): "
+                        "handler=%s topic=%s event_type=%s rows_upserted=%s result=%s",
+                        type(handler_instance).__name__,
+                        topic or "unknown",
+                        event_type,
+                        rows_upserted,
+                        result,
+                    )
         except TypeError as exc:
             logger.error(
                 "Projection handler TypeError (likely missing _db or _event_type): "
