@@ -72,6 +72,7 @@ _PINNED_CONTRACTS = (
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
     "dod_verify_runs": "omnimarket#2722",
+    "delegate_skill_command_claims": "omnimarket#2744",
 }
 
 _SKIP_REASON = (
