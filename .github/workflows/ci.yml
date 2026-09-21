@@ -3745,6 +3745,7 @@ jobs:
           tests/ci/test_omnimarket_contract_pin.py
           tests/ci/test_push_side_derivation_omn18863.py
           tests/ci/test_supplemental_declaration_expiry_omn18863.py
+          tests/integration/cli/test_execution_budget_shipped_contract_omn18924.py
           tests/ci/test_application_database_sql_authority_isolation.py
           tests/ci/test_application_database_sql_gate.py
 
