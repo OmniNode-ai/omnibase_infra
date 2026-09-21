@@ -12,12 +12,21 @@ compose will actually run, and the gap between the two is not hypothetical.
 
 Three ways the gap opens, all of them silent:
 
-1. **The ambient environment outranks the file.** Compose resolves an
-   interpolation from the OS environment first and from ``--env-file`` only as
-   a fallback. The lab host's interactive shell exports ``KAFKA_ENVIRONMENT``
-   set to ``local`` -- the dev lane's own consumer-group token -- so a slot
-   brought up from a terminal inherits it and joins the dev lane's groups
-   while every file on disk says it is isolated. Measured 2026-09-21.
+1. **The ambient environment outranks a file COMPOSE READS.** Compose resolves
+   an interpolation from the OS environment first and from ``--env-file`` only
+   as a fallback. The lab host's interactive shell exports
+   ``KAFKA_ENVIRONMENT`` set to ``local`` -- the dev lane's own consumer-group
+   token -- so a slot brought up from a terminal inherits it and joins the dev
+   lane's groups while every file on disk says it is isolated. Measured
+   2026-09-21.
+
+   The qualifier is load-bearing and is not pedantry. An env file the SHELL
+   sources under ``set -a`` behaves the opposite way: it assigns, so it
+   overwrites what the shell exported and the file wins. Both are precedence
+   questions with the same surface shape and they resolve in opposite
+   directions, and this author has already carried one conclusion to the
+   other once, in a claim that reached a merged document before a reviewer
+   refused to repeat the part they could not verify. Say which file.
 
 2. **A compose merge appends where you expected it to replace.** ``ports`` and
    ``volumes`` are sequences, and an override file's sequence is APPENDED to
