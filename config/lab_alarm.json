@@ -1,0 +1,40 @@
+{
+  "_comment_why_json": "JSON and not YAML because scripts/lab_alarm.py runs under launchd on the brew interpreter with no virtual environment (Operating Rule 11). A YAML config would put a third-party import on the path of a timer whose entire value is that it keeps running unattended. OMN-18867.",
+  "_comment_why_env_refs": "${ONEX_INFRA_HOST} and ${ONEX_RUNTIME_SSH_HOST} are expanded at load and RAISE when unset. A literal lab address here would be the hardcoded-host defect Operating Rule 6 forbids, and a silent empty default would be the Rule 8 one.",
+  "_comment_docker_transport": "The lab lane runs on the lab box, not on the host this timer runs on: a local docker daemon cannot see the lane's containers at all. Every docker invocation is therefore rewritten through ssh at the runner seam.",
+  "_comment_sha_surfaces": "The delivered sha is resolved from the deploy agent first and the runtime /ready second. Measured 2026-09-21: this lane's /ready answers healthy and carries a package version with no commit anywhere in its payload, while the agent answered with a 40-hex sha on the same host at the same moment. A resolver on /ready alone would report unresolved on a healthy lane forever.",
+  "_comment_restart_bounds": "Per container, not one fleet number. A broker that has never restarted and a runtime recreated on every deploy do not share a threshold, and one number for both is either noise or blindness. omnimarket-projection-savings-writer carries the tightest bound because it is the container that crash-looped unobserved for nine days (OMN-18851).",
+  "_comment_groups": "The standalone projection-writer groups declared by docker/docker-compose.dev-lane.yml KAFKA_CONSUMER_GROUP values, the same derivation scripts/runtime_build/declared_consumer_groups.py performs for the lab-pass receipt. savings-writer is the group that sat at lag 498 for nine days.",
+
+  "repo": "OmniNode-ai/omnibase_infra",
+  "lane": "compose-dev",
+  "ready_url": "http://${ONEX_INFRA_HOST}:8085/ready",
+  "agent_url": "http://${ONEX_INFRA_HOST}:8098",
+  "broker_container": "omnibase-infra-redpanda",
+  "broker_address": "localhost:19092",
+  "docker_command": ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "${ONEX_RUNTIME_SSH_HOST}", "docker"],
+
+  "container_restart_bounds": {
+    "omnibase-infra-postgres": 5,
+    "omnibase-infra-redpanda": 5,
+    "omnibase-infra-valkey": 5,
+    "omninode-runtime": 5,
+    "omninode-runtime-effects": 5,
+    "omnimarket-projection-api": 5,
+    "omnimarket-projection-savings-writer": 2,
+    "omnimarket-projection-delegation-writer": 5,
+    "omnimarket-projection-live-events-writer": 5,
+    "omnimarket-projection-registration-writer": 5,
+    "omnimarket-projection-tenant-credentials-writer": 5,
+    "omnimarket-projection-tenant-registry-writer": 5
+  },
+
+  "consumer_groups": [
+    "local.omnimarket-projections.delegation-writer.consume.v1",
+    "local.omnimarket-projections.live-events-writer.consume.v1",
+    "local.omnimarket-projections.registration-writer.consume.v1",
+    "local.omnimarket-projections.savings-writer.consume.v1",
+    "local.omnimarket-projections.tenant-credentials-writer.consume.v1",
+    "local.omnimarket-projections.tenant-registry-writer.consume.v1"
+  ]
+}

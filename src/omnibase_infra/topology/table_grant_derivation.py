@@ -309,6 +309,47 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="dod_verdict",
         ),
     ),
+    # OMN-18993 (blocking child of OMN-18887). Same seam, same reason as the
+    # dod_verify_runs entry above: the migration that creates this relation is
+    # vendored in this pull request, but the producing node's db_io declaration
+    # lives on the still-open omnimarket source PR, so the PINNED contracts
+    # root this repo's push-side derivation reads does not declare it yet.
+    # Without this entry the pull request is green on its own trailer-resolved
+    # head and reds dev for every other open pull request on the next push --
+    # the OMN-18863 window, measured twice on 2026-09-19/20.
+    #
+    # The relation is the durable correlation-keyed claim that stops a
+    # redelivered delegate-skill command from re-running the inference and
+    # billing it twice. access is read_write because the claim is a
+    # read-and-decide in one statement: the returned claimed_at is what tells
+    # the node whether it won, so it necessarily reads back what it wrote.
+    # Domain omninode_internal, not tenant -- per-node control state carrying
+    # no row-level security, so a tenant posture would assert an isolation the
+    # schema does not enforce.
+    #
+    # Tracked for expiry in _INTERIM_ENTRIES in
+    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes
+    # red on the pin advance that makes it redundant and says to delete it.
+    #
+    # Retired by: omnimarket#2744 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:delegate_skill_command_claims",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_delegate_skill_orchestrator/"
+            "0001_delegate_skill_command_claims.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegate_skill_command_claims",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_delegate_skill_orchestrator/"
+                "0001_delegate_skill_command_claims.sql"
+            ),
+            access="read_write",
+            role="delegate_skill_claim",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426

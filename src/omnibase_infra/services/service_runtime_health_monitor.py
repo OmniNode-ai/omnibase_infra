@@ -54,6 +54,14 @@ from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
 from omnibase_infra.protocols.protocol_consumer_sync_source import (
     ProtocolConsumerSyncSource,
 )
+from omnibase_infra.runtime.health.projection_apply_flow import (
+    IMMUTABLE_GRAIN_PROJECTIONS,
+    describe_projection_apply_divergence,
+    describe_projection_delta_dropped,
+    evaluate_projection_apply_flow,
+    projection_apply_divergence_status,
+    projection_delta_dropped_status,
+)
 from omnibase_infra.runtime.health.projection_liveness import (
     describe_dlq_saturation,
     describe_projection_attachment,
@@ -69,6 +77,9 @@ from omnibase_infra.runtime.health.runtime_lane_identity import (
     resolve_runtime_lane,
 )
 from omnibase_infra.runtime.observability import get_consumer_flow_counters
+from omnibase_infra.runtime.observability.projection_apply_counters import (
+    get_projection_apply_counters,
+)
 from omnibase_infra.runtime.projection_dispatch_ledger import (
     projections_with_no_live_dispatcher,
 )
@@ -965,6 +976,61 @@ class ServiceRuntimeHealthMonitor:
                 name="consumer_sync",
                 status=consumer_sync_status,
                 detail=consumer_sync_detail,
+            )
+        )
+
+        # --- Dimensions 8 and 9: Projection flow invariants (OMN-18910) -----
+        # Every dimension above answers whether a consumer is attached and
+        # MOVING. None answers whether it is moving and WRITING, and those
+        # come apart: a consumer that refuses a message still commits its
+        # offset, a projection that returns without writing still commits its
+        # offset, and a cache that drops a delta still consumed it. Lag was
+        # zero throughout OMN-18880 (nine hours of total refusal behind three
+        # green surfaces), OMN-18905 (a snapshot cache frozen mid-replay while
+        # readiness reported every topic bootstrapped) and OMN-18769 (a writer
+        # that wrote nothing and raised nothing).
+        #
+        # The honest claim: this does not prevent any of the three. It
+        # shortens detection, which in all three was set by a person happening
+        # to look.
+        apply_counters = get_projection_apply_counters()
+        # This cycle is also the window closer, and deliberately the ONLY one.
+        # The first revision closed the apply window on the heartbeat tick,
+        # beside the throughput window, which coupled the dimension to
+        # introspection being enabled AND to this node holding flow-window
+        # carriage. On a lane where neither holds, no window would ever close
+        # and both dimensions would sit permanently DEGRADED on their
+        # unobserved branch -- a check that cannot pass, which Operating Rule
+        # 24's correction is explicit is worse than one that cannot fail,
+        # because it stops delivery rather than missing a defect. Closing here
+        # means a window exists from the first cycle on any lane that runs
+        # this monitor at all.
+        try:
+            apply_counters.close_window()
+        except Exception:  # noqa: BLE001 -- the dimension fails closed below
+            logger.warning(
+                "Projection apply window could not be closed; the apply-flow "
+                "dimensions will report their unobserved outcome rather than "
+                "a clean one",
+                exc_info=True,
+            )
+        apply_flow = evaluate_projection_apply_flow(
+            windows=apply_counters.retained_windows(),
+            registered_projections=apply_counters.registered_projections(),
+            immutable_grain_projections=IMMUTABLE_GRAIN_PROJECTIONS,
+        )
+        dimensions.append(
+            ModelRuntimeHealthDimension(
+                name="projection_apply_divergence",
+                status=projection_apply_divergence_status(apply_flow),
+                detail=describe_projection_apply_divergence(apply_flow),
+            )
+        )
+        dimensions.append(
+            ModelRuntimeHealthDimension(
+                name="projection_delta_dropped",
+                status=projection_delta_dropped_status(apply_flow),
+                detail=describe_projection_delta_dropped(apply_flow),
             )
         )
 

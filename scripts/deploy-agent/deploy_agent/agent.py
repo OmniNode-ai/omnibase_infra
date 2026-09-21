@@ -167,6 +167,12 @@ LAB_OVERLAY_SOURCE_DIR = Path(
 #: it moves.
 JOB_POOL_MAX_WORKERS = 1
 
+#: Workers on the lag-refresh pool (OMN-19018). One is enough: the refresher
+#: serialises itself under its own lock and a second thread would only let two
+#: ListOffsets round trips overlap. It is separate from the job pool rather
+#: than larger than it, so nothing here can make two deploys possible.
+LAG_POOL_MAX_WORKERS = 1
+
 #: Milliseconds a rejection publish may spend resolving broker metadata
 #: (OMN-18143). See the call site in ``_publish_rejection_event`` for the
 #: measurement this replaces and for why the cause is recorded rather than
@@ -211,6 +217,22 @@ class DeployAgent:
         self._job_pool = ThreadPoolExecutor(
             max_workers=JOB_POOL_MAX_WORKERS,
             thread_name_prefix="deploy-agent-job",
+        )
+        # OMN-19018. The lag refresh gets a thread of its OWN, and borrowing
+        # the pool above is the defect this repairs. That pool is deliberately
+        # single-worker so deploys serialise, so a refresh submitted to it
+        # queues behind the rebuild it exists to measure and runs only once
+        # that rebuild is over -- inert in exactly the window OMN-18990 built
+        # it for. Measured live on the dev lane 2026-09-21: the sample's
+        # observation time did not move across 130s of a running rebuild
+        # against a 60s interval.
+        #
+        # Widening the job pool instead is refused. Its single worker is what
+        # makes two overlapping deploys impossible, and a stale count is a far
+        # smaller failure than a second rebuild on the same lane.
+        self._lag_pool = ThreadPoolExecutor(
+            max_workers=LAG_POOL_MAX_WORKERS,
+            thread_name_prefix="deploy-agent-lag",
         )
         # OMN-18636 AC4. Started once the socket is bound (see ``run``), stopped
         # in the same ``finally`` that tears the site down. It holds no handle on
@@ -437,14 +459,21 @@ class DeployAgent:
             # the worker. Abandoning a publish mid-flight is how a terminal
             # result goes missing.
             self._job_pool.shutdown(wait=True)
+            # Not waited on, unlike the job pool above. An observation in
+            # flight owes nobody a result, and a ListOffsets round trip to an
+            # unreachable broker must not hold up shutdown.
+            self._lag_pool.shutdown(wait=False)
             logger.info("Deploy agent stopped")
 
     async def _refresh_lag_forever(self, refresher: LagRefresher) -> None:
         """Sample the control-topic lag on a timer, off the polling client.
 
-        Offloaded like every other blocking call in this class: the round trip
-        is short next to a rebuild and long next to the 2s bound the receipt
-        reader needs from the health surface.
+        Runs on ``_lag_pool``, this class's own thread, and NOT on the job
+        pool: the job pool has one worker by design and it is occupied by the
+        rebuild for the whole window this refresh exists to measure
+        (OMN-19018). It stays off the event loop for the same reason every
+        other blocking call here does -- the listening socket must keep being
+        accepted while a deploy runs.
 
         Never lets a failed observation end the task. A refresher that stopped
         on its first transient error would leave the sampler ageing silently,
@@ -452,9 +481,13 @@ class DeployAgent:
         staleness bound one layer down is what turns that into an unreadable
         answer instead of a stale number.
         """
+        loop = asyncio.get_running_loop()
         while not self._shutdown:
             try:
-                await self._offload(refresher.refresh)
+                # NOT ``_offload`` (OMN-19018). That submits to the
+                # single-worker job pool, where this call would sit behind the
+                # rebuild it is measuring.
+                await loop.run_in_executor(self._lag_pool, refresher.refresh)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - never fatal to the agent
