@@ -550,10 +550,63 @@ if ! pool_build_lock_acquire; then
   Two 20-25 minute image builds at once on a host already at load average 7
   with 66 GiB swapped out is the contention this lock exists to prevent."
 fi
-log "building the runtime image from the snapshot (timeout ${BUILD_TIMEOUT}s) ..."
+# The build args a workspace build REQUIRES. They are passed on the command
+# line rather than left to the compose files' own `args:` blocks, because
+# those declare only the two BUILD_SOURCE selectors and the Dockerfile's
+# workspace branch refuses without the rest. Measured: the first live build
+# died at `BUILD_SOURCE=workspace requires OMNI_HOME` with an empty arg,
+# because exporting the variable is not the same as passing it.
+#
+# PROMOTION_CLASS=stability-candidate with NON_MAIN_LINEAGE=true is MANDATORY
+# on a workspace build (OMN-13656) and is exactly right here rather than
+# merely tolerated: it stamps the image so the prod-promotion gate refuses it,
+# which is the same statement as "a slot is a premise for nothing", enforced
+# on the artifact instead of in prose.
+#
+# RUNTIME_VERSION is read from the SNAPSHOT's pyproject rather than the
+# clone's, for the same reason every other provenance fact is: the snapshot is
+# what gets built. The Dockerfile refuses the placeholder 0.1.0 on a workspace
+# build, so an unreadable version is a build failure rather than an image
+# labelled with a lie.
+RUNTIME_VERSION="$("${PY}" - "${STAGING_ROOT}/repo/pyproject.toml" <<'PYVER'
+import re, sys, pathlib
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
+print(match.group(1) if match else "")
+PYVER
+)"
+[[ -n "${RUNTIME_VERSION}" && "${RUNTIME_VERSION}" != "0.1.0" ]] || fail "${EXIT_BUILD_FAILED}" \
+    "could not read a real RUNTIME_VERSION from the snapshot's pyproject.toml
+  (got '${RUNTIME_VERSION}'). A workspace build refuses the placeholder, and
+  stamping one would put a false version on every proof packet the image
+  produces."
+
+BUILD_ARGS=(
+    --build-arg "GIT_SHA=${TARGET_COMMIT}"
+    --build-arg "VCS_REF=${TARGET_COMMIT}"
+    --build-arg "RUNTIME_SOURCE_HASH=${TARGET_COMMIT}"
+    --build-arg "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    --build-arg "RUNTIME_VERSION=${RUNTIME_VERSION}"
+    --build-arg "COMPOSE_PROJECT=${COMPOSE_PROJECT}"
+    --build-arg "BUILD_SOURCE=workspace"
+    --build-arg "EXPECTED_BUILD_SOURCE=workspace"
+    --build-arg "PROMOTION_CLASS=stability-candidate"
+    --build-arg "NON_MAIN_LINEAGE=true"
+    --build-arg "OMNI_HOME=${OMNI_HOME_RESOLVED}"
+    --build-arg "OMNIBASE_COMPAT_REF=${SIBLING_COMMIT[omnibase_compat]}"
+    --build-arg "OMNIMARKET_REF=${SIBLING_COMMIT[omnimarket]}"
+    # Empty deliberately: the node inventory is a property of the image and
+    # cannot be known before the image exists, and an empty value skips the
+    # Dockerfile's verify guard. The two-pass stamping the declared lanes do
+    # (OMN-18708) is not reproduced here -- a slot's image is destroyed with
+    # the slot and is never promoted, so nothing downstream reads the stamp.
+    --build-arg "NODE_INVENTORY="
+)
+
+log "building the runtime image from the snapshot, version ${RUNTIME_VERSION} (timeout ${BUILD_TIMEOUT}s) ..."
 if ! timeout "${BUILD_TIMEOUT}" env -C "${STAGING_ROOT}/repo" \
         docker compose -p "${COMPOSE_PROJECT}" "${COMPOSE_FILES[@]}" "${PROFILES[@]}" \
-        build omninode-runtime; then
+        build --progress=plain "${BUILD_ARGS[@]}" omninode-runtime; then
     fail "${EXIT_BUILD_FAILED}" "the workspace build failed or timed out."
 fi
 pool_build_lock_release
