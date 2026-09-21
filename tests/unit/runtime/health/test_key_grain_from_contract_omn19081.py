@@ -70,13 +70,19 @@ def _contract(tmp_path: Path, *grains: str | None) -> Path:
 # --------------------------------------------------------------------------
 
 
-def test_ac1_the_hardcoded_exemption_list_no_longer_exists() -> None:
-    """Deleted, not left beside the new path.
+def test_ac1_the_unconditional_exemption_list_is_gone() -> None:
+    """The literal that applied unconditionally no longer exists.
 
-    A literal kept "for reference" next to the thing that replaced it is a
-    second source of truth with a comment on it.
+    REVISED after the pre-PR proof failed and the operator ruled, 2026-09-21.
+    The first version of this test asserted no literal at all, and that shape
+    of the change was measured on dogfood-101 to turn both content-addressed
+    exposures DEGRADED on a runtime carrying an omnimarket predating the
+    declaration. What is required is not the absence of a literal but the
+    absence of an UNCONDITIONAL one: the surviving list is reached only where
+    the contract resolves nothing, and its name says so.
     """
     assert not hasattr(projection_apply_flow, "IMMUTABLE_GRAIN_PROJECTIONS")
+    assert projection_apply_flow.FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS
 
 
 def test_ac1_an_immutable_declaration_is_read_from_the_contract(
@@ -324,3 +330,91 @@ def test_negative_control_the_factory_given_no_grain_exempts_nothing(
         assert counters.grain_unresolved_projections() == ("_Probe",)
     finally:
         reset_projection_apply_counters_for_test()
+
+
+# --------------------------------------------------------------------------
+# The fallback, and its resolution order. Operator ruling 2026-09-21, option
+# two, after the pre-PR proof on dogfood-101 measured the literal-free shape
+# turning healthy behaviour DEGRADED on a pre-declaration runtime.
+# --------------------------------------------------------------------------
+
+
+def _rising_gauge(projection: str, grain: str | None) -> ProjectionApplyCounters:
+    """A rising discarded-delta gauge, which is idempotence on an immutable grain."""
+    counters = ProjectionApplyCounters()
+    counters.register(projection, TOPIC, key_grain=grain)
+    for total in (5, 40, 400):
+        counters.record_drop_total(projection, TOPIC, total)
+        counters.close_window()
+    return counters
+
+
+def _verdict(counters: ProjectionApplyCounters) -> object:
+    return evaluate_projection_apply_flow(
+        windows=counters.retained_windows(),
+        registered_projections=counters.registered_projections(),
+        immutable_grain_projections=counters.immutable_grain_projections(),
+        grain_unresolved_projections=counters.grain_unresolved_projections(),
+        fallback_immutable_projections=(
+            projection_apply_flow.FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS
+        ),
+    )
+
+
+def test_the_0_4_178_replay_reads_healthy() -> None:
+    """The exact case the proof failed on, now the regression test.
+
+    A runtime whose omnimarket predates key_grain resolves no grain, so the
+    fallback carries the exemption and the intended idempotence of a
+    content-addressed exposure does not alarm.
+    """
+    verdict = _verdict(_rising_gauge("HandlerProjectionWorkEvents", None))
+    assert verdict.drop_accumulating_projections == ()
+    assert projection_delta_dropped_status(verdict) == "HEALTHY"
+    assert verdict.fallback_exempted_projections == ("HandlerProjectionWorkEvents",)
+
+
+def test_the_contract_wins_over_the_fallback() -> None:
+    """POSITIVE CONTROL for the resolution order, and the point of the change.
+
+    A projection named in the fallback whose contract declares it MUTABLE is
+    GRADED. The literal can never override a live declaration, which is what
+    keeps it a window-cover rather than a second opinion.
+    """
+    verdict = _verdict(_rising_gauge("HandlerProjectionWorkEvents", "mutable"))
+    assert verdict.drop_accumulating_projections == ("HandlerProjectionWorkEvents",)
+    assert verdict.fallback_exempted_projections == ()
+    assert projection_delta_dropped_status(verdict) == "DEGRADED"
+
+
+def test_a_contract_declared_immutable_is_not_credited_to_the_fallback() -> None:
+    """A name the fallback has never heard of, exempted by its declaration."""
+    verdict = _verdict(_rising_gauge("HandlerNeverSeenBefore", "immutable"))
+    assert verdict.drop_accumulating_projections == ()
+    assert verdict.fallback_exempted_projections == ()
+    assert verdict.excluded_immutable_grain == ("HandlerNeverSeenBefore",)
+
+
+def test_negative_control_absent_from_both_is_graded() -> None:
+    """Unresolved and not in the fallback: graded, never exempted.
+
+    Without this the fallback could be widened to everything and every test
+    above would still pass.
+    """
+    verdict = _verdict(_rising_gauge("HandlerProjectionRunnerFleet", None))
+    assert verdict.drop_accumulating_projections == ("HandlerProjectionRunnerFleet",)
+    assert verdict.fallback_exempted_projections == ()
+    assert projection_delta_dropped_status(verdict) == "DEGRADED"
+
+
+def test_an_unresolved_grain_is_still_reported_even_when_the_fallback_exempts() -> None:
+    """The token is a REPORT, not an exemption, per the ruling.
+
+    A reader deciding whether the literal can be deleted has to be able to see
+    which exposures still depend on it.
+    """
+    verdict = _verdict(_rising_gauge("HandlerProjectionWorkEvents", None))
+    assert verdict.grain_unresolved_projections == ("HandlerProjectionWorkEvents",)
+    detail = projection_apply_flow.describe_projection_delta_dropped(verdict)
+    assert projection_apply_flow.OUTCOME_KEY_GRAIN_UNRESOLVED in detail
+    assert "INTERIM fallback" in detail
