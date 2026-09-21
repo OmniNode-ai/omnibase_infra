@@ -106,7 +106,6 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # contract; add it in the same pull request that vendors it, and this module
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
-    "dod_verify_runs": "omnimarket#2722",
     "delegate_skill_command_claims": "omnimarket#2744",
 }
 
