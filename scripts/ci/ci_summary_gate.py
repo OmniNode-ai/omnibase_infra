@@ -1044,6 +1044,21 @@ SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(
 # passes through `verdict_is_provisional` first, so a producer that is
 # demonstrably about to re-run is PENDING rather than refused on the poll that
 # observes it.
+# OMN-18991, OPEN QUESTION, recorded here because the fleet currently
+# disagrees with itself and a reader of one repository cannot see the other.
+#
+# `cancelled` is in the failing set HERE and is NOT in onex_change_control's.
+# That sibling argues a cancellation is the ABSENCE of a verdict rather than a
+# red, and that an unregistered row carries no presence promise to wait on, so
+# it reports a cancelled swept row and carries on. This module instead fails
+# it once the OMN-18355 grace closes, which is what the 2026-09-21 instruction
+# asked for in as many words: a succeeded-then-cancelled pair must still read
+# red.
+#
+# Both readings are defensible and they cannot both be right for the same
+# layer. The divergence is flagged rather than resolved unilaterally, because
+# picking one silently is how two gates drift into meaning different things
+# under one name.
 SWEEP_GOOD_CONCLUSIONS: frozenset[str] = frozenset({"success"})
 
 
