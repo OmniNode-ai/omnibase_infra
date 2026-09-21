@@ -1968,8 +1968,15 @@ def run_delegate(
                         task_type_resolution=task_class.resolution.value,
                         addressing=addressing,
                         drift_guard=drift_guard_check,
-                        require_budget_evidence=True,
-                        require_contract_evidence=True,
+                        # OMN-18956 residual: this is the SECOND site that
+                        # arms the same refusal, and the first fix moved only
+                        # the validator. The writer runs inside the receipt
+                        # CALLBACK, so with literals here a run still exited
+                        # non-zero after the validator had accepted it --
+                        # which is why proving the leaf was not proof of the
+                        # entry. Both now read one derivation.
+                        require_budget_evidence=receipt_evidence_demanded[0],
+                        require_contract_evidence=receipt_evidence_demanded[1],
                     ),
                 )
         except DelegateTimeoutExceededError as exc:
