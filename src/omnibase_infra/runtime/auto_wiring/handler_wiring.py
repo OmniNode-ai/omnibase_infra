@@ -1512,6 +1512,58 @@ def _ingress_correlation_id(message: object) -> UUID | None:
     return coerced if isinstance(coerced, _UUID) else None
 
 
+def _ingress_message_id(message: object) -> UUID | None:
+    """Recover the ingress ENVELOPE id from a message's TRANSPORT surface.
+
+    OMN-18958, the identity half of the OMN-14498 lesson directly above.
+
+    A publisher that sends a bare contract model rather than an envelope
+    states its identity only in the wire header. The consume boundary then
+    synthesizes an envelope, and if it MINTS an id there, that mint is what
+    every hop caused by this message records as its parent -- a valid id with
+    no lineage, on no topic and in no table, so the causal edge can never
+    close. Measured on the .201 dev lane: the chain head recorded
+    ``70982614-...`` while both its children named ``53ffd454-...``, which
+    ``event_ledger`` does not contain.
+
+    Mirrors ``_ingress_correlation_id`` field for field, deliberately: the
+    two ids ride the same three transport shapes, and a second way of reading
+    the same surface is a second thing to keep in agreement.
+
+    Returns ``None`` when the transport states no identity, leaving the
+    caller to fall back to the body and then to minting. Never raises: a
+    malformed header must not take down the consume boundary.
+    """
+    from uuid import UUID as _UUID
+
+    headers = getattr(message, "headers", None)
+
+    header_id = getattr(headers, "message_id", None)
+    coerced = _coerce_uuid_or_none(header_id)
+    if isinstance(coerced, _UUID):
+        return coerced
+
+    if headers is not None and not isinstance(headers, (str, bytes)):
+        try:
+            for entry in headers:
+                key, value = entry
+                if key != "message_id":
+                    continue
+                decoded = (
+                    value.decode("utf-8", errors="replace")
+                    if isinstance(value, bytes)
+                    else value
+                )
+                coerced = _coerce_uuid_or_none(decoded)
+                if isinstance(coerced, _UUID):
+                    return coerced
+        except (TypeError, ValueError):
+            pass
+
+    coerced = _coerce_uuid_or_none(getattr(message, "envelope_id", None))
+    return coerced if isinstance(coerced, _UUID) else None
+
+
 def _coerce_datetime_or_none(value: object) -> object | None:
     from datetime import UTC, datetime
 
@@ -7458,8 +7510,32 @@ def _make_event_bus_callback(
                         data.get("correlation_id") if isinstance(data, dict) else None
                     )
                     corr = _coerce_uuid_or_none(raw_corr) or uuid4()
+                    # OMN-18958: ADOPT the identity the wire states; do not
+                    # mint a rival. `ModelEventEnvelope.envelope_id` defaults
+                    # to uuid4, so omitting this argument silently produced a
+                    # SECOND id for a message that already had one -- and that
+                    # second id is what every hop caused by this message
+                    # records as its parent, via the one shared
+                    # `current_dispatch_envelope()` contextvar. The result is
+                    # an edge no reader can resolve, because the parent it
+                    # names was never on the wire.
+                    #
+                    # Same precedence as `correlation_id` immediately above
+                    # and as the comment at the top of this block states:
+                    # ingress header -> body -> mint. A body that states its
+                    # own id is the authoritative in-band value; minting
+                    # survives only where there is nothing to adopt.
+                    raw_env_id = (
+                        data.get("envelope_id") if isinstance(data, dict) else None
+                    )
+                    env_id = (
+                        _ingress_message_id(message)
+                        or _coerce_uuid_or_none(raw_env_id)
+                        or uuid4()
+                    )
                     derived = _derive_event_type_from_topic(topic)
                     envelope = ModelEventEnvelope[object](
+                        envelope_id=env_id,
                         payload=data,
                         correlation_id=corr,
                         envelope_timestamp=datetime.now(UTC),
