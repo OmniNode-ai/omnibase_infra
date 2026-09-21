@@ -385,6 +385,11 @@ def _run(
             # the collector's own rows are asserted in the OMN-18567 block
             # at the end of this file, which switches it back on.
             "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
+            # OMN-18942: and the third probe. `collect()` now also reads the fleet
+            # failure probe, which queries GitHub. Same reasoning as the two rows
+            # above; the fleet rows are asserted in
+            # test_fleet_failure_sink_omn18942.py, which switches it back on.
+            "OMNINODE_FLEET_PROBE_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1834,6 +1839,11 @@ def _run_alert(
             # the collector's own rows are asserted in the OMN-18567 block
             # at the end of this file, which switches it back on.
             "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
+            # OMN-18942: and the third probe. `collect()` now also reads the fleet
+            # failure probe, which queries GitHub. Same reasoning as the two rows
+            # above; the fleet rows are asserted in
+            # test_fleet_failure_sink_omn18942.py, which switches it back on.
+            "OMNINODE_FLEET_PROBE_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1932,6 +1942,11 @@ class _AlertTicker:
                 # the collector's own rows are asserted in the OMN-18567 block
                 # at the end of this file, which switches it back on.
                 "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
+                # OMN-18942: and the third probe. `collect()` now also reads the fleet
+                # failure probe, which queries GitHub. Same reasoning as the two rows
+                # above; the fleet rows are asserted in
+                # test_fleet_failure_sink_omn18942.py, which switches it back on.
+                "OMNINODE_FLEET_PROBE_ENABLED": "0",
             }
         )
         env.update(self.extra_env)
@@ -2556,7 +2571,11 @@ def _runner_tree_rows(
             "OMNINODE_RUNNER_TREE_STATE_FILE": str(status_file),
         },
     )
-    section = report.split("*Runner clone tree*", 1)[1].split("*Active issues*", 1)[0]
+    # OMN-18942 inserted the fleet section between this one and the active
+    # issue list, so the runner-tree section now ends there. Sliced to the
+    # NEXT heading rather than to a fixed one, so the next section added
+    # between them does not silently widen this assertion again.
+    section = report.split("*Runner clone tree*", 1)[1].split("*Fleet failures*", 1)[0]
     issues = report.split("*Active issues*", 1)[1]
     rows = [
         line.strip() for line in section.splitlines() if line.strip().startswith("- ")
