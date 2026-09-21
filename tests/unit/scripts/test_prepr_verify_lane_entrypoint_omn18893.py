@@ -773,3 +773,120 @@ def test_the_provisioner_never_puts_the_password_on_a_command_line() -> None:
     text = PROVISIONER.read_text(encoding="utf-8")
     assert "-e PGPASSWORD " in text or '-e PGPASSWORD "' in text
     assert "PGPASSWORD=$" not in text.replace('PGPASSWORD="$POSTGRES_PASSWORD"', "")
+
+
+# ---------------------------------------------------------------------------
+# Pinned-sha staging, and no rendered configuration on disk
+# ---------------------------------------------------------------------------
+
+CUT_LAB_REF = REPO_ROOT / "scripts" / "runtime_build" / "cut-lab-ref.sh"
+
+
+def _entrypoint_code() -> str:
+    """The entrypoint with comment lines stripped.
+
+    Every assertion below is about what the script DOES. The comments
+    describe the defects at length and name the very constructs being
+    forbidden, so matching against the raw text would pass or fail on prose.
+    """
+    return "\n".join(
+        line
+        for line in ENTRYPOINT.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def test_the_snapshot_comes_from_the_object_store_not_a_working_tree() -> None:
+    """A copy of a working directory is only the commit when it happens to be clean.
+
+    OMN-19086 measured that failure staying silent: a git directory advanced
+    to a new commit over an old working tree, 8,084 files differing, no error
+    anywhere. ``git archive`` cannot express that state, because it
+    serialises a commit's tree and nothing else.
+    """
+    body = _entrypoint_code()
+    assert "archive --format=tar" in body, (
+        "the entrypoint no longer stages from a resolved sha. A working-tree "
+        "copy can contain content belonging to no commit, and the receipt "
+        "would still name one."
+    )
+    assert "rsync" not in body, (
+        "the entrypoint still rsyncs a source tree into the snapshot. That is "
+        "the staging shape the pinned-sha rule refuses."
+    )
+
+
+def test_the_entrypoint_never_writes_a_rendered_configuration() -> None:
+    """A rendered config expands every interpolation, credentials included.
+
+    With the operator environment loaded it carries the broker, database and
+    Keycloak values in clear, so it is piped into the verifier and never
+    persisted. The verifier reads ``-`` for standard input.
+    """
+    body = _entrypoint_code()
+    assert "--rendered -" in body, (
+        "the entrypoint does not pipe the render into the verifier."
+    )
+    # A FILE redirect, not the stderr suppression that legitimately follows
+    # the render. `2>/dev/null` discards compose's own diagnostics and
+    # persists nothing; `> path` would write the document, credentials and
+    # all. Matching a bare ">" would flag the safe form and make this test
+    # unpassable, which is how a real gate gets deleted.
+    offenders = [
+        line.strip()
+        for line in body.splitlines()
+        if "config --format json" in line
+        and re.search(r"(?<![0-9])>\s*\S", line.split("config --format json")[1])
+    ]
+    assert not offenders, (
+        "the entrypoint redirects a rendered configuration to a file:\n  "
+        + "\n  ".join(offenders)
+        + "\nA render holds every expanded secret; it must not reach disk."
+    )
+    assert "rendered.json" not in body, (
+        "the entrypoint still names a rendered.json path."
+    )
+
+
+def test_a_dirty_sibling_is_refused_rather_than_recorded() -> None:
+    """Recording a discrepancy does not make an artifact reproducible."""
+    body = _entrypoint_code()
+    assert "EXIT_REFUSED_DIRTY_WORKTREE" in body
+    assert body.count("EXIT_REFUSED_DIRTY_WORKTREE") >= 2, (
+        "only one dirty-tree refusal exists. Both the target and each sibling "
+        "must be refused when dirty: a dirty sibling puts content belonging "
+        "to no commit into an image whose receipt names one."
+    )
+
+
+@pytest.mark.parametrize("slot", sorted(policy.SLOTS))
+def test_cut_lab_ref_refuses_a_pool_lane_by_name(slot: int) -> None:
+    """The fast-lane deploy driver must refuse a pool slot, not drive one.
+
+    A pool arm there would be a SECOND path to build a slot, reachable with
+    one argument, bypassing the entrypoint's declared-lane refusals, its
+    attribution requirement, its build lock, its pinned-sha snapshot and its
+    rendered-config gate. Rule 24(e)'s sanction is worth exactly as much as
+    the entrypoint being the only way in.
+
+    The refusal is BY NAME rather than falling through to "unknown lane",
+    because a pool lane is not unknown: it is declared in the lane manifest
+    and deliberately not driven from here. A caller needs to be told where it
+    IS driven from, or they go looking for the arm to add.
+    """
+    lane = f"prepr-{slot}"
+    result = subprocess.run(
+        ["bash", str(CUT_LAB_REF), "--lane", lane],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "OMNI_HOME": str(REPO_ROOT)},
+    )
+    assert result.returncode == 2, (
+        f"cut-lab-ref.sh did not refuse lane {lane} (exit {result.returncode}). "
+        f"A second build path for a pool slot reopens what rule 24(e) closes."
+    )
+    assert "prepr_verify_lane.sh" in result.stderr, (
+        f"the refusal for {lane} does not name the entrypoint that DOES build "
+        f"a slot, so a caller is left looking for the arm to add here."
+    )

@@ -291,9 +291,21 @@ for repo in "${SIBLING_REPOS[@]}"; do
     # assertion is about the TARGET, whose commit the gate keys on; a sibling
     # is vendored content and its dirt is a provenance fact the descriptor must
     # carry rather than a reason to block a branch that did not cause it.
+    # A dirty sibling is REFUSED, not recorded. It used to be recorded, on the
+    # reasoning that the gate keys on the target's commit and a sibling is
+    # vendored content. That reasoning is wrong under the pinned-sha staging
+    # rule: the image would contain content belonging to no commit in that
+    # repository, so the sibling commit written on the receipt would name a
+    # tree the build did not use. Recording the discrepancy does not make the
+    # artifact reproducible; refusing it does.
     if [[ "${SIBLING_DIRTY[${repo}]}" == "true" ]]; then
-        SIBLING_ORIGIN["${repo}"]="${SIBLING_ORIGIN[${repo}]}+dirty"
-        log "WARNING: sibling ${repo} at ${src} is DIRTY; recording it as such on the descriptor and in the build provenance manifest."
+        fail "${EXIT_REFUSED_DIRTY_WORKTREE}" \
+            "sibling ${repo} at ${src} is DIRTY and will not be vendored.
+  The slot records ${repo}@${SIBLING_COMMIT[${repo}]} on its receipt, and an
+  image built from uncommitted content in that tree does not correspond to
+  that commit. Commit or discard the change in ${src}.
+  Uncommitted paths:
+$(git -C "${src}" status --porcelain | sed 's/^/    /')"
     fi
     log "sibling ${repo} <- ${src} @ ${SIBLING_COMMIT[${repo}]} (${SIBLING_ORIGIN[${repo}]})"
 done
@@ -383,17 +395,49 @@ rm -rf "${STAGING_ROOT}"
 mkdir -p "${STAGING_ROOT}" "${SLOT_ENV_DIR}" "${TENANT_STATE_DIR}"
 chmod 700 "${SLOT_ENV_DIR}"
 
-rsync -a --delete \
-    --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
-    --exclude '.onex_state' --exclude 'node_modules' \
-    "${WORKTREE}/" "${STAGING_ROOT}/repo/"
+# Each tree is extracted from the OBJECT STORE at a resolved sha, never copied
+# out of a working directory.
+#
+# This replaces an rsync of the working tree, and the difference is not
+# stylistic. A copy of a working directory contains whatever is on disk at
+# that instant, which is only the commit when the tree happens to be clean --
+# and OMN-19086 measured that exact failure staying SILENT: a git directory
+# advanced to a new commit over an old working tree, 8,084 files differing,
+# no error anywhere. `git archive` cannot express that state. It serialises
+# the commit's tree and nothing else, so a working-tree change cannot reach
+# the build even if one appears between the check above and this line.
+#
+# It also removes the .git question entirely rather than excluding it: an
+# archive carries no repository metadata, so nothing in the snapshot can
+# answer a git query about the clone it came from.
+stage_commit_tree() {
+    local src="$1" commit="$2" dest="$3" label="$4"
+    local head
+    head="$(git -C "${src}" rev-parse HEAD)"
+    # Readback: the pin this run recorded must still be what the source names.
+    # A source that moved between resolution and staging would otherwise be
+    # staged under the OLD commit's name.
+    if [[ "${head}" != "${commit}" ]]; then
+        fail "${EXIT_PROVENANCE_MISMATCH}" \
+            "${label} at ${src} moved during staging: this run resolved
+  ${commit} and the source now reports ${head}. Refusing rather than staging
+  a tree under a commit that no longer names it."
+    fi
+    if [[ -n "$(git -C "${src}" status --porcelain)" ]]; then
+        fail "${EXIT_REFUSED_DIRTY_WORKTREE}" \
+            "${label} at ${src} became dirty during staging; refusing."
+    fi
+    rm -rf "${dest}"
+    mkdir -p "${dest}"
+    git -C "${src}" archive --format=tar "${commit}" | tar -x -C "${dest}"
+}
+
+stage_commit_tree "${WORKTREE}" "${TARGET_COMMIT}" "${STAGING_ROOT}/repo" "the target"
 
 mkdir -p "${STAGING_ROOT}/repo/workspace/sibling-repos"
 for repo in "${SIBLING_REPOS[@]}"; do
-    rsync -a --delete \
-        --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
-        --exclude '.onex_state' --exclude 'node_modules' \
-        "${SIBLING_SRC[${repo}]}/" "${STAGING_ROOT}/repo/workspace/sibling-repos/${repo}/"
+    stage_commit_tree "${SIBLING_SRC[${repo}]}" "${SIBLING_COMMIT[${repo}]}" \
+        "${STAGING_ROOT}/repo/workspace/sibling-repos/${repo}" "sibling ${repo}"
 done
 
 # Content digests of the snapshot itself. The commit above is read from the
@@ -671,18 +715,33 @@ pool_build_lock_release
 # list, a base-file edit that added an unsuffixed DSN -- all of them show up
 # here, and none of them would show up in a review of this script.
 # -----------------------------------------------------------------------------
-log "rendering and verifying the slot configuration ..."
-RENDERED="${SLOT_ENV_DIR}/rendered.json"
-compose "${PROFILES[@]}" config --format json > "${RENDERED}" 2>/dev/null \
-    || fail "${EXIT_PROVENANCE_MISMATCH}" "the slot configuration did not render."
+# The render is piped, never written.
+#
+# A rendered compose configuration expands EVERY interpolation, so with the
+# operator env loaded it contains the broker, database and Keycloak
+# credentials in clear. Writing it to disk -- even inside a mode-700 staging
+# directory -- leaves a credential file behind for as long as the slot lives,
+# and a teardown that missed it leaves one for longer. It is also the kind of
+# file that gets copied into an issue when someone is debugging.
+#
+# So it goes down a pipe into the verifier, which parses it, asserts on the
+# structure, and reports only NAMES and non-secret fields: service names,
+# container names, ports, volume names, the topic namespace, the
+# consumer-group token, and each DSN's database and principal. It never
+# prints a password and never persists the document. A test asserts the
+# entrypoint leaves no render on disk.
+log "rendering and verifying the slot configuration (piped, never written) ..."
 
-VERIFY_ARGS=(--rendered "${RENDERED}" --slot "${SLOT}")
+VERIFY_ARGS=(--rendered - --slot "${SLOT}")
 [[ "${WITH_GATEWAY}" == "1" ]] && VERIFY_ARGS+=(--expect-gateway)
-"${PY}" "${SCRIPT_DIR}/prepr_verify_rendered_slot.py" "${VERIFY_ARGS[@]}" \
-    || fail "${EXIT_PROVENANCE_MISMATCH}" \
-        "the rendered slot configuration does not match the slot policy. Nothing
-  was started. The mismatches are listed above; each one is a way this slot
-  would have reached the dev lane's own namespace."
+if ! compose "${PROFILES[@]}" config --format json 2>/dev/null \
+        | "${PY}" "${SCRIPT_DIR}/prepr_verify_rendered_slot.py" "${VERIFY_ARGS[@]}"; then
+    fail "${EXIT_PROVENANCE_MISMATCH}" \
+        "the rendered slot configuration does not match the slot policy, or it
+  did not render at all. Nothing was started. The mismatches are listed
+  above; each one is a way this slot would have reached the dev lane's own
+  namespace."
+fi
 
 # -----------------------------------------------------------------------------
 # 10. MIGRATE the slot's databases, then bring the slot up.

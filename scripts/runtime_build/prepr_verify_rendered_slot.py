@@ -263,7 +263,17 @@ def build_parser() -> argparse.ArgumentParser:
             "Read-only: opens no connection and starts nothing."
         ),
     )
-    parser.add_argument("--rendered", required=True, type=Path)
+    parser.add_argument(
+        "--rendered",
+        required=True,
+        help=(
+            "the rendered compose configuration, as a path or '-' for stdin. "
+            "The entrypoint always pipes it: a rendered configuration expands "
+            "every interpolation, so on a real host it carries the broker, "
+            "database and Keycloak credentials in clear, and it must not be "
+            "written to disk."
+        ),
+    )
     parser.add_argument("--slot", required=True, type=int)
     parser.add_argument(
         "--expect-gateway",
@@ -281,13 +291,21 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"[prepr-verify-rendered] {exc}\n")
         return int(EXIT_USAGE)
 
+    source = "standard input" if args.rendered == "-" else args.rendered
     try:
-        rendered = json.loads(args.rendered.read_text(encoding="utf-8"))
+        if args.rendered == "-":
+            rendered = json.loads(sys.stdin.read())
+        else:
+            rendered = json.loads(Path(args.rendered).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
+        # Deliberately reports the SOURCE and the parse error, never the
+        # content: an unparseable render is still a render, and echoing it
+        # here would put every expanded credential in the log of a failing
+        # run, which is exactly where people paste from.
         sys.stderr.write(
-            f"[prepr-verify-rendered] cannot read the rendered configuration at "
-            f"{args.rendered}: {exc}. Failing closed: a gate that cannot read "
-            f"its own input has not passed, it has not run.\n"
+            f"[prepr-verify-rendered] cannot read the rendered configuration from "
+            f"{source}: {type(exc).__name__}. Failing closed: a gate that cannot "
+            f"read its own input has not passed, it has not run.\n"
         )
         return int(EXIT_PROVENANCE_MISMATCH)
 
