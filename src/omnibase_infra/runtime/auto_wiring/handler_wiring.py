@@ -163,8 +163,10 @@ from omnibase_infra.runtime.contract_terminal_events import (
 )
 from omnibase_infra.runtime.dispatch_envelope_context import (
     bind_dispatch_envelope,
+    bind_source_coordinate,
     current_dispatch_envelope,
     current_projection_tenant_authority,
+    current_source_coordinate,
 )
 from omnibase_infra.runtime.health.projection_liveness import (
     select_projection_contracts,
@@ -1506,6 +1508,58 @@ def _ingress_correlation_id(message: object) -> UUID | None:
             pass
 
     coerced = _coerce_uuid_or_none(getattr(message, "correlation_id", None))
+    return coerced if isinstance(coerced, _UUID) else None
+
+
+def _ingress_message_id(message: object) -> UUID | None:
+    """Recover the ingress ENVELOPE id from a message's TRANSPORT surface.
+
+    OMN-18958, the identity half of the OMN-14498 lesson directly above.
+
+    A publisher that sends a bare contract model rather than an envelope
+    states its identity only in the wire header. The consume boundary then
+    synthesizes an envelope, and if it MINTS an id there, that mint is what
+    every hop caused by this message records as its parent -- a valid id with
+    no lineage, on no topic and in no table, so the causal edge can never
+    close. Measured on the .201 dev lane: the chain head recorded
+    ``70982614-...`` while both its children named ``53ffd454-...``, which
+    ``event_ledger`` does not contain.
+
+    Mirrors ``_ingress_correlation_id`` field for field, deliberately: the
+    two ids ride the same three transport shapes, and a second way of reading
+    the same surface is a second thing to keep in agreement.
+
+    Returns ``None`` when the transport states no identity, leaving the
+    caller to fall back to the body and then to minting. Never raises: a
+    malformed header must not take down the consume boundary.
+    """
+    from uuid import UUID as _UUID
+
+    headers = getattr(message, "headers", None)
+
+    header_id = getattr(headers, "message_id", None)
+    coerced = _coerce_uuid_or_none(header_id)
+    if isinstance(coerced, _UUID):
+        return coerced
+
+    if headers is not None and not isinstance(headers, (str, bytes)):
+        try:
+            for entry in headers:
+                key, value = entry
+                if key != "message_id":
+                    continue
+                decoded = (
+                    value.decode("utf-8", errors="replace")
+                    if isinstance(value, bytes)
+                    else value
+                )
+                coerced = _coerce_uuid_or_none(decoded)
+                if isinstance(coerced, _UUID):
+                    return coerced
+        except (TypeError, ValueError):
+            pass
+
+    coerced = _coerce_uuid_or_none(getattr(message, "envelope_id", None))
     return coerced if isinstance(coerced, _UUID) else None
 
 
@@ -4684,6 +4738,32 @@ def _make_projection_dispatch_callback(
                 # submitted it, and under FORCE ROW LEVEL SECURITY that row then
                 # makes the real writer's conflict-update unwritable.
                 input_data["_tenant_id"] = envelope_tenant
+            source_coordinate = current_source_coordinate()
+            if source_coordinate is not None:
+                # OMN-18955 (producer half of OMN-18905). The SOURCE record's
+                # own Kafka coordinates, bound by the consume boundary that
+                # still holds the record -- they are not on the envelope,
+                # which declares no such field and forbids extras.
+                #
+                # A projection writer builds its snapshot-delta MessageMeta
+                # from these two keys. Without them it published every delta
+                # at partition 0 / offset 0, and the consuming SnapshotCache
+                # drops a delta whose source_offset does not exceed the cached
+                # one for the same source topic and partition -- so every
+                # delta after the FIRST for a key was discarded as a replay,
+                # first writer wins forever, and the exposure froze while
+                # sitting at lag zero. Measured on the .201 dev lane before
+                # this change: 6,210,195 lifetime drops on consumer-flow, and
+                # a readiness endpoint answering 503 because it correctly
+                # refuses to call a discarding cache healthy.
+                #
+                # Injected ONLY as a pair and only when the transport reported
+                # both, on the same terms as the timestamp and tenant above.
+                # An absent key leaves the writer with no coordinate, which is
+                # the correct terminal state for a record that has none -- a
+                # defaulted zero is the defect itself.
+                input_data["_partition"] = source_coordinate[0]
+                input_data["_offset"] = source_coordinate[1]
 
             def _invoke_projection_handler() -> object:
                 # OMN-16874: the runtime does NOT pre-connect a handler-owned DB
@@ -7417,8 +7497,32 @@ def _make_event_bus_callback(
                         data.get("correlation_id") if isinstance(data, dict) else None
                     )
                     corr = _coerce_uuid_or_none(raw_corr) or uuid4()
+                    # OMN-18958: ADOPT the identity the wire states; do not
+                    # mint a rival. `ModelEventEnvelope.envelope_id` defaults
+                    # to uuid4, so omitting this argument silently produced a
+                    # SECOND id for a message that already had one -- and that
+                    # second id is what every hop caused by this message
+                    # records as its parent, via the one shared
+                    # `current_dispatch_envelope()` contextvar. The result is
+                    # an edge no reader can resolve, because the parent it
+                    # names was never on the wire.
+                    #
+                    # Same precedence as `correlation_id` immediately above
+                    # and as the comment at the top of this block states:
+                    # ingress header -> body -> mint. A body that states its
+                    # own id is the authoritative in-band value; minting
+                    # survives only where there is nothing to adopt.
+                    raw_env_id = (
+                        data.get("envelope_id") if isinstance(data, dict) else None
+                    )
+                    env_id = (
+                        _ingress_message_id(message)
+                        or _coerce_uuid_or_none(raw_env_id)
+                        or uuid4()
+                    )
                     derived = _derive_event_type_from_topic(topic)
                     envelope = ModelEventEnvelope[object](
+                        envelope_id=env_id,
                         payload=data,
                         correlation_id=corr,
                         envelope_timestamp=datetime.now(UTC),
@@ -7455,17 +7559,26 @@ def _make_event_bus_callback(
                 envelope = message
             if envelope.correlation_id is not None:
                 correlation_id = envelope.correlation_id
-            if flow_counters is None or consumer_group is None:
-                await _dispatch_with_bounded_retry(envelope, message)
-            else:
-                # OMN-16777: an envelope reaching this line HAS been handed to
-                # dispatch. Counted before the call, not after, so a handler
-                # that hangs or dies still shows the message as taken in --
-                # counting only successful dispatches would reproduce exactly
-                # the "green because nothing was measured" defect.
-                flow_counters.record_in(consumer_group, topic)
-                with active_flow_key(consumer_group, topic):
+            # OMN-18955: bind the SOURCE record's coordinates around dispatch.
+            # This frame is the last one that still holds the record -- the
+            # envelope above was rebuilt from ``message.value`` alone, which is
+            # exactly where partition and offset used to be lost. Bound on BOTH
+            # branches and outside the flow-counter gate, because a projection
+            # writer needs the coordinates whether or not this lane happens to
+            # be counting flow.
+            with bind_source_coordinate(message):
+                if flow_counters is None or consumer_group is None:
                     await _dispatch_with_bounded_retry(envelope, message)
+                else:
+                    # OMN-16777: an envelope reaching this line HAS been handed
+                    # to dispatch. Counted before the call, not after, so a
+                    # handler that hangs or dies still shows the message as
+                    # taken in -- counting only successful dispatches would
+                    # reproduce exactly the "green because nothing was
+                    # measured" defect.
+                    flow_counters.record_in(consumer_group, topic)
+                    with active_flow_key(consumer_group, topic):
+                        await _dispatch_with_bounded_retry(envelope, message)
         except ProjectionNotMaterializedError:
             # OMN-17379: propagate unconditionally, for the same reason
             # BoundaryApplyPublishError does. Routing it through
@@ -7648,23 +7761,32 @@ def _make_raw_event_projection_callback(
                 source_tool=raw_message.headers.source,
                 tenant_id=_tenant_id_from_raw_message(raw_message),
             )
-            if flow_counters is None or consumer_group is None:
-                await _dispatch_and_apply_raw_projection(envelope)
-            else:
-                # OMN-17214: counted before the call for the same reason the
-                # sibling branch counts before its call -- an envelope reaching
-                # this line HAS been handed to dispatch, so a handler that hangs
-                # or dies still shows the message as taken in. Counting only
-                # completed dispatches would reproduce the "green because
-                # nothing was measured" defect this seam exists to close.
-                flow_counters.record_in(consumer_group, topic)
-                # The applier's publish loop records ``messages_out`` against
-                # this task-local key (``record_active_out``), so the apply()
-                # call has to run INSIDE the binding -- outside it, a projection
-                # that publishes is counted as producing nothing and reads
-                # STALLED while it is demonstrably producing.
-                with active_flow_key(consumer_group, topic):
+            # OMN-18955: the same source-coordinate binding as the sibling
+            # branch. No contract declares both `consumer_purpose: projection`
+            # and `db_tables` today, so nothing reaches this path AND needs the
+            # coordinates right now -- it is bound here anyway, because the day
+            # one does, the failure is a silently frozen exposure rather than
+            # an error, and that is the class this whole change removes.
+            with bind_source_coordinate(raw_message):
+                if flow_counters is None or consumer_group is None:
                     await _dispatch_and_apply_raw_projection(envelope)
+                else:
+                    # OMN-17214: counted before the call for the same reason
+                    # the sibling branch counts before its call -- an envelope
+                    # reaching this line HAS been handed to dispatch, so a
+                    # handler that hangs or dies still shows the message as
+                    # taken in. Counting only completed dispatches would
+                    # reproduce the "green because nothing was measured" defect
+                    # this seam exists to close.
+                    flow_counters.record_in(consumer_group, topic)
+                    # The applier's publish loop records ``messages_out``
+                    # against this task-local key (``record_active_out``), so
+                    # the apply() call has to run INSIDE the binding --
+                    # outside it, a projection that publishes is counted as
+                    # producing nothing and reads STALLED while it is
+                    # demonstrably producing.
+                    with active_flow_key(consumer_group, topic):
+                        await _dispatch_and_apply_raw_projection(envelope)
         except Exception as exc:  # noqa: BLE001 — consumer boundary; log and continue
             if flow_counters is not None and consumer_group is not None:
                 flow_counters.record_error(consumer_group, topic)
