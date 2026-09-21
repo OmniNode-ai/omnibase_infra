@@ -972,3 +972,74 @@ def test_every_scrubbed_name_is_one_the_slot_would_actually_inherit() -> None:
     assert len(live) >= 5, (
         "the scrub list has shrunk below the set measured for OMN-19076."
     )
+
+
+# ---------------------------------------------------------------------------
+# A branch name is not a pin
+# ---------------------------------------------------------------------------
+
+
+def _stage_fn() -> str:
+    """The body of the staging helper, comments stripped."""
+    text = ENTRYPOINT.read_text(encoding="utf-8")
+    start = text.index("stage_commit_tree() {")
+    end = text.index("\n}", start)
+    return "\n".join(
+        line
+        for line in text[start:end].splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def test_the_staging_helper_refuses_a_ref_that_is_not_a_literal_sha() -> None:
+    """A movable ref would be re-resolved by git at extraction time.
+
+    The readback verifies a tree; the archive then has to extract THAT tree.
+    If the archive is handed a branch, git resolves it again at extraction
+    time and the two can differ. Another lane measured it: two siblings moved
+    between builds while its readback still passed.
+
+    Every caller today passes a value resolved once with ``rev-parse HEAD``,
+    so the guard never fires in practice. It is asserted anyway because "by
+    construction" is a property of the current call sites, not of the
+    function, and the failure it prevents is silent.
+    """
+    body = _stage_fn()
+    assert "[0-9a-f]{40}" in body, (
+        "the staging helper does not check that its pin is a literal 40-hex "
+        "commit. Handed a branch it would archive whatever that branch points "
+        "at when the archive runs, which is not what the readback verified."
+    )
+
+
+def test_the_archive_is_given_the_recorded_pin_and_never_a_ref_expression() -> None:
+    """The archive's ref argument must be the recorded variable, nothing else."""
+    body = _stage_fn()
+    archive_lines = [ln.strip() for ln in body.splitlines() if "archive" in ln]
+    assert archive_lines, "the staging helper no longer archives anything."
+    for line in archive_lines:
+        assert '"${commit}"' in line, (
+            f"the archive command does not take the recorded pin: {line!r}. "
+            f"Anything else here is resolved at extraction time."
+        )
+        for movable in ("HEAD", "origin/", "FETCH_HEAD", "@{"):
+            assert movable not in line, (
+                f"the archive command names the movable ref {movable!r}: {line!r}."
+            )
+
+
+def test_every_pin_this_run_records_is_resolved_from_head_exactly_once() -> None:
+    """Resolved once, before staging, and reused; never re-resolved per repo."""
+    body = _entrypoint_code()
+    resolutions = [
+        ln.strip() for ln in body.splitlines() if "rev-parse HEAD" in ln and "=" in ln
+    ]
+    # One for the target, one for each sibling in the resolution loop, and one
+    # inside the staging helper, which is the readback rather than a new pin.
+    assert len(resolutions) <= 3, (
+        f"there are {len(resolutions)} places resolving HEAD into a variable:\n  "
+        + "\n  ".join(resolutions)
+        + "\nMore than the target, the sibling loop and the staging readback "
+        "means a pin is being resolved more than once, and two resolutions of "
+        "the same ref can disagree."
+    )

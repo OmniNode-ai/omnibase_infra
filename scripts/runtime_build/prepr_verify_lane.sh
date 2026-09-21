@@ -412,6 +412,30 @@ chmod 700 "${SLOT_ENV_DIR}"
 # answer a git query about the clone it came from.
 stage_commit_tree() {
     local src="$1" commit="$2" dest="$3" label="$4"
+
+    # A BRANCH NAME IS NOT A PIN, and this refuses one outright.
+    #
+    # Today every caller passes a value this run already resolved with
+    # `rev-parse HEAD`, so it is a literal sha by construction and this guard
+    # never fires. It is here because "by construction" is a property of the
+    # current call sites and not of this function. A later edit that let a ref
+    # be supplied -- a flag, a config value, a default of `origin/dev` -- would
+    # make the archive re-resolve at extraction time, and the tree extracted
+    # would then be whatever that ref pointed at THEN rather than what the
+    # readback above verified. Another lane measured exactly that: two
+    # siblings moved between two builds while its readback still passed.
+    #
+    # The distinction is the whole point. A pin this run RECORDED is not the
+    # same thing as a pin RESOLVED AGAIN later, and only the first can be
+    # compared against what was verified.
+    if [[ ! "${commit}" =~ ^[0-9a-f]{40}$ ]]; then
+        fail "${EXIT_PROVENANCE_MISMATCH}" \
+            "${label} was handed '${commit}' as its pin, which is not a
+  40-character commit sha. A branch or any other movable ref is refused here:
+  git would re-resolve it at extraction time, so the tree built would not be
+  the tree the readback verified."
+    fi
+
     local head
     head="$(git -C "${src}" rev-parse HEAD)"
     # Readback: the pin this run recorded must still be what the source names.
