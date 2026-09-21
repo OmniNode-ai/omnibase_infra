@@ -1149,10 +1149,45 @@ check_postgres_backup_freshness() {
 # outcome is a row naming the reason: an unreadable census is never an empty
 # green, because an absent finding set and an unevaluated one are the two
 # states this family exists to tell apart.
+# WHOSE HOME (OMN-18949, second defect, measured 2026-09-21).
+#
+# The paths below resolved through `$HOME` and this reporter runs from
+# /etc/cron.d as ROOT, so `$HOME` is /root. Neither
+# /root/.local/state/onex/census-snapshot.json nor
+# /root/Code/omni_home/omnibase_infra exists on .201. Measured that day: eight
+# consecutive ticks emitted `census|WARNING|snapshot|no live census ...; the
+# hourly lane-census timer may have stopped` while the real snapshot was
+# twenty minutes old and carried five findings. The census leg shipped by this
+# ticket therefore delivered a FALSE reason to the channel and never once
+# reported the drift it was added to report -- the reporting half was as blind
+# as the gate half.
+#
+# The census is written by a systemd USER unit
+# (deploy/lane-census/onex-disk-gc.service.d/20-lane-census.conf, whose
+# ExecStart uses `%h`), so it lands in the census OWNER's home, not the
+# caller's. Resolve that owner through getent rather than assuming the two are
+# the same account. The repository root is the deployed checkout, the same
+# /data tree this script already reads its env file and writes its logs under.
+_census_owner_home() {
+  local home
+  home=$(getent passwd "${OMNINODE_CENSUS_OWNER:-jonah}" 2>/dev/null | cut -d: -f6)
+  printf '%s' "${home:-$HOME}"
+}
+
 check_census_drift() {
-  local live manifest checker python_bin repo
-  repo="${OMNINODE_REPO_ROOT:-$HOME/Code/omni_home/omnibase_infra}"
-  live="${OMNINODE_CENSUS_LIVE_SNAPSHOT:-$HOME/.local/state/onex/census-snapshot.json}"
+  local live manifest checker python_bin repo owner_home
+  owner_home=$(_census_owner_home)
+  repo="${OMNINODE_REPO_ROOT:-/data/omninode/omnibase_infra}"
+  live="${OMNINODE_CENSUS_LIVE_SNAPSHOT:-}"
+  if [[ -z "$live" ]]; then
+    # The invoking user's own census wins when it exists (a human running this
+    # by hand reads their own host state); otherwise the owner's.
+    if [[ -r "$HOME/.local/state/onex/census-snapshot.json" ]]; then
+      live="$HOME/.local/state/onex/census-snapshot.json"
+    else
+      live="$owner_home/.local/state/onex/census-snapshot.json"
+    fi
+  fi
   manifest="${OMNINODE_CENSUS_MANIFEST:-$repo/deploy/lane-census/lane-manifest.yaml}"
   checker="${OMNINODE_CENSUS_CHECKER:-$repo/scripts/check_lane_census_drift.py}"
   python_bin="${OMNINODE_CENSUS_PYTHON:-python3}"
@@ -1220,7 +1255,22 @@ PY
       return 0
     fi
     if (( rc == 1 )); then
-      local summary
+      # OMN-18949: the checker now refuses on a non-zero drift count as well as
+      # on the two committed files contradicting each other, so its exit code
+      # alone no longer says WHICH happened. Split them back apart here: they
+      # are different defects with different remedies, and collapsing both into
+      # the `manifest` row would report "the census contradicts the manifest"
+      # for a lane that is merely running something undeclared. The `drift` row
+      # keeps its own key so its de-duplication and its resolution notice stay
+      # independent of the contradiction row's.
+      local summary drift_only
+      drift_only=$("$python_bin" -c 'import json,sys; f=json.load(sys.stdin)["findings"]; print("yes" if f and all(x["kind"]=="nonzero_drift_count" for x in f) else "no")' <<<"$json" 2>/dev/null)
+      if [[ "$drift_only" == "yes" ]]; then
+        summary=$("$python_bin" -c 'import json,sys; f=json.load(sys.stdin)["findings"]; print("; ".join("%s on lane(s) %s" % (x["detail"].split(";")[0], x["lane"]) for x in f[:2]))' <<<"$json" 2>/dev/null)
+        printf 'census|CRITICAL|drift|%s (census %sh old); declare it in the lane manifest or remove it from the lane\n' \
+          "${summary:-the live census reports drift}" "$age_h"
+        return 0
+      fi
       summary=$("$python_bin" -c 'import json,sys; d=json.load(sys.stdin); f=d["findings"]; print("%d disagreement(s): %s" % (len(f), "; ".join("%s on %s (%s)" % (x["kind"], x["lane"], x["subject"]) for x in f[:3])))' <<<"$json" 2>/dev/null)
       printf 'census|CRITICAL|manifest|the LIVE census contradicts the committed manifest -- %s\n' "${summary:-unparseable checker output}"
       return 0
@@ -1230,10 +1280,12 @@ PY
     return 0
   fi
 
-  # Live topology drift. Distinct from the disagreement above: the manifest and
-  # the census agree about what is DECLARED, and the host is running something
-  # else. It is a WARNING, not a critical, because a mutable lane is allowed to
-  # carry drift -- what is not allowed is nobody being told.
+  # Live topology drift. Since OMN-18949 armed the drift-count assertion the
+  # checker above refuses on this and emits the CRITICAL `drift` row, so in
+  # practice the checker path owns the non-zero case. This block stays as the
+  # fallback for the one reachable gap -- the checker present but the count
+  # read failing -- and as the surface that emits the OK row, because a census
+  # that is clean must say so rather than say nothing.
   local drift lanes
   drift=$("$python_bin" -c 'import json,sys; print(len(json.load(open(sys.argv[1])).get("findings",[])))' "$live" 2>/dev/null || echo "")
   if [[ -z "$drift" ]]; then

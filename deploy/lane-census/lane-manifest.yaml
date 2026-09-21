@@ -378,6 +378,39 @@ lanes:
       - name: omnimarket-tenant-projection-writer
         kind: service
         replicas: 1
+      # OMN-18949: the five containers the census reported as running-but-
+      # UNDECLARED on this lane every tick since 2026-09-18, while nothing
+      # refused on the count. Live state read on 192.168.86.201 2026-09-21,
+      # read-only `docker inspect`: all five carry com.omninode.lane=dev and
+      # com.docker.compose.project=omnibase-infra, which is this lane. They are
+      # declared here rather than filed because they are what the lane runs;
+      # the drift-count gate this ticket arms refuses until one or the other
+      # is true, and a count lowered by refreshing the snapshot instead is the
+      # thing AC-3 forbids.
+      #
+      # The three migration containers are `oneshot`: run-to-completion, and
+      # measured Exited 0. That is the same kind every other lane already
+      # declares its forward-migration under, so a completed migration is
+      # clean and a FAILED one is oneshot_failed rather than silence.
+      - name: omnibase-infra-forward-migration
+        kind: oneshot
+        replicas: 1
+      - name: omnibase-infra-cloud-migration
+        kind: oneshot
+        replicas: 1
+      - name: omnibase-infra-cloud-migration-files
+        kind: oneshot
+        replicas: 1
+      # Measured Running. `onex-api` is the gateway doctrine was corrected on
+      # 2026-09-19 to say does run on this lane; the manifest was the file left
+      # behind by that correction, and the only surface saying so was a warning
+      # nobody gated on.
+      - name: onex-api
+        kind: service
+        replicas: 1
+      - name: omninode-infra-routing-decisions-consumer
+        kind: service
+        replicas: 1
   # OMN-17143: COLLABORATOR lane for Lakshman Patel (operator decision
   # 2026-08-30). It ENTERED this file as a pure RESERVATION — no compose file,
   # no containers — declared here first, deliberately, so the port block and the
