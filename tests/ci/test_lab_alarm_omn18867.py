@@ -35,7 +35,10 @@ from scripts.ci.lab_pass_receipt import (
     ReceiptLookupError,
 )
 from scripts.lab_alarm import (
+    EFFECTS_HELD_AFTER,
     STALE_INDETERMINATE_AFTER,
+    EffectsGroupReadError,
+    EffectsHeldReader,
     EnumAlarmCondition,
     EnumConditionOutcome,
     GroupAuthorizationError,
@@ -47,8 +50,10 @@ from scripts.lab_alarm import (
     ModelAlarmRun,
     ModelAlarmState,
     ModelConditionReport,
+    ModelRecoveryNotice,
     evaluate_consumer_group_lag,
     evaluate_container_restarts,
+    evaluate_effects_held_behind_runtime,
     evaluate_lab_pass_receipt,
     evaluate_stale_indeterminate,
     expand_env,
@@ -438,6 +443,20 @@ def test_read_onex_lane_credential_refuses_a_missing_store(tmp_path: Path) -> No
 # ---------------------------------------------------------------------------
 
 
+def _effects_reader(
+    candidates: tuple[tuple[str, str, int], ...] = (("group-1.3.0", "Stable", 1),),
+) -> EffectsHeldReader:
+    """A healthy-by-default EffectsHeldReader for tests that do not care
+    about the effects-held condition -- one Stable candidate with a member,
+    matching the live positive control read against the real broker.
+    """
+
+    def read() -> tuple[tuple[str, str, int], ...]:
+        return candidates
+
+    return read
+
+
 def _run(
     tmp_path: Path,
     *,
@@ -455,6 +474,8 @@ def _run(
         docker_command=("docker",),
         container_restart_bounds={"savings-writer": 2},
         consumer_groups=("savings",),
+        effects_group_prefix="group-",
+        effects_group_suffix="",
     )
 
     def runner(
@@ -472,6 +493,7 @@ def _run(
         ),
         runner=runner,
         lag_reader=_lag_reader({"savings": lag}),
+        effects_reader=_effects_reader(),
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
     )
@@ -651,7 +673,175 @@ def test_a_condition_reporting_no_evidence_is_refused() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Condition 4 — STALE_INDETERMINATE, a condition blind for too long (OMN-19091)
+# Condition 4 — the delegate-skill runtime-effects group held with zero
+# live members (OMN-19091)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_a_live_stable_member_reads_ok() -> None:
+    """Positive control, the shape read live against the real broker while
+    this was built: one candidate Stable with a member is enough.
+    """
+
+    def reader() -> tuple[tuple[str, str, int], ...]:
+        return (("...consume.1.3.0...", "Stable", 1),)
+
+    state = ModelAlarmState()
+    report, recovery = evaluate_effects_held_behind_runtime(
+        reader, state=state, now=datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+    )
+    assert report.outcome is EnumConditionOutcome.OK
+    assert recovery is None
+    assert state.effects_held_since == {}
+
+
+@pytest.mark.unit
+def test_a_stale_empty_candidate_beside_a_live_one_still_reads_ok() -> None:
+    """The retired-version group (Empty, zero members) must not poison the
+    reading while a newer version of the same group is Stable -- exactly the
+    two-groups-coexisting shape measured live (1.2.0 Empty, 1.3.0 Stable).
+    """
+
+    def reader() -> tuple[tuple[str, str, int], ...]:
+        return (
+            ("...consume.1.2.0...", "Empty", 0),
+            ("...consume.1.3.0...", "Stable", 1),
+        )
+
+    state = ModelAlarmState()
+    report, _ = evaluate_effects_held_behind_runtime(
+        reader, state=state, now=datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+    )
+    assert report.outcome is EnumConditionOutcome.OK
+
+
+@pytest.mark.unit
+def test_zero_live_members_under_the_threshold_reads_ok_not_indeterminate() -> None:
+    """Team-lead's own bound: ALARM only past 60s. Under it is OK, not
+    INDETERMINATE -- the threshold IS the definition of "held" here, not a
+    comparison this run cannot yet make.
+    """
+
+    def reader() -> tuple[tuple[str, str, int], ...]:
+        return (("...consume.1.3.0...", "Empty", 0),)
+
+    state = ModelAlarmState()
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    report, recovery = evaluate_effects_held_behind_runtime(
+        reader, state=state, now=t0.isoformat()
+    )
+    assert report.outcome is EnumConditionOutcome.OK
+    assert recovery is None
+
+    still_under = t0 + EFFECTS_HELD_AFTER - timedelta(seconds=1)
+    report, _ = evaluate_effects_held_behind_runtime(
+        reader, state=state, now=still_under.isoformat()
+    )
+    assert report.outcome is EnumConditionOutcome.OK
+    assert "under the" in report.evidence
+
+
+@pytest.mark.unit
+def test_zero_live_members_past_the_threshold_alarms_naming_the_duration() -> None:
+    """AC falsifier: held past 60s reads OK instead of ALARM.
+
+    Positive control: the 2026-09-21T20:57:50Z-21:04:21Z OMN-18843
+    occurrence (container timestamps plus the effects log join line), one of
+    five that day averaging about six minutes, none caught by a monitor.
+    Modelled here with that exact duration, roughly 6m31s.
+    """
+
+    def reader() -> tuple[tuple[str, str, int], ...]:
+        return (("...consume.1.3.0...", "Empty", 0),)
+
+    state = ModelAlarmState()
+    t0 = datetime.fromisoformat("2026-09-21T20:57:50+00:00")
+    evaluate_effects_held_behind_runtime(reader, state=state, now=t0.isoformat())
+
+    t1 = datetime.fromisoformat("2026-09-21T21:04:21+00:00")
+    report, recovery = evaluate_effects_held_behind_runtime(
+        reader, state=state, now=t1.isoformat()
+    )
+    assert report.outcome is EnumConditionOutcome.ALARM
+    assert recovery is None
+    assert len(report.alarms) == 1
+    alarm = report.alarms[0]
+    assert alarm.subject == "runtime-effects"
+    assert "0:06:31" in alarm.detail
+
+
+@pytest.mark.unit
+def test_recovery_after_a_hold_names_the_window_length() -> None:
+    """Team-lead's own spec: clears on recovery WITH the window length in
+    the clear message.
+    """
+
+    def held() -> tuple[tuple[str, str, int], ...]:
+        return (("...consume.1.3.0...", "Empty", 0),)
+
+    def live() -> tuple[tuple[str, str, int], ...]:
+        return (("...consume.1.3.0...", "Stable", 1),)
+
+    state = ModelAlarmState()
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    evaluate_effects_held_behind_runtime(held, state=state, now=t0.isoformat())
+    t1 = t0 + EFFECTS_HELD_AFTER + timedelta(minutes=5)
+    alarm_report, _ = evaluate_effects_held_behind_runtime(
+        held, state=state, now=t1.isoformat()
+    )
+    assert alarm_report.outcome is EnumConditionOutcome.ALARM
+
+    t2 = t1 + timedelta(seconds=30)
+    recovered_report, recovery = evaluate_effects_held_behind_runtime(
+        live, state=state, now=t2.isoformat()
+    )
+    assert recovered_report.outcome is EnumConditionOutcome.OK
+    assert recovery is not None
+    assert recovery.condition is EnumAlarmCondition.EFFECTS_HELD_BEHIND_RUNTIME
+    assert recovery.subject == "runtime-effects"
+    # The window is t2 - t0 (first zero reading: 60s threshold + 5m + 30s =
+    # 390s = 0:06:30), not t2 - t1 (the moment it became an alarm).
+    assert "0:06:30" in recovery.detail
+    assert state.effects_held_since == {}
+
+
+@pytest.mark.unit
+def test_a_refused_read_is_indeterminate_with_a_named_reason() -> None:
+    """The only INDETERMINATE case team-lead specified: the read itself
+    refused, distinct from the group merely being held.
+    """
+
+    def reader() -> tuple[tuple[str, str, int], ...]:
+        raise EffectsGroupReadError("unreadable (KafkaConnectionError)")
+
+    state = ModelAlarmState()
+    report, recovery = evaluate_effects_held_behind_runtime(
+        reader, state=state, now=datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+    )
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert recovery is None
+    assert "KafkaConnectionError" in report.evidence
+    assert state.effects_held_since == {}
+
+
+@pytest.mark.unit
+def test_no_matching_group_is_indeterminate_not_a_silent_ok() -> None:
+    """Operating Rule 16: a renamed or undeclared group is not a live one."""
+
+    def reader() -> tuple[tuple[str, str, int], ...]:
+        return ()
+
+    state = ModelAlarmState()
+    report, _ = evaluate_effects_held_behind_runtime(
+        reader, state=state, now=datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+    )
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "no group matched" in report.evidence
+
+
+# ---------------------------------------------------------------------------
+# Condition 5 — STALE_INDETERMINATE, a condition blind for too long (OMN-19091)
 # ---------------------------------------------------------------------------
 
 _WATCHED = (
@@ -1146,6 +1336,8 @@ def test_the_shipped_config_loads_and_declares_every_condition_a_subject(
     assert config.container_restart_bounds
     assert config.consumer_groups
     assert config.docker_command[0] == "ssh"
+    assert config.effects_group_prefix
+    assert config.effects_group_suffix
 
 
 @pytest.mark.unit

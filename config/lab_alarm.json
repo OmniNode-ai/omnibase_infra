@@ -6,6 +6,7 @@
   "_comment_sha_surfaces": "The delivered sha is resolved from the deploy agent first and the runtime /ready second. Measured 2026-09-21: this lane's /ready answers healthy and carries a package version with no commit anywhere in its payload, while the agent answered with a 40-hex sha on the same host at the same moment. A resolver on /ready alone would report unresolved on a healthy lane forever.",
   "_comment_restart_bounds": "Per container, not one fleet number. A broker that has never restarted and a runtime recreated on every deploy do not share a threshold, and one number for both is either noise or blindness. omnimarket-projection-savings-writer carries the tightest bound because it is the container that crash-looped unobserved for nine days (OMN-18851).",
   "_comment_groups": "The standalone projection-writer groups declared by docker/docker-compose.dev-lane.yml KAFKA_CONSUMER_GROUP values, the same derivation scripts/runtime_build/declared_consumer_groups.py performs for the lab-pass receipt. savings-writer is the group that sat at lag 498 for nine days.",
+  "_comment_effects_group": "OMN-19091: the delegate-skill runtime-effects consumer group embeds the node's own contract_version (measured drifting 1.2.0 -> 1.3.0 mid-session), so it is matched by this stable prefix/suffix rather than one pinned literal -- scripts/runtime_build/declared_consumer_groups.py names exactly this staleness failure mode. Five occurrences on 2026-09-21 (18:47:53, 19:55:09, 20:27:38, 20:57:50, 21:29:04Z, roughly six minutes each) were each found only by a lane tripping over a delegation refusal, never by a monitor.",
 
   "repo": "OmniNode-ai/omnibase_infra",
   "lane": "compose-dev",
@@ -13,6 +14,8 @@
   "agent_url": "http://${ONEX_INFRA_HOST}:8098",
   "kafka_bootstrap_servers": "${ONEX_INFRA_HOST}:19092",
   "docker_command": ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "${ONEX_RUNTIME_SSH_HOST}", "docker"],
+  "effects_group_prefix": "local.omnimarket.node_delegate_skill_orchestrator.consume.",
+  "effects_group_suffix": ".__i.runtime-effects.__t.onex.cmd.omnimarket.delegate-skill.v1",
 
   "container_restart_bounds": {
     "omnibase-infra-postgres": 5,
