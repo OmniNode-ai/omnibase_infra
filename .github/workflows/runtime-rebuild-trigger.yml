@@ -234,6 +234,12 @@ jobs:
   verify-lane-converged:
     name: Verify dev lane applied the redeploy
     needs: trigger-rebuild
+    # OMN-18976. The merges that were queued behind this one and therefore
+    # emitted no receipt of their own. A JSON array, because the consumer is a
+    # matrix job and an EMPTY array skips it entirely, which is what should
+    # happen when nothing was queued.
+    outputs:
+      reemit_shas: ${{ steps.converge.outputs.reemit_shas }}
     # Only when a command was actually published, and only for the dev lane. A
     # no-op trigger run has nothing to wait for, and merges to main target the
     # stability-test lane, which this guard deliberately does not read.
@@ -1013,6 +1019,120 @@ jobs:
   # boot gate's verdict. They are also different claims -- a throwaway node with
   # one side-loaded image and an inert credential store, against the persistent
   # lane with the host's own secret store bound and the lane's tenant minted.
+  # OMN-18976 part two. Answer for the merges that were queued behind this one.
+  #
+  # WHY A SEPARATE JOB WITH A MATRIX. The number of queued shas is discovered
+  # at run time, and `uses:` steps cannot be looped -- one artifact upload per
+  # sha is only expressible as a matrix built with `fromJSON` from the verify
+  # job's output. An EMPTY array skips this job, which is the common case: the
+  # lane usually converges on the very next merge and nothing was queued.
+  #
+  # WHY IT RE-KEYS RATHER THAN RE-PROBES. The evidence is the verify job's own
+  # receipt, downloaded whole. Its probes were read against the image the lane
+  # converged to, and that image CONTAINS each of these shas, so they are the
+  # reads a lab pass for that sha would have made at the only moment it could.
+  # Re-probing here would read a later lane state and attribute it to an
+  # earlier sha, which is the weaker claim and the easier one to get wrong.
+  #
+  # A FAILING convergence re-emits a FAILURE, deliberately. Every sha in the
+  # window inherits whatever the converged run found; a re-emission that
+  # upgraded to PASS would be the worst possible outcome of this ticket.
+  reemit-queued-receipts:
+    name: Re-emit receipts for shas queued behind this merge
+    needs: [trigger-rebuild, verify-lane-converged]
+    if: >-
+      needs.verify-lane-converged.result == 'success' &&
+      needs.verify-lane-converged.outputs.reemit_shas != '' &&
+      needs.verify-lane-converged.outputs.reemit_shas != '[]'
+    # Hosted: this job reads two artifacts and writes a third. It touches no
+    # lane, so it has no reason to occupy the fleet, and the fork-aware
+    # selector is the repository's policy rather than a literal.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
+      }}
+    # A download, a re-key and an upload. Ten minutes is generous for that and
+    # bounded, which the ceiling gate requires of every job in this workflow.
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      # Every sha is independent; one failing re-emission must not withhold
+      # the others, each of which is a separate sha's only receipt.
+      fail-fast: false
+      matrix:
+        sha: ${{ fromJSON(needs.verify-lane-converged.outputs.reemit_shas) }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          persist-credentials: false
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-reemit-queued-receipts
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+      - name: Derive this run's own receipt directory
+        run: |
+          set -euo pipefail
+          # Per-run, per-attempt, per-job AND per-sha: this job is a matrix, so
+          # the job name alone does not name one execution. A self-hosted
+          # runner reuses RUNNER_TEMP, and two matrix legs sharing a directory
+          # would upload each other's receipt.
+          LAB_PASS_WORK="${RUNNER_TEMP}/lab-pass-reemit-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${REEMIT_SHA}"
+          rm -rf "${LAB_PASS_WORK}"
+          mkdir -p "${LAB_PASS_WORK}/receipt" "${LAB_PASS_WORK}/converged"
+          echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
+          echo "LAB_PASS_SOURCE_DIR=${LAB_PASS_WORK}/converged" >> "$GITHUB_ENV"
+        env:
+          REEMIT_SHA: ${{ matrix.sha }}
+      - name: Download the converged receipt
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.1.8
+        with:
+          name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.source_sha }}
+          path: ${{ env.LAB_PASS_SOURCE_DIR }}
+      - name: Re-key it onto the queued sha
+        env:
+          REEMIT_SHA: ${{ matrix.sha }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/lab_pass_receipt.py reemit \
+            --from "${LAB_PASS_SOURCE_DIR}/receipt.json" \
+            --sha "${REEMIT_SHA}" \
+            --out "${LAB_PASS_DIR}/receipt.json"
+          uv run python scripts/ci/lab_pass_receipt.py verify \
+            --path "${LAB_PASS_DIR}/receipt.json" \
+            --sha "${REEMIT_SHA}" \
+            --lane compose-dev
+      # OMN-18247. if-no-files-found: error fires only when NO path matches, so
+      # a zero-byte receipt would satisfy it. This asserts the file is real
+      # before the upload claims it is evidence.
+      - name: Assert the re-emitted receipt exists and is non-empty
+        # always(), so a failed re-key cannot skip the assertion and leave the
+        # uploader claiming evidence for a file nothing checked.
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact lab-pass-receipt-compose-dev-reemitted \
+            --require "${LAB_PASS_DIR}/receipt.json"
+      - name: Upload the re-emitted receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # Same key the gate queries by, for the QUEUED sha. The gate reads
+          # the newest artifact of a name, so this supersedes nothing and
+          # races nothing: the queued sha has no receipt at all until now.
+          name: lab-pass-receipt-compose-dev-${{ matrix.sha }}
+          path: ${{ env.LAB_PASS_DIR }}
+          retention-days: 90
+          if-no-files-found: error
+
   verify-lab-overlay-converged:
     name: Verify the k3s onex-lab overlay applied the merged sha
     needs: [trigger-rebuild, verify-lane-converged]
