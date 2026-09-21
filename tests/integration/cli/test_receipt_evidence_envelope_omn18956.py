@@ -40,7 +40,12 @@ import pytest
 from omnibase_infra.cli.cli_delegate import (
     _delegate_receipt_evidence_error,
     _receipt_evidence_requirements,
+    _write_local_run_files,
 )
+from omnibase_infra.cli.model_delegate_run_addressing import (
+    ModelDelegateRunAddressing,
+)
+from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 
 pytestmark = pytest.mark.integration
 
@@ -161,3 +166,65 @@ def test_a_requested_contract_that_was_answered_passes() -> None:
         require_contract_evidence=require_contract,
     )
     assert error is None, error
+
+
+@pytest.mark.integration
+def test_the_receipt_callback_also_accepts_the_lanes_own_terminal(
+    tmp_path: Path,
+) -> None:
+    """The residual: the CALLBACK arms the same refusal as the validator.
+
+    The first OMN-18956 fix moved the validator's flags and left literals on
+    this path, so the merge changed nothing observable and the next lane run
+    failed with the message it always had. The validator case above passed
+    throughout, which is exactly why this case exists: two entry points share
+    one refusal, and covering one of them is not coverage.
+    """
+    require_budget, require_contract = _receipt_evidence_requirements(
+        response_contract=None
+    )
+    _write_local_run_files(
+        receipt=_Receipt(_captured_envelope()),
+        state_root=tmp_path,
+        prompt="summarize the following",
+        task_type="document",
+        task_type_resolution="fallback",
+        addressing=ModelDelegateRunAddressing(
+            locus=EnumDelegateLocus.DEPLOYED_LANE,
+            bus="kafka",
+            lane="dev",
+        ),
+        require_budget_evidence=require_budget,
+        require_contract_evidence=require_contract,
+    )
+
+
+@pytest.mark.integration
+def test_the_receipt_callback_still_refuses_a_requested_contract(
+    tmp_path: Path,
+) -> None:
+    """Positive control on the callback path, matching the validator's."""
+    from omnibase_infra.cli.delegate_terminal_resolver import (
+        DelegateTerminalUnresolvedError,
+    )
+
+    require_budget, require_contract = _receipt_evidence_requirements(
+        response_contract={"type": "object"}
+    )
+    with pytest.raises(
+        DelegateTerminalUnresolvedError, match="response_contract_evidence"
+    ):
+        _write_local_run_files(
+            receipt=_Receipt(_captured_envelope()),
+            state_root=tmp_path,
+            prompt="summarize the following",
+            task_type="document",
+            task_type_resolution="fallback",
+            addressing=ModelDelegateRunAddressing(
+                locus=EnumDelegateLocus.DEPLOYED_LANE,
+                bus="kafka",
+                lane="dev",
+            ),
+            require_budget_evidence=require_budget,
+            require_contract_evidence=require_contract,
+        )
