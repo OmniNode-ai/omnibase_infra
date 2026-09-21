@@ -1,3 +1,26 @@
+## v0.38.51 (2026-09-21)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.51 by the scheduled release train.
+- 14 release-relevant commit(s) merged since v0.38.36.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.36
+- fix(OMN-18992): tell a guard-refused zero apart from a writer that wrote nothing (#3919)
+- fix(OMN-18938): add the parity direction that starts from our own signature, and make its absence a failure (#3917)
+- fix(OMN-18916): grade the chain by declared hop identity, not by position (#3905)
+- feat(OMN-18918): carry the source message coordinates to the projection seam (#3898)
+- fix(OMN-18956): arm the evidence refusal from one derivation, not two literals (#3904)
+- fix(OMN-18955): inject the source coordinates so projection deltas stop being dropped (#3900)
+- fix(OMN-18956): require receipt evidence only where the request demanded it (#3896)
+- fix(OMN-18958): the consume boundary adopts the wire identity instead of minting a rival (#3899)
+- test(OMN-18938): run the contract-reading case in the job that has the checkout (#3893)
+- fix(OMN-18953): read pg_database from the runner's own database, not the maintenance one (#3894)
+- fix(OMN-18924): tolerate an absent execution_budgets map instead of refusing every delegation (#3889)
+- fix(OMN-18937): record BOTH delegation terminals, not only the success one (#3891)
+- feat(OMN-18900): create dod_verify_runs, the durable definition-of-done verdict table (#3883)
+- feat(OMN-18892): per-slot databases and per-slot principals, with a bounded migration path (#3890)
+
 ## v0.38.36 (2026-09-20)
 
 ### Release
