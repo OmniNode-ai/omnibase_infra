@@ -1062,7 +1062,12 @@ check_postgres_backup_freshness() {
     return 0
   fi
 
-  printf 'backup|OK|postgres-freshness|every declared cluster has a fresh Postgres backup, verified %sh ago\n' "$age_hours"
+  # The OK row names the gate and the branch that answered. The digest section
+  # this lands in is what a person reads at 08:00, and "verified" with no
+  # subject cannot be told apart from a row asserting something it never
+  # measured -- which is the failure mode this whole check exists to remove.
+  printf 'backup|OK|postgres-freshness|every declared cluster has a fresh Postgres backup, verified %sh ago by %s on %s\n' \
+    "$age_hours" "$workflow" "$branch"
 }
 
 collect() {

@@ -227,6 +227,17 @@ class TestTheVerdictSelection:
         assert _status(row) == "OK"
         assert "fresh Postgres backup" in row
 
+    def test_the_ok_row_names_the_gate_that_answered(self, tmp_path: Path) -> None:
+        """A clean row with no subject cannot be told apart from an empty claim.
+
+        The digest section this lands in is what a person reads at 08:00, so
+        "verified 1h ago" has to say verified BY WHAT. Without it the healthy
+        rendering asserts a freshness whose source the reader cannot check.
+        """
+        row = _run(tmp_path, _run_payload(1))
+        assert "postgres-backup-freshness-gate.yml" in row
+        assert " on dev" in row
+
     def test_a_pull_request_run_is_not_a_verdict(self, tmp_path: Path) -> None:
         """A green pull request must not paper over a dead backup.
 
