@@ -347,12 +347,17 @@ def test_a_group_authorization_refusal_is_indeterminate_with_a_named_reason() ->
 
 
 @pytest.mark.unit
-def test_a_group_that_never_committed_is_indeterminate_not_zero_lag() -> None:
-    """AC4 falsifier: an empty offset map reads as lag 0 instead of unread.
+def test_a_never_committed_groups_first_sample_is_indeterminate_baseline() -> None:
+    """The baseline case only: no previous sample exists at all yet.
 
     A group with no committed offset at all could be freshly declared, or
     could be a stale name matching nothing live -- either way it is not a
-    reading of "caught up", and Rule 16 says an empty result proves nothing.
+    reading of "caught up". With NO previous sample this run cannot compare
+    anything (AC5's baseline rule applies uniformly), so it reads
+    INDETERMINATE here for the same reason every OTHER group would on a
+    first-ever run, not because never-committed is itself indeterminate --
+    see the steady-state tests below for that distinction, corrected
+    2026-09-21 against live evidence.
     """
 
     def reader(group: str) -> int:
@@ -363,6 +368,104 @@ def test_a_group_that_never_committed_is_indeterminate_not_zero_lag() -> None:
     report, sample = evaluate_consumer_group_lag(reader, ["savings"], previous=None)
     assert report.outcome is EnumConditionOutcome.INDETERMINATE
     assert "no committed offset" in report.evidence
+    assert "savings" not in sample
+
+
+@pytest.mark.unit
+def test_a_never_committed_group_does_not_block_ok_once_a_baseline_exists() -> None:
+    """Corrected 2026-09-21 (live finding): never-committed is informational.
+
+    Three of the dev lane's six declared groups have never committed and, as
+    far as this alarm can tell, never will. The lane's steady state must not
+    be a permanently INDETERMINATE condition -- an alarm nobody can ever read
+    OK from is an alarm nobody reads. A never-committed group with NO value
+    in the previous sample either (i.e. it has never been seen with a real
+    offset) is purely informational once a baseline exists: it is named in
+    the evidence and does not block OK.
+    """
+
+    def reader(group: str) -> int:
+        if group == "savings":
+            return 5
+        raise GroupNeverCommittedError(
+            f"group {group} holds no committed offset on any partition"
+        )
+
+    report, sample = evaluate_consumer_group_lag(
+        reader,
+        ["savings", "registration"],
+        previous={"savings": 5},
+    )
+    assert report.outcome is EnumConditionOutcome.OK
+    assert report.alarms == ()
+    assert "registration" in report.evidence
+    assert "never-committed" in report.evidence
+    assert "registration" not in sample
+
+
+@pytest.mark.unit
+def test_three_readable_and_three_never_committed_groups_reads_ok() -> None:
+    """The exact shape measured live on the dev lane 2026-09-21.
+
+    Three groups clean and flat, three groups that have never committed and
+    never will on this lane -- the condition-level verdict must be OK, not
+    permanently INDETERMINATE, or the alarm is installed but not watching.
+    """
+    readable = {"delegation": 0, "live-events": 0, "savings": 0}
+
+    def reader(group: str) -> int:
+        if group in readable:
+            return readable[group]
+        raise GroupNeverCommittedError(
+            f"group {group} holds no committed offset on any partition"
+        )
+
+    report, sample = evaluate_consumer_group_lag(
+        reader,
+        [
+            "delegation",
+            "live-events",
+            "savings",
+            "registration",
+            "tenant-credentials",
+            "tenant-registry",
+        ],
+        previous=readable,
+    )
+    assert report.outcome is EnumConditionOutcome.OK
+    assert report.alarms == ()
+    for never_committed_group in (
+        "registration",
+        "tenant-credentials",
+        "tenant-registry",
+    ):
+        assert never_committed_group in report.evidence
+        assert never_committed_group not in sample
+
+
+@pytest.mark.unit
+def test_a_group_that_vanishes_after_committing_is_an_alarm() -> None:
+    """A never-committed reading is NOT always quiet: this is the one case it isn't.
+
+    A group that held a real committed offset in the previous sample and now
+    reads never-committed has not gone quiet -- its offsets have vanished,
+    which is either the group being deleted or something wiping its offsets.
+    That is exactly as actionable as growth, so it is its own ALARM rather
+    than folded into the informational, non-blocking bucket above.
+    """
+
+    def reader(group: str) -> int:
+        raise GroupNeverCommittedError(
+            f"group {group} holds no committed offset on any partition"
+        )
+
+    report, sample = evaluate_consumer_group_lag(
+        reader, ["savings"], previous={"savings": 631}
+    )
+    assert report.outcome is EnumConditionOutcome.ALARM
+    assert len(report.alarms) == 1
+    assert report.alarms[0].subject == "savings"
+    assert "vanished" in report.alarms[0].detail or "wiped" in report.alarms[0].detail
     assert "savings" not in sample
 
 

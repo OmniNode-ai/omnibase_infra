@@ -810,10 +810,28 @@ def evaluate_consumer_group_lag(
     because a consumer that has stopped and a consumer mid-poll are
     indistinguishable seconds apart.
 
+    **A never-committed group is a distinct per-group STATE, not an unreadable
+    one (corrected 2026-09-21 against live evidence).** Measured live on the
+    dev lane: three of six declared groups (registration-writer,
+    tenant-credentials-writer, tenant-registry-writer) have never committed
+    and, as far as this alarm can tell, never will. Folding that into
+    "unreadable" made the condition permanently INDETERMINATE on this lane's
+    own steady state -- an alarm whose normal reading is "I can't tell" is
+    read by nobody. A never-committed group is now named in the evidence and
+    does NOT, by itself, block OK or force INDETERMINATE. Operating Rule 16
+    still applies in full to a group this alarm genuinely cannot read at all
+    -- an authorization refusal or a connection failure -- those keep forcing
+    INDETERMINATE, unchanged. The one case a never-committed reading DOES
+    raise: a group that held a real committed offset in the PREVIOUS sample
+    and now reads never-committed has not gone quiet, its offsets have
+    vanished -- that is an ALARM, not a shrug.
+
     Returns:
-        The report, and this run's sample for the caller to persist. The sample
-        is returned even on an INDETERMINATE reading, so that a run which could
-        not compare still leaves a baseline for the next one.
+        The report, and this run's sample for the caller to persist. Only
+        groups read with a real numeric offset this run are in the sample --
+        a never-committed group is never persisted with a value, so "this
+        group held a value in the previous sample" is exactly the
+        already-vanished comparison above and needs no extra state field.
 
     What this does NOT measure: whether the node behind the group is alive. A
     group can read Stable with zero lag while its node refuses every message
@@ -836,13 +854,14 @@ def evaluate_consumer_group_lag(
 
     sample: dict[str, int] = {}
     unreadable: list[str] = []
+    never_committed: list[tuple[str, str]] = []
     for group in sorted(groups):
         try:
             sample[group] = reader(group)
         except GroupAuthorizationError as exc:
             unreadable.append(f"{group} ({exc})")
         except GroupNeverCommittedError as exc:
-            unreadable.append(f"{group} ({exc})")
+            never_committed.append((group, str(exc)))
         except ValueError as exc:
             unreadable.append(f"{group} ({exc})")
 
@@ -866,6 +885,13 @@ def evaluate_consumer_group_lag(
             sample,
         )
 
+    never_committed_note = (
+        "; never-committed (informational, does not block OK): "
+        + "; ".join(f"{g} ({r})" for g, r in sorted(never_committed))
+        if never_committed
+        else ""
+    )
+
     if previous is None:
         return (
             ModelConditionReport(
@@ -873,7 +899,8 @@ def evaluate_consumer_group_lag(
                 outcome=EnumConditionOutcome.INDETERMINATE,
                 evidence=(
                     f"{read_fact}; sampled {readings}; no previous sample, so "
-                    "growth could not be evaluated and this run is the baseline"
+                    "growth could not be evaluated and this run is the "
+                    f"baseline{never_committed_note}"
                 ),
             ),
             sample,
@@ -902,7 +929,29 @@ def evaluate_consumer_group_lag(
                 )
             )
 
-    evidence = f"{read_fact}; {'; '.join(compared[: _EVIDENCE_SAMPLES * 8]) or 'none'}"
+    vanished: list[str] = []
+    for group, _reason in sorted(never_committed):
+        before = previous.get(group)
+        if before is not None:
+            vanished.append(f"{group}: held {before}, now never-committed")
+            alarms.append(
+                ModelAlarm(
+                    condition=condition,
+                    subject=group,
+                    detail=(
+                        f"consumer group {group} held a committed offset of "
+                        f"{before} in the previous sample and now reads "
+                        "never-committed -- its offsets appear to have been "
+                        "wiped or the group deleted, not merely quiet"
+                    ),
+                )
+            )
+
+    evidence = (
+        f"{read_fact}; {'; '.join(compared[: _EVIDENCE_SAMPLES * 8]) or 'none'}"
+        f"{never_committed_note}"
+        + (f"; VANISHED: {'; '.join(vanished)}" if vanished else "")
+    )
     if alarms:
         return (
             ModelConditionReport(
