@@ -407,6 +407,17 @@ def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
     The second is the one that matters operationally. It is also exactly how the
     leg is meant to be dispatched for a live proof once the host is reachable:
     `workflow_dispatch` with `refresh_after_days: 0`.
+
+    CORRECTED 2026-09-21 (OMN-18949). The steady case read the REAL committed
+    snapshot for BOTH sides, so the docstring's claim that this tests the rule
+    and not the clock was false of it: the assertion held only while that file
+    was under three days old, and it went red on the third day after each
+    refresh. It is the same defect the sibling test one function down records
+    in its own docstring -- "true the day it was written and false forever
+    about a week later" -- reached by a different route. The steady case now
+    uses a committed-side FIXTURE with a recent timestamp, which is what makes
+    it a test of the threshold. The forced case still reads the real file, so
+    the real artifact staying parseable is still asserted.
     """
     committed_path = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
     committed = json.loads(committed_path.read_text(encoding="utf-8"))
@@ -417,13 +428,24 @@ def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
     candidate_path = tmp_path / "census-candidate.json"
     candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
 
-    def _decide(days: str) -> dict[str, Any]:
+    # A committed-side fixture, same fleet, recent but an hour BEHIND the
+    # candidate. Both halves matter: recent keeps it inside the three-day
+    # threshold, and older keeps the candidate strictly newer, which the
+    # decision requires before it will consider the age question at all.
+    recent_committed = dict(committed)
+    recent_committed["emitted_at"] = (
+        datetime.now(UTC) - timedelta(hours=1)
+    ).isoformat()
+    recent_committed_path = tmp_path / "census-committed-recent.json"
+    recent_committed_path.write_text(json.dumps(recent_committed), encoding="utf-8")
+
+    def _decide(days: str, committed_arg: Path = committed_path) -> dict[str, Any]:
         result = subprocess.run(
             [
                 sys.executable,
                 str(_MODULE),
                 "--committed",
-                str(committed_path),
+                str(committed_arg),
                 "--candidate",
                 str(candidate_path),
                 "--refresh-after-days",
@@ -444,7 +466,7 @@ def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
     )
     assert forced["reason"] == REASON_AGING
 
-    steady = _decide("3")
+    steady = _decide("3", recent_committed_path)
     assert steady["refresh"] is False, (
         "the committed census is recent and the fixture describes the same "
         f"fleet, so the leg must stay quiet; got {steady}"

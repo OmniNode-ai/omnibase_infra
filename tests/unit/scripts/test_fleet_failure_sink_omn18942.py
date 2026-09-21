@@ -154,6 +154,12 @@ def _run_reporter(
         # The two neighbouring probes acquire network dependencies this suite
         # has no business on; their own rows are asserted in their own suites.
         "OMNINODE_CI_PROBE_ENABLED": "0",
+        # OMN-18949: the reporter also reads the lane census probe from
+        # collect(), and on a runner there is no live snapshot, so it emits a
+        # WARNING row and moves this file's issue counts. These cases are about
+        # the FLEET rows; the census rows are asserted in
+        # test_lane_census_sink_omn18949.py, which switches it back on.
+        "OMNINODE_CENSUS_PROBE_ENABLED": "0",
         "OMNINODE_RUNNER_TREE_CHECK_ENABLED": "0",
         "SLACK_BOT_TOKEN": "x",
         "SLACK_CHANNEL_ID": "C-TEST",
