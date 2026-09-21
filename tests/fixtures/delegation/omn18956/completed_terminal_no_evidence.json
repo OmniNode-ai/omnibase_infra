@@ -1,0 +1,199 @@
+{
+  "artifact_refs": [
+    {
+      "ref": "sha256:991a86901a3e8123c34a9ae5b20824386965d7ec40069d7be11bd1b053cc1a83"
+    }
+  ],
+  "correlation_id": "0b21b5f0-fb56-4ab6-9219-24bbfd841f35",
+  "duration_ms": 17435,
+  "exit_code": 1,
+  "metrics": {
+    "capture_log_bytes": 9061.0
+  },
+  "node_name": "node_delegate_skill_orchestrator",
+  "result": {
+    "capture_log": "22:26:10 WARNING  omnibase_infra.cli.receipt_mode \u2014 receipt_mode: emit of onex.evt.omniclaude.skill-started.v1 failed (FileNotFoundError); spooled to /Users/jonah/Code/omni_home/.onex_state/emit_spool/onex-evt-omniclaude-skill-started-v1-29f4508a-38f9-4252-a417-91b02601f379-started.json\n22:26:10 INFO     omnibase_infra.cli.receipt_mode \u2014 receipt_mode: execution locus=deployed-lane (explicit --locus deployed-lane OVERRIDES the transport-derived locus (transport=kafka)); orchestrator contract=/Users/jonah/Code/omni_home/.onex-dispatch-venv/lib/python3.13/site-packages/omnimarket/nodes/node_delegate_skill_orchestrator/contract.yaml from omnimarket 0.4.160 (/Users/jonah/Code/omni_home/.onex-dispatch-venv/lib/python3.13/site-packages/omnimarket); command topic=onex.cmd.omnimarket.delegate-skill.v1 broker=omninode-pc.tail75df5e.ts.net:19092 live lane consumers=local.omnibase_infra.node_ledger_projection_compute.consume.1.5.0.__i.runtime-main.__t.onex.cmd.omnimarket.delegate-skill.v1, local.omnimarket.node_delegate_skill_orchestrator.consume.1.2.0.__i.runtime-effects.__t.onex.cmd.omnimarket.delegate-skill.v1\n22:26:10 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: loaded contract contract.yaml, terminal_event=onex.evt.omnimarket.delegate-skill-completed.v1\n22:26:10 INFO     omnibase_infra.event_bus.event_bus_kafka \u2014 EventBusKafka: lane dev transport applied for omninode-pc.tail75df5e.ts.net:19092 (SASL_PLAINTEXT), declared in /Users/jonah/Code/omni_home/omnimarket/config/ci_bus_lanes.yaml\n22:26:10 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: event bus selected (kafka, bootstrap=omninode-pc.tail75df5e.ts.net:19092)\n22:26:10 INFO     aiokafka.conn \u2014 Authenticated as dev-cli-stickybeatz-studio via SCRAM-SHA-256\n22:26:10 INFO     aiokafka.conn \u2014 Authenticated as dev-cli-stickybeatz-studio via SCRAM-SHA-256\n22:26:10 INFO     omnibase_infra.event_bus.event_bus_kafka \u2014 EventBusKafka started\n22:26:10 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: contract declares handler_routing \u2014 using event-driven execution path\n22:26:10 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: routing graph:\n22:26:10 INFO     omnibase_core.runtime.runtime_local \u2014   [onex.cmd.omnimarket.delegate-skill.v1] -> HandlerDelegateSkill -> [onex.evt.omnimarket.delegate-skill-completed.v1]\n22:26:10 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: resolved initial-payload model omnimarket.nodes.node_delegate_skill_orchestrator.models.model_delegate_skill_request.ModelDelegateSkillRequest from contract.input_model\n22:26:11 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: client mode \u2014 publishing to 'onex.cmd.omnimarket.delegate-skill.v1' and awaiting correlation 0b21b5f0-fb56-4ab6-9219-24bbfd841f35; hosting no handlers (1 declared)\n22:26:11 INFO     aiokafka.consumer.subscription_state \u2014 Updating subscribed topics to: frozenset({'onex.evt.omnimarket.delegate-skill-completed.v1'})\n22:26:11 INFO     aiokafka.conn \u2014 Authenticated as dev-cli-stickybeatz-studio via SCRAM-SHA-256\n22:26:11 INFO     aiokafka.conn \u2014 Authenticated as dev-cli-stickybeatz-studio via SCRAM-SHA-256\n22:26:11 INFO     aiokafka.conn \u2014 Authenticated as dev-cli-stickybeatz-studio via SCRAM-SHA-256\n22:26:11 INFO     aiokafka.consumer.group_coordinator \u2014 Discovered coordinator 0 for group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9.consume.v1.__t.onex.evt.omnimarket.delegate-skill-completed.v1\n22:26:11 INFO     aiokafka.consumer.group_coordinator \u2014 Revoking previously assigned partitions set() for group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9.consume.v1.__t.onex.evt.omnimarket.delegate-skill-completed.v1\n22:26:11 INFO     aiokafka.consumer.group_coordinator \u2014 (Re-)joining group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9.consume.v1.__t.onex.evt.omnimarket.delegate-skill-completed.v1\n22:26:14 INFO     aiokafka.consumer.group_coordinator \u2014 Joined group 'local.omnibase_core.runtime_local_terminal_run_29f4508a38f9.consume.v1.__t.onex.evt.omnimarket.delegate-skill-completed.v1' (generation 1) with member_id local.omnibase_core.runtime_local_terminal_run_29f4508a38f9.consume.v1.__t.onex.evt.omnimarket.delegate-skill-completed.v1.Stickybeatz-Studio.local-9c237bbf-61f2-47ac-ab31-1aa55f1a0827\n22:26:14 INFO     aiokafka.consumer.group_coordinator \u2014 Elected group leader -- performing partition assignments using roundrobin\n22:26:14 INFO     aiokafka.consumer.group_coordinator \u2014 Successfully synced group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9.consume.v1.__t.onex.evt.omnimarket.delegate-skill-completed.v1 with generation 1\n22:26:14 INFO     aiokafka.consumer.group_coordinator \u2014 Setting newly assigned partitions {TopicPartition(topic='onex.evt.omnimarket.delegate-skill-completed.v1', partition=0)} for group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9.consume.v1.__t.onex.evt.omnimarket.delegate-skill-completed.v1\n22:26:14 INFO     omnibase_infra.event_bus.event_bus_kafka \u2014 Started consumer for topic onex.evt.omnimarket.delegate-skill-completed.v1\n22:26:14 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: watching terminal 'onex.evt.omnimarket.delegate-skill-completed.v1' (declared success)\n22:26:14 INFO     aiokafka.consumer.subscription_state \u2014 Updating subscribed topics to: frozenset({'onex.evt.omnimarket.delegate-skill-failed.v1'})\n22:26:14 INFO     aiokafka.conn \u2014 Authenticated as dev-cli-stickybeatz-studio via SCRAM-SHA-256\n22:26:14 INFO     aiokafka.conn \u2014 Authenticated as dev-cli-stickybeatz-studio via SCRAM-SHA-256\n22:26:14 INFO     aiokafka.conn \u2014 Authenticated as dev-cli-stickybeatz-studio via SCRAM-SHA-256\n22:26:14 INFO     aiokafka.consumer.group_coordinator \u2014 Discovered coordinator 0 for group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9_t1.consume.v1.__t.onex.evt.omnimarket.delegate-skill-failed.v1\n22:26:14 INFO     aiokafka.consumer.group_coordinator \u2014 Revoking previously assigned partitions set() for group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9_t1.consume.v1.__t.onex.evt.omnimarket.delegate-skill-failed.v1\n22:26:14 INFO     aiokafka.consumer.group_coordinator \u2014 (Re-)joining group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9_t1.consume.v1.__t.onex.evt.omnimarket.delegate-skill-failed.v1\n22:26:17 INFO     aiokafka.consumer.group_coordinator \u2014 Joined group 'local.omnibase_core.runtime_local_terminal_run_29f4508a38f9_t1.consume.v1.__t.onex.evt.omnimarket.delegate-skill-failed.v1' (generation 1) with member_id local.omnibase_core.runtime_local_terminal_run_29f4508a38f9_t1.consume.v1.__t.onex.evt.omnimarket.delegate-skill-failed.v1.Stickybeatz-Studio.local-2a908ac9-7e26-47e1-badb-f962f299dfd2\n22:26:17 INFO     aiokafka.consumer.group_coordinator \u2014 Elected group leader -- performing partition assignments using roundrobin\n22:26:17 INFO     aiokafka.consumer.group_coordinator \u2014 Successfully synced group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9_t1.consume.v1.__t.onex.evt.omnimarket.delegate-skill-failed.v1 with generation 1\n22:26:17 INFO     aiokafka.consumer.group_coordinator \u2014 Setting newly assigned partitions {TopicPartition(topic='onex.evt.omnimarket.delegate-skill-failed.v1', partition=0)} for group local.omnibase_core.runtime_local_terminal_run_29f4508a38f9_t1.consume.v1.__t.onex.evt.omnimarket.delegate-skill-failed.v1\n22:26:17 INFO     omnibase_infra.event_bus.event_bus_kafka \u2014 Started consumer for topic onex.evt.omnimarket.delegate-skill-failed.v1\n22:26:17 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: watching terminal 'onex.evt.omnimarket.delegate-skill-failed.v1' (declared failure)\n22:26:17 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: published initial command to 'onex.cmd.omnimarket.delegate-skill.v1' (correlation_id=0b21b5f0-fb56-4ab6-9219-24bbfd841f35, source=payload, locus=dispatched)\n22:26:28 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: terminal event received (status=completed)\n22:26:28 INFO     omnibase_infra.event_bus.event_bus_kafka \u2014 Consumer loop cancelled for topic onex.evt.omnimarket.delegate-skill-completed.v1\n22:26:28 INFO     omnibase_infra.event_bus.event_bus_kafka \u2014 Consumer loop exiting for topic onex.evt.omnimarket.delegate-skill-completed.v1\n22:26:28 INFO     omnibase_infra.event_bus.event_bus_kafka \u2014 Consumer loop cancelled for topic onex.evt.omnimarket.delegate-skill-failed.v1\n22:26:28 INFO     omnibase_infra.event_bus.event_bus_kafka \u2014 Consumer loop exiting for topic onex.evt.omnimarket.delegate-skill-failed.v1\n22:26:28 INFO     omnibase_infra.event_bus.event_bus_kafka \u2014 EventBusKafka closed\n22:26:28 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: wrote state to /Users/jonah/Code/omni_home/.onex_state/runs/29f4508a-38f9-4252-a417-91b02601f379/workflow_result.json\n22:26:28 INFO     omnibase_core.runtime.runtime_local \u2014 RuntimeLocal: result=completed\n",
+    "dispatch_target": "onex.cmd.omnimarket.delegate-skill.v1 via omninode-pc.tail75df5e.ts.net:19092; live consumers: local.omnibase_infra.node_ledger_projection_compute.consume.1.5.0.__i.runtime-main.__t.onex.cmd.omnimarket.delegate-skill.v1, local.omnimarket.node_delegate_skill_orchestrator.consume.1.2.0.__i.runtime-effects.__t.onex.cmd.omnimarket.delegate-skill.v1",
+    "error": "completed delegation terminal omits required evidence: budget_evidence, response_contract_evidence",
+    "exit_code": 1,
+    "handler_locus": "dispatched",
+    "handler_result": null,
+    "orchestrator_distribution": "omnimarket 0.4.160 (/Users/jonah/Code/omni_home/.onex-dispatch-venv/lib/python3.13/site-packages/omnimarket)",
+    "terminal_payload": {
+      "correlation_id": "0b21b5f0-fb56-4ab6-9219-24bbfd841f35",
+      "envelope_id": "aef5e1c9-0619-5c68-b336-854299f42ea8",
+      "envelope_timestamp": "2026-09-21T02:26:28.100797Z",
+      "envelope_version": {
+        "build": null,
+        "major": 2,
+        "minor": 2,
+        "patch": 0,
+        "prerelease": null
+      },
+      "event_type": "omnimarket.delegate-skill-completed",
+      "metadata": {
+        "headers": {},
+        "parent_span_id": null,
+        "request_id": null,
+        "span_id": null,
+        "tags": {},
+        "trace_id": null
+      },
+      "onex_version": {
+        "build": null,
+        "major": 1,
+        "minor": 0,
+        "patch": 0,
+        "prerelease": null
+      },
+      "parent_envelope_id": "ea9f1f07-27e1-44eb-a3f9-5b2c16b30300",
+      "payload": {
+        "attempts": [
+          {
+            "acceptance_decision": "accept",
+            "acceptance_detail": "",
+            "acceptance_reason": "quality_bar_met",
+            "backend_id": "61c35979-844a-5e90-882d-b8bbf5231b4c",
+            "cost_usd": 0.0,
+            "error_message": "",
+            "failure_class": null,
+            "input_token_budget": null,
+            "input_tokens_measured": null,
+            "model_id": "Qwen3.8-27B",
+            "quality_gate_passed": true,
+            "quality_score": 1.0,
+            "reasoning_preamble": "",
+            "reasoning_preamble_rule": null,
+            "tier": "local"
+          }
+        ],
+        "attempts_count": 1,
+        "correlation_id": "0b21b5f0-fb56-4ab6-9219-24bbfd841f35",
+        "credential_refusal": null,
+        "credential_withheld": null,
+        "error_message": "",
+        "escalation_count": 0,
+        "execution_duration_ms": 10774,
+        "metrics": {
+          "compliance_attempts": 1,
+          "cost_savings_usd": 0.01602,
+          "cost_usd": 0.0,
+          "frontier_costs_usd": {
+            "claude-haiku-3-5": 0.0008544,
+            "claude-opus-4-6": 0.01602,
+            "claude-sonnet-4-20250514": 0.003204,
+            "gpt-4o": 0.0022075
+          },
+          "input_tokens": 143,
+          "latency_ms": 6438,
+          "output_tokens": 185,
+          "premium_counterfactual": {
+            "as_of": "2026-02-01",
+            "counterfactual_cost_usd": "0.01602",
+            "measured": false,
+            "model": "claude-opus-4-6",
+            "price_in_per_1k": "0.015",
+            "price_out_per_1k": "0.075",
+            "pricing_source": "pricing_manifest",
+            "tokens_in": 143,
+            "tokens_out": 185
+          },
+          "tokens_to_compliance": 328,
+          "total_tokens": 328
+        },
+        "model_cloud_baseline": "claude-opus-4-6",
+        "model_name": "Qwen3.8-27B",
+        "pricing_manifest_version": 1,
+        "prompt_text": "Summarize the following in three short sentences of plain prose. The delivery gate reads a receipt for the exact commit and refuses the announcement when none exists. There is no force input and no skip input, and a positive control covers the refusal so the gate cannot pass by doing nothing.",
+        "provider": "local",
+        "quality_gate_passed": true,
+        "quality_gates_failed": [],
+        "quality_score": 1.0,
+        "required_quality_bar": 0.8,
+        "response": "We need answer user's request: \"Summarize the following in three short sentences of plain prose. The delivery gate reads a receipt for the exact commit and refuses the announcement when none exists. There is no force input and no skip input, and a positive control covers the refusal so the gate cannot pass by doing nothing.\"\n\nNeed produce three short sentences plain prose summarizing. Need likely concise. Ensure exactly three sentences. Maybe:\n\"The delivery gate checks for a receipt matching the exact commit. It refuses the announcement if that receipt is missing. No force or skip options exist, and a positive control ensures the gate fails when it should refuse.\"\nThree sentences. Plain prose. Good.\n\n\nThe delivery gate checks for a receipt matching the exact commit. It refuses the announcement if that receipt is missing. No force or skip options exist, and a positive control ensures the gate fails when it should refuse.",
+        "score_vs_required_bar": "at_or_above_bar",
+        "status": "completed",
+        "task_type": "document",
+        "tenant_id": null
+      },
+      "payload_schema_version": null,
+      "payload_type": null,
+      "priority": 5,
+      "request_id": null,
+      "retry_count": 0,
+      "security_context": null,
+      "source_tool": null,
+      "span_id": null,
+      "target_tool": null,
+      "tenant_id": null,
+      "timeout_seconds": null,
+      "trace_id": null
+    },
+    "wire_correlation_id": "0b21b5f0-fb56-4ab6-9219-24bbfd841f35",
+    "workflow": "/Users/jonah/Code/omni_home/.onex-dispatch-venv/lib/python3.13/site-packages/omnimarket/nodes/node_delegate_skill_orchestrator/contract.yaml",
+    "workflow_result": "error"
+  },
+  "result_model": "omnibase_infra.cli.model_receipt_runtime_summary.ModelReceiptRuntimeSummary",
+  "run_id": "29f4508a-38f9-4252-a417-91b02601f379",
+  "runtime_identity": {
+    "config_source": "/Users/jonah/Code/omni_home/.onex-dispatch-venv/lib/python3.13/site-packages/omnimarket/nodes/node_delegate_skill_orchestrator/contract.yaml",
+    "execution_locus": "/Users/jonah/Code/omni_home/.onex-dispatch-venv",
+    "host": "Stickybeatz-Studio.local",
+    "interpreter": "/Users/jonah/Code/omni_home/.onex-dispatch-venv/bin/python3",
+    "locus_kind": "venv",
+    "packages": {
+      "omnibase_compat": {
+        "commit": null,
+        "import_path": null,
+        "name": "omnibase_compat",
+        "source": "registry",
+        "version": "0.5.7"
+      },
+      "omnibase_core": {
+        "commit": null,
+        "import_path": null,
+        "name": "omnibase_core",
+        "source": "registry",
+        "version": "0.47.18"
+      },
+      "omnibase_infra": {
+        "commit": null,
+        "import_path": null,
+        "name": "omnibase_infra",
+        "source": "local_path",
+        "version": "0.38.43"
+      },
+      "omnibase_spi": {
+        "commit": null,
+        "import_path": null,
+        "name": "omnibase_spi",
+        "source": "registry",
+        "version": "0.23.3"
+      },
+      "omnimarket": {
+        "commit": "bf88396baa874574e4b0aa5f6180c391e4c27405",
+        "import_path": null,
+        "name": "omnimarket",
+        "source": "vcs",
+        "version": "0.4.160"
+      }
+    },
+    "schema_version": {
+      "build": null,
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": null
+    },
+    "stamped_at": "2026-09-21T02:26:28.216048Z"
+  },
+  "schema_version": {
+    "build": null,
+    "major": 1,
+    "minor": 1,
+    "patch": 0,
+    "prerelease": null
+  },
+  "skill_name": "node_delegate_skill_orchestrator",
+  "status": "failed"
+}
