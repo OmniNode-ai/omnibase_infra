@@ -742,7 +742,17 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # completion time, and 0001_grant_omninode_runtime_dod_verify_runs.sql,
     # which ISSUES the grants the topology only declares -- the table half and
     # the BIGSERIAL cursor's own standalone sequence, both asserted.
-    assert len(result.declarations) == 202
+    #
+    # 202 -> 203 for OMN-18993 (blocking child of OMN-18887), which vendors ONE
+    # node-owned migration: node_delegate_skill_orchestrator/
+    # 0001_delegate_skill_command_claims.sql, the durable correlation-keyed
+    # claim that stops a redelivered delegate-skill command from re-running the
+    # inference and billing it twice. Domain `omninode_internal`, not `tenant`:
+    # it is per-node control state carrying no row-level security, so a tenant
+    # posture here would assert an isolation the schema does not enforce.
+    # Vendored into omnibase_infra FIRST per the node-migration-vendor-parity
+    # ordering, ahead of the omnimarket PR that owns the source file.
+    assert len(result.declarations) == 203
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
