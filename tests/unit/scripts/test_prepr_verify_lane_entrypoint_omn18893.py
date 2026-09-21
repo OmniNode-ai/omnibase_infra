@@ -716,3 +716,60 @@ def test_the_positive_control_still_carries_the_fields_it_controls() -> None:
     assert runtime["environment"]["KAFKA_ENVIRONMENT"]
     assert runtime["ports"] and runtime["volumes"]
     assert copy.deepcopy(rendered) == rendered
+
+
+# ---------------------------------------------------------------------------
+# The provisioner must not assume a PostgreSQL client on the host
+# ---------------------------------------------------------------------------
+
+PROVISIONER = REPO_ROOT / "scripts" / "provision_db_slot.sh"
+
+
+def test_the_provisioner_routes_every_psql_call_through_the_resolver() -> None:
+    """No bare ``psql`` call may survive outside the resolver itself.
+
+    The lab host has no PostgreSQL client: nothing on PATH, nothing under
+    /usr/lib/postgresql, no postgresql-client package. It never needed one,
+    because every migration seam in this repository runs psql inside a
+    postgres:16-alpine container. The first live slot provisioning therefore
+    died on ``psql: command not found`` after the source snapshot had been
+    staged and the lane lock taken.
+
+    This is asserted over the source rather than by running the script,
+    because the failure is the ABSENCE of a binary and a test host that
+    happens to have one cannot reproduce it. Every call site is routed through
+    ``psql_run``, which picks the host binary when there is one and a
+    throwaway container on the lane network when there is not.
+    """
+    lines = PROVISIONER.read_text(encoding="utf-8").splitlines()
+    offenders: list[str] = []
+    in_resolver = False
+    for number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped:
+            continue
+        if "psql_run()" in stripped or "command -v psql" in stripped:
+            in_resolver = True
+        if in_resolver and stripped == "}":
+            in_resolver = False
+        if in_resolver:
+            continue
+        if re.search(r"(?<![\w_])psql\s+-", stripped):
+            offenders.append(f"{number}: {stripped}")
+    assert not offenders, (
+        "these call sites invoke psql directly instead of through psql_run, so "
+        "they assume a PostgreSQL client on the host and will die with "
+        "'command not found' on the lab host:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_provisioner_never_puts_the_password_on_a_command_line() -> None:
+    """The container form passes a bare ``-e PGPASSWORD``, not a value.
+
+    An inline ``-e PGPASSWORD=<value>`` would be visible in ``docker inspect``
+    and in the host's process list for the life of the call. The bare form
+    takes it from the caller's environment instead.
+    """
+    text = PROVISIONER.read_text(encoding="utf-8")
+    assert "-e PGPASSWORD " in text or '-e PGPASSWORD "' in text
+    assert "PGPASSWORD=$" not in text.replace('PGPASSWORD="$POSTGRES_PASSWORD"', "")
