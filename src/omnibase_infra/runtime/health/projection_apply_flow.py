@@ -162,9 +162,11 @@ OUTCOME_APPLY_FLOW_UNOBSERVED: str = "apply_flow_window_unobserved"
 OUTCOME_DROP_GAUGE_NONMONOTONIC: str = "apply_flow_drop_gauge_nonmonotonic"
 
 #: The outcome token for a registered projection whose contract-declared key
-#: grain could not be resolved (OMN-19081). Such a projection is GRADED, never
-#: exempted -- silently exempting it would hide a real accumulation behind a
-#: missing field -- and is named under this token so a reader can tell it from
+#: grain could not be resolved (OMN-19081). Such a projection is never
+#: exempted on the strength of the missing declaration itself -- that would
+#: hide a real accumulation behind a missing field. It is graded unless the
+#: interim FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS list covers it, and it is
+#: named under this token either way so a reader can tell it from
 #: one that genuinely declares a mutable grain. The remedies differ: one is a
 #: contract edit, the other is a real investigation.
 OUTCOME_KEY_GRAIN_UNRESOLVED: str = "apply_flow_key_grain_unresolved"
@@ -425,9 +427,9 @@ def describe_projection_delta_dropped(verdict: ModelProjectionApplyFlowVerdict) 
         unresolved = (
             f" ({OUTCOME_KEY_GRAIN_UNRESOLVED}: "
             f"{len(verdict.grain_unresolved_projections)} projection(s) "
-            "declare no resolvable key grain, so they are GRADED rather than "
-            "exempted -- an exemption taken on an unestablished fact is the "
-            f"rubber stamp this reads a declaration to avoid: "
+            "declare no resolvable key grain. Each is graded unless the "
+            "interim fallback below covers it, and none is exempted on the "
+            "strength of the missing declaration alone: "
             f"{_name_list(verdict.grain_unresolved_projections)})"
         )
     fallback_note = ""
