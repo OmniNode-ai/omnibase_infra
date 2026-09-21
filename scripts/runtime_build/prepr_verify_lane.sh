@@ -518,6 +518,41 @@ log "snapshot staged; target content digest ${TARGET_SNAPSHOT_DIGEST:0:16}..."
 # render gate re-reads the result rather than trusting this ordering, because
 # an ordering argument in a comment is not a control.
 # -----------------------------------------------------------------------------
+# Provider and forge credentials are UNSET before the operator env is read,
+# never afterwards, and never "corrected" in the env file (OMN-19076).
+#
+# The compose files this slot layers interpolate these names, and compose
+# resolves an interpolation from the OS environment BEFORE the env file. So a
+# login shell that exports a live provider or forge credential wins over the
+# file, and the value is baked into the slot's containers. That is the same
+# precedence this entrypoint already fights over the consumer-group token,
+# arriving as a credential exposure instead of an isolation defect.
+#
+# It has to be an unset here rather than a default in the file, because the
+# file LOSES. Unsetting restores the file as the only source, so a slot gets
+# whatever the operator env declares and nothing the invoking shell happens
+# to be carrying.
+#
+# Measured against the three layered files, with a positive control, because
+# the first two readings of this were false zeroes from a broken matcher:
+# GITHUB_TOKEN twice, and LINEAR_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY,
+# LLM_GLM_API_KEY and LOCAL_LLM_SHARED_SECRET once each. GH_TOKEN is unset
+# alongside GITHUB_TOKEN because one credential feeds both names.
+PREPR_SCRUBBED_CREDENTIAL_VARS=(
+    GITHUB_TOKEN
+    GH_TOKEN
+    LINEAR_API_KEY
+    GEMINI_API_KEY
+    GOOGLE_API_KEY
+    OPENROUTER_API_KEY
+    LLM_GLM_API_KEY
+    LOCAL_LLM_SHARED_SECRET
+)
+for _cred in "${PREPR_SCRUBBED_CREDENTIAL_VARS[@]}"; do
+    unset "${_cred}"
+done
+unset _cred
+
 OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
 if [[ ! -r "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
     fail "${EXIT_USAGE}" \

@@ -890,3 +890,85 @@ def test_cut_lab_ref_refuses_a_pool_lane_by_name(slot: int) -> None:
         f"the refusal for {lane} does not name the entrypoint that DOES build "
         f"a slot, so a caller is left looking for the arm to add here."
     )
+
+
+# ---------------------------------------------------------------------------
+# Provider and forge credentials must not ride in from the invoking shell
+# ---------------------------------------------------------------------------
+
+LAYERED_COMPOSE = (
+    REPO_ROOT / "docker" / "docker-compose.infra.yml",
+    REPO_ROOT / "docker" / "docker-compose.dev-lane.yml",
+    REPO_ROOT / "docker" / "docker-compose.prepr.yml",
+)
+
+
+def _interpolation_count(name: str) -> int:
+    """How many times the layered compose files interpolate ``name``."""
+    needle = "${" + name
+    return sum(f.read_text(encoding="utf-8").count(needle) for f in LAYERED_COMPOSE)
+
+
+def test_the_interpolation_detector_works_before_any_zero_is_believed() -> None:
+    """Positive and negative control on the counter the next test relies on.
+
+    This control exists because the first two readings of the credential
+    question returned zero for every name and both were WRONG: one from a
+    shell that does not word-split an unquoted variable, one from a bracket
+    expression that silently matched nothing. A zero from an unproven matcher
+    reads exactly like a clean bill of health, which is the whole reason a
+    positive control is mandatory before reporting one.
+    """
+    assert _interpolation_count("POSTGRES_PASSWORD") > 0, (
+        "the detector finds no POSTGRES_PASSWORD interpolation, so it is "
+        "broken and every zero it reports below is meaningless."
+    )
+    assert _interpolation_count("NO_SUCH_VARIABLE_XYZ") == 0
+
+
+def _scrub_list() -> list[str]:
+    text = ENTRYPOINT.read_text(encoding="utf-8")
+    match = re.search(r"PREPR_SCRUBBED_CREDENTIAL_VARS=\((.*?)\)", text, re.S)
+    assert match, "the entrypoint declares no credential scrub list at all."
+    return [n for n in match.group(1).split() if n and not n.startswith("#")]
+
+
+def test_the_entrypoint_scrubs_credentials_before_reading_the_operator_env() -> None:
+    """Order is the whole control: an unset after the source achieves nothing.
+
+    Compose resolves an interpolation from the OS environment before the env
+    file, so a login shell exporting a live credential beats the file. The
+    remedy cannot be a default in the file, because the file loses. It has to
+    be an unset, and it has to happen first.
+    """
+    body = _entrypoint_code()
+    assert "PREPR_SCRUBBED_CREDENTIAL_VARS" in body
+    scrub_at = body.index("PREPR_SCRUBBED_CREDENTIAL_VARS")
+    source_at = body.index('source "${OMNIBASE_OPERATOR_ENV_FILE}"')
+    assert scrub_at < source_at, (
+        "the credential scrub runs AFTER the operator env is sourced. In that "
+        "order it removes the file's own values and leaves the shell's, which "
+        "is worse than not scrubbing at all."
+    )
+
+
+def test_every_scrubbed_name_is_one_the_slot_would_actually_inherit() -> None:
+    """The list must not rot into naming variables nothing interpolates.
+
+    A scrub list that names only dead variables passes every test about
+    scrubbing while protecting nothing. Two names are carried deliberately
+    despite a zero count and are excused by name rather than silently: one
+    credential feeds both GitHub spellings, and the other provider is
+    reachable through the same resolver family.
+    """
+    excused = {"GH_TOKEN", "OPENROUTER_API_KEY"}
+    live = [n for n in _scrub_list() if n not in excused]
+    dead = [n for n in live if _interpolation_count(n) == 0]
+    assert not dead, (
+        f"these scrubbed names are interpolated nowhere in the layered compose "
+        f"files: {dead}. Either they are stale and should go, or the files "
+        f"moved and the scrub no longer covers what it was written for."
+    )
+    assert len(live) >= 5, (
+        "the scrub list has shrunk below the set measured for OMN-19076."
+    )
