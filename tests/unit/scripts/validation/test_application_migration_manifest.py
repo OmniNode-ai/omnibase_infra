@@ -783,7 +783,9 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # BIGSERIAL cursor's own standalone sequence, both asserted. The grant
     # rides in the owning node's own lineage, so it is a second declaration
     # here rather than an edit to the first.
-    assert len(result.declarations) == 207
+    # 207 -> 209 for OMN-18987: the append-only 0043z predecessor and the
+    # immutable 0044 delegation-shadow-comparisons restoration migration.
+    assert len(result.declarations) == 209
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

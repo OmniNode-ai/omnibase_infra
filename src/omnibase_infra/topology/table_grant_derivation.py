@@ -272,121 +272,18 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # that caused it. Both regenerations wrote nothing, which is the proof the
     # contracts derive what the entries used to.
     #
+    # OMN-18993 and OMN-18999 added two more, for delegate_skill_command_claims
+    # and prod_promotion_gate_decisions, and both were DELETED here by the pin
+    # advance to 622664a35575, which carries omnimarket#2744 and #2753 -- the
+    # retiring pull requests each entry named in its own comment. The pinned
+    # contract set went from 74 declared relations to 76, and those are the two.
+    # Same mechanism as the three above and the same proof: the expiry module
+    # went red on the bot's pin-advance pull request naming both entries, the
+    # deletion rode that commit, and the regeneration wrote nothing.
+    #
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
-    # OMN-18900: the same infra-first window, for dod_verify_runs -- one
-    # durable row per definition-of-done verification run. This repository
-    # vendors the create and grant migrations (step 2 of the forced
-    # three-part order) BEFORE omnimarket lands the node package that
-    # declares the relation in its contract (step 3), so the shipped topology
-    # instances declare a relation the PINNED contracts cannot derive.
-    #
-    # Regenerating instead of bridging would DELETE that declaration while
-    # the vendored migration still grants it, tripping the OMN-18768 reverse
-    # ratchet and refusing the projection binding at boot. This entry is the
-    # remedy the OMN-18863 failure text names, and it is SELF-EXPIRING: it is
-    # registered in _INTERIM_ENTRIES in
-    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes
-    # red on the pin advance that makes it redundant and says to delete it.
-    #
-    # Retired by: omnimarket#2722 merging and the pin advancing past it.
-    ContractTableDeclaration(
-        node="legacy_migration:dod_verify_runs",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_dod_verdict/"
-            "0000_create_dod_verify_runs.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="dod_verify_runs",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_dod_verdict/"
-                "0000_create_dod_verify_runs.sql"
-            ),
-            access="write",
-            role="dod_verdict",
-        ),
-    ),
-    # OMN-18993 (blocking child of OMN-18887). Same seam, same reason as the
-    # dod_verify_runs entry above: the migration that creates this relation is
-    # vendored in this pull request, but the producing node's db_io declaration
-    # lives on the still-open omnimarket source PR, so the PINNED contracts
-    # root this repo's push-side derivation reads does not declare it yet.
-    # Without this entry the pull request is green on its own trailer-resolved
-    # head and reds dev for every other open pull request on the next push --
-    # the OMN-18863 window, measured twice on 2026-09-19/20.
-    #
-    # The relation is the durable correlation-keyed claim that stops a
-    # redelivered delegate-skill command from re-running the inference and
-    # billing it twice. access is read_write because the claim is a
-    # read-and-decide in one statement: the returned claimed_at is what tells
-    # the node whether it won, so it necessarily reads back what it wrote.
-    # Domain omninode_internal, not tenant -- per-node control state carrying
-    # no row-level security, so a tenant posture would assert an isolation the
-    # schema does not enforce.
-    #
-    # Tracked for expiry in _INTERIM_ENTRIES in
-    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes
-    # red on the pin advance that makes it redundant and says to delete it.
-    #
-    # Retired by: omnimarket#2744 merging and the pin advancing past it.
-    ContractTableDeclaration(
-        node="legacy_migration:delegate_skill_command_claims",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_delegate_skill_orchestrator/"
-            "0001_delegate_skill_command_claims.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegate_skill_command_claims",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_delegate_skill_orchestrator/"
-                "0001_delegate_skill_command_claims.sql"
-            ),
-            access="read_write",
-            role="delegate_skill_claim",
-        ),
-    ),
-    # OMN-18999: the same infra-first window, for
-    # prod_promotion_gate_decisions -- one durable row per prod-promotion-gate
-    # evaluation, carrying the typed refusal code, the authorization grant, the
-    # requested digest and the evaluation time. This repository vendors the
-    # create and grant migrations BEFORE omnimarket lands the node package that
-    # declares the relation in its contract, because omnimarket's
-    # node-migration-vendor-parity-gate refuses a node migration with no
-    # vendored counterpart here. So for one window the shipped topology
-    # instances declare a relation the PINNED contracts cannot derive.
-    #
-    # Regenerating instead of bridging would DELETE that declaration while the
-    # vendored migration still grants it, tripping the OMN-18768 reverse
-    # ratchet and refusing the projection binding at boot. This entry is the
-    # remedy the OMN-18863 failure text names, and it is SELF-EXPIRING: it is
-    # registered in _INTERIM_ENTRIES in
-    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes red
-    # on the pin advance that makes it redundant and says to delete it.
-    #
-    # Retired by: omnimarket#2753 merging and the pin advancing past it.
-    ContractTableDeclaration(
-        node="legacy_migration:prod_promotion_gate_decisions",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_prod_promotion_gate/"
-            "0000_create_prod_promotion_gate_decisions.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="prod_promotion_gate_decisions",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_prod_promotion_gate/"
-                "0000_create_prod_promotion_gate_decisions.sql"
-            ),
-            access="write",
-            role="prod_promotion_gate",
-        ),
-    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
@@ -664,7 +561,7 @@ def derive_topology_table_grants(
     service-database relation is derived against that database's own
     principals rather than being reported as an ``application`` residual. A
     declaration naming a database no instance declares stays a typed residual
-    — routing must never invent a database to make a contract resolvable.
+    -- routing must never invent a database to make a contract resolvable.
     """
     materialized = tuple(declarations)
     by_database_ref: dict[str, list[ContractTableDeclaration]] = {}

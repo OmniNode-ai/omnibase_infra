@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 558
+    max_skips: 560
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -37,6 +37,14 @@ suites:
           node_ids:
             - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_redelivered_hop_is_recorded_once_through_the_real_dispatch
             - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_retried_chain_grades_green_through_the_real_dispatch
+        - measured_at: '2026-09-22'
+          measured_by: OMN-18964
+          delta: 2
+          reason: >-
+            Two more integration proofs in the same OMN-18419 file, for the same reason as the OMN-18916 pair above: a re-routed delegation chain driven through the real ledger projection and chain-writer dispatch, green with its re-route parents projected and red without them. They write event_ledger and ledger_chain, so the main splits have no database and collect them as skips. They are not unexecuted: the integration-guard job runs them against loopback Postgres and fails closed there; both PASSED in run 35782117063.
+          node_ids:
+            - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_reroute_whose_parent_was_never_projected_grades_red
+            - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_rerouted_chain_grades_green_through_the_real_dispatch
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -320,6 +328,8 @@ suites:
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_usage_and_set_are_independent_predicates
       - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_mis_parented_hop_grades_red_and_its_siblings_do_not
       - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_redelivered_hop_is_recorded_once_through_the_real_dispatch
+      - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_reroute_whose_parent_was_never_projected_grades_red
+      - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_rerouted_chain_grades_green_through_the_real_dispatch
       - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_retried_chain_grades_green_through_the_real_dispatch
       - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_declared_tree_grades_green_through_the_real_dispatch
       - tests.integration.nodes.test_gate_binding_conjunct_omn18414.TestTheGuardTranscriptionMatchesTheDeclaration::test_the_two_copies_are_byte_identical
