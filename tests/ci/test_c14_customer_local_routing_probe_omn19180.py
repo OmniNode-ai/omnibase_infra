@@ -472,3 +472,42 @@ def test_the_egress_recorder_sees_private_calls_and_refuses_metered_ones() -> No
         {"method": "GET", "target": target, "private": True},
         {"method": "CONNECT", "target": "8.8.8.8:443", "private": False},
     ]
+
+
+@pytest.mark.unit
+def test_a_failed_receipt_is_read_through_its_terminal_payload() -> None:
+    """A failed run's ladder lives one level down; it must not read as empty."""
+    attempts = [{"tier": "local", "acceptance_decision": "climb"}]
+    failed = {
+        "receipt": {
+            "result": {
+                "workflow_result": "failed",
+                "terminal_payload": {"status": "failed", "attempts": attempts},
+            }
+        }
+    }
+    completed = {"receipt": {"result": {"status": "completed", "attempts": attempts}}}
+    assert probe.receipt_result_of(failed) == {"status": "failed", "attempts": attempts}
+    assert probe.receipt_result_of(completed) == {
+        "status": "completed",
+        "attempts": attempts,
+    }
+    assert probe.receipt_result_of({}) is None
+
+
+@pytest.mark.unit
+def test_a_class_whose_ladder_does_not_start_local_is_red() -> None:
+    """The shape reported for code_review on 2026-09-22 (it proved false there).
+
+    A class that goes straight to a metered rung can never have a local answer
+    end its chain, so row 2 names it even when every backend it names binds.
+    """
+    payload = _green()
+    payload["collection"]["walk"]["code_review"] = payload["collection"]["walk"][
+        "code_review"
+    ][1:]
+    row = _row(_grade(payload), "row2_no_unbindable_tier")
+    assert not row.ok
+    assert any(
+        "code_review" in f and probe.NO_LOCAL_FIRST_RUNG in f for f in row.findings
+    )

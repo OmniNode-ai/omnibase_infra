@@ -109,10 +109,16 @@ PRODUCT_MODULES: Final[tuple[str, ...]] = (
     "omnibase_core",
 )
 
-#: The carrier's own recipe (OMN-16932): a prompt that constrains its answer to
-#: one word, on a class whose rubric used to reject exactly that answer.
-DEFAULT_PROMPT: Final[str] = "Reply with exactly the word: alive"
-DEFAULT_TASK_TYPE: Final[str] = "research"
+#: The prompt the shared customer machine (C13, OMN-19179) measured answering
+#: on its pinned local model, on an explicitly named class. The carrier's own
+#: one-word recipe (OMN-16932, "Reply with exactly the word: alive" on
+#: research) was measured on that model on 2026-09-22 and refused three times
+#: as an empty extraction: a 3B model does not emit the answer marker the
+#: extraction needs. That is the model's limit, not routing's, and a prompt the
+#: machine's model cannot answer would turn row 1 red for a reason that is not
+#: C14's.
+DEFAULT_PROMPT: Final[str] = "explain what a calendar app needs"
+DEFAULT_TASK_TYPE: Final[str] = "document"
 
 LOCAL_TIER: Final[str] = "local"
 
@@ -138,6 +144,7 @@ UNREACHABLE: Final[str] = "unreachable"
 MODEL_NOT_SERVED: Final[str] = "model_not_served"
 TIER_UNDECLARED: Final[str] = "tier_undeclared"
 TIER_SERVES_NOTHING: Final[str] = "tier_serves_class_with_no_backend"
+NO_LOCAL_FIRST_RUNG: Final[str] = "no_local_first_rung"
 
 
 #: The ONLY environment a customer command sees. Everything else the host
@@ -397,6 +404,15 @@ def grade_row2(collection: Mapping[str, Any]) -> RowResult:
             row.ok = False
             row.findings.append(f"{task_class}: resolved an empty tier order")
             continue
+        if tiers[0].get("tier") != LOCAL_TIER:
+            # Row 1's "a good local answer ends the chain" cannot hold for a
+            # class whose ladder does not START on a free local rung: the
+            # first answer it gets is a metered one.
+            row.ok = False
+            row.findings.append(
+                f"{task_class}: [{NO_LOCAL_FIRST_RUNG}] its tier order starts "
+                f"at {tiers[0].get('tier')!r}, so no local answer can end the chain"
+            )
         for tier in tiers:
             tier_name = tier.get("tier")
             if not tier.get("declared", True):
@@ -954,6 +970,22 @@ def _run_collector(
     )
 
 
+def receipt_result_of(receipt: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The delegation terminal a ``receipt.json`` carries, in either shape.
+
+    A completed run's receipt holds the terminal directly under
+    ``receipt.result``; a failed run's holds the workflow envelope there, with
+    the terminal one level down under ``terminal_payload``. Reading only the
+    first shape turns every failed run into "no attempts at all", which hides
+    the ladder that explains the failure.
+    """
+    result = (receipt.get("receipt") or {}).get("result")
+    if not isinstance(result, dict):
+        return None
+    terminal = result.get("terminal_payload")
+    return terminal if isinstance(terminal, dict) else result
+
+
 class _EgressRecorder:
     """A recording forward proxy: the instrument behind every absence claim.
 
@@ -1149,8 +1181,7 @@ def _run_delegation(
     receipt_path = work_dir / ".onex_state" / "runs" / str(run_id) / "receipt.json"
     if run_id and receipt_path.is_file():
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        result = (receipt.get("receipt") or {}).get("result")
-        run["receipt_result"] = result if isinstance(result, dict) else None
+        run["receipt_result"] = receipt_result_of(receipt)
         run["receipt_path"] = str(receipt_path)
     elif isinstance(skill_result, dict):
         terminal = (skill_result.get("result") or {}).get("terminal_payload") or {}
