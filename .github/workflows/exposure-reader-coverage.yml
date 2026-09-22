@@ -107,6 +107,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             src/omnimarket/nodes
+            src/omnimarket/projection
           sparse-checkout-cone-mode: false
 
       - name: Checkout omnidash (sibling — the reader surface)
@@ -155,6 +156,12 @@ jobs:
             || { echo "::error::omnidash src/templates missing from the sibling checkout"; exit 1; }
           test -d omnimarket/src/omnimarket/nodes \
             || { echo "::error::omnimarket contract tree missing from the sibling checkout"; exit 1; }
+          # OMN-18999: a typed `backend_readers` declaration is resolved against the
+          # status page that reads it, so that surface is evidence too. The validator
+          # refuses an unreadable one, but name the cause here for the same reason the
+          # three above are named.
+          test -d omnimarket/src/omnimarket/projection \
+            || { echo "::error::omnimarket projection surface missing from the sibling checkout"; exit 1; }
 
       - name: Run exposure reader-coverage gate
         shell: bash
@@ -164,4 +171,5 @@ jobs:
             src/omnibase_infra/nodes \
             --extra-contracts-dir omnimarket/src/omnimarket/nodes \
             --registry omnidash/src/registry/component-registry.json \
-            --layouts-dir omnidash/src/templates
+            --layouts-dir omnidash/src/templates \
+            --backend-reader-surface omnimarket/src/omnimarket/projection
