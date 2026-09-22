@@ -776,39 +776,15 @@ def test_the_resolver_reads_the_surface_the_judgement_tests_assume(
     assert "/" in resolved.routes
 
 
-def test_the_resolver_reads_the_live_market_surface_when_it_is_checked_out() -> None:
-    """A positive control against the real thing, when a sibling checkout exists.
-
-    An empty or synthetic-only proof is how a resolver that cannot read the live source
-    ships green (CLAUDE.md Operating Rule 16). This is skipped rather than failed off a
-    developer machine, because the sibling checkout is a CI-time fact.
-    """
-    repo_root = Path(__file__).resolve().parents[3]
-    # In CI the sibling is checked out INSIDE the workspace (`path: omnimarket`); on a
-    # developer machine it is a peer clone in the canonical registry. Both are checked
-    # so this control runs in CI rather than silently skipping where it matters most.
-    candidates = [
-        repo_root / "omnimarket" / "src" / "omnimarket" / "projection",
-        repo_root.parent / "omnimarket" / "src" / "omnimarket" / "projection",
-    ]
-    surface = next(
-        (path for path in candidates if (path / "morning_page.py").is_file()), None
-    )
-    if surface is None:
-        pytest.skip(f"no omnimarket checkout at any of {candidates}")
-
-    resolved = collect_backend_reader_surface(surface)
-
-    assert "projection_status_page" in resolved.kinds
-    assert "/" in resolved.routes
-    assert (
-        BackendReaderRegistration(
-            reader_id="onex_status_page",
-            route="/",
-            projection_slot="promotion_gate",
-        )
-        in resolved.registrations
-    )
+# The live Market surface is deliberately NOT probed from this suite. A test that
+# resolves a sibling omnimarket checkout cannot execute in the job that collects it --
+# the unit suite has no sibling checkout -- so it could only ever be a skip, and a test
+# that is collected and never executed proves nothing (OMN-18776). The live proof lives
+# where the checkout actually exists: the `exposure-reader-coverage` job runs this
+# validator against omnimarket `dev` on every pull request, and
+# `tests/integration/validators/test_omn18999_backend_reader_gate_integration.py` runs
+# the same entry point over all four inputs with no skip. Do not re-add a skipping
+# probe here.
 
 
 def test_the_omn18999_declaration_shipped_by_omnimarket_2774_is_accepted(
