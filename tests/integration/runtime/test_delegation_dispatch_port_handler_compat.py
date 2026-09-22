@@ -23,6 +23,7 @@ from omnibase_core.models.dispatch.model_dispatch_bus_command import (
 from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
+from omnibase_infra.errors.error_infra import InfraUnavailableError
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
     ProtocolDelegationDispatchPort,
 )
@@ -47,6 +48,22 @@ def _delegation_route() -> ModelRuntimeLocalIngressRoute:
         ),
         contract_path="/contracts/omnimarket/node_delegation_orchestrator/contract.yaml",
         package_name="omnimarket",
+    )
+
+
+class _AddressedTestBus:
+    """Configured transport identity for wire-shape compatibility coverage."""
+
+    environment = "test"
+    bootstrap_servers = "localhost:9092"
+
+
+def _allow_wire_shape_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Leave bounded-route admission to its dedicated suite for these wire tests."""
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port.resolve_bounded_delegation_route",
+        lambda **_kwargs: None,
     )
 
 
@@ -105,8 +122,9 @@ async def _dispatch_with_captured_command(
         "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
         FakePatternBBroker,
     )
+    _allow_wire_shape_route(monkeypatch)
     port = RuntimeDelegationDispatchPort(
-        event_bus=object(),  # type: ignore[arg-type]
+        event_bus=_AddressedTestBus(),  # type: ignore[arg-type]
         routes={"delegation.orchestrate": route},
     )
     result = await port.dispatch(
@@ -151,6 +169,33 @@ async def test_absent_consumer_features_dispatch_through_runtime_bus(
     request = ModelDelegationRequest.model_validate(command.payload)
     assert request.requested_timeout_seconds == 240
     assert "terminal_delivery_margin_seconds" not in command.payload
+
+
+@pytest.mark.asyncio
+async def test_runtime_bus_without_address_identity_refuses_before_route_selection() -> (
+    None
+):
+    """Wire-shape tests must not hide the configured-transport admission gate."""
+
+    port = RuntimeDelegationDispatchPort(
+        event_bus=object(),  # type: ignore[arg-type]
+        routes={"delegation.orchestrate": _delegation_route()},
+    )
+
+    with pytest.raises(
+        InfraUnavailableError, match="configured broker and environment"
+    ):
+        await port.dispatch(
+            prompt="identity probe",
+            task_type="reasoning",
+            correlation_id=uuid4(),
+            max_tokens=None,
+            source_file_path=None,
+            source_session_id=None,
+            wait=True,
+            execution_timeout_seconds=240,
+            terminal_delivery_margin_seconds=60,
+        )
 
 
 @pytest.mark.asyncio
@@ -218,8 +263,9 @@ async def test_metered_terminal_cost_crosses_the_runtime_consumer_boundary(
         "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
         FakePatternBBroker,
     )
+    _allow_wire_shape_route(monkeypatch)
     port = RuntimeDelegationDispatchPort(
-        event_bus=object(),  # type: ignore[arg-type]
+        event_bus=_AddressedTestBus(),  # type: ignore[arg-type]
         routes={"delegation.orchestrate": route},
     )
 
@@ -275,8 +321,9 @@ async def test_provenance_reaches_the_published_dispatch_payload(
         "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
         FakePatternBBroker,
     )
+    _allow_wire_shape_route(monkeypatch)
     port = RuntimeDelegationDispatchPort(
-        event_bus=object(),  # type: ignore[arg-type]
+        event_bus=_AddressedTestBus(),  # type: ignore[arg-type]
         routes={"delegation.orchestrate": route},
     )
 
@@ -346,8 +393,9 @@ async def test_absent_provenance_leaves_no_key_on_the_dispatch_payload(
         "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
         FakePatternBBroker,
     )
+    _allow_wire_shape_route(monkeypatch)
     port = RuntimeDelegationDispatchPort(
-        event_bus=object(),  # type: ignore[arg-type]
+        event_bus=_AddressedTestBus(),  # type: ignore[arg-type]
         routes={"delegation.orchestrate": route},
     )
 

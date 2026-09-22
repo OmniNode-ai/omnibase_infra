@@ -23,14 +23,21 @@ that venv is exactly what is broken.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -95,12 +102,17 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env=scrub_git_location_env(os.environ),
     ).stdout.strip()
 
 
 def _init_clone(repo: Path) -> str:
     repo.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+    subprocess.run(
+        ["git", "init", "--quiet", str(repo)],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
     _git(repo, "config", "user.email", "t@example.invalid")
     _git(repo, "config", "user.name", "t")
     (repo / "README.md").write_text("x\n", encoding="utf-8")
@@ -335,6 +347,596 @@ def test_floor_refuses_a_hyphenated_distribution_key(
             distributions={"omnibase-infra": "0.38.16"},
             omnimarket_commit="aaaa",
         )
+
+
+# --------------------------------------------------------------------------- #
+# Pinned candidate source provenance -- OMN-18929
+# --------------------------------------------------------------------------- #
+def _candidate_root(tmp_path: Path) -> tuple[Path, list[str]]:
+    root = tmp_path / "candidate"
+    names = ["omnibase_infra", "omnibase_core"]
+    for name in names:
+        _init_clone(root / name)
+    return root, names
+
+
+def test_candidate_manifest_proves_exact_clean_source_set(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-source.json"
+
+    vm.write_candidate_source_manifest(
+        output=manifest, omni_home=root, repositories=names
+    )
+    proof = vm.verify_candidate_source_manifest(
+        manifest=manifest, omni_home=root, repositories=names
+    )
+
+    assert proof["manifest"] == str(manifest)
+    assert len(proof["sha256"]) == 64
+
+
+def test_candidate_manifest_rejects_changed_or_dirty_source(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-source.json"
+    vm.write_candidate_source_manifest(
+        output=manifest, omni_home=root, repositories=names
+    )
+
+    (root / "omnibase_core" / "README.md").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="dirty"):
+        vm.verify_candidate_source_manifest(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+    _git(root / "omnibase_core", "add", "README.md")
+    _git(root / "omnibase_core", "commit", "-m", "different source")
+    with pytest.raises(ValueError, match="no longer matches"):
+        vm.verify_candidate_source_manifest(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+
+def test_candidate_manifest_rejects_missing_extra_or_escaped_repository(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-source.json"
+    vm.write_candidate_source_manifest(
+        output=manifest, omni_home=root, repositories=names
+    )
+
+    with pytest.raises(ValueError, match="repository set differs"):
+        vm.verify_candidate_source_manifest(
+            manifest=manifest, omni_home=root, repositories=[*names, "omnimarket"]
+        )
+    with pytest.raises(ValueError, match="invalid"):
+        vm.write_candidate_source_manifest(
+            output=manifest, omni_home=root, repositories=["../outside"]
+        )
+
+
+def test_candidate_content_snapshot_attests_dirty_tracked_and_untracked_bytes(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-content-snapshot.json"
+    tracked = root / "omnibase_core" / "README.md"
+    tracked.write_text("tracked mutation\n", encoding="utf-8")
+    untracked = root / "omnibase_core" / "candidate-input.json"
+    untracked.write_text('{"exact": true}\n', encoding="utf-8")
+    untracked.chmod(0o755)
+
+    vm.write_candidate_content_snapshot(
+        output=manifest, omni_home=root, repositories=names
+    )
+    proof = vm.verify_candidate_content_snapshot(
+        manifest=manifest, omni_home=root, repositories=names
+    )
+    assert len(proof["sha256"]) == 64
+
+    untracked.write_text('{"exact": false}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+    untracked.unlink()
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+
+def test_stage_digest_prunes_only_stage_exclusions_and_keeps_included_bytes(
+    vm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    repo = root / "omnibase_core"
+    (repo / ".gitignore").write_text(
+        ".venv/\n**/__pycache__/\n*.egg-info/\n", encoding="utf-8"
+    )
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "--quiet", "-m", "ignore generated stage exclusions")
+
+    excluded_payloads = [
+        repo / ".venv" / "lib" / "ignored.bin",
+        repo / "src" / "package" / "__pycache__" / "ignored.pyc",
+        repo / "src" / "package.egg-info" / "ignored.txt",
+    ]
+    for path in excluded_payloads:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("before", encoding="utf-8")
+    _git(
+        repo,
+        "check-ignore",
+        *[str(path.relative_to(repo)) for path in excluded_payloads],
+    )
+
+    scanned: list[Path] = []
+    original_scandir = vm.os.scandir
+
+    def record_scandir(path: str | os.PathLike[str]) -> object:
+        scanned_path = Path(path)
+        scanned.append(scanned_path)
+        return original_scandir(path)
+
+    manifest = root / ".onex-candidate-content-snapshot.json"
+    vm.write_candidate_content_snapshot(
+        output=manifest, omni_home=root, repositories=names
+    )
+    baseline_stage_digest = vm._workspace_stage_tree_sha256(repo)
+    excluded_payloads[0].write_text("after-v2", encoding="utf-8")
+    excluded_payloads[1].write_text("after-v2", encoding="utf-8")
+    excluded_payloads[2].write_text("after-v2", encoding="utf-8")
+
+    with monkeypatch.context() as context:
+        context.setattr(vm.os, "scandir", record_scandir)
+        excluded_stage_digest = vm._workspace_stage_tree_sha256(repo)
+    assert excluded_stage_digest == baseline_stage_digest
+    excluded_names = {".git", ".venv", "__pycache__"}
+    assert not any(
+        excluded_names.intersection(path.parts)
+        or any(part.endswith((".pyc", ".egg-info")) for part in path.parts)
+        for path in scanned
+    )
+    assert vm.verify_candidate_content_snapshot(
+        manifest=manifest, omni_home=root, repositories=names
+    )["sha256"]
+
+    included = repo / "README.md"
+    included.write_text("included mutation\n", encoding="utf-8")
+    assert vm._workspace_stage_tree_sha256(repo) != baseline_stage_digest
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+
+def test_candidate_content_snapshot_rejects_untracked_mode_change(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-content-snapshot.json"
+    untracked = root / "omnibase_core" / "candidate-launcher.sh"
+    untracked.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    untracked.chmod(0o644)
+
+    vm.write_candidate_content_snapshot(
+        output=manifest, omni_home=root, repositories=names
+    )
+    untracked.chmod(0o755)
+
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+
+def test_candidate_content_snapshot_rejects_tracked_mode_change(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-content-snapshot.json"
+    tracked = root / "omnibase_core" / "README.md"
+    tracked.chmod(0o644)
+
+    vm.write_candidate_content_snapshot(
+        output=manifest, omni_home=root, repositories=names
+    )
+    tracked.chmod(0o755)
+
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+
+def test_candidate_content_snapshot_attests_relative_internal_symlink(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    repo = root / "omnibase_core"
+    hook_dir = repo / "scripts" / "git-hooks"
+    hook_dir.mkdir(parents=True)
+    (repo / "scripts" / "canonical_clone_guard.sh").write_text(
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8"
+    )
+    (repo / "scripts" / "alternate_guard.sh").write_text(
+        "#!/usr/bin/env bash\nexit 1\n", encoding="utf-8"
+    )
+    hook = hook_dir / "pre-commit"
+    hook.symlink_to("../canonical_clone_guard.sh")
+    _git(
+        repo,
+        "add",
+        "scripts/canonical_clone_guard.sh",
+        "scripts/alternate_guard.sh",
+        "scripts/git-hooks/pre-commit",
+    )
+    manifest = root / ".onex-candidate-content-snapshot.json"
+
+    vm.write_candidate_content_snapshot(
+        output=manifest, omni_home=root, repositories=names
+    )
+    vm.verify_candidate_content_snapshot(
+        manifest=manifest, omni_home=root, repositories=names
+    )
+
+    hook.unlink()
+    hook.symlink_to("../alternate_guard.sh")
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+
+
+def test_candidate_content_snapshot_rejects_absolute_internal_symlink(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    repo = root / "omnibase_core"
+    hook_dir = repo / "scripts" / "git-hooks"
+    hook_dir.mkdir(parents=True)
+    target = repo / "scripts" / "canonical_clone_guard.sh"
+    target.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    hook = hook_dir / "pre-commit"
+    hook.symlink_to(target.resolve())
+    _git(
+        repo, "add", "scripts/canonical_clone_guard.sh", "scripts/git-hooks/pre-commit"
+    )
+
+    with pytest.raises(ValueError, match="absolute staged symlink"):
+        vm.write_candidate_content_snapshot(
+            output=root / ".onex-candidate-content-snapshot.json",
+            omni_home=root,
+            repositories=names,
+        )
+
+
+def test_candidate_content_snapshot_rejects_escaping_symlink(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    repo = root / "omnibase_core"
+    hook_dir = repo / "scripts" / "git-hooks"
+    hook_dir.mkdir(parents=True)
+    (root / "outside.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    hook = hook_dir / "pre-commit"
+    hook.symlink_to("../../../outside.sh")
+    _git(repo, "add", "scripts/git-hooks/pre-commit")
+
+    with pytest.raises(ValueError, match="escapes clone"):
+        vm.write_candidate_content_snapshot(
+            output=root / ".onex-candidate-content-snapshot.json",
+            omni_home=root,
+            repositories=names,
+        )
+
+
+@pytest.mark.parametrize("link_kind", ["dangling", "cyclic"])
+def test_candidate_content_snapshot_rejects_dangling_or_cyclic_symlink(
+    vm: ModuleType, tmp_path: Path, link_kind: str
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    hook_dir = root / "omnibase_core" / "scripts" / "git-hooks"
+    hook_dir.mkdir(parents=True)
+    first = hook_dir / "pre-commit"
+    if link_kind == "dangling":
+        first.symlink_to("missing-target.sh")
+        _git(root / "omnibase_core", "add", "scripts/git-hooks/pre-commit")
+    else:
+        second = hook_dir / "pre-merge-commit"
+        first.symlink_to("pre-merge-commit")
+        second.symlink_to("pre-commit")
+        _git(
+            root / "omnibase_core",
+            "add",
+            "scripts/git-hooks/pre-commit",
+            "scripts/git-hooks/pre-merge-commit",
+        )
+
+    with pytest.raises(ValueError, match="dangling or cyclic staged symlink"):
+        vm.write_candidate_content_snapshot(
+            output=root / ".onex-candidate-content-snapshot.json",
+            omni_home=root,
+            repositories=names,
+        )
+
+
+def test_candidate_content_snapshot_rejects_added_or_tampered_bytes(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    manifest = root / ".onex-candidate-content-snapshot.json"
+    vm.write_candidate_content_snapshot(
+        output=manifest, omni_home=root, repositories=names
+    )
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    (root / "omnibase_core" / "new-source.py").write_text(
+        "value = 1\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+    (root / "omnibase_core" / "new-source.py").unlink()
+    tracked = root / "omnibase_core" / "README.md"
+    tracked.unlink()
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+    tracked.write_text("x\n", encoding="utf-8")
+    ignored = root / "omnibase_core" / "generated-build-input.txt"
+    (root / "omnibase_core" / ".gitignore").write_text(
+        "generated-build-input.txt\n", encoding="utf-8"
+    )
+    ignored.write_text("included by workspace staging\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="bytes no longer match"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest, omni_home=root, repositories=names
+        )
+    ignored.unlink()
+    (root / "omnibase_core" / ".gitignore").unlink()
+    manifest.write_bytes(manifest.read_bytes() + b" ")
+    with pytest.raises(ValueError, match="digest differs"):
+        vm.verify_candidate_content_snapshot(
+            manifest=manifest,
+            omni_home=root,
+            repositories=names,
+            expected_sha256=digest,
+        )
+
+
+def test_content_snapshot_floor_verifies_only_the_attested_dirty_bytes(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    root, names = _candidate_root(tmp_path)
+    core = root / "omnibase_core"
+    (core / "README.md").write_text("attested dirty bytes\n", encoding="utf-8")
+    source_package = core / "src" / "omnibase_core"
+    source_package.mkdir(parents=True)
+    (source_package / "__init__.py").write_text(
+        "VALUE = 'attested'\n", encoding="utf-8"
+    )
+    site_packages = tmp_path / "candidate-site"
+    shutil.copytree(source_package, site_packages / "omnibase_core")
+    runner = tmp_path / "candidate-python"
+    runner.write_text(
+        "#!/usr/bin/env bash\n"
+        f"export PYTHONPATH={site_packages}\n"
+        f'exec {sys.executable} "$@"\n',
+        encoding="utf-8",
+    )
+    runner.chmod(0o755)
+    manifest = root / ".onex-candidate-content-snapshot.json"
+    vm.write_candidate_content_snapshot(
+        output=manifest, omni_home=root, repositories=names
+    )
+    proof = vm.verify_candidate_content_snapshot(
+        manifest=manifest, omni_home=root, repositories=names
+    )
+    installations = vm.capture_candidate_content_installation(
+        manifest=manifest,
+        omni_home=root,
+        repositories=names,
+        bindings=[f"omnibase_core:src/omnibase_core:omnibase_core:{runner}"],
+    )
+    vm.write_floor(
+        output=root / ".onex-workspace-floor.json",
+        omni_home=root,
+        distributions={},
+        omnimarket_commit=_git(core, "rev-parse", "HEAD"),
+        candidate_content_snapshot={**proof, "installations": installations},
+    )
+    proc = subprocess.run(
+        [
+            "python3",
+            str(_MODULE_PATH),
+            "candidate-floor-verify",
+            "--floor",
+            str(root / ".onex-workspace-floor.json"),
+            "--omni-home",
+            str(root),
+            "--required-mode",
+            "content",
+            *[item for name in names for item in ("--repo", name)],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    floor = root / ".onex-workspace-floor.json"
+    document = json.loads(floor.read_text(encoding="utf-8"))
+    document.pop("candidate_content_snapshot")
+    floor.write_text(json.dumps(document), encoding="utf-8")
+    stripped = subprocess.run(
+        [
+            "python3",
+            str(_MODULE_PATH),
+            "candidate-floor-verify",
+            "--floor",
+            str(floor),
+            "--omni-home",
+            str(root),
+            "--required-mode",
+            "content",
+            *[item for name in names for item in ("--repo", name)],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert stripped.returncode != 0
+    document["candidate_content_snapshot"] = proof
+    floor.write_text(json.dumps(document), encoding="utf-8")
+    (core / "README.md").write_text("not attested\n", encoding="utf-8")
+    refused = subprocess.run(
+        [
+            "python3",
+            str(_MODULE_PATH),
+            "candidate-floor-verify",
+            "--floor",
+            str(root / ".onex-workspace-floor.json"),
+            "--omni-home",
+            str(root),
+            "--required-mode",
+            "content",
+            *[item for name in names for item in ("--repo", name)],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert refused.returncode != 0
+
+
+def test_content_snapshot_floor_binds_candidate_interpreter_package_bytes(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    """A matching base commit is insufficient when installed package bytes drift."""
+    root, names = _candidate_root(tmp_path)
+    source_package = root / "omnibase_core" / "src" / "omnibase_core"
+    source_package.mkdir(parents=True)
+    (source_package / "__init__.py").write_text(
+        "VALUE = 'attested'\n", encoding="utf-8"
+    )
+    site_packages = tmp_path / "candidate-site"
+    installed_package = site_packages / "omnibase_core"
+    shutil.copytree(source_package, installed_package)
+    runner = tmp_path / "candidate-python"
+    runner.write_text(
+        "#!/usr/bin/env bash\n"
+        f"export PYTHONPATH={site_packages}\n"
+        f'exec {sys.executable} "$@"\n',
+        encoding="utf-8",
+    )
+    runner.chmod(0o755)
+    manifest = root / ".onex-candidate-content-snapshot.json"
+    vm.write_candidate_content_snapshot(
+        output=manifest, omni_home=root, repositories=names
+    )
+    proof = vm.verify_candidate_content_snapshot(
+        manifest=manifest, omni_home=root, repositories=names
+    )
+    binding = f"omnibase_core:src/omnibase_core:omnibase_core:{runner}"
+    installations = vm.capture_candidate_content_installation(
+        manifest=manifest, omni_home=root, repositories=names, bindings=[binding]
+    )
+    vm.write_floor(
+        output=root / ".onex-workspace-floor.json",
+        omni_home=root,
+        distributions={},
+        omnimarket_commit=_git(root / "omnibase_core", "rev-parse", "HEAD"),
+        candidate_content_snapshot={**proof, "installations": installations},
+    )
+    verified = subprocess.run(
+        [
+            "python3",
+            str(_MODULE_PATH),
+            "candidate-floor-verify",
+            "--floor",
+            str(root / ".onex-workspace-floor.json"),
+            "--omni-home",
+            str(root),
+            "--required-mode",
+            "content",
+            *[item for name in names for item in ("--repo", name)],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert verified.returncode == 0, verified.stderr
+
+    (installed_package / "__init__.py").write_text(
+        "VALUE = 'stale'\n", encoding="utf-8"
+    )
+    refused = subprocess.run(
+        [
+            "python3",
+            str(_MODULE_PATH),
+            "candidate-floor-verify",
+            "--floor",
+            str(root / ".onex-workspace-floor.json"),
+            "--omni-home",
+            str(root),
+            "--required-mode",
+            "content",
+            *[item for name in names for item in ("--repo", name)],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert refused.returncode != 0
+    assert "bytes differ" in refused.stderr
+
+
+def test_content_binding_preserves_candidate_venv_python_symlink(
+    vm: ModuleType, tmp_path: Path
+) -> None:
+    """A venv interpreter symlink must not be normalized to its base Python."""
+    root, names = _candidate_root(tmp_path)
+    source_package = root / "omnibase_core" / "src" / "omnibase_core"
+    source_package.mkdir(parents=True)
+    (source_package / "__init__.py").write_text(
+        "VALUE = 'candidate-source'\n", encoding="utf-8"
+    )
+    site_packages = tmp_path / "candidate-site"
+    shutil.copytree(source_package, site_packages / "omnibase_core")
+
+    target_python = tmp_path / "base-python-shim"
+    invocation_record = tmp_path / "invoked-python-path.txt"
+    target_python.write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s' \"$0\" > {invocation_record}\n"
+        f"export PYTHONPATH={site_packages}\n"
+        f'exec {sys.executable} "$@"\n',
+        encoding="utf-8",
+    )
+    target_python.chmod(0o755)
+    candidate_python = tmp_path / "dispatch-venv" / "bin" / "python"
+    candidate_python.parent.mkdir(parents=True)
+    candidate_python.symlink_to(target_python)
+
+    manifest = root / ".onex-candidate-content-snapshot.json"
+    vm.write_candidate_content_snapshot(
+        output=manifest, omni_home=root, repositories=names
+    )
+    vm.capture_candidate_content_installation(
+        manifest=manifest,
+        omni_home=root,
+        repositories=names,
+        bindings=[f"omnibase_core:src/omnibase_core:omnibase_core:{candidate_python}"],
+    )
+
+    assert invocation_record.read_text(encoding="utf-8") == str(candidate_python)
 
 
 # --------------------------------------------------------------------------- #

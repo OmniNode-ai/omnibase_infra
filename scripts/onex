@@ -168,6 +168,21 @@ ENTRYPOINT="$DISPATCH_VENV/bin/onex"
 RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
 HOST_RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-host.sh"
 FLOOR_FILE="$OMNI_HOME/.onex-workspace-floor.json"
+# Candidate source verification belongs to this wrapper's reconciler revision,
+# not to the candidate tree it is proving. This mirrors the wrapper's existing
+# self-location rule and permits a reviewed reconciler revision to prove an
+# immutable older candidate without copying tooling into that candidate.
+FLOOR_VERIFIER="$SCRIPT_DIR/reconcile_verify_movement.py"
+SIBLING_MANIFEST="$SCRIPT_DIR/runtime_build/sibling_clone_manifest.sh"
+# A governed caller chooses its candidate proof mode explicitly.  Inspecting a
+# JSON line for a key made a content floor silently ordinary if that key was
+# removed; that is not an authorization decision.  Empty remains the normal
+# canonical path.  Candidate launchers set this to clean or content.
+CANDIDATE_PROVENANCE_MODE="${ONEX_CANDIDATE_PROVENANCE_MODE:-}"
+case "$CANDIDATE_PROVENANCE_MODE" in
+  ""|clean|content) ;;
+  *) _say "REFUSED: ONEX_CANDIDATE_PROVENANCE_MODE must be clean or content when set"; exit "$EXIT_BELOW_FLOOR" ;;
+esac
 
 # --------------------------------------------------------------------------- #
 # Shadow warning
@@ -223,6 +238,34 @@ _is_evidence_invocation() {
   return 1
 }
 
+_candidate_floor_verdict() {
+  [[ -n "$CANDIDATE_PROVENANCE_MODE" ]] || { printf 'OK'; return 0; }
+  [[ -f "$FLOOR_VERIFIER" ]] || {
+    printf 'UNKNOWN:candidate floor verifier missing at %s' "$FLOOR_VERIFIER"
+    return 0
+  }
+  [[ -f "$SIBLING_MANIFEST" ]] || {
+    printf 'UNKNOWN:candidate sibling manifest missing at %s' "$SIBLING_MANIFEST"
+    return 0
+  }
+  local python_bin output repo
+  python_bin="$(command -v python3 2>/dev/null || true)"
+  [[ -n "$python_bin" ]] || { printf 'UNKNOWN:python3 is required to verify a candidate source floor'; return 0; }
+  # shellcheck source=./runtime_build/sibling_clone_manifest.sh
+  source "$SIBLING_MANIFEST"
+  local -a repo_args=()
+  for repo in "${SIBLING_CLONE_MANIFEST[@]}"; do
+    repo_args+=(--repo "$repo")
+  done
+  if ! output="$("$python_bin" "$FLOOR_VERIFIER" candidate-floor-verify \
+      --floor "$FLOOR_FILE" --omni-home "$OMNI_HOME" \
+      --required-mode "$CANDIDATE_PROVENANCE_MODE" "${repo_args[@]}" 2>&1)"; then
+    printf 'UNKNOWN:candidate source no longer matches the proven floor: %s' "$output"
+    return 0
+  fi
+  printf 'OK'
+}
+
 # Echoes one of: OK | BELOW:<detail> | UNKNOWN:<reason>
 #
 # Every observation below uses shell builtins; the single `awk` at the end is the
@@ -262,7 +305,8 @@ _floor_verdict() {
     break
   done
 
-  printf '%s\n' "${dist_names[@]}" | awk -v installed_commit="$installed_commit" '
+  local base_verdict
+  base_verdict="$(printf '%s\n' "${dist_names[@]}" | awk -v installed_commit="$installed_commit" '
     function trim(s) { gsub(/^[ \t\r]+|[ \t\r]+$/, "", s); return s }
     function unquote(s) { gsub(/["|,]/, "", s); return trim(s) }
     # Component-wise version compare. Numeric where both sides are numeric,
@@ -332,7 +376,9 @@ _floor_verdict() {
       }
       printf "OK"
     }
-  ' "$FLOOR_FILE" -
+  ' "$FLOOR_FILE" -)"
+  [[ "$base_verdict" == "OK" ]] || { printf '%s' "$base_verdict"; return 0; }
+  _candidate_floor_verdict
 }
 
 _enforce_floor() {

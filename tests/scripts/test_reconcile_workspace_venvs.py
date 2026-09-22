@@ -39,6 +39,7 @@ That is OMN-16366 (reversed drift), and it is asserted here directly.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -236,6 +237,19 @@ def _make_uv_shim(
     )
     uv.chmod(0o755)
     return uv
+
+
+def _make_content_verifier(infra: Path, *, exit_code: int = 0) -> Path:
+    """Stub only the source-manifest check for delegate shell-order tests."""
+    verifier = infra / "scripts" / "reconcile_verify_movement.py"
+    verifier.write_text(
+        "import sys\n"
+        "if len(sys.argv) < 2 or sys.argv[1] != 'candidate-content-verify':\n"
+        "    raise SystemExit(91)\n"
+        f"raise SystemExit({exit_code})\n",
+        encoding="utf-8",
+    )
+    return verifier
 
 
 def _make_install_shim(path: Path, *, exit_code: int = 0) -> Path:
@@ -478,6 +492,145 @@ def test_check_reports_drift_when_venv_is_behind_the_clone(ws: _Workspace) -> No
 def test_check_is_clean_immediately_after_a_reconcile(ws: _Workspace) -> None:
     assert ws.run().returncode == _EXIT_OK
     assert ws.run("--check").returncode == _EXIT_OK
+
+
+def test_reconcile_accepts_omnimarket_worktree_at_the_declared_clone_root(
+    ws: _Workspace,
+) -> None:
+    """A governed candidate may be a Git worktree, whose .git is a file."""
+    primary = ws.root.parent / "omnimarket-primary"
+    ws.omnimarket.rename(primary)
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", str(ws.root / "omnimarket")],
+        cwd=primary,
+        check=True,
+        env=scrub_git_location_env(),
+    )
+    ws.omnimarket = ws.root / "omnimarket"
+    ws.market_head = _git("rev-parse", "HEAD", cwd=ws.omnimarket)
+    ws.set_installed_commit(ws.market_head)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+
+
+def test_reconcile_refuses_a_non_repository_at_the_declared_clone_root(
+    ws: _Workspace,
+) -> None:
+    shutil.rmtree(ws.omnimarket)
+    ws.omnimarket.mkdir()
+    (ws.omnimarket / ".git").write_text("not a git dir\n", encoding="utf-8")
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_INDETERMINATE
+    assert "no canonical omnimarket clone" in result.stdout + result.stderr
+
+
+def test_reconcile_refuses_a_subdirectory_of_an_omnimarket_repository(
+    ws: _Workspace,
+) -> None:
+    parent_repo = ws.root / "omnimarket-parent"
+    ws.omnimarket.rename(parent_repo)
+    nested_clone = parent_repo / "nested-clone"
+    nested_clone.mkdir()
+    ws.omnimarket = ws.root / "omnimarket"
+    ws.omnimarket.symlink_to(nested_clone, target_is_directory=True)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_INDETERMINATE
+    assert "no canonical omnimarket clone" in result.stdout + result.stderr
+
+
+def test_content_candidate_force_composes_core_and_market_after_lock(
+    ws: _Workspace,
+) -> None:
+    """Content mode explicitly replaces released package bytes in the target."""
+    core_source = ws.root / "omnibase_core"
+    market_source = ws.root / "omnimarket"
+    for path in (core_source, market_source):
+        path.mkdir(parents=True, exist_ok=True)
+    stale_marker = ws.dispatch_venv / "lib" / "python3.13" / "site-packages"
+    stale_marker.mkdir(parents=True)
+    (stale_marker / "stale-core-release.marker").write_text("0.47.18\n")
+    ws.set_installed_commit("0" * _SHA_LEN)
+    _make_content_verifier(ws.infra)
+    manifest = ws.root / "candidate-content.json"
+    manifest.write_text("{}\n", encoding="utf-8")
+    env = ws.env()
+    env["ONEX_CANDIDATE_CONTENT_MANIFEST"] = str(manifest)
+    env["ONEX_CANDIDATE_CONTENT_MANIFEST_SHA256"] = "a" * 64
+
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    ordered = ws.ordered_calls()
+    install_index = next(
+        index
+        for index, (kind, call) in enumerate(ordered)
+        if kind == "uv" and "pip install" in call and "--reinstall-package" in call
+    )
+    install_call = ordered[install_index][1]
+    assert "--reinstall-package omnibase-infra" in install_call
+    assert "--reinstall-package omnibase-core" in install_call
+    assert "--reinstall-package omnimarket" in install_call
+    assert "--no-deps" not in install_call
+    assert f"--python {ws.dispatch_venv}/bin/python" in install_call
+    assert str(ws.infra) in install_call
+    assert str(core_source) in install_call
+    assert str(market_source) in install_call
+    assert install_index > next(
+        index
+        for index, (kind, call) in enumerate(ordered)
+        if kind == "uv" and "sync --frozen --inexact" in call
+    )
+    assert any(
+        kind == "uv" and "pip check" in call
+        for kind, call in ordered[install_index + 1 :]
+    )
+    assert stale_marker.joinpath("stale-core-release.marker").read_text() == "0.47.18\n"
+
+
+def test_content_candidate_refuses_stale_source_before_pair_install(
+    ws: _Workspace,
+) -> None:
+    _make_content_verifier(ws.infra, exit_code=1)
+    manifest = ws.root / "candidate-content.json"
+    manifest.write_text("{}\n", encoding="utf-8")
+    env = ws.env()
+    env["ONEX_CANDIDATE_CONTENT_MANIFEST"] = str(manifest)
+    env["ONEX_CANDIDATE_CONTENT_MANIFEST_SHA256"] = "a" * 64
+
+    result = subprocess.run(
+        ["bash", str(_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == _EXIT_FAILED
+    assert "source no longer matches" in result.stdout + result.stderr
+    assert not any("pip install" in call for call in ws.uv_calls())
+    assert not any("pip check" in call for call in ws.uv_calls())
+
+
+def test_ordinary_reconcile_does_not_force_install_candidate_sources(
+    ws: _Workspace,
+) -> None:
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert not any("pip install" in call for call in ws.uv_calls())
+    assert not any("pip check" in call for call in ws.uv_calls())
 
 
 # --------------------------------------------------------------------------- #

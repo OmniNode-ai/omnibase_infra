@@ -742,8 +742,16 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # completion time, and 0001_grant_omninode_runtime_dod_verify_runs.sql,
     # which ISSUES the grants the topology only declares -- the table half and
     # the BIGSERIAL cursor's own standalone sequence, both asserted.
+    # 202 -> 204 after two additive node-owned declarations:
+    # OMN-19031 adds the consumer-flow index and OMN-18693 restores the
+    # immutable delegation 0044 declaration. Both source files are required.
     #
-    # 202 -> 203 for OMN-19031, which adds ONE node-owned migration:
+    # 204 -> 208 for the exact OMN-18987 Market source 52f0ddd4: the
+    # delegate-skill command-claim and prod-promotion gate node streams each
+    # contribute their create and runtime-grant migration. The four vendored
+    # bytes are checksum-bound here before the forward runner can apply them.
+    #
+    # OMN-19031 adds node_projection_consumer_flow/0005_add_node_id_ingest_index.sql.
     # node_projection_consumer_flow/0005_add_node_id_ingest_index.sql. It
     # indexes (node_id, ingest_sequence DESC) on
     # omninode_internal.consumer_flow_windows, the predicate
@@ -756,7 +764,11 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 0002_reconcile_consumer_flow_window_shapes.sql is the one that does
     # ADD COLUMN IF NOT EXISTS node_id UUID -- files apply in sort order, so a
     # 0002 index would sort before the reconcile that guarantees its column.
-    assert len(result.declarations) == 203
+    # OMN-18693 restores the already-applied 0044 delegation
+    # shadow-comparison migration with the exact content checksum recorded by
+    # the lane.  This restores a missing source declaration; it does not alter
+    # any historical migration bytes or ledger row.
+    assert len(result.declarations) == 208
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

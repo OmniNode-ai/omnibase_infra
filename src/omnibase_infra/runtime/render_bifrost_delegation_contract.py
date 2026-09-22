@@ -26,6 +26,9 @@ from omnibase_infra.runtime.config_provenance import (
     build_config_provenance,
     write_provenance_sidecar,
 )
+from omnibase_infra.runtime.dogfood_delegation_fault_routes import (
+    load_dogfood_delegation_fault_routes,
+)
 from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
@@ -198,6 +201,41 @@ def _is_local_backend(backend_id: str, backend: dict[object, object]) -> bool:
     return backend.get("tier") == _LOCAL_TIER or backend_id in ACTIVE_BACKEND_KEYS
 
 
+def _append_dogfood_fault_backends(
+    base: dict[str, object], *, overlay: ModelBifrostLaneOverlay
+) -> None:
+    """Materialize dogfood fault routes from their single packaged authority.
+
+    The ci bus-lane resource owns fault endpoint, status, and one-hop policy.
+    The dogfood Bifrost overlay chooses the lane; it never repeats those values.
+    These backends exist only in the rendered dogfood artifact, not the shipped
+    normal/prod Bifrost contract.
+    """
+    if overlay.lane != "dogfood":
+        return
+    backends = base.get("backends")
+    if not isinstance(backends, list):
+        raise ProtocolConfigurationError("Bifrost base contract must declare backends")
+    existing = _index_base_backends(base)
+    for route in load_dogfood_delegation_fault_routes():
+        if route.backend_id in existing:
+            raise ProtocolConfigurationError(
+                f"dogfood fault route {route.backend_id!r} collides with a base backend"
+            )
+        backends.append(
+            {
+                "backend_id": route.backend_id,
+                "provider": "dogfood_fault",
+                "endpoint_url": route.endpoint_url,
+                "model_name": route.backend_id,
+                "tier": "dogfood_fault",
+                "timeout_ms": route.requested_timeout_seconds * 1000,
+                "max_tokens": 1,
+                "capabilities": [],
+            }
+        )
+
+
 def _disable_local_backends(by_id: dict[str, dict[object, object]]) -> None:
     """Write a cloud lane's absent local rungs into the artifact (OMN-17502).
 
@@ -221,6 +259,7 @@ def _merge_lane_overlay(
     verify: bool,
     endpoint_probe: EndpointProbe,
 ) -> dict[str, object]:
+    _append_dogfood_fault_backends(base, overlay=overlay)
     by_id = _index_base_backends(base)
 
     if overlay.locale is EnumBifrostLaneLocale.CLOUD:

@@ -177,6 +177,16 @@ DRIFT_OVERRIDE_ENV = "ONEX_ALLOW_OMNIMARKET_DRIFT"
 # Local `git rev-parse HEAD` only -- this never touches the network, so a
 # generous timeout still keeps the hot path fast.
 _GIT_TIMEOUT_SECONDS = 2
+# Content floors hash every attested source and installed package tree.  That
+# is intentionally bounded, but it is not a local Git metadata probe.
+_CONTENT_FLOOR_VERIFY_TIMEOUT_SECONDS = 30
+_CANDIDATE_FLOOR_FILENAME = ".onex-workspace-floor.json"
+_CANDIDATE_VERIFIER_RELATIVE_PATH = Path(
+    "omnibase_infra/scripts/reconcile_verify_movement.py"
+)
+_CANDIDATE_SIBLING_MANIFEST_RELATIVE_PATH = Path(
+    "omnibase_infra/scripts/runtime_build/sibling_clone_manifest.sh"
+)
 
 
 @dataclass(frozen=True)
@@ -225,6 +235,99 @@ def _diagnostic_error(exc: BaseException) -> str:
 
 class OmnimarketDriftError(RuntimeError):
     """Raised when the installed omnimarket commit diverges from canonical."""
+
+
+def _verified_detached_candidate_source(
+    *, omni_home: Path, installed_commit: str | None
+) -> bool:
+    """Return whether a detached candidate is bound to this installed market build.
+
+    A detached clone normally cannot establish moving-branch provenance.  A
+    pinned candidate is the narrow exception: its floor binds one exact source
+    manifest, and the shared stdlib verifier proves that every governed clone
+    remains clean at the declared commit.  The verifier also compares the
+    floor and manifest market commits to the current interpreter's installed
+    market build.  This is provenance, not a drift override.
+    """
+    if installed_commit is None:
+        return False
+    floor = omni_home / _CANDIDATE_FLOOR_FILENAME
+    verifier = omni_home / _CANDIDATE_VERIFIER_RELATIVE_PATH
+    sibling_manifest = omni_home / _CANDIDATE_SIBLING_MANIFEST_RELATIVE_PATH
+    if not (floor.is_file() and verifier.is_file() and sibling_manifest.is_file()):
+        return False
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(verifier),
+                "candidate-floor-verify",
+                "--floor",
+                str(floor),
+                "--omni-home",
+                str(omni_home),
+                "--sibling-manifest",
+                str(sibling_manifest),
+                "--expected-omnimarket-commit",
+                installed_commit,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def verify_content_candidate_floor(*, omni_home: Path) -> None:
+    """Prove the content-attested candidate that a delegate command will use.
+
+    A content candidate deliberately does not carry the normal Git
+    ``direct_url.json`` commit that the ordinary drift guard compares.  It is
+    not an override: its floor binds the complete source snapshot and the
+    actual imports in this interpreter.  Re-running the ordinary reconciler
+    here would replace those proven local bytes with the canonical Git install,
+    so content callers must prove this stricter floor before they may proceed.
+    """
+    floor = omni_home / _CANDIDATE_FLOOR_FILENAME
+    verifier = omni_home / _CANDIDATE_VERIFIER_RELATIVE_PATH
+    sibling_manifest = omni_home / _CANDIDATE_SIBLING_MANIFEST_RELATIVE_PATH
+    if not floor.is_file() or not verifier.is_file() or not sibling_manifest.is_file():
+        raise OmnimarketDriftError(
+            "content candidate floor is incomplete; refusing before delegate dispatch"
+        )
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(verifier),
+                "candidate-floor-verify",
+                "--floor",
+                str(floor),
+                "--omni-home",
+                str(omni_home),
+                "--sibling-manifest",
+                str(sibling_manifest),
+                "--required-mode",
+                "content",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_CONTENT_FLOOR_VERIFY_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise OmnimarketDriftError(
+            f"content candidate floor could not be verified: {_diagnostic_error(exc)}"
+        ) from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip() or "candidate verifier failed"
+        raise OmnimarketDriftError(
+            "content candidate floor does not match this dispatch interpreter: "
+            f"{detail}"
+        )
 
 
 def _path_onex_executable(identity: PathOnexIdentity) -> str:
@@ -816,6 +919,20 @@ def check_omnimarket_drift(
         attachment = canonical_clone_attachment(omni_home=omni_home)
     if attachment is not CanonicalCloneAttachment.ATTACHED:
         assert omni_home_path is not None
+        installed = None if allow_drift else installed_omnimarket_commit()
+        if (
+            not allow_drift
+            and attachment is CanonicalCloneAttachment.DETACHED
+            and _verified_detached_candidate_source(
+                omni_home=omni_home_path, installed_commit=installed
+            )
+        ):
+            logger.info(
+                "omnimarket drift guard: detached candidate source matches the "
+                "floor-bound installed market commit %s",
+                installed[:12] if installed else "<missing>",
+            )
+            return None
         converge_cmd = str(
             omni_home_path / "omniclaude" / "scripts" / "converge-canonical-clone.sh"
         )

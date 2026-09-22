@@ -1657,6 +1657,324 @@ def test_drift_guard_fires_before_delegate_dispatch(
     assert DRIFT_OVERRIDE_ENV in combined
 
 
+def _run_with_stubbed_task_class(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    candidate_content_floor: bool,
+    omni_home: Path | None,
+) -> int:
+    """Run through the CLI preflight into receipt mode with no bus/network."""
+    from types import SimpleNamespace
+
+    contract_path = tmp_path / "delegate-contract.yaml"
+    contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
+    monkeypatch.setattr(
+        cli_delegate, "_resolve_packaged_contract", lambda _name: contract_path
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "resolve_task_class",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            task_type="document",
+            resolution=EnumTaskTypeResolution.FALLBACK,
+            reason="test fixture",
+        ),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "resolve_task_class_execution_budget",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            task_class_timeout_ceiling_seconds=240,
+            terminal_delivery_margin_seconds=10,
+        ),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "resolve_task_class_contract_path",
+        lambda: contract_path,
+    )
+    monkeypatch.setattr(cli_delegate, "run_receipt_mode", lambda **_kwargs: 0)
+    return run_delegate(
+        prompt="write a short note",
+        task_type=None,
+        max_tokens=None,
+        bus="inmemory",
+        locus=EnumDelegateLocus.IN_PROCESS,
+        state_root=tmp_path / "state",
+        timeout=None,
+        verbose=False,
+        emit_socket=tmp_path / "unused.sock",
+        omni_home=omni_home,
+        candidate_content_floor=candidate_content_floor,
+    )
+
+
+def test_candidate_content_floor_cli_verifies_then_skips_generic_reconcile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    verified: list[Path] = []
+    monkeypatch.setattr(
+        cli_delegate,
+        "verify_content_candidate_floor",
+        lambda *, omni_home: verified.append(omni_home),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "check_omnimarket_drift",
+        lambda **_kwargs: pytest.fail("ordinary drift guard must not run"),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "make_workspace_reconciler",
+        lambda *_args, **_kwargs: pytest.fail(
+            "content candidate must not construct generic reconciler"
+        ),
+    )
+
+    assert (
+        _run_with_stubbed_task_class(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            candidate_content_floor=True,
+            omni_home=tmp_path,
+        )
+        == 0
+    )
+    assert verified == [tmp_path]
+
+
+def test_hidden_candidate_content_flag_is_forwarded_by_delegate_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_delegate,
+        "run_delegate",
+        lambda **kwargs: captured.update(kwargs) or 0,
+    )
+
+    result = CliRunner().invoke(
+        delegate_command,
+        [
+            "write a short note",
+            "--candidate-content-floor",
+            "--omni-home",
+            str(tmp_path),
+            "--state-root",
+            str(tmp_path / "state"),
+            "--emit-socket",
+            str(tmp_path / "unused.sock"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["candidate_content_floor"] is True
+    assert captured["omni_home"] == tmp_path
+
+
+def test_candidate_content_floor_missing_or_stale_refuses_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from omnibase_infra.cli.omnimarket_drift_guard import OmnimarketDriftError
+
+    generic_reconcile_calls: list[object] = []
+    receipt_calls: list[object] = []
+    monkeypatch.setattr(
+        cli_delegate,
+        "make_workspace_reconciler",
+        lambda *_args, **_kwargs: generic_reconcile_calls.append("created"),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "check_omnimarket_drift",
+        lambda **_kwargs: pytest.fail("candidate path called ordinary drift guard"),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "run_receipt_mode",
+        lambda **kwargs: receipt_calls.append(kwargs),
+    )
+
+    with pytest.raises(click.ClickException, match="requires --omni-home"):
+        _run_with_stubbed_task_class(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            candidate_content_floor=True,
+            omni_home=None,
+        )
+    assert generic_reconcile_calls == []
+    assert receipt_calls == []
+
+    monkeypatch.setattr(
+        cli_delegate,
+        "verify_content_candidate_floor",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            OmnimarketDriftError("candidate floor is stale")
+        ),
+    )
+    with pytest.raises(click.ClickException, match="candidate floor is stale"):
+        _run_with_stubbed_task_class(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            candidate_content_floor=True,
+            omni_home=tmp_path,
+        )
+    assert generic_reconcile_calls == []
+    assert receipt_calls == []
+
+
+def test_content_floor_verifier_requires_content_mode_and_refuses_bad_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from types import SimpleNamespace
+
+    from omnibase_infra.cli import omnimarket_drift_guard
+    from omnibase_infra.cli.omnimarket_drift_guard import OmnimarketDriftError
+
+    (tmp_path / ".onex-workspace-floor.json").write_text("{}", encoding="utf-8")
+    verifier = tmp_path / "omnibase_infra/scripts/reconcile_verify_movement.py"
+    sibling_manifest = (
+        tmp_path / "omnibase_infra/scripts/runtime_build/sibling_clone_manifest.sh"
+    )
+    verifier.parent.mkdir(parents=True)
+    sibling_manifest.parent.mkdir(parents=True)
+    verifier.write_text("# candidate verifier fixture\n", encoding="utf-8")
+    sibling_manifest.write_text("# sibling manifest fixture\n", encoding="utf-8")
+
+    commands: list[list[str]] = []
+
+    def _verified_run(command: list[str], **_kwargs: object) -> object:
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(omnimarket_drift_guard.subprocess, "run", _verified_run)
+    omnimarket_drift_guard.verify_content_candidate_floor(omni_home=tmp_path)
+    assert len(commands) == 1
+    assert commands[0][1] == str(verifier)
+    assert "--floor" in commands[0]
+    assert str(tmp_path / ".onex-workspace-floor.json") in commands[0]
+    assert "--sibling-manifest" in commands[0]
+    assert str(sibling_manifest) in commands[0]
+    assert commands[0][commands[0].index("--required-mode") + 1] == "content"
+
+    commands.clear()
+    monkeypatch.setattr(
+        omnimarket_drift_guard.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=1, stdout="", stderr="mode mismatch"
+        ),
+    )
+    with pytest.raises(OmnimarketDriftError, match="mode mismatch"):
+        omnimarket_drift_guard.verify_content_candidate_floor(omni_home=tmp_path)
+
+    (tmp_path / ".onex-workspace-floor.json").unlink()
+    with pytest.raises(OmnimarketDriftError, match="incomplete"):
+        omnimarket_drift_guard.verify_content_candidate_floor(omni_home=tmp_path)
+
+
+def test_content_floor_timeout_refuses_without_reconcile_or_dispatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import subprocess
+
+    from omnibase_infra.cli import omnimarket_drift_guard
+
+    (tmp_path / ".onex-workspace-floor.json").write_text("{}", encoding="utf-8")
+    verifier = tmp_path / "omnibase_infra/scripts/reconcile_verify_movement.py"
+    sibling_manifest = (
+        tmp_path / "omnibase_infra/scripts/runtime_build/sibling_clone_manifest.sh"
+    )
+    verifier.parent.mkdir(parents=True)
+    sibling_manifest.parent.mkdir(parents=True)
+    verifier.write_text("# candidate verifier fixture\n", encoding="utf-8")
+    sibling_manifest.write_text("# sibling manifest fixture\n", encoding="utf-8")
+
+    verifier_timeouts: list[float] = []
+
+    def _timeout(command: list[str], **kwargs: object) -> object:
+        timeout = float(kwargs["timeout"])
+        verifier_timeouts.append(timeout)
+        raise subprocess.TimeoutExpired(command, timeout=timeout)
+
+    monkeypatch.setattr(omnimarket_drift_guard.subprocess, "run", _timeout)
+    monkeypatch.setattr(
+        cli_delegate,
+        "make_workspace_reconciler",
+        lambda *_args, **_kwargs: pytest.fail(
+            "timed-out content verification must not start generic repair"
+        ),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "check_omnimarket_drift",
+        lambda **_kwargs: pytest.fail(
+            "timed-out content verification must not enter ordinary drift path"
+        ),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "run_receipt_mode",
+        lambda **_kwargs: pytest.fail(
+            "timed-out content verification must not dispatch"
+        ),
+    )
+
+    with pytest.raises(click.ClickException, match="could not be verified"):
+        _run_with_stubbed_task_class(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            candidate_content_floor=True,
+            omni_home=tmp_path,
+        )
+    assert verifier_timeouts == [30.0]
+
+
+def test_ordinary_delegate_path_keeps_drift_guard_and_reconciler(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from omnibase_infra.cli.task_class_selection import TaskClassContractError
+
+    reconcile = object()
+    observed: list[object] = []
+    monkeypatch.setattr(
+        cli_delegate, "make_workspace_reconciler", lambda *_args, **_kwargs: reconcile
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "check_omnimarket_drift",
+        lambda **kwargs: observed.append(kwargs["reconcile"]),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "resolve_task_class",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            TaskClassContractError("stop after drift guard")
+        ),
+    )
+    monkeypatch.setattr(
+        cli_delegate,
+        "run_receipt_mode",
+        lambda **_kwargs: pytest.fail("dispatch must not be reached"),
+    )
+
+    with pytest.raises(click.ClickException, match="stop after drift guard"):
+        run_delegate(
+            prompt="write a short note",
+            task_type=None,
+            max_tokens=None,
+            bus="inmemory",
+            locus=EnumDelegateLocus.IN_PROCESS,
+            state_root=tmp_path / "state",
+            timeout=None,
+            verbose=False,
+            emit_socket=tmp_path / "unused.sock",
+            omni_home=tmp_path,
+        )
+    assert observed == [reconcile]
+
+
 class TestExplicitOverrideProvenance:
     """OMN-17304 AC1 -- ``--bus``/``--kafka-bootstrap`` announce overrides."""
 

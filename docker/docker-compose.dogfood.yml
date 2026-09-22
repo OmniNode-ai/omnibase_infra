@@ -397,6 +397,44 @@ services:
       - omnibase-infra-dogfood-network
     restart: "no"
     logging: *logging-defaults
+  dogfood-delegation-fault-429:
+    image: python:3.13-alpine
+    container_name: omnibase-infra-dogfood-delegation-fault-429
+    profiles: ["dogfood"]
+    command: ["python", "/app/dogfood_delegation_fault_provider.py", "--status", "429"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./fault-providers/dogfood_delegation_fault_provider.py:/app/dogfood_delegation_fault_provider.py:ro
+    networks: !override
+      - omnibase-infra-dogfood-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8080/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+    logging: *logging-defaults
+  dogfood-delegation-fault-503:
+    image: python:3.13-alpine
+    container_name: omnibase-infra-dogfood-delegation-fault-503
+    profiles: ["dogfood"]
+    command: ["python", "/app/dogfood_delegation_fault_provider.py", "--status", "503"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./fault-providers/dogfood_delegation_fault_provider.py:/app/dogfood_delegation_fault_provider.py:ro
+    networks: !override
+      - omnibase-infra-dogfood-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8080/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+    logging: *logging-defaults
   omninode-runtime:
     !!merge <<: *runtime-base
     container_name: omninode-dogfood-runtime

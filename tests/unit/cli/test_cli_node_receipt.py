@@ -223,6 +223,42 @@ class TestReceiptModeSuccess:
         assert observed[0].status.value == "failed"
         assert observed[0].exit_code == 1
 
+    def test_receipt_bytes_callback_failure_keeps_emitted_receipt_and_returns_nonzero(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        contract_path, input_path = _write_fixture_inputs(
+            tmp_path, _PROOF_NOOP_CONTRACT
+        )
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+        observed: list[bytes] = []
+
+        def refuse_capture(_: object, receipt_bytes: bytes) -> None:
+            observed.append(receipt_bytes)
+            raise RuntimeError("capture storage refused")
+
+        exit_code = run_receipt_mode(
+            node_name="proof_noop",
+            contract_path=contract_path,
+            input_path=input_path,
+            state_root=tmp_path / "state",
+            backend_overrides={"event_bus": "inmemory"},
+            timeout=30,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+            receipt_bytes_callback=refuse_capture,
+        )
+
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert len(observed) == 1
+        assert observed[0].endswith(b"\n")
+        assert captured.out.encode("utf-8") == observed[0]
+        assert _parse_single_receipt(captured.out)["status"] == "success"
+        assert "receipt byte callback failed: capture storage refused" in captured.err
+
     def test_zero_runtime_log_lines_on_stdout_or_stderr(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

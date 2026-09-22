@@ -4038,7 +4038,32 @@ pattern_exemptions:
       correlation_id echoes hook_events.correlation_id, a nullable VARCHAR(64) holding an opaque producer-supplied token, never a UUID. Same class as the metric_collector.py correlation_id exemption above.
 
     ticket: OMN-17205
-# These handle one-model-per-file violations for domain-grouped protocols
+    # These handle one-model-per-file violations for domain-grouped protocols
+  # OMN-18925: external provider/routing labels are not entity UUIDs.
+  - file_pattern: 'dogfood_delegation_fault_routes\.py'
+    violation_pattern: "Field 'backend_id' should use UUID type instead of str"
+    reason: >
+      backend_id is the explicit human-readable provider route slug from the dogfood lane configuration, not an ONEX entity reference. The canonical routing config and its operator-facing diagnostics use this textual key.
+
+    documentation:
+      - src/omnibase_infra/runtime/dogfood_delegation_fault_routes.py
+    ticket: OMN-18925
+  - file_pattern: 'model_delegation_first_inference_identity\.py'
+    violation_pattern: "Field 'backend_id' should use UUID type instead of str"
+    reason: >
+      backend_id records the provider/backend label emitted by an inference attempt. It is not a UUID entity reference and must preserve the wire label used by routing and audit consumers.
+
+    documentation:
+      - src/omnibase_infra/models/delegation/model_delegation_first_inference_identity.py
+    ticket: OMN-18925
+  - file_pattern: 'model_delegation_first_inference_identity\.py'
+    violation_pattern: "Field 'model_id' should use UUID type instead of str"
+    reason: >
+      model_id records the provider model name from the inference attempt, not an ONEX entity UUID. Keeping the literal model label preserves the existing terminal and audit payload contract.
+
+    documentation:
+      - src/omnibase_infra/models/delegation/model_delegation_first_inference_identity.py
+    ticket: OMN-18925
 architecture_exemptions:
   # ==========================================================================
   # Emit Daemon Exemptions (OMN-1610) - REMOVED in OMN-1945

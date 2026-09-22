@@ -65,6 +65,7 @@ Ticket: OMN-15376 (gate), OMN-17150 (frozen-bytes exemption)
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -124,7 +125,10 @@ def test_the_corpus_is_non_empty_and_the_fence_resolved() -> None:
 # stated `frozen_by` reason next to it. An entry whose bytes are NOT actually
 # bound by a live ledger row is an unfixed bug being relabelled.
 _EXPECTED_FROZEN = frozenset(
-    {"node:node_projection_registration:0000_create_node_service_registry.sql"}
+    {
+        "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql",
+        "node:node_projection_registration:0000_create_node_service_registry.sql",
+    }
 )
 
 
@@ -139,6 +143,20 @@ def test_shape_exemptions_are_the_known_frozen_set() -> None:
         "the next forward-migration run FATAL. A migration that has not applied "
         "anywhere yet must be FIXED, not exempted — its bytes are still free."
     )
+
+
+def test_0044_frozen_record_pins_the_deployed_checksum_and_successor_obligation() -> (
+    None
+):
+    """A restored applied source cannot silently become a general exemption."""
+    record = (
+        Path(__file__).resolve().parents[2]
+        / "docker/migrations/forward/shape-reconciliation-exemptions.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert 'ticket: "OMN-18693"' in record
+    assert "3a1089294056fafeebbe5fdbe1c0910d3dc178b37d9402e2f37c19a32161c298" in record
+    assert "new, later reconciliation migration" in record
 
 
 def test_no_id_is_both_fenced_and_frozen() -> None:

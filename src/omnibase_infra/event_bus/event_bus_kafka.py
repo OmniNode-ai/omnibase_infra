@@ -736,6 +736,11 @@ class EventBusKafka(
         return self._environment
 
     @property
+    def bootstrap_servers(self) -> str:
+        """Return the configured broker endpoint as public transport identity."""
+        return self._config.bootstrap_servers
+
+    @property
     def health_emitter(self) -> ConsumerHealthEmitter | None:
         """Get the consumer health emitter (OMN-5518).
 

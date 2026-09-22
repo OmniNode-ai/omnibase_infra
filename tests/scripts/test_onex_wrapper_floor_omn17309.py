@@ -32,10 +32,26 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WRAPPER_SOURCE = _REPO_ROOT / "scripts" / "onex"
+_CONTENT_LAUNCHER_SOURCE = _REPO_ROOT / "scripts" / "onex-candidate-content"
+_VERIFIER_SOURCE = _REPO_ROOT / "scripts" / "reconcile_verify_movement.py"
+_MANIFEST_SOURCE = (
+    _REPO_ROOT / "scripts" / "runtime_build" / "sibling_clone_manifest.sh"
+)
+_GOVERNED = (
+    "omnibase_infra",
+    "omnibase_core",
+    "omnibase_spi",
+    "omnibase_compat",
+    "omnimarket",
+)
 
 _EXIT_BELOW_FLOOR = 3
 _SENTINEL_OK = 41  # a status no shell failure mode produces by accident
@@ -47,6 +63,7 @@ class _Workspace:
         self.infra = root / "omnibase_infra"
         self.scripts = self.infra / "scripts"
         self.scripts.mkdir(parents=True)
+        (self.scripts / "runtime_build").mkdir()
         # The floor's distributions and omnimarket commit are read from the
         # DISPATCH venv (OMN-17819): that is the interpreter a dispatch runs in,
         # so it is the only one whose installed build the floor is about.
@@ -59,6 +76,13 @@ class _Workspace:
         self.wrapper = self.scripts / "onex"
         shutil.copy2(_WRAPPER_SOURCE, self.wrapper)
         self.wrapper.chmod(0o755)
+        self.content_launcher = self.scripts / "onex-candidate-content"
+        shutil.copy2(_CONTENT_LAUNCHER_SOURCE, self.content_launcher)
+        self.content_launcher.chmod(0o755)
+        shutil.copy2(_VERIFIER_SOURCE, self.scripts / _VERIFIER_SOURCE.name)
+        shutil.copy2(
+            _MANIFEST_SOURCE, self.scripts / "runtime_build" / _MANIFEST_SOURCE.name
+        )
 
         self.floor = root / ".onex-workspace-floor.json"
         self.argv_log = root / "argv.log"
@@ -91,33 +115,114 @@ class _Workspace:
         self,
         distributions: dict[str, str] | None = None,
         omnimarket_commit: str = "",
+        candidate_source: dict[str, str] | None = None,
         raw: str | None = None,
     ) -> None:
         if raw is not None:
             self.floor.write_text(raw, encoding="utf-8")
             return
-        self.floor.write_text(
-            json.dumps(
-                {
-                    "schema": "onex.workspace.floor.v1",
-                    "generated_at": "2026-08-31T00:00:00Z",
-                    "host": "test",
-                    "omni_home": str(self.root),
-                    "distributions": distributions or {},
-                    "omnimarket_commit": omnimarket_commit,
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        document: dict[str, object] = {
+            "schema": "onex.workspace.floor.v1",
+            "generated_at": "2026-08-31T00:00:00Z",
+            "host": "test",
+            "omni_home": str(self.root),
+            "distributions": distributions or {},
+            "omnimarket_commit": omnimarket_commit,
+        }
+        if candidate_source is not None:
+            document["candidate_source"] = candidate_source
+        self.floor.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
-    def run(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def candidate_manifest(self) -> tuple[Path, dict[str, str]]:
+        """Create a real clean source set for the candidate verifier."""
+        for name in _GOVERNED:
+            repo = self.root / name
+            repo.mkdir(exist_ok=True)
+            subprocess.run(
+                ["git", "init", "--quiet", str(repo)],
+                check=True,
+                env=scrub_git_location_env(os.environ),
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.email", "t@example.invalid"],
+                check=True,
+                env=scrub_git_location_env(os.environ),
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.name", "t"],
+                check=True,
+                env=scrub_git_location_env(os.environ),
+            )
+            (repo / "README.md").write_text(f"{name}\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "add", "-A"],
+                check=True,
+                env=scrub_git_location_env(os.environ),
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "--quiet", "-m", "candidate"],
+                check=True,
+                env=scrub_git_location_env(os.environ),
+            )
+        manifest = self.root / ".onex-candidate-source.json"
+        argv = [
+            "python3",
+            str(self.scripts / _VERIFIER_SOURCE.name),
+            "candidate-manifest",
+            "--output",
+            str(manifest),
+            "--omni-home",
+            str(self.root),
+            *[item for name in _GOVERNED for item in ("--repo", name)],
+        ]
+        created = subprocess.run(argv, capture_output=True, text=True, check=False)
+        assert created.returncode == 0, created.stderr
+        verified = subprocess.run(
+            [
+                "python3",
+                str(self.scripts / _VERIFIER_SOURCE.name),
+                "candidate-verify",
+                "--manifest",
+                str(manifest),
+                "--omni-home",
+                str(self.root),
+                *[item for name in _GOVERNED for item in ("--repo", name)],
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert verified.returncode == 0, verified.stderr
+        return manifest, json.loads(verified.stdout)
+
+    def run(
+        self, *args: str, candidate_mode: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
         env["OMNI_HOME"] = str(self.root)
         env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"  # no stray `onex` to shadow
+        if candidate_mode is not None:
+            env["ONEX_CANDIDATE_PROVENANCE_MODE"] = candidate_mode
         return subprocess.run(
             ["bash", str(self.wrapper), *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+            check=False,
+        )
+
+    def run_content_candidate(
+        self, *args: str, inherited_mode: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        """Run the persisted candidate launcher, not an ad-hoc env assignment."""
+        env = dict(os.environ)
+        env["OMNI_HOME"] = str(self.root)
+        env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        if inherited_mode is not None:
+            env["ONEX_CANDIDATE_PROVENANCE_MODE"] = inherited_mode
+        return subprocess.run(
+            ["bash", str(self.content_launcher), *args],
             capture_output=True,
             text=True,
             env=env,
@@ -167,10 +272,23 @@ def test_double_digit_patch_is_not_ordered_lexically(ws: _Workspace) -> None:
     The live versions in this workspace are exactly in that range, so a lexical
     comparison would refuse every evidence command on a perfectly current venv.
     """
+    _manifest, proof = ws.candidate_manifest()
+    market_commit = subprocess.run(
+        ["git", "-C", str(ws.root / "omnimarket"), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    ).stdout.strip()
     ws.install_dist("omnibase_infra", "0.38.16")
-    ws.write_floor({"omnibase_infra": "0.38.9"})
+    ws.install_dist("omnimarket", "0.4.11", commit=market_commit)
+    ws.write_floor(
+        {"omnibase_infra": "0.38.9"},
+        omnimarket_commit=market_commit,
+        candidate_source=proof,
+    )
 
-    assert ws.run("delegate", "x").returncode == _SENTINEL_OK
+    assert ws.run("delegate", "x", candidate_mode="clean").returncode == _SENTINEL_OK
 
 
 # --------------------------------------------------------------------------- #
@@ -231,7 +349,7 @@ def test_absent_floor_refuses_evidence_and_warns_on_ordinary(ws: _Workspace) -> 
     ws.install_dist("omnibase_core", "0.46.9")
     assert not ws.floor.exists()
 
-    refused = ws.run("delegate", "x")
+    refused = ws.run("delegate", "x", candidate_mode="clean")
     assert refused.returncode == _EXIT_BELOW_FLOOR
     assert "no floor marker" in refused.stderr
 
@@ -266,6 +384,93 @@ def test_pypi_omnimarket_with_no_direct_url_is_unknown_not_a_pass(
 
     assert proc.returncode == _EXIT_BELOW_FLOOR
     assert "cannot be identified" in proc.stderr
+
+
+def test_candidate_floor_rechecks_the_clean_source_manifest_before_evidence(
+    ws: _Workspace,
+) -> None:
+    """A candidate floor is not a reusable approval after source changes."""
+    _manifest, proof = ws.candidate_manifest()
+    market_commit = subprocess.run(
+        ["git", "-C", str(ws.root / "omnimarket"), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    ).stdout.strip()
+    ws.install_dist("omnibase_core", "0.46.9")
+    ws.install_dist("omnimarket", "0.4.11", commit=market_commit)
+    ws.write_floor(
+        {"omnibase_core": "0.46.9"},
+        omnimarket_commit=market_commit,
+        candidate_source=proof,
+    )
+
+    assert ws.run("delegate", "x", candidate_mode="clean").returncode == _SENTINEL_OK
+    before = ws.argv_log.read_text(encoding="utf-8")
+    (ws.root / "omnibase_core" / "README.md").write_text("changed\n", encoding="utf-8")
+
+    refused = ws.run("delegate", "x", candidate_mode="clean")
+
+    assert refused.returncode == _EXIT_BELOW_FLOOR
+    assert "candidate source no longer matches" in refused.stderr
+    assert ws.argv_log.read_text(encoding="utf-8") == before
+
+
+def test_explicit_content_mode_refuses_floor_without_content_provenance(
+    ws: _Workspace,
+) -> None:
+    """A candidate caller cannot degrade a content floor into ordinary mode."""
+    ws.install_dist("omnibase_core", "0.46.9")
+    ws.install_dist("omnimarket", "0.4.11", commit="a" * 40)
+    ws.write_floor({"omnibase_core": "0.46.9"}, omnimarket_commit="a" * 40)
+
+    refused = ws.run("delegate", "x", candidate_mode="content")
+
+    assert refused.returncode == _EXIT_BELOW_FLOOR
+    assert "candidate source no longer matches" in refused.stderr
+
+
+def test_content_candidate_launcher_forces_content_mode_and_refuses_ordinary_floor(
+    ws: _Workspace,
+) -> None:
+    """The supported candidate command cannot lose or downgrade its selector."""
+    ws.install_dist("omnibase_core", "0.46.9")
+    ws.install_dist("omnimarket", "0.4.11", commit="a" * 40)
+    ws.write_floor({"omnibase_core": "0.46.9"}, omnimarket_commit="a" * 40)
+
+    refused = ws.run_content_candidate("delegate", "x", inherited_mode="clean")
+
+    assert refused.returncode == _EXIT_BELOW_FLOOR
+    assert "candidate source no longer matches" in refused.stderr
+    assert not ws.argv_log.exists()
+
+
+def test_candidate_floor_refuses_a_manifest_byte_change_before_evidence(
+    ws: _Workspace,
+) -> None:
+    """The floor binds manifest bytes, not merely a still-clean clone set."""
+    manifest, proof = ws.candidate_manifest()
+    market_commit = subprocess.run(
+        ["git", "-C", str(ws.root / "omnimarket"), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    ).stdout.strip()
+    ws.install_dist("omnibase_core", "0.46.9")
+    ws.install_dist("omnimarket", "0.4.11", commit=market_commit)
+    ws.write_floor(
+        {"omnibase_core": "0.46.9"},
+        omnimarket_commit=market_commit,
+        candidate_source=proof,
+    )
+    manifest.write_bytes(manifest.read_bytes() + b" ")
+
+    refused = ws.run("delegate", "x", candidate_mode="clean")
+
+    assert refused.returncode == _EXIT_BELOW_FLOOR
+    assert "candidate source no longer matches" in refused.stderr
 
 
 def test_venv_with_no_distributions_is_unknown_not_a_pass(ws: _Workspace) -> None:

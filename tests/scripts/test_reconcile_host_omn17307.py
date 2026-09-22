@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
@@ -662,6 +663,203 @@ def test_check_mode_still_reports_drift(ws: Workspace) -> None:
 
     assert proc.returncode == EXIT_FAILED
     assert "clone:omnibase_core: DID_NOT_MOVE" in proc.stderr
+
+
+# --------------------------------------------------------------------------- #
+# Pinned candidate mode -- OMN-18929
+# --------------------------------------------------------------------------- #
+def _prepare_pinned_candidate(ws: Workspace) -> Path:
+    # The fixture already places reconciler scripts under omnibase_infra. Turn
+    # that existing directory into a clean clone-shaped source surface instead
+    # of trying to clone over it.
+    _git(ws.infra, "init", "--quiet", "-b", "dev")
+    _git(ws.infra, "config", "user.email", "t@example.invalid")
+    _git(ws.infra, "config", "user.name", "t")
+    for repo in GOVERNED[1:]:
+        _make_clone(ws.root, repo)
+    _lock(
+        ws,
+        **{
+            "omnibase-infra": "0.38.38",
+            "omnibase-core": "0.47.18",
+            "omnibase-spi": "0.5.7",
+            "omnibase-compat": "0.5.7",
+        },
+    )
+    _write_dist(ws.site_packages, "omnibase_infra", "0.38.38")
+    _write_dist(ws.site_packages, "omnibase_core", "0.47.18")
+    _write_dist(ws.site_packages, "omnibase_spi", "0.5.7")
+    _write_dist(ws.site_packages, "omnibase_compat", "0.5.7")
+    _write_dist(
+        ws.site_packages,
+        "omnimarket",
+        "0.4.155",
+        commit=_git(ws.root / "omnimarket", "rev-parse", "HEAD"),
+    )
+    _stub(
+        ws.scripts / "runtime_build" / "reconcile_deploy_clones.sh", ws.delegate_witness
+    )
+    _stub(ws.scripts / "reconcile-workspace-venvs.sh", ws.delegate_witness)
+    _git(ws.infra, "add", "-A")
+    _git(ws.infra, "commit", "--quiet", "-m", "fixture infra")
+    manifest = ws.root / ".onex-candidate-source.json"
+    result = subprocess.run(
+        [
+            "python3",
+            str(ws.scripts / "reconcile_verify_movement.py"),
+            "candidate-manifest",
+            "--output",
+            str(manifest),
+            "--omni-home",
+            str(ws.root),
+            *[item for repo in GOVERNED for item in ("--repo", repo)],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == EXIT_OK, result.stderr
+    return manifest
+
+
+def _prepare_content_candidate(ws: Workspace) -> Path:
+    """Create a dirty source candidate and an interpreter importing its bytes."""
+    _prepare_pinned_candidate(ws)
+    for repository, module in (
+        ("omnibase_core", "omnibase_core"),
+        ("omnimarket", "omnimarket"),
+    ):
+        source = ws.root / repository / "src" / module
+        source.mkdir(parents=True)
+        (source / "__init__.py").write_text(
+            f"VALUE = {repository!r}\n", encoding="utf-8"
+        )
+        shutil.copytree(source, ws.site_packages / module)
+    core_authority = ws.root / "omnibase_core" / "architecture-handshakes"
+    core_authority.mkdir()
+    (core_authority / "gitignore-baseline.yaml").write_text(
+        "authority: core-root\n", encoding="utf-8"
+    )
+    installed_core_authority = ws.site_packages / "omnibase_core" / "data"
+    installed_core_authority.mkdir()
+    (installed_core_authority / "gitignore-baseline.yaml").write_text(
+        "authority: core-root\n", encoding="utf-8"
+    )
+    source_config = ws.root / "omnimarket" / "src" / "omnimarket" / "config"
+    source_config.mkdir()
+    (source_config / "ci_bus_lanes.yaml").write_text(
+        "authority: stale\n", encoding="utf-8"
+    )
+    authority = ws.root / "omnimarket" / "config"
+    authority.mkdir()
+    (authority / "ci_bus_lanes.yaml").write_text("authority: root\n", encoding="utf-8")
+    installed_config = ws.site_packages / "omnimarket" / "config"
+    installed_config.mkdir()
+    (installed_config / "ci_bus_lanes.yaml").write_text(
+        "authority: root\n", encoding="utf-8"
+    )
+    runner = ws.root / ".onex-dispatch-venv" / "bin" / "python"
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    runner.write_text(
+        "#!/usr/bin/env bash\n"
+        f"export PYTHONPATH={ws.site_packages}\n"
+        f'exec {sys.executable} "$@"\n',
+        encoding="utf-8",
+    )
+    runner.chmod(0o755)
+    manifest = ws.root / ".onex-candidate-content-snapshot.json"
+    result = subprocess.run(
+        [
+            "python3",
+            str(ws.scripts / "reconcile_verify_movement.py"),
+            "candidate-content-manifest",
+            "--output",
+            str(manifest),
+            "--omni-home",
+            str(ws.root),
+            *[item for repo in GOVERNED for item in ("--repo", repo)],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == EXIT_OK, result.stderr
+    return manifest
+
+
+def test_pinned_candidate_stamps_floor_without_clone_delegate_movement(
+    ws: Workspace,
+) -> None:
+    manifest = _prepare_pinned_candidate(ws)
+
+    proc = _run(ws, "--pinned-candidate-manifest", str(manifest))
+
+    assert proc.returncode == EXIT_OK, proc.stderr
+    assert ws.floor.exists()
+    receipt = json.loads(ws.receipt.read_text(encoding="utf-8"))
+    assert receipt["candidate_manifest"] == str(manifest)
+    assert len(receipt["candidate_manifest_sha256"]) == 64
+    calls = ws.delegate_witness.read_text(encoding="utf-8")
+    assert "reconcile-workspace-venvs.sh" in calls
+    assert "reconcile_deploy_clones.sh" not in calls
+
+
+def test_pinned_candidate_refuses_dirty_source_before_any_delegate_runs(
+    ws: Workspace,
+) -> None:
+    manifest = _prepare_pinned_candidate(ws)
+    (ws.root / "omnibase_core" / "README.md").write_text("dirty\n", encoding="utf-8")
+
+    proc = _run(ws, "--pinned-candidate-manifest", str(manifest))
+
+    assert proc.returncode == EXIT_INDETERMINATE
+    assert "does not match the exact source set" in proc.stderr
+    assert not ws.delegate_witness.exists()
+    assert not ws.floor.exists()
+
+
+def test_content_candidate_stamps_floor_only_after_imported_bytes_match(
+    ws: Workspace,
+) -> None:
+    manifest = _prepare_content_candidate(ws)
+
+    proc = _run(ws, "--pinned-candidate-content-manifest", str(manifest))
+
+    assert proc.returncode == EXIT_OK, proc.stderr
+    floor = json.loads(ws.floor.read_text(encoding="utf-8"))
+    assert floor["candidate_content_snapshot"]["installations"]
+    assert (
+        floor["candidate_content_snapshot"]["installations"][0]["module"]
+        == "omnibase_core"
+    )
+
+
+def test_content_candidate_refuses_stale_force_included_resource(
+    ws: Workspace,
+) -> None:
+    manifest = _prepare_content_candidate(ws)
+    (ws.site_packages / "omnimarket" / "config" / "ci_bus_lanes.yaml").write_text(
+        "authority: stale\n", encoding="utf-8"
+    )
+
+    proc = _run(ws, "--pinned-candidate-content-manifest", str(manifest))
+
+    assert proc.returncode == EXIT_FAILED
+    assert "candidate floor could not be stamped" in proc.stderr
+
+
+def test_content_candidate_refuses_stale_core_force_included_resource(
+    ws: Workspace,
+) -> None:
+    manifest = _prepare_content_candidate(ws)
+    (
+        ws.site_packages / "omnibase_core" / "data" / "gitignore-baseline.yaml"
+    ).write_text("authority: stale\n", encoding="utf-8")
+
+    proc = _run(ws, "--pinned-candidate-content-manifest", str(manifest))
+
+    assert proc.returncode == EXIT_FAILED
+    assert "candidate floor could not be stamped" in proc.stderr
 
 
 # --------------------------------------------------------------------------- #

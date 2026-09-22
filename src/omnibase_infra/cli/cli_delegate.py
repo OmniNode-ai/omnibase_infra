@@ -107,6 +107,7 @@ error) even when the hang is not asyncio-cooperative.
 from __future__ import annotations
 
 import functools
+import hashlib
 import importlib
 import json
 import logging
@@ -122,6 +123,7 @@ from pathlib import Path
 
 import click
 
+from omnibase_core.artifacts.artifact_store import ArtifactStore
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.backends.auto_configure import (
@@ -169,6 +171,7 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     OmnimarketDriftError,
     check_omnimarket_drift,
+    verify_content_candidate_floor,
 )
 from omnibase_infra.cli.protocol_drift_guard_verdict import (
     ProtocolDriftGuardVerdict,
@@ -321,6 +324,210 @@ def _atomic_write_text(path: Path, content: str) -> None:
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _copy_evidence_bytes(source: Path, destination: Path) -> dict[str, object]:
+    """Copy one already-emitted file into the private, write-once capture."""
+    data = source.read_bytes()
+    with destination.open("xb") as handle:
+        handle.write(data)
+    destination.chmod(0o600)
+    return {
+        "path": destination.name,
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+
+
+def _write_issued_delegation_evidence(
+    *,
+    receipt: object,
+    receipt_bytes: bytes,
+    payload_path: Path,
+    state_root: Path,
+    addressing: ModelDelegateRunAddressing,
+    locus_decision: ModelDelegateLocusDecision,
+) -> None:
+    """Capture exact emitted delegation bytes at the existing receipt callback seam.
+
+    The delegate has already written its caller-visible request, response and
+    run files before this runs. This function copies those bytes, the exact
+    stdout receipt bytes, the live resolved address, and every receipt artifact
+    reference into one private write-once directory. It does not rebuild a
+    response, terminal, route, or source claim from descriptor literals.
+    """
+    receipt_dump = getattr(receipt, "model_dump", None)
+    if not callable(receipt_dump):
+        raise ValueError("issued evidence requires a serializable typed receipt")
+    envelope = receipt_dump(mode="json")
+    if not isinstance(envelope, dict):
+        raise ValueError("issued evidence receipt did not serialize to an object")
+    try:
+        emitted_envelope = json.loads(receipt_bytes.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("issued evidence receipt bytes are not JSON") from exc
+    if not isinstance(emitted_envelope, dict):
+        raise ValueError("issued evidence receipt bytes are not a JSON object")
+    if emitted_envelope != envelope:
+        raise ValueError("issued evidence receipt bytes disagree with typed receipt")
+    result = _delegation_result(envelope)
+    if result is None:
+        return
+    receipt_result = emitted_envelope.get("result")
+    if not isinstance(receipt_result, dict):
+        raise ValueError("issued evidence receipt has no object result")
+    result_model = str(envelope.get("result_model") or "")
+    terminal_carrier: object
+    if "ModelDelegateSkill" in result_model:
+        terminal_carrier = receipt_result
+        terminal_pointer = "/result"
+    else:
+        terminal_carrier = receipt_result.get("terminal_payload")
+        terminal_pointer = "/result/terminal_payload"
+    if not isinstance(terminal_carrier, dict):
+        raise ValueError("issued evidence receipt has no terminal payload carrier")
+    runtime_identity = envelope.get("runtime_identity")
+    if not isinstance(runtime_identity, dict):
+        raise ValueError("issued evidence receipt lacks runtime_identity")
+    run_id = str(emitted_envelope.get("run_id") or "")
+    correlation_id = str(emitted_envelope.get("correlation_id") or "")
+    if not run_id or not correlation_id:
+        raise ValueError("issued evidence receipt lacks run or correlation identity")
+    run_dir = (state_root / "runs" / run_id).resolve()
+    expected_files = {
+        "request": payload_path,
+        "caller_response": run_dir / "result.txt",
+        "run_readback": run_dir / "run.json",
+        "persisted_receipt": run_dir / "receipt.json",
+    }
+    for label, path in expected_files.items():
+        if not path.is_file():
+            raise ValueError(f"issued evidence missing {label}: {path}")
+    persisted_receipt = json.loads(
+        expected_files["persisted_receipt"].read_text(encoding="utf-8")
+    )
+    if (
+        not isinstance(persisted_receipt, dict)
+        or persisted_receipt.get("run_id") != run_id
+    ):
+        raise ValueError("issued evidence persisted receipt does not bind run_id")
+    if persisted_receipt.get("correlation_id") != correlation_id:
+        raise ValueError(
+            "issued evidence persisted receipt does not bind correlation_id"
+        )
+    run_readback = json.loads(
+        expected_files["run_readback"].read_text(encoding="utf-8")
+    )
+    if not isinstance(run_readback, dict):
+        raise ValueError("issued evidence run readback is not an object")
+    if run_readback.get("run_id") != run_id:
+        raise ValueError("issued evidence run readback does not bind run_id")
+    if run_readback.get("correlation_id") != correlation_id:
+        raise ValueError("issued evidence run readback does not bind correlation_id")
+    for field, value in addressing.as_run_file_fields().items():
+        if run_readback.get(field) != value:
+            raise ValueError(f"issued evidence run readback disagrees on {field}")
+    if locus_decision.locus is not addressing.locus:
+        raise ValueError("issued evidence locus decision disagrees with addressing")
+    if addressing.dispatch_target is not None:
+        expected_target = f"{locus_decision.command_topic} via {locus_decision.broker}"
+        if addressing.dispatch_target != expected_target:
+            raise ValueError(
+                "issued evidence dispatch target disagrees with locus decision"
+            )
+
+    evidence_dir = run_dir / "evidence"
+    if evidence_dir.exists():
+        raise ValueError(
+            f"refusing to overwrite issued evidence directory {evidence_dir}"
+        )
+    evidence_dir.mkdir(mode=0o700)
+    try:
+        captured = {
+            label: _copy_evidence_bytes(path, evidence_dir / f"{label}.bin")
+            for label, path in expected_files.items()
+        }
+        with (evidence_dir / "stdout-receipt.json").open("xb") as handle:
+            handle.write(receipt_bytes)
+        (evidence_dir / "stdout-receipt.json").chmod(0o600)
+        captured["stdout_receipt"] = {
+            "path": "stdout-receipt.json",
+            "bytes": len(receipt_bytes),
+            "sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+        }
+        terminal_bytes = json.dumps(
+            terminal_carrier, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+        with (evidence_dir / "terminal-payload.json").open("xb") as handle:
+            handle.write(terminal_bytes)
+        (evidence_dir / "terminal-payload.json").chmod(0o600)
+        captured["terminal_payload"] = {
+            "path": "terminal-payload.json",
+            "bytes": len(terminal_bytes),
+            "sha256": hashlib.sha256(terminal_bytes).hexdigest(),
+        }
+
+        artifacts: list[dict[str, object]] = []
+        refs = getattr(receipt, "artifact_refs", None)
+        if not isinstance(refs, list):
+            raise ValueError("issued evidence receipt has invalid artifact_refs")
+        store = ArtifactStore()
+        for index, ref in enumerate(refs):
+            data = store.read(ref)
+            destination = evidence_dir / f"artifact-{index}.bin"
+            with destination.open("xb") as handle:
+                handle.write(data)
+            destination.chmod(0o600)
+            if hashlib.sha256(data).hexdigest() != ref.hex_digest:
+                raise ValueError(
+                    f"artifact store returned mismatched bytes for {ref.ref}"
+                )
+            artifacts.append(
+                {
+                    "ref": ref.ref,
+                    "path": destination.name,
+                    "bytes": len(data),
+                    "sha256": ref.hex_digest,
+                }
+            )
+
+        manifest = {
+            "schema_version": "1.0.0",
+            "run_id": run_id,
+            "correlation_id": correlation_id,
+            "runtime_identity": runtime_identity,
+            "addressing": addressing.model_dump(mode="json"),
+            "locus_decision": locus_decision.model_dump(mode="json"),
+            "terminal": {
+                "raw_receipt_path": "stdout-receipt.json",
+                "raw_receipt_sha256": captured["stdout_receipt"]["sha256"],
+                "json_pointer": terminal_pointer,
+                "canonical_payload": {
+                    **captured["terminal_payload"],
+                    "derivation": "canonical JSON extracted from raw_receipt_path at json_pointer",
+                },
+            },
+            "tenant_proof": {
+                "state": "pending_authoritative_projection_readback",
+                "reason": (
+                    "ModelDelegateTerminal carries no tenant field; a final "
+                    "K1-K6 proof must append a correlation-bound Market or "
+                    "projection readback and fail closed on absence or mismatch."
+                ),
+            },
+            "evidence": captured,
+            "artifact_refs": artifacts,
+        }
+        manifest_path = evidence_dir / "manifest.json"
+        with manifest_path.open("x", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        manifest_path.chmod(0o600)
+    except Exception:
+        import shutil
+
+        shutil.rmtree(evidence_dir)
+        raise
 
 
 #: Receipt fields a summary-shaped receipt may carry this run's terminal in,
@@ -1568,6 +1775,12 @@ def _timeout_receipt(
         "come from an UNVERIFIED build and are not evidence."
     ),
 )
+@click.option(
+    "--candidate-content-floor",
+    is_flag=True,
+    default=False,
+    hidden=True,
+)
 def delegate_command(
     prompt: str,
     task_type: str | None,
@@ -1588,6 +1801,7 @@ def delegate_command(
     emit_socket: Path | None,
     omni_home: Path | None,
     allow_omnimarket_drift: bool,
+    candidate_content_floor: bool,
 ) -> None:
     """Delegate PROMPT to a local LLM and print exactly one typed result.
 
@@ -1630,6 +1844,7 @@ def delegate_command(
             emit_socket=emit_socket,
             omni_home=omni_home,
             allow_drift=allow_omnimarket_drift,
+            candidate_content_floor=candidate_content_floor,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -1656,6 +1871,7 @@ def run_delegate(
     emit_socket: Path | None,
     omni_home: Path | None = None,
     allow_drift: bool = False,
+    candidate_content_floor: bool = False,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -1710,14 +1926,26 @@ def run_delegate(
         # so a customer can read after the fact which check this run got, and
         # is None on a registry machine -- where the commit comparison ran and
         # the receipt is unchanged.
-        drift_guard_check = check_omnimarket_drift(
-            omni_home=str(omni_home) if omni_home else None,
-            allow_drift=allow_drift,
-            # OMN-17190: heal in-flight instead of handing a human a command to
-            # type. Bound here rather than defaulted inside the guard so the
-            # guard stays a pure function for every non-CLI caller.
-            reconcile=make_workspace_reconciler(str(omni_home) if omni_home else None),
-        )
+        if candidate_content_floor:
+            if omni_home is None:
+                raise OmnimarketDriftError(
+                    "content candidate dispatch requires --omni-home"
+                )
+            # The content floor binds the source snapshot and actual Core/Market
+            # imports. The ordinary Git repair would replace those attested bytes.
+            verify_content_candidate_floor(omni_home=omni_home)
+            drift_guard_check = None
+        else:
+            drift_guard_check = check_omnimarket_drift(
+                omni_home=str(omni_home) if omni_home else None,
+                allow_drift=allow_drift,
+                # OMN-17190: heal in-flight instead of handing a human a command to
+                # type. Bound here rather than defaulted inside the guard so the
+                # guard stays a pure function for every non-CLI caller.
+                reconcile=make_workspace_reconciler(
+                    str(omni_home) if omni_home else None
+                ),
+            )
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -1977,6 +2205,13 @@ def run_delegate(
                         # entry. Both now read one derivation.
                         require_budget_evidence=receipt_evidence_demanded[0],
                         require_contract_evidence=receipt_evidence_demanded[1],
+                    ),
+                    receipt_bytes_callback=functools.partial(
+                        _write_issued_delegation_evidence,
+                        payload_path=payload_path,
+                        state_root=state_root,
+                        addressing=addressing,
+                        locus_decision=locus_decision,
                     ),
                 )
         except DelegateTimeoutExceededError as exc:

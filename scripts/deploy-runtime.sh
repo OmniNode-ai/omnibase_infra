@@ -1899,10 +1899,10 @@ cleanup_on_exit() {
 
 assert_deployed_migration_tree_synced() {
     # OMN-13415: assert the deployed (bind-mounted) forward-migration tree is
-    # byte-identical to the canonical clone @ the target SHA before any migration
-    # runs. The stability-promotion footgun (stale 0016, missing 0018/0019) made a
-    # lane look "deployed" while applying the wrong migration SQL; this gate makes
-    # that drift abort the deploy instead of silently mis-migrating.
+    # byte-identical to the selected deploy source before any migration runs.
+    # Canonical deploys use the clone @ target SHA.  A governed hotpatch uses the
+    # frozen staged source itself, including its ledger, because dirty source is
+    # deliberately attested rather than represented by a fictitious git ref.
     local deploy_target="$1"
     local repo_root="$2"
     local git_sha="$3"
@@ -1919,6 +1919,20 @@ assert_deployed_migration_tree_synced() {
     if [[ ! -f "${check_script}" ]]; then
         log_error "Migration-sync gate script missing: ${check_script}"
         exit 1
+    fi
+
+    if [[ "${DEPLOY_HOTPATCH:-0}" == "1" ]]; then
+        local frozen_source_tree="${repo_root}/${MIGRATION_TREE_REL_PATH}"
+        log_info "Asserting deployed migration tree == frozen hotpatch source ${frozen_source_tree} (OMN-13415)..."
+        if ! python3 "${check_script}" \
+            --deployed-tree "${deployed_tree}" \
+            --source-tree "${frozen_source_tree}"; then
+            log_error "Deployed migration tree is OUT OF SYNC with frozen hotpatch source ${frozen_source_tree}."
+            log_error "Aborting deploy to avoid applying a stale migration set (OMN-13415)."
+            exit 1
+        fi
+        log_info "Deployed migration tree is in sync with frozen hotpatch source ${frozen_source_tree}."
+        return 0
     fi
 
     log_info "Asserting deployed migration tree == canonical clone @ ${git_sha} (OMN-13415)..."
@@ -3469,6 +3483,16 @@ restart_services() {
     # writers, which are declared only in its own overlay.
     local -a lane_services
     resolve_lane_runtime_services lane_services "${compose_project}"
+    # OMN-18931: these two static, internal-only fault responders are part of
+    # the dogfood K4 cohort. They are restarted by the governed lane path but
+    # intentionally excluded from image build/OCI revision readback because
+    # they use the pinned upstream python image rather than this repo's image.
+    if [[ "${compose_project}" == "omnibase-infra-dogfood" ]]; then
+        lane_services+=(
+            dogfood-delegation-fault-429
+            dogfood-delegation-fault-503
+        )
+    fi
 
     local cmd=(
         docker compose
@@ -4351,11 +4375,10 @@ main() {
     sync_files "${repo_root}" "${deploy_target}"
 
     # OMN-13415: assert the freshly-synced deployed (bind-mounted) forward-migration
-    # tree is byte-identical to the canonical clone @ the target SHA BEFORE the
-    # forward-migration phase. The stability-promotion footgun was a stale
-    # bind-mounted tree (old 0016, no 0018/0019) that made the lane look "deployed"
-    # while running the wrong migration SQL — caught only by an out-of-band rsync.
-    # This gate makes that drift fail the deploy instead of silently mis-migrating.
+    # tree is byte-identical to its attested source before the forward-migration
+    # phase: canonical clone @ target SHA for clean deployments, or the frozen
+    # staged workspace tree for governed hotpatches. A stale bind-mounted tree
+    # (old 0016, no 0018/0019) must abort rather than silently apply wrong SQL.
     assert_deployed_migration_tree_synced "${deploy_target}" "${repo_root}" "${git_sha}"
 
     # OMN-13364: snapshot the freshly-synced vendored migration tree so a later

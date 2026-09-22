@@ -309,3 +309,30 @@ def test_compose_call_sites_route_through_resolver() -> None:
             f"{func}() must resolve its -f flags via resolve_compose_file_args "
             "(so the lane overlay is layered)"
         )
+
+
+def test_dogfood_restart_starts_declared_fault_providers_without_build_readback_scope() -> (
+    None
+):
+    """The governed restart starts K4's static dogfood controls beside runtime images."""
+    harness = "\n".join(
+        [
+            "set -euo pipefail",
+            "COMPOSE_PROFILE=dogfood",
+            "RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=30",
+            'resolve_compose_file_args() { eval "$1=(-f /DEPLOY/docker/docker-compose.dogfood.yml)"; }',
+            'resolve_lane_runtime_services() { eval "$1=(omninode-runtime runtime-effects projection-api)"; }',
+            "log_step() { :; }",
+            "log_info() { :; }",
+            "log_cmd() { :; }",
+            'compose_up_bounded() { printf "%s\n" "$*"; }',
+            _extract_function("restart_services"),
+            "restart_services /DEPLOY omnibase-infra-dogfood",
+        ]
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert "omninode-runtime runtime-effects projection-api " in result.stdout
+    assert "dogfood-delegation-fault-429 dogfood-delegation-fault-503" in result.stdout

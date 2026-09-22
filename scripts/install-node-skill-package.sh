@@ -182,14 +182,20 @@ if [[ "${ONEX_VENV_RECONCILE_LOCK:-}" != "$VENV_LOCK_PATH" ]]; then
 fi
 
 # The canonical clone is REQUIRED: it is where the co-installed pin versions
-# are read from. Fail fast naming the variable rather than defaulting.
-if [[ -z "${OMNI_HOME:-}" || ! -d "${OMNI_HOME}/omnimarket/.git" ]]; then
+# are read from.  A governed candidate may use a Git worktree, where `.git` is
+# a file; prove the declared path itself is the Git root instead of accepting
+# either a directory marker or an arbitrary nested checkout.
+OMNIMARKET_DECLARED_ROOT="${OMNI_HOME:-}/omnimarket"
+OMNIMARKET_ROOT="$(cd "$OMNIMARKET_DECLARED_ROOT" 2>/dev/null && pwd -P || true)"
+OMNIMARKET_GIT_ROOT="$(git -C "$OMNIMARKET_DECLARED_ROOT" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "${OMNI_HOME:-}" || -z "$OMNIMARKET_ROOT" || -z "$OMNIMARKET_GIT_ROOT" || \
+      "$(cd "$OMNIMARKET_GIT_ROOT" 2>/dev/null && pwd -P || true)" != "$OMNIMARKET_ROOT" ]]; then
   echo "ERROR: OMNI_HOME must point at a repo registry containing an omnimarket clone." >&2
   echo "  The co-installed pin versions are read from the installed ref's own" >&2
   echo "  pyproject.toml via that clone (OMN-18675). There is no baked-in default." >&2
   exit 1
 fi
-OMNIMARKET_CLONE="${OMNI_HOME}/omnimarket"
+OMNIMARKET_CLONE="$OMNIMARKET_ROOT"
 
 # Resolve the ref to install — fail fast, never silently fall back to a stale
 # baked-in default (CLAUDE.md rule #8).
@@ -201,7 +207,7 @@ else
   OMNIMARKET_REF="$(awk '{print $1}' <<<"$LS_REMOTE_OUTPUT" | head -n1)"
   if [[ -n "$OMNIMARKET_REF" ]]; then
     REF_SOURCE="git ls-remote ${OMNIMARKET_GIT} dev"
-  elif [[ -d "${OMNIMARKET_CLONE}/.git" ]]; then
+  elif [[ -n "$OMNIMARKET_CLONE" ]]; then
     # Offline fallback: the canonical local clone's checked-out HEAD.
     OMNIMARKET_REF="$(git -C "${OMNIMARKET_CLONE}" rev-parse HEAD)"
     REF_SOURCE="local clone ${OMNIMARKET_CLONE} (offline fallback — git ls-remote unreachable)"

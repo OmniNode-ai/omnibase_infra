@@ -395,6 +395,14 @@ INFRA_PYTHON="$INFRA_VENV/bin/python"
 # on a machine whose checkout lives somewhere else (CLAUDE.md rules 6 and 8).
 DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"
 DISPATCH_PYTHON="$DISPATCH_VENV/bin/python"
+CONTENT_MANIFEST="${ONEX_CANDIDATE_CONTENT_MANIFEST:-}"
+CONTENT_MANIFEST_SHA256="${ONEX_CANDIDATE_CONTENT_MANIFEST_SHA256:-}"
+
+if [[ -n "$CONTENT_MANIFEST" && -z "$CONTENT_MANIFEST_SHA256" ]] || \
+   [[ -z "$CONTENT_MANIFEST" && -n "$CONTENT_MANIFEST_SHA256" ]]; then
+  say "INDETERMINATE: content candidate manifest and digest must be supplied together."
+  exit "$EXIT_INDETERMINATE"
+fi
 
 # --------------------------------------------------------------------------- #
 # The dispatch venv may never BE a clone's own venv
@@ -686,12 +694,16 @@ swap_dispatch_venv() {
 
 INSTALL_SCRIPT="${ONEX_RECONCILE_INSTALL_SCRIPT:-$INFRA_DIR/scripts/install-node-skill-package.sh}"
 
-if [[ ! -d "$MARKET_CLONE/.git" ]]; then
+MARKET_ROOT="$(cd "$MARKET_CLONE" 2>/dev/null && pwd -P || true)"
+MARKET_GIT_ROOT="$(git -C "$MARKET_CLONE" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$MARKET_ROOT" || -z "$MARKET_GIT_ROOT" || \
+      "$(cd "$MARKET_GIT_ROOT" 2>/dev/null && pwd -P || true)" != "$MARKET_ROOT" ]]; then
   say "INDETERMINATE: no canonical omnimarket clone at $MARKET_CLONE"
   say "  The provider layer is reconciled against that clone's HEAD; without it"
   say "  there is no reference commit to reconcile to."
   exit "$EXIT_INDETERMINATE"
 fi
+MARKET_CLONE="$MARKET_ROOT"
 
 # --------------------------------------------------------------------------- #
 # Surface ownership, and resolving the one tool that does all the writing
@@ -1801,6 +1813,44 @@ run_repair() {
       fi
     fi
     say "dispatch venv: reconciled"
+  fi
+
+  # A content candidate is intentionally allowed to carry dirty source bytes.
+  # The ordinary provider install above proves its released ref and repairs
+  # lock-governed dependencies; it cannot prove those dirty Core/Market bytes.
+  # Resolve the three local package roots only after the final lock pass, then
+  # prove dependency consistency.  This is deliberately a resolver-backed
+  # install: Market's declared memory/cryptography requirements and Infra's
+  # exact Core contract must be true in the dispatch environment rather than
+  # hidden behind a no-deps source overlay. The host verifies the identical
+  # manifest again while stamping the floor and binds imported source trees.
+  if [[ -n "$CONTENT_MANIFEST" ]]; then
+    local content_verifier content_python
+    content_verifier="$INFRA_DIR/scripts/reconcile_verify_movement.py"
+    content_python="$(command -v python3 2>/dev/null || true)"
+    if [[ ! -f "$content_verifier" || -z "$content_python" ]]; then
+      fail "content candidate verification tooling is unavailable; $intact_note" \
+        "Expected verifier: $content_verifier" \
+        "Expected python3 on PATH."
+    fi
+    if ! "$content_python" "$content_verifier" candidate-content-verify \
+        --manifest "$CONTENT_MANIFEST" --omni-home "$OMNI_HOME" \
+        --expected-sha256 "$CONTENT_MANIFEST_SHA256" \
+        --repo omnibase_infra --repo omnibase_core --repo omnibase_spi \
+        --repo omnibase_compat --repo omnimarket >/dev/null; then
+      fail "content candidate source no longer matches its verified manifest; $intact_note"
+    fi
+    say "dispatch venv: resolving attested Infra, Core, and Market source bytes"
+    if ! (cd "$OMNI_HOME" && as_owner env -u PYTHONPATH \
+        "$UV_BIN" pip install --reinstall-package omnibase-infra \
+        --reinstall-package omnibase-core --reinstall-package omnimarket \
+        --python "$target_python" "$INFRA_DIR" "$OMNI_HOME/omnibase_core" \
+        "$OMNI_HOME/omnimarket"); then
+      fail "content candidate source composition did not complete; $intact_note"
+    fi
+    if ! as_owner env -u PYTHONPATH "$UV_BIN" pip check --python "$target_python"; then
+      fail "content candidate source composition has incompatible dependencies; $intact_note"
+    fi
   fi
 
   # PROVE THE STAGED VENV BEFORE IT BECOMES THE LIVE ONE. `uv` exiting 0 is not

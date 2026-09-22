@@ -88,6 +88,55 @@ def _make_fixture_registry(root: Path) -> tuple[Path, str]:
     return omni_home, sha
 
 
+def _make_worktree_fixture_registry(root: Path) -> tuple[Path, str]:
+    """Build a linked worktree at the canonical registry location."""
+    omni_home = root / "omni_home"
+    clone = omni_home / "omnimarket"
+    source = root / "market-source"
+    omni_home.mkdir()
+    source.mkdir()
+
+    def git(cwd: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=scrub_git_location_env(os.environ),
+        )
+        return result.stdout.strip()
+
+    git(source, "init", "--quiet", "-b", "dev")
+    git(source, "config", "user.email", "test@example.com")
+    git(source, "config", "user.name", "Test")
+    (source / "pyproject.toml").write_text(_FIXTURE_PYPROJECT, encoding="utf-8")
+    git(source, "add", "pyproject.toml")
+    git(source, "commit", "--quiet", "-m", "fixture")
+    sha = git(source, "rev-parse", "HEAD")
+    git(source, "worktree", "add", "--quiet", "-b", "registry", str(clone))
+    return omni_home, sha
+
+
+def _run_pinned_dry_run(
+    omni_home: Path, sha: str, tmp_path: Path
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(_SCRIPT), sys.executable],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+        env={
+            **os.environ,
+            "PATH": f"{_fake_uv_on_path(tmp_path)}{os.pathsep}{os.environ['PATH']}",
+            "OMNIMARKET_REF": sha,
+            "OMNI_HOME": str(omni_home),
+        },
+    )
+
+
 def _fake_uv_on_path(root: Path) -> Path:
     """A `uv` that prints an empty change plan, so no network or venv is touched.
 
@@ -141,7 +190,7 @@ def test_has_offline_fallback_to_local_canonical_clone() -> None:
     # $OMNI_HOME/omnimarket rather than hard-failing outright.
     text = _script_text()
     assert "OMNI_HOME" in text
-    assert "omnimarket/.git" in text
+    assert "rev-parse --show-toplevel" in text
     assert "rev-parse HEAD" in text
 
 
@@ -240,6 +289,73 @@ def test_dry_run_with_current_interpreter_prints_plan(tmp_path: Path) -> None:
     # The pins printed are the fixture ref's, not any literal in the script.
     assert "omnibase-compat==0.5.7" in result.stdout
     assert "omninode-memory==0.18.0" in result.stdout
+
+
+def test_dry_run_accepts_canonical_omnimarket_worktree(tmp_path: Path) -> None:
+    omni_home, sha = _make_worktree_fixture_registry(tmp_path)
+    assert (omni_home / "omnimarket" / ".git").is_file()
+
+    result = _run_pinned_dry_run(omni_home, sha, tmp_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sha in result.stdout
+    assert "DRY RUN" in result.stdout
+
+
+def test_dry_run_rejects_nested_subdirectory_as_canonical_root(tmp_path: Path) -> None:
+    repo = tmp_path / "outer-repo"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            timeout=30,
+            env=scrub_git_location_env(os.environ),
+        )
+
+    git("init", "--quiet", "-b", "dev")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    nested_market = repo / "omnimarket"
+    nested_market.mkdir()
+    (nested_market / "pyproject.toml").write_text(_FIXTURE_PYPROJECT, encoding="utf-8")
+    git("add", "omnimarket/pyproject.toml")
+    git("commit", "--quiet", "-m", "nested fixture")
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=scrub_git_location_env(os.environ),
+    ).stdout.strip()
+
+    result = _run_pinned_dry_run(repo, sha, tmp_path)
+
+    assert result.returncode != 0
+    assert "repo registry containing an omnimarket clone" in (
+        result.stdout + result.stderr
+    )
+    assert "node-skill-package install plan" not in result.stdout
+
+
+def test_dry_run_rejects_nonrepository_with_git_named_file(tmp_path: Path) -> None:
+    omni_home = tmp_path / "omni_home"
+    clone = omni_home / "omnimarket"
+    clone.mkdir(parents=True)
+    (clone / ".git").write_text("not git metadata", encoding="utf-8")
+
+    result = _run_pinned_dry_run(omni_home, "a" * 40, tmp_path)
+
+    assert result.returncode != 0
+    assert "repo registry containing an omnimarket clone" in (
+        result.stdout + result.stderr
+    )
+    assert "node-skill-package install plan" not in result.stdout
 
 
 def test_dry_run_without_override_does_not_touch_network_before_python_check() -> None:

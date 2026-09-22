@@ -827,6 +827,7 @@ def run_receipt_mode(
     expected_correlation_id: uuid.UUID | None = None,
     receipt_validator: Callable[[object], str | None] | None = None,
     receipt_callback: Callable[[object], None] | None = None,
+    receipt_bytes_callback: Callable[[object, bytes], None] | None = None,
     host_handlers: bool = True,
     locus_decision: ModelDelegateLocusDecision | None = None,
 ) -> int:
@@ -852,6 +853,7 @@ def run_receipt_mode(
                 expected_correlation_id=expected_correlation_id,
                 receipt_validator=receipt_validator,
                 receipt_callback=receipt_callback,
+                receipt_bytes_callback=receipt_bytes_callback,
                 host_handlers=host_handlers,
                 locus_decision=locus_decision,
             )
@@ -908,6 +910,7 @@ def _run_receipt_mode(
     expected_correlation_id: uuid.UUID | None = None,
     receipt_validator: Callable[[object], str | None] | None = None,
     receipt_callback: Callable[[object], None] | None = None,
+    receipt_bytes_callback: Callable[[object, bytes], None] | None = None,
     host_handlers: bool = True,
     locus_decision: ModelDelegateLocusDecision | None = None,
 ) -> int:
@@ -1350,7 +1353,8 @@ def _run_receipt_mode(
     # may be able to suppress it. Any callback failure is reported and folded
     # into the exit code instead.
     try:
-        click.echo(receipt.model_dump_json())
+        receipt_json = receipt.model_dump_json()
+        click.echo(receipt_json)
     except ValidationError as exc:  # pragma: no cover - construction validates
         click.echo(f"receipt mode: receipt serialization failed: {exc}", err=True)
         return 1
@@ -1360,5 +1364,14 @@ def _run_receipt_mode(
             receipt_callback(receipt)
         except Exception as exc:  # noqa: BLE001 - a writer must not erase the receipt
             click.echo(f"receipt mode: receipt callback failed: {exc}", err=True)
+            return exit_code or 1
+    if receipt_bytes_callback is not None:
+        try:
+            # The callback receives the exact one-line body emitted above,
+            # including Click's trailing newline, rather than a later
+            # reconstruction from the typed receipt.
+            receipt_bytes_callback(receipt, (receipt_json + "\n").encode("utf-8"))
+        except Exception as exc:  # noqa: BLE001 - required capture is fail-closed
+            click.echo(f"receipt mode: receipt byte callback failed: {exc}", err=True)
             return exit_code or 1
     return exit_code

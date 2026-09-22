@@ -76,11 +76,13 @@ databases:
           - object_type: TABLE
             objects:
               - consumer_flow_windows
+              - delegate_skill_command_claims
               - dod_verify_runs
               - lab_lane_health
               - live_events
               - log_entries
               - open_obligations
+              - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness
               - runtime_error_fingerprints
@@ -365,5 +367,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 85dcb1933b699f4c46931ca404e8b9ffafa8605511a7d350a08acfbf3950d75b
+  sha256: 92c72651c26eb07806a6e4801cb50ae56b5cdf86638e57a6b9163db0ef69f7df
 topology_instance: onex-prod

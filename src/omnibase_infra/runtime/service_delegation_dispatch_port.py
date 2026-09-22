@@ -17,13 +17,25 @@ from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
+from omnibase_infra.runtime.bounded_delegation_routes import (
+    resolve_bounded_delegation_route,
+)
+from omnibase_infra.runtime.models.model_delegation_terminal_evidence import (
+    ModelDelegationTerminalEvidence,
+)
 from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
+)
+from omnibase_infra.runtime.protocol_addressed_broker_transport import (
+    ProtocolAddressedBrokerTransport,
 )
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
     DEFAULT_EXECUTION_TIMEOUT_SECONDS,
     DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
     ProtocolDelegationDispatchPort,
+)
+from omnibase_infra.runtime.protocols.protocol_delegation_terminal_evidence_sink import (
+    ProtocolDelegationTerminalEvidenceSink,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
     ModelRuntimeLocalIngressRoute,
@@ -218,6 +230,7 @@ class RuntimeDelegationDispatchPort:
         routes: Mapping[str, ModelRuntimeLocalIngressRoute] | None = None,
         command_topic: str | None = None,
         response_topic: str | None = None,
+        terminal_evidence_sink: ProtocolDelegationTerminalEvidenceSink | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._package_names = (
@@ -226,6 +239,7 @@ class RuntimeDelegationDispatchPort:
         self._routes = dict(routes) if routes is not None else None
         self._command_topic = command_topic
         self._response_topic = response_topic
+        self._terminal_evidence_sink = terminal_evidence_sink
 
     def _resolved_routes(self) -> dict[str, ModelRuntimeLocalIngressRoute]:
         if self._routes is not None:
@@ -265,6 +279,7 @@ class RuntimeDelegationDispatchPort:
         tenant_id: str | None = None,
         provenance: ModelDelegationProvenance | None = None,
         backend_id: str | None = None,
+        no_escalation: bool = False,
         response_contract: dict[str, object] | None = None,
         system_prompt: str | None = None,
         temperature: float | None = None,
@@ -288,10 +303,11 @@ class RuntimeDelegationDispatchPort:
                     "requires the canonical delegation request wire to carry it "
                     "end to end (OMN-15482)"
                 )
-        if backend_id is not None:
-            raise NotImplementedError(
-                "backend_id pin is not yet supported on the deployed bus "
-                "dispatch path (RuntimeDelegationDispatchPort)"
+        if backend_id is None and no_escalation:
+            raise ValueError("no_escalation requires backend_id")
+        if self._terminal_evidence_sink is not None and tenant_id is None:
+            raise ValueError(
+                "terminal evidence capture requires the actual dispatch tenant_id"
             )
         if execution_timeout_seconds <= 0:
             raise ValueError("execution_timeout_seconds must be positive")
@@ -299,6 +315,33 @@ class RuntimeDelegationDispatchPort:
             raise ValueError("terminal_delivery_margin_seconds must be positive")
         routes = self._resolved_routes()
         selected = _select_delegation_route(routes)
+        if not isinstance(self._event_bus, ProtocolAddressedBrokerTransport):
+            raise InfraUnavailableError(
+                "runtime delegation bus does not expose its configured broker "
+                "and environment identity; refusing route selection"
+            )
+        resolve_bounded_delegation_route(
+            transport=self._event_bus,
+            selected_route=selected.route,
+        )
+        if backend_id is not None:
+            from omnibase_infra.runtime.dogfood_delegation_fault_routes import (
+                resolve_dogfood_delegation_fault_route,
+            )
+
+            fault_route = resolve_dogfood_delegation_fault_route(
+                environment=self._event_bus.environment,
+                bootstrap_servers=self._event_bus.bootstrap_servers,
+                backend_id=backend_id,
+            )
+            if no_escalation is not fault_route.no_escalation:
+                raise InfraUnavailableError(
+                    "declared dogfood fault backend pin requires no-escalation policy"
+                )
+            if execution_timeout_seconds != fault_route.requested_timeout_seconds:
+                raise InfraUnavailableError(
+                    "declared dogfood fault backend pin requires its exact timeout policy"
+                )
         request_payload: dict[str, object] = {
             "prompt": prompt,
             "task_type": task_type,
@@ -317,6 +360,7 @@ class RuntimeDelegationDispatchPort:
             # that model; the terminal delivery margin only bounds this caller's
             # broker wait and is not a delegation request field.
             "requested_timeout_seconds": execution_timeout_seconds,
+            "backend_id": backend_id,
             # OMN-18321 / OMN-18172: carried ONTO THE WIRE, not merely accepted.
             # Accepting the keyword and dropping it would trade a loud TypeError
             # for a silent classification hole -- precisely the silent-drop
@@ -329,6 +373,8 @@ class RuntimeDelegationDispatchPort:
                 None if provenance is None else provenance.model_dump(mode="json")
             ),
         }
+        if no_escalation:
+            request_payload["no_escalation"] = True
 
         command = ModelDispatchBusCommand(
             command_name=selected.alias,
@@ -351,7 +397,45 @@ class RuntimeDelegationDispatchPort:
             command_topic=self._command_topic or selected.route.command_topic,
             routes=routes,
         )
-        _route, result = await broker.dispatch_request(command)
+        terminal_evidence_sink = self._terminal_evidence_sink
+        if terminal_evidence_sink is None:
+            _route, result = await broker.dispatch_request(command)
+        else:
+            # The fail-closed guard above establishes the actual dispatch
+            # tenant before this nested observer is created. Bind both values
+            # locally: mypy cannot retain a mutable instance attribute's
+            # narrowing across an async closure.
+            if tenant_id is None:
+                raise RuntimeError(
+                    "terminal evidence sink reached without a dispatch tenant_id"
+                )
+            evidence_tenant_id = tenant_id
+
+            async def observe_terminal(terminal: object) -> None:
+                from omnibase_infra.runtime.service_pattern_b_broker import (
+                    TerminalPayload,
+                )
+
+                if not isinstance(terminal, TerminalPayload):
+                    raise TypeError(
+                        "broker terminal observer received an invalid terminal"
+                    )
+                await terminal_evidence_sink(
+                    ModelDelegationTerminalEvidence(
+                        correlation_id=correlation_id,
+                        tenant_id=evidence_tenant_id,
+                        topic=terminal.topic,
+                        raw_envelope=terminal.raw_envelope,
+                        encoding="utf-8",
+                        partition=terminal.partition,
+                        offset=terminal.offset,
+                    )
+                )
+
+            _route, result = await broker.dispatch_request(
+                command,
+                terminal_observer=observe_terminal,
+            )
         return _normalize_result_payload(
             status=result.status,
             payload=result.payload,

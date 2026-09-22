@@ -1,0 +1,34 @@
+{
+  "evidence": {
+    "correlation_id": "ab36c9c7-3246-48e2-8a9c-4081d8caf53d",
+    "partition": 0,
+    "run_id": "f53300cb-bc3a-4666-acc5-b5289ee10729",
+    "terminal_envelope_sha256": "e9cf02241b4cdc303ae66cf661835409cd8b17c5a7dc2cfe39a0f66b8645f9c4",
+    "topic_offset": 489
+  },
+  "observed_key_fields": {
+    "prompt_sha256": "50b4c1b7f9a5e5f62612a697095dda14949bbb6b76978ec42b78a945fdd6836e",
+    "resolved_task_type": "document",
+    "response_contract_sha256": null,
+    "lane": "dev",
+    "first_hop_identity": {
+      "backend_id": "61c35979-844a-5e90-882d-b8bbf5231b4c",
+      "model_id": "Qwen3.8-27B",
+      "tier": "local",
+      "provider": "local"
+    }
+  },
+  "observed_context_not_equivalent_to_key_fields": {
+    "lane_authority": "caller-asserted wrapper metadata",
+    "first_attempt_acceptance": "accept",
+    "terminal_attempts_count": 1,
+    "wrapper_timeout_seconds": 240
+  },
+  "unproven_key_dimensions": [
+    "build_identity",
+    "consumer_identity",
+    "provider_policy",
+    "deadline_seconds",
+    "retry_bounds"
+  ]
+}

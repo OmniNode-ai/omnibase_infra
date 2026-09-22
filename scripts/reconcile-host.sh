@@ -75,12 +75,20 @@
 # ----------------------------------------------------------------------------
 # Usage:
 #   reconcile-host.sh [--check] [--verbose] [--omni-home PATH] [--branch NAME]
+#                     [--pinned-candidate-manifest PATH|--pinned-candidate-content-manifest PATH]
 #
 #     --check       Observe and verdict; run NO delegate and mutate NOTHING.
 #                   Fetches (to establish targets) but never checks out or syncs.
 #     --verbose     Echo each collaborator command.
 #     --omni-home   Registry root, overriding $OMNI_HOME.
 #     --branch      Tracked branch (default: dev).
+#     --pinned-candidate-manifest
+#                   Reconcile a clean, explicit source candidate without moving
+#                   any clone toward origin/<branch>. The manifest is generated
+#                   and revalidated by reconcile_verify_movement.py.
+#     --pinned-candidate-content-manifest
+#                   Reconcile an exact dirty source snapshot. Its floor binds
+#                   imported Core and Market package bytes before evidence use.
 #
 # Env:
 #   OMNI_HOME                       required unless --omni-home (rule 8: no default)
@@ -120,6 +128,8 @@ MODE="repair"
 VERBOSE=0
 OMNI_HOME_ARG=""
 BRANCH="dev"
+PINNED_CANDIDATE_MANIFEST=""
+PINNED_CANDIDATE_CONTENT_MANIFEST=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -137,11 +147,34 @@ while [[ $# -gt 0 ]]; do
       BRANCH="$1"
       ;;
     --branch=*) BRANCH="${1#--branch=}" ;;
+    --pinned-candidate-manifest)
+      shift
+      [[ $# -gt 0 ]] || { echo "reconcile-host.sh: --pinned-candidate-manifest requires a path" >&2; exit "$EXIT_INDETERMINATE"; }
+      PINNED_CANDIDATE_MANIFEST="$1"
+      ;;
+    --pinned-candidate-manifest=*) PINNED_CANDIDATE_MANIFEST="${1#--pinned-candidate-manifest=}" ;;
+    --pinned-candidate-content-manifest)
+      shift
+      [[ $# -gt 0 ]] || { echo "reconcile-host.sh: --pinned-candidate-content-manifest requires a path" >&2; exit "$EXIT_INDETERMINATE"; }
+      PINNED_CANDIDATE_CONTENT_MANIFEST="$1"
+      ;;
+    --pinned-candidate-content-manifest=*) PINNED_CANDIDATE_CONTENT_MANIFEST="${1#--pinned-candidate-content-manifest=}" ;;
     -h|--help) sed -n '2,110p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
     *) echo "reconcile-host.sh: unknown argument: $1" >&2; exit "$EXIT_INDETERMINATE" ;;
   esac
   shift
 done
+
+if [[ -n "$PINNED_CANDIDATE_MANIFEST" && -n "$PINNED_CANDIDATE_CONTENT_MANIFEST" ]]; then
+  echo "reconcile-host.sh: choose one clean or content candidate manifest" >&2
+  exit "$EXIT_INDETERMINATE"
+fi
+CANDIDATE_MODE=""
+if [[ -n "$PINNED_CANDIDATE_MANIFEST" ]]; then
+  CANDIDATE_MODE="clean"
+elif [[ -n "$PINNED_CANDIDATE_CONTENT_MANIFEST" ]]; then
+  CANDIDATE_MODE="content"
+fi
 
 say() { printf '[reconcile-host] %s\n' "$*" >&2; }
 trace() { [[ "$VERBOSE" -eq 1 ]] && printf '[reconcile-host]   $ %s\n' "$*" >&2; return 0; }
@@ -424,13 +457,58 @@ judge() { # surface before after target
 # --------------------------------------------------------------------------- #
 # Clone surface
 # --------------------------------------------------------------------------- #
+clone_head() { git -C "$1" rev-parse HEAD 2>/dev/null || true; }
+clone_target() { git -C "$1" rev-parse "origin/$BRANCH" 2>/dev/null || true; }
+is_declared_git_root() {
+  local declared_root physical_root git_root physical_git_root
+  declared_root="$1"
+  physical_root="$(cd "$declared_root" 2>/dev/null && pwd -P || true)"
+  git_root="$(git -C "$declared_root" rev-parse --show-toplevel 2>/dev/null || true)"
+  physical_git_root="$(cd "$git_root" 2>/dev/null && pwd -P || true)"
+  [[ -n "$physical_root" && -n "$physical_git_root" && "$physical_git_root" == "$physical_root" ]]
+}
+
 present_clones=()
 for repo in "${SIBLING_CLONE_MANIFEST[@]}"; do
   [[ -e "$OMNI_HOME/$repo/.git" ]] && present_clones+=("$repo")
 done
 
-clone_head() { git -C "$1" rev-parse HEAD 2>/dev/null || true; }
-clone_target() { git -C "$1" rev-parse "origin/$BRANCH" 2>/dev/null || true; }
+candidate_manifest_args=()
+candidate_floor_args=()
+candidate_manifest_sha256=""
+if [[ -n "$CANDIDATE_MODE" ]]; then
+  if [[ "${#present_clones[@]}" -ne "${#SIBLING_CLONE_MANIFEST[@]}" ]]; then
+    say "INDETERMINATE: pinned candidate requires every declared sibling clone."
+    exit "$EXIT_INDETERMINATE"
+  fi
+  for repo in "${SIBLING_CLONE_MANIFEST[@]}"; do
+    if ! is_declared_git_root "$OMNI_HOME/$repo"; then
+      say "INDETERMINATE: pinned candidate sibling is not its declared Git root: $OMNI_HOME/$repo"
+      exit "$EXIT_INDETERMINATE"
+    fi
+    candidate_manifest_args+=(--repo "$repo")
+    candidate_floor_args+=(--candidate-repo "$repo")
+  done
+  candidate_verifier="candidate-verify"
+  candidate_manifest_path="$PINNED_CANDIDATE_MANIFEST"
+  if [[ "$CANDIDATE_MODE" == "content" ]]; then
+    candidate_verifier="candidate-content-verify"
+    candidate_manifest_path="$PINNED_CANDIDATE_CONTENT_MANIFEST"
+  fi
+  if ! candidate_manifest_proof="$("$PYTHON_BIN" "$VERIFIER" "$candidate_verifier" \
+      --manifest "$candidate_manifest_path" --omni-home "$OMNI_HOME" \
+      "${candidate_manifest_args[@]}" 2>&1)"; then
+    say "INDETERMINATE: pinned candidate manifest does not match the exact source set."
+    say "  $candidate_manifest_proof"
+    exit "$EXIT_INDETERMINATE"
+  fi
+  candidate_manifest_sha256="$(printf '%s' "$candidate_manifest_proof" | sed -n 's/.*"sha256": "\([0-9a-f]*\)".*/\1/p')"
+  [[ "$candidate_manifest_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+    say "INDETERMINATE: candidate verifier returned no manifest digest."
+    exit "$EXIT_INDETERMINATE"
+  }
+  say "pinned candidate ${CANDIDATE_MODE} source: ${candidate_manifest_sha256:0:12}; clone movement disabled"
+fi
 
 # --------------------------------------------------------------------------- #
 # Who the clone-surface writes run as (OMN-17366)
@@ -512,12 +590,14 @@ say "surfaces under $OMNI_HOME (branch $BRANCH): clones=${#present_clones[@]}"
 
 plan_clone_privileges
 
-fetch_all
+if [[ -z "$CANDIDATE_MODE" ]]; then
+  fetch_all
+fi
 for repo in "${present_clones[@]}"; do
   before_heads+=("$(clone_head "$OMNI_HOME/$repo")")
 done
 
-if [[ "$MODE" == "repair" ]]; then
+if [[ "$MODE" == "repair" && -z "$CANDIDATE_MODE" ]]; then
   if [[ ! -f "$CLONE_DELEGATE" ]]; then
     # Not a skip. See the header.
     record "clone-surface" "UNCOVERED" \
@@ -536,12 +616,18 @@ fi
 
 # Re-establish targets after the delegate ran; a delegate that fetched moves
 # origin/<branch>, and one that did not leaves it where we put it above.
-fetch_all
+if [[ -z "$CANDIDATE_MODE" ]]; then
+  fetch_all
+fi
 idx=0
 for repo in "${present_clones[@]}"; do
   clone="$OMNI_HOME/$repo"
   if health="$("$PYTHON_BIN" "$VERIFIER" clone-health --clone "$clone" 2>/dev/null)"; then
-    judge "clone:$repo" "${before_heads[$idx]}" "$(clone_head "$clone")" "$(clone_target "$clone")"
+    if [[ -n "$CANDIDATE_MODE" ]]; then
+      judge "clone:$repo" "${before_heads[$idx]}" "$(clone_head "$clone")" "${before_heads[$idx]}"
+    else
+      judge "clone:$repo" "${before_heads[$idx]}" "$(clone_head "$clone")" "$(clone_target "$clone")"
+    fi
   else
     IFS=$'\t' read -r _ _ health_reason <<<"$health"
     # The core.bare=true trap: fetch succeeds, checkout cannot. Reported ahead
@@ -622,8 +708,15 @@ if [[ "$MODE" == "repair" ]]; then
     # onto. Both default to `dev`; they would only disagree when someone passes
     # --branch here, which is precisely when a silent disagreement would be
     # hardest to spot.
-    trace "bash $VENV_DELEGATE --omni-home $OMNI_HOME --branch $BRANCH"
-    bash "$VENV_DELEGATE" --omni-home "$OMNI_HOME" --branch "$BRANCH" >&2 || \
+    venv_delegate_env=()
+    if [[ "$CANDIDATE_MODE" == "content" ]]; then
+      venv_delegate_env=(
+        "ONEX_CANDIDATE_CONTENT_MANIFEST=$PINNED_CANDIDATE_CONTENT_MANIFEST"
+        "ONEX_CANDIDATE_CONTENT_MANIFEST_SHA256=$candidate_manifest_sha256"
+      )
+    fi
+    trace "${venv_delegate_env[*]} bash $VENV_DELEGATE --omni-home $OMNI_HOME --branch $BRANCH"
+    env "${venv_delegate_env[@]}" bash "$VENV_DELEGATE" --omni-home "$OMNI_HOME" --branch "$BRANCH" >&2 || \
       say "venv delegate exited non-zero; the readback below is what decides."
     SP="$(site_packages "$DISPATCH_VENV" || true)"
   fi
@@ -645,9 +738,12 @@ if [[ -n "$SP" ]]; then
   done
 
   # omnimarket is deliberately absent from omnibase_infra's lock (the layer
-  # graph puts it ABOVE infra), so its target is the canonical clone's HEAD --
-  # which is also exactly what the OMN-14060 drift guard compares against.
-  if [[ -d "$MARKET_CLONE/.git" ]]; then
+  # graph puts it ABOVE infra), so ordinary reconciliation proves its Git ref
+  # against the declared clone. A content candidate deliberately installs a
+  # local source distribution, where direct_url has no VCS commit; its required
+  # Core/Market package-tree binding is instead performed by the content floor
+  # below, after every other surface has been observed.
+  if [[ "$CANDIDATE_MODE" != "content" ]] && is_declared_git_root "$MARKET_CLONE"; then
     judge "venv:omnimarket" "$before_market_commit" \
       "$(observe_commit "$SP" "omnimarket")" "$(clone_head "$MARKET_CLONE")"
   fi
@@ -731,6 +827,9 @@ path_onex_shadow_check
   printf '{\n  "schema": "onex.workspace.reconcile.v1",\n'
   printf '  "generated_at": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '  "mode": "%s",\n  "omni_home": "%s",\n  "branch": "%s",\n' "$MODE" "$OMNI_HOME" "$BRANCH"
+  if [[ -n "$CANDIDATE_MODE" ]]; then
+    printf '  "candidate_manifest": "%s",\n  "candidate_manifest_sha256": "%s",\n  "candidate_mode": "%s",\n' "${PINNED_CANDIDATE_MANIFEST:-$PINNED_CANDIDATE_CONTENT_MANIFEST}" "$candidate_manifest_sha256" "$CANDIDATE_MODE"
+  fi
   printf '  "surfaces": [\n'
   sep=""
   for line in "${SURFACE_LINES[@]}"; do
@@ -782,7 +881,24 @@ if [[ "${#floor_args[@]}" -gt 0 ]]; then
   # As the owner: the floor lives inside $OMNI_HOME, and `scripts/onex` reads it
   # on every invocation. A root-owned floor is one the operator's own reconcile
   # can no longer restamp.
-  as_owner "$PYTHON_BIN" "$VERIFIER" floor --output "$FLOOR" --omni-home "$OMNI_HOME" "${floor_args[@]}" >&2
+  if [[ "$CANDIDATE_MODE" == "clean" ]]; then
+    floor_args+=(--candidate-manifest "$PINNED_CANDIDATE_MANIFEST" "${candidate_floor_args[@]}")
+  elif [[ "$CANDIDATE_MODE" == "content" ]]; then
+    dispatch_python="$DISPATCH_VENV/bin/python"
+    if [[ ! -x "$dispatch_python" ]]; then
+      say "VERDICT: FAILED — content candidate dispatch interpreter is missing: $dispatch_python"
+      exit "$EXIT_FAILED"
+    fi
+    floor_args+=(--candidate-content-manifest "$PINNED_CANDIDATE_CONTENT_MANIFEST" "${candidate_floor_args[@]}" \
+      --candidate-content-binding "omnibase_core:src/omnibase_core:omnibase_core:$dispatch_python" \
+      --candidate-content-binding "omnimarket:src/omnimarket:omnimarket:$dispatch_python" \
+      --candidate-content-resource "omnibase_core:architecture-handshakes/gitignore-baseline.yaml:omnibase_core:data/gitignore-baseline.yaml" \
+      --candidate-content-resource "omnimarket:config/ci_bus_lanes.yaml:omnimarket:config/ci_bus_lanes.yaml")
+  fi
+  if ! as_owner "$PYTHON_BIN" "$VERIFIER" floor --output "$FLOOR" --omni-home "$OMNI_HOME" "${floor_args[@]}" >&2; then
+    say "VERDICT: FAILED — candidate floor could not be stamped from the verified source set."
+    exit "$EXIT_FAILED"
+  fi
 else
   say "WARNING: nothing observable to stamp; floor left untouched."
 fi
