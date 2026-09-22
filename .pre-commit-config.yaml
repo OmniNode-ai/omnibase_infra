@@ -340,6 +340,22 @@ repos:
       # control that makes removing the job-level suppression safe), that every
       # failure state still writes a non-empty record, and that the job carries
       # no suppression at either level.
+      # OMN-19175: the C11 negative-paths producer grades four refusals against
+      # expectations declared in its own source. Pins that the four cases and
+      # the control stay declared, that the header form stays pinned (bearer
+      # returns the same invalid code with a different detail, so two arms
+      # would collide on one code), that an unreachable endpoint cannot grade
+      # PASS, and that the malformed arm stays graded on the 422 envelope
+      # rather than on a code the platform never returns. Runs offline over
+      # recorded observations, so the grader is falsifiable here and not only
+      # on a lane.
+      - id: c11-negative-paths-grading
+        name: C11 negative-paths grader (OMN-19175)
+        entry: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q
+        language: system
+        files: ^(\.github/workflows/chain-canary-c11-negative-paths\.yml|scripts/ci/c11_negative_paths_probe\.py|tests/ci/test_c11_negative_paths_probe_omn19175\.py|tests/fixtures/omn19175/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: lab-load-probe-honesty
         name: Lab-load probe reports honestly (OMN-18253)
         entry: uv run --frozen pytest tests/ci/test_lab_load_probe_omn18253.py -q

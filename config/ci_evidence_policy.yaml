@@ -57,6 +57,22 @@
 #   Four edits in one PR, all of them visible.
 version: 1
 evidence_artifacts:
+  # --- chain-canary-c11-negative-paths.yml: the C11 verdict (OMN-19175) ----
+  #
+  # The probe's EXIT CODE is the criterion's verdict, so this record is not how
+  # the verdict is read -- it is how a reader sees the four rows without
+  # reading a log. That still makes its existence a claim about a measurement:
+  # an empty or absent record beside a green run would say "the four negative
+  # paths were exercised" with nothing behind it.
+  - id: c11-negative-paths
+    workflow: .github/workflows/chain-canary-c11-negative-paths.yml
+    job: c11-negative-paths
+    producer_step: "Drive the four negative paths and grade them"
+    artifact_name: c11-negative-paths
+    required_paths:
+      - c11-negative-paths.json
+    rationale: >-
+      One row per negative path (wrong key, absent key, wrong tenant, malformed) with the expectation declared in the grader, the observed status and code, and the positive control taken in the same invocation. A zero-byte record is the case that matters: four refusals are exactly what an unreachable endpoint produces, so the control row is what makes an all-refused result readable as a failure rather than a proof.
   # --- dev-lane-liveness.yml: the lab saturation signal (OMN-18031) ---------
   #
   # This pair is the plan's named regression fixture. The probe was dead from
