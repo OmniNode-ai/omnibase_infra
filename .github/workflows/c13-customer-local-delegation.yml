@@ -58,6 +58,12 @@ on:
     # canary (:41) so the board's three probes never share a minute.
     - cron: '29 4,16 * * *'
   workflow_dispatch:
+  # TEMPORARY, reverted before merge: the one pre-merge run on a hosted machine,
+  # scoped to this branch only (workflow_dispatch cannot reach a workflow that
+  # is not yet on the default branch).
+  push:
+    branches:
+      - jonah/omn-19179-c13-customer-local-producer
 
 concurrency:
   group: c13-customer-local-${{ github.ref }}
