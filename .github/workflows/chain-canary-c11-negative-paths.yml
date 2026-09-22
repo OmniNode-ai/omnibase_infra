@@ -1,0 +1,172 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# chain-canary-c11-negative-paths.yml — OMN-19175
+#
+# WHAT THIS IS
+#   The PRODUCER for beta criterion C11: "Negative paths: wrong key, absent
+#   key, wrong tenant, malformed — each a typed refusal naming the defect."
+#   This job's EXIT CODE is that criterion's verdict, which is the shape C15
+#   (chain-canary.yml) already set and the shape the board reads without
+#   needing a second grader anywhere.
+#
+# WHY A SEPARATE WORKFLOW RATHER THAN A JOB IN chain-canary.yml
+#   Three reasons, in order of weight.
+#
+#   1. One job's exit code must answer for exactly ONE criterion. Folding this
+#      in would make a single conclusion mean "C15 and C11", and a red would
+#      not say which — the failure mode chain-canary.yml's own OMN-16931 note
+#      records for a different surface ("a green probe verdict is NOT a
+#      five-link chain proof").
+#   2. chain-canary PUBLISHES a real delegation. It carries
+#      `concurrency: chain-canary, cancel-in-progress: false` precisely so two
+#      probes never race and make its quarantine tail scan ambiguous. This
+#      probe writes nothing — four reads and one POST that is refused by
+#      request validation before the endpoint function runs — so it has no
+#      reason to queue behind a delegation, and putting it there would make a
+#      cheap read wait on an expensive write.
+#   3. It has a `pull_request` trigger scoped to its own files (see below).
+#      chain-canary must not acquire one: a probe that fires a real delegation
+#      on every PR that edits it is a different proposition entirely.
+#
+# WHY SELF-HOSTED, AND WHY host-201 IS REQUIRED
+#   Unchanged from chain-canary.yml, and read that file's own two notes before
+#   editing this line. `omnibase-verify` names a runner CLASS, not a host; a
+#   second verify-class runner exists on another lab host. The lane's onex-api
+#   is reachable only through THIS host's `host.docker.internal` gateway alias,
+#   so a run placed anywhere else reports the lane unreachable — and a
+#   permanently-red check is a disabled check. The pair fails SAFE: if that
+#   runner is down the job queues rather than running somewhere blind.
+#
+# WHY IT ALSO RUNS ON pull_request, ON ITS OWN PATHS ONLY
+#   The wrong-tenant arm needs a credential that WORKS, and the only place that
+#   credential exists is this repository's own secret store. So the first run
+#   that can exercise all four arms is a run in this repository — and a
+#   criterion whose first real evidence arrives only after its own change has
+#   merged is a criterion nobody checked before merging. The trigger is scoped
+#   to this workflow, the probe and its tests, so it cannot slow an unrelated
+#   pull request, and it is deliberately not scheduled onto `dev` pushes.
+#
+# THE CREDENTIAL: EXISTING, LANE-LOCAL, REUSED IN ITS OWN REPOSITORY
+#   `CHAIN_CANARY_GATEWAY_API_KEY` is already a repository secret HERE, and
+#   chain-canary.yml already injects it the same way. It is lane-local: it
+#   belongs to the tenant the dev lane's own onex-api issues for itself
+#   in-process and it authorises nothing outside that compose project. No
+#   credential is created, rotated, re-issued or revoked by this workflow, and
+#   nothing is read across a repository boundary.
+#
+#   It is injected as ENVIRONMENT under its literal name and the probe is given
+#   the NAME, never the value: `/proc` is world-readable, so a value on a
+#   command line is readable by every process on the host, and this job
+#   uploads an artifact, so a value in the record would be a real exposure.
+#
+# ABSENT CREDENTIAL IS EXIT 2, NOT A VERDICT
+#   The probe distinguishes "I could not run" from "the platform refused
+#   wrongly". An unresolvable credential is a CONFIGURATION failure and is
+#   reported as one — it must never be graded as a product refusal, which is
+#   the "configuration failure wearing a product failure's clothes" class.
+#   Both are non-zero, so both still fail the job; the difference is what the
+#   log and the record say happened.
+#
+# NO uv sync, DELIBERATELY
+#   scripts/ci/c11_negative_paths_probe.py imports the standard library only.
+#   A probe whose job is to be readable should not acquire a dependency
+#   resolution step that can fail for reasons that have nothing to do with the
+#   thing being probed.
+
+name: Chain Canary — C11 negative paths
+
+on:
+  schedule:
+    # 4x/day at :17, offset from chain-canary (:41 odd hours),
+    # dev-lane-liveness (:07/:22/:37/:52) and sync-revert-watchdog (:00 even
+    # hours) so no two scheduled probes contend for the same runner minute.
+    - cron: '17 2,8,14,20 * * *'
+  workflow_dispatch:
+    inputs:
+      gateway_url:
+        description: 'Tenant-bearing API base URL (onex-api on the dev lane).'
+        required: false
+        default: 'http://host.docker.internal:8090'
+      other_tenant_slug:
+        description: 'A tenant slug the credential does NOT own; drives the wrong-tenant arm.'
+        required: false
+        default: 'onex-lab-house'
+  pull_request:
+    paths:
+      - '.github/workflows/chain-canary-c11-negative-paths.yml'
+      - 'scripts/ci/c11_negative_paths_probe.py'
+      - 'tests/ci/test_c11_negative_paths_probe_omn19175.py'
+      - 'tests/fixtures/omn19175/**'
+
+concurrency:
+  # Four reads and one refused POST: a second run racing this one changes
+  # nothing about either verdict. Cancelling in progress is still right for
+  # pull_request, where a newer head supersedes an older one.
+  group: chain-canary-c11-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  c11-negative-paths:
+    name: C11 negative paths (dev lane)
+    runs-on: [self-hosted, omnibase-verify, host-201]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Drive the four negative paths and grade them
+        env:
+          # Inside a runner container `localhost` is the container itself, so a
+          # localhost probe would hit the wrong network namespace and
+          # manufacture a false RED. The host-gateway alias is what reaches the
+          # lane's published port — same precedent as chain-canary.yml.
+          GATEWAY_URL: ${{ github.event.inputs.gateway_url || 'http://host.docker.internal:8090' }}
+          OTHER_TENANT_SLUG: ${{ github.event.inputs.other_tenant_slug || 'onex-lab-house' }}
+          # The NAME is what the probe is told; the VALUE reaches it only here,
+          # as environment. See the header note.
+          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: a non-zero probe is the verdict and must still write
+          # its record before the job ends.
+          python3 scripts/ci/c11_negative_paths_probe.py \
+            --base-url "${GATEWAY_URL}" \
+            --credential-env CHAIN_CANARY_GATEWAY_API_KEY \
+            --other-tenant-slug "${OTHER_TENANT_SLUG}" \
+            --record c11-negative-paths.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+          status=$?
+          echo "probe exit status: ${status}"
+          exit "${status}"
+
+      - name: Assert the C11 record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact c11-negative-paths \
+            --require c11-negative-paths.json
+
+      - name: Upload the C11 negative-paths record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c11-negative-paths
+          path: c11-negative-paths.json
+          if-no-files-found: error
+          retention-days: 30
