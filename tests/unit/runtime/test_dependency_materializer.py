@@ -889,8 +889,25 @@ class TestProviderKafkaProducerTimeout:
     """Tests for Kafka producer timeout and cleanup behavior."""
 
     @pytest.mark.asyncio
-    async def test_kafka_producer_timeout_cleanup(self) -> None:
-        """Kafka producer is cleaned up on start timeout."""
+    async def test_kafka_producer_timeout_cleanup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every failed connect attempt is cleaned up, not just the last.
+
+        UPDATED by OMN-18925. This previously asserted exactly one ``stop()``
+        because ``create()`` made exactly one connect attempt. That
+        single-shot behaviour was the defect: a broker stall longer than the
+        per-attempt deadline -- measured at 17.2s against a 10s deadline on
+        2026-09-21 -- was unsurvivable by construction.
+
+        The property under test is unchanged and is the one that matters:
+        **a failed connect never leaks its producer.** It is now asserted
+        across all four attempts rather than one, which is a strictly
+        stronger claim -- a retry loop that tore down only the final attempt
+        would leak one socket per retry and would pass the old assertion.
+        """
+        monkeypatch.setenv("KAFKA_RETRY_BACKOFF_BASE", "0.001")
+
         mock_producer = AsyncMock()
         mock_producer.start = AsyncMock(side_effect=TimeoutError())
         mock_producer.stop = AsyncMock()
@@ -905,7 +922,9 @@ class TestProviderKafkaProducerTimeout:
             with pytest.raises(asyncio.TimeoutError):
                 await provider.create()
 
-            mock_producer.stop.assert_awaited_once()
+            # 1 initial attempt + the 3 declared retries, each torn down.
+            assert mock_producer.start.await_count == 4
+            assert mock_producer.stop.await_count == 4
 
 
 # ---------------------------------------------------------------------------
