@@ -367,6 +367,8 @@ repos:
         entry: uv run --frozen pytest tests/ci/test_c13_customer_local_probe_omn19179.py -q
         language: system
         files: ^(\.github/workflows/c13-customer-local-delegation\.yml|scripts/ci/c13_customer_local_probe\.py|tests/ci/test_c13_customer_local_probe_omn19179\.py|tests/fixtures/omn19179/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-19195: the C12 producer's grader. Pins that the recorded lab
       # reading grades PASS, that each broken observation (a catalogue drifted
       # from its platform contract, a Claude id, a house finding, an intake
