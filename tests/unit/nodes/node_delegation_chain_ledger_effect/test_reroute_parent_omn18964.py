@@ -263,3 +263,71 @@ def test_a_malformed_reroute_declaration_is_refused(
         ModelDeclaredChainHop(
             topic=ROUTING_REQUEST, parent=REQUEST, reroute_parents=reroute_parents
         )
+
+
+# Recorded on the .201 dev lane while this fix was hotpatched, 2026-09-22,
+# correlation 4eec9ee4-6740-4123-80d5-038d3f9e71e7: a delegation that climbed
+# every rung and FAILED. It carries both re-route kinds -- one caused by a
+# failing quality-gate-result, one by an inference-response
+# (uuid5(correlation, "ModelInferenceResponseData:0") reproduces 38272eda) --
+# plus the redeliveries event_ledger holds as repeated envelope ids.
+ESC_CORRELATION = UUID("4eec9ee4-6740-4123-80d5-038d3f9e71e7")
+INFERENCE_RESPONSE = "onex.evt.omnibase-infra.inference-response.v1"
+FAILED = "onex.evt.omnimarket.delegate-skill-failed.v1"
+
+
+def _escalated_chain() -> list[ModelObservedHop]:
+    def hop(topic: str, envelope: str, parent: str | None) -> ModelObservedHop:
+        return ModelObservedHop(
+            topic=topic,
+            envelope_id=UUID(envelope),
+            parent_envelope_id=UUID(parent) if parent else None,
+            correlation_id=ESC_CORRELATION,
+        )
+
+    skill = "2e876d50-dfd1-408e-8032-1ad8cfad0a73"
+    request = "18edbba0-e409-4d03-92fc-184cbb6c8491"
+    first_routing = "f9607e0d-f65f-54f1-9f04-491d2c28af44"
+    decision = "4f555f01-a917-5c0c-951a-eb8dff19f937"
+    gate = "8d2e6ebe-0e90-50e7-b739-e8b506f675a6"
+    gate_reroute = "e5d8b64b-2309-58bd-89dc-12bca8355692"
+    inference = "38272eda-fbea-5b36-9243-751a4229d84b"
+    inference_reroute = "7342e282-353b-5166-b306-3b350fb142fa"
+    return [
+        hop(SKILL, skill, None),
+        hop(REQUEST, request, skill),
+        hop(ROUTING_REQUEST, first_routing, request),
+        hop(ROUTING_DECISION, decision, first_routing),
+        hop(QUALITY_GATE_RESULT, gate, "151919f3-d00f-5187-9663-61ef1a93d226"),
+        hop(ROUTING_REQUEST, gate_reroute, gate),
+        hop(ROUTING_DECISION, decision, gate_reroute),
+        hop(QUALITY_GATE_RESULT, gate, "151919f3-d00f-5187-9663-61ef1a93d226"),
+        hop(ROUTING_REQUEST, gate_reroute, gate),
+        hop(INFERENCE_RESPONSE, inference, None),
+        hop(ROUTING_REQUEST, inference_reroute, inference),
+        hop(ROUTING_DECISION, decision, inference_reroute),
+        hop(FAILED, "4cb765ea-7666-5476-a605-2780a952ba33", skill),
+    ]
+
+
+def test_both_reroute_kinds_replay_green_on_the_recorded_escalated_chain() -> None:
+    rows = assemble_replay_and_verify(ESC_CORRELATION, _escalated_chain(), _declared())
+    red = [(r.hop_index, r.replay_detail) for r in rows if not r.replay_green]
+    assert not red, red
+    assert [r.observed_topic for r in rows] == [
+        SKILL,
+        REQUEST,
+        ROUTING_REQUEST,
+        ROUTING_DECISION,
+        ROUTING_REQUEST,
+        ROUTING_REQUEST,
+        FAILED,
+    ]
+
+
+def test_the_inference_reroute_is_red_without_its_projected_parent() -> None:
+    """Control: inference-response is a declared re-route parent, not a pass."""
+    chain = [h for h in _escalated_chain() if h.topic != INFERENCE_RESPONSE]
+    rows = assemble_replay_and_verify(ESC_CORRELATION, chain, _declared())
+    assert [r.replay_green for r in rows] == [True, True, True, True, True, False, True]
+    assert INFERENCE_RESPONSE in rows[5].replay_detail

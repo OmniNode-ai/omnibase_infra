@@ -7,9 +7,9 @@ runtime_profiles:
   - effects
 contract_version:
   major: 1
-  minor: 2
+  minor: 3
   patch: 0
-node_version: "0.2.0"
+node_version: "0.3.0"
 description: >
   Records a correlation-scoped delegation chain after its terminal event. The handler reads envelope identity and parent identity from event_ledger, re-derives every causal edge against the parent this contract DECLARES for each hop (the chain is a tree, so a positional re-derivation grades a correct edge red -- OMN-18419), verifies the observed topics against this contract's declared topology, and idempotently writes public.ledger_chain. A write that cannot happen is a typed failure, never a success (OMN-18398): when the event_ledger read yields no hop at all on any topic in chain_topology, the handler refuses with a typed error naming the correlation id, the topics it looked for and the settle attempts it made, rather than reporting success having written nothing. A PARTIAL observation is still persisted as-is -- absence of a hop is honest evidence the canary reports as an incomplete chain, while absence of a whole chain is a success verdict resting on nothing. Each upsert is additionally required to affect a row: the statement always touches exactly one, so a zero count means the row this node claims to have recorded is not in the relation.
 
@@ -90,19 +90,26 @@ chain_topology:
     parent: "onex.cmd.omnimarket.delegate-skill.v1"
   - topic: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
     parent: "onex.cmd.omnibase-infra.delegation-request.v1"
-    # OMN-18964: the RE-ROUTE. When the first draft misses the quality bar the
-    # orchestrator issues a second routing request while consuming the failing
-    # quality-gate-result (the OMN-14234 free-tier best-of-N path), so that
-    # repeat's recorded parent is the quality-gate-result envelope. Measured on
-    # the .201 dev lane over 30 chains: every re-routed chain replayed red and
-    # every other chain green, because this hop could name only one cause.
-    # Parent EVIDENCE, not a hop: read so the edge can close, never graded or
-    # counted, so the declaration stays five hops and EXPECTED_LEDGER_HOPS is
-    # unchanged. Only a REPEAT may cite it; the first routing request closes
-    # against `parent` alone. Projected into event_ledger by
-    # node_ledger_projection_compute's contract 1.6.0.
+    # OMN-18964: the RE-ROUTES. The delegation orchestrator issues another
+    # routing request while consuming one of two events, and records that
+    # event as the repeat's parent:
+    #   quality-gate-result  the draft missed the quality bar (the OMN-14234
+    #                        free-tier best-of-N path, and tier escalation on
+    #                        a gate verdict)
+    #   inference-response   the inference errored retryably (tier escalation,
+    #                        sibling-backend and customer-route retries)
+    # Both observed live on the .201 dev lane, each identified by re-deriving
+    # uuid5(correlation, "<Class>:0"). Measured over 30 chains before this:
+    # every re-routed chain replayed red and every other chain green, because
+    # this hop could name only one cause. Parent EVIDENCE, not hops: read so
+    # the edge can close, never graded or counted, so the declaration stays
+    # five hops and EXPECTED_LEDGER_HOPS is unchanged. Only a REPEAT may cite
+    # one; the first routing request closes against `parent` alone. Both are
+    # projected into event_ledger by node_ledger_projection_compute's
+    # contract 1.6.0.
     reroute_parents:
       - "onex.evt.omnibase-infra.quality-gate-result.v1"
+      - "onex.evt.omnibase-infra.inference-response.v1"
   - topic: "onex.evt.omnibase-infra.routing-decision.v1"
     parent: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
   # The branch. Observed last in time, caused by the head.
