@@ -783,11 +783,9 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # BIGSERIAL cursor's own standalone sequence, both asserted. The grant
     # rides in the owning node's own lineage, so it is a second declaration
     # here rather than an edit to the first.
-    # 207 -> 208 for OMN-18693: the immutable 0044 delegation-shadow-
-    # comparisons restoration migration. Its 0043z preflight predecessor is
-    # deliberately not vendored -- see tests/unit/migrations/
-    # test_omn18987_pre0044_vendor.py for the refusal it is blocked on.
-    assert len(result.declarations) == 208
+    # 207 -> 209 for OMN-18987: the append-only 0043z predecessor and the
+    # immutable 0044 delegation-shadow-comparisons restoration migration.
+    assert len(result.declarations) == 209
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

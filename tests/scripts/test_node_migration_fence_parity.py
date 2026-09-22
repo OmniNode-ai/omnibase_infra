@@ -510,6 +510,7 @@ FENCED_BUDGET_STATE_RLS_IDS = (
     "0041_delegation_budget_state_rls_tenant_isolation.sql",
 )
 FENCED_OMN18987_IDS = (
+    "node:node_projection_delegation:0043z_preflight_delegation_shadow_comparisons.sql",
     "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql",
 )
 EXPECTED_FENCE = (
