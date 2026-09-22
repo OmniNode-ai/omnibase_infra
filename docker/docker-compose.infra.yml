@@ -1161,9 +1161,35 @@ services:
     !!merge <<: *runtime-base
     container_name: omninode-runtime-effects
     profiles: ["runtime", "full"]
+    # OMN-18843: this container is a BUS CONSUMER and must not wait on the main
+    # runtime's HEALTH before it starts. Measured on the .201 dev lane
+    # 2026-09-21: a force-recreate created it at 18:47:59Z and compose held it
+    # in State=created, StartedAt=0001-01-01, until 18:53:47Z -- 5 min 48 s --
+    # because omninode-runtime answered /health 503 the whole time while it
+    # auto-wired 507 contracts under the 1800 s start_period below, so compose
+    # waited rather than failing. node_delegate_skill_orchestrator runs in the
+    # effects profile, so its command consumer group was Empty for that entire
+    # window and every `onex delegate` refused pre-publish, correctly. Second
+    # measured occurrence; the first is on the ticket.
+    #
+    # The edge was never justified. It dates to 706ec9229 (2026-02-06,
+    # OMN-1897), the FIRST commit of this file, with no stated reason, and the
+    # boot log says there is nothing behind it: this container's startup talks
+    # to postgres (schema-fingerprint stamp), redpanda (SASL auth and topic
+    # provisioning) and four LLM endpoints, and never calls omninode-runtime on
+    # any port.
+    #
+    # service_started, NOT the removal of the edge. Compose starts
+    # omninode-runtime only once ITS OWN depends_on set is satisfied -- the
+    # migration gate healthy, both migrations run to completion, the partition
+    # cap applied, valkey healthy (see that service above). Waiting for it to be
+    # STARTED therefore still inherits every one of those preconditions
+    # transitively, and still orders the main runtime first so it wins the
+    # topic-provisioning race. The ONLY thing dropped is its /health, which is
+    # the only thing this container never needed.
     depends_on:
       omninode-runtime:
-        condition: service_healthy
+        condition: service_started
       redpanda:
         condition: service_healthy
     environment:
@@ -1328,9 +1354,15 @@ services:
   runtime-worker:
     !!merge <<: *runtime-base
     profiles: ["runtime", "full"]
+    # OMN-18843: service_started, not service_healthy, for the reason stated in
+    # full on runtime-effects above -- this container is a bus consumer, it
+    # never calls the main runtime at boot, and waiting on the main runtime's
+    # /health held it in State=created for 5 min 48 s of a measured redeploy.
+    # service_started still inherits the main runtime's own migration and broker
+    # preconditions transitively, so nothing is lost but the health wait.
     depends_on:
       omninode-runtime:
-        condition: service_healthy
+        condition: service_started
       redpanda:
         condition: service_healthy
     environment:
@@ -1747,9 +1779,15 @@ services:
     !!merge <<: *runtime-base
     container_name: omninode-contract-resolver
     profiles: ["runtime", "full"]
+    # OMN-18843: service_started, not service_healthy, for the reason stated in
+    # full on runtime-effects above -- this container is a bus consumer, it
+    # never calls the main runtime at boot, and waiting on the main runtime's
+    # /health held it in State=created for 5 min 48 s of a measured redeploy.
+    # service_started still inherits the main runtime's own migration and broker
+    # preconditions transitively, so nothing is lost but the health wait.
     depends_on:
       omninode-runtime:
-        condition: service_healthy
+        condition: service_started
       redpanda:
         condition: service_healthy
     command:
