@@ -765,6 +765,28 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-17422 AC5: a policy predicated on the app.tenant_id session GUC is
+      # satisfiable only if the writer reaching the relation SETS that GUC, and
+      # only TenantProjectionTableOperation does — the Internal and Catalog
+      # operations say in their own docstrings that they never open a tenant
+      # transaction. So a relation whose declared domain is omninode_internal
+      # or platform_catalog carrying such a policy can never be written by its
+      # declared writer; it survives today only where the connection owns the
+      # table and FORCE is off, and fails closed under the non-bypassing login
+      # lab parity requires. Fourth RLS-shape defect on this family
+      # (OMN-17288 -> OMN-17298 -> OMN-17315 -> OMN-18774), so it is a gate.
+      # Judges NET end state, never a text match: the corpus is append-only, so
+      # the CREATE POLICY OMN-18774 remediated is still in the tree verbatim
+      # and a grep would report a fixed defect as live.
+      # always_run because the subject is the whole corpus plus the whole
+      # topology, not the staged file list.
+      - id: onex-check-tenant-guc-domain-parity
+        name: ONEX Tenant GUC Domain Parity
+        entry: uv run --frozen python scripts/validation/check_tenant_guc_domain_parity.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-14086: wire run_duplication_sweep.py (D1 Drizzle table dupes /
       # D2 omniclaude-vs-occ topic-producer conflicts) as an ENFORCED gate —
       # it had a full pytest fixture suite but zero CI/pre-commit caller,
