@@ -53,3 +53,27 @@ backends:
     max_tokens: 65536
     timeout_ms: 300000
     serving: false
+  # OMN-19187: omnipc2, the second RTX 4090 host at .202, serving the same
+  # Qwen3.8-27B as .201 under llama.cpp, keyless (operator ruling, ledger row
+  # 5474). A NEW backend id, added by this lane overlay (OMN-17099) — the
+  # deleted local-reasoner id is not revived (OMN-16442). Probe recorded in
+  # tests/fixtures/bifrost_served_models_probe.json (2026-09-22T22:39:22Z, from
+  # inside omninode-runtime-effects). context_window is llama.cpp's per-slot
+  # n_ctx. Reachable today by a per-run backend_id pin; placing it in the tier
+  # ladder so it takes unpinned traffic is OMN-19215.
+  # onex-allow-internal-ip OMN-19187 reason="typed dev-lane delegation contract"
+  - backend_id: local-omnipc2-chat
+    endpoint_url: "http://192.168.86.202:8000/v1/chat/completions"
+    served_model_id: "Qwen3.8-27B"
+    parameter_count: "27B"
+    context_window: 32768
+    max_tokens: 16384
+    timeout_ms: 300000
+    provider: local
+    tier: local
+    credential:
+      kind: none
+    capabilities:
+      - code_generation
+      - refactoring
+      - documentation
