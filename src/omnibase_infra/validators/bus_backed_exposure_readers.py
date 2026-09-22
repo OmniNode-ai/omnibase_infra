@@ -41,9 +41,14 @@ WHAT COUNTS AS A READER
    (``src/templates/*.ts`` -- ``DASHBOARD_TEMPLATES``, NOT the gitignored
    ``dashboard-layouts/``). Strictly stronger than (1); either satisfies the gate, and
    the report says which.
-3. A typed ``backend_readers`` declaration on the Market-owned exposure. The
-   validator validates its closed initial shape, then resolves that same contract
-   fact as a backend reader; it does not scan Market source or invent a mirror.
+3. A typed ``backend_readers`` declaration on the Market-owned exposure, naming a
+   status-page slot the Market surface is measured to actually read. The declaration
+   is checked twice: its shape must be closed (known keys, known kind, lower_snake id
+   and slot, absolute route, no duplicates), and its ``(id, route, projection_slot)``
+   must match a ``read_backend_projection`` call the status page really makes, at a
+   route that page really serves. Both halves are resolved out of the omnimarket
+   checkout, never restated here -- a copy of Market's slot names in this file would
+   keep passing the first time Market renamed one.
 4. An explicit ``consumers: none`` on the exposure carrying a non-empty
    ``consumers_reason``.
 
@@ -94,7 +99,8 @@ USAGE
         <contracts-dir> [<contracts-dir> ...] \
         [--extra-contracts-dir <dir> ...] \
         --registry <path/to/component-registry.json> \
-        --layouts-dir <path/to/omnidash/src/templates>
+        --layouts-dir <path/to/omnidash/src/templates> \
+        --backend-reader-surface <path/to/omnimarket/src/omnimarket/projection>
 
 Exit ``0`` when every served ``bus_backed`` exposure has a reader or a reasoned opt-out;
 ``1`` otherwise, including when the scan found no contracts at all.
@@ -103,6 +109,7 @@ Exit ``0`` when every served ``bus_backed`` exposure has a reader or a reasoned 
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -136,10 +143,28 @@ _MIN_REASON_CHARS = 10
 _MISSING = object()
 
 _BACKEND_READER_ID = re.compile(r"^[a-z][a-z0-9_]*$")
-_BACKEND_READER_KIND = "projection_status_page"
-_STATUS_PAGE_READER_ID = "onex_status_page"
-_STATUS_PAGE_ROUTE = "/"
-_STATUS_PAGE_SLOT = "promotion_gate"
+
+# The Market-side names this validator resolves ITS reader facts out of. They are read
+# from the omnimarket checkout, never restated here: a constant like
+# `_STATUS_PAGE_SLOT = "promotion_gate"` sitting in this file would be a second
+# authority for a fact Market owns, and the first time Market renamed the slot this gate
+# would keep passing a declaration nothing reads -- the exact fail-open shape OMN-17199
+# exists to close. What is named below is the SHAPE of the Market surface (which module
+# holds which fact), which is a structural dependency this gate is entitled to have.
+_SURFACE_MODEL_FILE = "models.py"
+_SURFACE_PAGE_FILE = "morning_page.py"
+_SURFACE_API_FILE = "api_server.py"
+# The model class whose `kind` Literal IS the closed set of backend reader kinds.
+_SURFACE_MODEL_CLASS = "ModelProjectionBackendReader"
+_SURFACE_MODEL_KIND_FIELD = "kind"
+# The status page resolves each of its slots through exactly this call, so its call
+# sites ARE the registration table -- there is no separate registry file to read.
+_SURFACE_REGISTRATION_CALL = "read_backend_projection"
+_SURFACE_REGISTRATION_KWARGS = ("reader_id", "projection_slot", "route")
+# Route declarations are decorator calls on the ASGI app, e.g. `@app.get("/")`.
+_SURFACE_ROUTE_VERBS = frozenset(
+    {"get", "post", "put", "patch", "delete", "head", "options"}
+)
 
 # A shipped layout entry names the component it places. The templates are hand-written
 # TypeScript object literals with a uniform `componentName: '<name>'` field
@@ -183,6 +208,35 @@ class BackendReader:
     def label(self) -> str:
         """Name the reader in reports without manufacturing another authority."""
         return f"backend:{self.id}"
+
+
+@dataclass(frozen=True)
+class BackendReaderRegistration:
+    """One status-page slot the Market surface is measured to actually read.
+
+    Not a declaration this gate accepts, but a fact resolved out of the omnimarket
+    checkout: a ``read_backend_projection`` call site the status page really makes.
+    A contract's ``backend_readers`` entry is accepted only when it names one of these.
+    """
+
+    reader_id: str
+    route: str
+    projection_slot: str
+
+
+@dataclass(frozen=True)
+class BackendReaderSurface:
+    """What the Market status page is measured to declare and to read.
+
+    ``kinds`` comes from the owning Pydantic model's ``kind`` Literal; ``registrations``
+    from the page's own call sites; ``routes`` from the ASGI route decorators. All three
+    are read from source, so a contract can only ever be accepted against something that
+    exists on the other side of the fence.
+    """
+
+    kinds: frozenset[str]
+    registrations: frozenset[BackendReaderRegistration]
+    routes: frozenset[str]
 
 
 @dataclass(frozen=True)
@@ -305,8 +359,221 @@ def _iter_contract_files(dirs: Sequence[Path]) -> Iterator[Path]:
             yield path
 
 
+def _parse_surface_module(surface_dir: Path, filename: str) -> ast.Module:
+    """Parse one Market surface module, or refuse to produce a verdict."""
+    path = surface_dir / filename
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ReaderSurfaceError(
+            f"the Market backend-reader surface is unreadable at {path}: {exc}. "
+            "A backend reader is accepted only against the surface that reads it, so "
+            "an absent surface is not an empty one -- it is no verdict."
+        ) from exc
+    try:
+        return ast.parse(source, filename=str(path))
+    except SyntaxError as exc:
+        raise ReaderSurfaceError(
+            f"the Market backend-reader surface at {path} does not parse: {exc}."
+        ) from exc
+
+
+def _module_string_constants(module: ast.Module) -> dict[str, str]:
+    """Module-level ``NAME = "literal"`` bindings, for resolving keyword arguments."""
+    constants: dict[str, str] = {}
+    for node in module.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        else:
+            continue
+        value = node.value
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                constants[target.id] = value.value
+    return constants
+
+
+def _resolve_string(node: ast.expr, constants: dict[str, str]) -> str | None:
+    """A string argument's value, when it can be resolved without executing code."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return constants.get(node.id)
+    return None
+
+
+def _declared_reader_kinds(module: ast.Module, path: Path) -> frozenset[str]:
+    """The ``kind`` Literal on the model that owns the backend-reader declaration."""
+    for node in ast.walk(module):
+        if not isinstance(node, ast.ClassDef) or node.name != _SURFACE_MODEL_CLASS:
+            continue
+        for statement in node.body:
+            if not isinstance(statement, ast.AnnAssign):
+                continue
+            target = statement.target
+            if (
+                not isinstance(target, ast.Name)
+                or target.id != _SURFACE_MODEL_KIND_FIELD
+            ):
+                continue
+            annotation = statement.annotation
+            if not isinstance(annotation, ast.Subscript):
+                break
+            container = annotation.value
+            name = (
+                container.id
+                if isinstance(container, ast.Name)
+                else container.attr
+                if isinstance(container, ast.Attribute)
+                else ""
+            )
+            if name != "Literal":
+                break
+            elements = (
+                annotation.slice.elts
+                if isinstance(annotation.slice, ast.Tuple)
+                else [annotation.slice]
+            )
+            kinds = {
+                element.value
+                for element in elements
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            }
+            if kinds:
+                return frozenset(kinds)
+            break
+        break
+    raise ReaderSurfaceError(
+        f"{path} declares no `{_SURFACE_MODEL_CLASS}.{_SURFACE_MODEL_KIND_FIELD}` "
+        "Literal, so the closed set of backend reader kinds cannot be resolved. "
+        "Accepting a kind this gate cannot check against its owning model is how a "
+        "typed field becomes an untyped one."
+    )
+
+
+def _declared_registrations(
+    module: ast.Module, path: Path
+) -> frozenset[BackendReaderRegistration]:
+    """Every status-page slot registration, read off the page's own call sites."""
+    constants = _module_string_constants(module)
+    registrations: set[BackendReaderRegistration] = set()
+    for node in ast.walk(module):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        called = (
+            func.id
+            if isinstance(func, ast.Name)
+            else func.attr
+            if isinstance(func, ast.Attribute)
+            else ""
+        )
+        if called != _SURFACE_REGISTRATION_CALL:
+            continue
+        supplied = {
+            keyword.arg: keyword.value
+            for keyword in node.keywords
+            if keyword.arg is not None
+        }
+        resolved: dict[str, str] = {}
+        for name in _SURFACE_REGISTRATION_KWARGS:
+            argument = supplied.get(name)
+            value = None if argument is None else _resolve_string(argument, constants)
+            if value is None:
+                raise ReaderSurfaceError(
+                    f"{path} line {node.lineno} calls "
+                    f"`{_SURFACE_REGISTRATION_CALL}` with a `{name}` this gate cannot "
+                    "resolve statically. An unresolvable registration is ambiguous, "
+                    "and an ambiguous surface must refuse rather than guess which "
+                    "slot a contract is allowed to claim."
+                )
+            resolved[name] = value
+        registrations.add(
+            BackendReaderRegistration(
+                reader_id=resolved["reader_id"],
+                route=resolved["route"],
+                projection_slot=resolved["projection_slot"],
+            )
+        )
+    if not registrations:
+        raise ReaderSurfaceError(
+            f"{path} makes no `{_SURFACE_REGISTRATION_CALL}` call, so no backend "
+            "reader exists to accept a declaration against. Zero registrations is not "
+            "an empty allowlist -- it is a surface this gate failed to read."
+        )
+    return frozenset(registrations)
+
+
+def _declared_routes(module: ast.Module, path: Path) -> frozenset[str]:
+    """Every HTTP path the serving app declares, from its route decorators."""
+    constants = _module_string_constants(module)
+    routes: set[str] = set()
+    for node in ast.walk(module):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            func = decorator.func
+            if (
+                not isinstance(func, ast.Attribute)
+                or func.attr not in _SURFACE_ROUTE_VERBS
+                or not decorator.args
+            ):
+                continue
+            route = _resolve_string(decorator.args[0], constants)
+            if route is not None:
+                routes.add(route)
+    if not routes:
+        raise ReaderSurfaceError(
+            f"{path} declares no HTTP routes, so no declared route can be confirmed to "
+            "exist. A reader pointing at a route nobody serves is not a reader."
+        )
+    return frozenset(routes)
+
+
+def collect_backend_reader_surface(surface_dir: Path) -> BackendReaderSurface:
+    """Resolve what the Market status page declares and reads, from its own source.
+
+    Read rather than restated, for the same reason the omnidash registry is read: a gate
+    that carries its own copy of the other side's facts passes on a declaration nothing
+    reads the moment the other side is renamed. Every failure here raises
+    :class:`ReaderSurfaceError` rather than returning an empty surface, because "the
+    page reads nothing" and "the page was not checked out" would otherwise be one value.
+    """
+    model = _parse_surface_module(surface_dir, _SURFACE_MODEL_FILE)
+    page = _parse_surface_module(surface_dir, _SURFACE_PAGE_FILE)
+    api = _parse_surface_module(surface_dir, _SURFACE_API_FILE)
+
+    kinds = _declared_reader_kinds(model, surface_dir / _SURFACE_MODEL_FILE)
+    registrations = _declared_registrations(page, surface_dir / _SURFACE_PAGE_FILE)
+    routes = _declared_routes(api, surface_dir / _SURFACE_API_FILE)
+
+    unserved = sorted(
+        {
+            registration.route
+            for registration in registrations
+            if registration.route not in routes
+        }
+    )
+    if unserved:
+        raise ReaderSurfaceError(
+            f"{surface_dir / _SURFACE_PAGE_FILE} registers slots at route(s) "
+            f"{', '.join(repr(route) for route in unserved)}, which "
+            f"{surface_dir / _SURFACE_API_FILE} does not serve. The two halves of the "
+            "Market surface disagree, so no reader fact can be resolved from it."
+        )
+    return BackendReaderSurface(kinds=kinds, registrations=registrations, routes=routes)
+
+
 def _parse_backend_readers(
     raw: object,
+    surface: BackendReaderSurface,
 ) -> tuple[tuple[BackendReader, ...], tuple[str, ...]]:
     """Validate the initial closed backend-reader declaration shape.
 
@@ -358,27 +625,45 @@ def _parse_backend_readers(
             errors.append(f"{prefix}.id duplicates {reader_id!r}")
             continue
         seen_ids.add(reader_id)
-        if kind != _BACKEND_READER_KIND:
+        if not isinstance(kind, str) or kind not in surface.kinds:
             errors.append(
-                f"{prefix}.kind must be the known kind {_BACKEND_READER_KIND!r}"
+                f"{prefix}.kind {kind!r} is not one of the kinds the reader model "
+                f"declares ({', '.join(sorted(surface.kinds))})"
             )
             continue
-        if reader_id != _STATUS_PAGE_READER_ID:
-            errors.append(
-                f"{prefix}.id must be the known status-page reader "
-                f"{_STATUS_PAGE_READER_ID!r}"
-            )
+        if not isinstance(route, str) or not route.startswith("/"):
+            errors.append(f"{prefix}.route must be an absolute path")
             continue
-        if route != _STATUS_PAGE_ROUTE:
-            errors.append(
-                f"{prefix}.route must be the known status-page route "
-                f"{_STATUS_PAGE_ROUTE!r}"
-            )
+        if not isinstance(projection_slot, str) or not _BACKEND_READER_ID.fullmatch(
+            projection_slot
+        ):
+            errors.append(f"{prefix}.projection_slot must be lower_snake")
             continue
-        if projection_slot != _STATUS_PAGE_SLOT:
+        registration = BackendReaderRegistration(
+            reader_id=reader_id,
+            route=route,
+            projection_slot=projection_slot,
+        )
+        if registration not in surface.registrations:
+            # Well-formed and still refused: the declaration names a reader the status
+            # page does not make. This is the whole point of resolving the surface --
+            # a syntactically perfect entry for a slot nobody reads is precisely the
+            # promise-without-a-reader that OMN-17199 exists to refuse.
             errors.append(
-                f"{prefix}.projection_slot must be the known status-page slot "
-                f"{_STATUS_PAGE_SLOT!r}"
+                f"{prefix} declares reader {reader_id!r} at route {route!r} slot "
+                f"{projection_slot!r}, which the Market status page does not read. "
+                "Declared readers: "
+                + ", ".join(
+                    f"{known.reader_id}@{known.route}:{known.projection_slot}"
+                    for known in sorted(
+                        surface.registrations,
+                        key=lambda item: (
+                            item.reader_id,
+                            item.route,
+                            item.projection_slot,
+                        ),
+                    )
+                )
             )
             continue
         readers.append(
@@ -392,7 +677,9 @@ def _parse_backend_readers(
     return tuple(readers), tuple(errors)
 
 
-def collect_bus_backed_exposures(dirs: Sequence[Path]) -> list[Exposure]:
+def collect_bus_backed_exposures(
+    dirs: Sequence[Path], surface: BackendReaderSurface
+) -> list[Exposure]:
     """Return every served ``bus_backed: true`` exposure under the given roots."""
     found: list[Exposure] = []
     for contract_path in _iter_contract_files(dirs):
@@ -408,7 +695,7 @@ def collect_bus_backed_exposures(dirs: Sequence[Path]) -> list[Exposure]:
         for exposure in _projection_api_served_exposures(data.get("projection_api")):
             topic = exposure.get("topic")
             backend_readers, backend_reader_errors = _parse_backend_readers(
-                exposure.get("backend_readers", _MISSING)
+                exposure.get("backend_readers", _MISSING), surface
             )
             found.append(
                 Exposure(
@@ -577,6 +864,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="path to omnidash src/templates/ (the shipped DASHBOARD_TEMPLATES).",
     )
+    parser.add_argument(
+        "--backend-reader-surface",
+        required=True,
+        type=Path,
+        help=(
+            "path to omnimarket src/omnimarket/projection/ -- the status-page surface a "
+            "typed `backend_readers` declaration is resolved against. Required, not "
+            "defaulted: a gate that silently skips this check when the path is absent "
+            "accepts every declaration on a checkout regression."
+        ),
+    )
     return parser
 
 
@@ -601,8 +899,10 @@ def _report(
             "\n  Fix, in order of preference:\n"
             "    1. Render it. Add an omnidash component whose `dataSources` declares\n"
             "       the topic, and place it on a shipped dashboard layout.\n"
-            "    2. For a Market-owned status-page reader, declare a valid typed\n"
-            "       `backend_readers` entry on the exposure.\n"
+            "    2. For a Market-owned status-page reader, declare a typed\n"
+            "       `backend_readers` entry naming a slot the status page really\n"
+            "       reads. If the page does not read it yet, make it read it first --\n"
+            "       the declaration follows the reader, it does not stand in for one.\n"
             "    3. If nothing should ever render or read it, declare on the exposure:\n"
             "         consumers: none\n"
             '         consumers_reason: "<why nothing renders this>"\n'
@@ -618,7 +918,15 @@ def _report(
         "exposure(s), 0 without a reader.\n"
     )
     for exposure in sorted(exposures, key=lambda e: e.topic):
-        seen_by = sorted(readers.get(exposure.topic, ()))
+        # Both reader kinds, for the same reason `_judge` counts both: reading only the
+        # omnidash map here printed "opted out with a stated reason" against an exposure
+        # that carries no opt-out at all and is read by the status page. A pass line that
+        # names the wrong reason is how the next reader concludes a live exposure was
+        # silenced.
+        seen_by = sorted(
+            set(readers.get(exposure.topic, ()))
+            | {reader.label for reader in exposure.backend_readers}
+        )
         detail = ", ".join(seen_by) if seen_by else "opted out with a stated reason"
         stream.write(f"  - {exposure.topic} :: {detail}\n")
 
@@ -627,10 +935,12 @@ def check_exposure_readers(
     contracts_dirs: Sequence[Path],
     registry: Path,
     layouts_dir: Path,
+    backend_reader_surface: Path,
     stream: IO[str] | None = None,
 ) -> int:
     out = stream if stream is not None else sys.stderr
 
+    surface = collect_backend_reader_surface(backend_reader_surface)
     registry_readers = collect_registry_readers(registry)
     layout_readers = collect_layout_readers(layouts_dir, registry_readers)
     readers: dict[str, set[str]] = {
@@ -649,7 +959,7 @@ def check_exposure_readers(
         )
         return 1
 
-    exposures = collect_bus_backed_exposures(contracts_dirs)
+    exposures = collect_bus_backed_exposures(contracts_dirs, surface)
     findings = evaluate(exposures, readers)
     _report(findings, exposures, readers, out)
     return 1 if findings else 0
@@ -659,7 +969,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     dirs = [*args.contracts_dirs, *args.extra_contracts_dirs]
     try:
-        return check_exposure_readers(dirs, args.registry, args.layouts_dir)
+        return check_exposure_readers(
+            dirs,
+            args.registry,
+            args.layouts_dir,
+            args.backend_reader_surface,
+        )
     except ReaderSurfaceError as exc:
         sys.stderr.write(f"[exposure-reader-coverage] FAIL (fail-closed): {exc}\n")
         return 1
