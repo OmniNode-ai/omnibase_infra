@@ -89,6 +89,7 @@ from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
 )
 from omnibase_infra.cli.model_receipt_runtime_summary import ModelReceiptRuntimeSummary
+from omnibase_infra.errors import InfraConnectionError, InfraTimeoutError
 from omnibase_infra.runtime_identity import (
     collect_runtime_identity,
     render_identity_line,
@@ -990,6 +991,7 @@ def _run_receipt_mode(
     started = time.monotonic()
     runtime_error = ""
     runtime_error_type: str | None = None
+    runtime_error_is_transport = False
     workflow_result: EnumWorkflowResult | None = None
     exit_code = 1
     handler_result_obj: object | None = None
@@ -1027,6 +1029,17 @@ def _run_receipt_mode(
         # hidden: the traceback goes to the capture AND inline in the result.
         runtime_error = traceback.format_exc()
         runtime_error_type = type(exc).__name__
+        # OMN-18925: classify HERE, where the exception object still exists.
+        # Bus construction and bus start are the two things that raise out of
+        # RuntimeLocal before any workflow result, and a transport failure is
+        # the one class the delegate CLI can write a truthful typed terminal
+        # for. Deciding it by isinstance at the catch site rather than by
+        # matching a class NAME downstream is deliberate: a renamed or
+        # re-homed exception would silently stop matching a string, and the
+        # symptom would be the return of the exact silence this closes.
+        runtime_error_is_transport = isinstance(
+            exc, (InfraConnectionError, InfraTimeoutError)
+        )
         logger.exception("receipt_mode: runtime raised")
     finally:
         if previous_onex_state_dir is None:
@@ -1268,6 +1281,8 @@ def _run_receipt_mode(
             terminal_payload=workflow_data.get("terminal_payload"),
             handler_result=handler_result_json,
             error=runtime_error or absent_receipt_explanation,
+            runtime_error_type=runtime_error_type or "",
+            runtime_error_is_transport=runtime_error_is_transport,
             # Errors are never hidden: non-success inlines the FULL capture
             # log; success keeps it behind the artifact ref.
             capture_log="" if status.is_success_like else capture_text,

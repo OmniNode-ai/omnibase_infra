@@ -783,8 +783,10 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # BIGSERIAL cursor's own standalone sequence, both asserted. The grant
     # rides in the owning node's own lineage, so it is a second declaration
     # here rather than an edit to the first.
+    # 207 -> 209 for OMN-18987: the append-only 0043z predecessor and the
+    # immutable 0044 delegation-shadow-comparisons restoration migration.
     #
-    # 207 -> 209 for OMN-18903 (decision 2 of epic OMN-18850), which vendors
+    # 209 -> 211 for OMN-18903 (decision 2 of epic OMN-18850), which vendors
     # TWO node-owned migrations in the same pair shape as every pair above:
     # node_projection_ci_attempt_outcome/0000_create_ci_attempt_outcome.sql,
     # the read model holding one row per (repository, pull request, head
@@ -796,7 +798,7 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     #
     # Vendored into omnibase_infra FIRST per the node-migration
     # vendor-parity ordering, ahead of omnimarket#2730.
-    assert len(result.declarations) == 209
+    assert len(result.declarations) == 211
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
