@@ -72,3 +72,18 @@ def test_vendor_bytes_and_manifest_bindings_are_exact() -> None:
 def test_predecessor_orders_before_immutable_successor() -> None:
     names = sorted(path.name for path in _VENDOR.glob("004*.sql"))
     assert names.index(_PRECHECK) < names.index(_FROZEN)
+
+
+def test_vendored_precheck_carries_no_dynamic_sql() -> None:
+    """The gate's first refusal, asserted where the vendored bytes live.
+
+    ``check_application_database_sql.py`` rejects any ``EXECUTE`` inside a
+    procedural block unconditionally -- a relation target assembled at runtime
+    cannot be proven statically -- and it admits no annotation, so this is a
+    precondition for vendoring rather than a style preference. The sha256 pin
+    above already fails on any byte change; this assertion says WHICH property
+    the next author has to preserve, and fails with that reason rather than
+    with an opaque digest mismatch.
+    """
+    source = (_VENDOR / _PRECHECK).read_text(encoding="utf-8")
+    assert "EXECUTE" not in source.upper()
