@@ -99,7 +99,8 @@ def resolve_lane_declaration_path(omni_home: Path | None) -> Path:
         message = (
             "cannot locate the lane declaration: no workspace root is set. "
             "Pass --omni-home <path to the omni_home workspace> (or export "
-            "$OMNI_HOME, which that flag binds to) so "
+            "$OMNIBASE_PATH, which that flag binds to; the sanctioned wrapper "
+            "omnibase_infra/scripts/onex binds it for you) so "
             f"{LANE_DECLARATION_RELATIVE_PATH} can be read. The broker "
             "address is never taken from the environment (OMN-16871)."
         )
