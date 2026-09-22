@@ -145,6 +145,19 @@ NEW_VERIFY_JOBS = (
         "c12-provider-catalogue",
         "C12 provider catalogue (dev lane)",
     ),
+    # OMN-19181: the C16 receipt-identity producer. Born on the label, for the
+    # identical reason as C11 above: the lane's onex-api is reachable only
+    # through THIS host's gateway alias, and a verify-class runner on another
+    # lab host would report the lane unreachable forever. Its lane writes are
+    # two delegations through the tenant-bearing API -- the canary's own
+    # liveness prompt and one with a task class no consumer accepts -- plus a
+    # correlation-scoped read of the orchestrator's terminal off the bus, as chain-canary already does. It publishes nothing to the
+    # bus directly and reconfigures nothing.
+    (
+        "chain-canary-c16-receipt-identity.yml",
+        "c16-receipt-identity",
+        "C16 receipt identity (dev lane)",
+    ),
 )
 
 # Every job legally on the label, however it got there.

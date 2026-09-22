@@ -67,6 +67,8 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "c11-negative-paths",
     # OMN-19195: the C12 provider-catalogue record.
     "c12-provider-catalogue",
+    # OMN-19181: the C16 receipt-identity record.
+    "c16-receipt-identity",
     "lab-load",
     "lab-pass-receipt-compose-dev",
     # OMN-18572: the same lane, keyed by the OMNINODE_INFRA commit that changed
