@@ -152,6 +152,7 @@ from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
     resolve_delegate_terminal,
 )
+from omnibase_infra.cli.model_delegate_default_bus import ModelDelegateDefaultBus
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
 )
@@ -195,6 +196,7 @@ from omnibase_infra.cli.task_class_selection import (
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     bind_lane_client_transport,
 )
@@ -1042,7 +1044,11 @@ def _write_local_run_files(
     )
 
 
-def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str]:
+def resolve_default_bus(
+    *,
+    kafka_bootstrap: str | None = None,
+    workspace_root: Path | None = None,
+) -> ModelDelegateDefaultBus:
     """Resolve the bus ``--bus`` defaults to when the flag is omitted (OMN-17304).
 
     The CLI hosts a runtime instance, and per the OMN-17304 operator ruling a
@@ -1056,9 +1062,10 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
        :func:`omnibase_infra.runtime.service_kernel.resolve_embedded_runtime_config`:
        the ``ONEX_CONTRACTS_DIR`` BOOTSTRAP pointer names a contracts
        directory whose ``runtime/runtime_config.yaml`` is the configured
-       authority; with no pointer (or no file), the SHIPPED tier-0 default
-       runtime config answers — in-memory bus, ``local`` profile. An
-       unconfigured install is still config-resolved.
+       authority; with no pointer, a bound ``workspace_root`` answers with its
+       checked-in tier-1 runtime config (OMN-19193); with neither, the SHIPPED
+       tier-0 default runtime config answers — in-memory bus, ``local``
+       profile. An unconfigured install is still config-resolved.
     2. ``config.event_bus.type`` from that configuration is passed as
        ``config_bus=`` — the tier the pre-ruling CLI skipped, which is what
        made ``~/.zshrc`` the transport authority.
@@ -1087,9 +1094,10 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
     exact delegation topic; on the current path it is inert by construction.
 
     Returns:
-        ``(bus_type, reason)`` — the resolved transport and provenance naming
-        WHICH authority answered (the config file path, or the shipped tier-0
-        default), for the capture log and receipts.
+        The resolved transport, the provenance naming WHICH authority answered
+        (the config file path, or the shipped tier-0 default), and the lane
+        that same configuration binds a shared bus to (OMN-19193) -- one value,
+        because one configuration answered all three.
 
     Raises:
         ProtocolConfigurationError: the resolved runtime config exists but is
@@ -1098,13 +1106,16 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
     """
     from omnibase_infra.runtime.service_kernel import resolve_embedded_runtime_config
 
-    config, config_source = resolve_embedded_runtime_config()
-    return resolve_bus_type(
+    config, config_source = resolve_embedded_runtime_config(
+        workspace_root=workspace_root
+    )
+    bus, reason = resolve_bus_type(
         config_bus=str(config.event_bus.type),
         config_source=config_source,
         kafka_bootstrap=kafka_bootstrap,
         authority_topic=SUFFIX_DELEGATION_REQUEST,
     )
+    return ModelDelegateDefaultBus(bus=bus, reason=reason, lane=config.event_bus.lane)
 
 
 @contextmanager
@@ -1958,13 +1969,29 @@ def run_delegate(
                 "an explicit bootstrap override — pass --bus kafka too)."
             )
         try:
-            bus, reason = resolve_default_bus()
-        except EventBusResolutionAmbiguousError as exc:
+            default_bus = resolve_default_bus(workspace_root=omni_home)
+        except (EventBusResolutionAmbiguousError, ProtocolConfigurationError) as exc:
             # OMN-16678: an indeterminate probe is a REFUSAL, not a fallback.
-            # Surfaced as a ClickException so the caller gets the ambiguity and
-            # both remedies on stderr with a non-zero exit, instead of a
-            # traceback or a silently coin-flipped transport.
+            # OMN-19193: so is a bound workspace root that declares no runtime
+            # config. Surfaced as a ClickException so the caller gets the cause
+            # and the remedies on stderr with a non-zero exit, instead of a
+            # traceback or a silently chosen transport.
             raise click.ClickException(str(exc)) from exc
+        bus, reason = default_bus.bus, default_bus.reason
+        if bus == "kafka" and lane is None and default_bus.lane is not None:
+            # OMN-19193: the configuration that chose the shared bus also names
+            # which declared lane it is. Taken only on this branch, where the
+            # transport itself came from that configuration -- an explicit
+            # --bus never inherits it, and an explicit --lane outranks it. The
+            # lane still resolves through the lane declaration below, exactly
+            # as a typed --lane would.
+            lane = default_bus.lane
+            logger.info(
+                "onex delegate: lane %s taken from the configuration that "
+                "resolved the transport (%s)",
+                lane,
+                reason,
+            )
         if bus == "kafka":
             logger.info("onex delegate: auto-resolved event bus -> kafka (%s)", reason)
         else:
@@ -2150,6 +2177,18 @@ def run_delegate(
                     dispatch_target=None,
                 ),
             )
+            if lane_target is not None:
+                # OMN-19193: a default workspace run lands on a declared lane,
+                # so a lane that is down refuses the operator's ordinary
+                # delegation. Name the lane, and name the one explicit way to
+                # run offline -- never fall to it.
+                raise click.ClickException(
+                    f"{exc} [lane '{lane_target.lane}', broker "
+                    f"{lane_target.bootstrap_servers}, declared in "
+                    f"{lane_target.declared_in}] To run offline on purpose, pass "
+                    "--bus inmemory: the explicit override, whose evidence stays "
+                    "in the local store."
+                ) from exc
             raise click.ClickException(str(exc)) from exc
 
         # OMN-18810: the four addressing facts the two written files record,
