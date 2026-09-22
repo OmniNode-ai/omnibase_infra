@@ -807,7 +807,7 @@ class TestContractValidation:
         with open(CONTRACT_PATH) as f:
             return yaml.safe_load(f)
 
-    def test_contract_has_all_26_dispatchable_topics(self, contract_data: dict) -> None:
+    def test_contract_has_all_27_dispatchable_topics(self, contract_data: dict) -> None:
         """Verify contract subscribes to every topic the runtime can deliver.
 
         7 platform topic suffixes + 12 of the business command/completion/DLQ
@@ -843,7 +843,10 @@ class TestContractValidation:
         # success one. A delegation has two terminals and this node is the only
         # writer of public.event_ledger, so while only the success terminal was
         # recorded a failed delegation left zero rows there.
-        assert len(topics) == 26, f"Expected 26 topics, got {len(topics)}: {topics}"
+        # OMN-18964: 27 -- quality-gate-result.v1, the recorded parent of a
+        # re-routed delegation's second routing request. Absent here, every
+        # re-routed chain replayed red on chain-canary link 5.
+        assert len(topics) == 27, f"Expected 27 topics, got {len(topics)}: {topics}"
 
         # Verify expected topic suffixes/categories are covered
         expected_suffixes = [

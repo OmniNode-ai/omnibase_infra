@@ -90,6 +90,19 @@ chain_topology:
     parent: "onex.cmd.omnimarket.delegate-skill.v1"
   - topic: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
     parent: "onex.cmd.omnibase-infra.delegation-request.v1"
+    # OMN-18964: the RE-ROUTE. When the first draft misses the quality bar the
+    # orchestrator issues a second routing request while consuming the failing
+    # quality-gate-result (the OMN-14234 free-tier best-of-N path), so that
+    # repeat's recorded parent is the quality-gate-result envelope. Measured on
+    # the .201 dev lane over 30 chains: every re-routed chain replayed red and
+    # every other chain green, because this hop could name only one cause.
+    # Parent EVIDENCE, not a hop: read so the edge can close, never graded or
+    # counted, so the declaration stays five hops and EXPECTED_LEDGER_HOPS is
+    # unchanged. Only a REPEAT may cite it; the first routing request closes
+    # against `parent` alone. Projected into event_ledger by
+    # node_ledger_projection_compute's contract 1.6.0.
+    reroute_parents:
+      - "onex.evt.omnibase-infra.quality-gate-result.v1"
   - topic: "onex.evt.omnibase-infra.routing-decision.v1"
     parent: "onex.cmd.omnibase-infra.delegation-routing-request.v1"
   # The branch. Observed last in time, caused by the head.

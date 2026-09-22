@@ -162,6 +162,12 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # publish_topics list anywhere, which is why it needs an entry here rather
     # than a contract fix.
     "onex.cmd.omnibase-infra.delegation-request.v1": "Published by RuntimePatternBBroker as the runtime-discovered route.command_topic for node_delegation_orchestrator (service_delegation_dispatch_port.py), never declared in a publish_topics list | owner: jonah | expiry: 2026-12-01",
+    # OMN-18964: the delegation RE-ROUTE's parent. A re-routed delegation's
+    # second routing request records the quality-gate-result envelope as its
+    # parent, so node_ledger_projection_compute now projects it and
+    # node_delegation_chain_ledger_effect declares it as `reroute_parents`.
+    # Same cross-repo shape as the OMN-18398 entries above.
+    "onex.evt.omnibase-infra.quality-gate-result.v1": "Published by omnimarket node_delegation_quality_gate_reducer as its success terminal (contract.yaml:51), cross-repo; consumed by the OMN-18964 ledger projection | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------

@@ -53,20 +53,26 @@
 #     envelope no correlation-scoped read could resolve and chain-canary link 5
 #     graded a correct edge red. Paired subscribe_topics+handler_routing diff,
 #     same OMN-14594 pattern.
+#   - OMN-18964: widen subscribe_topics from 26 to 27 by adding
+#     onex.evt.omnibase-infra.quality-gate-result.v1, the recorded parent of a
+#     RE-ROUTED delegation's second routing request. Third instance of the
+#     OMN-18419 class: on the wire, never projected, so every re-routed chain
+#     replayed red. Paired subscribe_topics+handler_routing diff, same
+#     OMN-14594 pattern.
 # Contract identifiers
 name: "node_ledger_projection_compute"
 contract_name: "node_ledger_projection_compute"
 node_name: "node_ledger_projection_compute"
 contract_version:
   major: 1
-  minor: 5
+  minor: 6
   patch: 0
-node_version: "0.5.0"
+node_version: "0.6.0"
 # Node type - COMPUTE for event projection logic
 node_type: "COMPUTE_GENERIC"
 # Description
 description: >
-  COMPUTE node that subscribes to 26 topics (7 platform-lifecycle + 12 business command/completion/DLQ topics remaining from OMN-15006 after OMN-18013 deleted six category-less DLQ subscriptions + 1 external steel_onslaught terminal-event topic, OMN-15168 + 5 delegation-chain topics, OMN-18398 and OMN-18419 + the second delegation terminal, OMN-18937) for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract 1.5.0 (OMN-18937) adds the delegation FAILURE terminal, without which a delegation that failed left no trace in event_ledger at all and the chain writer's read was empty by construction; contract 1.4.0 (OMN-18419) adds the fifth delegation-chain hop, delegation-request.v1, without which the routing request's recorded causal parent resolved to nothing; contract 1.3.0 (OMN-18398) adds the four delegation-chain topics the chain-canary link-5 writer reads back out of public.event_ledger; contract 1.2.0 (OMN-15168) adds the steel_onslaught terminal-match topic as a paired subscribe_topics+handler_routing diff; contract 1.1.0 (OMN-15006) widened the truth surface to build_loop + OCC governance + DLQ topics whose silent loss OMN-15002 documented; contract patch 2 (1.0.2) recorded the OMN-14823 canonical def-B handler entrypoint flip.
+  COMPUTE node that subscribes to 27 topics (7 platform-lifecycle + 12 business command/completion/DLQ topics remaining from OMN-15006 after OMN-18013 deleted six category-less DLQ subscriptions + 1 external steel_onslaught terminal-event topic, OMN-15168 + 5 delegation-chain topics, OMN-18398 and OMN-18419 + the second delegation terminal, OMN-18937 + the delegation re-route parent, OMN-18964) for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events. Contract 1.6.0 (OMN-18964) adds quality-gate-result.v1, the recorded parent of a re-routed delegation's second routing request, without which every re-routed chain replayed red; contract 1.5.0 (OMN-18937) adds the delegation FAILURE terminal, without which a delegation that failed left no trace in event_ledger at all and the chain writer's read was empty by construction; contract 1.4.0 (OMN-18419) adds the fifth delegation-chain hop, delegation-request.v1, without which the routing request's recorded causal parent resolved to nothing; contract 1.3.0 (OMN-18398) adds the four delegation-chain topics the chain-canary link-5 writer reads back out of public.event_ledger; contract 1.2.0 (OMN-15168) adds the steel_onslaught terminal-match topic as a paired subscribe_topics+handler_routing diff; contract 1.1.0 (OMN-15006) widened the truth surface to build_loop + OCC governance + DLQ topics whose silent loss OMN-15002 documented; contract patch 2 (1.0.2) recorded the OMN-14823 canonical def-B handler entrypoint flip.
 
 # Event bus configuration
 event_bus:
@@ -74,11 +80,12 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
-  # Subscribe to 26 topics for complete audit coverage: 7 platform-lifecycle
+  # Subscribe to 27 topics for complete audit coverage: 7 platform-lifecycle
   # topics, plus the 12 business command/completion/DLQ topics that remain from
   # OMN-15006 after OMN-18013 deleted six category-less DLQ subscriptions, plus 1
   # external steel_onslaught terminal-event topic (OMN-15168), plus the 4
-  # delegation-chain topics (OMN-18398) plus the fifth (OMN-18419). Counted
+  # delegation-chain topics (OMN-18398) plus the fifth (OMN-18419), plus the
+  # second terminal (OMN-18937) and the re-route parent (OMN-18964). Counted
   # from the list below, which is
   # the only authority -- the prose said 26 for as long as the list said 20.
   subscribe_topics:
@@ -170,6 +177,15 @@ event_bus:
     # not close. node_delegation_chain_ledger_effect's contract 1.1.0 declares
     # it as a hop with delegate-skill as its parent.
     - "onex.cmd.omnibase-infra.delegation-request.v1"
+    # --- OMN-18964: the delegation RE-ROUTE's parent ---
+    # A delegation whose first draft misses the quality bar is re-routed: the
+    # orchestrator issues a second routing request while consuming the failing
+    # quality-gate-result, and records that envelope as its parent. Never
+    # projected, so node_delegation_chain_ledger_effect could not observe the
+    # parent and every re-routed chain replayed red (12 of 12 over 30 chains
+    # on the .201 dev lane). That contract declares it as the routing
+    # request's `reroute_parents` entry.
+    - "onex.evt.omnibase-infra.quality-gate-result.v1"
   # Audit consumer - read-only, non-processing consumption for ledger persistence
   consumer_purpose: "audit"
   # Start from earliest offset to capture all historical events
@@ -523,6 +539,20 @@ handler_routing:
     - topic: "onex.cmd.omnibase-infra.delegation-request.v1"
       operation: ledger.project
       message_category: "command"
+      handler_type: "ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+    # OMN-18964: the re-route parent, paired with its subscribe_topics entry
+    # above per the OMN-14594 rule.
+    - topic: "onex.evt.omnibase-infra.quality-gate-result.v1"
+      operation: ledger.project
+      message_category: "event"
       handler_type: "ledger_projection"
       event_model:
         name: "ModelEventMessage"
