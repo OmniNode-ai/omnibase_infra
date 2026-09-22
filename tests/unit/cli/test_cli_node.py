@@ -287,7 +287,7 @@ def test_drift_guard_fires_before_unknown_node_lookup(
     runner = CliRunner()
     result = runner.invoke(
         run_node_by_name,
-        ["definitely_not_a_real_node", "--omni-home", "/fake/omni_home"],
+        ["definitely_not_a_real_node", "--omnibase-path", "/fake/workspace"],
     )
 
     assert result.exit_code != 0

@@ -312,7 +312,7 @@ class TestRunDelegateDefaultPath:
 
 
 class TestTheRefusalNamesTheBoundVariable:
-    """AC5: the no-root refusal names the variable --omni-home actually binds."""
+    """AC5: the no-root refusal names the variable --omnibase-path actually binds."""
 
     def test_the_message_names_omnibase_path_not_omni_home(self) -> None:
         from omnibase_infra.cli.delegate_lane import (

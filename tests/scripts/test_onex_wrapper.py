@@ -370,11 +370,13 @@ def test_argv_is_passed_through_verbatim(workspace: _Workspace) -> None:
     the wrapper parses nothing and must stay transparent."""
     workspace.install_entrypoint()
 
-    result = workspace.run("delegate", "--verbose", "--omni-home", "/elsewhere", "a b")
+    result = workspace.run(
+        "delegate", "--verbose", "--omnibase-path", "/elsewhere", "a b"
+    )
 
     assert result.returncode == _SENTINEL_OK
     assert (
-        "ENTRYPOINT delegate --verbose --omni-home /elsewhere a b"
+        "ENTRYPOINT delegate --verbose --omnibase-path /elsewhere a b"
         in workspace.witness_lines()[0]
     )
 
@@ -519,7 +521,7 @@ def _install_root_reporting_entrypoint(workspace: _Workspace) -> None:
 
 
 def test_the_workspace_root_is_bound_for_the_cli(workspace: _Workspace) -> None:
-    """``--omni-home`` binds ``$OMNIBASE_PATH``. Unbound, every wrapper run on
+    """``--omnibase-path`` binds ``$OMNIBASE_PATH``. Unbound, every wrapper run on
     the registry machine read as off-registry and could not find the lane
     declaration or the workspace's tier-1 runtime config."""
     _install_root_reporting_entrypoint(workspace)

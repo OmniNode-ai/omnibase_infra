@@ -1656,7 +1656,7 @@ def test_drift_guard_fires_before_delegate_dispatch(
             "explain the router",
             "--state-root",
             str(tmp_path),
-            "--omni-home",
+            "--omnibase-path",
             "/fake/omni_home",
         ],
     )
