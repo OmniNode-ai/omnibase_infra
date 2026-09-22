@@ -55,17 +55,35 @@ def _load(path: Path) -> ModelBifrostLaneOverlay:
     return ModelBifrostLaneOverlay.model_validate(raw)
 
 
-def test_dev_overlay_matches_cross_repo_v2_parity_fixture() -> None:
-    """Infra's real binding and the shared parser fixture cannot drift."""
+def test_dev_overlay_carries_every_parity_fixture_binding_unchanged() -> None:
+    """Infra's real binding and the shared parser fixture cannot drift.
+
+    OMN-17099: a lab lane may now ADD a backend (a lab host registered by a
+    lane-overlay-only change), so the dev overlay is a SUPERSET of the fixture
+    rather than equal to it. Every binding the fixture pins must still appear in
+    the dev overlay byte-for-byte in meaning, and the header fields must agree.
+    """
     overlay = _load(OVERLAY_YAML)
     fixture = _load(PARITY_FIXTURE)
 
-    assert overlay.model_dump(mode="json") == fixture.model_dump(mode="json")
+    assert (overlay.schema_version, overlay.lane, overlay.locale) == (
+        fixture.schema_version,
+        fixture.lane,
+        fixture.locale,
+    )
+    overlay_bindings = {
+        binding.backend_key: binding.model_dump(mode="json")
+        for binding in overlay.backends
+    }
+    for binding in fixture.backends:
+        assert overlay_bindings.get(binding.backend_key) == binding.model_dump(
+            mode="json"
+        ), binding.backend_key
 
     # OMN-16833: the lane serves more than one local rung, so these are pinned
     # per-backend rather than as single-valued sets.
     by_id = {binding.backend_key: binding for binding in overlay.backends}
-    assert set(by_id) == {"local-coder", "local-heavy-reasoning", "local-ds-v4-flash"}
+    assert set(by_id) >= {"local-coder", "local-heavy-reasoning", "local-ds-v4-flash"}
 
     # OMN-18626: the served id is read from the RECORDED PROBE, not restated.
     # A literal here is a second copy of a value that already lives in the

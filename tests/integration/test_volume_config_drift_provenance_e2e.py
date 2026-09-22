@@ -53,14 +53,17 @@ _CANONICAL_LANE_OVERLAY = REPO_ROOT / "docker" / "lane-overlays" / "dev.bifrost.
 # re-probe touches one place and this fixture follows. (OMN-17099 moved the lab
 # bindings out of a table in ``src/`` into the lane overlays; this reads those.)
 #
-# OMN-16833: every backend the canonical dev lane overlay binds is declared here
-# too, because `_merge_lane_overlay` also refuses an overlay naming a backend the
-# base contract does not declare unless the overlay declares it in full.
+# OMN-16833: every backend the canonical dev lane overlay REBINDS is declared
+# here too, because `_merge_lane_overlay` refuses an overlay naming a base
+# backend the base contract does not declare. A backend the overlay ADDS (it
+# carries its own ``provider``, OMN-17099) is left out: the renderer refuses a
+# base contract that already declares a backend the overlay claims to add.
 _OVERLAY_SERVED_IDS: dict[str, str] = {
     backend["backend_id"]: backend["served_model_id"]
     for backend in yaml.safe_load(_CANONICAL_LANE_OVERLAY.read_text("utf-8"))[
         "backends"
     ]
+    if "provider" not in backend
 }
 
 _SOURCE_CONTRACT: dict[str, object] = {
