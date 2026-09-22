@@ -41,7 +41,10 @@ WHAT COUNTS AS A READER
    (``src/templates/*.ts`` -- ``DASHBOARD_TEMPLATES``, NOT the gitignored
    ``dashboard-layouts/``). Strictly stronger than (1); either satisfies the gate, and
    the report says which.
-3. An explicit ``consumers: none`` on the exposure carrying a non-empty
+3. A typed ``backend_readers`` declaration on the Market-owned exposure. The
+   validator validates its closed initial shape, then resolves that same contract
+   fact as a backend reader; it does not scan Market source or invent a mirror.
+4. An explicit ``consumers: none`` on the exposure carrying a non-empty
    ``consumers_reason``.
 
 (1) is not a CI-only field. ``dataSources[].topic`` is emitted from the very ``TOPICS``
@@ -61,8 +64,9 @@ amnesty list by another name:
 
 * ``consumers_reason`` without ``consumers: none`` FAILS — a reason with nothing to
   justify is a leftover.
-* ``consumers: none`` on an exposure that DOES have a reader FAILS — once somebody
-  renders it, the opt-out is a lie and must be deleted, not left standing.
+* ``consumers: none`` on an exposure that DOES have an omnidash or backend reader
+  FAILS — once somebody reads it, the opt-out is a lie and must be deleted, not left
+  standing.
 * Any other ``consumers`` value FAILS closed. ``consumers: tbd`` must not become a
   third, undocumented escape hatch.
 
@@ -131,6 +135,9 @@ _MIN_REASON_CHARS = 10
 
 _MISSING = object()
 
+_BACKEND_READER_ID = re.compile(r"^[a-z][a-z0-9_]*$")
+_BACKEND_READER_KIND = "projection_status_page"
+
 # A shipped layout entry names the component it places. The templates are hand-written
 # TypeScript object literals with a uniform `componentName: '<name>'` field
 # (`src/templates/*.ts`), so the name is lifted textually rather than by standing up a
@@ -156,6 +163,23 @@ class Exposure:
     topic: str
     consumers: object
     consumers_reason: object
+    backend_readers: tuple[BackendReader, ...]
+    backend_reader_errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BackendReader:
+    """One syntactically valid Market-declared backend projection reader."""
+
+    id: str
+    kind: str
+    route: str
+    projection_slot: str
+
+    @property
+    def label(self) -> str:
+        """Name the reader in reports without manufacturing another authority."""
+        return f"backend:{self.id}"
 
 
 @dataclass(frozen=True)
@@ -278,6 +302,83 @@ def _iter_contract_files(dirs: Sequence[Path]) -> Iterator[Path]:
             yield path
 
 
+def _parse_backend_readers(
+    raw: object,
+) -> tuple[tuple[BackendReader, ...], tuple[str, ...]]:
+    """Validate the initial closed backend-reader declaration shape.
+
+    Market owns the typed model and runtime discovery. This validator consumes the
+    same YAML declaration only to account for a served exposure's reader. Invalid
+    declarations remain findings even if an Omnidash reader happens to exist: a
+    malformed contract fact must not become a silent second reader authority.
+    """
+    if raw is _MISSING:
+        return (), ()
+    if not isinstance(raw, list):
+        return (), ("`backend_readers` must be a list of reader mappings",)
+
+    readers: list[BackendReader] = []
+    errors: list[str] = []
+    seen_ids: set[str] = set()
+    required_keys = frozenset({"id", "kind", "route", "projection_slot"})
+
+    for index, entry in enumerate(raw):
+        prefix = f"`backend_readers[{index}]`"
+        if not isinstance(entry, dict):
+            errors.append(f"{prefix} must be a mapping")
+            continue
+
+        if any(not isinstance(key, str) for key in entry):
+            errors.append(f"{prefix} keys must be strings")
+            continue
+
+        entry_keys = frozenset(entry)
+        missing_keys = sorted(required_keys - entry_keys)
+        unknown_keys = sorted(entry_keys - required_keys)
+        if missing_keys:
+            errors.append(f"{prefix} is missing {', '.join(missing_keys)}")
+        if unknown_keys:
+            errors.append(f"{prefix} has unknown keys {', '.join(unknown_keys)}")
+        if missing_keys or unknown_keys:
+            continue
+
+        reader_id = entry["id"]
+        kind = entry["kind"]
+        route = entry["route"]
+        projection_slot = entry["projection_slot"]
+        if not isinstance(reader_id, str) or not _BACKEND_READER_ID.fullmatch(
+            reader_id
+        ):
+            errors.append(f"{prefix}.id must be lower_snake")
+            continue
+        if reader_id in seen_ids:
+            errors.append(f"{prefix}.id duplicates {reader_id!r}")
+            continue
+        seen_ids.add(reader_id)
+        if kind != _BACKEND_READER_KIND:
+            errors.append(
+                f"{prefix}.kind must be the known kind {_BACKEND_READER_KIND!r}"
+            )
+            continue
+        if not isinstance(route, str) or not route.startswith("/"):
+            errors.append(f"{prefix}.route must be an absolute path")
+            continue
+        if not isinstance(projection_slot, str) or not _BACKEND_READER_ID.fullmatch(
+            projection_slot
+        ):
+            errors.append(f"{prefix}.projection_slot must be lower_snake")
+            continue
+        readers.append(
+            BackendReader(
+                id=reader_id,
+                kind=kind,
+                route=route,
+                projection_slot=projection_slot,
+            )
+        )
+    return tuple(readers), tuple(errors)
+
+
 def collect_bus_backed_exposures(dirs: Sequence[Path]) -> list[Exposure]:
     """Return every served ``bus_backed: true`` exposure under the given roots."""
     found: list[Exposure] = []
@@ -293,12 +394,17 @@ def collect_bus_backed_exposures(dirs: Sequence[Path]) -> list[Exposure]:
             continue
         for exposure in _projection_api_served_exposures(data.get("projection_api")):
             topic = exposure.get("topic")
+            backend_readers, backend_reader_errors = _parse_backend_readers(
+                exposure.get("backend_readers", _MISSING)
+            )
             found.append(
                 Exposure(
                     contract=contract_path,
                     topic=topic if isinstance(topic, str) and topic else "<missing>",
                     consumers=exposure.get("consumers", _MISSING),
                     consumers_reason=exposure.get("consumers_reason", _MISSING),
+                    backend_readers=backend_readers,
+                    backend_reader_errors=backend_reader_errors,
                 )
             )
     return found
@@ -334,7 +440,18 @@ def _judge(exposure: Exposure, readers: dict[str, set[str]]) -> Finding | None:
             ),
         )
 
-    seen_by = sorted(readers.get(exposure.topic, ()))
+    if exposure.backend_reader_errors:
+        return Finding(
+            contract=exposure.contract,
+            topic=exposure.topic,
+            code="invalid_backend_reader",
+            reason="; ".join(exposure.backend_reader_errors),
+        )
+
+    seen_by = sorted(
+        set(readers.get(exposure.topic, ()))
+        | {reader.label for reader in exposure.backend_readers}
+    )
     declared = exposure.consumers
     raw_reason = exposure.consumers_reason
     reason_text = raw_reason.strip() if isinstance(raw_reason, str) else ""
@@ -358,9 +475,9 @@ def _judge(exposure: Exposure, readers: dict[str, set[str]]) -> Finding | None:
             topic=exposure.topic,
             code="no_reader",
             reason=(
-                "declared `bus_backed: true` and NO omnidash component declares this "
-                "topic in its `dataSources`, and no shipped layout places one. The "
-                "exposure is a promise that somebody looks, and nobody does."
+                "declared `bus_backed: true` and has no Omnidash or typed backend "
+                "reader. The exposure is a promise that somebody looks, and nobody "
+                "does."
             ),
         )
 
@@ -372,8 +489,8 @@ def _judge(exposure: Exposure, readers: dict[str, set[str]]) -> Finding | None:
             reason=(
                 f"`consumers: {declared!r}` is not a recognised declaration. The only "
                 f"accepted value is the literal `{_OPT_OUT_LITERAL}`; readers are "
-                "declared on the reader side, in the omnidash component registry, so "
-                "that the render layer and this gate resolve one field and not two."
+                "declared by their owning runtime surface, so the runtime and this gate "
+                "resolve one field and not two."
             ),
         )
 
@@ -471,10 +588,12 @@ def _report(
             "\n  Fix, in order of preference:\n"
             "    1. Render it. Add an omnidash component whose `dataSources` declares\n"
             "       the topic, and place it on a shipped dashboard layout.\n"
-            "    2. If nothing should ever render it, declare on the exposure:\n"
+            "    2. For a Market-owned status-page reader, declare a valid typed\n"
+            "       `backend_readers` entry on the exposure.\n"
+            "    3. If nothing should ever render or read it, declare on the exposure:\n"
             "         consumers: none\n"
             '         consumers_reason: "<why nothing renders this>"\n'
-            "    3. If nothing reads it and nothing should expose it, delete the\n"
+            "    4. If nothing reads it and nothing should expose it, delete the\n"
             "       exposure. An exposure nobody wants is not a thing to silence.\n"
             "\n  This gate has no companion file to record a violation in, on purpose\n"
             "  (OMN-17068). Do not add one.\n"

@@ -44,6 +44,17 @@ LIVE_EVENTS_TOPIC = "onex.snapshot.projection.live-events.v1"
 # ---------------------------------------------------------------------------
 
 
+def _backend_reader(**overrides: object) -> dict[str, object]:
+    reader: dict[str, object] = {
+        "id": "onex_status_page",
+        "kind": "projection_status_page",
+        "route": "/",
+        "projection_slot": "promotion_gate",
+    }
+    reader.update(overrides)
+    return reader
+
+
 def _write_contract(
     root: Path,
     node: str,
@@ -147,7 +158,7 @@ def test_ac1_bus_backed_with_no_reader_and_no_consumers_key_is_a_violation(
     )
 
     assert [f.topic for f in findings] == ["onex.snapshot.projection.orphan.v1"]
-    assert "NO omnidash component" in findings[0].reason
+    assert "no Omnidash or typed backend reader" in findings[0].reason
 
 
 def test_ac1_exit_code_is_nonzero_so_the_gate_can_block(tmp_path: Path) -> None:
@@ -197,6 +208,104 @@ def test_a_bus_backed_exposure_with_a_registry_reader_passes(tmp_path: Path) -> 
         evaluate(collect_bus_backed_exposures([contracts]), _readers(registry, layouts))
         == []
     )
+
+
+def test_a_bus_backed_exposure_with_a_typed_backend_reader_passes(
+    tmp_path: Path,
+) -> None:
+    contracts = tmp_path / "contracts"
+    _write_contract(
+        contracts,
+        "node_projection_promotion_gate",
+        {
+            "expose": True,
+            "topic": "onex.snapshot.projection.prod-promotion-gate.v1",
+            "bus_backed": True,
+            "backend_readers": [_backend_reader()],
+        },
+    )
+    registry = _write_registry(tmp_path / "registry.json", {"w": [REGISTRATION_TOPIC]})
+    layouts = tmp_path / "layouts"
+    _write_layout(layouts, "default", ["w"])
+
+    assert (
+        evaluate(collect_bus_backed_exposures([contracts]), _readers(registry, layouts))
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "backend_readers",
+    [
+        pytest.param("onex_status_page", id="not-a-list"),
+        pytest.param(["onex_status_page"], id="entry-not-a-mapping"),
+        pytest.param([{}], id="missing-required-fields"),
+        pytest.param([_backend_reader(kind="unknown_reader")], id="unknown-kind"),
+        pytest.param([_backend_reader(route="morning")], id="relative-route"),
+        pytest.param(
+            [_backend_reader(projection_slot="promotion-gate")], id="invalid-slot"
+        ),
+        pytest.param(
+            [_backend_reader(), _backend_reader(projection_slot="secondary_gate")],
+            id="duplicate-id",
+        ),
+    ],
+)
+def test_malformed_backend_reader_declarations_fail_closed(
+    tmp_path: Path, backend_readers: object
+) -> None:
+    contracts = tmp_path / "contracts"
+    _write_contract(
+        contracts,
+        "node_projection_promotion_gate",
+        {
+            "expose": True,
+            "topic": "onex.snapshot.projection.prod-promotion-gate.v1",
+            "bus_backed": True,
+            "backend_readers": backend_readers,
+        },
+    )
+    registry = _write_registry(
+        tmp_path / "registry.json",
+        {"real-dashboard-reader": ["onex.snapshot.projection.prod-promotion-gate.v1"]},
+    )
+    layouts = tmp_path / "layouts"
+    _write_layout(layouts, "default", ["real-dashboard-reader"])
+
+    findings = evaluate(
+        collect_bus_backed_exposures([contracts]), _readers(registry, layouts)
+    )
+
+    assert len(findings) == 1
+    assert findings[0].code == "invalid_backend_reader"
+
+
+def test_consumers_none_is_stale_when_a_backend_reader_exists(tmp_path: Path) -> None:
+    contracts = tmp_path / "contracts"
+    topic = "onex.snapshot.projection.prod-promotion-gate.v1"
+    _write_contract(
+        contracts,
+        "node_projection_promotion_gate",
+        {
+            "expose": True,
+            "topic": topic,
+            "bus_backed": True,
+            "backend_readers": [_backend_reader()],
+            "consumers": "none",
+            "consumers_reason": "The old reader was intentionally retired.",
+        },
+    )
+    registry = _write_registry(tmp_path / "registry.json", {"w": [REGISTRATION_TOPIC]})
+    layouts = tmp_path / "layouts"
+    _write_layout(layouts, "default", ["w"])
+
+    findings = evaluate(
+        collect_bus_backed_exposures([contracts]), _readers(registry, layouts)
+    )
+
+    assert len(findings) == 1
+    assert findings[0].code == "stale_opt_out"
+    assert "backend:onex_status_page" in findings[0].reason
 
 
 def test_a_layout_entry_alone_counts_as_a_reader(tmp_path: Path) -> None:
