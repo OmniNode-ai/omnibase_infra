@@ -96,6 +96,20 @@ scope:
     # no locator that resolves). Honest debt, not a case.
     - scripts/ci/check_trivyignore_expiry.py
     - scripts/ci/ci_env_digest.py
+    # OMN-19175: a PROBE, not a guard, and the same class as
+    # model_review_capability_canary.py two lines below and
+    # runner_fleet_canary.sh further down. It drives four negative paths
+    # against a deployed lane and grades them against expectations declared in
+    # its own source; there is no historical incident whose BYTES it replays,
+    # because the behaviour it asserts was landed preventively by OMN-18042 and
+    # never regressed. Capturing a fixture for an incident that did not happen
+    # is exactly the hand-typed approximation R2 exists to refuse, so the
+    # honest record is debt rather than a manufactured case. Its own grading
+    # logic IS proven offline, over recorded observations, in
+    # tests/ci/test_c11_negative_paths_probe_omn19175.py -- that is a
+    # regression suite, not an incident replay, and the two are not
+    # interchangeable.
+    - scripts/ci/c11_negative_paths_probe.py
     # OMN-17876: the offline contract canary is a new preventive evidence
     # projection; it deliberately cannot replay a live runner incident.
     - scripts/ci/model_review_capability_canary.py
