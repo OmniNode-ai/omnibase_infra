@@ -12,13 +12,16 @@ request until the vendored counterpart is on this repo's ``dev``. A
 hand-authored ``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entry carried it for the
 length of that window.
 
-The pin advance to ``622664a35575`` (OMN-17292) closes the window. It carries
-omnimarket#2744, the retiring pull request the entry named in its own comment,
-so the pinned contracts now declare the relation themselves and the entry
-contributes byte-identical output. ``test_no_interim_entry_is_redundant`` in
+The pin advance to ``fb41fdedc57e`` (OMN-17292) closes the window -- it is
+ancestor-forward of ``622664a35575`` (verified: git merge-base --is-ancestor
+622664a3557592abd16f1a97513278c98549fd59 fb41fdedc57e8fda3a001b394dc286d6910bb983
+=> true, reverse => false) and carries omnimarket#2744, the retiring pull
+request the entry named in its own comment, so the pinned contracts now
+declare the relation themselves and the entry contributes byte-identical
+output. ``test_no_interim_entry_is_redundant`` in
 ``tests/ci/test_supplemental_declaration_expiry_omn18863.py`` went red naming
 it, and the deletion rides the commit that caused it -- the sequence OMN-18900
-followed for ``dod_verify_runs`` on the previous pin advance.
+followed for ``dod_verify_runs`` on an earlier pin advance.
 
 The relation is the durable correlation-keyed claim that stops a redelivered
 delegate-skill command from re-running the inference and billing it twice, so
@@ -111,7 +114,7 @@ class TestTheBridgeWasRetired:
         assert _RELATION not in carried, (
             f"{_RELATION} still has a supplemental LEGACY_MIGRATION_TABLE_"
             "DECLARATIONS entry in table_grant_derivation.py, but the pinned "
-            "omnimarket contracts (622664a35575, OMN-17292, carrying "
+            "omnimarket contracts (fb41fdedc57e, OMN-17292, carrying "
             "omnimarket#2744) declare it. A redundant bridge contributes "
             "byte-identical output and nothing else will tell you it is there."
         )
