@@ -1,0 +1,148 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# chain-canary-c12-provider-catalogue.yml — OMN-19195
+#
+# WHAT THIS IS
+#   The PRODUCER for beta criterion C12: "Provider catalogue equals the
+#   handler-backed set; no Claude entry; no house entry", proven by "catalogue
+#   readback + negative test". This job's EXIT CODE is that criterion's
+#   verdict — the shape C11 (chain-canary-c11-negative-paths.yml) and C15
+#   (chain-canary.yml) already use, so the board reads a conclusion and needs
+#   no second grader anywhere.
+#
+#   Until this existed C12 carried a single hand-recorded readback of one
+#   image (2026-09-19). Nothing re-measured it: a later image shipping a
+#   catalogue drifted from its platform contract, or an intake model that
+#   stopped validating against the catalogue, would have left C12 reading
+#   green indefinitely.
+#
+# HOW IT READS THE SUBJECT
+#   scripts/ci/c12_provider_catalogue_observe.py is piped to
+#   `docker exec -i -u appuser onex-api python - /app` through this runner's
+#   docker socket, so it runs in the DEPLOYED interpreter against the DEPLOYED
+#   omnimarket package and the DEPLOYED intake route, as the container's own
+#   unprivileged user. It writes nothing: every injection of the negative test
+#   is an in-memory copy handed to a pure function. The grading runs here, in
+#   scripts/ci/c12_provider_catalogue_probe.py, against expectations declared in
+#   that file and tested offline in
+#   tests/ci/test_c12_provider_catalogue_probe_omn19195.py.
+#
+#   Over HTTP there is nothing to read: the intake route answers 401 before its
+#   body is validated and its OpenAPI schema carries only a charset regex. The
+#   deployed package through the deployed interpreter is the strongest reading
+#   available, and the same one the hand readback took.
+#
+# WHY THIS REPOSITORY, THIS RUNNER, THIS LANE
+#   The subject is the dev lane's onex-api container on the lab host. Reaching
+#   it needs that host's docker socket, which the `omnibase-verify` runner on
+#   host-201 already carries — runtime-rebuild-trigger.yml's
+#   verify-lane-converged job reads the same lane's Postgres through it with
+#   `docker exec`. So the runner, the socket and the lane are already here, and
+#   the board already holds a grant for this repository (C11 and C15 are probed
+#   from it), so registering this producer needs no new board credential.
+#   `host-201` is required, not decoration: `omnibase-verify` names a runner
+#   CLASS and a run placed on another lab host would find no such container.
+#   The pair fails SAFE — if the runner is down the job queues.
+#
+#   No credential is used at all. `docker exec` into a container on the
+#   runner's own host needs none, and the probe calls no route.
+#
+# WHY A SEPARATE WORKFLOW
+#   One job's exit code must answer for exactly ONE criterion, or a red does
+#   not say which. Same reasoning as the C11 producer's header, in full there.
+#
+# WHY THERE IS NO pull_request TRIGGER
+#   The C11 producer found it the hard way: a path-scoped pull-request job sits
+#   in neither `required_status_checks` nor `EXPECTED_EXTERNAL_CONTEXTS`, the
+#   advisory-job gate (OMN-18775) refuses it, and registering it would hold CI
+#   Summary pending on every pull request that does not touch these files. The
+#   pre-merge evidence is the hand-run on the lab lane cited in the pull
+#   request; `workflow_dispatch` re-runs it on demand.
+#
+# EXIT 2 IS "COULD NOT LOOK", NOT A VERDICT
+#   No container, a stopped container, docker refusing, or the observer failing
+#   to import the subject exit 2. Both 1 and 2 fail the job; the record and the
+#   log say which happened. An unreachable container can never produce exit 0.
+#
+# NO uv sync, DELIBERATELY
+#   Both scripts import the standard library only (the observer additionally
+#   imports the subject it is reading, inside the container). A probe should
+#   not acquire a dependency-resolution step that can fail for reasons that
+#   have nothing to do with the thing it probes.
+
+name: Chain Canary — C12 provider catalogue
+
+on:
+  schedule:
+    # 4x/day at :27, offset from the C11 producer (:17), chain-canary (:41 odd
+    # hours), dev-lane-liveness (:07/:22/:37/:52) and sync-revert-watchdog
+    # (:00 even hours) so no two scheduled probes contend for the runner minute.
+    - cron: '27 2,8,14,20 * * *'
+  workflow_dispatch:
+    inputs:
+      container:
+        description: 'The deployed onex-api container on the dev lane.'
+        required: false
+        default: 'onex-api'
+
+concurrency:
+  # Read-only: a second run racing this one changes nothing about either
+  # verdict. The group only stops a dispatch stacking on a scheduled tick.
+  group: chain-canary-c12-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  c12-provider-catalogue:
+    name: C12 provider catalogue (dev lane)
+    runs-on: [self-hosted, omnibase-verify, host-201]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Read the deployed catalogue and grade it
+        env:
+          C12_CONTAINER: ${{ github.event.inputs.container || 'onex-api' }}
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: a non-zero probe is the verdict and must still write
+          # its record before the job ends.
+          python3 scripts/ci/c12_provider_catalogue_probe.py \
+            --container "${C12_CONTAINER}" \
+            --record c12-provider-catalogue.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+          status=$?
+          echo "probe exit status: ${status}"
+          exit "${status}"
+
+      - name: Assert the C12 record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact c12-provider-catalogue \
+            --require c12-provider-catalogue.json
+
+      - name: Upload the C12 provider-catalogue record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c12-provider-catalogue
+          path: c12-provider-catalogue.json
+          if-no-files-found: error
+          retention-days: 30
