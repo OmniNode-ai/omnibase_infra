@@ -64,6 +64,32 @@ class ModelReceiptRuntimeSummary(BaseModel):
             "Empty when the run produced a terminal workflow result."
         ),
     )
+    runtime_error_type: str = Field(
+        default="",
+        description=(
+            "Exception class name when the runtime raised, e.g. "
+            "'InfraConnectionError'. Empty when the run produced a terminal "
+            "workflow result. Carried as its own field rather than left for "
+            "a reader to parse out of the traceback in ``error``: a "
+            "projection grouping failures by class should not have to "
+            "regex prose, and prose is the thing most likely to be reworded."
+        ),
+    )
+    runtime_error_is_transport: bool = Field(
+        default=False,
+        description=(
+            "OMN-18925. True when the runtime raised because it could not "
+            "reach the message broker, as classified by isinstance against "
+            "the infra transport error types AT THE POINT THE EXCEPTION WAS "
+            "CAUGHT -- never by string-matching a type name downstream, "
+            "which is how a renamed exception silently stops being "
+            "recognised. A delegate run carrying this flag has a typed "
+            "transport terminal written for it instead of raising an "
+            "unresolved-terminal error at its caller, which is the whole of "
+            "the C16 gap this closes. Defaulted false so every receipt "
+            "written before this field existed still validates."
+        ),
+    )
     handler_locus: str = Field(
         default="",
         description=(

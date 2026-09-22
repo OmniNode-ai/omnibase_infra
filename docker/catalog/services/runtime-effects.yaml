@@ -126,9 +126,18 @@ optional_directory_bind_mounts:
   - source_env: CODING_AGENT_CLAUDE_CREDS_HOST_DIR
     container_path: /home/omniinfra/.claude
     read_only: true
+# OMN-18843: service_started, NOT service_healthy. This container is a bus
+# consumer and never calls the main runtime at boot; waiting on the main
+# runtime's /health held it in State=created for 5 min 48 s of a measured
+# redeploy on the .201 dev lane (2026-09-21), during which the delegate-skill
+# command consumer group was Empty and every `onex delegate` refused
+# pre-publish. Compose starts omninode-runtime only once its own migration,
+# partition-cap and valkey conditions are met, so service_started still
+# inherits all of them transitively and still orders the main runtime first.
+# The full reasoning lives on runtime-effects in docker/docker-compose.infra.yml.
 depends_on:
   - service: omninode-runtime
-    condition: service_healthy
+    condition: service_started
   - service: redpanda
     condition: service_healthy
 restart: unless-stopped

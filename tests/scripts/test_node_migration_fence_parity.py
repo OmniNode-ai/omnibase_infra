@@ -184,6 +184,10 @@ from typing import TYPE_CHECKING
 import pytest
 import yaml
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 # Bound by assignment rather than `from ... import`: the OMN-15291 module owns
 # the scratch-Postgres harness, and re-exporting its `pg_target` fixture as an
 # import makes every test that takes it as a parameter read as a redefinition.
@@ -505,6 +509,10 @@ FENCED_BUDGET_STATE_RLS_IDS = (
     "node:node_projection_delegation:"
     "0041_delegation_budget_state_rls_tenant_isolation.sql",
 )
+FENCED_OMN18987_IDS = (
+    "node:node_projection_delegation:0043z_preflight_delegation_shadow_comparisons.sql",
+    "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -513,6 +521,7 @@ EXPECTED_FENCE = (
     + FENCED_HOOK_EVENT_CAPTURE_IDS
     + FENCED_DELEGATION_UUID_CONVERSION_IDS
     + FENCED_BUDGET_STATE_RLS_IDS
+    + FENCED_OMN18987_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -865,9 +874,9 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         found[hook_event_capture_end:uuid_conversion_end]
         == FENCED_DELEGATION_UUID_CONVERSION_IDS
     ), "the OMN-16493 delegation-0031 hold is not the expected id"
-    assert found[uuid_conversion_end:] == FENCED_BUDGET_STATE_RLS_IDS, (
-        "the OMN-14894 delegation_budget_state RLS hold is not the expected id"
-    )
+    assert found[uuid_conversion_end:] == (
+        FENCED_BUDGET_STATE_RLS_IDS + FENCED_OMN18987_IDS
+    ), "the post-conversion operator fence tail is not the expected ids"
 
 
 def test_manifest_shell_parse_matches_yaml_parse() -> None:
@@ -1424,6 +1433,7 @@ def _k8s_manifest_source(root: Path) -> tuple[str, str]:
         check=False,
         capture_output=True,
         text=True,
+        env=scrub_git_location_env(os.environ),
     )
     if show.returncode == 0:
         sha = subprocess.run(
@@ -1431,6 +1441,7 @@ def _k8s_manifest_source(root: Path) -> tuple[str, str]:
             check=False,
             capture_output=True,
             text=True,
+            env=scrub_git_location_env(os.environ),
         ).stdout.strip()
         return show.stdout, f"{root} origin/dev@{sha or '?'} (last local fetch)"
     return (
@@ -3218,6 +3229,7 @@ def test_guard_introduction_commit_is_reachable() -> None:
         capture_output=True,
         text=True,
         check=False,
+        env=scrub_git_location_env(os.environ),
     )
     assert result.returncode == 0, (
         f"GUARD_INTRODUCTION_COMMIT ({GUARD_INTRODUCTION_COMMIT}) is not an "
@@ -3247,6 +3259,7 @@ def test_grandfathered_ids_predate_the_guard_commit() -> None:
             capture_output=True,
             text=True,
             check=False,
+            env=scrub_git_location_env(os.environ),
         )
         assert result.returncode == 0, (
             f"{grandfathered} is grandfathered but did not exist at "

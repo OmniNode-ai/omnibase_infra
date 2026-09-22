@@ -365,7 +365,7 @@ for pass in 1 2; do
     "$FRESH_HOST" "$FRESH_PORT" omnibase_infra
   fresh_log="$(mktemp)"
   run_forward "$FRESH_HOST" "$FRESH_PORT" omnibase_infra "$fresh_log" \
-    || { sed -n '1,240p' "$fresh_log"; fail "fresh real migration pass $pass failed"; }
+    || { cat "$fresh_log"; fail "fresh real migration pass $pass failed"; }
   grep -F 'Sentinel set. Migration gate will report HEALTHY.' "$fresh_log" >/dev/null \
     || fail "fresh real migration pass $pass omitted terminal sentinel proof"
   if [ "$pass" = "2" ]; then
