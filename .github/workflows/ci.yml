@@ -3708,7 +3708,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: d7f922aacf5b76628fe84b0c2abffd5dc2eecc6e
+          ref: b0ce124838108bdce47f0e02245906ec5be4fde2
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -3969,6 +3969,22 @@ jobs:
           # Dependabot lane. Empty on non-PR events, which also drops
           # nothing.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # OMN-19167 — the three facts the CONDITIONAL sweep registry decides
+          # against. `occ-autobind` and `occ-companion-effect` skip by their own
+          # `if:` on a pull request with no ticket token, which doctrine's
+          # PR-title rule deliberately EXEMPTS a dependency bump from carrying;
+          # the strict layer-5 bar counted that declared skip as red and blocked
+          # every ticketless dependency-bot PR in the repo (#3953-#3958,
+          # 2026-09-22). Passed as ENV rather than interpolated into the script,
+          # so a title is data and never shell. Each is empty on a non-PR event,
+          # which admits NOTHING: the registry fails closed on an unresolved
+          # context, exactly as PR_AUTHOR above does.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          # NOT the same as PR_AUTHOR: an update-branch makes the actor the
+          # pushing user while the author stays the bot. The producers' `if:`
+          # reads the ACTOR, so the mirror has to as well.
+          EVENT_ACTOR: ${{ github.actor }}
           HEAD_SHA: >-
             ${{ github.event.pull_request.head.sha
               || github.event.merge_group.head_sha
@@ -4033,7 +4049,10 @@ jobs:
             python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" \
               --check-runs-file check_runs.json --event-name "${EVENT_NAME}" \
               --workflow-runs-file workflow_runs.json \
-              --pr-author "${PR_AUTHOR:-}"
+              --pr-author "${PR_AUTHOR:-}" \
+              --pr-title "${PR_TITLE:-}" \
+              --pr-head-ref "${PR_HEAD_REF:-}" \
+              --event-actor "${EVENT_ACTOR:-}"
             rc=$?
             case "${rc}" in
               0) echo "::notice::CI Summary = SUCCESS (all gating jobs and asserted external contexts provably passed)"; exit 0 ;;
