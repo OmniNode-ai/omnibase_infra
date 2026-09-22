@@ -349,6 +349,20 @@ repos:
       # rather than on a code the platform never returns. Runs offline over
       # recorded observations, so the grader is falsifiable here and not only
       # on a lane.
+      # OMN-19200: the C29 customer-own-key producer grades a real customer
+      # session -- install, key registration, delegation -- from outside the
+      # process. Pins that a real working session grades PASS and the real
+      # documented-surface refusal grades FAIL, that an OmniNode lookup, an
+      # address nobody looked up, a blind tracer, a blind DNS decoder and a
+      # keyless success each fail, and that the workflow's grading step cannot
+      # be softened. Runs offline over recorded observations.
+      - id: c29-customer-byo-key-grading
+        name: C29 customer-own-key grader (OMN-19200)
+        entry: uv run --frozen pytest tests/ci/test_c29_customer_byo_key_probe_omn19200.py -q
+        language: system
+        files: ^(\.github/workflows/c29-customer-byo-key-delegation\.yml|scripts/ci/c29_customer_byo_key_probe\.py|tests/ci/test_c29_customer_byo_key_probe_omn19200\.py|tests/fixtures/omn19200/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: c11-negative-paths-grading
         name: C11 negative-paths grader (OMN-19175)
         entry: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q
