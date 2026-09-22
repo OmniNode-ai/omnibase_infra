@@ -131,9 +131,28 @@ def _declared_hop_for(
     return None
 
 
+def _envelopes_on(
+    names: Sequence[str],
+    declared_chain: Sequence[ModelDeclaredChainHop],
+    observed: Sequence[ModelObservedHop],
+) -> tuple[UUID, ...]:
+    """Envelope ids observed on any topic the cited names resolve to.
+
+    A cited name that is a declared hop expands to every topic that hop
+    answers to (OMN-18937 alternatives); any other name matches itself.
+    """
+    topics: set[str] = set()
+    for name in names:
+        declared = _declared_hop_for(name, declared_chain)
+        topics.update(declared.topics if declared is not None else (name,))
+    return tuple(
+        candidate.envelope_id for candidate in observed if candidate.topic in topics
+    )
+
+
 def _replay_one_hop(
-    index: int,
     hop: ModelObservedHop,
+    is_repeat: bool,
     observed: Sequence[ModelObservedHop],
     declared_chain: Sequence[ModelDeclaredChainHop],
     correlation_id: UUID,
@@ -143,6 +162,11 @@ def _replay_one_hop(
     Returns ``(replay_green, detail)``. ``detail`` is EMPTY exactly when the
     replay was green -- a green carrying an explanation would suggest the check
     was hedged.
+
+    ``observed`` is every envelope on this correlation, graded hops and
+    re-route parent evidence alike (OMN-18964): it is only ever searched for
+    parent candidates. ``is_repeat`` says whether an earlier graded hop
+    resolved to the same declared hop, which is what admits a re-route parent.
     """
     if hop.correlation_id is not None and hop.correlation_id != correlation_id:
         return (
@@ -184,15 +208,7 @@ def _replay_one_hop(
     # parent. Citing a hop that is not declared at all is already refused at
     # parse time, so the fallback below is unreachable in a parsed topology
     # and exists so this function is total on its own.
-    declared_parent = _declared_hop_for(declared.parent, declared_chain)
-    parent_names = (
-        declared_parent.topics if declared_parent is not None else (declared.parent,)
-    )
-    candidates = tuple(
-        candidate.envelope_id
-        for candidate in observed
-        if candidate.topic in parent_names
-    )
+    candidates = _envelopes_on((declared.parent,), declared_chain, observed)
     if not candidates:
         return (
             False,
@@ -214,17 +230,41 @@ def _replay_one_hop(
             ),
         )
 
-    if hop.parent_envelope_id not in candidates:
+    if hop.parent_envelope_id in candidates:
+        return True, ""
+
+    # OMN-18964: a RE-ROUTE. A repeat of this hop may instead be caused by one
+    # of its declared re-route parents -- the orchestrator issues a second
+    # routing request while consuming a failing quality-gate verdict. Only a
+    # repeat: the first occurrence has exactly one declared cause, and a
+    # verdict on a routing cannot have caused that same routing. The edge is
+    # still checked against a concrete envelope observed on this correlation.
+    if is_repeat and declared.reroute_parents:
+        reroute_candidates = _envelopes_on(
+            declared.reroute_parents, declared_chain, observed
+        )
+        if hop.parent_envelope_id in reroute_candidates:
+            return True, ""
         return (
             False,
             (
                 f"the declared parent {declared.parent!r} was observed as "
-                f"{list(candidates)!r}, but this hop records "
-                f"{hop.parent_envelope_id!r} — the causal link does not close"
+                f"{list(candidates)!r} and the declared re-route parent(s) "
+                f"{list(declared.reroute_parents)!r} as "
+                f"{list(reroute_candidates)!r}, but this repeat of "
+                f"{hop.topic!r} records {hop.parent_envelope_id!r} — the "
+                "causal link does not close"
             ),
         )
 
-    return True, ""
+    return (
+        False,
+        (
+            f"the declared parent {declared.parent!r} was observed as "
+            f"{list(candidates)!r}, but this hop records "
+            f"{hop.parent_envelope_id!r} — the causal link does not close"
+        ),
+    )
 
 
 def _declared_index_for(
@@ -352,7 +392,20 @@ def assemble_replay_and_verify(
             continue
         seen_envelope_ids.add(candidate.envelope_id)
         deduplicated.append(candidate)
-    observed = tuple(deduplicated)
+    # OMN-18964: envelopes on a declared re-route parent that is not itself a
+    # hop are parent EVIDENCE. They are read so a re-route edge can close,
+    # and are never graded, counted or written as a row -- a row for one
+    # would need a declared, projected parent of its own, and would change
+    # the hop count of exactly the chains that were re-routed.
+    hop_topics = {topic for entry in declared_chain for topic in entry.topics}
+    evidence_topics = {
+        parent
+        for entry in declared_chain
+        for parent in entry.reroute_parents
+        if parent not in hop_topics
+    }
+    parent_evidence = tuple(h for h in deduplicated if h.topic in evidence_topics)
+    observed = tuple(h for h in deduplicated if h.topic not in evidence_topics)
 
     rows: list[ModelLedgerChainRow] = []
     # Which declared hops have already had their FIRST occurrence. Tier 2
@@ -360,8 +413,17 @@ def assemble_replay_and_verify(
     first_seen_declared_indices: set[int] = set()
 
     for index, hop in enumerate(observed):
+        is_repeat = any(
+            _declared_hop_for(earlier.topic, declared_chain)
+            == _declared_hop_for(hop.topic, declared_chain)
+            for earlier in observed[:index]
+        )
         replay_green, replay_detail = _replay_one_hop(
-            index, hop, observed, declared_chain, correlation_id
+            hop,
+            is_repeat,
+            (*observed, *parent_evidence),
+            declared_chain,
+            correlation_id,
         )
         verdict, verifier_detail = _verify_one_hop(
             hop, declared_chain, first_seen_declared_indices
