@@ -119,25 +119,40 @@ def test_the_referent_helper_reads_a_moe_id_and_declines_an_opaque_one() -> None
     assert _expected_parameter_count("gpt-4o") is None
 
 
+def _pair_id(pair: tuple[str, ModelBifrostLaneBackendBinding]) -> str:
+    return f"{pair[0]}:{pair[1].backend_key}"
+
+
+#: Bindings whose served id states a parameter figure, which the rule binds. The
+#: rest stay declarations and are listed by the test below rather than skipped
+#: one by one, so a collected-but-never-run parameter cannot accumulate here.
+_FIGURED = [
+    pair for pair in _BINDINGS if _expected_parameter_count(pair[1].advertised_model)
+]
+_DECLARED = [pair for pair in _BINDINGS if pair not in _FIGURED]
+
+
 def test_the_committed_overlays_carry_bindings_to_check() -> None:
     """Positive control: an empty parametrization would pass the test below."""
-    assert _BINDINGS, "no binding found under docker/lane-overlays"
+    assert _FIGURED, "no binding with a parameter figure under docker/lane-overlays"
 
 
-@pytest.mark.parametrize(
-    "pair", _BINDINGS, ids=lambda pair: f"{pair[0]}:{pair[1].backend_key}"
-)
+def test_bindings_without_a_figure_are_declarations_the_rule_declines() -> None:
+    """The declined set is stated, not skipped: each has no figure to read."""
+    for overlay_name, binding in _DECLARED:
+        assert _expected_parameter_count(binding.advertised_model) is None, (
+            f"{overlay_name}:{binding.backend_key}"
+        )
+        assert binding.parameter_count, f"{overlay_name}:{binding.backend_key}"
+
+
+@pytest.mark.parametrize("pair", _FIGURED, ids=_pair_id)
 def test_parameter_count_agrees_with_the_served_model_id(
     pair: tuple[str, ModelBifrostLaneBackendBinding],
 ) -> None:
     """A row may not state a parameter count its own served id contradicts."""
     overlay_name, binding = pair
     expected = _expected_parameter_count(binding.advertised_model)
-    if expected is None:
-        pytest.skip(
-            f"{binding.advertised_model!r} carries no parameter figure, so "
-            f"parameter_count {binding.parameter_count!r} stays a declaration"
-        )
     assert binding.parameter_count == expected, (
         f"{overlay_name} declares parameter_count {binding.parameter_count!r} "
         f"for {binding.backend_key!r}, but its own served_model_id "
