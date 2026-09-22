@@ -1,0 +1,159 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# chain-canary-c16-receipt-identity.yml — OMN-19181
+#
+# WHAT THIS IS
+#   The PRODUCER for beta criterion C16: "Receipt identity equals route; SKIP
+#   never PASS; a failed run never reports ok=true; every dead run emits a
+#   typed terminal failure cause that the caller can distinguish from still
+#   running, including a config-class dispatch failure." This job's EXIT CODE
+#   is that criterion's verdict, graded over the R-DELEG-11, R-DELEG-12 and
+#   R-DELEG-26 probes — the shape C15 (chain-canary.yml) set and C11
+#   (chain-canary-c11-negative-paths.yml) repeated, which the board reads
+#   without a second grader anywhere.
+#
+# WHAT IT WRITES TO THE LANE
+#   Two delegations through the lane's own tenant-bearing onex-api, per run:
+#   the chain canary's liveness prompt (the lane already serves it every two
+#   hours), and the same submission with a task class no consumer accepts.
+#   The second one is a CALLER mistake the gateway accepts by design (its
+#   task_type is a bare string; the class universe is registry-owned) and the
+#   consumer refuses one hop later. It is not a fault injected into the lane:
+#   nothing is reconfigured, nothing is stopped, and the lane is the dev lane,
+#   which the lane map declares fully mutable. Everything else is a read.
+#
+# WHY A SEPARATE WORKFLOW RATHER THAN A JOB IN chain-canary.yml
+#   One job's exit code must answer for exactly ONE criterion, or a red does
+#   not say which (the same reason C11 is separate). And chain-canary's quarantine
+#   tail scan is correlation-scoped, so this probe's two submissions — minted
+#   correlation ids of their own — cannot make its verdict ambiguous; the
+#   concurrency group below only stops a dispatch stacking on a scheduled tick.
+#
+# WHY SELF-HOSTED, AND WHY host-201 IS REQUIRED
+#   Unchanged from chain-canary.yml: `omnibase-verify` names a runner CLASS and
+#   a second verify-class runner exists on another lab host. The lane's
+#   onex-api is reachable only through THIS host's `host.docker.internal`
+#   gateway alias, so a run placed elsewhere reports the lane unreachable, and
+#   a permanently-red check is a disabled check. The pair fails SAFE.
+#
+# THE CREDENTIALS: EXISTING, LANE-LOCAL, REUSED IN THEIR OWN REPOSITORY
+#   `CHAIN_CANARY_GATEWAY_API_KEY` and `CHAIN_CANARY_PROJECTION_DSN` are
+#   already repository secrets HERE, and chain-canary.yml already injects both
+#   the same way. No credential is created, rotated, re-issued or revoked. Both
+#   are injected as ENVIRONMENT under their literal names and the probe is
+#   given the NAMES, never the values. The probe refuses a ledger role that is
+#   SUPERUSER or BYPASSRLS, asked of the server (the OMN-18060 refusal).
+#
+# ABSENT CREDENTIAL IS EXIT 2, NOT A VERDICT
+#   "I could not run" and "the platform is wrong" are both non-zero, so both
+#   fail the job; the record and the log say which one happened.
+
+name: Chain Canary — C16 receipt identity
+
+on:
+  schedule:
+    # 4x/day at :29, offset from chain-canary (:41 odd hours), the C11 probe
+    # (:17), dev-lane-liveness (:07/:22/:37/:52) and sync-revert-watchdog
+    # (:00 even hours) so no two scheduled probes contend for one runner minute.
+    - cron: '29 3,9,15,21 * * *'
+  workflow_dispatch:
+    inputs:
+      gateway_url:
+        description: 'Tenant-bearing API base URL (onex-api on the dev lane).'
+        required: false
+        default: 'http://host.docker.internal:8090'
+      budget_seconds:
+        description: 'How long each run may take to reach a terminal status.'
+        required: false
+        default: '240'
+  pull_request:
+    paths:
+      - '.github/workflows/chain-canary-c16-receipt-identity.yml'
+      - 'scripts/ci/c16_receipt_identity_probe.py'
+
+concurrency:
+  group: chain-canary-c16-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.8.3"
+
+jobs:
+  c16-receipt-identity:
+    name: C16 receipt identity (dev lane)
+    runs-on: [self-hosted, omnibase-verify, host-201]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # The ledger read needs a Postgres driver; the replay half does not.
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Drive the healthy and the dying delegation and grade C16
+        env:
+          # Inside a runner container `localhost` is the container itself; the
+          # host-gateway alias reaches the lane's published port — same
+          # precedent as chain-canary.yml.
+          GATEWAY_URL: ${{ github.event.inputs.gateway_url || 'http://host.docker.internal:8090' }}
+          BUDGET_SECONDS: ${{ github.event.inputs.budget_seconds || '240' }}
+          RUNNER_IDENTITY: gha-${{ github.run_id }}-${{ github.run_attempt }}
+          # The NAMES are what the probe is told; the VALUES reach it only
+          # here, as environment. See the header note.
+          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
+          CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.CHAIN_CANARY_PROJECTION_DSN }}
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: a non-zero probe is the verdict and must still write
+          # its record before the job ends.
+          uv run --frozen python scripts/ci/c16_receipt_identity_probe.py \
+            --base-url "${GATEWAY_URL}" \
+            --credential-env CHAIN_CANARY_GATEWAY_API_KEY \
+            --ledger-dsn-env CHAIN_CANARY_PROJECTION_DSN \
+            --budget-seconds "${BUDGET_SECONDS}" \
+            --runner-identity "${RUNNER_IDENTITY}" \
+            --record c16-receipt-identity.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+          status=$?
+          echo "probe exit status: ${status}"
+          exit "${status}"
+
+      - name: Assert the C16 record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact c16-receipt-identity \
+            --require c16-receipt-identity.json
+
+      - name: Upload the C16 receipt-identity record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c16-receipt-identity
+          path: c16-receipt-identity.json
+          if-no-files-found: error
+          retention-days: 30

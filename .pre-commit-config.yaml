@@ -356,6 +356,18 @@ repos:
         files: ^(\.github/workflows/chain-canary-c11-negative-paths\.yml|scripts/ci/c11_negative_paths_probe\.py|tests/ci/test_c11_negative_paths_probe_omn19175\.py|tests/fixtures/omn19175/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19181: the C16 receipt-identity producer grades R-DELEG-11/12/26
+      # over observations captured from the .201 dev lane. Pins that the
+      # healthy capture can PASS, that SKIP fails the verdict (the SKIP/SKIP/
+      # PASS falsifier), that a receipt naming a route the ledger does not show
+      # fails, and that a dead run with an untyped cause or no terminal fails.
+      - id: c16-receipt-identity-grading
+        name: C16 receipt-identity grader (OMN-19181)
+        entry: uv run --frozen pytest tests/ci/test_c16_receipt_identity_probe_omn19181.py -q
+        language: system
+        files: ^(\.github/workflows/chain-canary-c16-receipt-identity\.yml|scripts/ci/c16_receipt_identity_probe\.py|tests/ci/test_c16_receipt_identity_probe_omn19181\.py|tests/fixtures/omn19181/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: lab-load-probe-honesty
         name: Lab-load probe reports honestly (OMN-18253)
         entry: uv run --frozen pytest tests/ci/test_lab_load_probe_omn18253.py -q

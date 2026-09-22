@@ -57,6 +57,21 @@
 #   Four edits in one PR, all of them visible.
 version: 1
 evidence_artifacts:
+  # --- chain-canary-c16-receipt-identity.yml: the C16 verdict (OMN-19181) --
+  #
+  # As with C11, the probe's EXIT CODE is the verdict and this record is how a
+  # reader sees the three probe rows without reading a log. An absent or empty
+  # record beside a green run would claim three probes ran with nothing behind
+  # the claim -- on the one criterion whose subject is "SKIP never PASS".
+  - id: c16-receipt-identity
+    workflow: .github/workflows/chain-canary-c16-receipt-identity.yml
+    job: c16-receipt-identity
+    producer_step: "Drive the healthy and the dying delegation and grade C16"
+    artifact_name: c16-receipt-identity
+    required_paths:
+      - c16-receipt-identity.json
+    rationale: >-
+      One row per probe (R-DELEG-11, R-DELEG-12, R-DELEG-26) with its outcome, its reasons and the compared keys: the route, provider and model the receipt names beside the route the event ledger shows was taken, the completed run's rule count, and the dead run's typed failure class and code. SKIP rows are recorded as SKIP and fail the verdict, so an empty record is exactly the state that must not read green.
   # --- chain-canary-c11-negative-paths.yml: the C11 verdict (OMN-19175) ----
   #
   # The probe's EXIT CODE is the criterion's verdict, so this record is not how

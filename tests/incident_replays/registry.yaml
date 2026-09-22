@@ -110,6 +110,15 @@ scope:
     # regression suite, not an incident replay, and the two are not
     # interchangeable.
     - scripts/ci/c11_negative_paths_probe.py
+    # OMN-19181: a PROBE, the C16 producer, and the same class as the C11 one
+    # above. Its grading IS driven by real bytes -- three observations captured
+    # read-only from the .201 dev lane's gateway_workflows and event_ledger
+    # rows, including a live untyped 429 death and a run left 'published' for
+    # two days -- in tests/ci/test_c16_receipt_identity_probe_omn19181.py. They
+    # are recorded as a regression suite rather than a replay case because a
+    # psql read has no re-fetchable locator of the kind R3 requires; claiming
+    # one would be the free-text provenance this registry exists to refuse.
+    - scripts/ci/c16_receipt_identity_probe.py
     # OMN-17876: the offline contract canary is a new preventive evidence
     # projection; it deliberately cannot replay a live runner incident.
     - scripts/ci/model_review_capability_canary.py
