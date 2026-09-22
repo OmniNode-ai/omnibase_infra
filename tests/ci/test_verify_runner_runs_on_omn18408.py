@@ -110,6 +110,25 @@ NEW_VERIFY_JOBS = (
         "refresh",
         "Collect the lab census and open a bump PR when it has moved",
     ),
+    # OMN-19175: the C11 negative-paths producer. Born on the label, and it
+    # clears the OMN-18602 bar by a wide margin: four HTTP GETs against the
+    # lane's onex-api plus one POST that request validation refuses BEFORE the
+    # endpoint function runs, so the mutating path is structurally unreachable
+    # rather than merely unused. It publishes nothing to the bus, unlike the
+    # chain canary beside it.
+    #
+    # It needs the HOST label for the identical reason every entry above does,
+    # and the failure without it is the bad kind: `omnibase-verify` names a
+    # runner CLASS and a second verify-class runner exists on another lab host,
+    # so a run placed there cannot see this lane at all and would report it
+    # unreachable. A permanently-red probe is a disabled probe. The pair fails
+    # SAFE -- if the .201 verify runner is down the job queues rather than
+    # answering from somewhere blind.
+    (
+        "chain-canary-c11-negative-paths.yml",
+        "c11-negative-paths",
+        "C11 negative paths (dev lane)",
+    ),
 )
 
 # Every job legally on the label, however it got there.

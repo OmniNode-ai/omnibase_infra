@@ -561,7 +561,7 @@ def derive_topology_table_grants(
     service-database relation is derived against that database's own
     principals rather than being reported as an ``application`` residual. A
     declaration naming a database no instance declares stays a typed residual
-    — routing must never invent a database to make a contract resolvable.
+    -- routing must never invent a database to make a contract resolvable.
     """
     materialized = tuple(declarations)
     by_database_ref: dict[str, list[ContractTableDeclaration]] = {}
