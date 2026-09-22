@@ -55,6 +55,17 @@
 #   orchestrator's own terminal event carries provider, model and the accepted
 #   attempt, and this job can already read it.
 #
+# WHY THERE IS NO pull_request TRIGGER, THOUGH THE FIRST CUT HAD ONE
+#   Same finding as C11's. The first cut ran on `pull_request` scoped to this
+#   workflow's two paths so that the run which can hold the lane's credentials
+#   happened before merge; it did, three times (35772227932, 35773679801,
+#   35774918453), and the third graded R-DELEG-11 and R-DELEG-12 PASS on live
+#   data. The advisory-job-gate (OMN-18775) refuses a job that runs on every
+#   pull request while sitting in neither `required_status_checks` nor
+#   `EXPECTED_EXTERNAL_CONTEXTS`, correctly, and every name in that tuple is an
+#   unconditional job, so the trigger is removed and the pre-merge evidence is
+#   cited rather than re-taken. Re-run on demand with `workflow_dispatch`.
+#
 # ABSENT CREDENTIAL IS EXIT 2, NOT A VERDICT
 #   "I could not run" and "the platform is wrong" are both non-zero, so both
 #   fail the job; the record and the log say which one happened.
@@ -77,10 +88,6 @@ on:
         description: 'How long each run may take to reach a terminal status.'
         required: false
         default: '240'
-  pull_request:
-    paths:
-      - '.github/workflows/chain-canary-c16-receipt-identity.yml'
-      - 'scripts/ci/c16_receipt_identity_probe.py'
 
 concurrency:
   group: chain-canary-c16-${{ github.ref }}
