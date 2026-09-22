@@ -25,9 +25,8 @@
 #      request validation before the endpoint function runs — so it has no
 #      reason to queue behind a delegation, and putting it there would make a
 #      cheap read wait on an expensive write.
-#   3. It has a `pull_request` trigger scoped to its own files (see below).
-#      chain-canary must not acquire one: a probe that fires a real delegation
-#      on every PR that edits it is a different proposition entirely.
+#   3. Its verdict is C11's and C15's is chain-canary's, and a board that
+#      resolves two criteria from one conclusion cannot say which one moved.
 #
 # WHY SELF-HOSTED, AND WHY host-201 IS REQUIRED
 #   Unchanged from chain-canary.yml, and read that file's own two notes before
@@ -38,14 +37,26 @@
 #   permanently-red check is a disabled check. The pair fails SAFE: if that
 #   runner is down the job queues rather than running somewhere blind.
 #
-# WHY IT ALSO RUNS ON pull_request, ON ITS OWN PATHS ONLY
-#   The wrong-tenant arm needs a credential that WORKS, and the only place that
-#   credential exists is this repository's own secret store. So the first run
-#   that can exercise all four arms is a run in this repository — and a
-#   criterion whose first real evidence arrives only after its own change has
-#   merged is a criterion nobody checked before merging. The trigger is scoped
-#   to this workflow, the probe and its tests, so it cannot slow an unrelated
-#   pull request, and it is deliberately not scheduled onto `dev` pushes.
+# WHY THERE IS NO pull_request TRIGGER, THOUGH THE FIRST CUT HAD ONE
+#   The first cut ran on `pull_request` scoped to this workflow's own four
+#   paths, so that the run which can exercise all four arms — the wrong-tenant
+#   arm needs a credential that WORKS, and the only one is this repository's
+#   own secret — happened before merge. It did: run 35757759333 at commit
+#   ca273a8da graded all four arms green on the lab lane.
+#
+#   The advisory-job-gate (OMN-18775) then refused it, correctly. A job that
+#   runs on every pull request and sits in neither `required_status_checks` nor
+#   `EXPECTED_EXTERNAL_CONTEXTS` reads as coverage in a CI listing while being
+#   unable to fail anything. And the obvious remedy is worse than the finding:
+#   every name in `EXPECTED_EXTERNAL_CONTEXTS` is an UNCONDITIONAL job, because
+#   that tuple asserts PRESENCE on every head, so registering a path-scoped job
+#   would hold CI Summary pending on every pull request that does not touch
+#   these four files. Dropping the path filter instead would make every pull
+#   request in this repository depend on the lab lane being up — a check that
+#   cannot pass does not fail loudly, it stops delivery.
+#
+#   So the trigger is gone and the pre-merge evidence is cited rather than
+#   re-taken. Re-run on demand with `workflow_dispatch`.
 #
 # THE CREDENTIAL: EXISTING, LANE-LOCAL, REUSED IN ITS OWN REPOSITORY
 #   `CHAIN_CANARY_GATEWAY_API_KEY` is already a repository secret HERE, and
@@ -92,19 +103,13 @@ on:
         description: 'A tenant slug the credential does NOT own; drives the wrong-tenant arm.'
         required: false
         default: 'onex-lab-house'
-  pull_request:
-    paths:
-      - '.github/workflows/chain-canary-c11-negative-paths.yml'
-      - 'scripts/ci/c11_negative_paths_probe.py'
-      - 'tests/ci/test_c11_negative_paths_probe_omn19175.py'
-      - 'tests/fixtures/omn19175/**'
 
 concurrency:
   # Four reads and one refused POST: a second run racing this one changes
-  # nothing about either verdict. Cancelling in progress is still right for
-  # pull_request, where a newer head supersedes an older one.
+  # nothing about either verdict, so unlike chain-canary this group exists only
+  # to stop a dispatch stacking on top of a scheduled tick.
   group: chain-canary-c11-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
