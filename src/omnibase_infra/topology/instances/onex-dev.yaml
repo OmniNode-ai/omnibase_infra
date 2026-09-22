@@ -92,6 +92,7 @@ databases:
               - live_events
               - log_entries
               - open_obligations
+              - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness
               - runtime_error_fingerprints

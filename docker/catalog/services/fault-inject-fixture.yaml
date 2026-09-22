@@ -83,9 +83,16 @@ volumes:
   - fault_inject_fixture_logs:/app/logs
   - fault_inject_fixture_data:/app/data
   - ../contracts:/app/contracts:ro
+# OMN-18843: service_started, NOT service_healthy. This is a bus consumer, and a
+# consumer that waits on the main runtime's health is held by compose in
+# State=created for the whole healthcheck window -- 1800 s of start_period on
+# every lane -- so a force-recreate naming both services strands its consumer
+# groups for minutes. service_started still inherits the main runtime's own
+# migration, broker and cache preconditions transitively and still orders it
+# first. Full reasoning: runtime-effects in docker/docker-compose.infra.yml.
 depends_on:
   - service: omninode-runtime
-    condition: service_healthy
+    condition: service_started
   - service: redpanda
     condition: service_healthy
 restart: unless-stopped

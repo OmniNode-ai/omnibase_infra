@@ -110,6 +110,54 @@ NEW_VERIFY_JOBS = (
         "refresh",
         "Collect the lab census and open a bump PR when it has moved",
     ),
+    # OMN-19175: the C11 negative-paths producer. Born on the label, and it
+    # clears the OMN-18602 bar by a wide margin: four HTTP GETs against the
+    # lane's onex-api plus one POST that request validation refuses BEFORE the
+    # endpoint function runs, so the mutating path is structurally unreachable
+    # rather than merely unused. It publishes nothing to the bus, unlike the
+    # chain canary beside it.
+    #
+    # It needs the HOST label for the identical reason every entry above does,
+    # and the failure without it is the bad kind: `omnibase-verify` names a
+    # runner CLASS and a second verify-class runner exists on another lab host,
+    # so a run placed there cannot see this lane at all and would report it
+    # unreachable. A permanently-red probe is a disabled probe. The pair fails
+    # SAFE -- if the .201 verify runner is down the job queues rather than
+    # answering from somewhere blind.
+    (
+        "chain-canary-c11-negative-paths.yml",
+        "c11-negative-paths",
+        "C11 negative paths (dev lane)",
+    ),
+    # OMN-19195: the C12 provider-catalogue producer. Born on the label, and
+    # it clears the OMN-18602 bar the same way `verify-lane-converged` does: it
+    # reads the lane through the docker socket this runner already mounts. Its
+    # one `docker exec` runs a Python process as the container's own
+    # unprivileged user that imports the deployed package and calls pure
+    # functions on in-memory copies. No file is written, no route is called and
+    # nothing is published. It calls no HTTP surface at all.
+    #
+    # It needs the HOST label for the identical reason: on another lab host's
+    # daemon there is no `onex-api` container to exec into, so an unpinned run
+    # would exit 2 on every tick and be read as a lane outage.
+    (
+        "chain-canary-c12-provider-catalogue.yml",
+        "c12-provider-catalogue",
+        "C12 provider catalogue (dev lane)",
+    ),
+    # OMN-19181: the C16 receipt-identity producer. Born on the label, for the
+    # identical reason as C11 above: the lane's onex-api is reachable only
+    # through THIS host's gateway alias, and a verify-class runner on another
+    # lab host would report the lane unreachable forever. Its lane writes are
+    # two delegations through the tenant-bearing API -- the canary's own
+    # liveness prompt and one with a task class no consumer accepts -- plus a
+    # correlation-scoped read of the orchestrator's terminal off the bus, as chain-canary already does. It publishes nothing to the
+    # bus directly and reconfigures nothing.
+    (
+        "chain-canary-c16-receipt-identity.yml",
+        "c16-receipt-identity",
+        "C16 receipt identity (dev lane)",
+    ),
 )
 
 # Every job legally on the label, however it got there.

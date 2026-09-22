@@ -40,6 +40,9 @@ from omnibase_infra.enums import (
     EnumDispatchStatus,
     EnumInfraTransportType,
 )
+from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy import (
+    ModelKafkaConnectRetryPolicy,
+)
 from omnibase_infra.event_bus.models.model_dlq_event import ModelDlqEvent
 from omnibase_infra.event_bus.models.model_dlq_metrics import ModelDlqMetrics
 from omnibase_infra.event_bus.models.model_durability_confirmation import (
@@ -295,6 +298,27 @@ def _make_durability_confirmation() -> ModelDurabilityConfirmation:
         receipt=_make_publish_receipt(),
         checked_at=datetime.now(UTC),
         detail="record was not observed within the readback deadline",
+    )
+
+
+def _make_kafka_connect_retry_policy() -> ModelKafkaConnectRetryPolicy:
+    """The Kafka connect retry policy (OMN-19043).
+
+    Covered by a real factory rather than dispositioned alongside the two
+    Kafka config models above, and the difference is not arbitrary: those
+    carry broker validation and nested dependencies, while this one is three
+    validated scalars with no dependency of its own, so the reason the
+    disposition list exists does not apply to it.
+
+    Built with a non-default ``max_retry_attempts`` on purpose. Its two
+    derived surfaces, the backoff schedule and the total bound, are computed
+    from that field, so a policy built at the default would roundtrip
+    identically even if the field were dropped on the wire.
+    """
+    return ModelKafkaConnectRetryPolicy(
+        max_retry_attempts=4,
+        retry_backoff_base=0.5,
+        attempt_timeout_seconds=10.0,
     )
 
 
@@ -566,6 +590,7 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     ModelEventMessage: _make_event_message,
     ModelPublishReceipt: _make_publish_receipt,
     ModelDurabilityConfirmation: _make_durability_confirmation,
+    ModelKafkaConnectRetryPolicy: _make_kafka_connect_retry_policy,
     # Runtime models (13/59 covered)
     ModelBatchPublisherConfig: _make_batch_publisher_config,
     ModelBatchPublisherMetrics: _make_batch_publisher_metrics,
