@@ -1,0 +1,532 @@
+{
+  "_provenance": "OMN-19180: recorded 2026-09-22 from a real run of this probe on a no-checkout install (omnimarket 0.4.198 / omnibase-infra 0.38.51 from the package index, env -i, fresh HOME, overlay binding the local rungs AND the reviewer leg to one local endpoint). Machine paths and the lab address are normalised; every graded field is as recorded.",
+  "collection": {
+    "backends": {
+      "cloud-gemini-flash": {
+        "classification": "bindable",
+        "declared_tier": "cheap_cloud",
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "endpoint_private": false,
+        "model_name": "gemini-2.5-flash-lite",
+        "provider": "gemini",
+        "secret_ref": "llm.gemini.api_key"
+      },
+      "cloud-gemini-pro": {
+        "classification": "bindable",
+        "declared_tier": "frontier_api",
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "endpoint_private": false,
+        "model_name": "gemini-2.5-flash",
+        "provider": "gemini",
+        "secret_ref": "llm.gemini.api_key"
+      },
+      "cloud-glm": {
+        "classification": "bindable",
+        "declared_tier": "cheap_cloud",
+        "endpoint": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+        "endpoint_private": false,
+        "model_name": "glm-5.3-flash",
+        "provider": "glm",
+        "secret_ref": "llm.glm.api_key"
+      },
+      "local-coder": {
+        "classification": "bindable",
+        "declared_tier": "local",
+        "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+        "endpoint_private": true,
+        "model_name": "Qwen3.8-27B",
+        "provider": "local",
+        "secret_ref": null,
+        "served_models": [
+          "Qwen3.8-27B"
+        ]
+      },
+      "local-heavy-reasoning": {
+        "classification": "bindable",
+        "declared_tier": "local",
+        "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+        "endpoint_private": true,
+        "model_name": "Qwen3.8-27B",
+        "provider": "local",
+        "secret_ref": null,
+        "served_models": [
+          "Qwen3.8-27B"
+        ]
+      },
+      "openrouter-qwen3-coder-480b": {
+        "classification": "bindable",
+        "declared_tier": "cheap_frontier",
+        "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+        "endpoint_private": false,
+        "model_name": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "provider": "openrouter",
+        "secret_ref": "llm.openrouter.api_key"
+      }
+    },
+    "bindings": {
+      "BIFROST_CONTRACT_PATH": {
+        "path": null
+      },
+      "BIFROST_OVERLAY_PATH": {
+        "git_ancestor": null,
+        "path": "/opt/customer/home/.omninode/delegation/bifrost_overrides.yaml"
+      },
+      "DELEGATION_ROUTING_TIERS_PATH": {
+        "git_ancestor": null,
+        "matches_shipped": true,
+        "path": "/opt/customer/venv/lib/python3.12/site-packages/omnimarket/configs/routing_tiers.yaml"
+      }
+    },
+    "controls": [
+      {
+        "classification": "deleted_backend",
+        "input": "c14-control-backend-declared-nowhere",
+        "name": "deleted_backend_control"
+      },
+      {
+        "classification": "unreachable",
+        "endpoint_private": true,
+        "input": "http://127.0.0.1:9/v1/chat/completions",
+        "name": "unreachable_endpoint_control",
+        "served_models": null
+      }
+    ],
+    "isolated_interpreter": true,
+    "judge": {
+      "backend_id": "cloud-glm-judge",
+      "classification": "bindable",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "endpoint_private": true,
+      "model_id": "Qwen3.8-27B",
+      "provider": "openai_compatible",
+      "secret_ref": null,
+      "served_models": [
+        "Qwen3.8-27B"
+      ]
+    },
+    "modules": {
+      "omnibase_core": {
+        "git_ancestor": null,
+        "in_site_packages": true,
+        "path": "/opt/customer/venv/lib/python3.12/site-packages/omnibase_core/__init__.py",
+        "version": "0.47.20"
+      },
+      "omnibase_infra": {
+        "git_ancestor": null,
+        "in_site_packages": true,
+        "path": "/opt/customer/venv/lib/python3.12/site-packages/omnibase_infra/__init__.py",
+        "version": "0.38.51"
+      },
+      "omnimarket": {
+        "git_ancestor": null,
+        "in_site_packages": true,
+        "path": "/opt/customer/venv/lib/python3.12/site-packages/omnimarket/__init__.py",
+        "version": "0.4.198"
+      }
+    },
+    "public_task_classes": [
+      "code_generation",
+      "code_review",
+      "complex_reasoning",
+      "document",
+      "planning",
+      "reasoning",
+      "refactor",
+      "research",
+      "review",
+      "summarization",
+      "test"
+    ],
+    "public_task_classes_from_contract_yaml": [
+      "code_generation",
+      "code_review",
+      "complex_reasoning",
+      "document",
+      "planning",
+      "reasoning",
+      "refactor",
+      "research",
+      "review",
+      "summarization",
+      "test"
+    ],
+    "python": "3.13.3",
+    "walk": {
+      "code_generation": [
+        {
+          "candidates": [
+            "local-coder"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-coder",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "openrouter-qwen3-coder-480b"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "openrouter-qwen3-coder-480b",
+          "tier": "cheap_frontier"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro",
+            "cloud-glm"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "cheap_cloud"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "claude"
+        }
+      ],
+      "code_review": [
+        {
+          "candidates": [
+            "local-coder",
+            "local-heavy-reasoning"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-coder",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "openrouter-qwen3-coder-480b"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "openrouter-qwen3-coder-480b",
+          "tier": "cheap_frontier"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro",
+            "cloud-glm"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-glm",
+          "tier": "cheap_cloud"
+        }
+      ],
+      "complex_reasoning": [
+        {
+          "candidates": [
+            "local-coder",
+            "local-heavy-reasoning"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-heavy-reasoning",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "claude"
+        }
+      ],
+      "document": [
+        {
+          "candidates": [
+            "local-heavy-reasoning"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-heavy-reasoning",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "openrouter-qwen3-coder-480b"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "openrouter-qwen3-coder-480b",
+          "tier": "cheap_frontier"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-flash",
+            "cloud-glm"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-glm",
+          "tier": "cheap_cloud"
+        }
+      ],
+      "planning": [
+        {
+          "candidates": [
+            "local-coder",
+            "local-heavy-reasoning"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-heavy-reasoning",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "cheap_cloud"
+        }
+      ],
+      "reasoning": [
+        {
+          "candidates": [
+            "local-coder",
+            "local-heavy-reasoning"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-heavy-reasoning",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro",
+            "cloud-glm"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-glm",
+          "tier": "cheap_cloud"
+        }
+      ],
+      "refactor": [
+        {
+          "candidates": [
+            "local-coder"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-coder",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "openrouter-qwen3-coder-480b"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "openrouter-qwen3-coder-480b",
+          "tier": "cheap_frontier"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro",
+            "cloud-glm"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "cheap_cloud"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "claude"
+        }
+      ],
+      "research": [
+        {
+          "candidates": [
+            "local-coder",
+            "local-heavy-reasoning"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-heavy-reasoning",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro",
+            "cloud-glm"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-glm",
+          "tier": "cheap_cloud"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "claude"
+        }
+      ],
+      "review": [
+        {
+          "candidates": [
+            "local-coder",
+            "local-heavy-reasoning"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-heavy-reasoning",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "cheap_cloud"
+        }
+      ],
+      "summarization": [
+        {
+          "candidates": [
+            "local-heavy-reasoning"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-heavy-reasoning",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "openrouter-qwen3-coder-480b"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "openrouter-qwen3-coder-480b",
+          "tier": "cheap_frontier"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-flash",
+            "cloud-glm"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-glm",
+          "tier": "cheap_cloud"
+        }
+      ],
+      "test": [
+        {
+          "candidates": [
+            "local-coder"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "local-coder",
+          "tier": "local"
+        },
+        {
+          "candidates": [
+            "openrouter-qwen3-coder-480b"
+          ],
+          "declared": true,
+          "paid": false,
+          "selected_without_credential": "openrouter-qwen3-coder-480b",
+          "tier": "cheap_frontier"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "cheap_cloud"
+        },
+        {
+          "candidates": [
+            "cloud-gemini-pro"
+          ],
+          "declared": true,
+          "paid": true,
+          "selected_without_credential": "cloud-gemini-pro",
+          "tier": "claude"
+        }
+      ]
+    }
+  },
+  "run": {
+    "egress": [
+      {
+        "method": "GET",
+        "private": true,
+        "target": "http://127.0.0.1:8000/health"
+      },
+      {
+        "method": "GET",
+        "private": true,
+        "target": "http://127.0.0.1:8000/v1/models"
+      },
+      {
+        "method": "POST",
+        "private": true,
+        "target": "http://127.0.0.1:8000/v1/chat/completions"
+      }
+    ],
+    "exit_code": 0,
+    "receipt_result": {
+      "attempts": [
+        {
+          "acceptance_decision": "accept",
+          "acceptance_detail": "",
+          "acceptance_reason": "quality_bar_met",
+          "backend_id": "local-heavy-reasoning",
+          "cost_usd": 0.0,
+          "error_message": "",
+          "failure_class": null,
+          "input_token_budget": null,
+          "input_tokens_measured": null,
+          "model_id": "Qwen3.8-27B",
+          "quality_gate_passed": true,
+          "quality_score": 1.0,
+          "reasoning_preamble": "",
+          "reasoning_preamble_rule": null,
+          "tier": "local"
+        }
+      ],
+      "attempts_count": 1,
+      "correlation_id": "f96e2635-847f-4955-b1d9-b4c705ec8d24",
+      "error_message": "",
+      "escalation_count": 0,
+      "metrics": {
+        "cost_usd": 0.0
+      },
+      "model_name": "Qwen3.8-27B",
+      "provider": "http://127.0.0.1:8000/v1/chat/completions",
+      "status": "completed",
+      "task_type": "research"
+    }
+  }
+}

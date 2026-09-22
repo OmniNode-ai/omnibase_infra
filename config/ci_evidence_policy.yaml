@@ -87,6 +87,21 @@ evidence_artifacts:
       - c16-receipt-identity.json
     rationale: >-
       One row per probe (R-DELEG-11, R-DELEG-12, R-DELEG-26) with its outcome, its reasons and the compared keys: the route, provider and model the receipt names beside the provider and model the orchestrator's own bus terminal records, the completed run's rule count, and the dead run's typed failure class and code. SKIP rows are recorded as SKIP and fail the verdict, so an empty record is exactly the state that must not read green.
+  # --- chain-canary-c14-customer-local-routing.yml: the C14 verdict (OMN-19180)
+  #
+  # The probe's EXIT CODE is the criterion's verdict; this record is how a
+  # reader sees which row went red and why without reading a log. An empty or
+  # absent record beside a green run would say "routing was proven on a
+  # customer machine" with nothing behind it.
+  - id: c14-customer-local-routing
+    workflow: .github/workflows/chain-canary-c14-customer-local-routing.yml
+    job: c14-customer-local-routing
+    producer_step: "Drive rows 1, 2 and 4 on the customer machine and grade them"
+    artifact_name: c14-customer-local-routing
+    required_paths:
+      - c14-customer-local-routing.json
+    rationale: >-
+      One row per GOAL row (1 local answer ends the chain, 2 no unbindable tier, 4 reviewer leg unmetered) with its findings, the no-checkout machine facts (module paths, bindings, isolation) and the two negative controls taken in the same invocation. A zero-byte record is the case that matters: the rows are absence claims, so the recorded egress and controls are what make a green readable as a measurement rather than a silence.
   # --- chain-canary-c11-negative-paths.yml: the C11 verdict (OMN-19175) ----
   #
   # The probe's EXIT CODE is the criterion's verdict, so this record is not how

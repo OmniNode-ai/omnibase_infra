@@ -158,6 +158,19 @@ NEW_VERIFY_JOBS = (
         "c16-receipt-identity",
         "C16 receipt identity (dev lane)",
     ),
+    # OMN-19180: the C14 customer-local routing producer. Born on the label.
+    # It installs the published product into a fresh venv, runs ONE local
+    # delegation against the lab GPU endpoint and reads that endpoint's model
+    # list; it writes nothing to any lane, publishes nothing to a bus and holds
+    # no credential. It needs the HOST label for the reason the entries above
+    # do: the customer's local model is reached through this host's
+    # `host.docker.internal` alias, so a run placed on the other verify-class
+    # runner would grade every local rung unreachable.
+    (
+        "chain-canary-c14-customer-local-routing.yml",
+        "c14-customer-local-routing",
+        "C14 customer-local routing (no-checkout install)",
+    ),
 )
 
 # Every job legally on the label, however it got there.

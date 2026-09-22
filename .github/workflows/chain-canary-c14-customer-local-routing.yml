@@ -1,0 +1,173 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# chain-canary-c14-customer-local-routing.yml — OMN-19180
+#
+# WHAT THIS IS
+#   The PRODUCER for beta criterion C14: "Routing proven on the customer-local
+#   path; no customer-visible task class has an unbindable tier", proof "rows 1,
+#   2 and 4 probes on a no-checkout customer machine". This job's EXIT CODE is
+#   the criterion's verdict -- the shape C11 and C15 set -- and it uploads a
+#   record naming each row's findings.
+#
+# THE CUSTOMER MACHINE, AND WHAT MAKES IT ONE
+#   Built fresh inside the job, in $RUNNER_TEMP, from nothing a repository
+#   provides:
+#     * the product is installed from the PACKAGE INDEX into a new venv -- the
+#       published release a customer gets, never this checkout;
+#     * a fresh HOME carrying only the customer's own overlay, which binds the
+#       local rungs to one local model endpoint -- the "declare which models you
+#       delegate to" configuration a customer writes (OMN-16200);
+#     * every product command runs under `env -i`, so nothing from the runner's
+#       environment -- PYTHONPATH, OMNI_HOME, a stray binding -- reaches it.
+#   The checkout below supplies ONLY the probe script. The probe re-asserts the
+#   no-checkout property from inside the customer interpreter and refuses to
+#   grade (exit 2) if any product module imports from a git working tree.
+#
+#   The overlay deliberately binds the local rungs and NOTHING else. In
+#   particular it does not repoint the reviewer leg: whatever the shipped
+#   contract makes that leg on a customer's machine is what row 4 grades.
+#
+#   This machine is the one the C13 probe (OMN-19179) is meant to share; the
+#   routing assertions live in scripts/ci/c14_customer_local_routing_probe.py
+#   and take the machine's interpreter as an argument, so another producer can
+#   run them against the same install.
+#
+# WHY SELF-HOSTED, AND WHY host-201 IS REQUIRED
+#   The customer's local model is the lab's GPU endpoint on this host, reached
+#   through the runner container's `host.docker.internal` gateway alias -- the
+#   same reason chain-canary.yml and the C11 producer carry the host label. A
+#   run placed on another verify-class runner cannot see it and would grade
+#   every local rung unreachable. The pair fails SAFE: if the .201 verify runner
+#   is down the job queues rather than answering from somewhere blind.
+#
+# WHY THERE IS NO pull_request TRIGGER
+#   The C11 producer's reason, unchanged: a job on every pull request that sits
+#   in neither required_status_checks nor EXPECTED_EXTERNAL_CONTEXTS reads as
+#   coverage while being unable to fail anything (the advisory-job-gate,
+#   OMN-18775), and making every pull request depend on the lab GPU would stop
+#   delivery whenever it is busy. The grader is proven offline by
+#   tests/ci/test_c14_customer_local_routing_probe_omn19180.py on every pull
+#   request instead; this job is the live half, on a schedule and on demand.
+#
+# NO CREDENTIAL
+#   A customer-local delegation needs none, and this job injects none. A
+#   metered call the product makes anyway is exactly what rows 1 and 4 grade.
+
+name: Chain Canary — C14 customer-local routing
+
+on:
+  schedule:
+    # 4x/day at :29, offset from chain-canary (:41 odd hours), the C11 producer
+    # (:17), dev-lane-liveness (:07/:22/:37/:52) and sync-revert-watchdog (:00
+    # even hours) so no two scheduled probes contend for the same runner minute.
+    - cron: '29 3,9,15,21 * * *'
+  workflow_dispatch:
+    inputs:
+      local_model_endpoint:
+        description: 'The customer machine''s local model, as a complete chat-completions URL.'
+        required: false
+        default: 'http://host.docker.internal:8000/v1/chat/completions'
+      product_spec:
+        description: 'Package-index requirement(s) installed onto the customer machine.'
+        required: false
+        default: 'omnibase-infra omnimarket'
+
+concurrency:
+  # One real local delegation per run. A second run racing it would share the
+  # one-slot GPU endpoint and change neither verdict, so this only stops a
+  # dispatch stacking on a scheduled tick.
+  group: chain-canary-c14-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  c14-customer-local-routing:
+    name: C14 customer-local routing (no-checkout install)
+    runs-on: [self-hosted, omnibase-verify, host-201]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout omnibase_infra (the probe script only)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Build the no-checkout customer machine
+        env:
+          LOCAL_MODEL_ENDPOINT: ${{ github.event.inputs.local_model_endpoint || 'http://host.docker.internal:8000/v1/chat/completions' }}
+          PRODUCT_SPEC: ${{ github.event.inputs.product_spec || 'omnibase-infra omnimarket' }}
+        run: |
+          set -euo pipefail
+          machine="${RUNNER_TEMP}/c14-customer"
+          rm -rf "${machine}"
+          mkdir -p "${machine}/home/.omninode/delegation" "${machine}/work"
+          python3 -m venv "${machine}/venv"
+          # shellcheck disable=SC2086 # PRODUCT_SPEC is a word list on purpose
+          env -i HOME="${machine}/home" PATH="${machine}/venv/bin:/usr/bin:/bin" \
+            "${machine}/venv/bin/pip" install --quiet --no-cache-dir ${PRODUCT_SPEC}
+          env -i HOME="${machine}/home" PATH="${machine}/venv/bin:/usr/bin:/bin" \
+            "${machine}/venv/bin/pip" list 2>/dev/null | grep -Ei '^omni' || true
+          cat > "${machine}/home/.omninode/delegation/bifrost_overrides.yaml" <<EOF
+          config_version: "2.1.0"
+          schema_version: "bifrost_delegation.v1"
+          backends:
+            - backend_id: local-coder
+              endpoint_url: "${LOCAL_MODEL_ENDPOINT}"
+              tier: local
+            - backend_id: local-heavy-reasoning
+              endpoint_url: "${LOCAL_MODEL_ENDPOINT}"
+              tier: local
+          EOF
+          tiers="$(env -i "${machine}/venv/bin/python" -I -c \
+            'from omnimarket.routing.routing_tiers_path import ROUTING_TIERS_PACKAGED_DEFAULT_PATH as p; print(p)')"
+          {
+            echo "C14_MACHINE=${machine}"
+            echo "C14_TIERS=${tiers}"
+          } >> "${GITHUB_ENV}"
+          env -i HOME="${machine}/home" PATH="${machine}/venv/bin:/usr/bin:/bin" \
+            DELEGATION_ROUTING_TIERS_PATH="${tiers}" \
+            BIFROST_OVERLAY_PATH="${machine}/home/.omninode/delegation/bifrost_overrides.yaml" \
+            "${machine}/venv/bin/onex" local init --json
+
+      - name: Drive rows 1, 2 and 4 on the customer machine and grade them
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: a non-zero probe is the verdict and must still write
+          # its record before the job ends.
+          env -i HOME="${C14_MACHINE}/home" PATH="${C14_MACHINE}/venv/bin:/usr/bin:/bin" \
+            DELEGATION_ROUTING_TIERS_PATH="${C14_TIERS}" \
+            BIFROST_OVERLAY_PATH="${C14_MACHINE}/home/.omninode/delegation/bifrost_overrides.yaml" \
+            "$(command -v python3)" scripts/ci/c14_customer_local_routing_probe.py \
+              --customer-python "${C14_MACHINE}/venv/bin/python" \
+              --work-dir "${C14_MACHINE}/work" \
+              --record "${GITHUB_WORKSPACE}/c14-customer-local-routing.json" \
+              --summary "${GITHUB_STEP_SUMMARY}"
+          status=$?
+          echo "probe exit status: ${status}"
+          exit "${status}"
+
+      - name: Assert the C14 record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact c14-customer-local-routing \
+            --require c14-customer-local-routing.json
+
+      - name: Upload the C14 customer-local routing record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c14-customer-local-routing
+          path: c14-customer-local-routing.json
+          if-no-files-found: error
+          retention-days: 30

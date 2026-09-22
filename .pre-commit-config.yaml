@@ -396,6 +396,20 @@ repos:
         files: ^(\.github/workflows/chain-canary-c16-receipt-identity\.yml|scripts/ci/c16_receipt_identity_probe\.py|tests/ci/test_c16_receipt_identity_probe_omn19181\.py|tests/fixtures/omn19181/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19180: the C14 customer-local routing producer grades rows 1, 2
+      # and 4 from a recorded {collection, run}. Pins that a healthy recorded
+      # no-checkout run grades PASS, that each unbindable-tier class, a ladder
+      # that leaves local, an unproven egress zero and a metered reviewer each
+      # grade RED by name, and that a checkout, an edited routing contract or a
+      # blind control refuses to grade at all. Runs offline, so the grader is
+      # falsifiable here and not only on the lab.
+      - id: c14-customer-local-routing-grading
+        name: C14 customer-local routing grader (OMN-19180)
+        entry: uv run --frozen pytest tests/ci/test_c14_customer_local_routing_probe_omn19180.py -q
+        language: system
+        files: ^(\.github/workflows/chain-canary-c14-customer-local-routing\.yml|scripts/ci/c14_customer_local_routing_probe\.py|tests/ci/test_c14_customer_local_routing_probe_omn19180\.py|tests/fixtures/omn19180/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: lab-load-probe-honesty
         name: Lab-load probe reports honestly (OMN-18253)
         entry: uv run --frozen pytest tests/ci/test_lab_load_probe_omn18253.py -q

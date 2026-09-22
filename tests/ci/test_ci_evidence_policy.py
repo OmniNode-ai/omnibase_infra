@@ -71,6 +71,8 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "c13-customer-local",
     # OMN-19181: the C16 receipt-identity record.
     "c16-receipt-identity",
+    # OMN-19180: the C14 customer-local routing record.
+    "c14-customer-local-routing",
     "lab-load",
     "lab-pass-receipt-compose-dev",
     # OMN-18572: the same lane, keyed by the OMNINODE_INFRA commit that changed

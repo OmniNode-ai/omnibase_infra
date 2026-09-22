@@ -128,6 +128,15 @@ scope:
     # psql read has no re-fetchable locator of the kind R3 requires; claiming
     # one would be the free-text provenance this registry exists to refuse.
     - scripts/ci/c16_receipt_identity_probe.py
+    # OMN-19180: the C14 customer-local routing producer is a PROBE of the same
+    # class as the C11 one above. It grades a no-checkout install's routing
+    # against expectations declared in its own source; the behaviours it
+    # asserts were landed by OMN-16932 and OMN-16833 and there are no captured
+    # incident bytes from a customer machine to replay, because no customer
+    # machine was probed before this ticket. Its grading is proven offline over
+    # a RECORDED run in tests/ci/test_c14_customer_local_routing_probe_omn19180.py
+    # -- a regression suite, not an incident replay.
+    - scripts/ci/c14_customer_local_routing_probe.py
     # OMN-17876: the offline contract canary is a new preventive evidence
     # projection; it deliberately cannot replay a live runner incident.
     - scripts/ci/model_review_capability_canary.py
