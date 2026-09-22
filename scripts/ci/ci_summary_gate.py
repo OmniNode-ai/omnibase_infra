@@ -1254,6 +1254,24 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
         added="2026-09-21",
         expires="2026-12-20",
     ),
+    # OMN-19218 — the eleventh name, missed by the 16-PR window because none of
+    # those heads touched prod-promotion-lineage.yml's path filter.
+    "Enforce clean + promoted build source": SweepExclusion(
+        reason=(
+            "The check run Enforce clean + promoted build source is the lineage-check "
+            "job of prod-promotion-lineage.yml, which carries the condition "
+            "github.event_name == 'workflow_call' && inputs.enforce_lineage. The "
+            "workflow runs on pull_request for a path filter that includes the "
+            "deploy-agent executor and deploy-runtime.sh, so on every such pull "
+            "request the job skips without producing a verdict. Measured on "
+            "omnibase_infra#3980 at head ba61dc95: every producer green, CI Summary "
+            "red on this skipped row alone. The job does its real work only when the "
+            "prod image build calls the workflow, which this exclusion does not touch."
+        ),
+        ticket="OMN-19218",
+        added="2026-09-22",
+        expires="2026-12-20",
+    ),
 }
 
 
