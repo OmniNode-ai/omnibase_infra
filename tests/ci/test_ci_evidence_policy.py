@@ -65,6 +65,8 @@ ASSERTION_SCRIPT = "assert_evidence_artifact.py"
 EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     # OMN-19175: the C11 negative-paths record.
     "c11-negative-paths",
+    # OMN-19195: the C12 provider-catalogue record.
+    "c12-provider-catalogue",
     # OMN-19181: the C16 receipt-identity record.
     "c16-receipt-identity",
     "lab-load",
