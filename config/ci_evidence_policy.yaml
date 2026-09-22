@@ -57,6 +57,21 @@
 #   Four edits in one PR, all of them visible.
 version: 1
 evidence_artifacts:
+  # --- c13-customer-local-delegation.yml: the C13 verdict (OMN-19179) ------
+  #
+  # As with C11, the job's EXIT CODE is the verdict and this record is how a
+  # reader sees the four clauses and the three controls without a log. A green
+  # run beside an absent record would claim a customer-local delegation was
+  # observed from outside the process with nothing behind the claim.
+  - id: c13-customer-local
+    workflow: .github/workflows/c13-customer-local-delegation.yml
+    job: c13-customer-local
+    producer_step: "Drive one customer delegation and grade it"
+    artifact_name: c13-customer-local
+    required_paths:
+      - c13-customer-local.json
+    rationale: >-
+      One entry per C13 clause (no checkout, three files, local model named, zero provider calls) with its evidence, plus the negative control (an unconfigured run that must reach no model) and the two positive controls (the configured run's connect to the model server with the server's own token counter moving, and a deliberate outbound connect the parser must classify external). Without the controls an empty connect log would read as zero provider calls.
   # --- chain-canary-c11-negative-paths.yml: the C11 verdict (OMN-19175) ----
   #
   # The probe's EXIT CODE is the criterion's verdict, so this record is not how

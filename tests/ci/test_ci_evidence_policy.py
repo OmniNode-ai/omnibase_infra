@@ -65,6 +65,8 @@ ASSERTION_SCRIPT = "assert_evidence_artifact.py"
 EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     # OMN-19175: the C11 negative-paths record.
     "c11-negative-paths",
+    # OMN-19179: the C13 customer-local record.
+    "c13-customer-local",
     "lab-load",
     "lab-pass-receipt-compose-dev",
     # OMN-18572: the same lane, keyed by the OMNINODE_INFRA commit that changed
