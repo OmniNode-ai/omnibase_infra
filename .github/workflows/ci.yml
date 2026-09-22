@@ -3708,7 +3708,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: d7f922aacf5b76628fe84b0c2abffd5dc2eecc6e
+          ref: b0ce124838108bdce47f0e02245906ec5be4fde2
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false

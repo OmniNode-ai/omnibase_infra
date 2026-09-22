@@ -272,16 +272,18 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # that caused it. Both regenerations wrote nothing, which is the proof the
     # contracts derive what the entries used to.
     #
+    # OMN-18993 and OMN-18999 added two more, for delegate_skill_command_claims
+    # and prod_promotion_gate_decisions, and both were DELETED here by the pin
+    # advance to 622664a35575, which carries omnimarket#2744 and #2753 -- the
+    # retiring pull requests each entry named in its own comment. The pinned
+    # contract set went from 74 declared relations to 76, and those are the two.
+    # Same mechanism as the three above and the same proof: the expiry module
+    # went red on the bot's pin-advance pull request naming both entries, the
+    # deletion rode that commit, and the regeneration wrote nothing.
+    #
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
-    # OMN-18993 and OMN-18999 added two more, for delegate_skill_command_claims
-    # and prod_promotion_gate_decisions, and both were DELETED here by this pin
-    # advance to fb41fdedc57e, which carries omnimarket#2744 and #2753 -- the
-    # retiring pull requests each entry named in its own comment. Same
-    # mechanism as the three above and the same proof: the expiry module goes
-    # red on this bot's pin-advance pull request naming both entries, the
-    # deletion rides this commit, and the regeneration writes nothing.
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
