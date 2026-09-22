@@ -4028,6 +4028,43 @@ def _bind_handler_owned_projection_database(
 ROWS_REFUSED_KEY: Final[str] = "rows_refused_by_ordering_guard"
 
 
+#: OMN-18910. The optional field a projection writer uses to report its
+#: CUMULATIVE count of deltas it discarded since process start. A gauge, not a
+#: per-call delta, because the graded fact is whether it RISES across windows:
+#: one discard is legitimate idempotence and a high flat count is a measured
+#: steady state, so a per-call increment could not tell those from loss.
+#:
+#: Optional on exactly the terms ``ROWS_REFUSED_KEY`` is, and for the same
+#: reason: a writer that omits it behaves precisely as it does today, which is
+#: what makes this consumer-first across the repository boundary. The producer
+#: half is an ``omnimarket`` change and is NOT in this ticket.
+#:
+#: This is NOT the projection-api's snapshot-cache drop counter. That gauge
+#: lives in a different container, is unreachable from this process, and is
+#: already graded where it belongs -- the serving cache reads itself stale on a
+#: drop streak, landed under OMN-18905 / omnimarket#2728. Do not add a second
+#: reading of it here.
+DELTAS_DROPPED_TOTAL_KEY: Final[str] = "deltas_dropped_total"
+
+
+def _extract_deltas_dropped_total(result: object) -> int | None:
+    """The writer's cumulative discarded-delta gauge, or ``None`` if unreported.
+
+    OMN-18910. ``None`` and ``0`` are different facts and must stay that way:
+    zero is a writer saying "I have discarded nothing", while ``None`` is a
+    writer that does not report at all, and recording the second as the first
+    would publish a measured clean series over a projection nobody is
+    measuring.
+    """
+    if isinstance(result, dict) and DELTAS_DROPPED_TOTAL_KEY in result:
+        try:
+            total = int(result[DELTAS_DROPPED_TOTAL_KEY])
+        except (TypeError, ValueError):
+            return None
+        return total if total >= 0 else None
+    return None
+
+
 def _extract_rows_refused(result: object) -> int:
     """Rows a projection handler DECLINED to write, as its own count.
 
@@ -4062,6 +4099,52 @@ def _extract_rows_refused(result: object) -> int:
             return 0
         return refused if refused > 0 else 0
     return 0
+
+
+def _record_projection_apply(
+    *,
+    handler_instance: object,
+    topic: str | None,
+    rows_upserted: int,
+    rows_refused: int,
+    deltas_dropped_total: int | None = None,
+) -> None:
+    """Record one projection dispatch on the process apply accumulator.
+
+    OMN-18910. Best-effort and deliberately swallowing: this is an
+    observability side-effect on the hot dispatch path, and a counter that can
+    take down a projection write is a worse defect than the one it exists to
+    detect. A failure here is logged at DEBUG and the dispatch continues -- the
+    health dimension it feeds fails CLOSED on the resulting absence, so a
+    counter that stopped recording shows up as an unobserved window rather
+    than as a clean one.
+
+    The projection identity is the handler class name, which is what every
+    other projection log line on this path already names, so an operator
+    reading a DEGRADED dimension can grep for the same token.
+    """
+    if not topic:
+        return
+    try:
+        from omnibase_infra.runtime.observability import (
+            get_projection_apply_counters,
+        )
+
+        counters = get_projection_apply_counters()
+        projection = type(handler_instance).__name__
+        counters.record_apply(
+            projection,
+            topic,
+            consumed=1,
+            upserted=max(rows_upserted, 0),
+            refused_by_guard=max(rows_refused, 0),
+        )
+        if deltas_dropped_total is not None:
+            counters.record_drop_total(projection, topic, deltas_dropped_total)
+    except Exception:  # noqa: BLE001 -- never fail a write over a counter
+        logger.debug(
+            "Projection apply counters unavailable for topic=%s", topic, exc_info=True
+        )
 
 
 def _extract_rows_upserted(result: object) -> int:
@@ -4660,6 +4743,13 @@ def _make_projection_dispatch_callback(
     guarantee: a malformed inbound event whose ``ValidationError`` escapes the
     handler is now durably captured on the bus on the REAL dispatch path, not
     only when a handler happens to catch it internally.
+
+    OMN-18910: every projection wired here is REGISTERED on the process apply
+    accumulator before any traffic, so a projection that attaches and then
+    takes nothing still emits a row every window. Registering at wiring time
+    rather than on first dispatch is the whole point -- a consumer that stopped
+    taking anything would otherwise vanish from the dimension that exists to
+    notice exactly that.
     """
     sinks = sinks or ProjectionDispatchSinks()
     secret_resolver = sinks.secret_resolver
@@ -4668,6 +4758,24 @@ def _make_projection_dispatch_callback(
     dlq_topics = list(sinks.dlq_topics)
     handler_name = type(handler_instance).__name__
     is_projection_runner = _is_standalone_projection_runner(handler_instance)
+    # OMN-18910. Registered before any traffic, for the reason in the
+    # docstring above: scope comes from what was wired, never from what was
+    # observed. Wrapped because an observability registration must never be
+    # the thing that stops a projection from being wired at all.
+    try:
+        from omnibase_infra.runtime.observability import (
+            get_projection_apply_counters,
+        )
+
+        apply_counters = get_projection_apply_counters()
+        for subscribe_topic in subscribe_topics:
+            apply_counters.register(handler_name, subscribe_topic)
+    except Exception:  # noqa: BLE001 -- never fail wiring over a counter
+        logger.debug(
+            "Projection apply counters unavailable at wiring for handler=%s",
+            handler_name,
+            exc_info=True,
+        )
     # OMN-18918. Only a writer the SHARED runtime dispatches in-process can
     # be deprived of coordinates by this seam; a standalone runner reads its
     # own records and never comes through here. Scoping the refusal to that
@@ -4866,6 +4974,20 @@ def _make_projection_dispatch_callback(
             # rows so the failure surfaces instead of being masked.
             rows_upserted = _extract_rows_upserted(result)
             projected = rows_upserted >= 1
+            # OMN-18910. The one seam that knows, at the same instant, that an
+            # event was CONSUMED and whether a row LANDED. Every other health
+            # signal reads one or the other: lag says a consumer is moving, the
+            # DLQ ratio says it is not erroring, attachment says it is
+            # subscribed. None of them says it wrote. Recorded here, before any
+            # of the branches below, so a refusal, an early return and a
+            # success are all counted rather than only the paths that log.
+            _record_projection_apply(
+                handler_instance=handler_instance,
+                topic=topic,
+                rows_upserted=rows_upserted,
+                rows_refused=_extract_rows_refused(result),
+                deltas_dropped_total=_extract_deltas_dropped_total(result),
+            )
             if projected:
                 logger.debug(
                     "Projection handler completed: topic=%s event_type=%s "

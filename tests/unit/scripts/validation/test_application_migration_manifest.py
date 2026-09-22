@@ -764,11 +764,39 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 0002_reconcile_consumer_flow_window_shapes.sql is the one that does
     # ADD COLUMN IF NOT EXISTS node_id UUID -- files apply in sort order, so a
     # 0002 index would sort before the reconcile that guarantees its column.
-    # OMN-18693 restores the already-applied 0044 delegation
-    # shadow-comparison migration with the exact content checksum recorded by
-    # the lane.  This restores a missing source declaration; it does not alter
-    # any historical migration bytes or ledger row.
-    assert len(result.declarations) == 208
+    #
+    # 203 -> 205 for OMN-18993 (blocking child of OMN-18887), which vendors TWO
+    # node-owned migrations in the pair shape used above for
+    # node_projection_lab_lane_health and node_projection_dod_verdict:
+    # node_delegate_skill_orchestrator/0001_delegate_skill_command_claims.sql,
+    # the durable correlation-keyed claim that stops a redelivered
+    # delegate-skill command from re-running the inference and billing it
+    # twice, and 0001_grant_omninode_runtime_delegate_skill_command_claims.sql,
+    # which ISSUES the grants the topology only declares. The grant rides in
+    # the owning node's own lineage rather than a shared file, so it is a
+    # second declaration here rather than an edit to the first.
+    #
+    # Domain omninode_internal, not tenant: per-node control state carrying no
+    # row-level security, so a tenant posture would assert an isolation the
+    # schema does not enforce. Vendored into omnibase_infra FIRST per the
+    # node-migration-vendor-parity ordering, ahead of omnimarket#2744.
+    #
+    # 205 -> 207 for OMN-18999 (surface 2 of 4 under OMN-18946), which vendors
+    # TWO node-owned migrations in the same pair shape as OMN-18900 directly
+    # above: 0000_create_prod_promotion_gate_decisions.sql, one durable row per
+    # prod-promotion-gate evaluation keyed on the redeploy run, so that a
+    # refusal leaves a queryable row instead of only a return value, and
+    # 0001_grant_omninode_runtime_prod_promotion_gate_decisions.sql, which
+    # ISSUES the grants the topology only declares -- the table half and the
+    # BIGSERIAL cursor's own standalone sequence, both asserted. The grant
+    # rides in the owning node's own lineage, so it is a second declaration
+    # here rather than an edit to the first.
+    # 207 -> 209 for OMN-18987: the append-only 0043z predecessor and the
+    # immutable 0044 delegation-shadow-comparisons restoration migration,
+    # which OMN-18693 restores with the exact content checksum recorded by
+    # the lane. This restores a missing source declaration; it does not
+    # alter any historical migration bytes or ledger row.
+    assert len(result.declarations) == 209
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
