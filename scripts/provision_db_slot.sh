@@ -316,18 +316,68 @@ PGADMINDB="${POSTGRES_DB:-postgres}"
 PGPASSWORD="$POSTGRES_PASSWORD"
 export PGPASSWORD
 
+# ---------------------------------------------------------------------------
+# HOW psql IS REACHED (OMN-18893)
+#
+# This script originally invoked a bare `psql`, which assumes a PostgreSQL
+# client on the host. The lab host has none -- no binary on PATH, none under
+# /usr/lib/postgresql, and no postgresql-client package -- and it never needed
+# one, because every migration seam in this repository runs psql INSIDE a
+# `postgres:16-alpine` container against the lane's own network. The dev lane's
+# forward-migration, cloud-migration, intelligence-migration and migration-gate
+# services are all that shape.
+#
+# Found on the first live slot provisioning: `psql: command not found`, after
+# the source snapshot had been staged and the lane lock taken.
+#
+# So psql is resolved rather than assumed: the host binary when one exists (a
+# developer machine, and what the unit tests exercise), otherwise a throwaway
+# container on the lane network. Both paths take the password from the
+# environment and never from argv, which is why the container form passes a
+# bare `-e PGPASSWORD` rather than an inline value -- a value there would be
+# visible in `docker inspect` and in the host's process list.
+#
+# The container path adds no host package and no image pull: postgres:16-alpine
+# is already resident, because the dev lane's own migration one-shots run it.
+# ---------------------------------------------------------------------------
+ONEX_PSQL_IMAGE="${ONEX_PSQL_IMAGE:-postgres:16-alpine}"
+ONEX_PSQL_NETWORK="${ONEX_PSQL_NETWORK:-omnibase-infra-network}"
+
+if command -v psql >/dev/null 2>&1; then
+    ONEX_PSQL_VIA="host-binary"
+    psql_run() { psql "$@"; }
+elif command -v docker >/dev/null 2>&1; then
+    ONEX_PSQL_VIA="container:${ONEX_PSQL_IMAGE}@${ONEX_PSQL_NETWORK}"
+    psql_run() {
+        # -i so a heredoc on stdin reaches psql; --rm so nothing accumulates.
+        docker run --rm -i --network "$ONEX_PSQL_NETWORK" \
+            -e PGPASSWORD "$ONEX_PSQL_IMAGE" psql "$@"
+    }
+else
+    fail "$EXIT_USAGE" \
+        "no way to reach PostgreSQL: there is no psql on PATH and no docker to
+       run one in. Slot provisioning refuses rather than guessing, because a
+       half-provisioned slot on a SHARED server is worse than an unprovisioned
+       one."
+fi
+
+# Printed rather than merely chosen: which path answered is part of the
+# provisioning evidence, and a run that silently switched paths between two
+# hosts is a difference an operator should be able to see in the log.
+echo "[provision-db-slot] psql via ${ONEX_PSQL_VIA}" >&2
+
 psql_admin() {
-    psql -v ON_ERROR_STOP=1 -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGADMINDB" "$@"
+    psql_run -v ON_ERROR_STOP=1 -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGADMINDB" "$@"
 }
 
 psql_admin_in() {
     _target_db="$1"
     shift
-    psql -v ON_ERROR_STOP=1 -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$_target_db" "$@"
+    psql_run -v ON_ERROR_STOP=1 -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$_target_db" "$@"
 }
 
 scalar() {
-    psql -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGADMINDB" -c "$1"
+    psql_run -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGADMINDB" -c "$1"
 }
 
 # The whole fence rests on this connection being able to see and refuse
@@ -382,7 +432,7 @@ database_holds_no_lane_data() {
         [ "$_nld_candidate" = "$_nld_db" ] && _nld_listed=1
     done
     [ "$_nld_listed" -eq 1 ] || return 1
-    _nld_tables="$(psql -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$_nld_db" \
+    _nld_tables="$(psql_run -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$_nld_db" \
         -c "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')")"
     if [ "$_nld_tables" != "0" ]; then
         echo "[provision-db-slot]   '${_nld_db}' is listed as holding no lane data but reports ${_nld_tables} application tables — the exemption does not apply" >&2

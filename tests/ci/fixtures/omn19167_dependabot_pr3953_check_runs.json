@@ -1,0 +1,1858 @@
+{
+  "_provenance": {
+    "ticket": "OMN-19167",
+    "repo": "OmniNode-ai/omnibase_infra",
+    "pr": 3953,
+    "head_sha": "4af8a2d5b623371b046e1585af74feeacac894df",
+    "captured_at": "2026-09-22T12:35:00Z",
+    "pr_author": "dependabot[bot]",
+    "pr_title": "chore(deps): bump OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml from 76532c203a2dccd5f928fba6657d5dd5ff3bdf10 to aeaf3b16fc30d9bc1b537f6c56998b5df69c77b4",
+    "pr_head_ref": "dependabot/github_actions/OmniNode-ai/omnibase_core/dot-github/workflows/receipt-gate.yml-aeaf3b16fc30d9bc1b537f6c56998b5df69c77b4",
+    "event_actor": "jonahgabriel",
+    "blocking_verdict_job": 106734128710,
+    "blocking_verdict_line": "external sweep failures (red, and named by NOTHING else): occ-autobind (skipped), occ-companion-effect (skipped)",
+    "note": "Real, unedited check-run and workflow-run rows for the head that was blocked. Fields are slimmed to the ones the gate reads; no value was altered.",
+    "ci_run_id": 35724290634
+  },
+  "check_runs": [
+    {
+      "name": "Runtime Boot Smoke (compose)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-22T12:08:56Z",
+      "completed_at": "2026-09-22T12:08:55Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106737934939",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106737934939"
+    },
+    {
+      "name": "Skip Count Ratchet (OMN-18776)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T12:08:59Z",
+      "completed_at": "2026-09-22T12:09:20Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106737933811",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106737933811"
+    },
+    {
+      "name": "CI Tests Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T12:08:51Z",
+      "completed_at": "2026-09-22T12:08:55Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106737891010",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106737891010"
+    },
+    {
+      "name": "Test-Failure Ratchet Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T12:08:51Z",
+      "completed_at": "2026-09-22T12:09:02Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106737890933",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106737890933"
+    },
+    {
+      "name": "Tests (Split 2/2)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T12:04:48Z",
+      "completed_at": "2026-09-22T12:07:43Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106736623946",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106736623946"
+    },
+    {
+      "name": "Tests (Split 1/2)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T12:04:47Z",
+      "completed_at": "2026-09-22T12:08:46Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106736623867",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106736623867"
+    },
+    {
+      "name": "Detect Changes",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T12:04:25Z",
+      "completed_at": "2026-09-22T12:04:44Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106736507339",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106736507339"
+    },
+    {
+      "name": "reason-graph",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:58:46Z",
+      "completed_at": "2026-09-22T11:58:52Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289631/job/106734711197",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289631/job/106734711197"
+    },
+    {
+      "name": "Omni Standards Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:58:17Z",
+      "completed_at": "2026-09-22T11:58:19Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734571084",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734571084"
+    },
+    {
+      "name": "CodeQL",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:45Z",
+      "completed_at": "2026-09-22T11:57:47Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/runs/106734420170",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/runs/106734420170"
+    },
+    {
+      "name": "Lint",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:46Z",
+      "completed_at": "2026-09-22T12:04:22Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734380311",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734380311"
+    },
+    {
+      "name": "Migration Integration Test",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:29Z",
+      "completed_at": "2026-09-22T11:59:23Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734286468",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734286468"
+    },
+    {
+      "name": "Docs-Only Marker (OMN-16661)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-22T11:57:18Z",
+      "completed_at": "2026-09-22T11:57:17Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734284509",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734284509"
+    },
+    {
+      "name": "Service-Backed Integration Suites (OMN-18781)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:25Z",
+      "completed_at": "2026-09-22T12:05:31Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734284224",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734284224"
+    },
+    {
+      "name": "Application Database Domain Enforcement (OMN-15361)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:47Z",
+      "completed_at": "2026-09-22T12:02:32Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283693",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283693"
+    },
+    {
+      "name": "Integration Silent-Skip Guard (OMN-14172)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:29Z",
+      "completed_at": "2026-09-22T11:58:28Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283603",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283603"
+    },
+    {
+      "name": "Demo Loop Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:31Z",
+      "completed_at": "2026-09-22T11:57:58Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283564",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283564"
+    },
+    {
+      "name": "Kafka Boundary Compat (OMN-3256)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:26Z",
+      "completed_at": "2026-09-22T11:58:15Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283558",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283558"
+    },
+    {
+      "name": "Kafka Schema Handshake (OMN-3411)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:29Z",
+      "completed_at": "2026-09-22T11:58:10Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283512",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283512"
+    },
+    {
+      "name": "Effect-Assertion Gate (RT-5)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:25Z",
+      "completed_at": "2026-09-22T11:57:38Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283491",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734283491"
+    },
+    {
+      "name": "Hostile Reviewer (adversarial gate)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-22T11:56:59Z",
+      "completed_at": "2026-09-22T11:56:58Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290267/job/106734196941",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290267/job/106734196941"
+    },
+    {
+      "name": "Hostile Review Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:01Z",
+      "completed_at": "2026-09-22T11:57:04Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290267/job/106734196460",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290267/job/106734196460"
+    },
+    {
+      "name": "Hostile Review Thread Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:11Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290267/job/106734196388",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290267/job/106734196388"
+    },
+    {
+      "name": "call-reject-skip-token / scan / reject-skip-gate-token",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:04Z",
+      "completed_at": "2026-09-22T11:57:07Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290999/job/106734194035",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290999/job/106734194035"
+    },
+    {
+      "name": "AI-Slop Pattern Check (strict, PR diff)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:15Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193417",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193417"
+    },
+    {
+      "name": "Cross-Repo Migration Conflicts",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:13Z",
+      "completed_at": "2026-09-22T11:57:30Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193393",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193393"
+    },
+    {
+      "name": "Writer-Migration Coupling Check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:23Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193380",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193380"
+    },
+    {
+      "name": "Node Migration Declaration Check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:25Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193367",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193367"
+    },
+    {
+      "name": "Contract Compliance",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:01Z",
+      "completed_at": "2026-09-22T11:57:43Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193293",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193293"
+    },
+    {
+      "name": "Compose Required-Env Coverage (OMN-5439)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:43Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193254",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193254"
+    },
+    {
+      "name": "Contract Sync Gate (Wave C) [OMN-8915]",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:09Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193242",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193242"
+    },
+    {
+      "name": "Lockfile Registry Allowlist (OMN-16516)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:16Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193233",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193233"
+    },
+    {
+      "name": "Trivyignore Expiry Check (OMN-16229)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:01Z",
+      "completed_at": "2026-09-22T11:57:06Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193205",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193205"
+    },
+    {
+      "name": "Contract Compliance Check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:26Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193201",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193201"
+    },
+    {
+      "name": "Contract Path Pre-Flight",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:09Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193135",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193135"
+    },
+    {
+      "name": "Lockfile CVE Scan (OMN-16228)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:23Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193111",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193111"
+    },
+    {
+      "name": "Dep Provenance Lineage Gate (OMN-15604)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:18Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193094",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193094"
+    },
+    {
+      "name": "Pin Reachability (OMN-15538)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:01Z",
+      "completed_at": "2026-09-22T11:57:23Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193085",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193085"
+    },
+    {
+      "name": "Topic Naming Lint",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:21Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193062",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193062"
+    },
+    {
+      "name": "Arch Invariants (OMN-3343)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:22Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193024",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193024"
+    },
+    {
+      "name": "Topic Drift Check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:43Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193016",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734193016"
+    },
+    {
+      "name": "Exposed Identifier Gate (OMN-17320)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:48Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192997",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192997"
+    },
+    {
+      "name": "zone-filter / Zone Filter (docs-only check)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:16Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192991",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192991"
+    },
+    {
+      "name": "Topic Enum Drift Check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:30Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192979",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192979"
+    },
+    {
+      "name": "OCC Born-Path Trigger Coverage (OMN-14987)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:32Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192959",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192959"
+    },
+    {
+      "name": "Plugin ENV->Service Completeness (OMN-4313)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:37Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192933",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192933"
+    },
+    {
+      "name": "Fingerprint Check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:57:26Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192924",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192924"
+    },
+    {
+      "name": "Version Pin Compliance",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:01Z",
+      "completed_at": "2026-09-22T11:57:25Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192884",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192884"
+    },
+    {
+      "name": "Infra Node Handler Ownership",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:00Z",
+      "completed_at": "2026-09-22T11:57:07Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192465",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192465"
+    },
+    {
+      "name": "ONEX Validators",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:02Z",
+      "completed_at": "2026-09-22T11:59:28Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192422",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192422"
+    },
+    {
+      "name": "Migration Freeze Check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:01Z",
+      "completed_at": "2026-09-22T11:57:10Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192386",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734192386"
+    },
+    {
+      "name": "occ-companion-effect-manual-replay",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-22T11:56:53Z",
+      "completed_at": "2026-09-22T11:56:44Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290346/job/106734168615",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290346/job/106734168615"
+    },
+    {
+      "name": "verify",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-22T11:56:50Z",
+      "completed_at": "2026-09-22T11:56:44Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289696/job/106734156639",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289696/job/106734156639"
+    },
+    {
+      "name": "Canonical Inference Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:35Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289621/job/106734132466",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289621/job/106734132466"
+    },
+    {
+      "name": "Sanitized Legacy RDS Fixture Proof / PostgreSQL 16 Fresh + Legacy Fixture",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:55Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734129015",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734129015"
+    },
+    {
+      "name": "Customer Path Boundary (OMN-18012)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:55Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128761",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128761"
+    },
+    {
+      "name": "call-reject-skip-token / occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:56:58Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290999/job/106734128746",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290999/job/106734128746"
+    },
+    {
+      "name": "Event Chain Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:21Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128726",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128726"
+    },
+    {
+      "name": "CI Summary",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T12:16:53Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128710",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128710"
+    },
+    {
+      "name": "merge-hold-gate / evaluate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:04Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128680",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128680"
+    },
+    {
+      "name": "Enforce validator-requirements.yaml (OMN-13291)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:08Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128639",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128639"
+    },
+    {
+      "name": "Runtime Profiles / validate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:08Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128611",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128611"
+    },
+    {
+      "name": "Subscribe Wiring Health",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:34Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128539",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128539"
+    },
+    {
+      "name": "Runner Route (OMN-18031) / route",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:26Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128523",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128523"
+    },
+    {
+      "name": "no-noncanonical-lifecycle-classes",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:15Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128461",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128461"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:57Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128448",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128448"
+    },
+    {
+      "name": "Deploy Agent Tests (OMN-15378) / deploy-agent-tests",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:58:17Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128392",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128392"
+    },
+    {
+      "name": "Reconcilers prove movement by readback (OMN-17307)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:50Z",
+      "completed_at": "2026-09-22T11:56:58Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128390",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128390"
+    },
+    {
+      "name": "OCC Companion Merged Gate (OMN-15214)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:57Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128212",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128212"
+    },
+    {
+      "name": "CI Evidence Policy (OMN-18247)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:58:27Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128018",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290634/job/106734128018"
+    },
+    {
+      "name": "occ-companion-effect",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-22T11:56:45Z",
+      "completed_at": "2026-09-22T11:56:44Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290346/job/106734127911",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290346/job/106734127911"
+    },
+    {
+      "name": "occ-autobind",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-22T11:56:44Z",
+      "completed_at": "2026-09-22T11:56:44Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290222/job/106734126718",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290222/job/106734126718"
+    },
+    {
+      "name": "occ-autobind-manual-replay",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-22T11:56:44Z",
+      "completed_at": "2026-09-22T11:56:44Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290222/job/106734126550",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290222/job/106734126550"
+    },
+    {
+      "name": "occ-preflight / eligibility",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:56:58Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290267/job/106734126331",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290267/job/106734126331"
+    },
+    {
+      "name": "required-check-skip-guard / check-skip-vectors",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:58Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290371/job/106734126288",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290371/job/106734126288"
+    },
+    {
+      "name": "advisory-job-gate / advisory-job-gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:06Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290517/job/106734126286",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290517/job/106734126286"
+    },
+    {
+      "name": "verify / verify",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:56:57Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290438/job/106734126246",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290438/job/106734126246"
+    },
+    {
+      "name": "kb-doc-gate / kb-doc-gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:02Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290509/job/106734126236",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290509/job/106734126236"
+    },
+    {
+      "name": "imperative-contract-guard / Imperative Contract Guard",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:31Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290335/job/106734126225",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290335/job/106734126225"
+    },
+    {
+      "name": "shell-hygiene",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:19Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289754/job/106734126152",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289754/job/106734126152"
+    },
+    {
+      "name": "public-repo-hygiene / public-repo-hygiene",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:41Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290424/job/106734125951",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290424/job/106734125951"
+    },
+    {
+      "name": "deploy-gate / deploy-gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:09Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290440/job/106734125898",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290440/job/106734125898"
+    },
+    {
+      "name": "Runner Disk Preflight",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:52Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289823/job/106734125871",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289823/job/106734125871"
+    },
+    {
+      "name": "runner-label-exists / runner-label-exists",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:57:01Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290223/job/106734125701",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290223/job/106734125701"
+    },
+    {
+      "name": "pr-title / check-title",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:51Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290280/job/106734125520",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290280/job/106734125520"
+    },
+    {
+      "name": "call / validate-docs",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:07Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290283/job/106734125351",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724290283/job/106734125351"
+    },
+    {
+      "name": "Publish PR Webhook Event",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:52Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289462/job/106734125350",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289462/job/106734125350"
+    },
+    {
+      "name": "skill-node-mapping-sync",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:30Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289813/job/106734124460",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289813/job/106734124460"
+    },
+    {
+      "name": "consumer-kwarg-parity",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:25Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289787/job/106734124318",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289787/job/106734124318"
+    },
+    {
+      "name": "check-env-reads-gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:58Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289613/job/106734124293",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289613/job/106734124293"
+    },
+    {
+      "name": "receipt-honesty",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:17Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289761/job/106734124255",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289761/job/106734124255"
+    },
+    {
+      "name": "CI Naming Convention",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:55Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734124169",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734124169"
+    },
+    {
+      "name": "Duplication Sweep",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:02Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289727/job/106734124141",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289727/job/106734124141"
+    },
+    {
+      "name": "PEP 604 Type Union Check (UP007)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:55Z",
+      "completed_at": "2026-09-22T11:57:14Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734124112",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734124112"
+    },
+    {
+      "name": "Handler Contract Compliance",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:08Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734124110",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734124110"
+    },
+    {
+      "name": "Runner Routing Audit",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:07Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289780/job/106734124059",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289780/job/106734124059"
+    },
+    {
+      "name": "Precommit Parity Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:00Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289719/job/106734124023",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289719/job/106734124023"
+    },
+    {
+      "name": "ci-bus-overlay-binding",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:23Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289641/job/106734124018",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289641/job/106734124018"
+    },
+    {
+      "name": "contract-validation",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:06Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289638/job/106734124013",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289638/job/106734124013"
+    },
+    {
+      "name": "URL Authority Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:25Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289604/job/106734123975",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289604/job/106734123975"
+    },
+    {
+      "name": "Stale TODO Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:55Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289776/job/106734123971",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289776/job/106734123971"
+    },
+    {
+      "name": "non-dev-base-guard",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:53Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289645/job/106734123896",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289645/job/106734123896"
+    },
+    {
+      "name": "context-field-presence",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:01Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123887",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123887"
+    },
+    {
+      "name": "No bare compose teardown",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:49Z",
+      "completed_at": "2026-09-22T11:57:18Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289764/job/106734123827",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289764/job/106734123827"
+    },
+    {
+      "name": "terminal-cost-completeness",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:57Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123818",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123818"
+    },
+    {
+      "name": "wheel-content-parity",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:01Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289590/job/106734123806",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289590/job/106734123806"
+    },
+    {
+      "name": "lint (shadow)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:06Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289631/job/106734123772",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289631/job/106734123772"
+    },
+    {
+      "name": "Dep Provenance Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:02Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289592/job/106734123755",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289592/job/106734123755"
+    },
+    {
+      "name": "dispatcher-route-coverage",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:11Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289530/job/106734123740",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289530/job/106734123740"
+    },
+    {
+      "name": "Type Safety Validation",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:58:13Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734123718",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289778/job/106734123718"
+    },
+    {
+      "name": "release-identity",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:55Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123702",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123702"
+    },
+    {
+      "name": "sibling-lock-pins",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:57:25Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123683",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123683"
+    },
+    {
+      "name": "Git env scrub gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:13Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289581/job/106734123645",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289581/job/106734123645"
+    },
+    {
+      "name": "typecheck (shadow)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:46Z",
+      "completed_at": "2026-09-22T11:58:43Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289631/job/106734123610",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289631/job/106734123610"
+    },
+    {
+      "name": "deployed-migration-tree-sync-logic",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:57:21Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289542/job/106734123591",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289542/job/106734123591"
+    },
+    {
+      "name": "exposure-reader-coverage",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:57:32Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289619/job/106734123550",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289619/job/106734123550"
+    },
+    {
+      "name": "pinned-wheel-skew",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:56:55Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123522",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289624/job/106734123522"
+    },
+    {
+      "name": "CodeQL",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T12:06:25Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289570/job/106734123435",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289570/job/106734123435"
+    },
+    {
+      "name": "tests+coverage (shadow)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:57:34Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289631/job/106734123430",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289631/job/106734123430"
+    },
+    {
+      "name": "Integration Test Removal Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:56:57Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289616/job/106734123306",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289616/job/106734123306"
+    },
+    {
+      "name": "main-target-guard",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:57:24Z",
+      "completed_at": "2026-09-22T11:57:30Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289549/job/106734123253",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289549/job/106734123253"
+    },
+    {
+      "name": "Check architecture handshake",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:56:59Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289585/job/106734123204",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289585/job/106734123204"
+    },
+    {
+      "name": "node-migration-sync",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:48Z",
+      "completed_at": "2026-09-22T11:56:58Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289542/job/106734123122",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289542/job/106734123122"
+    },
+    {
+      "name": "Governed helper primitive gate",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:56:57Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289644/job/106734123101",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289644/job/106734123101"
+    },
+    {
+      "name": "Integration Test Coverage",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:47Z",
+      "completed_at": "2026-09-22T11:56:58Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289616/job/106734123025",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724289616/job/106734123025"
+    },
+    {
+      "name": "Analyze (javascript-typescript)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:46Z",
+      "completed_at": "2026-09-22T11:57:55Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724286043/job/106734117010",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724286043/job/106734117010"
+    },
+    {
+      "name": "Analyze (actions)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:46Z",
+      "completed_at": "2026-09-22T11:57:57Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724286043/job/106734116974",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724286043/job/106734116974"
+    },
+    {
+      "name": "Analyze (python)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-22T11:56:45Z",
+      "completed_at": "2026-09-22T11:58:34Z",
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724286043/job/106734116769",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35724286043/job/106734116769"
+    }
+  ],
+  "workflow_runs": [
+    {
+      "id": 35724290222,
+      "name": "OCC Autobind Publisher",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "skipped",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290280,
+      "name": "PR Title Check",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290371,
+      "name": "Required-Check Skip-Vector Guard",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290999,
+      "name": "Reject skip-gate bypass tokens",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290438,
+      "name": "Receipt Gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290509,
+      "name": "KB Doc Gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290517,
+      "name": "Advisory Job Gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290283,
+      "name": "docs-validate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290267,
+      "name": "Hostile Reviewer",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290424,
+      "name": "Public Repo Hygiene",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290223,
+      "name": "Runner Label Exists",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290440,
+      "name": "Deploy Gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290335,
+      "name": "Imperative Contract Guard",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290634,
+      "name": "CI",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "failure",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289696,
+      "name": "OmniGate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "skipped",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724290346,
+      "name": "OCC Companion Effect Publisher",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "skipped",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289645,
+      "name": "Non-dev base guard",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289585,
+      "name": "Check Architecture Handshake",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289616,
+      "name": "Integration Test Check",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289644,
+      "name": "Governed helper primitive gate (OMN-18629)",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289613,
+      "name": "check-env-reads-gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289592,
+      "name": "Dep Provenance Gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289462,
+      "name": "Artifact Reconciliation Webhook",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289823,
+      "name": "Runner Disk Preflight",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289727,
+      "name": "Duplication Sweep",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289638,
+      "name": "Contract Validation",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289530,
+      "name": "Dispatcher Route Coverage",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289624,
+      "name": "fresh-deploy-fitness",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289590,
+      "name": "Wheel Content Parity",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289719,
+      "name": "Precommit Parity Gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289780,
+      "name": "Runner Routing Audit",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289581,
+      "name": "Git env scrub",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289754,
+      "name": "Shell Hygiene Gate (OMN-14761)",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289776,
+      "name": "Stale TODO Gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289604,
+      "name": "URL Authority Gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289787,
+      "name": "Delegation Consumer Keyword Parity",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289641,
+      "name": "CI Bus Overlay Binding",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289764,
+      "name": "No bare compose teardown (OMN-13886)",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289542,
+      "name": "node-migration-sync",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289761,
+      "name": "receipt-honesty",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289621,
+      "name": "Canonical Inference Gate",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289813,
+      "name": "skill-node-mapping-sync",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289619,
+      "name": "Exposure Reader Coverage",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289549,
+      "name": "Main target guard",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289778,
+      "name": "Omni* Ecosystem Standards Compliance",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289631,
+      "name": "product-readiness-shadow",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724289570,
+      "name": "Security Scan",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    },
+    {
+      "id": 35724286043,
+      "name": "PR #3953",
+      "event": "dynamic",
+      "status": "completed",
+      "conclusion": "success",
+      "actor": {
+        "login": "jonahgabriel"
+      },
+      "triggering_actor": {
+        "login": "jonahgabriel"
+      }
+    }
+  ],
+  "in_run_job_names": [
+    "AI-Slop Pattern Check (strict, PR diff)",
+    "Application Database Domain Enforcement (OMN-15361)",
+    "Arch Invariants (OMN-3343)",
+    "CI Evidence Policy (OMN-18247)",
+    "CI Summary",
+    "CI Tests Gate",
+    "Compose Required-Env Coverage (OMN-5439)",
+    "Contract Compliance",
+    "Contract Compliance Check",
+    "Contract Path Pre-Flight",
+    "Contract Sync Gate (Wave C) [OMN-8915]",
+    "Cross-Repo Migration Conflicts",
+    "Customer Path Boundary (OMN-18012)",
+    "Demo Loop Gate",
+    "Dep Provenance Lineage Gate (OMN-15604)",
+    "Deploy Agent Tests (OMN-15378) / deploy-agent-tests",
+    "Detect Changes",
+    "Docs-Only Marker (OMN-16661)",
+    "Effect-Assertion Gate (RT-5)",
+    "Enforce validator-requirements.yaml (OMN-13291)",
+    "Event Chain Gate",
+    "Exposed Identifier Gate (OMN-17320)",
+    "Fingerprint Check",
+    "Infra Node Handler Ownership",
+    "Integration Silent-Skip Guard (OMN-14172)",
+    "Kafka Boundary Compat (OMN-3256)",
+    "Kafka Schema Handshake (OMN-3411)",
+    "Lint",
+    "Lockfile CVE Scan (OMN-16228)",
+    "Lockfile Registry Allowlist (OMN-16516)",
+    "Migration Freeze Check",
+    "Migration Integration Test",
+    "Node Migration Declaration Check",
+    "OCC Born-Path Trigger Coverage (OMN-14987)",
+    "OCC Companion Merged Gate (OMN-15214)",
+    "ONEX Validators",
+    "Pin Reachability (OMN-15538)",
+    "Plugin ENV->Service Completeness (OMN-4313)",
+    "Reconcilers prove movement by readback (OMN-17307)",
+    "Runner Route (OMN-18031) / route",
+    "Runtime Boot Smoke (compose)",
+    "Runtime Profiles / validate",
+    "Sanitized Legacy RDS Fixture Proof / PostgreSQL 16 Fresh + Legacy Fixture",
+    "Service-Backed Integration Suites (OMN-18781)",
+    "Skip Count Ratchet (OMN-18776)",
+    "Subscribe Wiring Health",
+    "Test-Failure Ratchet Gate",
+    "Tests (Split 1/2)",
+    "Tests (Split 2/2)",
+    "Topic Drift Check",
+    "Topic Enum Drift Check",
+    "Topic Naming Lint",
+    "Trivyignore Expiry Check (OMN-16229)",
+    "Version Pin Compliance",
+    "Writer-Migration Coupling Check",
+    "merge-hold-gate / evaluate",
+    "no-noncanonical-lifecycle-classes",
+    "occ-preflight / eligibility",
+    "zone-filter / Zone Filter (docs-only check)"
+  ]
+}

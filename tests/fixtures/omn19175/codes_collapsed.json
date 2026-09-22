@@ -1,0 +1,57 @@
+{
+  "fixture": "codes_collapsed.json",
+  "observations": {
+    "absent_key": {
+      "body": {
+        "code": "auth.credential.invalid",
+        "detail": "Unauthorized"
+      },
+      "status": 401
+    },
+    "malformed": {
+      "body": {
+        "detail": [
+          {
+            "input": {
+              "omn19175_not_a_field": true
+            },
+            "loc": [
+              "body",
+              "name"
+            ],
+            "msg": "Field required",
+            "type": "missing"
+          }
+        ]
+      },
+      "status": 422
+    },
+    "positive_control": {
+      "body": {
+        "ok": true,
+        "service": "onex-api",
+        "time": "2026-09-22T16:51:35.002774+00:00",
+        "version": "0.1.0"
+      },
+      "status": 200
+    },
+    "wrong_key": {
+      "body": {
+        "code": "auth.credential.invalid",
+        "detail": "Unauthorized"
+      },
+      "status": 401
+    },
+    "wrong_tenant": {
+      "body": {
+        "code": "auth.tenant.forbidden",
+        "detail": "Forbidden"
+      },
+      "status": 403
+    }
+  },
+  "provenance": "Recorded on the lab dev lane 2026-09-22 (onex-api, compose project omnibase-infra, host port 8090) unless a row says otherwise. The 401 and 200 rows are verbatim response bytes. The wrong_tenant 403 row is DERIVED from the route source read in the running image -- routers/api_keys.py raises TypedRefusalHTTPException(403, 'Forbidden', RefusalCode.TENANT_FORBIDDEN) and refusal_codes.py fixes TENANT_FORBIDDEN = 'auth.tenant.forbidden' -- because driving it needs a valid credential, which exists only as a repository secret. The malformed row's envelope shape is verbatim from an observed 422 on the same app; only the omitted field name differs, because the observation was taken on a route reachable without a credential.",
+  "ticket": "OMN-19175",
+  "version": 1,
+  "what_this_is": "The pre-OMN-18042 state: wrong_key and absent_key indistinguishable to a caller."
+}
