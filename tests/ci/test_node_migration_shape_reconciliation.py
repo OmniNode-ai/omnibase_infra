@@ -159,14 +159,41 @@ def test_0044_frozen_record_pins_the_deployed_checksum_and_successor_obligation(
     assert "new, later reconciliation migration" in record
 
 
-def test_no_id_is_both_fenced_and_frozen() -> None:
-    """The two manifests answer different questions and must stay disjoint.
+# Pinned, reviewed exceptions to the disjointness invariant below, same
+# discipline as _EXPECTED_FROZEN: growing this set requires a reviewed diff
+# naming the lane and the ticket, never a silent widening.
+#
+# 0044_restore_delegation_shadow_comparisons.sql is BOTH baseline-fenced
+# (OMN-18987, dev commit e01596269: not yet released to any lane this baseline
+# governs, because the real restore lands separately via omnimarket#2699) AND
+# frozen (OMN-18693: already applied and checksum-bound on the a870 dogfood
+# lane, a lane outside the baseline fence's release system). Both records are
+# correct about their own lane; the two questions "is this released on the
+# baseline lanes" and "has this already applied somewhere, immutably" are
+# answered independently for this one id. Proven live 2026-09-22: dropping the
+# fence entry to satisfy a blanket disjointness check made the Sanitized
+# Legacy RDS Fixture Proof job FATAL — the forward-migration runner's
+# unclassified-FORCE-RLS guard (scripts/run-forward-migrations.sh OMN-15336
+# item 4) requires the id to be classified in the fence manifest before it may
+# even be considered on a fresh database, regardless of its frozen status
+# elsewhere.
+_KNOWN_FENCED_AND_FROZEN = frozenset(
+    {
+        "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql",
+    }
+)
 
-    An id in both is a category error: a fenced migration is never applied, so
-    its bytes cannot be bound by a ledger row, so 'frozen by the ledger' cannot
-    be true of it. Overlap means one of the two records is wrong.
+
+def test_no_id_is_both_fenced_and_frozen() -> None:
+    """The two manifests answer different questions and must stay disjoint,
+    except for the pinned, reviewed exceptions in _KNOWN_FENCED_AND_FROZEN.
+
+    An id in both is normally a category error: a fenced migration is never
+    applied, so its bytes cannot be bound by a ledger row, so 'frozen by the
+    ledger' cannot be true of it. Overlap outside the pinned set means one of
+    the two records is wrong.
     """
-    overlap = sorted(_FENCED & _FROZEN)
+    overlap = sorted((_FENCED & _FROZEN) - _KNOWN_FENCED_AND_FROZEN)
     assert not overlap, (
         "these ids claim BOTH an operator fence (never applied) and frozen "
         f"bytes (applied and checksum-bound), which cannot both hold: {overlap}"

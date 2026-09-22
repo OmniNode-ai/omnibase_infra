@@ -823,13 +823,5 @@ fenced_node_migrations:
     ticket: "OMN-14894"
   - id: "node:node_projection_delegation:0043z_preflight_delegation_shadow_comparisons.sql"
     ticket: "OMN-18987"
-# 0044 is deliberately NOT fenced here (dropped from dev's e01596269 pair on
-# merge into OMN-18925/OMN-18931): this branch's own OMN-18693 lineage
-# already carries its ledger declaration (_ledger/application-migrations.tsv)
-# and its shape-reconciliation-exemptions.yaml frozen-bytes entry, checksum
-# 3a1089294056fafeebbe5fdbe1c0910d3dc178b37d9402e2f37c19a32161c298, applied
-# and verified on the a870 dogfood lane. Fencing it here as well as freezing
-# it there is the exact category error
-# test_no_id_is_both_fenced_and_frozen refuses: fenced means never applied,
-# frozen means already applied and ledger-bound, and both cannot hold for
-# the same id. 0043z stays fenced; it carries no frozen-bytes exemption.
+  - id: "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql"
+    ticket: "OMN-18987"
