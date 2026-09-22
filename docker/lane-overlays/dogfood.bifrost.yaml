@@ -1,6 +1,6 @@
 # Typed Bifrost overlay for the isolated dogfood lane.
-# Backend bindings are validated against the authorized binding model; local
-# inference endpoints are host services rather than resources of another lane.
+# Backend bindings are validated by the lane overlay schema; local inference
+# endpoints are host services rather than resources of another lane.
 # onex-allow-internal-ip OMN-18693 reason="typed dogfood lane backend binding"
 schema_version: "bifrost_lane_overlay.v3"
 lane: dogfood

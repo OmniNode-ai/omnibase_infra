@@ -1,7 +1,8 @@
 {
   "_comment": [
-    "OMN-16999. A RECORDED /v1/models readback per authorized lab endpoint.",
-    "This file is the evidence that pins _AUTHORIZED_BINDINGS to live truth.",
+    "OMN-16999. A RECORDED /v1/models readback per lab endpoint a lane binds.",
+    "This file is the evidence that pins the lab lane overlays to live truth",
+    "(OMN-17099 moved the bindings out of the product into those overlays).",
     "It exists because the .201 served id has now flipped TWICE with nothing in",
     "the repo able to notice: OMN-16419 changed it Qwen3.6-35B-A3B -> qwen3.8 on",
     "2026-08-23 after a reboot, and by 2026-09-05 the endpoint had been redeployed",
@@ -11,7 +12,7 @@
     "",
     "UPDATING THIS FILE IS THE POINT, NOT A CHORE. When an endpoint is",
     "re-deployed, re-probe it and paste the readback here in the same commit that",
-    "changes the binding table. Never edit the binding table alone: the paired",
+    "changes the lane overlay. Never edit the lane overlay alone: the paired",
     "test asserts the two agree, so an unaccompanied edit fails CI instead of",
     "shipping a rung that 404s on its first call.",
     "",
