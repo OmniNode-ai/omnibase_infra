@@ -195,6 +195,27 @@ def endpoint_is_private(endpoint_url: str) -> bool:
     return _address_is_private(str(address))
 
 
+def _private_address(endpoint_url: str) -> str | None:
+    """The private IP to connect to for ``endpoint_url``, or None if it is not private.
+
+    The recorder connects to the ADDRESS this returns, never to the hostname a
+    request named, so a destination outside the private network is unreachable
+    through it by construction rather than by a check a later edit could skip.
+    """
+    if not endpoint_is_private(endpoint_url):
+        return None
+    host = urlsplit(endpoint_url).hostname or ""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return None
+    for info in infos:
+        candidate = str(info[4][0])
+        if _address_is_private(candidate):
+            return ipaddress.ip_address(candidate.split("%", 1)[0]).compressed
+    return None
+
+
 def _address_is_private(raw: str) -> bool:
     try:
         address = ipaddress.ip_address(raw.split("%", 1)[0])
@@ -576,10 +597,10 @@ def grade_row4(
             "private-network endpoint -- a disputed answer is arbitrated by a "
             "metered provider"
         )
-    if judge.get("secret_ref"):
+    if judge.get("requires_credential"):
         row.ok = False
         row.findings.append(
-            f"the reviewer leg requires the credential {judge.get('secret_ref')!r}; "
+            "the reviewer leg requires a provider credential; "
             "an unmetered local reviewer needs none"
         )
     if judge.get("endpoint_private") and judge.get("classification") != "bindable":
@@ -680,7 +701,9 @@ def _classify_backend(
             "endpoint": endpoint,
             "model_name": ref.model_name,
             "provider": ref.provider,
-            "secret_ref": ref.api_key_ref,
+            # Whether a credential is needed, never its reference: the record is
+            # an uploaded artifact and carries no credential material at all.
+            "requires_credential": bool(ref.api_key_ref),
             "endpoint_private": endpoint_is_private(endpoint),
         }
     )
@@ -886,7 +909,7 @@ def collect() -> dict[str, Any]:  # pragma: no cover - exercised on the machine
             "backend_id": judge_backend_id,
             "endpoint": endpoint,
             "model_id": resolved.model_id,
-            "secret_ref": getattr(resolved, "secret_ref", None),
+            "requires_credential": bool(getattr(resolved, "secret_ref", None)),
             "provider": getattr(declarations.get(judge_backend_id), "provider", None),
             "endpoint_private": endpoint_is_private(endpoint),
         }
@@ -972,10 +995,17 @@ class _EgressRecorder:
 
             def do_CONNECT(self) -> None:
                 host, _, port = self.path.partition(":")
-                self._record("CONNECT", self.path, f"https://{host}:{port or 443}")
+                target = f"https://{host}:{port or 443}"
+                self._record("CONNECT", self.path, target)
+                address = _private_address(target)
+                if address is None:
+                    # Recorded, then refused: a customer-local probe never
+                    # spends a metered call, and the record already grades it.
+                    self.send_error(403, "c14 probe: non-private egress refused")
+                    return
                 try:
                     upstream = socket.create_connection(
-                        (host, int(port or 443)), timeout=30
+                        (address, int(port or 443)), timeout=30
                     )
                 except OSError:
                     self.send_error(502)
@@ -989,6 +1019,10 @@ class _EgressRecorder:
 
                 self._record(self.command, self.path, self.path)
                 parts = urlsplit(self.path)
+                address = _private_address(self.path)
+                if address is None:
+                    self.send_error(403, "c14 probe: non-private egress refused")
+                    return
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length) if length else None
                 headers = {
@@ -999,8 +1033,9 @@ class _EgressRecorder:
                 path = parts.path + (f"?{parts.query}" if parts.query else "")
                 try:
                     conn = http.client.HTTPConnection(
-                        parts.hostname or "", parts.port or 80, timeout=600
+                        address, parts.port or 80, timeout=600
                     )
+                    headers["Host"] = parts.netloc
                     conn.request(self.command, path or "/", body=body, headers=headers)
                     response = conn.getresponse()
                     payload = response.read()

@@ -273,12 +273,12 @@ def test_the_shipped_metered_reviewer_default_is_red() -> None:
         "endpoint_private": False,
         "model_id": "gemini-2.5-flash",
         "provider": "gemini",
-        "secret_ref": "llm.gemini.api_key",
+        "requires_credential": True,
     }
     row = _row(_grade(payload), "row4_reviewer_leg_unmetered")
     assert not row.ok
     assert any("metered provider" in f for f in row.findings)
-    assert any("llm.gemini.api_key" in f for f in row.findings)
+    assert any("requires a provider credential" in f for f in row.findings)
 
 
 @pytest.mark.unit
@@ -421,3 +421,54 @@ def test_a_customer_command_sees_only_the_allowlisted_environment() -> None:
         }
     )
     assert set(env) == {"HOME", "PATH", "BIFROST_OVERLAY_PATH"}
+
+
+@pytest.mark.unit
+def test_the_egress_recorder_sees_private_calls_and_refuses_metered_ones() -> None:
+    """The instrument itself: it records what it forwards and what it refuses.
+
+    A private destination is forwarded and recorded; a public one is recorded
+    and refused, so a customer-local probe can never spend a metered call and
+    still grades the attempt RED. Loopback only -- no external network.
+    """
+    import http.client
+    import http.server
+    import threading
+
+    class Upstream(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_: object) -> None:
+            return
+
+        def do_GET(self) -> None:
+            body = b'{"data":[{"id":"m"}]}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    target = f"http://127.0.0.1:{upstream.server_address[1]}/v1/models"
+    try:
+        with probe._EgressRecorder() as recorder:
+            host, port = recorder.url.removeprefix("http://").split(":")
+            conn = http.client.HTTPConnection(host, int(port), timeout=10)
+            conn.request("GET", target)
+            forwarded = conn.getresponse()
+            assert forwarded.status == 200
+            assert b'"id":"m"' in forwarded.read()
+            conn.close()
+
+            conn = http.client.HTTPConnection(host, int(port), timeout=10)
+            conn.request("CONNECT", "8.8.8.8:443")
+            refused = conn.getresponse()
+            assert refused.status == 403
+            conn.close()
+            entries = list(recorder.entries)
+    finally:
+        upstream.shutdown()
+        upstream.server_close()
+    assert entries == [
+        {"method": "GET", "target": target, "private": True},
+        {"method": "CONNECT", "target": "8.8.8.8:443", "private": False},
+    ]

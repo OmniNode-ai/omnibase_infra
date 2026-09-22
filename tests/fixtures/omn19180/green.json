@@ -9,7 +9,7 @@
         "endpoint_private": false,
         "model_name": "gemini-2.5-flash-lite",
         "provider": "gemini",
-        "secret_ref": "llm.gemini.api_key"
+        "requires_credential": true
       },
       "cloud-gemini-pro": {
         "classification": "bindable",
@@ -18,7 +18,7 @@
         "endpoint_private": false,
         "model_name": "gemini-2.5-flash",
         "provider": "gemini",
-        "secret_ref": "llm.gemini.api_key"
+        "requires_credential": true
       },
       "cloud-glm": {
         "classification": "bindable",
@@ -27,7 +27,7 @@
         "endpoint_private": false,
         "model_name": "glm-5.3-flash",
         "provider": "glm",
-        "secret_ref": "llm.glm.api_key"
+        "requires_credential": true
       },
       "local-coder": {
         "classification": "bindable",
@@ -36,7 +36,7 @@
         "endpoint_private": true,
         "model_name": "Qwen3.8-27B",
         "provider": "local",
-        "secret_ref": null,
+        "requires_credential": false,
         "served_models": [
           "Qwen3.8-27B"
         ]
@@ -48,7 +48,7 @@
         "endpoint_private": true,
         "model_name": "Qwen3.8-27B",
         "provider": "local",
-        "secret_ref": null,
+        "requires_credential": false,
         "served_models": [
           "Qwen3.8-27B"
         ]
@@ -60,7 +60,7 @@
         "endpoint_private": false,
         "model_name": "nvidia/nemotron-3-ultra-550b-a55b:free",
         "provider": "openrouter",
-        "secret_ref": "llm.openrouter.api_key"
+        "requires_credential": true
       }
     },
     "bindings": {
@@ -99,7 +99,7 @@
       "endpoint_private": true,
       "model_id": "Qwen3.8-27B",
       "provider": "openai_compatible",
-      "secret_ref": null,
+      "requires_credential": false,
       "served_models": [
         "Qwen3.8-27B"
       ]
