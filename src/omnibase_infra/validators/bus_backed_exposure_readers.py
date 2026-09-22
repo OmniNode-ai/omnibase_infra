@@ -137,6 +137,9 @@ _MISSING = object()
 
 _BACKEND_READER_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 _BACKEND_READER_KIND = "projection_status_page"
+_STATUS_PAGE_READER_ID = "onex_status_page"
+_STATUS_PAGE_ROUTE = "/"
+_STATUS_PAGE_SLOT = "promotion_gate"
 
 # A shipped layout entry names the component it places. The templates are hand-written
 # TypeScript object literals with a uniform `componentName: '<name>'` field
@@ -360,13 +363,23 @@ def _parse_backend_readers(
                 f"{prefix}.kind must be the known kind {_BACKEND_READER_KIND!r}"
             )
             continue
-        if not isinstance(route, str) or not route.startswith("/"):
-            errors.append(f"{prefix}.route must be an absolute path")
+        if reader_id != _STATUS_PAGE_READER_ID:
+            errors.append(
+                f"{prefix}.id must be the known status-page reader "
+                f"{_STATUS_PAGE_READER_ID!r}"
+            )
             continue
-        if not isinstance(projection_slot, str) or not _BACKEND_READER_ID.fullmatch(
-            projection_slot
-        ):
-            errors.append(f"{prefix}.projection_slot must be lower_snake")
+        if route != _STATUS_PAGE_ROUTE:
+            errors.append(
+                f"{prefix}.route must be the known status-page route "
+                f"{_STATUS_PAGE_ROUTE!r}"
+            )
+            continue
+        if projection_slot != _STATUS_PAGE_SLOT:
+            errors.append(
+                f"{prefix}.projection_slot must be the known status-page slot "
+                f"{_STATUS_PAGE_SLOT!r}"
+            )
             continue
         readers.append(
             BackendReader(

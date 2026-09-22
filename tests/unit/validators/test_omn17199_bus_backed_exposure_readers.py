@@ -242,9 +242,14 @@ def test_a_bus_backed_exposure_with_a_typed_backend_reader_passes(
         pytest.param([{}], id="missing-required-fields"),
         pytest.param([_backend_reader(kind="unknown_reader")], id="unknown-kind"),
         pytest.param([_backend_reader(route="morning")], id="relative-route"),
+        pytest.param([_backend_reader(route="/history")], id="unknown-absolute-route"),
         pytest.param(
             [_backend_reader(projection_slot="promotion-gate")], id="invalid-slot"
         ),
+        pytest.param(
+            [_backend_reader(projection_slot="other_panel")], id="unknown-slot"
+        ),
+        pytest.param([_backend_reader(id="other_status_page")], id="unknown-reader-id"),
         pytest.param(
             [_backend_reader(), _backend_reader(projection_slot="secondary_gate")],
             id="duplicate-id",
