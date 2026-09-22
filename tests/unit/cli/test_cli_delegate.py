@@ -1361,7 +1361,9 @@ class TestResolveDefaultBus:
         # broker — the shipped tier-0 default runtime config answers.
         _probe_must_not_run(monkeypatch)
 
-        bus, reason = resolve_default_bus()
+        resolved = resolve_default_bus()
+
+        bus, reason = resolved.bus, resolved.reason
 
         assert bus == "inmemory"
         assert "config.event_bus.type=inmemory" in reason
@@ -1374,7 +1376,9 @@ class TestResolveDefaultBus:
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(contracts_dir))
         _probe_must_not_run(monkeypatch)
 
-        bus, reason = resolve_default_bus()
+        resolved = resolve_default_bus()
+
+        bus, reason = resolved.bus, resolved.reason
 
         assert bus == "kafka"
         assert "config.event_bus.type=kafka" in reason
@@ -1394,7 +1398,9 @@ class TestResolveDefaultBus:
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(contracts_dir))
         _probe_must_not_run(monkeypatch)
 
-        bus, reason = resolve_default_bus()
+        resolved = resolve_default_bus()
+
+        bus, reason = resolved.bus, resolved.reason
 
         assert bus == "inmemory"
         assert "config.event_bus.type=inmemory" in reason
@@ -1433,7 +1439,9 @@ class TestResolveDefaultBus:
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(empty_dir))
         _probe_must_not_run(monkeypatch)
 
-        bus, reason = resolve_default_bus()
+        resolved = resolve_default_bus()
+
+        bus, reason = resolved.bus, resolved.reason
 
         assert bus == "inmemory"
         assert "tier-0" in reason
@@ -1451,7 +1459,8 @@ class TestResolveDefaultBus:
         with caplog.at_level(
             logging.WARNING, logger="omnibase_infra.backends.auto_configure"
         ):
-            bus, reason = resolve_default_bus()
+            resolved = resolve_default_bus()
+            bus, reason = resolved.bus, resolved.reason
 
         assert bus == "inmemory"
         assert BUS_TYPE_OVERRIDE_ENV not in reason
@@ -1477,7 +1486,9 @@ class TestResolveDefaultBus:
         monkeypatch.setenv(BUS_TYPE_OVERRIDE_ENV, "inmemory")
         _probe_must_not_run(monkeypatch)
 
-        bus, _reason = resolve_default_bus()
+        resolved = resolve_default_bus()
+
+        bus, _reason = resolved.bus, resolved.reason
 
         assert bus == "kafka"
 
@@ -1491,7 +1502,9 @@ class TestResolveDefaultBus:
         # combination at the CLI boundary — this pins the resolver seam).
         _probe_must_not_run(monkeypatch)
 
-        bus, _reason = resolve_default_bus(kafka_bootstrap="broker.example:9092")
+        resolved = resolve_default_bus(kafka_bootstrap="broker.example:9092")
+
+        bus, _reason = resolved.bus, resolved.reason
 
         assert bus == "inmemory"
 

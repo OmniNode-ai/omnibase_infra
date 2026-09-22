@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# =============================================================================
+# ONEX Registry-Workspace Tier-1 Runtime Configuration (OMN-19193)
+# =============================================================================
+# The tier-1 (self-hosted) runtime configuration of the OmniNode registry
+# workspace. An EMBEDDED runtime on the workspace -- the `onex delegate` CLI's --
+# resolves this file through service_kernel.resolve_embedded_runtime_config()
+# when the workspace root is bound (--omni-home / $OMNIBASE_PATH, which the
+# sanctioned wrapper omnibase_infra/scripts/onex binds) and no ONEX_CONTRACTS_DIR
+# bootstrap pointer is set. It is the overlay the OMN-17304 ruling composes on
+# top of the shipped tier-0 default (tier0_runtime_config.yaml, in-memory bus).
+#
+# WHY IT EXISTS. OMN-17304 took ONEX_EVENT_BUS_TYPE out of transport resolution.
+# On this workspace that env var had been the whole of OMN-14376's fix, and
+# nothing replaced it, so every default delegation fell to tier-0 and its
+# evidence landed only in the local SQLite file, never in the shared
+# delegation_events projection. This file is the replacement, as configuration.
+#
+# WHAT IT DECLARES. The workspace's shared bus is the .201 dev lane, addressed
+# through the lane declaration (omnimarket/config/ci_bus_lanes.yaml) -- never
+# through KAFKA_BOOTSTRAP_SERVERS, which on the operator host names the
+# governed stability-test lane (OMN-16871). The dev lane is the mutable test
+# platform; stability-test and judge are proof lanes and are not a default.
+#
+# WHEN THE LANE IS DOWN. A default delegation is refused, loudly, by the
+# fail-closed locus gate naming the command topic -- it does not degrade to the
+# in-memory bus. `--bus inmemory` remains the explicit, self-announcing
+# override for an offline run.
+#
+# NO `name` field, for the same reason as tier-0 (OMN-17287): this supplies the
+# transport axis only, never a runtime identity.
+description: "Registry workspace tier-1 runtime configuration: dev-lane shared bus, local profile"
+event_bus:
+  type: "kafka"
+  # 'local': this is a workstation-hosted runtime, not a lane container.
+  profile: "local"
+  environment: "local"
+  lane: "dev"

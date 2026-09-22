@@ -502,3 +502,52 @@ def test_the_reconciler_default_and_the_wrapper_default_are_the_same_string() ->
         "reconcile-workspace-venvs.sh resolves the dispatch venv differently "
         "from the wrapper that execs it"
     )
+
+
+# --------------------------------------------------------------------------- #
+# OMN-19193: the wrapper binds the workspace root the CLI reads
+# --------------------------------------------------------------------------- #
+def _install_root_reporting_entrypoint(workspace: _Workspace) -> None:
+    """An entrypoint that records the workspace root the CLI would see."""
+    workspace.entrypoint.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "OMNIBASE_PATH=%s\\n" "${OMNIBASE_PATH-<unset>}" >> "$WITNESS"\n'
+        f"exit {_SENTINEL_OK}\n",
+        encoding="utf-8",
+    )
+    workspace.entrypoint.chmod(0o755)
+
+
+def test_the_workspace_root_is_bound_for_the_cli(workspace: _Workspace) -> None:
+    """``--omni-home`` binds ``$OMNIBASE_PATH``. Unbound, every wrapper run on
+    the registry machine read as off-registry and could not find the lane
+    declaration or the workspace's tier-1 runtime config."""
+    _install_root_reporting_entrypoint(workspace)
+
+    env_without = {k: v for k, v in os.environ.items() if k != "OMNIBASE_PATH"}
+    result = subprocess.run(
+        [str(workspace.wrapper), "delegate", "x"],
+        capture_output=True,
+        text=True,
+        env={
+            **env_without,
+            "WITNESS": str(workspace.witness),
+            "PATH": f"{workspace.shim_bin}:/usr/bin:/bin",
+            "OMNI_HOME": str(workspace.root),
+        },
+        check=False,
+    )
+
+    assert result.returncode == _SENTINEL_OK, result.stderr
+    assert workspace.witness_lines() == [f"OMNIBASE_PATH={workspace.root}"]
+
+
+def test_an_explicit_omnibase_path_is_not_overwritten(workspace: _Workspace) -> None:
+    _install_root_reporting_entrypoint(workspace)
+
+    result = workspace.run(
+        "delegate", "x", extra_env={"OMNIBASE_PATH": "/named/by/the/operator"}
+    )
+
+    assert result.returncode == _SENTINEL_OK, result.stderr
+    assert workspace.witness_lines() == ["OMNIBASE_PATH=/named/by/the/operator"]

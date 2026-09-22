@@ -231,6 +231,16 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 # profile), never a hardcoded code fallback.
 TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 
+# OMN-19193: the registry workspace's tier-1 (self-hosted) runtime contracts
+# directory, relative to the workspace root. Its runtime/runtime_config.yaml
+# is what an embedded runtime on the workspace resolves once no bootstrap
+# pointer is set -- the tier-1 overlay the OMN-17304 ruling composes on top of
+# tier-0. Relative to the root, like the lane declaration the CLI already reads
+# from the same root, so it is found by the workspace binding and never by cwd.
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = (
+    Path("omnibase_infra") / "config" / "workspace"
+)
+
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
 # Marketplace package skill-manifest root.
@@ -1167,6 +1177,8 @@ def _load_tier0_runtime_config(
 
 def resolve_embedded_runtime_config(
     correlation_id: UUID | None = None,
+    *,
+    workspace_root: Path | None = None,
 ) -> tuple[ModelRuntimeConfig, str]:
     """Resolve the per-runtime config for an EMBEDDED (CLI-hosted) runtime.
 
@@ -1179,9 +1191,15 @@ def resolve_embedded_runtime_config(
     1. ``ONEX_CONTRACTS_DIR`` (a BOOTSTRAP pointer — it names where config
        lives, never what the transport is) selects the contracts directory,
        and :func:`load_runtime_config` loads it exactly as the kernel would.
-    2. With no pointer, the SHIPPED tier-0 default runtime configuration
-       answers (:func:`_load_tier0_runtime_config`) — in-memory bus, local
-       profile.
+    2. With no pointer, a bound WORKSPACE root answers with its tier-1
+       (self-hosted) runtime config, when it declares one:
+       ``<workspace_root>/omnibase_infra/config/workspace/runtime/runtime_config.yaml``
+       (OMN-19193). This is the tier-1 overlay the OMN-17304 ruling composes
+       on top of tier-0. It is a checked-in file found through the workspace
+       root the caller already binds for the lane declaration, so it is
+       configuration, not an env tier, and it is never found through cwd.
+    3. Otherwise the SHIPPED tier-0 default runtime configuration answers
+       (:func:`_load_tier0_runtime_config`) — in-memory bus, local profile.
 
     The kernel's cwd-relative ``./contracts`` fallback is DELIBERATELY not a
     tier here: a deployed kernel is launched with a controlled working
@@ -1210,13 +1228,24 @@ def resolve_embedded_runtime_config(
             f"shipped tier-0 default runtime config "
             f"({ENV_CONTRACTS_DIR}={pointer} has no {DEFAULT_RUNTIME_CONFIG})"
         )
+    if workspace_root is not None:
+        workspace_contracts = workspace_root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+        workspace_config = workspace_contracts / DEFAULT_RUNTIME_CONFIG
+        if workspace_config.is_file():
+            config = load_runtime_config(
+                workspace_contracts, correlation_id=correlation_id
+            )
+            return config, f"workspace tier-1 runtime config at {workspace_config}"
+        absent = f"; workspace root {workspace_root} declares no {workspace_config}"
+    else:
+        absent = ""
     config = _load_tier0_runtime_config(
         correlation_id=correlation_id or generate_correlation_id(),
         consumer_group_override=None,
     )
     return config, (
         f"shipped tier-0 default runtime config (no {ENV_CONTRACTS_DIR} "
-        f"bootstrap pointer set)"
+        f"bootstrap pointer set{absent})"
     )
 
 
