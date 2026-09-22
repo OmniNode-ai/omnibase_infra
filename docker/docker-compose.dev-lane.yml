@@ -316,6 +316,45 @@ x-dev-lane-broker-auth-env: &dev_lane_broker_auth_env
 # is the same placement stability-test uses.
 x-dev-lane-consumer-poll-env: &dev_lane_consumer_poll_env
   KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
+# ---------------------------------------------------------------------------
+# OMN-19144: this lane tells its runtime which lane it is.
+# ---------------------------------------------------------------------------
+# A runtime's health verdict is only usable per-lane if the runtime can name
+# its own lane, and it cannot: the compose project name, the k3s namespace and
+# the overlay are all facts about the DEPLOYMENT and none of them is visible
+# from inside the container. So the deployment states it here and the runtime
+# reads it back (src/omnibase_infra/runtime/health/runtime_lane_identity.py),
+# stamping it onto every runtime-health-check event it emits.
+#
+# OMN-18769 shipped the event field, the resolver and the lane-keyed consumer
+# and shipped NO deployment that sets this variable, on any lane. The result
+# was a silent total loss rather than an error: every health event carried
+# lane=null, the lab lane-health projection dropped each one because a fact
+# whose lane cannot be named cannot be keyed, and the offsets committed anyway
+# -- so consumer lag read 0, every watermark advanced, and the projection's
+# health columns sat NULL for the life of the deployment beside a census fact
+# and a receipt fact that were landing normally.
+#
+# The value is the RECEIPT emitter's spelling of this lane. The lane census
+# calls it `dev`; the projection's join key is `compose-dev`, and an
+# unrecognised value is refused by the resolver and returned as None, which is
+# indistinguishable at the consumer from setting nothing at all.
+#
+# MERGED INTO ONE SERVICE, DELIBERATELY. `omninode-runtime` and
+# `runtime-effects` both run the health monitor and both emit on the health
+# topic. The projection stores ONE row per lane and its health arm is an
+# observed_at-guarded upsert, not a fold across processes, so a second service
+# claiming this lane would not add a fact -- it would overwrite the first
+# whenever it happened to emit later, making the lane's recorded health a race
+# between two processes. `omninode-runtime` speaks for the lane because it is
+# the lane's health surface: port 8085 is what a lane health probe reads.
+# `runtime-effects` keeps no lane and its health events stay unkeyable, which
+# is the honest answer for a process that cannot speak for the lane. A
+# worst-of fold across a lane's runtimes is a different design and belongs to
+# OMN-18769, not to this repair. `tests/unit/scripts/
+# test_omn19144_dev_lane_runtime_lane_identity.py` holds all of this.
+x-dev-lane-identity-env: &dev_lane_identity_env
+  ONEX_RUNTIME_LANE: "compose-dev"
 services:
   # ===========================================================================
   # (6a) BROKER READINESS THAT READS A PARTITION -- OMN-18789
@@ -720,7 +759,7 @@ services:
   #   docker/docker-compose.stability-test.yml (OMN-15217).
   omninode-runtime:
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_identity_env]
     healthcheck:
       test:
         - CMD
