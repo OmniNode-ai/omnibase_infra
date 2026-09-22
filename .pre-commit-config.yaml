@@ -359,7 +359,7 @@ repos:
       # OMN-19181: the C16 receipt-identity producer grades R-DELEG-11/12/26
       # over observations captured from the .201 dev lane. Pins that the
       # healthy capture can PASS, that SKIP fails the verdict (the SKIP/SKIP/
-      # PASS falsifier), that a receipt naming a route the ledger does not show
+      # PASS falsifier), that a receipt naming a route the orchestrator did not record
       # fails, and that a dead run with an untyped cause or no terminal fails.
       - id: c16-receipt-identity-grading
         name: C16 receipt-identity grader (OMN-19181)

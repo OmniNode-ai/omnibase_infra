@@ -5,7 +5,7 @@
 
 Every test here runs against RECORDED observations under
 ``tests/fixtures/omn19181/`` -- captured read-only from the .201 dev lane's
-gateway and event-ledger rows, provenance in each file -- and performs no
+gateway and orchestrator-projection rows, provenance in each file -- and performs no
 network or database I/O, so the verdict is falsifiable on a laptop and in CI
 rather than only on the lab.
 
@@ -18,7 +18,6 @@ changes, so a red here always points at one clause.
 
 from __future__ import annotations
 
-import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -96,7 +95,7 @@ def test_skip_skip_pass_is_red_and_never_a_pass() -> None:
         ("receipt", "terminal_model_used", "claude-opus-4-6"),
     ],
 )
-def test_a_receipt_naming_a_route_the_ledger_does_not_show_fails(
+def test_a_receipt_naming_a_route_the_orchestrator_did_not_record_fails(
     side: str, key: str, value: str
 ) -> None:
     payload = _load()
@@ -110,33 +109,45 @@ def test_a_receipt_naming_a_route_the_ledger_does_not_show_fails(
 @pytest.mark.unit
 def test_two_blank_routes_are_not_an_identity() -> None:
     payload = _load()
+    state = payload["observations"]["healthy_state"]["payload"]
     payload["observations"]["healthy"]["receipt"]["route"] = None
-    for decision in payload["observations"]["healthy_ledger"]["routing_decisions"]:
-        decision["payload"]["route"] = None
+    state["routing_decision"]["route"] = None
+    state["inference_route"] = None
     assert _outcomes(payload)["R-DELEG-12"] == "FAIL"
 
 
 @pytest.mark.unit
-def test_the_last_routing_decision_is_the_route_taken() -> None:
-    """A re-route answers from its final decision, never its first."""
+@pytest.mark.parametrize(
+    "field_path",
+    [
+        ("routing_decision", "route"),
+        ("inference_route",),
+        ("routing_decision", "provider"),
+        ("inference_model_used",),
+    ],
+)
+def test_each_independent_observation_is_compared_not_just_one(
+    field_path: tuple[str, ...],
+) -> None:
+    """A re-route whose answering attempt disagrees with the receipt is caught."""
     payload = _load()
-    decisions = payload["observations"]["healthy_ledger"]["routing_decisions"]
-    first = copy.deepcopy(decisions[0])
-    first["payload"]["route"] = "cloud-gemini-pro"
-    decisions.insert(0, first)
-    assert _outcomes(payload)["R-DELEG-12"] == "PASS"
-    decisions.append(first)
+    target = payload["observations"]["healthy_state"]["payload"]
+    for part in field_path[:-1]:
+        target = target[part]
+    target[field_path[-1]] = "cloud-gemini-pro"
     assert _outcomes(payload)["R-DELEG-12"] == "FAIL"
 
 
 @pytest.mark.unit
-def test_an_uncorroborated_route_fails_and_an_unreadable_ledger_skips() -> None:
+def test_an_unterminated_projection_fails_and_an_unreadable_one_skips() -> None:
     payload = _load()
-    payload["observations"]["healthy_ledger"]["terminal"] = None
+    payload["observations"]["healthy_state"].update(
+        state="INFERENCE_PENDING", payload=None
+    )
     assert _outcomes(payload)["R-DELEG-12"] == "FAIL"
     payload = _load()
-    payload["observations"]["healthy_ledger"]["error"] = (
-        "connect failed: OperationalError"
+    payload["observations"]["healthy_state"]["error"] = (
+        "read failed: InsufficientPrivilege"
     )
     assert _outcomes(payload)["R-DELEG-12"] == "SKIP"
 
@@ -251,7 +262,7 @@ def test_a_missing_secret_is_an_input_failure_and_still_writes_a_record(
             "http://127.0.0.1:9",
             "--credential-env",
             "OMN19181_TEST_UNSET",
-            "--ledger-dsn-env",
+            "--projection-dsn-env",
             "OMN19181_TEST_UNSET",
             "--runner-identity",
             "test",

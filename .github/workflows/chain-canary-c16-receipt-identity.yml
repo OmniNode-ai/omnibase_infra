@@ -42,7 +42,7 @@
 #   already repository secrets HERE, and chain-canary.yml already injects both
 #   the same way. No credential is created, rotated, re-issued or revoked. Both
 #   are injected as ENVIRONMENT under their literal names and the probe is
-#   given the NAMES, never the values. The probe refuses a ledger role that is
+#   given the NAMES, never the values. The probe refuses a projection role that is
 #   SUPERUSER or BYPASSRLS, asked of the server (the OMN-18060 refusal).
 #
 # ABSENT CREDENTIAL IS EXIT 2, NOT A VERDICT
@@ -109,7 +109,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
-      # The ledger read needs a Postgres driver; the replay half does not.
+      # The projection read needs a Postgres driver; the replay half does not.
       - name: Install dependencies
         run: uv sync --frozen
 
@@ -132,7 +132,7 @@ jobs:
           uv run --frozen python scripts/ci/c16_receipt_identity_probe.py \
             --base-url "${GATEWAY_URL}" \
             --credential-env CHAIN_CANARY_GATEWAY_API_KEY \
-            --ledger-dsn-env CHAIN_CANARY_PROJECTION_DSN \
+            --projection-dsn-env CHAIN_CANARY_PROJECTION_DSN \
             --budget-seconds "${BUDGET_SECONDS}" \
             --runner-identity "${RUNNER_IDENTITY}" \
             --record c16-receipt-identity.json \

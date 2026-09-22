@@ -71,7 +71,7 @@ evidence_artifacts:
     required_paths:
       - c16-receipt-identity.json
     rationale: >-
-      One row per probe (R-DELEG-11, R-DELEG-12, R-DELEG-26) with its outcome, its reasons and the compared keys: the route, provider and model the receipt names beside the route the event ledger shows was taken, the completed run's rule count, and the dead run's typed failure class and code. SKIP rows are recorded as SKIP and fail the verdict, so an empty record is exactly the state that must not read green.
+      One row per probe (R-DELEG-11, R-DELEG-12, R-DELEG-26) with its outcome, its reasons and the compared keys: the route, provider and model the receipt names beside the route the delegation orchestrator's own projection recorded, the completed run's rule count, and the dead run's typed failure class and code. SKIP rows are recorded as SKIP and fail the verdict, so an empty record is exactly the state that must not read green.
   # --- chain-canary-c11-negative-paths.yml: the C11 verdict (OMN-19175) ----
   #
   # The probe's EXIT CODE is the criterion's verdict, so this record is not how

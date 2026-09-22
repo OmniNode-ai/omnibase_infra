@@ -14,7 +14,7 @@ WHAT THIS IS
     ``0``  all three probes graded PASS
     ``1``  at least one probe graded FAIL or SKIP; the record names which and why
     ``2``  the probe could not run at all (unresolvable credential or DSN, a
-           ledger role that bypasses row-level security, an unreadable replay
+           projection role that bypasses row-level security, an unreadable replay
            file). Distinct from ``1`` on purpose: "I could not run" is not "the
            platform is wrong", and collapsing them is how a configuration
            failure gets reported as a product failure.
@@ -37,12 +37,14 @@ WHAT C16 SAYS, AND WHICH PROBE ANSWERS EACH CLAUSE
     R-DELEG-12  receipt identity equals route. The HEALTHY run's receipt
                 (``GET /v1/workflows/{id}/receipt``) names ``route``,
                 ``provider`` and ``terminal_model_used``; the route the chain
-                actually TOOK is read independently, from the event ledger's
-                last ``routing-decision`` hop and its terminal hop for the same
-                correlation id. Every key must be present and non-empty on both
-                sides and equal. The comparison is across two surfaces on
-                purpose: the status and receipt routes read one database row,
-                so comparing them to each other would be a tautology.
+                actually TOOK is read independently, from the delegation
+                orchestrator's own FSM projection (``delegation_workflow_state``)
+                for the same correlation id: its ``routing_decision`` and the
+                ``inference_*`` fields of the attempt that answered. Every key
+                must be present and non-empty on both sides and equal. The
+                comparison is across two surfaces on purpose: the status and
+                receipt routes read one gateway row, so comparing them to each
+                other would be a tautology.
     R-DELEG-11  SKIP never PASS; a failed run never reports success. The
                 HEALTHY run, if completed, must carry a NON-EMPTY list of
                 quality-rule evaluations, every one of which states a boolean
@@ -72,7 +74,7 @@ WHY A REPLAY MODE EXISTS
     route the chain did not take; a dead run whose cause is untyped).
 
 NO CREDENTIAL REACHES ARGV, A LOG OR THE RECORD
-    The API key and the ledger DSN are read from the environment by NAME.
+    The API key and the projection DSN are read from the environment by NAME.
     ``/proc`` is world-readable, so a value on a command line is readable by
     every process on the host; the record is an uploaded artifact, so a value
     in it would be a real exposure. The record also carries no tenant id, no
@@ -124,10 +126,10 @@ SKIP: Final[str] = "SKIP"
 
 TERMINAL_STATUSES: Final[frozenset[str]] = frozenset({"completed", "failed"})
 
-ROUTING_DECISION_TOPIC: Final[str] = "onex.evt.omnibase-infra.routing-decision.v1"
-LEDGER_TERMINAL_TOPICS: Final[frozenset[str]] = frozenset(
-    {"onex.evt.omnimarket.delegate-skill-completed.v1"}
-)
+# The orchestrator FSM's terminal states, as delegation_workflow_state writes
+# them. The projection is polled until it reaches one, because the gateway row
+# can close out a beat before the projection writer does.
+STATE_TERMINAL: Final[frozenset[str]] = frozenset({"COMPLETED", "FAILED"})
 
 # The gateway's typed failure grammar, read from the one construction site that
 # builds it (onex-api workflow_failure_attribution._ATTRIBUTION_GRAMMAR): a
@@ -164,18 +166,18 @@ class RunObservation:
 
 
 @dataclass(frozen=True)
-class LedgerObservation:
-    """The same run's hops, read from the event ledger by correlation id."""
+class StateObservation:
+    """The same run as the delegation orchestrator's FSM projection records it."""
 
-    routing_decisions: tuple[Mapping[str, Any], ...] = ()
-    terminal: Mapping[str, Any] | None = None
+    state: str | None = None
+    payload: Mapping[str, Any] | None = None
     error: str | None = None
 
 
 @dataclass(frozen=True)
 class Observations:
     healthy: RunObservation
-    healthy_ledger: LedgerObservation
+    healthy_state: StateObservation
     dying: RunObservation
 
 
@@ -213,7 +215,7 @@ def _payload_of(envelope: Mapping[str, Any]) -> Mapping[str, Any]:
     return payload if isinstance(payload, Mapping) else {}
 
 
-def grade_identity(healthy: RunObservation, ledger: LedgerObservation) -> ProbeResult:
+def grade_identity(healthy: RunObservation, state: StateObservation) -> ProbeResult:
     """R-DELEG-12: the receipt names the route the chain actually took."""
     result = ProbeResult("R-DELEG-12", FAIL)
     receipt_status = _status_of(healthy.receipt)
@@ -226,44 +228,47 @@ def grade_identity(healthy: RunObservation, ledger: LedgerObservation) -> ProbeR
             "is no route on the receipt side to compare. SKIP is not PASS"
         )
         return result
-    if ledger.error is not None:
+    if state.error is not None:
         result.outcome = SKIP
         result.reasons.append(
-            f"the event ledger could not be read ({ledger.error}), so the route "
-            "the chain took has no independent observation. SKIP is not PASS"
+            f"the orchestrator projection could not be read ({state.error}), so "
+            "the route the chain took has no independent observation. SKIP is "
+            "not PASS"
         )
         return result
-    if not ledger.routing_decisions or ledger.terminal is None:
+    result.evidence["projection.state"] = state.state
+    if state.payload is None or state.state != "COMPLETED":
         result.reasons.append(
-            "the event ledger carries "
-            f"{len(ledger.routing_decisions)} routing-decision hop(s) and "
-            f"{'a' if ledger.terminal is not None else 'no'} terminal hop for "
-            "this correlation id; a completed receipt whose route the ledger "
-            "cannot corroborate names a route nobody can show was taken"
+            f"the orchestrator projection reads state={state.state!r} for a run "
+            "the receipt calls completed; a route nobody can show was taken is "
+            "not corroborated"
         )
         return result
 
-    decision = _payload_of(ledger.routing_decisions[-1])
-    terminal = _payload_of(ledger.terminal)
+    decision = state.payload.get("routing_decision")
+    decision = decision if isinstance(decision, Mapping) else {}
     receipt = healthy.receipt
     # Each key: the receipt's value, then every independent observation of it.
     comparisons: dict[str, tuple[Any, tuple[tuple[str, Any], ...]]] = {
         "route": (
             receipt.get("route"),
-            (("routing_decision.route", decision.get("route")),),
+            (
+                ("routing_decision.route", decision.get("route")),
+                ("inference_route", state.payload.get("inference_route")),
+            ),
         ),
         "provider": (
             receipt.get("provider"),
             (
                 ("routing_decision.provider", decision.get("provider")),
-                ("terminal.provider", terminal.get("provider")),
+                ("inference_provider", state.payload.get("inference_provider")),
             ),
         ),
         "model": (
             receipt.get("terminal_model_used"),
             (
                 ("routing_decision.selected_model", decision.get("selected_model")),
-                ("terminal.model_name", terminal.get("model_name")),
+                ("inference_model_used", state.payload.get("inference_model_used")),
             ),
         ),
     }
@@ -277,15 +282,16 @@ def grade_identity(healthy: RunObservation, ledger: LedgerObservation) -> ProbeR
             )
             continue
         for label, value in observed:
-            result.evidence[label] = value
+            result.evidence[f"projection.{label}"] = value
             if _text(value) is None:
                 result.reasons.append(
-                    f"{label} is {value!r}, so the receipt's {key}={claimed!r} "
-                    "has nothing to be compared against"
+                    f"projection {label} is {value!r}, so the receipt's "
+                    f"{key}={claimed!r} has nothing to be compared against"
                 )
             elif value != claimed:
                 result.reasons.append(
-                    f"the receipt names {key}={claimed!r} but {label}={value!r}"
+                    f"the receipt names {key}={claimed!r} but projection "
+                    f"{label}={value!r}"
                 )
     if not result.reasons:
         result.outcome = PASS
@@ -435,7 +441,7 @@ class Record:
     def detail(self) -> str:
         if not self.failures:
             return (
-                "the receipt named the route the ledger shows was taken, the "
+                "the receipt named the route the orchestrator recorded, the "
                 "completed run's every quality rule reached a boolean verdict, "
                 "and the dead run ended 'failed' with a typed cause"
             )
@@ -445,7 +451,7 @@ class Record:
 def grade(observations: Observations) -> Record:
     results = [
         grade_skip_never_pass(observations.healthy, observations.dying),
-        grade_identity(observations.healthy, observations.healthy_ledger),
+        grade_identity(observations.healthy, observations.healthy_state),
         grade_typed_death(observations.dying),
     ]
     graded = tuple(r.probe for r in results)
@@ -590,26 +596,27 @@ def _observe_run(
     )
 
 
-def _read_ledger(
+def _read_state(
     dsn: str,
     correlation_id: str,
     *,
     wait_seconds: float,
     poll_seconds: float,
-) -> LedgerObservation:
-    """Read the run's routing and terminal hops from the event ledger.
+) -> StateObservation:
+    """Read the run's row from the orchestrator's FSM projection.
 
-    Refuses a role carrying SUPERUSER or BYPASSRLS, asked of the server rather
-    than inferred from the DSN: such a role reads past row-level security, so a
-    green read through it cannot tell a readable ledger from one readable only
-    by an identity nothing else has (the chain canary's OMN-18060 refusal).
+    The same DSN, and the same table, chain-canary.yml's projection readback
+    (link 2) reads. Refuses a role carrying SUPERUSER or BYPASSRLS, asked of the
+    server rather than inferred from the DSN: such a role reads past row-level
+    security, so a green read through it cannot tell a readable projection from
+    one readable only by an identity nothing else has (the OMN-18060 refusal).
     """
     import psycopg2  # imported here so --replay needs no database driver
 
     try:
         connection = psycopg2.connect(dsn, connect_timeout=10)
     except psycopg2.Error as exc:
-        return LedgerObservation(error=f"connect failed: {type(exc).__name__}")
+        return StateObservation(error=f"connect failed: {type(exc).__name__}")
     try:
         connection.set_session(readonly=True, autocommit=True)
         with connection.cursor() as cursor:
@@ -620,34 +627,29 @@ def _read_ledger(
             role = cursor.fetchone()
             if role is None or role[0] or role[1]:
                 raise ProbeInputError(
-                    "the ledger DSN authenticates as a role that is SUPERUSER, "
-                    "BYPASSRLS, or has no pg_roles row; refusing to read through it"
+                    "the projection DSN authenticates as a role that is "
+                    "SUPERUSER, BYPASSRLS, or has no pg_roles row; refusing to "
+                    "read through it"
                 )
         deadline = time.monotonic() + wait_seconds
         while True:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT topic, convert_from(event_value, 'UTF8') "
-                    "FROM public.event_ledger WHERE correlation_id = %s::uuid "
-                    "ORDER BY ledger_written_at, kafka_offset",
+                    "SELECT state, payload FROM delegation_workflow_state "
+                    "WHERE correlation_id = %s",
                     (correlation_id,),
                 )
-                rows = cursor.fetchall()
-            decisions: list[Mapping[str, Any]] = []
-            terminal: Mapping[str, Any] | None = None
-            for topic, raw in rows:
-                envelope = _maybe_json(raw)
-                if not isinstance(envelope, dict):
-                    continue
-                if topic == ROUTING_DECISION_TOPIC:
-                    decisions.append(envelope)
-                elif topic in LEDGER_TERMINAL_TOPICS:
-                    terminal = envelope
-            if terminal is not None or time.monotonic() >= deadline:
-                return LedgerObservation(tuple(decisions), terminal)
+                row = cursor.fetchone()
+            if row is not None and str(row[0]) in STATE_TERMINAL:
+                payload = row[1] if isinstance(row[1], dict) else _maybe_json(row[1])
+                return StateObservation(
+                    str(row[0]), payload if isinstance(payload, dict) else None
+                )
+            if time.monotonic() >= deadline:
+                return StateObservation(state=str(row[0]) if row is not None else None)
             time.sleep(poll_seconds)
     except psycopg2.Error as exc:
-        return LedgerObservation(error=f"read failed: {type(exc).__name__}")
+        return StateObservation(error=f"read failed: {type(exc).__name__}")
     finally:
         connection.close()
 
@@ -656,7 +658,7 @@ def observe_live(
     *,
     base_url: str,
     api_key: str,
-    ledger_dsn: str,
+    projection_dsn: str,
     budget_seconds: float,
     runner_identity: str,
     timeout: float = 20.0,
@@ -675,17 +677,17 @@ def observe_live(
     }
     healthy_run = _observe_run(base_url, healthy, **kwargs)
     dying_run = _observe_run(base_url, dying, **kwargs)
-    ledger = (
-        _read_ledger(
-            ledger_dsn,
+    state = (
+        _read_state(
+            projection_dsn,
             healthy.correlation_id,
             wait_seconds=60.0,
             poll_seconds=poll_seconds,
         )
         if _status_of(healthy_run.receipt) == "completed"
-        else LedgerObservation(error="not read: the healthy run did not complete")
+        else StateObservation(error="not read: the healthy run did not complete")
     )
-    return Observations(healthy_run, ledger, dying_run)
+    return Observations(healthy_run, state, dying_run)
 
 
 # ---------------------------------------------------------------------------
@@ -713,21 +715,18 @@ def observations_from_replay(payload: Mapping[str, Any]) -> Observations:
     raw = payload.get("observations")
     if not isinstance(raw, dict):
         raise ProbeInputError("replay payload has no 'observations' mapping")
-    for name in ("healthy", "healthy_ledger", "dying"):
+    for name in ("healthy", "healthy_state", "dying"):
         if name not in raw:
             raise ProbeInputError(f"replay payload has no {name!r} observation")
-    ledger = raw["healthy_ledger"]
-    if not isinstance(ledger, dict):
-        raise ProbeInputError("replay observation 'healthy_ledger' is not an object")
-    decisions = ledger.get("routing_decisions") or []
-    if not isinstance(decisions, list) or not all(
-        isinstance(d, dict) for d in decisions
-    ):
-        raise ProbeInputError("replay 'routing_decisions' is not a list of objects")
+    state = raw["healthy_state"]
+    if not isinstance(state, dict):
+        raise ProbeInputError("replay observation 'healthy_state' is not an object")
+    if state.get("payload") is not None and not isinstance(state.get("payload"), dict):
+        raise ProbeInputError("replay 'healthy_state.payload' is not an object")
     return Observations(
         healthy=_run_from(raw["healthy"], "healthy"),
-        healthy_ledger=LedgerObservation(
-            tuple(decisions), ledger.get("terminal"), ledger.get("error")
+        healthy_state=StateObservation(
+            state.get("state"), state.get("payload"), state.get("error")
         ),
         dying=_run_from(raw["dying"], "dying"),
     )
@@ -777,9 +776,9 @@ def main(argv: list[str] | None = None) -> int:
         help="NAME of the environment variable holding the API key. Never a value.",
     )
     parser.add_argument(
-        "--ledger-dsn-env",
+        "--projection-dsn-env",
         default="",
-        help="NAME of the environment variable holding the event-ledger DSN. Never a value.",
+        help="NAME of the environment variable holding the projection DSN. Never a value.",
     )
     parser.add_argument("--budget-seconds", type=float, default=240.0)
     parser.add_argument(
@@ -810,15 +809,19 @@ def main(argv: list[str] | None = None) -> int:
                     "--runner-identity is required and must be non-empty"
                 )
             api_key = resolve_env(args.credential_env, os.environ, "API key")
-            ledger_dsn = resolve_env(args.ledger_dsn_env, os.environ, "ledger DSN")
+            projection_dsn = resolve_env(
+                args.projection_dsn_env, os.environ, "projection DSN"
+            )
             print(f"base url:        {base_url}")
             print(f"credential var:  {args.credential_env}  (a NAME; never printed)")
-            print(f"ledger dsn var:  {args.ledger_dsn_env}  (a NAME; never printed)")
+            print(
+                f"projection dsn:  {args.projection_dsn_env}  (a NAME; never printed)"
+            )
             print(f"dying task type: {DYING_TASK_TYPE}")
             observations = observe_live(
                 base_url=args.base_url,
                 api_key=api_key,
-                ledger_dsn=ledger_dsn,
+                projection_dsn=projection_dsn,
                 budget_seconds=args.budget_seconds,
                 runner_identity=args.runner_identity,
             )
