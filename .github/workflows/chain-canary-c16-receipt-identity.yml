@@ -38,12 +38,22 @@
 #   a permanently-red check is a disabled check. The pair fails SAFE.
 #
 # THE CREDENTIALS: EXISTING, LANE-LOCAL, REUSED IN THEIR OWN REPOSITORY
-#   `CHAIN_CANARY_GATEWAY_API_KEY` and `CHAIN_CANARY_PROJECTION_DSN` are
-#   already repository secrets HERE, and chain-canary.yml already injects both
-#   the same way. No credential is created, rotated, re-issued or revoked. Both
-#   are injected as ENVIRONMENT under their literal names and the probe is
-#   given the NAMES, never the values. The probe refuses a projection role that is
-#   SUPERUSER or BYPASSRLS, asked of the server (the OMN-18060 refusal).
+#   `CHAIN_CANARY_GATEWAY_API_KEY`, `KAFKA_SASL_USERNAME` and
+#   `KAFKA_SASL_PASSWORD` are already repository secrets HERE, and
+#   chain-canary.yml already injects all three the same way; the broker and
+#   its transport come from the declared CI bus lane exactly as they do there.
+#   No credential is created, rotated, re-issued or revoked. The API key is
+#   given to the probe by NAME, never by value.
+#
+# WHY THE BUS AND NOT THE DATABASE, FOR THE ROUTE
+#   R-DELEG-12 compares the receipt to an INDEPENDENT observation of the route
+#   taken. The canary's database role, `chain_canary_reader`, holds column
+#   grants on `correlation_id`, `state` and `traffic_class` only, deliberately
+#   (OMN-18060); the first two live runs of this workflow graded SKIP on
+#   InsufficientPrivilege against event_ledger and then delegation_workflow_state.
+#   Widening that grant would let the canary read every tenant's payloads. The
+#   orchestrator's own terminal event carries provider, model and the accepted
+#   attempt, and this job can already read it.
 #
 # ABSENT CREDENTIAL IS EXIT 2, NOT A VERDICT
 #   "I could not run" and "the platform is wrong" are both non-zero, so both
@@ -109,9 +119,39 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
-      # The projection read needs a Postgres driver; the replay half does not.
+      # The bus read needs aiokafka and the lane transport helpers; the replay
+      # half needs neither.
       - name: Install dependencies
         run: uv sync --frozen
+
+      - name: Fetch the declared CI bus lanes
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .ci-bus-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve the declared lane transport
+        run: |
+          set -euo pipefail
+          uv run --frozen python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              lane_transport_env, load_lane_transport,
+          )
+          transport = load_lane_transport(
+              pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), 'dev'
+          )
+          print(f'lane dev declares {transport.bootstrap_servers} '
+                f'({transport.security_protocol}/{transport.sasl_mechanism})')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in lane_transport_env(transport).items():
+                  handle.write(f'{key}={value}\n')
+          "
 
       - name: Drive the healthy and the dying delegation and grade C16
         env:
@@ -124,7 +164,11 @@ jobs:
           # The NAMES are what the probe is told; the VALUES reach it only
           # here, as environment. See the header note.
           CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
-          CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.CHAIN_CANARY_PROJECTION_DSN }}
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          # The healthy run's terminal, read off the bus for R-DELEG-12. Named
+          # here, as chain-canary.yml names its hops, never in the script.
+          TERMINAL_TOPIC: onex.evt.omnimarket.delegate-skill-completed.v1
         run: |
           set -uo pipefail
           # NOT `set -e`: a non-zero probe is the verdict and must still write
@@ -132,7 +176,7 @@ jobs:
           uv run --frozen python scripts/ci/c16_receipt_identity_probe.py \
             --base-url "${GATEWAY_URL}" \
             --credential-env CHAIN_CANARY_GATEWAY_API_KEY \
-            --projection-dsn-env CHAIN_CANARY_PROJECTION_DSN \
+            --terminal-topic "${TERMINAL_TOPIC}" \
             --budget-seconds "${BUDGET_SECONDS}" \
             --runner-identity "${RUNNER_IDENTITY}" \
             --record c16-receipt-identity.json \

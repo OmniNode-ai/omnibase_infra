@@ -5,7 +5,7 @@
 
 Every test here runs against RECORDED observations under
 ``tests/fixtures/omn19181/`` -- captured read-only from the .201 dev lane's
-gateway and orchestrator-projection rows, provenance in each file -- and performs no
+gateway rows and the orchestrator's bus terminal, provenance in each file -- and performs no
 network or database I/O, so the verdict is falsifiable on a laptop and in CI
 rather than only on the lab.
 
@@ -90,12 +90,14 @@ def test_skip_skip_pass_is_red_and_never_a_pass() -> None:
 @pytest.mark.parametrize(
     ("side", "key", "value"),
     [
-        ("receipt", "route", "cloud-gemini-pro"),
+        # `route` is presence-checked only: the bus terminal carries a backend
+        # UUID, not a route NAME, so there is nothing independent to compare
+        # it with. Pinned below so that limit cannot quietly become a claim.
         ("receipt", "provider", "gemini"),
         ("receipt", "terminal_model_used", "claude-opus-4-6"),
     ],
 )
-def test_a_receipt_naming_a_route_the_orchestrator_did_not_record_fails(
+def test_a_receipt_naming_a_route_the_bus_terminal_does_not_show_fails(
     side: str, key: str, value: str
 ) -> None:
     payload = _load()
@@ -107,47 +109,55 @@ def test_a_receipt_naming_a_route_the_orchestrator_did_not_record_fails(
 
 
 @pytest.mark.unit
-def test_two_blank_routes_are_not_an_identity() -> None:
+def test_a_receipt_with_no_route_fails_even_when_provider_and_model_agree() -> None:
     payload = _load()
-    state = payload["observations"]["healthy_state"]["payload"]
     payload["observations"]["healthy"]["receipt"]["route"] = None
-    state["routing_decision"]["route"] = None
-    state["inference_route"] = None
+    assert _outcomes(payload)["R-DELEG-12"] == "FAIL"
+
+
+@pytest.mark.unit
+def test_two_blank_providers_are_not_an_identity() -> None:
+    payload = _load()
+    payload["observations"]["healthy"]["receipt"]["provider"] = None
+    payload["observations"]["healthy_terminal"]["payload"]["provider"] = None
     assert _outcomes(payload)["R-DELEG-12"] == "FAIL"
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "field_path",
+    ("key", "value"),
     [
-        ("routing_decision", "route"),
-        ("inference_route",),
-        ("routing_decision", "provider"),
-        ("inference_model_used",),
+        ("provider", "gemini"),
+        ("model_name", "gemini-2.5-flash"),
+        ("status", "failed"),
     ],
 )
-def test_each_independent_observation_is_compared_not_just_one(
-    field_path: tuple[str, ...],
-) -> None:
-    """A re-route whose answering attempt disagrees with the receipt is caught."""
+def test_each_bus_observation_is_compared_not_just_one(key: str, value: str) -> None:
     payload = _load()
-    target = payload["observations"]["healthy_state"]["payload"]
-    for part in field_path[:-1]:
-        target = target[part]
-    target[field_path[-1]] = "cloud-gemini-pro"
+    payload["observations"]["healthy_terminal"]["payload"][key] = value
     assert _outcomes(payload)["R-DELEG-12"] == "FAIL"
 
 
 @pytest.mark.unit
-def test_an_unterminated_projection_fails_and_an_unreadable_one_skips() -> None:
+def test_the_accepted_attempt_is_the_one_compared_not_the_first() -> None:
+    """A re-route answers from its accepted attempt, never an abandoned one."""
     payload = _load()
-    payload["observations"]["healthy_state"].update(
-        state="INFERENCE_PENDING", payload=None
-    )
+    attempts = payload["observations"]["healthy_terminal"]["payload"]["attempts"]
+    assert [a["acceptance_decision"] for a in attempts] == ["climb", "accept"]
+    attempts[0]["model_id"] = "gemini-2.5-flash"
+    assert _outcomes(payload)["R-DELEG-12"] == "PASS"
+    attempts[1]["model_id"] = "gemini-2.5-flash"
+    assert _outcomes(payload)["R-DELEG-12"] == "FAIL"
+
+
+@pytest.mark.unit
+def test_an_absent_terminal_fails_and_an_unreadable_bus_skips() -> None:
+    payload = _load()
+    payload["observations"]["healthy_terminal"]["payload"] = None
     assert _outcomes(payload)["R-DELEG-12"] == "FAIL"
     payload = _load()
-    payload["observations"]["healthy_state"]["error"] = (
-        "read failed: InsufficientPrivilege"
+    payload["observations"]["healthy_terminal"]["error"] = (
+        "consumer start failed: KafkaConnectionError"
     )
     assert _outcomes(payload)["R-DELEG-12"] == "SKIP"
 
@@ -262,8 +272,8 @@ def test_a_missing_secret_is_an_input_failure_and_still_writes_a_record(
             "http://127.0.0.1:9",
             "--credential-env",
             "OMN19181_TEST_UNSET",
-            "--projection-dsn-env",
-            "OMN19181_TEST_UNSET",
+            "--terminal-topic",
+            "unused-because-the-credential-is-refused-first",
             "--runner-identity",
             "test",
             "--record",
@@ -272,3 +282,12 @@ def test_a_missing_secret_is_an_input_failure_and_still_writes_a_record(
     )
     assert code == probe.EXIT_INPUT
     assert json.loads(out.read_text(encoding="utf-8"))["verdict"] == "could_not_run"
+
+
+@pytest.mark.unit
+def test_route_is_presence_checked_only_and_says_so() -> None:
+    """The honest limit: a different route NAME with matching provider/model passes."""
+    payload = _load()
+    payload["observations"]["healthy"]["receipt"]["route"] = "cloud-gemini-pro"
+    assert _outcomes(payload)["R-DELEG-12"] == "PASS"
+    assert "no route NAME to\n                compare it with" in (probe.__doc__ or "")

@@ -13,9 +13,9 @@ WHAT THIS IS
 
     ``0``  all three probes graded PASS
     ``1``  at least one probe graded FAIL or SKIP; the record names which and why
-    ``2``  the probe could not run at all (unresolvable credential or DSN, a
-           projection role that bypasses row-level security, an unreadable replay
-           file). Distinct from ``1`` on purpose: "I could not run" is not "the
+    ``2``  the probe could not run at all (unresolvable credential, an
+           undeclared terminal topic or broker, an unreadable replay file).
+           Distinct from ``1`` on purpose: "I could not run" is not "the
            platform is wrong", and collapsing them is how a configuration
            failure gets reported as a product failure.
 
@@ -37,14 +37,20 @@ WHAT C16 SAYS, AND WHICH PROBE ANSWERS EACH CLAUSE
     R-DELEG-12  receipt identity equals route. The HEALTHY run's receipt
                 (``GET /v1/workflows/{id}/receipt``) names ``route``,
                 ``provider`` and ``terminal_model_used``; the route the chain
-                actually TOOK is read independently, from the delegation
-                orchestrator's own FSM projection (``delegation_workflow_state``)
-                for the same correlation id: its ``routing_decision`` and the
-                ``inference_*`` fields of the attempt that answered. Every key
-                must be present and non-empty on both sides and equal. The
-                comparison is across two surfaces on purpose: the status and
-                receipt routes read one gateway row, so comparing them to each
-                other would be a tautology.
+                actually TOOK is read independently, off the BUS: the
+                orchestrator's own terminal event for the same correlation id
+                (``delegate-skill-completed``), whose ``provider`` and
+                ``model_name`` and whose ACCEPTED attempt's ``model_id`` must
+                each equal the receipt's. The receipt's ``route`` must be
+                present and non-empty; the terminal carries no route NAME to
+                compare it with (only a backend UUID), and the record says so
+                rather than pretending otherwise. The comparison is across two
+                surfaces on purpose: the status and receipt routes read one
+                gateway row, so comparing them to each other would be a
+                tautology. (The canary's database role holds column grants on
+                ``correlation_id``, ``state`` and ``traffic_class`` only, by
+                design; the bus is the surface this lane can read without
+                widening a least-privilege grant over every tenant's payloads.)
     R-DELEG-11  SKIP never PASS; a failed run never reports success. The
                 HEALTHY run, if completed, must carry a NON-EMPTY list of
                 quality-rule evaluations, every one of which states a boolean
@@ -74,7 +80,7 @@ WHY A REPLAY MODE EXISTS
     route the chain did not take; a dead run whose cause is untyped).
 
 NO CREDENTIAL REACHES ARGV, A LOG OR THE RECORD
-    The API key and the projection DSN are read from the environment by NAME.
+    The API key and the SASL credential are read from the environment by NAME.
     ``/proc`` is world-readable, so a value on a command line is readable by
     every process on the host; the record is an uploaded artifact, so a value
     in it would be a real exposure. The record also carries no tenant id, no
@@ -126,11 +132,6 @@ SKIP: Final[str] = "SKIP"
 
 TERMINAL_STATUSES: Final[frozenset[str]] = frozenset({"completed", "failed"})
 
-# The orchestrator FSM's terminal states, as delegation_workflow_state writes
-# them. The projection is polled until it reaches one, because the gateway row
-# can close out a beat before the projection writer does.
-STATE_TERMINAL: Final[frozenset[str]] = frozenset({"COMPLETED", "FAILED"})
-
 # The gateway's typed failure grammar, read from the one construction site that
 # builds it (onex-api workflow_failure_attribution._ATTRIBUTION_GRAMMAR): a
 # class with a conventional Error/Exception suffix and a canonical ONEX_ code.
@@ -166,10 +167,9 @@ class RunObservation:
 
 
 @dataclass(frozen=True)
-class StateObservation:
-    """The same run as the delegation orchestrator's FSM projection records it."""
+class TerminalObservation:
+    """The same run's terminal event, as the orchestrator published it."""
 
-    state: str | None = None
     payload: Mapping[str, Any] | None = None
     error: str | None = None
 
@@ -177,7 +177,7 @@ class StateObservation:
 @dataclass(frozen=True)
 class Observations:
     healthy: RunObservation
-    healthy_state: StateObservation
+    healthy_terminal: TerminalObservation
     dying: RunObservation
 
 
@@ -215,7 +215,21 @@ def _payload_of(envelope: Mapping[str, Any]) -> Mapping[str, Any]:
     return payload if isinstance(payload, Mapping) else {}
 
 
-def grade_identity(healthy: RunObservation, state: StateObservation) -> ProbeResult:
+def _accepted_model(terminal: Mapping[str, Any]) -> Any:
+    attempts = terminal.get("attempts")
+    if not isinstance(attempts, list):
+        return None
+    accepted = [
+        a
+        for a in attempts
+        if isinstance(a, Mapping) and a.get("acceptance_decision") == "accept"
+    ]
+    return accepted[-1].get("model_id") if accepted else None
+
+
+def grade_identity(
+    healthy: RunObservation, terminal: TerminalObservation
+) -> ProbeResult:
     """R-DELEG-12: the receipt names the route the chain actually took."""
     result = ProbeResult("R-DELEG-12", FAIL)
     receipt_status = _status_of(healthy.receipt)
@@ -228,47 +242,47 @@ def grade_identity(healthy: RunObservation, state: StateObservation) -> ProbeRes
             "is no route on the receipt side to compare. SKIP is not PASS"
         )
         return result
-    if state.error is not None:
+    if terminal.error is not None:
         result.outcome = SKIP
         result.reasons.append(
-            f"the orchestrator projection could not be read ({state.error}), so "
-            "the route the chain took has no independent observation. SKIP is "
-            "not PASS"
+            f"the bus terminal could not be read ({terminal.error}), so the "
+            "route the chain took has no independent observation. SKIP is not "
+            "PASS"
         )
         return result
-    result.evidence["projection.state"] = state.state
-    if state.payload is None or state.state != "COMPLETED":
+    if terminal.payload is None:
         result.reasons.append(
-            f"the orchestrator projection reads state={state.state!r} for a run "
-            "the receipt calls completed; a route nobody can show was taken is "
-            "not corroborated"
+            "no terminal event for this correlation id was found on the bus "
+            "inside the window, for a run the receipt calls completed"
         )
         return result
 
-    decision = state.payload.get("routing_decision")
-    decision = decision if isinstance(decision, Mapping) else {}
     receipt = healthy.receipt
+    bus = terminal.payload
+    result.evidence["terminal.status"] = bus.get("status")
+    if bus.get("status") != "completed":
+        result.reasons.append(
+            f"the bus terminal reads status={bus.get('status')!r} for a run the "
+            "receipt calls completed"
+        )
+    route = receipt.get("route")
+    result.evidence["receipt.route"] = route
+    if _text(route) is None:
+        result.reasons.append(
+            f"the receipt carries no usable route ({route!r}); a completed "
+            "receipt that does not name its route names nothing to check"
+        )
     # Each key: the receipt's value, then every independent observation of it.
     comparisons: dict[str, tuple[Any, tuple[tuple[str, Any], ...]]] = {
-        "route": (
-            receipt.get("route"),
-            (
-                ("routing_decision.route", decision.get("route")),
-                ("inference_route", state.payload.get("inference_route")),
-            ),
-        ),
         "provider": (
             receipt.get("provider"),
-            (
-                ("routing_decision.provider", decision.get("provider")),
-                ("inference_provider", state.payload.get("inference_provider")),
-            ),
+            (("terminal.provider", bus.get("provider")),),
         ),
         "model": (
             receipt.get("terminal_model_used"),
             (
-                ("routing_decision.selected_model", decision.get("selected_model")),
-                ("inference_model_used", state.payload.get("inference_model_used")),
+                ("terminal.model_name", bus.get("model_name")),
+                ("terminal.accepted_attempt.model_id", _accepted_model(bus)),
             ),
         ),
     }
@@ -282,16 +296,15 @@ def grade_identity(healthy: RunObservation, state: StateObservation) -> ProbeRes
             )
             continue
         for label, value in observed:
-            result.evidence[f"projection.{label}"] = value
+            result.evidence[label] = value
             if _text(value) is None:
                 result.reasons.append(
-                    f"projection {label} is {value!r}, so the receipt's "
-                    f"{key}={claimed!r} has nothing to be compared against"
+                    f"{label} is {value!r}, so the receipt's {key}={claimed!r} "
+                    "has nothing to be compared against"
                 )
             elif value != claimed:
                 result.reasons.append(
-                    f"the receipt names {key}={claimed!r} but projection "
-                    f"{label}={value!r}"
+                    f"the receipt names {key}={claimed!r} but {label}={value!r}"
                 )
     if not result.reasons:
         result.outcome = PASS
@@ -441,7 +454,7 @@ class Record:
     def detail(self) -> str:
         if not self.failures:
             return (
-                "the receipt named the route the orchestrator recorded, the "
+                "the receipt named the provider and model the bus terminal shows answered, the "
                 "completed run's every quality rule reached a boolean verdict, "
                 "and the dead run ended 'failed' with a typed cause"
             )
@@ -451,7 +464,7 @@ class Record:
 def grade(observations: Observations) -> Record:
     results = [
         grade_skip_never_pass(observations.healthy, observations.dying),
-        grade_identity(observations.healthy, observations.healthy_state),
+        grade_identity(observations.healthy, observations.healthy_terminal),
         grade_typed_death(observations.dying),
     ]
     graded = tuple(r.probe for r in results)
@@ -596,69 +609,100 @@ def _observe_run(
     )
 
 
-def _read_state(
-    dsn: str,
-    correlation_id: str,
-    *,
-    wait_seconds: float,
-    poll_seconds: float,
-) -> StateObservation:
-    """Read the run's row from the orchestrator's FSM projection.
+async def _scan_terminal(
+    topic: str, correlation_id: str, *, wait_seconds: float, max_records: int
+) -> TerminalObservation:
+    """Read ``topic`` for ``correlation_id`` and return the terminal's payload.
 
-    The same DSN, and the same table, chain-canary.yml's projection readback
-    (link 2) reads. Refuses a role carrying SUPERUSER or BYPASSRLS, asked of the
-    server rather than inferred from the DSN: such a role reads past row-level
-    security, so a green read through it cannot tell a readable projection from
-    one readable only by an identity nothing else has (the OMN-18060 refusal).
+    The lessons are chain-canary's own (``_scan_topics_for_correlation``): the
+    topic is passed to the CONSTRUCTOR so aiokafka fetches its metadata; the
+    backward seek is clamped to each partition's own log start, because a seek
+    below it is silently repositioned to the high watermark, past the record
+    this scan exists to find; and there is no group id, so no coordinator.
     """
-    import psycopg2  # imported here so --replay needs no database driver
+    import asyncio
 
+    from aiokafka import AIOKafkaConsumer
+
+    from omnibase_infra.event_bus.kafka_auth import (
+        build_aiokafka_auth_kwargs_from_env,
+    )
+    from omnibase_infra.topics.topic_namespace import apply_topic_namespace_all
+
+    bootstrap = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "")
+    if not bootstrap:
+        raise ProbeInputError(
+            "KAFKA_BOOTSTRAP_SERVERS is unset; the workflow resolves it from the "
+            "declared CI bus lane, exactly as chain-canary.yml does"
+        )
+    consumer = AIOKafkaConsumer(
+        *apply_topic_namespace_all((topic,)),
+        bootstrap_servers=bootstrap,
+        enable_auto_commit=False,
+        auto_offset_reset="latest",
+        **build_aiokafka_auth_kwargs_from_env(),
+    )
+    needle = correlation_id.encode()
     try:
-        connection = psycopg2.connect(dsn, connect_timeout=10)
-    except psycopg2.Error as exc:
-        return StateObservation(error=f"connect failed: {type(exc).__name__}")
+        await asyncio.wait_for(consumer.start(), timeout=30)
+    except Exception as exc:  # noqa: BLE001 - reported, never a verdict
+        return TerminalObservation(error=f"consumer start failed: {type(exc).__name__}")
     try:
-        connection.set_session(readonly=True, autocommit=True)
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT rolsuper, rolbypassrls FROM pg_roles "
-                "WHERE rolname = current_user"
+        partitions = list(consumer.assignment())
+        if not partitions:
+            return TerminalObservation(
+                error=f"topic {topic!r} resolved no partitions for this client"
             )
-            role = cursor.fetchone()
-            if role is None or role[0] or role[1]:
-                raise ProbeInputError(
-                    "the projection DSN authenticates as a role that is "
-                    "SUPERUSER, BYPASSRLS, or has no pg_roles row; refusing to "
-                    "read through it"
-                )
+        ends = await consumer.end_offsets(partitions)
+        begins = await consumer.beginning_offsets(partitions)
+        per_partition = max(1, max_records // len(partitions))
+        for partition in partitions:
+            consumer.seek(
+                partition, max(begins[partition], ends[partition] - per_partition)
+            )
         deadline = time.monotonic() + wait_seconds
-        while True:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT state, payload FROM delegation_workflow_state "
-                    "WHERE correlation_id = %s",
-                    (correlation_id,),
-                )
-                row = cursor.fetchone()
-            if row is not None and str(row[0]) in STATE_TERMINAL:
-                payload = row[1] if isinstance(row[1], dict) else _maybe_json(row[1])
-                return StateObservation(
-                    str(row[0]), payload if isinstance(payload, dict) else None
-                )
-            if time.monotonic() >= deadline:
-                return StateObservation(state=str(row[0]) if row is not None else None)
-            time.sleep(poll_seconds)
-    except psycopg2.Error as exc:
-        return StateObservation(error=f"read failed: {type(exc).__name__}")
+        while time.monotonic() < deadline:
+            batches = await consumer.getmany(timeout_ms=1_000, max_records=500)
+            for records in batches.values():
+                for record in records:
+                    if not record.value or needle not in record.value:
+                        continue
+                    envelope = _maybe_json(record.value.decode("utf-8", "replace"))
+                    payload = (
+                        envelope.get("payload") if isinstance(envelope, dict) else None
+                    )
+                    if (
+                        isinstance(payload, dict)
+                        and payload.get("correlation_id") == correlation_id
+                    ):
+                        return TerminalObservation(payload)
+        return TerminalObservation()
+    except Exception as exc:  # noqa: BLE001 - reported, never a verdict
+        return TerminalObservation(error=f"topic scan failed: {type(exc).__name__}")
     finally:
-        connection.close()
+        try:
+            await consumer.stop()
+        except (Exception, asyncio.CancelledError):  # noqa: BLE001 - teardown noise
+            pass
+
+
+def _read_terminal(
+    topic: str, correlation_id: str, *, wait_seconds: float
+) -> TerminalObservation:
+    import asyncio
+
+    return asyncio.run(
+        _scan_terminal(
+            topic, correlation_id, wait_seconds=wait_seconds, max_records=2_000
+        )
+    )
 
 
 def observe_live(
     *,
     base_url: str,
     api_key: str,
-    projection_dsn: str,
+    terminal_topic: str,
     budget_seconds: float,
     runner_identity: str,
     timeout: float = 20.0,
@@ -677,17 +721,12 @@ def observe_live(
     }
     healthy_run = _observe_run(base_url, healthy, **kwargs)
     dying_run = _observe_run(base_url, dying, **kwargs)
-    state = (
-        _read_state(
-            projection_dsn,
-            healthy.correlation_id,
-            wait_seconds=60.0,
-            poll_seconds=poll_seconds,
-        )
+    terminal = (
+        _read_terminal(terminal_topic, healthy.correlation_id, wait_seconds=60.0)
         if _status_of(healthy_run.receipt) == "completed"
-        else StateObservation(error="not read: the healthy run did not complete")
+        else TerminalObservation(error="not read: the healthy run did not complete")
     )
-    return Observations(healthy_run, state, dying_run)
+    return Observations(healthy_run, terminal, dying_run)
 
 
 # ---------------------------------------------------------------------------
@@ -715,18 +754,20 @@ def observations_from_replay(payload: Mapping[str, Any]) -> Observations:
     raw = payload.get("observations")
     if not isinstance(raw, dict):
         raise ProbeInputError("replay payload has no 'observations' mapping")
-    for name in ("healthy", "healthy_state", "dying"):
+    for name in ("healthy", "healthy_terminal", "dying"):
         if name not in raw:
             raise ProbeInputError(f"replay payload has no {name!r} observation")
-    state = raw["healthy_state"]
-    if not isinstance(state, dict):
-        raise ProbeInputError("replay observation 'healthy_state' is not an object")
-    if state.get("payload") is not None and not isinstance(state.get("payload"), dict):
-        raise ProbeInputError("replay 'healthy_state.payload' is not an object")
+    terminal = raw["healthy_terminal"]
+    if not isinstance(terminal, dict):
+        raise ProbeInputError("replay observation 'healthy_terminal' is not an object")
+    if terminal.get("payload") is not None and not isinstance(
+        terminal.get("payload"), dict
+    ):
+        raise ProbeInputError("replay 'healthy_terminal.payload' is not an object")
     return Observations(
         healthy=_run_from(raw["healthy"], "healthy"),
-        healthy_state=StateObservation(
-            state.get("state"), state.get("payload"), state.get("error")
+        healthy_terminal=TerminalObservation(
+            terminal.get("payload"), terminal.get("error")
         ),
         dying=_run_from(raw["dying"], "dying"),
     )
@@ -776,9 +817,12 @@ def main(argv: list[str] | None = None) -> int:
         help="NAME of the environment variable holding the API key. Never a value.",
     )
     parser.add_argument(
-        "--projection-dsn-env",
+        "--terminal-topic",
         default="",
-        help="NAME of the environment variable holding the projection DSN. Never a value.",
+        help=(
+            "The delegation terminal topic to read the healthy run's terminal "
+            "from. Passed by the workflow, never hardcoded here."
+        ),
     )
     parser.add_argument("--budget-seconds", type=float, default=240.0)
     parser.add_argument(
@@ -809,19 +853,16 @@ def main(argv: list[str] | None = None) -> int:
                     "--runner-identity is required and must be non-empty"
                 )
             api_key = resolve_env(args.credential_env, os.environ, "API key")
-            projection_dsn = resolve_env(
-                args.projection_dsn_env, os.environ, "projection DSN"
-            )
+            if not args.terminal_topic.strip():
+                raise ProbeInputError("--terminal-topic is required for a live run")
             print(f"base url:        {base_url}")
             print(f"credential var:  {args.credential_env}  (a NAME; never printed)")
-            print(
-                f"projection dsn:  {args.projection_dsn_env}  (a NAME; never printed)"
-            )
+            print(f"terminal topic:  {args.terminal_topic}")
             print(f"dying task type: {DYING_TASK_TYPE}")
             observations = observe_live(
                 base_url=args.base_url,
                 api_key=api_key,
-                projection_dsn=projection_dsn,
+                terminal_topic=args.terminal_topic,
                 budget_seconds=args.budget_seconds,
                 runner_identity=args.runner_identity,
             )

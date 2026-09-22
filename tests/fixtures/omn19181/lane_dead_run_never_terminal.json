@@ -66,27 +66,34 @@
       },
       "submit_status": 202
     },
-    "healthy_state": {
+    "healthy_terminal": {
       "error": null,
       "payload": {
-        "inference_model_used": "Qwen3.8-27B",
-        "inference_provider": "local",
-        "inference_route": "local-coder",
-        "routing_decision": {
-          "provider": "local",
-          "route": "local-coder",
-          "selected_backend_ref": "local-coder",
-          "selected_model": "Qwen3.8-27B",
-          "tier_name": "local"
-        }
-      },
-      "state": "COMPLETED"
+        "attempts": [
+          {
+            "acceptance_decision": "climb",
+            "acceptance_reason": "acceptance_criteria_failed",
+            "model_id": "Qwen3.8-27B",
+            "tier": "local"
+          },
+          {
+            "acceptance_decision": "accept",
+            "acceptance_reason": "judge_unavailable_deterministic_floor",
+            "model_id": "Qwen3.8-27B",
+            "tier": "local"
+          }
+        ],
+        "correlation_id": "f8d87788-468c-4b3c-a189-e6e86cdb393d",
+        "model_name": "Qwen3.8-27B",
+        "provider": "local",
+        "status": "completed"
+      }
     }
   },
   "provenance": {
     "captured": "2026-09-22, read-only psql on the .201 dev lane (compose project omnibase-infra)",
     "dying": "omninode_cloud.public.gateway_workflows, correlation_id=ef38360e-9c91-4957-8ae7-8950c6168966 (workflow_id=b1e7b31e-26f8-4bdd-a1e4-0db06ebcc16b)",
-    "healthy": "omninode_cloud.public.gateway_workflows + omnibase_infra.public.delegation_workflow_state (route/provider/model fields only), correlation_id=f8d87788-468c-4b3c-a189-e6e86cdb393d (a chain-canary run, workflow_id=6623608e-a821-4d4a-a5ef-5c8abe75ba44)",
+    "healthy": "omninode_cloud.public.gateway_workflows (receipt/status columns) and the onex.evt.omnimarket.delegate-skill-completed.v1 terminal as recorded byte-for-byte in omnibase_infra.public.event_ledger (status/provider/model_name/attempts fields only), correlation_id=f8d87788-468c-4b3c-a189-e6e86cdb393d (a chain-canary run)",
     "receipt_note": "receipt and status bodies are the gateway_workflows columns render_workflow_receipt and get_workflow_status read; tenant ids, endpoint URLs and prompt text are omitted",
     "why": "a submitted run still reading 'published' two days later: indistinguishable from one still running"
   }

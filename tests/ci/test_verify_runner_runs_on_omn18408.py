@@ -135,7 +135,7 @@ NEW_VERIFY_JOBS = (
     # lab host would report the lane unreachable forever. Its lane writes are
     # two delegations through the tenant-bearing API -- the canary's own
     # liveness prompt and one with a task class no consumer accepts -- plus a
-    # read-only, RLS-respecting read of the orchestrator projection chain-canary already reads. It publishes nothing to the
+    # correlation-scoped read of the orchestrator's terminal off the bus, as chain-canary already does. It publishes nothing to the
     # bus directly and reconfigures nothing.
     (
         "chain-canary-c16-receipt-identity.yml",
