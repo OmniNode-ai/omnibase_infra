@@ -1,3 +1,19 @@
+## v0.38.53 (2026-09-22)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.53 by the scheduled release train.
+- 7 release-relevant commit(s) merged since v0.38.51.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.51
+- fix(OMN-19144): declare the dev lane's runtime lane so its health events can be keyed (#3963)
+- fix(OMN-17427): admit uvicorn 0.53 (#3959)
+- chore(OMN-17292): advance omnimarket contract pin to fb41fdedc57e (#3960)
+- chore(OMN-17292): advance omnimarket contract pin to 622664a35575 (#3950)
+- feat(OMN-18999): validate typed backend projection readers (drain landing) (#3961)
+- chore(OMN-17292): advance omnimarket contract pin to bf88396baa87 (#3895)
+- chore(OMN-18999): vendor the prod-promotion-gate projection migrations (#3929)
+
 ## v0.38.51 (2026-09-21)
 
 ### Release
