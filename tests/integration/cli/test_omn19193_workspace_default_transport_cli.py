@@ -3,24 +3,23 @@
 
 """End-to-end CLI coverage: a default delegation on a registry workspace (OMN-19193).
 
-The unit module drives the resolver with a synthetic tier-1 file. This one goes
-through ``click`` with the REAL checked-in
-``config/workspace/runtime/runtime_config.yaml`` of this repository, found the
-only way the product finds it: a workspace root bound through ``$OMNIBASE_PATH``
-(the variable ``--omni-home`` reads, which the sanctioned wrapper exports),
-with no ``--bus``, no ``--lane`` and no ``--omni-home`` on the command line.
+Through ``click``, with the workspace root bound the only way the product binds
+it: ``$OMNIBASE_PATH`` (the variable ``--omni-home`` reads, which the sanctioned
+wrapper exports), and no ``--bus``, ``--lane`` or ``--omni-home`` on the
+command line. The workspace carries its OWN tier-1 runtime config at
+``config/onex/runtime/runtime_config.yaml``; this package ships no lab values
+(OMN-19184), so the file here is written by the test exactly as a workspace
+declares it.
 
 The operator's shell is reproduced around it: ``ONEX_EVENT_BUS_TYPE=kafka``,
 which holds no tier since OMN-17304, and ``KAFKA_BOOTSTRAP_SERVERS`` naming
-the governed stability-test lane. Before the fix, that exact invocation
-resolved the shipped tier-0 in-memory bus, so the delegation's evidence never
-reached the shared projection.
+the governed stability-test lane. Before the fix that invocation resolved the
+shipped tier-0 in-memory bus, so the delegation's evidence never reached the
+shared projection. A bound root that declares no config is now refused.
 
 Dispatch itself needs a co-installed omnimarket and a live model endpoint,
 neither of which belongs in this gate, so the receipt-mode dispatch is captured
 rather than run -- the same stand-in the lane-identity integration test uses.
-Everything under test happens in front of dispatch: the env binding, the
-workspace tier, the lane taken from that config, and the declaration read.
 """
 
 from __future__ import annotations
@@ -39,8 +38,6 @@ from omnibase_infra.runtime.service_kernel import (
 )
 
 pytestmark = pytest.mark.integration
-
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: The ambient value on the operator host: the governed stability-test lane.
 AMBIENT_STABILITY_BROKER = "192.168.86.201:39092"  # onex-allow-internal-ip OMN-16871 reason="test fixture quoting the ambient env value the CLI must no longer resolve; not a configurable endpoint"
@@ -68,19 +65,28 @@ STAND_IN_TASK_CLASS_CONTRACT = (
 )
 
 
-def _workspace(root: Path, *, with_repo_config: bool) -> Path:
-    """A workspace root: the lane declaration, and THIS repo as omnibase_infra.
+_WORKSPACE_RUNTIME_CONFIG = """
+event_bus:
+  type: "kafka"
+  profile: "local"
+  lane: "dev"
+"""
 
-    ``omnibase_infra`` is a symlink to the repository under test, so the tier-1
-    file the CLI reads is the committed one, byte for byte.
-    """
+
+def _workspace(root: Path, *, with_config: bool) -> Path:
+    """A workspace root: the lane declaration and, optionally, its tier-1 config."""
     declaration = root / LANE_DECLARATION_RELATIVE_PATH
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(_DECLARATION, encoding="utf-8")
-    if with_repo_config:
-        (root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH.parts[0]).symlink_to(
-            _REPO_ROOT, target_is_directory=True
+    if with_config:
+        config = (
+            root
+            / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+            / "runtime"
+            / "runtime_config.yaml"
         )
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(_WORKSPACE_RUNTIME_CONFIG, encoding="utf-8")
     return root
 
 
@@ -140,11 +146,11 @@ def _delegate(tmp_path: Path, root: Path) -> object:
 
 
 class TestTheDefaultInvocationOnAWorkspace:
-    def test_the_committed_tier1_config_puts_it_on_the_declared_dev_lane(
+    def test_the_workspace_tier1_config_puts_it_on_the_declared_dev_lane(
         self, tmp_path: Path, captured_dispatch: dict[str, object]
     ) -> None:
         """RED before the fix: this resolved the in-memory bus."""
-        root = _workspace(tmp_path / "workspace", with_repo_config=True)
+        root = _workspace(tmp_path / "workspace", with_config=True)
         result = _delegate(tmp_path, root)
         assert result.exit_code == 0, result.output
         assert captured_dispatch["backend_overrides"] == {
@@ -152,11 +158,14 @@ class TestTheDefaultInvocationOnAWorkspace:
             "kafka_bootstrap": DECLARED_DEV_BROKER,
         }
 
-    def test_positive_control_without_the_config_it_is_still_tier0(
+    def test_a_bound_root_with_no_config_is_refused_loudly(
         self, tmp_path: Path, captured_dispatch: dict[str, object]
     ) -> None:
-        """The same invocation on a root with no tier-1 file is unchanged."""
-        root = _workspace(tmp_path / "workspace", with_repo_config=False)
+        """Never the silent tier-0 fall that stranded the evidence."""
+        root = _workspace(tmp_path / "workspace", with_config=False)
         result = _delegate(tmp_path, root)
-        assert result.exit_code == 0, result.output
-        assert captured_dispatch["backend_overrides"] == {"event_bus": "inmemory"}
+        assert result.exit_code != 0
+        output = " ".join(str(result.output).split())
+        assert "config/onex/runtime/runtime_config.yaml" in output
+        assert "--bus inmemory" in output
+        assert captured_dispatch == {}, "nothing may be dispatched on a refusal"

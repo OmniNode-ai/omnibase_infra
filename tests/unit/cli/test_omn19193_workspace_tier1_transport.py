@@ -20,11 +20,11 @@ THE FIX, at the configuration authority and nowhere else:
   local-profile runtime's shared bus is -- because a kafka transport with no
   lane is refused (OMN-16871) and a config could not otherwise say which;
 * ``resolve_embedded_runtime_config`` gains a WORKSPACE tier between the
-  ``ONEX_CONTRACTS_DIR`` bootstrap pointer and tier-0: the checked-in
-  ``omnibase_infra/config/workspace/runtime/runtime_config.yaml`` under the
-  workspace root the CLI already binds to find the lane declaration. It is a
-  file in the workspace, not an env var, and it is read only when that root is
-  bound;
+  ``ONEX_CONTRACTS_DIR`` bootstrap pointer and tier-0: the workspace's own
+  ``config/onex/runtime/runtime_config.yaml`` under the workspace root the CLI
+  already binds to find the lane declaration. The file belongs to the
+  workspace; this package ships the convention and no lab values (OMN-19184).
+  A bound root that declares none is refused, never answered with tier-0;
 * ``run_delegate`` uses the configured lane only when the transport itself
   came from the configuration. An explicit ``--bus`` is tier 1 and keeps its
   own addressing; an explicit ``--bus inmemory`` never inherits a lane.
@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import click
 import pytest
 from pydantic import ValidationError
 
@@ -46,8 +47,10 @@ from omnibase_core.enums.enum_event_bus_type import EnumEventBusType
 from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import resolve_default_bus, run_delegate
 from omnibase_infra.cli.delegate_lane import LANE_DECLARATION_RELATIVE_PATH
+from omnibase_infra.cli.delegate_locus import DelegateLocusRefusedError
 from omnibase_infra.cli.store_lane_credential import StoreLaneCredential
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.models.enum_event_bus_profile import EnumEventBusProfile
 from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
 from omnibase_infra.runtime.service_kernel import (
@@ -122,14 +125,17 @@ class TestTheWorkspaceTier:
         assert "workspace tier-1" in source
         assert str(root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH) in source
 
-    def test_a_bound_workspace_without_one_still_resolves_tier0_and_says_so(
+    def test_a_bound_workspace_without_one_is_refused_not_tier0(
         self, tmp_path: Path
     ) -> None:
         root = _workspace(tmp_path, tier1=None)
-        config, source = resolve_embedded_runtime_config(workspace_root=root)
-        assert config.event_bus.type is EnumEventBusType.INMEMORY
-        assert "tier-0" in source
-        assert "workspace" in source
+        with pytest.raises(ProtocolConfigurationError) as exc:
+            resolve_embedded_runtime_config(workspace_root=root)
+        message = str(exc.value)
+        assert (
+            str(root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH / "runtime") in message
+        )
+        assert "--bus inmemory" in message
 
     def test_the_bootstrap_pointer_still_outranks_the_workspace(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -172,20 +178,19 @@ class TestTheLaneField:
         with pytest.raises(ValidationError):
             ModelEventBusConfig(type="kafka", profile="local", lane="")
 
-    def test_the_checked_in_workspace_config_declares_the_dev_lane(self) -> None:
-        # The real file this ticket ships, read by the same loader the
-        # workspace tier uses. WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH is
-        # relative to the workspace root, whose omnibase_infra/ is this repo.
-        assert WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH.parts[0] == "omnibase_infra"
-        contracts = _REPO_ROOT.joinpath(
-            *WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH.parts[1:]
-        )
-        assert (contracts / "runtime" / "runtime_config.yaml").is_file()
-
-        shipped = load_runtime_config(contracts)
-        assert shipped.event_bus.type is EnumEventBusType.KAFKA
-        assert shipped.event_bus.profile is EnumEventBusProfile.LOCAL
-        assert shipped.event_bus.lane == "dev"
+    def test_the_product_ships_no_lane_value(self) -> None:
+        # Lab configuration is never hardcoded in the product every customer
+        # runs (OMN-19184). The package ships the resolution tier and the
+        # optional field; the lane a workspace uses is the workspace's own.
+        assert not (_REPO_ROOT / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH).exists()
+        declared = [
+            path
+            for path in _REPO_ROOT.rglob("runtime_config.yaml")
+            if "tests" not in path.relative_to(_REPO_ROOT).parts
+            and ".venv" not in path.relative_to(_REPO_ROOT).parts
+            and load_runtime_config(path.parent.parent).event_bus.lane is not None
+        ]
+        assert declared == []
 
 
 class TestRunDelegateDefaultPath:
@@ -215,7 +220,7 @@ class TestRunDelegateDefaultPath:
         )
         return captured
 
-    def _run(self, tmp_path: Path, root: Path, **overrides: object) -> int:
+    def _run(self, tmp_path: Path, root: Path | None, **overrides: object) -> int:
         kwargs: dict[str, object] = {
             "prompt": "document the router",
             "task_type": "document",
@@ -242,12 +247,43 @@ class TestRunDelegateDefaultPath:
             "kafka_bootstrap": DECLARED_DEV_BROKER,
         }
 
-    def test_positive_control_no_tier1_config_stays_tier0(
+    def test_a_bound_root_with_no_tier1_config_refuses_and_dispatches_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         captured = self._capture(tmp_path, monkeypatch)
-        assert self._run(tmp_path, _workspace(tmp_path / "ws", tier1=None)) == 0
+        with pytest.raises(click.ClickException) as exc:
+            self._run(tmp_path, _workspace(tmp_path / "ws", tier1=None))
+        assert "--bus inmemory" in str(exc.value.message)
+        assert captured == {}
+
+    def test_positive_control_no_workspace_root_is_tier0(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured = self._capture(tmp_path, monkeypatch)
+        assert self._run(tmp_path, None) == 0
         assert captured["backend_overrides"] == {"event_bus": "inmemory"}
+
+    def test_a_lane_with_no_orchestrator_is_refused_naming_it_and_the_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured = self._capture(tmp_path, monkeypatch)
+
+        def _no_consumer(**_: object) -> object:
+            raise DelegateLocusRefusedError(
+                "no live consumer group is bound to 'onex.cmd.test.v1'"
+            )
+
+        monkeypatch.setattr(cli_delegate, "resolve_delegate_locus", _no_consumer)
+        with pytest.raises(click.ClickException) as exc:
+            self._run(
+                tmp_path, _workspace(tmp_path / "ws"), locus=EnumDelegateLocus.AUTO
+            )
+        message = str(exc.value.message)
+        assert "no live consumer group" in message
+        assert "lane 'dev'" in message
+        assert DECLARED_DEV_BROKER in message
+        assert "--bus inmemory" in message
+        assert captured == {}
 
     def test_an_explicit_inmemory_bus_does_not_inherit_the_configured_lane(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

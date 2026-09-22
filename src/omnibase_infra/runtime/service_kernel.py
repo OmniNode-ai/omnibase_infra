@@ -231,15 +231,15 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 # profile), never a hardcoded code fallback.
 TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 
-# OMN-19193: the registry workspace's tier-1 (self-hosted) runtime contracts
-# directory, relative to the workspace root. Its runtime/runtime_config.yaml
-# is what an embedded runtime on the workspace resolves once no bootstrap
-# pointer is set -- the tier-1 overlay the OMN-17304 ruling composes on top of
-# tier-0. Relative to the root, like the lane declaration the CLI already reads
-# from the same root, so it is found by the workspace binding and never by cwd.
-WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = (
-    Path("omnibase_infra") / "config" / "workspace"
-)
+# OMN-19193: where a workspace keeps its own tier-1 (self-hosted) runtime
+# contracts directory, relative to the workspace root; its
+# runtime/runtime_config.yaml is what an embedded runtime on that workspace
+# resolves once no bootstrap pointer is set -- the tier-1 overlay the OMN-17304
+# ruling composes on top of tier-0. The product ships only this convention.
+# The VALUES (which transport, which lane) belong to the workspace that
+# declares them and are never shipped in this package: lab configuration is
+# not hardcoded in the product every customer runs (OMN-19184).
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
 
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
@@ -1192,13 +1192,15 @@ def resolve_embedded_runtime_config(
        lives, never what the transport is) selects the contracts directory,
        and :func:`load_runtime_config` loads it exactly as the kernel would.
     2. With no pointer, a bound WORKSPACE root answers with its tier-1
-       (self-hosted) runtime config, when it declares one:
-       ``<workspace_root>/omnibase_infra/config/workspace/runtime/runtime_config.yaml``
-       (OMN-19193). This is the tier-1 overlay the OMN-17304 ruling composes
-       on top of tier-0. It is a checked-in file found through the workspace
-       root the caller already binds for the lane declaration, so it is
-       configuration, not an env tier, and it is never found through cwd.
-    3. Otherwise the SHIPPED tier-0 default runtime configuration answers
+       (self-hosted) runtime config,
+       ``<workspace_root>/config/onex/runtime/runtime_config.yaml``
+       (OMN-19193) -- the tier-1 overlay the OMN-17304 ruling composes on top
+       of tier-0. The file belongs to the workspace, never to this package. A
+       bound root that declares none is REFUSED rather than answered with
+       tier-0: binding a workspace root is a claim to be a registry workspace,
+       and quietly running one on the in-memory bus is how its delegation
+       evidence stranded in local storage.
+    3. With neither, the SHIPPED tier-0 default runtime configuration answers
        (:func:`_load_tier0_runtime_config`) — in-memory bus, local profile.
 
     The kernel's cwd-relative ``./contracts`` fallback is DELIBERATELY not a
@@ -1213,9 +1215,10 @@ def resolve_embedded_runtime_config(
         receipts.
 
     Raises:
-        ProtocolConfigurationError: the pointed-at or shipped config exists
-            but fails validation (e.g. a lane-profile config declaring the
-            in-memory bus).
+        ProtocolConfigurationError: the pointed-at, workspace or shipped
+            config exists but fails validation (e.g. a lane-profile config
+            declaring the in-memory bus), or a workspace root is bound and
+            declares no runtime config.
     """
     pointer = os.environ.get(ENV_CONTRACTS_DIR, "").strip()
     if pointer:
@@ -1236,16 +1239,30 @@ def resolve_embedded_runtime_config(
                 workspace_contracts, correlation_id=correlation_id
             )
             return config, f"workspace tier-1 runtime config at {workspace_config}"
-        absent = f"; workspace root {workspace_root} declares no {workspace_config}"
-    else:
-        absent = ""
+        raise ProtocolConfigurationError(
+            f"workspace root {workspace_root} is bound but declares no runtime "
+            f"config at {workspace_config}. A bound workspace root is a "
+            f"registry workspace, and its transport comes from its own tier-1 "
+            f"config; it is never answered with the shipped in-memory default, "
+            f"which would strand the workspace's evidence in local storage "
+            f"(OMN-19193). Declare the workspace's runtime config there, or "
+            f"select a transport explicitly (onex delegate --bus inmemory runs "
+            f"offline on purpose).",
+            context=ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_workspace_runtime_config",
+                target_name=str(workspace_config),
+                correlation_id=correlation_id or generate_correlation_id(),
+            ),
+            config_path=str(workspace_config),
+        )
     config = _load_tier0_runtime_config(
         correlation_id=correlation_id or generate_correlation_id(),
         consumer_group_override=None,
     )
     return config, (
         f"shipped tier-0 default runtime config (no {ENV_CONTRACTS_DIR} "
-        f"bootstrap pointer set{absent})"
+        f"bootstrap pointer set, no workspace root bound)"
     )
 
 

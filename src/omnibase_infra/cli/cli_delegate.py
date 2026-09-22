@@ -193,6 +193,7 @@ from omnibase_infra.cli.task_class_selection import (
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     bind_lane_client_transport,
 )
@@ -1758,11 +1759,12 @@ def run_delegate(
             )
         try:
             default_bus = resolve_default_bus(workspace_root=omni_home)
-        except EventBusResolutionAmbiguousError as exc:
+        except (EventBusResolutionAmbiguousError, ProtocolConfigurationError) as exc:
             # OMN-16678: an indeterminate probe is a REFUSAL, not a fallback.
-            # Surfaced as a ClickException so the caller gets the ambiguity and
-            # both remedies on stderr with a non-zero exit, instead of a
-            # traceback or a silently coin-flipped transport.
+            # OMN-19193: so is a bound workspace root that declares no runtime
+            # config. Surfaced as a ClickException so the caller gets the cause
+            # and the remedies on stderr with a non-zero exit, instead of a
+            # traceback or a silently chosen transport.
             raise click.ClickException(str(exc)) from exc
         bus, reason = default_bus.bus, default_bus.reason
         if bus == "kafka" and lane is None and default_bus.lane is not None:
@@ -1922,6 +1924,18 @@ def run_delegate(
                 shared_bus_value=BUS_KAFKA,
             )
         except DelegateLocusRefusedError as exc:
+            if lane_target is not None:
+                # OMN-19193: a default workspace run lands on a declared lane,
+                # so a lane that is down refuses the operator's ordinary
+                # delegation. Name the lane, and name the one explicit way to
+                # run offline -- never fall to it.
+                raise click.ClickException(
+                    f"{exc} [lane '{lane_target.lane}', broker "
+                    f"{lane_target.bootstrap_servers}, declared in "
+                    f"{lane_target.declared_in}] To run offline on purpose, pass "
+                    "--bus inmemory: the explicit override, whose evidence stays "
+                    "in the local store."
+                ) from exc
             raise click.ClickException(str(exc)) from exc
 
         # OMN-18810: the four addressing facts the two written files record,
