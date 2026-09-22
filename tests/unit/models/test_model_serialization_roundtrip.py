@@ -60,6 +60,9 @@ from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchRe
 from omnibase_infra.runtime.enums.enum_contract_attach_gate_phase import (
     EnumContractAttachGatePhase,
 )
+from omnibase_infra.runtime.models.enum_bifrost_lane_credential_kind import (
+    EnumBifrostLaneCredentialKind,
+)
 
 # -- Runtime models --
 from omnibase_infra.runtime.models.model_batch_publisher_config import (
@@ -69,8 +72,10 @@ from omnibase_infra.runtime.models.model_batch_publisher_metrics import (
     ModelBatchPublisherMetrics,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
-    _AUTHORIZED_BINDINGS,
     ModelBifrostLaneBackendBinding,
+)
+from omnibase_infra.runtime.models.model_bifrost_lane_backend_credential import (
+    ModelBifrostLaneBackendCredential,
 )
 from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
 from omnibase_infra.runtime.models.model_contract_attach_gate_status import (
@@ -537,31 +542,34 @@ def _make_pattern_b_broker_config() -> ModelPatternBBrokerConfig:
     )
 
 
-def _make_bifrost_lane_backend_binding() -> ModelBifrostLaneBackendBinding:
-    """Build the fixture FROM the authorized table, never from restated literals.
+def _make_bifrost_lane_backend_credential() -> ModelBifrostLaneBackendCredential:
+    return ModelBifrostLaneBackendCredential(
+        kind=EnumBifrostLaneCredentialKind.SECRET_REF,
+        secret_ref="llm.example.api_key",
+    )
 
-    OMN-16999: this factory previously spelled served_model_id/context_window by
-    hand. Every one of those literals is validated against
-    ``_AUTHORIZED_BINDINGS``, so the correction of a drifted served id broke a
-    serialization round-trip test that has nothing to do with model identity —
-    and it broke it on the pre-push full-suite escalation, several repos away
-    from the change. Deriving the values means a future re-probe touches the
-    table and the fixture follows; a round-trip test should exercise
-    serialization, not re-assert routing facts.
+
+def _make_bifrost_lane_backend_binding() -> ModelBifrostLaneBackendBinding:
+    """A lane-ADDED backend, so the round trip covers every optional field.
+
+    OMN-17099: the binding is validated for shape and completeness, not against a
+    table of lab hosts, so the fixture uses a documentation-range host and
+    exercises the added-backend declaration (provider, tier, credential,
+    capabilities), which a base-backend binding leaves unset.
     """
-    backend_key = "local-coder"
-    authorized = _AUTHORIZED_BINDINGS[backend_key]
     return ModelBifrostLaneBackendBinding(
-        backend_id=backend_key,
-        endpoint_url=(
-            f"http://{authorized.host}:{authorized.port}/v1/chat/completions"  # onex-allow-internal-ip OMN-16999 reason="derived from the authorized lab binding table"
-        ),
-        served_model_id=authorized.served_model_id,
-        parameter_count=authorized.parameter_count,
-        context_window=authorized.context_window,
+        backend_id="cloud-example",
+        endpoint_url="https://inference.example.test/v1/chat/completions",
+        served_model_id="example-model",
+        parameter_count="7B",
+        context_window=32_768,
         max_tokens=8_192,
         timeout_ms=30_000,
-        serving=authorized.serving,
+        serving=True,
+        provider="openrouter",
+        tier="cheap_cloud",
+        credential=_make_bifrost_lane_backend_credential(),
+        capabilities=("code_generation",),
     )
 
 
@@ -595,6 +603,7 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     ModelBatchPublisherConfig: _make_batch_publisher_config,
     ModelBatchPublisherMetrics: _make_batch_publisher_metrics,
     ModelBifrostLaneBackendBinding: _make_bifrost_lane_backend_binding,
+    ModelBifrostLaneBackendCredential: _make_bifrost_lane_backend_credential,
     ModelComponentHealth: _make_component_health,
     ModelContractAttachGateStatus: _make_contract_attach_gate_status,
     ModelDetailedHealthResponse: _make_detailed_health_response,

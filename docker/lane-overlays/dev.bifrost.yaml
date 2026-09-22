@@ -1,12 +1,13 @@
 # OMN-15807: Canonical local delegation contract overlay for the dev lab lane.
 #
 # This file is mounted directly by docker-compose.infra.yml and is deliberately
-# not rendered through dotenv. It owns the exact authorized .201 lab binding,
-# which the shared v2 parser enforces alongside port and URL shape.
+# not rendered through dotenv. It IS the dev lane's lab binding (OMN-17099: the
+# product ships no table of lab hosts); the shared parser enforces its shape,
+# the renderer checks each served id against the base contract, and
+# tests/fixtures/bifrost_served_models_probe.json pins each endpoint to a probe.
 # onex-allow-internal-ip OMN-15807 reason="typed dev-lane delegation contract"
 # OMN-17502: `locale: lab` states what the schema used to assume — this lane's
-# runtime sits on the lab network, so it declares the exact authorized local
-# backend set. A lane that runs elsewhere declares `locale: cloud` and zero
+# runtime sits on the lab network, so it binds the lab's local backends. A lane that runs elsewhere declares `locale: cloud` and zero
 # backends instead of mounting bindings it cannot reach.
 schema_version: "bifrost_lane_overlay.v3"
 lane: dev
