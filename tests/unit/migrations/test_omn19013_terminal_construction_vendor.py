@@ -12,7 +12,7 @@ _FORWARD = _ROOT / "docker" / "migrations" / "forward"
 _VENDOR = _FORWARD / "nodes" / "node_projection_delegation"
 _MANIFEST = _FORWARD / "_ledger" / "application-migrations.tsv"
 _FILENAME = "0045_terminal_construction_outcome_metrics.sql"
-_SHA256 = "389f85226ac6192e00949e5b6b052a8f78b17a1925d1c1ff471b9ee0e77bf897"
+_SHA256 = "796979e03d010fbe187f3adc0d2700af343cad3cb95ca8eedf48698f2a9c2ea7"
 
 
 def _manifest_rows() -> dict[str, list[str]]:
@@ -34,3 +34,51 @@ def test_vendor_bytes_and_manifest_binding_are_exact() -> None:
         f"node:node_projection_delegation:{_FILENAME}",
         _SHA256,
     ]
+
+
+def test_migration_passes_the_application_database_sql_gate() -> None:
+    """OMN-19013: 0045 must clear the OMN-15361 gate at the full bar.
+
+    The frozen baseline is shrink-only and a new file may never be added to
+    it, so this asserts the verdict the gate itself returns rather than the
+    presence of an exemption. It was RED before the fix -- the parser reads
+    ``EXTRACT(EPOCH FROM created_at)`` as a FROM clause and reported
+    ``application relation target 'created_at' must be schema-qualified`` --
+    and the sibling 0039 in this same stream already carries the parenthesised
+    operand for the same reason.
+
+    Every shipped profile is checked, not just ``local``: the gate runs the
+    corpus against each one, so a verdict proven on a single profile would not
+    be the verdict CI reaches.
+    """
+    from omnibase_infra.topology.application_database import load_topology_profile
+    from omnibase_infra.validation.application_database_domain_enforcement import (
+        lint_application_database_sql,
+    )
+
+    sql = (_VENDOR / _FILENAME).read_text(encoding="utf-8")
+    for profile in ("local", "onex-dev", "onex-prod", "stability-test"):
+        violations = lint_application_database_sql(sql, load_topology_profile(profile))
+        assert violations == (), f"{profile}: {violations}"
+
+
+def test_the_sibling_migration_is_a_positive_control() -> None:
+    """A zero from the linter means something only if it can return non-zero.
+
+    0039 is the nearest non-baselined migration in the same stream and is
+    known-clean, so this proves the harness above reaches real SQL rather
+    than silently linting nothing.
+    """
+    from omnibase_infra.topology.application_database import load_topology_profile
+    from omnibase_infra.validation.application_database_domain_enforcement import (
+        lint_application_database_sql,
+    )
+
+    sibling = _VENDOR / "0039_delegation_aggregate_views_per_tenant.sql"
+    assert sibling.is_file()
+    assert (
+        lint_application_database_sql(
+            sibling.read_text(encoding="utf-8"), load_topology_profile("local")
+        )
+        == ()
+    )

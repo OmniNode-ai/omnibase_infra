@@ -772,11 +772,24 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # row-level security, so a tenant posture would assert an isolation the
     # schema does not enforce. Vendored into omnibase_infra FIRST per the
     # node-migration-vendor-parity ordering, ahead of omnimarket#2744.
-    # 205 -> 206 for OMN-19013: the append-only delegation quality-reader
+    #
+    # 205 -> 207 for OMN-18999 (surface 2 of 4 under OMN-18946), which vendors
+    # TWO node-owned migrations in the same pair shape as OMN-18900 directly
+    # above: 0000_create_prod_promotion_gate_decisions.sql, one durable row per
+    # prod-promotion-gate evaluation keyed on the redeploy run, so that a
+    # refusal leaves a queryable row instead of only a return value, and
+    # 0001_grant_omninode_runtime_prod_promotion_gate_decisions.sql, which
+    # ISSUES the grants the topology only declares -- the table half and the
+    # BIGSERIAL cursor's own standalone sequence, both asserted. The grant
+    # rides in the owning node's own lineage, so it is a second declaration
+    # here rather than an edit to the first.
+    # 207 -> 209 for OMN-18987: the append-only 0043z predecessor and the
+    # immutable 0044 delegation-shadow-comparisons restoration migration.
+    # 209 -> 210 for OMN-19013: the append-only delegation quality-reader
     # correction must be a first-class vendored application migration. Its
     # exact source bytes and manifest binding are pinned separately by
     # test_omn19013_terminal_construction_vendor.py.
-    assert len(result.declarations) == 206
+    assert len(result.declarations) == 210
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

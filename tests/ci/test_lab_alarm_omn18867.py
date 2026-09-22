@@ -948,6 +948,79 @@ def test_the_installer_prints_both_halves_of_the_omn17173_readback() -> None:
     assert "/Users/" not in body
 
 
+def _render_lab_alarm_plist(
+    tmp_path: Path, *, drop_env: str | None = None
+) -> subprocess.CompletedProcess[bytes]:
+    """Invoke the real installer's ``--render-only`` mode against a fixture env.
+
+    Never touches launchd, plutil or the real ``~/Library/LaunchAgents`` --
+    ``--render-only`` writes the substituted plist to an explicit target and
+    exits before any of that, so this is safe on a CI runner with no brew
+    interpreter (see the installer's own fallback for a missing one).
+    """
+    fake_omni_home = tmp_path / "omni_home"
+    (fake_omni_home / "omnibase_infra" / "config").mkdir(parents=True)
+    (fake_omni_home / "omnibase_infra" / "config" / "lab_alarm.json").write_text("{}")
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path / "home"),
+        "OMNI_HOME": str(fake_omni_home),
+        "ONEX_INFRA_HOST": "lab.fixture.invalid",
+        "ONEX_RUNTIME_SSH_HOST": "fixture-user@lab.fixture.invalid",
+    }
+    if drop_env is not None:
+        del env[drop_env]
+    return subprocess.run(
+        [str(INSTALLER), "--render-only", str(tmp_path / "rendered.plist")],
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+
+
+@pytest.mark.unit
+def test_a_render_carries_the_lab_host_and_ssh_target_from_the_installing_env(
+    tmp_path: Path,
+) -> None:
+    """AC1's env-var half.
+
+    The plist template's ``EnvironmentVariables`` carried ``OMNI_HOME`` and
+    ``PATH`` but not the two vars ``config/lab_alarm.json`` needs to even
+    load. Falsifier: a rendered plist that still carries an ``@..@``
+    placeholder, which is exactly what crashed the agent at config load on
+    the first real launchd fire -- measured live during the OMN-18867 AC1
+    install, 2026-09-21: a manual shell run succeeded on the operator's
+    inherited env while ``launchctl kickstart`` on that same installed plist
+    died before evaluating any condition, because launchd never sources
+    ``~/.zshrc``.
+    """
+    completed = _render_lab_alarm_plist(tmp_path)
+    assert completed.returncode == 0, completed.stderr.decode()
+    rendered = (tmp_path / "rendered.plist").read_text(encoding="utf-8")
+    assert "lab.fixture.invalid" in rendered
+    assert "fixture-user@lab.fixture.invalid" in rendered
+    assert "@ONEX_INFRA_HOST@" not in rendered
+    assert "@ONEX_RUNTIME_SSH_HOST@" not in rendered
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing", ["ONEX_INFRA_HOST", "ONEX_RUNTIME_SSH_HOST"])
+def test_the_installer_refuses_rather_than_render_an_empty_lab_host(
+    tmp_path: Path, missing: str
+) -> None:
+    """Falsifier: the installer renders a blank instead of refusing.
+
+    A silently empty ``${ONEX_INFRA_HOST}`` or ``${ONEX_RUNTIME_SSH_HOST}``
+    is Operating Rule 8's exact failure mode -- a default the agent then
+    fires against -- and the two-cluster / two-host confusion this repo has
+    already hit once makes an empty lab address worse than a loud refusal.
+    """
+    completed = _render_lab_alarm_plist(tmp_path, drop_env=missing)
+    assert completed.returncode != 0
+    assert missing in completed.stderr.decode()
+    assert not (tmp_path / "rendered.plist").exists()
+
+
 @pytest.mark.unit
 def test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv() -> None:
     """Operating Rule 11: launchd has a restricted PATH and no login shell.
