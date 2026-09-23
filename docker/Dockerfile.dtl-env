@@ -20,8 +20,17 @@
 #   dtl-env:<repo>-<sha256(uv.lock)[:12]>-<test image id[:12]>
 #
 # Build (context = a directory holding only pyproject.toml and uv.lock):
-#   docker build -f docker/Dockerfile.dtl-env \
-#     --build-arg TEST_IMAGE=<test image id> -t dtl-env:<key> <context dir>
+#   docker build --provenance=false --sbom=false -f docker/Dockerfile.dtl-env \
+#     --build-arg SOURCE_DATE_EPOCH=0 \
+#     --build-arg TEST_IMAGE=omninode-gate-runner:dtl-<omnibase_infra sha> \
+#     -t dtl-env:<key> <context dir>
+#
+# TEST_IMAGE is the test image's content-keyed TAG: BuildKit resolves a FROM
+# through a registry reference and refuses a bare image id. The two flags and
+# SOURCE_DATE_EPOCH make a rebuild reproduce the same image id. Measured on
+# .101 (Docker Desktop 29.8.0, containerd image store): without
+# --provenance=false, two cached builds gave two different ids, because the
+# provenance attestation carries the build time.
 ARG TEST_IMAGE
 FROM ${TEST_IMAGE}
 
