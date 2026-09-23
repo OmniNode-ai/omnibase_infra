@@ -3321,6 +3321,7 @@ def evaluate_workflow_verdict(
     out: Any,
     *,
     now: datetime | None = None,
+    dispatch_title_contains: str = "",
 ) -> int:
     """Fail closed unless the NEWEST completed measurement of a workflow is green.
 
@@ -3352,6 +3353,15 @@ def evaluate_workflow_verdict(
     newest measurement older than ``max_age_hours``, or an unparseable start.
     There is no override, and a manual dispatch with non-default inputs is not
     admitted unless the caller admits its event.
+
+    ``dispatch_title_contains`` (OMN-19311, D11) narrows an admitted
+    ``workflow_dispatch`` further: such a run is a measurement only when its run
+    title carries the token. D11's nightly takes a ``lane`` input and renders it
+    into its ``run-name``; admitting its dispatches (the fast path to a fresh
+    measurement after a fix) without this would let a green dispatch aimed at
+    the dev lane stand in for the governed stability-test verdict, dropping the
+    red by changing what is measured. Runs of every other admitted event are
+    unaffected: a scheduled run takes no inputs and measures the default lane.
     """
     moment = now or datetime.now(tz=UTC)
     admitted = tuple(dict.fromkeys(e.strip() for e in events if e.strip()))
@@ -3398,6 +3408,11 @@ def evaluate_workflow_verdict(
         and r.get("status") == "completed"
         and r.get("head_branch") == branch
         and r.get("event") in admitted
+        and (
+            not dispatch_title_contains
+            or r.get("event") != "workflow_dispatch"
+            or dispatch_title_contains in str(r.get("display_title", ""))
+        )
     ]
     ignored = len(runs) - len(candidates)
     print(
@@ -3405,6 +3420,12 @@ def evaluate_workflow_verdict(
         f"({len(candidates)} completed run(s) admitted, {ignored} other(s) ignored)",
         file=out,
     )
+    if dispatch_title_contains:
+        print(
+            f"  dispatches  : admitted only when the run title carries "
+            f"{dispatch_title_contains!r}",
+            file=out,
+        )
     if not candidates:
         return refuse(
             f"no completed {'/'.join(admitted)} run exists on {branch}; an absent "
@@ -3433,6 +3454,7 @@ def evaluate_workflow_verdict(
         file=out,
     )
     print(f"  run head    : {head} (the workflow file's sha, not the lane's)", file=out)
+    print(f"  run title   : {newest.get('display_title', '?')}", file=out)
     print(f"  url         : {newest.get('html_url', '?')}", file=out)
 
     if conclusion != "success":
@@ -3853,6 +3875,14 @@ def build_parser() -> argparse.ArgumentParser:
             "other event is ignored, never counted as a pass."
         ),
     )
+    verdict.add_argument(
+        "--dispatch-title-contains",
+        default="",
+        help=(
+            "OMN-19311: an admitted workflow_dispatch run is a measurement only "
+            "when its run title carries this token (the lane it measured)"
+        ),
+    )
 
     verify = sub.add_parser(
         "verify",
@@ -4132,6 +4162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.max_age_hours,
             args.event,
             sys.stdout,
+            dispatch_title_contains=args.dispatch_title_contains,
         )
 
     raise AssertionError(f"unreachable subcommand {args.command!r}")  # pragma: no cover
