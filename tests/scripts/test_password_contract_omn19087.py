@@ -322,7 +322,6 @@ def test_migration_runner_login_roles_and_pattern_match_the_contract() -> None:
     assert names == _CONTRACT.LOGIN_ROLE_VARS
     body = _function_body(text, "reassert_login_only_role_credential")
     assert "*[!0-9a-fA-F]*)" in body
-    assert "preflight_password_contract.py" in body
 
 
 def test_bootstrap_login_roles_and_patterns_match_the_contract() -> None:

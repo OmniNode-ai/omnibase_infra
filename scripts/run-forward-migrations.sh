@@ -1498,13 +1498,6 @@ reassert_login_only_role_credential() {
   # (openssl rand -hex 32). A placeholder or a quoted value is a provisioning
   # defect, not something to paper over.
   #
-  # OMN-19087: this is the consumer's own guard, not the first one. The same
-  # hex rule, with the format of the other two compose passwords, is stated
-  # once in scripts/preflight_password_contract.py and checked there before
-  # any container starts (deploy-runtime.sh, and the compose env preflight the
-  # deploy agent runs). tests/scripts/test_password_contract_omn19087.py pins
-  # this case pattern and the role list below to that contract.
-  #
   # Deliberately STRICTER than the bootstrap, which counts an invalid password
   # as a SKIP and carries on. A skip is right for an ABSENT credential (the lane
   # has not been provisioned) and wrong for a MALFORMED one: skipping there is
