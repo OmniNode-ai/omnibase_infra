@@ -961,6 +961,25 @@ route:
       - omninode_infra
       - omniweb
       - onex_change_control
+    # ALERT DEDUP WINDOW (OMN-18942), in hours.
+    #
+    # Measured 2026-09-23: with the channel secrets set at 10:43Z, every
+    # scheduled run of pr-ci-zombie-detector.yml re-posted the same unchanged
+    # findings (runs 35850665037, 35851297482, 35852673260). A finding whose
+    # failure count is unchanged or lower than the count last POSTED is
+    # suppressed for this long after that post, and the suppression is written
+    # to the run's report artifact and job summary. A new finding, a higher
+    # count, or an expired window posts immediately.
+    #
+    # WHY 24: a standing, unchanged non-required-check failure is a triage
+    # item, not a page. Once per day keeps it in front of a reader without the
+    # ~144 posts a day a ten-minute cadence would otherwise produce, and any
+    # deterioration re-posts at once, so the window never hides a worsening.
+    # Shorter (the `.201` reporter re-surfaces its scheduled-workflow keys
+    # every 6h) would put four copies of an unchanged finding in the channel
+    # per day for a class that blocks nothing. The prior state lives in the
+    # report artifact, whose 30-day retention comfortably covers the window.
+    alert_dedup_window_hours: 24
     # ABSENT FROM required_status_checks IS NOT THE SAME AS UNENFORCED.
     # omnibase_infra requires exactly ONE context on dev - the CI Summary
     # umbrella - whose poller fails on any job in its own run that concludes

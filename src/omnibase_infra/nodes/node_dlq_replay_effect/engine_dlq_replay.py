@@ -190,6 +190,14 @@ class ModelDlqReplayEngineConfig(BaseModel):
     # rather than carved out of its remainder: teardown must still get a real
     # budget on a run that legitimately spent its whole clock on records.
     dependency_lifecycle_timeout_seconds: float = Field(default=15.0, gt=0.0)
+    # OMN-19241: how many times one record may FAIL (neither replayed nor
+    # quarantined) before the drain stops attempting its partition. A failed
+    # record withholds its offset, so without a bound the next run re-reads it
+    # and fails again for as long as the cause persists. At this count the
+    # partition is HALTED: nothing on it is attempted again in this process, a
+    # CRITICAL line names the coordinate, and every later run result carries it
+    # in ``halted_partitions``. The offset is still never committed past it.
+    max_record_failure_attempts: int = Field(default=5, gt=0)
 
     @field_validator("bootstrap_servers")
     @classmethod
