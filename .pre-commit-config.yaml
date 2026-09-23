@@ -666,6 +666,17 @@ repos:
         files: ^(scripts/ci/(run_on_gate_runner|gate_runner_supervisor)\.sh|scripts/hooks/prepush_smart_tests\.sh|tests/ci/test_gate_runner_detached_entrypoint\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19206: the runner image must keep Playwright chromium's system
+      # libraries, because a job on the fleet cannot apt-install them. This pins
+      # the package list and the build smoke's in-image ldconfig assertion; the
+      # same file runs in CI (it is under `testpaths`).
+      - id: runner-image-playwright-chromium-libs
+        name: runner image Playwright chromium libraries (OMN-19206)
+        entry: uv run --frozen pytest tests/ci/test_runner_image_playwright_chromium_libs_omn19206.py -q
+        language: system
+        files: ^(docker/runners/Dockerfile|\.github/workflows/runner-image-build-smoke\.yml|tests/ci/test_runner_image_playwright_chromium_libs_omn19206\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-17214: every subscription path the auto-wiring loop can select must
       # register a consumer-flow counter. `_make_event_bus_callback` got that
       # seam from OMN-16777; `_make_raw_event_projection_callback` -- the branch
@@ -842,6 +853,28 @@ repos:
       - id: onex-check-topology-grant-delivery
         name: ONEX Topology Grant Delivery
         entry: uv run --frozen python scripts/validation/check_topology_grant_delivery.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      # OMN-17422 AC5: a policy predicated on the app.tenant_id session GUC is
+      # satisfiable only if the writer reaching the relation SETS that GUC, and
+      # only TenantProjectionTableOperation does — the Internal and Catalog
+      # operations say in their own docstrings that they never open a tenant
+      # transaction. So a relation whose declared domain is omninode_internal
+      # or platform_catalog carrying such a policy can never be written by its
+      # declared writer; it survives today only where the connection owns the
+      # table and FORCE is off, and fails closed under the non-bypassing login
+      # lab parity requires. Fourth RLS-shape defect on this family
+      # (OMN-17288 -> OMN-17298 -> OMN-17315 -> OMN-18774), so it is a gate.
+      # Judges NET end state, never a text match: the corpus is append-only, so
+      # the CREATE POLICY OMN-18774 remediated is still in the tree verbatim
+      # and a grep would report a fixed defect as live.
+      # always_run because the subject is the whole corpus plus the whole
+      # topology, not the staged file list.
+      - id: onex-check-tenant-guc-domain-parity
+        name: ONEX Tenant GUC Domain Parity
+        entry: uv run --frozen python scripts/validation/check_tenant_guc_domain_parity.py
         language: system
         pass_filenames: false
         always_run: true

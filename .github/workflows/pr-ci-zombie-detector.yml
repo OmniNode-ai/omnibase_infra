@@ -24,26 +24,32 @@
 # stdlib-only (argparse/json/subprocess/dataclasses) plus the `gh` CLI, both
 # preinstalled on GitHub-hosted runners -- no `uv sync` / venv needed.
 #
-# Token: CROSS_REPO_PAT, because the target repos (onex_change_control,
-# omnimarket) are NOT this repo -- the default GITHUB_TOKEN cannot
-# force-cancel runs in another repo, and force-cancel needs Actions WRITE on
-# the target. Neither org App can stand in yet: read live on 2026-09-23 from
-# `gh api /orgs/OmniNode-ai/installations`, `onexbot` (installation
-# 123040063) and `onexbot-occ-writer` (148180820) both carry `actions: read`
-# only. Granting an App Actions write is an installation-permission change,
-# which is an operator action (OMN-19258; the PAT's retirement is OMN-16373).
+# Token: a minted `onexbot` App installation token (OMN-19258). The target
+# repos (onex_change_control, omnimarket) are NOT this repo, so the default
+# GITHUB_TOKEN cannot read or force-cancel their runs, and force-cancel needs
+# Actions WRITE on the target. The operator granted `onexbot` (app 3342522,
+# installation 123040063) `actions: write` on 2026-09-23 (ruling on
+# OMN-19258); read back live from `gh api /orgs/OmniNode-ai/installations`
+# at 2026-09-23T15:06:01Z. The token is scoped to exactly the two target
+# repos and to `actions: write`, the only permission the script's three calls
+# need (list runs, list a run's jobs, force-cancel a run).
 #
-# EVERY FAILURE IS RED (OMN-19258). There is no skip path any more:
-#   - an absent CROSS_REPO_PAT fails the job at its first step. It used to
-#     print a warning and skip the detector with the job GREEN, which is the
-#     silent-gate shape the 2026-09-20 operator ruling forbids;
+# WHY IT IS NOT CROSS_REPO_PAT ANY MORE. Until OMN-19258 this job ran on
+# CROSS_REPO_PAT, a personal access token. Its rate limit is its owning
+# account's personal quota, shared with every other consumer of that token
+# (OMN-19101), and measured over the retained history (2,907 runs,
+# 2026-08-25..2026-09-23) 68 of 2,904 reports carried a rate-limit fetch
+# error for BOTH target repos: 68 runs that saw nothing and were green. An
+# App installation token has its own quota. The PAT secret itself still
+# exists for other workflows; its retirement is OMN-16373, not this file.
+#
+# EVERY FAILURE IS RED (OMN-19258). There is no skip path and no fallback:
+#   - a failed or empty token mint fails the job before the detector runs.
+#     There is no fallback to GITHUB_TOKEN (it cannot reach another repo's
+#     runs, so it would read nothing) or to the PAT;
 #   - the detector exits 1 when it could not read a target repo, read zero
 #     runs from one, or failed a force-cancel. It used to exit 0 on every
-#     completed scan: measured over the retained history (2,907 runs,
-#     2026-08-25..2026-09-23), 68 of 2,904 reports carried a rate-limit
-#     fetch error for BOTH repos and each of those runs was green while
-#     seeing nothing. The PAT's rate limit is its owning account's, shared
-#     with every other consumer of that token (OMN-19101);
+#     completed scan, which is how the 68 blind runs above were green;
 #   - the report is uploaded even when the detector exits 1, and its
 #     `scanned` map (runs read per repo) is the positive control that tells a
 #     clean sweep from a blind one.
@@ -57,11 +63,11 @@
 # scheduler to read the same API would be a second thing to keep alive for no
 # new capability.
 #
-# The two jobs do NOT share a credential, and that is deliberate rather than an
-# oversight. The zombie detector WRITES (force-cancel) to two repos and keeps
-# CROSS_REPO_PAT; the alerter only READS, but reads a PRIVATE repo's check-runs
-# and a branch's protection, which that PAT cannot do -- see the OMN-18254
-# comment on its mint step below.
+# The two jobs mint SEPARATE tokens from the same `onexbot` App, and that is
+# deliberate. The zombie detector WRITES (force-cancel) Actions on two repos;
+# the alerter only READS, but reads a PRIVATE repo's check-runs and a branch's
+# protection -- see the OMN-18254 comment on its mint step below. One token per
+# job keeps each at the narrowest repository list and permission set it needs.
 #
 # The workflow's name still says "Zombie Detector" and now carries a second,
 # adjacent concern. That is named here rather than papered over: both jobs
@@ -69,7 +75,7 @@
 # concurrency groups and one for checks that fail without blocking.
 #
 # The two jobs are independent -- no `needs` -- so a zombie-detector failure
-# (for example a missing CROSS_REPO_PAT) does not silence the alerter, and an
+# (for example a failed token mint) does not silence the alerter, and an
 # alerter failure does not stop a wedge from being cleared.
 name: PR CI Zombie Detector
 
@@ -102,24 +108,43 @@ jobs:
         with:
           persist-credentials: false
 
-      # OMN-19258: a missing credential FAILS the job. No fallback to
+      # OMN-19258: the onexbot App token, scoped to exactly the two repos the
+      # detector reads and cancels in, with `actions: write` and nothing
+      # else. The script's only calls are `GET actions/runs`,
+      # `GET actions/runs/{id}/jobs` and `POST actions/runs/{id}/force-cancel`,
+      # all covered by Actions; metadata read is implicit on every
+      # installation token. Same action and pin as the sibling job's mint.
+      - name: Mint the onexbot App token (OMN-19258)
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: |
+            onex_change_control
+            omnimarket
+          permission-actions: write
+
+      # The mint action already fails its own step; this catches the one
+      # shape it cannot: an empty token that still exits 0. No fallback to
       # GITHUB_TOKEN (it cannot reach another repo's runs, so it would read
       # nothing and report a clean sweep) and no skip.
-      - name: Refuse a missing CROSS_REPO_PAT
+      - name: Refuse an empty minted token
         env:
-          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          if [ -z "${CROSS_REPO_PAT}" ]; then
-            echo "::error::CROSS_REPO_PAT is not set. The zombie detector cannot read or force-cancel runs in onex_change_control/omnimarket without it. Failing closed -- a detector that cannot see must never read as a clean sweep (OMN-19258)."
+          if [ -z "${APP_TOKEN}" ]; then
+            echo "::error::onexbot App token mint produced an empty token. The zombie detector cannot read or force-cancel runs in onex_change_control/omnimarket without it. Failing closed -- a detector that cannot see must never read as a clean sweep (OMN-19258)."
             exit 1
           fi
-          echo "CROSS_REPO_PAT present."
+          echo "onexbot App token minted."
 
       - name: Run zombie detector
         id: detector
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DO_APPLY: ${{ (github.event_name == 'workflow_dispatch' && inputs.apply == false) && 'false' || 'true' }}
         run: |
           set -euo pipefail

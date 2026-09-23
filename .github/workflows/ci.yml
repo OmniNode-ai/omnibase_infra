@@ -4601,6 +4601,20 @@ jobs:
       - name: Check topology grant delivery
         run: uv run python scripts/validation/check_topology_grant_delivery.py
 
+      # OMN-17422 AC5. Exactly one code path issues set_config('app.tenant_id',
+      # ...) -- tenant_transaction, reached only from TenantProjectionTableOperation.
+      # The Internal and Catalog operations never do, and the kernel picks the
+      # operation class from the relation's declared domain. So a GUC-predicated
+      # policy on an internal- or catalog-declared relation is unsatisfiable by
+      # its own declared writer: OMN-18774 found generation_events and
+      # node_service_registry in exactly that state, writing only because the
+      # connection owned the table and FORCE was off. Fourth instance of this
+      # shape, so detection becomes enforcement (Rule 5). Net end state, not a
+      # text match -- the corpus is append-only and the remediated CREATE POLICY
+      # is still in the tree.
+      - name: Check tenant GUC / declared-domain parity
+        run: uv run python scripts/validation/check_tenant_guc_domain_parity.py
+
   # Migration integration test -- spins up real Postgres, applies all migrations,
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:

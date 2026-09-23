@@ -58,3 +58,79 @@ SIBLING_CLONE_MANIFEST_DIST_NAMES=(
     "omnibase-compat"
     "omnimarket"
 )
+
+# ---------------------------------------------------------------------------
+# OMN-19072: every OTHER named sibling set lives here too.
+#
+# Six scripts in this directory used to keep literal lists of their own. One of
+# them, cut-lab-ref.sh, carried a comment saying it mirrored stage_workspace.sh
+# plus the build context, which was false in both directions: it added
+# onex_change_control and it omitted omnibase_spi, the very repo whose absence
+# caused OMN-15137. A reader took that list for the clone set and wrote a
+# runbook that failed on first use. The sets below are the only place a sibling
+# repo is spelled under scripts/runtime_build/;
+# tests/scripts/test_sibling_clone_manifest_parity.py fails on a literal
+# sibling array anywhere else in the directory and pins each relation below.
+# ---------------------------------------------------------------------------
+
+# Siblings vendored as SOURCE into the runtime image (rsync'd by
+# stage_workspace.sh, clean-checked-out to DEPLOY_REF by its RT-1 step, and
+# staged by prepr_verify_lane.sh), in install order: omnibase_core FIRST so
+# the dev-HEAD core is the resolved core for everything after it (OMN-13405).
+# A strict subset of SIBLING_CLONE_MANIFEST: omnibase_infra is the Docker build
+# context itself and omnibase_spi is installed from the published wheel. It is
+# also the key set of compute_workspace_provenance.py's WORKSPACE_PACKAGES,
+# which runs inside the image and cannot source this file; the parity test
+# holds the two equal.
+# shellcheck disable=SC2034  # consumed by scripts that `source` this file
+SIBLING_VENDORED_REPOS=(
+    "omnibase_core"
+    "omnibase_compat"
+    "omnimarket"
+)
+
+# Repos the lab lane scripts TRACK although they are not build siblings: the
+# lab tag cutters tag them and the lane refresh scripts move them to the
+# deployed ref, but nothing vendors them and no pin preflight reads them.
+# onex_change_control left the runtime image in OMN-16296, but both tag cutters
+# have always tagged it and both refresh scripts refresh it.
+# shellcheck disable=SC2034  # consumed by scripts that `source` this file
+SIBLING_EXTRA_TRACKED_REPOS=(
+    "onex_change_control"
+)
+
+# The lab tag set (cut-lab-ref.sh --cut-tag, cut_release_train_tag.sh): every
+# clone the pin preflight reads, plus the extras above. Derived, never spelled,
+# so a sibling added to the manifest is tagged without anyone remembering to.
+# shellcheck disable=SC2034  # consumed by scripts that `source` this file
+SIBLING_LAB_TAG_REPOS=(
+    "${SIBLING_CLONE_MANIFEST[@]}"
+    "${SIBLING_EXTRA_TRACKED_REPOS[@]}"
+)
+
+# Tag-set members the lane refresh scripts do NOT move. omnibase_spi is
+# installed from the wheel its lock pins, and refresh_dev_lane.sh and
+# refresh_stability_lane.sh have never checked its clone out to the deployed
+# ref. OMN-19072 records that membership as it was; changing it would change
+# what a lane refresh does, which is out of that ticket's scope.
+# shellcheck disable=SC2034  # consumed by scripts that `source` this file
+SIBLING_LANE_REFRESH_EXCLUDED_REPOS=(
+    "omnibase_spi"
+)
+
+# The repos refresh_dev_lane.sh and refresh_stability_lane.sh record prior
+# HEADs for and refresh: the tag set less the exclusions above.
+# shellcheck disable=SC2034  # consumed by scripts that `source` this file
+SIBLING_LANE_REFRESH_REPOS=()
+for _sibling_manifest_repo in "${SIBLING_LAB_TAG_REPOS[@]}"; do
+    _sibling_manifest_skip=false
+    for _sibling_manifest_excluded in "${SIBLING_LANE_REFRESH_EXCLUDED_REPOS[@]}"; do
+        if [[ "${_sibling_manifest_repo}" == "${_sibling_manifest_excluded}" ]]; then
+            _sibling_manifest_skip=true
+        fi
+    done
+    if [[ "${_sibling_manifest_skip}" == false ]]; then
+        SIBLING_LANE_REFRESH_REPOS+=("${_sibling_manifest_repo}")
+    fi
+done
+unset _sibling_manifest_repo _sibling_manifest_skip _sibling_manifest_excluded

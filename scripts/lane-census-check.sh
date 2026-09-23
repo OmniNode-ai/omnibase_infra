@@ -41,7 +41,13 @@
 # Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps,
 #             4 inventory unobservable (BOTH Engine API and bounded CLI failed —
 #               fail-loud, NO drift event; deliberately distinct from 30 so a host
-#               we cannot see is never reported as a host that is down. OMN-15466).
+#               we cannot see is never reported as a host that is down. OMN-15466),
+#             5 host undeclared (LANE_CENSUS_HOST, default `hostname`, names no entry
+#               of the manifest's `hosts:` registry — no plan, no event. OMN-19088).
+#
+# Host scoping (OMN-19088): only the lanes the manifest declares for this host
+# are evaluated; the rest are reported in `lanes_not_applicable`, and one of
+# them found RUNNING here is a `lane_on_undeclared_host` finding.
 #
 # Runs on .201 via the SHARED onex-disk-gc.timer (4th ExecStart — coordinated with
 # OMN-13008 rather than a second timer). Log: ~/.local/log/onex/lane-census.log
@@ -69,6 +75,8 @@ OBSERVED_TOPIC="onex.evt.omnibase-infra.lane-census-observed.v1"
 OBSERVED_OUT=""
 # Inventory unobservable — NOT drift. See the exit-code table above (OMN-15466).
 EXIT_INVENTORY_UNAVAILABLE=4
+# Host not declared in the manifest's hosts registry — NOT drift (OMN-19088).
+EXIT_HOST_UNDECLARED=5
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -183,7 +191,25 @@ fi
 # Surface any fallback/degradation notices without changing the exit policy.
 while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/inventory.err"
 
-PLAN_JSON="$(echo "$ENVELOPE_JSON" | "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_plan.py")"
+# OMN-19088: the planner evaluates only the lanes the manifest declares for this
+# host and reports the others not-applicable. It resolves HOST through the
+# manifest's `hosts:` registry and refuses (exit 5) a host that registry does
+# not declare. No plan exists for such a host, so nothing is emitted, written or
+# published: a census that cannot say which host it describes describes none.
+set +e
+PLAN_JSON="$(echo "$ENVELOPE_JSON" | LANE_CENSUS_HOST="$HOST" "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_plan.py" 2>"$SCRATCH/plan.err")"
+PLAN_RC=$?
+set -e
+if [[ $PLAN_RC -ne 0 ]]; then
+  while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/plan.err"
+  if [[ $PLAN_RC -eq $EXIT_HOST_UNDECLARED ]]; then
+    log "ABORT: host '$HOST' is not declared in the lane manifest's hosts registry. \
+Publishing NO census — declare the host and its lanes first."
+  else
+    log "ABORT: the lane planner failed (exit $PLAN_RC)."
+  fi
+  exit "$PLAN_RC"
+fi
 
 if [[ "$EMIT_JSON" == true ]]; then
   echo "$PLAN_JSON"

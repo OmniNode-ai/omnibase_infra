@@ -31,9 +31,16 @@ Values are never printed, never logged and never compared — only presence and
 emptiness. A variable set to the empty string counts as missing, because that is
 exactly how ``${VAR:?}`` treats it.
 
+It also runs the compose password FORMAT contract (OMN-19087), stated once in
+``scripts/preflight_password_contract.py``, so the deploy agent and
+``refresh_dev_lane.sh`` refuse a malformed password here, before any container
+starts, rather than in the forward migration after the infrastructure is up. That
+check matches each set password against a pattern and still prints only names.
+
 Exit codes:
-  0 — every required variable is set and non-empty in this environment
-  1 — at least one is missing (all of them are named in the message)
+  0 — every required variable is set and non-empty, and every set password
+      matches its format
+  1 — at least one is missing or malformed (all of them are named)
   2 — a compose file could not be read
 """
 
@@ -44,6 +51,12 @@ import os
 import re
 import sys
 from pathlib import Path
+
+# The format contract lives beside this script. Running a script puts its own
+# directory on sys.path, which is how the deploy agent and refresh_dev_lane.sh
+# invoke it; the explicit insert covers an import from anywhere else.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import preflight_password_contract as password_contract
 
 # docker-compose required-var syntax: ${VARNAME:?message}. The :? form aborts
 # compose when the variable is unset OR empty. Same pattern as
@@ -137,12 +150,21 @@ def main(argv: list[str] | None = None) -> int:
     policy_keys = _dotenv_keys(Path(args.runtime_policy_env))
 
     missing = sorted(name for name in required if not os.environ.get(name, "").strip())
+    malformed = password_contract.violations(os.environ)
+    if malformed:
+        print(
+            password_contract.render_refusal(malformed, args.lane),
+            file=sys.stderr,
+        )
 
     if not missing:
+        if malformed:
+            return 1
         print(
             f"OK: all {len(required)} required compose variables for lane "
             f"'{args.lane}' are set in this environment "
-            f"({', '.join(p.name for p in compose_paths)})."
+            f"({', '.join(p.name for p in compose_paths)}), and every set "
+            "compose password matches its format."
         )
         return 0
 
