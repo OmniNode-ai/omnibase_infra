@@ -25,6 +25,11 @@ class ModelEventBusConfig(BaseModel):
             the in-memory bus, which is a first-class configured value for
             local runtimes and the shipped tier-0 default.
         environment: Deployment environment name
+        lane: The declared lane (``omnimarket/config/ci_bus_lanes.yaml``)
+            whose broker a runtime's shared bus is. ``None`` for a runtime
+            whose broker is supplied by its own deployment (every lane
+            container), and required for none -- but only a ``kafka``
+            transport can name one (OMN-19193).
         max_history: Maximum event history to retain
         circuit_breaker_threshold: Failure count before circuit breaker trips
     """
@@ -51,6 +56,15 @@ class ModelEventBusConfig(BaseModel):
     environment: str = Field(
         default="local",
         description="Deployment environment name",
+    )
+    lane: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The declared lane whose broker this runtime's shared bus is "
+            "(OMN-19193). Resolved through the lane declaration, never taken "
+            "from KAFKA_BOOTSTRAP_SERVERS. Valid only with type 'kafka'."
+        ),
     )
     max_history: int = Field(
         default=1000,
@@ -87,6 +101,16 @@ class ModelEventBusConfig(BaseModel):
                 f"legitimately wants '{self.type.value}' must declare "
                 f"event_bus.profile: '{EnumEventBusProfile.LOCAL.value}' "
                 f"(OMN-17304)."
+            )
+            raise ValueError(msg)
+        if self.lane is not None and self.type is not EnumEventBusType.KAFKA:
+            # Mirrors the CLI's own refusal of --lane on an in-process bus: a
+            # lane names a broker, and a transport with no broker would ignore
+            # it silently (OMN-19193).
+            msg = (
+                f"event_bus.lane '{self.lane}' names a broker, but event_bus.type "
+                f"is '{self.type.value}'. A lane is only meaningful with "
+                f"'{EnumEventBusType.KAFKA.value}'."
             )
             raise ValueError(msg)
         return self

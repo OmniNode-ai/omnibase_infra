@@ -1595,7 +1595,7 @@ def test_drift_override_env_unset_still_refuses(
 
     result = CliRunner().invoke(
         run_skill_by_name,
-        ["definitely_not_a_real_skill", "--omni-home", "/fake/omni_home"],
+        ["definitely_not_a_real_skill", "--omnibase-path", "/fake/workspace"],
     )
 
     assert result.exit_code != 0
@@ -1617,7 +1617,7 @@ def test_drift_override_env_is_actually_bound_to_the_flag(
 
     result = CliRunner().invoke(
         run_skill_by_name,
-        ["definitely_not_a_real_skill", "--omni-home", "/fake/omni_home"],
+        ["definitely_not_a_real_skill", "--omnibase-path", "/fake/workspace"],
     )
 
     combined = result.output + str(result.exception or "")
@@ -1640,7 +1640,7 @@ def test_drift_override_env_falsey_values_still_refuse(
 
     result = CliRunner().invoke(
         run_skill_by_name,
-        ["definitely_not_a_real_skill", "--omni-home", "/fake/omni_home"],
+        ["definitely_not_a_real_skill", "--omnibase-path", "/fake/workspace"],
     )
 
     assert result.exit_code != 0

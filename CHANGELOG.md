@@ -1,3 +1,27 @@
+## v0.38.56 (2026-09-23)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.56 by the scheduled release train.
+- 15 release-relevant commit(s) merged since v0.38.51.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.51
+- fix(OMN-19197): the customer onex spells its workspace-root option --omnibase-path (#3984)
+- feat(OMN-19081): read the key grain from the contract, not from a list here (#3943)
+- feat(OMN-17099): a lane overlay may add a delegation backend, validated as a contract (#3981)
+- feat(OMN-18903): the ci_attempt_outcome migration and its topology grants (#3885)
+- fix(OMN-19193): a registry workspace's default onex delegate resolves its own tier-1 config (#3974)
+- fix(OMN-18964): a re-routed delegation's chain replays green (C15) (#3972)
+- fix(OMN-19043): retry a Kafka connect, and leave a receipt when it never lands (#3934)
+- fix(OMN-18843): a bus consumer may not wait on the main runtime's health (#3939)
+- fix(OMN-19144): declare the dev lane's runtime lane so its health events can be keyed (#3963)
+- fix(OMN-17427): admit uvicorn 0.53 (#3959)
+- chore(OMN-17292): advance omnimarket contract pin to fb41fdedc57e (#3960)
+- chore(OMN-17292): advance omnimarket contract pin to 622664a35575 (#3950)
+- feat(OMN-18999): validate typed backend projection readers (drain landing) (#3961)
+- chore(OMN-17292): advance omnimarket contract pin to bf88396baa87 (#3895)
+- chore(OMN-18999): vendor the prod-promotion-gate projection migrations (#3929)
+
 ## v0.38.51 (2026-09-21)
 
 ### Release

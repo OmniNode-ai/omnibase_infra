@@ -45,10 +45,6 @@ sys.path.insert(0, str(ROOT / "src"))
 from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
-from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
-    _AUTHORIZED_BINDINGS,
-    ACTIVE_BACKEND_KEYS,
-)
 from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
     ModelBifrostLaneOverlay,
 )
@@ -59,21 +55,39 @@ def _load(path: Path) -> ModelBifrostLaneOverlay:
     return ModelBifrostLaneOverlay.model_validate(raw)
 
 
-def test_dev_overlay_matches_cross_repo_v2_parity_fixture() -> None:
-    """Infra's real binding and the shared parser fixture cannot drift."""
+def test_dev_overlay_carries_every_parity_fixture_binding_unchanged() -> None:
+    """Infra's real binding and the shared parser fixture cannot drift.
+
+    OMN-17099: a lab lane may now ADD a backend (a lab host registered by a
+    lane-overlay-only change), so the dev overlay is a SUPERSET of the fixture
+    rather than equal to it. Every binding the fixture pins must still appear in
+    the dev overlay byte-for-byte in meaning, and the header fields must agree.
+    """
     overlay = _load(OVERLAY_YAML)
     fixture = _load(PARITY_FIXTURE)
 
-    assert overlay.model_dump(mode="json") == fixture.model_dump(mode="json")
+    assert (overlay.schema_version, overlay.lane, overlay.locale) == (
+        fixture.schema_version,
+        fixture.lane,
+        fixture.locale,
+    )
+    overlay_bindings = {
+        binding.backend_key: binding.model_dump(mode="json")
+        for binding in overlay.backends
+    }
+    for binding in fixture.backends:
+        assert overlay_bindings.get(binding.backend_key) == binding.model_dump(
+            mode="json"
+        ), binding.backend_key
 
     # OMN-16833: the lane serves more than one local rung, so these are pinned
     # per-backend rather than as single-valued sets.
     by_id = {binding.backend_key: binding for binding in overlay.backends}
-    assert set(by_id) == {"local-coder", "local-heavy-reasoning", "local-ds-v4-flash"}
+    assert set(by_id) >= {"local-coder", "local-heavy-reasoning", "local-ds-v4-flash"}
 
     # OMN-18626: the served id is read from the RECORDED PROBE, not restated.
-    # A literal here is the third copy of a value that already lives in the
-    # overlay and in the authorized table, and three copies of a wrong value
+    # A literal here is a second copy of a value that already lives in the
+    # overlay, and two copies of a wrong value
     # agree with each other perfectly -- which is how the .201 served id stayed
     # wrong through two flips while every static test passed. The probe fixture
     # is the only site in this repo with an EXTERNAL referent: it is a
@@ -92,14 +106,12 @@ def test_dev_overlay_matches_cross_repo_v2_parity_fixture() -> None:
             f"{backend_key} advertises {binding.advertised_model!r}, which the "
             f"recorded /v1/models readback does not list. Re-probe the endpoint "
             f"and update tests/fixtures/bifrost_served_models_probe.json in the "
-            f"same commit as the binding table."
+            f"same commit as the lane overlay."
         )
-        # OMN-18570: read from the authorized table rather than restating it.
-        # This assertion carried "27B" for two weeks after the endpoint moved
-        # off the Qwen3.8 27B, agreeing with an overlay that was also wrong.
-        assert (
-            binding.parameter_count == _AUTHORIZED_BINDINGS[backend_key].parameter_count
-        )
+        # OMN-18570: parameter_count is NOT restated here. This assertion
+        # carried "27B" for two weeks after the endpoint moved off the Qwen3.8
+        # 27B, agreeing with an overlay that was also wrong; the served id is
+        # its referent, checked by test_bifrost_parameter_count_matches_served_id.
         assert binding.context_window == 131_072
 
     ds_v4 = by_id["local-ds-v4-flash"]
@@ -272,18 +284,35 @@ def test_onex_dev_overlay_is_cloud_only_with_zero_local_backends() -> None:
     # the OMN-17150 defect class done explicitly (OMN-17502).
     text = _CLOUD_OVERLAY.read_text(encoding="utf-8")
     assert "chat/completions" not in text
-    for backend_key in sorted(ACTIVE_BACKEND_KEYS):
+    for backend_key in sorted(_lab_backend_keys()):
         assert backend_key not in text
 
 
-def test_lab_lane_overlays_declare_the_lab_locale_and_the_exact_backend_set() -> None:
-    """The lab rule is unchanged by OMN-17502 — only newly stated."""
+def _lab_backend_keys() -> set[str]:
+    """Every backend id any committed lab lane overlay binds."""
+    return {
+        binding.backend_key
+        for lane in _LAB_LANE_OVERLAYS
+        for binding in _load(LANE_OVERLAYS_DIR / f"{lane}.bifrost.yaml").backends
+    }
+
+
+def test_lab_lane_overlays_declare_the_lab_locale_and_bind_the_routed_rungs() -> None:
+    """Every lab lane states its locale and binds the rungs routing depends on.
+
+    OMN-17099 removed the set-equality rule against a list shipped in the
+    product; the renderer now derives the required set from the base contract.
+    The committed lab overlays still bind the two .201 rungs every task class
+    routes through, stated here so a lane dropping one fails before a render.
+    """
+    assert _lab_backend_keys() >= {"local-coder", "local-heavy-reasoning"}
     for lane in _LAB_LANE_OVERLAYS:
         overlay = _load(LANE_OVERLAYS_DIR / f"{lane}.bifrost.yaml")
         assert overlay.locale is EnumBifrostLaneLocale.LAB, lane
-        assert {binding.backend_key for binding in overlay.backends} == set(
-            ACTIVE_BACKEND_KEYS
-        ), lane
+        assert {binding.backend_key for binding in overlay.backends} >= {
+            "local-coder",
+            "local-heavy-reasoning",
+        }, lane
 
 
 def test_every_lane_overlay_declares_an_explicit_locale() -> None:

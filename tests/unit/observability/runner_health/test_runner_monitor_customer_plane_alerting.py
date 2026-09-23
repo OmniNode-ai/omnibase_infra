@@ -416,6 +416,14 @@ def _run_monitor(
         "AUTO_BOUNCE_VERIFY_RETRY_SLEEP_SECONDS": "0",
         "AUTO_BOUNCE_PER_CONTAINER_BUDGET_SECONDS": "5",
         "AUTO_BOUNCE_HARD_LIMIT_SECONDS": "5",
+        # OMN-19169 added an announcement dwell: a changed actionable count
+        # must be observed on N consecutive cycles before it is posted to
+        # Slack. This module drives the script ONCE per case and asserts on
+        # the rendered message, so it pins the dwell to 1 -- it is about
+        # WHETHER a customer-plane / verify-runner outage pages, never about
+        # how many cycles that takes. The dwell's own behaviour is owned by
+        # test_runner_monitor_alert_dwell_omn19169.py.
+        "RUNNER_MONITOR_ALERT_DWELL_CYCLES": "1",
     }
     if auto_bounce:
         env["MONITOR_AUTO_BOUNCE"] = "1"

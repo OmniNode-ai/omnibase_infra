@@ -44,6 +44,24 @@ _HANGING_BUILD = (
     "time.sleep(30)\n"
 )
 
+# OMN-19208: the stream split compose v5 (bake) actually produces, measured on
+# .201 -- BuildKit progress on STDOUT, only the image summary on stderr. The
+# child above writes everything to stderr, which is why it could not catch a
+# parser that read stderr alone.
+_HANGING_COMPOSE_V5_BUILD = (
+    "import sys, time\n"
+    "sys.stderr.write(' Image omnibase-infra-omninode-runtime Building \\n')\n"
+    "sys.stderr.flush()\n"
+    "sys.stdout.write('#1 [internal] load local bake definitions\\n')\n"
+    "sys.stdout.write('#1 DONE 0.0s\\n')\n"
+    "sys.stdout.write('#5 [builder 1/9] COPY pyproject.toml .\\n')\n"
+    "sys.stdout.write('#5 DONE 0.5s\\n')\n"
+    "sys.stdout.write('#6 [builder 2/9] RUN uv sync\\n')\n"
+    "sys.stdout.write('#6 DONE 41.2s\\n')\n"
+    "sys.stdout.flush()\n"
+    "time.sleep(30)\n"
+)
+
 
 def _is_compose_build(cmd: list[str]) -> bool:
     return "build" in cmd and "compose" in cmd
@@ -206,6 +224,40 @@ class TestTheKillMessageIsActionable:
         assert "s/step observed" in message
         assert "s/step assumed" in message
         assert "NOT" in message and "mutated" in message
+
+    @pytest.mark.usefixtures("_no_workspace_staging")
+    def test_compose_v5_progress_on_stdout_is_counted_not_called_a_stall(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-19208: a non-empty stderr summary must not hide stdout progress."""
+        _pin_host(monkeypatch, load1=1.0, cache=EnumBuildCacheState.WARM)
+
+        def _runner(cmd: list[str], **kwargs: Any) -> Any:
+            if not _is_compose_build(cmd):
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return subprocess.run(
+                [sys.executable, "-c", _HANGING_COMPOSE_V5_BUILD],
+                timeout=1,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        _build_with_spy(monkeypatch, _runner)
+        with pytest.raises(RuntimeError) as raised:
+            DeployExecutor()._compose_build(
+                Scope.RUNTIME,
+                "0" * 40,
+                _noop_phase_update,
+                build_source="workspace",
+                runtime_lane=EnumRuntimeLane.DEV,
+                git_ref="origin/dev",
+            )
+
+        message = str(raised.value)
+        assert EnumBuildOutcome.BUDGET_EXHAUSTED.value in message
+        assert "3/" in message
+        assert "STALL" not in message
 
     @pytest.mark.usefixtures("_no_workspace_staging")
     def test_a_nonzero_exit_is_the_other_token(
