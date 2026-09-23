@@ -1037,6 +1037,63 @@ jobs:
       - name: Install uv (the receipt reader's runtime)
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
+      # OMN-19311 -- D11, the omnimarket delegation regression corpus run
+      # against the stability-test lane (delegation-regression-nightly.yml),
+      # blocks staging delivery. Operator ruling 2026-09-23T17:12:15Z: the check
+      # is bound NOW, while it is red, and delivery stops until it is fixed.
+      #
+      # WHY DELIVERY AND NOT MERGES. D11 needs a deployed lane; it cannot run
+      # against a PR head (the pre-PR verify slots have no entrypoint). A merge
+      # gate keyed on it would refuse the very PR that fixes it. Delivery is
+      # the surface its verdict can bind without a deadlock: the fix merges,
+      # the stability-test lane redeploys through its own pre-authorized
+      # procedure, the nightly runs (schedule, or a dispatch -- a new
+      # measurement, not an override), and delivery resumes on its green.
+      #
+      # WHY EVERY PATH, not only the sibling one. The push path builds the
+      # runtime with omnimarket vendored at its dev HEAD (sibling_ref: dev), so
+      # gating only omnimarket's own deliveries would let any push here carry
+      # the same omnimarket code to onex-dev. So this step has no `if:`.
+      #
+      # STATE-KEYED, and it names what it read. The verdict is the newest
+      # completed run on omnimarket dev, fresh within 26 hours (a nightly plus
+      # slack). A failed, cancelled, stale, unreadable or absent run refuses.
+      # A dispatch aimed at another lane does not count: the nightly renders its
+      # lane into the run title, and only `lane=stability-test` qualifies, so a
+      # green dev-lane dispatch cannot stand in for the governed measurement.
+      # There is no force, skip or allow-list;
+      # tests/ci/test_workflow_verdict_omn_d11.py asserts it. The receiving
+      # deploy (omninode_infra lab_pass_gate.py) reads the same verdict
+      # independently.
+      #
+      # The token is an App installation token with `actions: read` on
+      # omnimarket alone -- the same App the sibling read below uses -- rather
+      # than this repository's GITHUB_TOKEN, whose scope is this repository.
+      # Absent App credentials fail the job; they do not skip the read.
+      - name: Obtain a read-only Actions token for omnimarket (D11, OMN-19311)
+        id: d11-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omnimarket
+          permission-actions: read
+
+      - name: Require a fresh green D11 delegation regression verdict (OMN-19311)
+        env:
+          GH_TOKEN: ${{ steps.d11-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          uv run --no-project \
+            python3 scripts/ci/lab_pass_receipt.py workflow-verdict \
+            --repo OmniNode-ai/omnimarket \
+            --workflow delegation-regression-nightly.yml \
+            --branch dev \
+            --max-age-hours 26 \
+            --dispatch-title-contains "lane=stability-test" \
+            | tee /tmp/d11-verdict.txt
+
       - name: Read the lab-pass receipt for the delivered sha
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1100,6 +1157,12 @@ jobs:
         if: always()
         run: |
           {
+            echo "### D11 delegation regression verdict (OMN-19311)"
+            echo ""
+            echo '```'
+            cat /tmp/d11-verdict.txt 2>/dev/null || echo "(the verdict read produced no output)"
+            echo '```'
+            echo ""
             echo "### Lab-pass gate (rule 24(b), OMN-17530)"
             echo ""
             echo '```'

@@ -96,6 +96,15 @@ Subcommands
     publishing mechanism is ``actions/upload-artifact``, which needs no
     credential this repository does not already grant.
 
+``workflow-verdict`` (OMN-19311)
+    Reads the newest completed run of a named workflow on a named branch and
+    exits non-zero unless it concluded ``success`` within a freshness bound.
+    It carries the verdict of a check that runs against a GOVERNED lane (D11,
+    the delegation regression nightly against ``stability-test``), which the
+    lane enum below forbids from naming itself in a receipt. State-keyed, not
+    sha-keyed: it answers "is this check green now", and a delivery refuses
+    while it is not.
+
 ``gate``
     Reads the surface for one sha, prints every receipt it found (sha, lane,
     result, checks), and exits non-zero unless a ``PASS`` receipt exists for the
@@ -3285,6 +3294,219 @@ def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -
 
 
 # ---------------------------------------------------------------------------
+# workflow verdict (OMN-19311)
+# ---------------------------------------------------------------------------
+#: How many completed runs one verdict read looks at. The newest QUALIFYING run
+#: is the verdict, and a dispatch aimed at another lane does not qualify, so a
+#: burst of such dispatches could push every qualifying run off one page. A
+#: page with no qualifying run on it is a refusal naming this bound, never a
+#: pass: an empty read is not evidence of a green check (rule 16).
+WORKFLOW_VERDICT_PAGE_SIZE: Final[int] = 50
+
+#: Conclusions that are a verdict about the subject. Only ``success`` admits.
+#: Everything else -- ``failure``, ``cancelled``, ``timed_out``,
+#: ``action_required``, ``neutral``, ``skipped``, ``stale``, ``startup_failure``
+#: or a conclusion GitHub adds later -- refuses, and is named in the refusal. A
+#: cancelled or preflight-failed run is an instrument defect to be logged
+#: against the check's own ticket; it is not an exception, and it blocks.
+_ADMITTING_CONCLUSION: Final[str] = "success"
+
+
+@dataclass(frozen=True)
+class ModelWorkflowVerdictRequest:
+    """Which scheduled verdict a delivery requires, and how fresh it must be.
+
+    ``dispatch_title_contains`` exists because a verdict can be laundered by
+    re-aiming the instrument. D11's workflow takes a ``lane`` input; a manual
+    dispatch against the ``dev`` lane that went green would otherwise stand in
+    for the governed ``stability-test`` measurement it did not make. A
+    ``workflow_dispatch`` run qualifies only when its run title carries this
+    token (the workflow's ``run-name:`` renders the lane into the title). Runs
+    of every other event (``schedule`` above all) take no inputs and so measure
+    the workflow's declared default: they always qualify.
+    """
+
+    repo: str
+    workflow: str
+    branch: str
+    max_age_hours: float
+    dispatch_title_contains: str = ""
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self.repo):
+            msg = f"workflow verdict: {self.repo!r} is not an owner/repo name"
+            raise ValueError(msg)
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+\.ya?ml", self.workflow):
+            msg = f"workflow verdict: {self.workflow!r} is not a workflow file name"
+            raise ValueError(msg)
+        if not self.branch.strip():
+            msg = "workflow verdict: a branch is required"
+            raise ValueError(msg)
+        if not self.max_age_hours > 0:
+            msg = f"workflow verdict: max age {self.max_age_hours!r}h must be positive"
+            raise ValueError(msg)
+
+    @property
+    def label(self) -> str:
+        return f"{self.repo} {self.workflow} on {self.branch}"
+
+
+def _run_qualifies(
+    run: Mapping[str, Any], request: ModelWorkflowVerdictRequest
+) -> bool:
+    if str(run.get("head_branch", "")) != request.branch:
+        return False
+    if str(run.get("event", "")) != "workflow_dispatch":
+        return True
+    if not request.dispatch_title_contains:
+        return True
+    return request.dispatch_title_contains in str(run.get("display_title", ""))
+
+
+def judge_workflow_runs(
+    runs: Sequence[Mapping[str, Any]],
+    request: ModelWorkflowVerdictRequest,
+    now: datetime,
+    out: Any,
+) -> int:
+    """Admit only when the newest qualifying completed run is a fresh success.
+
+    Pure: the transport is ``evaluate_workflow_verdict``'s job. Every terminal
+    branch names the workflow, and every branch that found a run names its id
+    and URL, because "the verdict gate failed" with no run named sends the
+    reader to search for the evidence the gate already had.
+    """
+    print(f"workflow verdict gate (OMN-19311) for {request.label}", file=out)
+    print(
+        f"  freshness  : newest qualifying completed run, at most "
+        f"{request.max_age_hours:g}h old",
+        file=out,
+    )
+    if request.dispatch_title_contains:
+        print(
+            f"  dispatches : count only when the run title carries "
+            f"{request.dispatch_title_contains!r}",
+            file=out,
+        )
+
+    completed = [r for r in runs if str(r.get("status", "")) == "completed"]
+    qualifying = [r for r in completed if _run_qualifies(r, request)]
+    # Newest first by creation. The API already orders this way; sorting here
+    # makes the verdict independent of that, and a re-run keeps its run's
+    # creation time, so a re-run of an old run never outranks a newer run.
+    qualifying.sort(key=lambda r: str(r.get("created_at", "")), reverse=True)
+    ignored = len(completed) - len(qualifying)
+    if ignored:
+        print(
+            f"  ignored    : {ignored} completed run(s) that measure something "
+            "else (another branch, or a dispatch whose title does not carry the "
+            "required token)",
+            file=out,
+        )
+
+    if not qualifying:
+        print(
+            f"::error::workflow verdict gate FAILED for {request.label}: no "
+            f"qualifying completed run among the newest "
+            f"{WORKFLOW_VERDICT_PAGE_SIZE}. An absent verdict is not a pass. Run "
+            "the workflow (its schedule, or a dispatch on the governed lane) and "
+            "let it conclude.",
+            file=out,
+        )
+        return 1
+
+    newest = qualifying[0]
+    run_id = newest.get("id", "?")
+    url = str(newest.get("html_url", ""))
+    conclusion = str(newest.get("conclusion") or "none")
+    finished_raw = str(newest.get("updated_at") or "")
+    print(f"  newest run : {run_id} ({newest.get('event', '?')}) {url}", file=out)
+    print(f"  title      : {newest.get('display_title', '')}", file=out)
+    print(f"  head sha   : {newest.get('head_sha', '?')}", file=out)
+    print(f"  conclusion : {conclusion}", file=out)
+    print(f"  finished   : {finished_raw or '(unrecorded)'}", file=out)
+
+    if conclusion != _ADMITTING_CONCLUSION:
+        print(
+            f"::error::workflow verdict gate FAILED for {request.label}: the "
+            f"newest qualifying run {run_id} concluded {conclusion!r}, not "
+            f"'success' ({url}). This check blocks while it is red, per the "
+            "2026-09-23 every-check-blocks ruling; the release is a green run of "
+            "the check itself, never an override. There is no override flag.",
+            file=out,
+        )
+        return 1
+
+    try:
+        finished = _parse_ts(finished_raw)
+    except ValueError:
+        print(
+            f"::error::workflow verdict gate FAILED for {request.label}: run "
+            f"{run_id} carries an unreadable finish time {finished_raw!r}; a "
+            "verdict of unknown age is not fresh.",
+            file=out,
+        )
+        return 1
+    age_hours = (now - finished).total_seconds() / 3600.0
+    print(f"  age        : {age_hours:.1f}h", file=out)
+    if age_hours > request.max_age_hours:
+        print(
+            f"::error::workflow verdict gate FAILED for {request.label}: the "
+            f"newest qualifying run {run_id} succeeded, but {age_hours:.1f}h ago, "
+            f"beyond the {request.max_age_hours:g}h bound ({url}). A stale green "
+            "is not a verdict about today's code.",
+            file=out,
+        )
+        return 1
+
+    print(
+        f"workflow verdict gate PASSED for {request.label}: run {run_id} "
+        f"succeeded {age_hours:.1f}h ago.",
+        file=out,
+    )
+    return 0
+
+
+def evaluate_workflow_verdict(
+    request: ModelWorkflowVerdictRequest,
+    out: Any,
+    now: datetime | None = None,
+) -> int:
+    """Read the newest completed runs of one workflow and judge them.
+
+    A transport failure, a non-JSON body or a body with no run list refuses,
+    and says the surface was unreadable. That is a different repair from a red
+    check, and printing it as one is how a credential gap gets recorded as a
+    failing test.
+    """
+    path = (
+        f"repos/{request.repo}/actions/workflows/{request.workflow}/runs"
+        f"?branch={request.branch}&status=completed"
+        f"&per_page={WORKFLOW_VERDICT_PAGE_SIZE}"
+    )
+    try:
+        payload = json.loads(_gh_api(path).decode("utf-8"))
+        runs = payload["workflow_runs"]
+        if not isinstance(runs, list):
+            msg = "'workflow_runs' is not a list"
+            raise TypeError(msg)
+    except Exception as exc:  # noqa: BLE001 - any failure to READ is a refusal
+        print(
+            f"::error::workflow verdict gate FAILED for {request.label}: the run "
+            f"surface is unreadable ({exc}). This is NOT a red check -- it is a "
+            "read that did not happen -- and it refuses all the same.",
+            file=out,
+        )
+        return 1
+    return judge_workflow_runs(
+        [r for r in runs if isinstance(r, dict)],
+        request,
+        now if now is not None else datetime.now(UTC),
+        out,
+    )
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def _parse_ts(value: str) -> datetime:
@@ -3660,6 +3882,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="repeatable; defaults to every lab lane",
     )
 
+    verdict = sub.add_parser(
+        "workflow-verdict",
+        help=(
+            "fail closed unless the newest qualifying completed run of a "
+            "workflow is a fresh success (OMN-19311)"
+        ),
+    )
+    verdict.add_argument("--repo", required=True, help="owner/repo")
+    verdict.add_argument("--workflow", required=True, help="workflow file name")
+    verdict.add_argument("--branch", required=True)
+    verdict.add_argument("--max-age-hours", required=True, type=float)
+    verdict.add_argument(
+        "--dispatch-title-contains",
+        default="",
+        help=(
+            "a workflow_dispatch run qualifies only when its run title carries "
+            "this token; runs of every other event always qualify"
+        ),
+    )
+
     verify = sub.add_parser(
         "verify",
         help="refuse a receipt file that is not the one this job emitted",
@@ -3930,6 +4172,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             else list(EnumLabLane)
         )
         return evaluate_gate(args.repo, args.sha, lanes, sys.stdout)
+
+    if args.command == "workflow-verdict":
+        try:
+            request = ModelWorkflowVerdictRequest(
+                repo=args.repo,
+                workflow=args.workflow,
+                branch=args.branch,
+                max_age_hours=args.max_age_hours,
+                dispatch_title_contains=args.dispatch_title_contains,
+            )
+        except ValueError as exc:
+            print(f"::error::{exc}", file=sys.stdout)
+            return 1
+        return evaluate_workflow_verdict(request, sys.stdout)
 
     raise AssertionError(f"unreachable subcommand {args.command!r}")  # pragma: no cover
 
