@@ -73,16 +73,37 @@ logger = logging.getLogger(__name__)
 
 HANDLER_ID_DLQ_REPLAY: str = "dlq-replay-handler"
 
-_RUN_LOCKS: WeakKeyDictionary[object, asyncio.Lock] = WeakKeyDictionary()
+
+class DlqConsumerDrainState:
+    """What every run over one consumer shares: its mutex and its failure count.
+
+    ``failed_attempts`` and ``halted`` are OMN-19241. They live beside the run
+    mutex, not on a handler, because the three dispatchers are three handler
+    instances over the same consumers; a count kept per handler would let each
+    of them spend the whole bound. Both are read and written only while the
+    mutex is held.
+    """
+
+    __slots__ = ("failed_attempts", "halted", "lock")
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        # (partition, offset) -> consecutive runs whose handling of it FAILED.
+        self.failed_attempts: dict[tuple[int, int], int] = {}
+        # partition -> the offset whose record halted it.
+        self.halted: dict[int, int] = {}
+
+
+_DRAIN_STATES: WeakKeyDictionary[object, DlqConsumerDrainState] = WeakKeyDictionary()
 """One run mutex per shared consumer object (OMN-18084).
 
 ``service_kernel`` keys runtime dependencies by handler NAME, so the three
 per-topic dispatcher entries OMN-18013 split this node's routing into all
 resolve to the same ``dependencies["HandlerDlqReplay"]`` mapping — one
 ``DLQConsumer`` behind three ``HandlerDlqReplay`` instances. Nothing then
-serialised them, and ``_ensure_runtime_dependencies_started`` skips a
-dependency already flagged ``_started``, so it does not put that dependency in
-the list its own ``finally`` stops while the peer that DID start it stops it
+serialised them, and the run's dependency start-up skipped a dependency
+already flagged ``_started``, so it did not put that dependency in the list its
+own ``finally`` stopped while the peer that DID start it stopped it
 unconditionally. One dispatcher's teardown therefore lands under another's
 drain, and the victim's next read of the consumer raises
 ``RuntimeError("Consumer not started")``.
@@ -97,13 +118,65 @@ was never safe independently of the lifecycle flag.
 """
 
 
+def _drain_state_for(consumer: object) -> DlqConsumerDrainState:
+    state = _DRAIN_STATES.get(consumer)
+    if state is None:
+        state = DlqConsumerDrainState()
+        _DRAIN_STATES[consumer] = state
+    return state
+
+
 def _run_lock_for(consumer: object) -> asyncio.Lock:
     """Return the mutex guarding one shared consumer's start/drain/stop."""
-    lock = _RUN_LOCKS.get(consumer)
-    if lock is None:
-        lock = asyncio.Lock()
-        _RUN_LOCKS[consumer] = lock
-    return lock
+    return _drain_state_for(consumer).lock
+
+
+class DlqDependencyLease:
+    """Reference count over one dependency that runs share (OMN-19241).
+
+    The run mutex above is keyed on the consumer, and since OMN-18119 each
+    topic has its own, so runs over different topics proceed concurrently. The
+    replay and quarantine producers are NOT per topic: ``service_kernel``
+    builds one of each and hands them to every dispatcher. Before this, a run
+    that found a producer stopped started it and stopped it in its ``finally``,
+    and a run that found it started borrowed it and stopped nothing -- so the
+    starter finishing first stopped the producer under the borrower. Measured
+    on the .201 dev lane 2026-09-23: every quarantine from 10:32:48Z raised
+    ``Quarantine producer not started``.
+
+    A lease stops a dependency only when the LAST holder releases it, and only
+    if a lease started it. A dependency the caller started itself (as
+    ``scripts/dlq_replay.py`` does) is never stopped here.
+
+    Chosen over the two alternatives. A run mutex keyed on the producers would
+    serialise every topic behind one lock, and a run that cannot take the mutex
+    within its budget skips the topic (OMN-17137), so a busy topic would starve
+    the other two. Per-run producers would need a factory in the kernel's
+    dependency mapping and in the script; this keeps both call sites unchanged.
+    """
+
+    __slots__ = ("holders", "lock", "owned")
+
+    def __init__(self) -> None:
+        # Held across start() and stop() only, never across a drain.
+        self.lock = asyncio.Lock()
+        self.holders = 0
+        self.owned = False
+
+
+_DEPENDENCY_LEASES: WeakKeyDictionary[object, DlqDependencyLease] = WeakKeyDictionary()
+
+
+def _lease_for(dependency: object) -> DlqDependencyLease:
+    lease = _DEPENDENCY_LEASES.get(dependency)
+    if lease is None:
+        lease = DlqDependencyLease()
+        _DEPENDENCY_LEASES[dependency] = lease
+    return lease
+
+
+def _halted_coordinate(topic: str, partition: int, offset: int) -> str:
+    return f"{topic}/{partition}@{offset}"
 
 
 class HandlerDlqReplay:
@@ -310,7 +383,7 @@ class HandlerDlqReplay:
             finally:
                 lock.release()
 
-        return self._summarize(results, tuple(order))
+        return self._summarize(results, tuple(order), self._halted_partitions())
 
     async def _run_locked(
         self, consumer: DLQConsumer, deadline: float
@@ -320,11 +393,13 @@ class HandlerDlqReplay:
         ``deadline`` is the RUN's shared wall clock, not this topic's own.
         """
         config = consumer.config
-        started_dependencies = await self._ensure_runtime_dependencies_started(consumer)
+        state = _drain_state_for(consumer)
+        leased_dependencies = await self._acquire_runtime_dependencies(consumer)
         try:
             results: list[ModelDlqReplayResult] = []
             count = 0
             uncommitted = 0
+            withheld = 0
             # OMN-17896: the offsets whose handling actually COMPLETED, per
             # partition, as a contiguous prefix. A partition is BLOCKED by the
             # first record on it that did not complete, so a later success can
@@ -334,6 +409,10 @@ class HandlerDlqReplay:
             # whose handling never finished — so any early exit advanced past
             # the in-flight record.
             ledger = ModelDlqCommitLedger()
+            # OMN-19241: a halted partition starts the run blocked, so nothing
+            # on it is attempted and nothing on it is committed.
+            for partition in state.halted:
+                ledger.block((config.dlq_topic, partition))
             limit = config.limit
             max_records = config.max_records_per_run
             effective_limit = max_records if limit is None else min(limit, max_records)
@@ -394,13 +473,23 @@ class HandlerDlqReplay:
                             )
                         break
 
+                    count += 1
+                    # OMN-19241: nothing BEHIND a failed record on its partition
+                    # is handled in the same run. Its offset cannot be committed
+                    # over the failed one, so the next run reads it again; a
+                    # record replayed here would be replayed once per run for as
+                    # long as the failure lasts. It is left for redelivery.
+                    if self._ledger_key(message, config.dlq_topic) in ledger.blocked:
+                        withheld += 1
+                        continue
+
                     if isinstance(message, ModelUnparseableDlqRecord):
                         result = await self._quarantine_unparseable(message)
                     else:
                         result = await self._process_message(message, config)
                     results.append(result)
                     self._mark_offset(message, result, ledger, config.dlq_topic)
-                    count += 1
+                    self._count_failure(message, result, state, config)
                     uncommitted += 1
 
                     if (
@@ -422,14 +511,77 @@ class HandlerDlqReplay:
             if uncommitted and not config.dry_run and ledger.has_committable_offsets:
                 await consumer.commit_offsets(ledger.completed)
 
+            if withheld:
+                logger.warning(
+                    "DLQ replay withheld %d record(s) on %s behind a record that "
+                    "failed or a halted partition (%s); they are redelivered, "
+                    "not replayed twice (OMN-19241).",
+                    withheld,
+                    config.dlq_topic,
+                    sorted(ledger.blocked),
+                )
             return results
         finally:
-            await self._stop_runtime_dependencies(started_dependencies)
+            await self._release_runtime_dependencies(leased_dependencies)
 
-    async def _ensure_runtime_dependencies_started(
+    def _count_failure(
+        self,
+        message: DlqDrainRecord,
+        result: ModelDlqReplayResult,
+        state: DlqConsumerDrainState,
+        config: ModelDlqReplayEngineConfig,
+    ) -> None:
+        """Bound how often one record may fail, and say so when it trips.
+
+        OMN-19241. A FAILED record withholds its offset (OMN-17896), which is
+        right, but the next run reads it again and fails again for as long as
+        the cause lasts, and on the .201 dev lane that was every run for hours
+        with nothing but a traceback per attempt. At
+        ``max_record_failure_attempts`` the partition is halted instead: it is
+        not attempted again in this process, one CRITICAL line names the
+        coordinate, and every run result carries it. Restarting the runtime
+        after fixing the cause clears it.
+        """
+        coordinate = (message.dlq_partition, message.dlq_offset)
+        if result.status != EnumReplayStatus.FAILED:
+            state.failed_attempts.pop(coordinate, None)
+            return
+        attempts = state.failed_attempts.get(coordinate, 0) + 1
+        bound = config.max_record_failure_attempts
+        if attempts < bound:
+            state.failed_attempts[coordinate] = attempts
+            logger.error(
+                "DLQ record %s failed (attempt %d of %d): %s. Its offset is "
+                "withheld and it is retried on the next run (OMN-19241).",
+                _halted_coordinate(config.dlq_topic, *coordinate),
+                attempts,
+                bound,
+                result.message,
+            )
+            return
+        state.failed_attempts.pop(coordinate, None)
+        state.halted[message.dlq_partition] = message.dlq_offset
+        logger.critical(
+            "DLQ replay HALTED partition %s: the record there failed %d times "
+            "(last: %s). Nothing on this partition is replayed, quarantined or "
+            "committed until the runtime restarts; fix the cause, then "
+            "restart. Consumer lag on it will grow (OMN-19241).",
+            _halted_coordinate(config.dlq_topic, *coordinate),
+            attempts,
+            result.message,
+        )
+
+    def _halted_partitions(self) -> tuple[str, ...]:
+        return tuple(
+            _halted_coordinate(topic, partition, offset)
+            for topic, consumer in self._consumers.items()
+            for partition, offset in sorted(_drain_state_for(consumer).halted.items())
+        )
+
+    async def _acquire_runtime_dependencies(
         self, consumer: DLQConsumer
     ) -> list[object]:
-        """Start owned Kafka dependencies lazily when a replay run executes.
+        """Lease this run's Kafka dependencies, starting any that are stopped.
 
         Only the consumer for the topic being drained is started; the peers for
         the other declared topics stay closed until their own turn, so a run
@@ -441,78 +593,143 @@ class HandlerDlqReplay:
         joins a consumer group, and on this node's shared ``onex-dlq-replay``
         group that join lands in a permanent rebalance. An unbounded join holds
         the outer trigger consumer exactly as an unbounded record wait did.
+
+        OMN-19241: the producers are shared by every dispatcher, so each
+        dependency is LEASED rather than started-and-stopped by whoever got
+        there first (see ``DlqDependencyLease``).
         """
-        started: list[object] = []
-        budget = self._config.dependency_lifecycle_timeout_seconds
+        leased: list[object] = []
         try:
             for dependency in (
                 consumer,
                 self._producer,
                 self._quarantine_producer,
             ):
-                if getattr(dependency, "_started", False):
-                    continue
-                start = getattr(dependency, "start", None)
-                if start is None:
-                    continue
+                await self._acquire_lease(dependency)
+                leased.append(dependency)
+            return leased
+        except Exception:
+            await self._release_runtime_dependencies(leased)
+            raise
+
+    async def _acquire_lease(self, dependency: object) -> None:
+        """Take one holder on ``dependency``, starting it if it is stopped.
+
+        Both awaits are bounded by ``dependency_lifecycle_timeout_seconds``.
+        The lease lock is held only across a peer's ``start()`` or ``stop()``,
+        each already bounded, so its wait is too.
+        """
+        budget = self._config.dependency_lifecycle_timeout_seconds
+        lease = _lease_for(dependency)
+        name = type(dependency).__name__
+        try:
+            await asyncio.wait_for(lease.lock.acquire(), timeout=budget)
+        except TimeoutError as exc:
+            raise DlqDependencyLifecycleTimeoutError(
+                f"the lease on {name} was not free within {budget:.2f}s; ending "
+                f"this DLQ replay run so the outer trigger consumer keeps "
+                f"polling (OMN-19241)",
+                dependency=name,
+                operation="lease",
+                timeout_seconds=budget,
+            ) from exc
+        try:
+            start = getattr(dependency, "start", None)
+            if start is not None and not getattr(dependency, "_started", False):
                 try:
                     await asyncio.wait_for(start(), timeout=budget)
                 except TimeoutError as exc:
                     raise DlqDependencyLifecycleTimeoutError(
-                        f"{type(dependency).__name__}.start() did not complete "
-                        f"within {budget:.2f}s; ending this DLQ replay run so "
-                        f"the outer trigger consumer keeps polling (OMN-17137)",
-                        dependency=type(dependency).__name__,
+                        f"{name}.start() did not complete within {budget:.2f}s; "
+                        f"ending this DLQ replay run so the outer trigger "
+                        f"consumer keeps polling (OMN-17137)",
+                        dependency=name,
                         operation="start",
                         timeout_seconds=budget,
                     ) from exc
-                started.append(dependency)
-            return started
-        except Exception:
-            await self._stop_runtime_dependencies(started)
-            raise
+                lease.owned = True
+            lease.holders += 1
+        finally:
+            lease.lock.release()
 
-    async def _stop_runtime_dependencies(self, dependencies: list[object]) -> None:
-        """Stop what this run started, under a BOUNDED await per dependency.
+    async def _release_runtime_dependencies(self, dependencies: list[object]) -> None:
+        """Release this run's leases; the LAST holder stops what a lease started.
 
-        OMN-17137 (second pass) -- this is the await the live wedge was in, and
-        it is the one place a timeout must NOT propagate. Measured on the .201
-        dev lane 2026-09-16: the three per-topic DLQ consumers share one Kafka
-        group and this handler starts and stops one of them on every trigger
-        message, so the group rebalances without pause (generation 227,675
-        eight minutes after a cold boot). ``AIOKafkaConsumer.stop()`` issued
-        into that storm awaits a coordinator close that never settles. Because
-        this runs in ``_run_locked``'s ``finally``, that unbounded await was
-        holding BOTH the run mutex and the outer trigger consumer's serial poll
-        loop; aiokafka evicted the outer consumer at ``max_poll_interval_ms``
-        and nothing rejoined it, because a rejoin only happens on the next
-        poll and the loop was still inside this ``await``.
+        OMN-17137 (second pass) -- the stop is the await the live wedge was in,
+        and it is the one place a timeout must NOT propagate. Measured on the
+        .201 dev lane 2026-09-16: the three per-topic DLQ consumers share one
+        Kafka group and this handler starts and stops one of them on every
+        trigger message, so the group rebalances without pause (generation
+        227,675 eight minutes after a cold boot). ``AIOKafkaConsumer.stop()``
+        issued into that storm awaits a coordinator close that never settles.
+        Because this runs in ``_run_locked``'s ``finally``, that unbounded await
+        was holding BOTH the run mutex and the outer trigger consumer's serial
+        poll loop; aiokafka evicted the outer consumer at
+        ``max_poll_interval_ms`` and nothing rejoined it, because a rejoin only
+        happens on the next poll and the loop was still inside this ``await``.
 
         A timed-out stop is reported at ERROR and ABANDONED rather than raised:
         the drain it is tearing down has already produced its committed,
         durable result, and turning a completed batch into an exception would
         discard that result and redeliver every record in it. The dependency is
-        left for the next run's ``_started`` check to reconcile -- degraded, and
-        strictly better than a runtime that never polls again.
+        left for the next lease's ``_started`` check to reconcile -- degraded,
+        and strictly better than a runtime that never polls again.
         """
         budget = self._config.dependency_lifecycle_timeout_seconds
         for dependency in reversed(dependencies):
-            stop = getattr(dependency, "stop", None)
-            if stop is None:
-                continue
+            lease = _lease_for(dependency)
+            name = type(dependency).__name__
             try:
-                await asyncio.wait_for(stop(), timeout=budget)
+                await asyncio.wait_for(lease.lock.acquire(), timeout=budget)
             except TimeoutError:
+                # The holder count still has to drop, or no later release can
+                # ever reach zero. A bare decrement is safe on one event loop.
+                lease.holders -= 1
                 logger.exception(
-                    "DLQ replay teardown of %s did not complete within %.2fs "
-                    "and was ABANDONED. This is the OMN-17137 wedge: an "
-                    "unbounded stop() holds the outer trigger consumer's poll "
-                    "loop until aiokafka evicts it at max_poll_interval_ms, "
-                    "and nothing rejoins because a rejoin needs a poll. The "
-                    "drain's committed offsets stand.",
-                    type(dependency).__name__,
+                    "DLQ replay release of %s could not take its lease within "
+                    "%.2fs; the holder was dropped without a stop (OMN-19241).",
+                    name,
                     budget,
                 )
+                continue
+            try:
+                lease.holders -= 1
+                if lease.holders > 0 or not lease.owned:
+                    continue
+                lease.owned = False
+                stop = getattr(dependency, "stop", None)
+                if stop is None:
+                    continue
+                try:
+                    await asyncio.wait_for(stop(), timeout=budget)
+                except TimeoutError:
+                    logger.exception(
+                        "DLQ replay teardown of %s did not complete within "
+                        "%.2fs and was ABANDONED. This is the OMN-17137 wedge: "
+                        "an unbounded stop() holds the outer trigger consumer's "
+                        "poll loop until aiokafka evicts it at "
+                        "max_poll_interval_ms, and nothing rejoins because a "
+                        "rejoin needs a poll. The drain's committed offsets "
+                        "stand.",
+                        name,
+                        budget,
+                    )
+            finally:
+                lease.lock.release()
+
+    @staticmethod
+    def _ledger_key(message: DlqDrainRecord, dlq_topic: str) -> tuple[str, int]:
+        # ``ModelDlqMessage`` carries no DLQ topic of its own — a consumer
+        # drains exactly one, named by ITS OWN config, which is why the caller
+        # passes it rather than reading a handler-wide primary (OMN-18119) —
+        # while the unparseable record carries its own so the two shapes key
+        # identically.
+        topic = (
+            message.dlq_topic
+            if isinstance(message, ModelUnparseableDlqRecord)
+            else dlq_topic
+        )
+        return (topic, message.dlq_partition)
 
     def _mark_offset(
         self,
@@ -532,17 +749,7 @@ class HandlerDlqReplay:
         Its partition is blocked for the rest of the batch so no later success
         can commit over it.
         """
-        # ``ModelDlqMessage`` carries no DLQ topic of its own — a consumer
-        # drains exactly one, named by ITS OWN config, which is why the caller
-        # passes it rather than reading a handler-wide primary (OMN-18119) —
-        # while the unparseable record carries its own so the two shapes key
-        # identically.
-        topic = (
-            message.dlq_topic
-            if isinstance(message, ModelUnparseableDlqRecord)
-            else dlq_topic
-        )
-        key = (topic, message.dlq_partition)
+        key = self._ledger_key(message, dlq_topic)
         if result.status == EnumReplayStatus.FAILED:
             ledger.block(key)
             return
@@ -914,7 +1121,10 @@ class HandlerDlqReplay:
             )
 
     def _summarize(
-        self, results: list[ModelDlqReplayResult], topics_drained: tuple[str, ...]
+        self,
+        results: list[ModelDlqReplayResult],
+        topics_drained: tuple[str, ...],
+        halted_partitions: tuple[str, ...],
     ) -> ModelDlqReplayRunResult:
         """Aggregate one run across every topic it visited (OMN-18119).
 
@@ -936,6 +1146,7 @@ class HandlerDlqReplay:
             failed=_count(EnumReplayStatus.FAILED),
             pending=_count(EnumReplayStatus.PENDING),
             dry_run=self._config.dry_run,
+            halted_partitions=halted_partitions,
             results=tuple(results),
         )
 
