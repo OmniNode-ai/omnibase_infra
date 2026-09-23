@@ -89,6 +89,27 @@ class ModelProjectionApplyFlowVerdict(BaseModel):
             "dimension, and still rendered, because unreported is not ungated."
         ),
     )
+    grain_unresolved_projections: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Projections whose contract-declared key grain could not be "
+            "resolved (OMN-19081). Graded like a mutable grain and reported "
+            "separately, because silently exempting one would hide an "
+            "accumulation behind a missing field while silently grading it "
+            "would hide that the declaration is the thing to fix."
+        ),
+    )
+    fallback_exempted_projections: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Projections exempted by the INTERIM fallback list rather than by "
+            "a contract declaration (OMN-19081). Rendered rather than hidden: "
+            "an exemption resting on a literal in this repository is weaker "
+            "evidence than one the contract states, and a reader deciding "
+            "whether the literal can be deleted needs to see which exposures "
+            "still depend on it."
+        ),
+    )
     total_consumed: int = Field(
         default=0, ge=0, description="Envelopes dispatched across all windows in scope"
     )

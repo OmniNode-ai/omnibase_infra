@@ -10,9 +10,6 @@ from pydantic import ValidationError
 from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
-from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
-    ACTIVE_BACKEND_KEYS,
-)
 from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
     ModelBifrostLaneOverlay,
 )
@@ -20,9 +17,10 @@ from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
 _QWEN_ENDPOINT = "http://192.168.86.201:8000/v1/chat/completions"
 _DS_V4_ENDPOINT = "http://192.168.86.200:8101/v1/chat/completions"
 
-# Per-backend authorized shape, mirroring the live 2026-08-28 readback recorded in
-# OMN-16833: .201:8000 serves ``Qwen3.6-35B-A3B`` (max_model_len 131072) and .200:8101 serves
-# ``deepseek-v4-flash`` (context_length 131072).
+# Per-backend shape, mirroring the committed dev lane overlay. OMN-17099: these
+# are fixture values, no longer an authorization table the model checks against
+# — the model validates SHAPE and completeness; which endpoint a lab lane binds
+# is the lane overlay's own declaration.
 _SHAPES: dict[str, dict[str, object]] = {
     "local-coder": {
         "endpoint_url": _QWEN_ENDPOINT,
@@ -50,8 +48,7 @@ _SHAPES: dict[str, dict[str, object]] = {
         "max_tokens": 65_536,
         "timeout_ms": 300_000,
         # OMN-16999: declared but not serving — .200:8101 answered http=000 on
-        # the 2026-09-05 probe. `serving` is validated against the authorized
-        # table exactly like every other field, so this shape has to carry it.
+        # the 2026-09-05 probe.
         "serving": False,
     },
 }
@@ -75,7 +72,7 @@ def _overlay(**overrides: object) -> dict[str, object]:
 
 
 @pytest.mark.unit
-def test_valid_overlay_has_exact_authorized_lab_bindings() -> None:
+def test_valid_lab_overlay_round_trips_its_bindings() -> None:
     overlay = ModelBifrostLaneOverlay.model_validate(_overlay())
 
     assert [binding.backend_key for binding in overlay.backends] == [
@@ -87,57 +84,40 @@ def test_valid_overlay_has_exact_authorized_lab_bindings() -> None:
         "Qwen3.8-27B",
         "deepseek-v4-flash",
     }
-    assert overlay.model_dump(by_alias=True)["backends"][0] == _binding()
-
-
-@pytest.mark.unit
-def test_active_backend_keys_cover_every_bindable_local_backend() -> None:
-    """OMN-16833: the DS-V4-Flash rung is a required member, not optional.
-
-    ``escalation``'s large-window (65536) local rung is ``local-ds-v4-flash``.  If it
-    is absent from the required set an overlay can omit it and the lane silently
-    degrades to the metered ceiling, which is exactly the OMN-16833 defect.
-    """
-    assert (
-        frozenset({"local-coder", "local-heavy-reasoning", "local-ds-v4-flash"})
-        == ACTIVE_BACKEND_KEYS
+    dumped = overlay.model_dump(by_alias=True)["backends"][0]
+    assert {key: dumped[key] for key in _binding()} == _binding()
+    # A binding of a base-declared backend carries no added-backend declaration.
+    assert (dumped["provider"], dumped["tier"], dumped["credential"]) == (
+        None,
+        None,
+        None,
     )
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("backend_id", "endpoint_url"),
+    "endpoint_url",
     [
-        # local-coder / local-heavy-reasoning are pinned to .201:8000.
-        ("local-coder", "http://192.168.86.201:8001/v1/chat/completions"),
-        ("local-coder", "http://192.168.86.201:8000/v1"),
-        (
-            "local-coder",
-            "http://192.168.86.201:8000/v1/chat/completions?model=Qwen3.8-27B",
-        ),
-        ("local-coder", "http://user@192.168.86.201:8000/v1/chat/completions"),
-        ("local-coder", "http://localhost:8000/v1/chat/completions"),
-        ("local-coder", "http://192.168.86.200:8000/v1/chat/completions"),
-        ("local-coder", "http://192.168.86.202:8000/v1/chat/completions"),
-        ("local-coder", "https://192.168.86.201:8000/v1/chat/completions"),
-        # local-ds-v4-flash is pinned to .200:8101 — the qwen host/port is NOT
-        # interchangeable, and a bare base still fails closed (OMN-12815).
-        ("local-ds-v4-flash", "http://192.168.86.201:8000/v1/chat/completions"),
-        ("local-ds-v4-flash", "http://192.168.86.200:8101/v1"),
-        ("local-ds-v4-flash", "http://192.168.86.200:8102/v1/chat/completions"),
-        ("local-ds-v4-flash", "https://192.168.86.200:8101/v1/chat/completions"),
+        # A bare base is not a complete endpoint (OMN-12815).
+        "http://192.168.86.201:8000/v1",
+        "http://192.168.86.201:8000/v1/chat/completions?model=Qwen3.8-27B",
+        "http://user@192.168.86.201:8000/v1/chat/completions",
+        "http://192.168.86.201:8000/v1/chat/completions#fragment",
+        "ftp://192.168.86.201:8000/v1/chat/completions",
     ],
 )
-def test_incomplete_or_unauthorized_endpoint_is_rejected(
-    backend_id: str, endpoint_url: str
-) -> None:
+def test_incomplete_or_malformed_endpoint_is_rejected(endpoint_url: str) -> None:
     with pytest.raises(ValidationError, match="endpoint_url"):
         ModelBifrostLaneOverlay.model_validate(
             _overlay(
                 backends=[
                     _binding(
                         bid,
-                        **({"endpoint_url": endpoint_url} if bid == backend_id else {}),
+                        **(
+                            {"endpoint_url": endpoint_url}
+                            if bid == "local-coder"
+                            else {}
+                        ),
                     )
                     for bid in _SHAPES
                 ]
@@ -146,20 +126,40 @@ def test_incomplete_or_unauthorized_endpoint_is_rejected(
 
 
 @pytest.mark.unit
+def test_the_endpoint_host_is_the_lane_overlays_declaration() -> None:
+    """OMN-17099: the model no longer pins a binding to a shipped lab host."""
+    overlay = ModelBifrostLaneOverlay.model_validate(
+        _overlay(
+            backends=[
+                _binding(
+                    bid,
+                    **(
+                        {"endpoint_url": "https://192.0.2.9:8443/v1/chat/completions"}
+                        if bid == "local-coder"
+                        else {}
+                    ),
+                )
+                for bid in _SHAPES
+            ]
+        )
+    )
+
+    assert (
+        overlay.backends[0].endpoint_url == "https://192.0.2.9:8443/v1/chat/completions"
+    )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("backend_id", "field", "value"),
     [
-        ("local-coder", "served_model_id", "Qwen3.8-27B-27b"),
-        ("local-coder", "parameter_count", "35b-a3b"),
-        ("local-coder", "context_window", 32_768),
+        # A served id that disagrees with the base contract is refused by the
+        # renderer, not here (OMN-17099) — see test_base_model_mismatch_fails_*.
         ("local-coder", "max_tokens", 131_073),
+        ("local-coder", "context_window", 0),
         ("local-coder", "endpoint_url_env", "BIFROST_LOCAL_CODER_ENDPOINT_URL"),
+        # A credential is a declared ``credential``, never a bare secret_ref.
         ("local-coder", "secret_ref", "infisical://local-coder"),
-        # OMN-16833: the DS-V4-Flash served id is ``deepseek-v4-flash``, NOT the
-        # ``ds-v4-flash`` label the repo contract carried before this ticket.  A
-        # mismatch here is the OMN-16419 silent-misattribution class.
-        ("local-ds-v4-flash", "served_model_id", "ds-v4-flash"),
-        ("local-ds-v4-flash", "context_window", 65_536),
         ("local-ds-v4-flash", "max_tokens", 131_073),
         (
             "local-ds-v4-flash",
@@ -183,16 +183,28 @@ def test_model_metadata_and_env_transport_are_rejected(
 
 
 @pytest.mark.unit
-def test_unknown_duplicate_or_missing_backend_is_rejected() -> None:
+def test_duplicate_backend_is_rejected() -> None:
     complete = [_binding(bid) for bid in _SHAPES]
-    for backends in (
-        [*complete, _binding()],  # duplicate local-coder
-        [*complete, {**_binding(), "backend_id": "local-reasoner"}],  # unknown
-        complete[:-1],  # missing local-ds-v4-flash — the OMN-16833 defect
-        [_binding()],
-    ):
-        with pytest.raises(ValidationError):
-            ModelBifrostLaneOverlay.model_validate(_overlay(backends=backends))
+    with pytest.raises(ValidationError, match="duplicate"):
+        ModelBifrostLaneOverlay.model_validate(
+            _overlay(backends=[*complete, _binding()])
+        )
+
+
+@pytest.mark.unit
+def test_a_backend_the_model_cannot_place_is_left_to_the_renderer() -> None:
+    """OMN-17099: set equality with a shipped list is gone from the model.
+
+    Whether a binding names a base backend, adds a new one, or omits a routed
+    one is only decidable against the base contract, so the renderer refuses
+    those cases (``test_bifrost_lane_overlay_adds_backend_omn17099.py``). The
+    model accepts an overlay binding fewer backends than before.
+    """
+    overlay = ModelBifrostLaneOverlay.model_validate(
+        _overlay(backends=[_binding("local-coder")])
+    )
+
+    assert [binding.backend_key for binding in overlay.backends] == ["local-coder"]
 
 
 # ---------------------------------------------------------------------------
@@ -218,22 +230,6 @@ def test_cloud_locale_declares_zero_local_backends() -> None:
 
     assert overlay.locale is EnumBifrostLaneLocale.CLOUD
     assert overlay.backends == ()
-
-
-@pytest.mark.unit
-def test_lab_locale_missing_a_backend_is_rejected_naming_lane_and_rule() -> None:
-    """The lab exact-set rule is unchanged, and the message names both."""
-    incomplete = [_binding(bid) for bid in _SHAPES][:-1]
-
-    with pytest.raises(ValidationError) as excinfo:
-        ModelBifrostLaneOverlay.model_validate(
-            _overlay(lane="dev", locale="lab", backends=incomplete)
-        )
-
-    message = str(excinfo.value)
-    assert "'dev'" in message
-    assert "locale 'lab'" in message
-    assert "local-ds-v4-flash" in message
 
 
 @pytest.mark.unit

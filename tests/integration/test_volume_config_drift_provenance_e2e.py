@@ -36,9 +36,6 @@ from omnibase_infra.runtime.config_provenance import (
 from omnibase_infra.runtime.health.health_config_provenance import (
     check_config_provenance_health,
 )
-from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
-    _AUTHORIZED_BINDINGS,
-)
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
@@ -46,37 +43,46 @@ from omnibase_infra.runtime.render_bifrost_delegation_contract import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _CANONICAL_LANE_OVERLAY = REPO_ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
 
-# OMN-16999: DERIVED from the authorized binding table, never restated.
+# OMN-16999: DERIVED from the committed dev lane overlay, never restated.
 #
 # `_merge_lane_overlay` refuses a base contract whose ``model_name`` disagrees
-# with the overlay's ``served_model_id``, and both sides of that comparison are
-# authored by ``_AUTHORIZED_BINDINGS``. Spelling the served ids here as literals
-# made this fixture a THIRD copy of a fact that has now flipped twice, so a
-# routing re-probe broke a test about volume drift -- a surface with nothing to
-# do with which model .201 is serving. Reading the table means the next re-probe
-# touches one place and this fixture follows.
+# with the overlay's ``served_model_id``. Spelling the served ids here as literals
+# made this fixture another copy of a fact that has now flipped several times, so
+# a routing re-probe broke a test about volume drift -- a surface with nothing to
+# do with which model .201 is serving. Reading the overlay means the next
+# re-probe touches one place and this fixture follows. (OMN-17099 moved the lab
+# bindings out of a table in ``src/`` into the lane overlays; this reads those.)
 #
-# OMN-16833: every backend the canonical dev lane overlay binds must be declared
-# here too, because `_merge_lane_overlay` also refuses an overlay naming a
-# backend the base contract does not declare. Deriving the whole list from the
-# table keeps that true by construction rather than by remembering to edit it.
+# OMN-16833: every backend the canonical dev lane overlay REBINDS is declared
+# here too, because `_merge_lane_overlay` refuses an overlay naming a base
+# backend the base contract does not declare. A backend the overlay ADDS (it
+# carries its own ``provider``, OMN-17099) is left out: the renderer refuses a
+# base contract that already declares a backend the overlay claims to add.
+_OVERLAY_SERVED_IDS: dict[str, str] = {
+    backend["backend_id"]: backend["served_model_id"]
+    for backend in yaml.safe_load(_CANONICAL_LANE_OVERLAY.read_text("utf-8"))[
+        "backends"
+    ]
+    if "provider" not in backend
+}
+
 _SOURCE_CONTRACT: dict[str, object] = {
     "backends": [
         {
             "backend_id": backend_id,
-            "model_name": binding.served_model_id,
+            "model_name": served_model_id,
             "endpoint_url": "",
             "required": True,
         }
-        for backend_id, binding in _AUTHORIZED_BINDINGS.items()
+        for backend_id, served_model_id in _OVERLAY_SERVED_IDS.items()
     ],
     "routing_rules": [
         {
             "rule_id": "default",
-            "backend_ids": list(_AUTHORIZED_BINDINGS),
+            "backend_ids": list(_OVERLAY_SERVED_IDS),
         },
     ],
-    "default_backends": list(_AUTHORIZED_BINDINGS),
+    "default_backends": list(_OVERLAY_SERVED_IDS),
 }
 
 
@@ -159,11 +165,8 @@ async def test_volume_config_drift_detected_and_reseeded(tmp_path: Path) -> None
     )
     post_data = yaml.safe_load(volume_target.read_text("utf-8"))
     # The re-seed restored the SOURCE value, undoing the drift injected above.
-    # Read it from the authority for the same reason the fixture does.
-    assert (
-        post_data["backends"][0]["model_name"]
-        == _AUTHORIZED_BINDINGS["local-coder"].served_model_id
-    )
+    # Read it from the overlay for the same reason the fixture does.
+    assert post_data["backends"][0]["model_name"] == _OVERLAY_SERVED_IDS["local-coder"]
     assert check_config_provenance_health(post_reseed).status != "unhealthy"
 
 
