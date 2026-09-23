@@ -261,6 +261,11 @@ task_classes:
       - write up
       - write-up
       priority: 80
+      short_prompt:
+        min_words: 6
+        opening_phrases:
+        - summarise
+        - summarize
   test:
     gateway_exposure: public
     selection:

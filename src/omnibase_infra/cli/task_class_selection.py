@@ -43,6 +43,12 @@ THE THREE RULES, each a contract field rather than an implementation detail:
   class's declared qualifiers sits within ``within_words`` words of it, so
   "write a parser" is a code request and "write a PR body" is not. The
   vocabulary is the contract's; see ``ModelQualifiedPhrases``.
+* **A short prompt is admitted by its opening** (OMN-19140). A class that
+  declares ``short_prompt`` is eligible below its ``min_words``, down to the
+  block's own floor, only for a prompt that opens with one of its
+  ``opening_phrases``. "Summarize in one sentence: ..." reaches
+  ``summarization``; a short prompt that merely mentions a summary does not.
+  See ``ModelShortPromptSelection``.
 
 Ties between eligible classes are broken by ``priority`` (higher wins) and then
 by class name, so resolution is total and deterministic.
@@ -60,6 +66,9 @@ from pydantic import ValidationError
 
 from omnibase_infra.cli.model_qualified_phrases import ModelQualifiedPhrases
 from omnibase_infra.cli.model_selectable_task_class import ModelSelectableTaskClass
+from omnibase_infra.cli.model_short_prompt_selection import (
+    ModelShortPromptSelection,
+)
 from omnibase_infra.cli.model_task_class_execution_budget import (
     ModelTaskClassExecutionBudget,
 )
@@ -70,6 +79,7 @@ __all__ = [
     "EnumTaskTypeResolution",
     "ModelQualifiedPhrases",
     "ModelSelectableTaskClass",
+    "ModelShortPromptSelection",
     "ModelTaskClassExecutionBudget",
     "ModelTaskTypeResolution",
     "TaskClassContractError",
@@ -197,6 +207,7 @@ def load_selectable_task_classes(
                     min_words=selection.get("min_words"),
                     max_words=selection.get("max_words"),
                     qualified_phrases=selection.get("qualified_phrases"),
+                    short_prompt=selection.get("short_prompt"),
                 )
             )
         except ValidationError as exc:
@@ -353,13 +364,18 @@ def resolve_task_type(
 
     lowered = prompt.lower()
     word_count = len(prompt.split())
-    eligible: list[tuple[ModelSelectableTaskClass, str]] = []
+    eligible: list[tuple[ModelSelectableTaskClass, str, bool]] = []
     for entry in classes:
-        if not entry.shape_admits(word_count):
+        if entry.shape_admits(word_count):
+            phrase = entry.matching_phrase(lowered)
+            if phrase is not None:
+                eligible.append((entry, phrase, False))
             continue
-        phrase = entry.matching_phrase(lowered)
-        if phrase is not None:
-            eligible.append((entry, phrase))
+        # OMN-19140: below a class's floor, only a declared opening phrase at
+        # the very start of the prompt can admit it.
+        opening = entry.short_prompt_phrase(lowered, word_count)
+        if opening is not None:
+            eligible.append((entry, opening, True))
 
     if not eligible:
         return ModelTaskTypeResolution(
@@ -375,12 +391,19 @@ def resolve_task_type(
 
     # Highest priority wins; an exact tie is broken by class name so the
     # resolution is total and reproducible rather than map-order dependent.
-    winner, phrase = min(eligible, key=lambda pair: (-pair[0].priority, pair[0].name))
+    winner, phrase, opens = min(
+        eligible, key=lambda item: (-item[0].priority, item[0].name)
+    )
+    how = (
+        f"opening phrase {phrase!r} at the start of a {word_count}-word prompt"
+        if opens
+        else f"phrase {phrase!r} in a {word_count}-word prompt"
+    )
     return ModelTaskTypeResolution(
         task_type=winner.name,
         resolution=EnumTaskTypeResolution.CONTRACT,
         reason=(
             f"contract predicate for {winner.name!r} (priority {winner.priority}) "
-            f"matched the phrase {phrase!r} in a {word_count}-word prompt"
+            f"matched the {how}"
         ),
     )
