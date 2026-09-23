@@ -227,25 +227,41 @@ def test_the_minted_token_is_scoped_to_exactly_the_repos_the_sweep_reads() -> No
 
 
 def test_the_sibling_zombie_detector_keeps_its_own_credential() -> None:
-    """Positive control: this change is scoped to the alert job.
+    """Positive control: the two jobs keep separate, separately scoped tokens.
 
-    The detector WRITES (force-cancel) to two repos on CROSS_REPO_PAT and is
-    deliberately untouched. Without this control, a later edit that swept both
-    jobs onto one credential would pass every assertion above while changing a
-    write path nobody reviewed.
+    The detector WRITES (force-cancel) to two repos. Since OMN-19258 it mints
+    its own onexbot token with `actions: write` scoped to exactly those two
+    repos. This alert job only READS. Without this control, a later edit that
+    swept both jobs onto one credential -- or widened this read-only job to
+    Actions write -- would pass every assertion above while changing a write
+    path nobody reviewed.
     """
     doc: dict[Any, Any] = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     detector = doc["jobs"]["detect"]
+    detector_steps = [s for s in detector["steps"] if isinstance(s, dict)]
     tokens = [
         str(step["env"]["GH_TOKEN"])
-        for step in detector["steps"]
-        if isinstance(step, dict)
-        and isinstance(step.get("env"), dict)
-        and "GH_TOKEN" in step["env"]
+        for step in detector_steps
+        if isinstance(step.get("env"), dict) and "GH_TOKEN" in step["env"]
     ]
     assert tokens, "the zombie detector sets no GH_TOKEN; it needs one to cancel runs"
     for token in tokens:
-        assert "CROSS_REPO_PAT" in token, (
-            "the zombie detector's own credential is out of scope for OMN-18254 "
-            f"and must stay as it was: {token!r}"
+        assert token.strip() == "${{ steps.app-token.outputs.token }}", (
+            "the zombie detector must use the token minted in its OWN job "
+            f"(OMN-19258): {token!r}"
         )
+    detector_mints = [
+        s
+        for s in detector_steps
+        if str(s.get("uses", "")).startswith("actions/create-github-app-token@")
+    ]
+    assert len(detector_mints) == 1, "the detect job must mint its own token"
+    detector_with = detector_mints[0].get("with")
+    assert isinstance(detector_with, dict)
+    assert detector_with.get("permission-actions") == "write"
+
+    alert_with = _step_named("Mint the onexbot App token").get("with")
+    assert isinstance(alert_with, dict)
+    assert alert_with.get("permission-actions") != "write", (
+        "the alert job only reads; Actions write belongs to the detector alone"
+    )
