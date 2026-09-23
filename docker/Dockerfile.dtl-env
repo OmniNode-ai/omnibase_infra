@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1.4
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# OMN-19358 — the delegated test loop's per-lockfile environment image.
+#
+# One repository's locked environment on top of the gate-runner test image
+# (docker/Dockerfile.gate-runner, built with a digest-pinned BASE_IMAGE). The
+# build context holds ONLY that repository's pyproject.toml and uv.lock at the
+# target commit: the project itself is never installed, and no source is baked
+# in. At test time the task worktree is the container's one bind mount, and the
+# run puts its src/ on PYTHONPATH.
+#
+# The package index is reached here, at build time, with no worktree anywhere
+# near the build. Every test run afterwards is --network none, so the venv must
+# already hold everything the suite imports; uv includes the default dev group,
+# which carries pytest.
+#
+# Key the tag by content so a rebuild with the same inputs is a no-op:
+#   dtl-env:<repo>-<sha256(uv.lock)[:12]>-<test image id[:12]>
+#
+# Build (context = a directory holding only pyproject.toml and uv.lock):
+#   docker build -f docker/Dockerfile.dtl-env \
+#     --build-arg TEST_IMAGE=<test image id> -t dtl-env:<key> <context dir>
+ARG TEST_IMAGE
+FROM ${TEST_IMAGE}
+
+USER root
+
+ENV UV_PROJECT_ENVIRONMENT=/opt/dtl-venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_CACHE_DIR=/tmp/dtl-uv-cache
+
+WORKDIR /opt/dtl-lock
+COPY pyproject.toml uv.lock ./
+
+RUN uv sync --frozen --no-install-project --all-extras \
+    && /opt/dtl-venv/bin/python -c "import pytest" \
+    && rm -rf /tmp/dtl-uv-cache \
+    && chmod -R a+rX /opt/dtl-venv
+
+# The test image's non-root user (gaterunner, uid/gid 1000). The loop also
+# passes --user 1000:1000, so the two agree.
+USER 1000:1000
+WORKDIR /work
