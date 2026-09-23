@@ -57,6 +57,21 @@
 #   Four edits in one PR, all of them visible.
 version: 1
 evidence_artifacts:
+  # --- chain-canary-c16-receipt-identity.yml: the C16 verdict (OMN-19181) --
+  #
+  # As with C11, the probe's EXIT CODE is the verdict and this record is how a
+  # reader sees the three probe rows without reading a log. An absent or empty
+  # record beside a green run would claim three probes ran with nothing behind
+  # the claim -- on the one criterion whose subject is "SKIP never PASS".
+  - id: c16-receipt-identity
+    workflow: .github/workflows/chain-canary-c16-receipt-identity.yml
+    job: c16-receipt-identity
+    producer_step: "Drive the healthy and the dying delegation and grade C16"
+    artifact_name: c16-receipt-identity
+    required_paths:
+      - c16-receipt-identity.json
+    rationale: >-
+      One row per probe (R-DELEG-11, R-DELEG-12, R-DELEG-26) with its outcome, its reasons and the compared keys: the route, provider and model the receipt names beside the provider and model the orchestrator's own bus terminal records, the completed run's rule count, and the dead run's typed failure class and code. SKIP rows are recorded as SKIP and fail the verdict, so an empty record is exactly the state that must not read green.
   # --- chain-canary-c11-negative-paths.yml: the C11 verdict (OMN-19175) ----
   #
   # The probe's EXIT CODE is the criterion's verdict, so this record is not how
@@ -73,6 +88,21 @@ evidence_artifacts:
       - c11-negative-paths.json
     rationale: >-
       One row per negative path (wrong key, absent key, wrong tenant, malformed) with the expectation declared in the grader, the observed status and code, and the positive control taken in the same invocation. A zero-byte record is the case that matters: four refusals are exactly what an unreachable endpoint produces, so the control row is what makes an all-refused result readable as a failure rather than a proof.
+  # --- chain-canary-c12-provider-catalogue.yml: the C12 verdict (OMN-19195) --
+  #
+  # As with C11, the probe's EXIT CODE is the verdict and this record is how a
+  # reader sees the checks without reading a log. An empty record beside a
+  # green run would claim the deployed catalogue was read and graded with
+  # nothing behind it.
+  - id: c12-provider-catalogue
+    workflow: .github/workflows/chain-canary-c12-provider-catalogue.yml
+    job: c12-provider-catalogue
+    producer_step: "Read the deployed catalogue and grade it"
+    artifact_name: c12-provider-catalogue
+    required_paths:
+      - c12-provider-catalogue.json
+    rationale: >-
+      One row per check over the deployed catalogue (parity both directions, no Claude entry, no house entry, the intake route's binding) plus the negative-test injections run in the same process, with the image and the sha256 of the catalogue, the platform contract and both deployed modules. The injections are what make a green readable: a checker that always answers clean produces the same shipped reading, and only the injections tell the two apart.
   # --- dev-lane-liveness.yml: the lab saturation signal (OMN-18031) ---------
   #
   # This pair is the plan's named regression fixture. The probe was dead from

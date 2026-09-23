@@ -4,6 +4,13 @@
 
 The lane overlay is configuration data, not a dotenv template.  In particular,
 this module never reads endpoint or model bindings from the process environment.
+
+OMN-17099: the overlay may ADD a backend the base contract does not declare,
+when the binding carries the full declaration (provider, tier, credential). The
+added backend is appended to the rendered contract after every base backend, so
+it never displaces a rung the base declared. A binding that names an undeclared
+backend without that declaration, or a base backend WITH it, fails the render —
+never a silent drop and never a default.
 """
 
 from __future__ import annotations
@@ -30,7 +37,8 @@ from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
-    ACTIVE_BACKEND_KEYS,
+    NEW_BACKEND_DECLARATION_FIELDS,
+    ModelBifrostLaneBackendBinding,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
     ModelBifrostLaneOverlay,
@@ -188,14 +196,35 @@ def _index_base_backends(base: dict[str, object]) -> dict[str, dict[object, obje
     return by_id
 
 
-def _is_local_backend(backend_id: str, backend: dict[object, object]) -> bool:
-    """Whether the BASE contract declares this backend as lab-served.
+def _is_local_backend(backend: dict[object, object]) -> bool:
+    """Whether the contract declares this backend as lab-served (its ``tier``)."""
+    return backend.get("tier") == _LOCAL_TIER
 
-    Two sources, both the contract's own: the backend's declared ``tier`` and
-    the authorized local binding table the overlay validates against. A cloud
-    lane disables every backend either one calls local.
+
+def _routed_local_backend_ids(
+    base: dict[str, object], by_id: dict[str, dict[object, object]]
+) -> set[str]:
+    """Every local backend the BASE contract routes to.
+
+    A lab lane must bind each of these (OMN-16833: an omitted rung silently
+    degrades its task classes to the metered ceiling). The set is read from the
+    base contract's own routing surface — ``routing_rules[].backend_ids`` and
+    ``default_backends`` — never from a list shipped in this module (OMN-17099).
     """
-    return backend.get("tier") == _LOCAL_TIER or backend_id in ACTIVE_BACKEND_KEYS
+    routed: set[str] = set()
+    rules = base.get("routing_rules")
+    if isinstance(rules, list):
+        for rule in rules:
+            if isinstance(rule, dict) and isinstance(rule.get("backend_ids"), list):
+                routed.update(str(item) for item in rule["backend_ids"])
+    defaults = base.get("default_backends")
+    if isinstance(defaults, list):
+        routed.update(str(item) for item in defaults)
+    return {
+        backend_id
+        for backend_id in routed
+        if backend_id in by_id and _is_local_backend(by_id[backend_id])
+    }
 
 
 def _disable_local_backends(by_id: dict[str, dict[object, object]]) -> None:
@@ -209,9 +238,31 @@ def _disable_local_backends(by_id: dict[str, dict[object, object]]) -> None:
     ``_load_bifrost_endpoints`` skips, so the chain of responders never offers a
     local rung while the routing table stays internally consistent.
     """
-    for backend_id, backend in by_id.items():
-        if _is_local_backend(backend_id, backend):
+    for backend in by_id.values():
+        if _is_local_backend(backend):
             backend["endpoint_url"] = None
+
+
+def _added_backend_entry(
+    binding: ModelBifrostLaneBackendBinding,
+) -> dict[object, object]:
+    """The complete base-contract entry for a backend the lane overlay adds."""
+    # The binding model guarantees the declaration is all-or-none; the caller
+    # has already established it is present.
+    assert binding.provider is not None
+    assert binding.tier is not None
+    assert binding.credential is not None
+    return {
+        "backend_id": binding.backend_key,
+        "provider": binding.provider,
+        "endpoint_url": binding.endpoint_url if binding.serving else None,
+        "model_name": binding.advertised_model,
+        "tier": binding.tier,
+        "timeout_ms": binding.timeout_ms,
+        "max_tokens": binding.max_tokens,
+        "secret_ref": binding.credential.secret_ref,
+        "capabilities": list(binding.capabilities),
+    }
 
 
 def _merge_lane_overlay(
@@ -225,23 +276,52 @@ def _merge_lane_overlay(
 
     if overlay.locale is EnumBifrostLaneLocale.CLOUD:
         _disable_local_backends(by_id)
+    else:
+        bound = {binding.backend_key for binding in overlay.backends}
+        unbound = sorted(_routed_local_backend_ids(base, by_id) - bound)
+        if unbound:
+            raise ProtocolConfigurationError(
+                f"Bifrost lane overlay for lane {overlay.lane!r} declares locale "
+                f"{EnumBifrostLaneLocale.LAB.value!r} but does not bind the "
+                f"local backend(s) {unbound} that the base contract routes to. "
+                "A lab lane that omits a routed rung silently degrades those "
+                "task classes to the metered ceiling (OMN-16833); bind it, or "
+                "bind it with serving: false if its endpoint is dark."
+            )
 
+    added: list[dict[object, object]] = []
     for binding in overlay.backends:
         backend = by_id.get(binding.backend_key)
         if backend is None:
-            raise ProtocolConfigurationError(
-                f"Bifrost lane overlay names unknown backend {binding.backend_key!r}"
-            )
-        if "model_name" not in backend:
-            raise ProtocolConfigurationError(
-                f"Bifrost base backend {binding.backend_key!r} must declare model_name"
-            )
-        base_model = backend["model_name"]
-        if base_model is not None and base_model != binding.advertised_model:
-            raise ProtocolConfigurationError(
-                f"Bifrost base backend {binding.backend_key!r} model_name {base_model!r} "
-                f"does not match overlay served_model_id {binding.advertised_model!r}"
-            )
+            if not binding.declares_new_backend:
+                raise ProtocolConfigurationError(
+                    f"Bifrost lane overlay backend {binding.backend_key!r} is not "
+                    "declared by the base contract, and the binding does not "
+                    f"declare it either: an added backend must declare "
+                    f"{list(NEW_BACKEND_DECLARATION_FIELDS)} (OMN-17099). A "
+                    "misspelled id of a base backend fails here too."
+                )
+            backend = _added_backend_entry(binding)
+            added.append(backend)
+        else:
+            if binding.declares_new_backend:
+                raise ProtocolConfigurationError(
+                    f"Bifrost lane overlay backend {binding.backend_key!r} is "
+                    f"declared by the base contract, which owns its "
+                    f"{list(NEW_BACKEND_DECLARATION_FIELDS)}: a lane may rebind "
+                    "its endpoint and served id, never rewrite its provider, "
+                    "tier or credential (OMN-17099)."
+                )
+            if "model_name" not in backend:
+                raise ProtocolConfigurationError(
+                    f"Bifrost base backend {binding.backend_key!r} must declare model_name"
+                )
+            base_model = backend["model_name"]
+            if base_model is not None and base_model != binding.advertised_model:
+                raise ProtocolConfigurationError(
+                    f"Bifrost base backend {binding.backend_key!r} model_name {base_model!r} "
+                    f"does not match overlay served_model_id {binding.advertised_model!r}"
+                )
         if not binding.serving:
             # OMN-16999: a DECLARED-but-dark rung. Write the disabled shape —
             # the same ``endpoint_url: null`` a cloud lane's local backends get
@@ -277,6 +357,10 @@ def _merge_lane_overlay(
     for backend in by_id.values():
         backend.pop("endpoint_url_env", None)
         backend.pop("required", None)
+    if added:
+        backends = base["backends"]
+        assert isinstance(backends, list)
+        backends.extend(added)
     return base
 
 
@@ -307,7 +391,7 @@ def _validate_rendered_contract(
                 )
             active += 1
             backend_id = backend.get("backend_id")
-            if isinstance(backend_id, str) and _is_local_backend(backend_id, backend):
+            if isinstance(backend_id, str) and _is_local_backend(backend):
                 local_with_endpoint.append(backend_id)
     if active == 0:
         raise ProtocolConfigurationError(
@@ -339,7 +423,8 @@ def render_bifrost_delegation_contract(
     resolved overlay file, never from the environment.
 
     The overlay's execution locale decides what "merged" means (OMN-17502): a
-    ``lab`` lane binds exactly the authorized local backends, while a ``cloud``
+    ``lab`` lane binds every local backend the base contract routes to and may
+    add fully declared backends of its own (OMN-17099), while a ``cloud``
     lane declares none and renders the base contract's cloud backends with every
     local rung explicitly disabled.
     """

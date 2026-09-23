@@ -6,6 +6,12 @@ OMN-17502 adds the execution-locale axis. See
 :class:`~omnibase_infra.runtime.models.enum_bifrost_lane_locale.EnumBifrostLaneLocale`
 for why a lane that runs off the lab network has to be able to declare zero
 local backends as a stated fact.
+
+OMN-17099 removed the set-equality rule: a lab lane used to have to declare
+EXACTLY a backend set hardcoded in the product. Which backends a lab lane must
+bind is now derived from the base contract by the renderer — every local
+backend the base contract routes to — and a lane may add backends the base
+does not declare, fully specified.
 """
 
 from __future__ import annotations
@@ -18,7 +24,6 @@ from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
-    ACTIVE_BACKEND_KEYS,
     ModelBifrostLaneBackendBinding,
 )
 
@@ -67,22 +72,21 @@ class ModelBifrostLaneOverlay(BaseModel):
                     f"lane {self.lane!r} declares locale "
                     f"{EnumBifrostLaneLocale.CLOUD.value!r} and must declare zero "
                     f"local backends, got {sorted(backend_keys)}: a cloud lane runs "
-                    "where the authorized lab endpoints do not exist, so binding "
+                    "where the lab endpoints do not exist, so binding "
                     "one here would advertise a rung the lane cannot reach "
                     "(OMN-17502). Its delegation comes from the base contract's "
                     "cloud backends."
                 )
             return self
 
-        if set(backend_keys) != ACTIVE_BACKEND_KEYS:
+        if not backend_keys:
             raise ValueError(
                 f"lane {self.lane!r} declares locale "
-                f"{EnumBifrostLaneLocale.LAB.value!r} and must declare exactly the "
-                f"active local backend IDs {sorted(ACTIVE_BACKEND_KEYS)}, got "
-                f"{sorted(backend_keys)}. A lab lane that omits a rung silently "
-                "degrades to the metered ceiling (OMN-16833); a lane with no "
-                f"local backends at all declares locale "
-                f"{EnumBifrostLaneLocale.CLOUD.value!r} instead (OMN-17502)."
+                f"{EnumBifrostLaneLocale.LAB.value!r} and must bind at least one "
+                "backend. A lab lane with no local backends silently degrades "
+                "to the metered ceiling (OMN-16833); a lane that runs off the lab "
+                f"network declares locale {EnumBifrostLaneLocale.CLOUD.value!r} "
+                "instead (OMN-17502)."
             )
         return self
 

@@ -152,6 +152,7 @@ from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
     resolve_delegate_terminal,
 )
+from omnibase_infra.cli.model_delegate_default_bus import ModelDelegateDefaultBus
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
 )
@@ -164,6 +165,9 @@ from omnibase_infra.cli.model_delegate_run_addressing import (
 from omnibase_infra.cli.model_delegate_terminal import ModelDelegateTerminal
 from omnibase_infra.cli.model_delegate_timeout_refusal import (
     ModelDelegateTimeoutRefusal,
+)
+from omnibase_infra.cli.model_delegate_transport_refusal import (
+    ModelDelegateTransportRefusal,
 )
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
@@ -192,14 +196,20 @@ from omnibase_infra.cli.task_class_selection import (
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     bind_lane_client_transport,
 )
 from omnibase_infra.event_bus.model_lane_client_transport import (
     ModelLaneClientTransport,
 )
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy import (
+    ModelKafkaConnectRetryPolicy,
+)
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -673,6 +683,174 @@ def _write_unattributed_run_files(
     )
 
 
+def _write_transport_refusal_run_files(
+    *,
+    refusal: ModelDelegateTransportRefusal,
+    run_id: str,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
+    envelope: dict[str, object] | None = None,
+) -> None:
+    """Persist the three files for a delegation that never reached the broker.
+
+    OMN-18925 / C16. This is the same writer shape as the attributed and
+    unattributed paths above -- same directory, same three filenames, same
+    atomic write -- deliberately, rather than a second artifact format for a
+    third kind of outcome. A caller that already knows how to read a failed
+    delegation can read this one, and the invariant "there is always a
+    ``receipt.json`` after a dispatch attempt" is worth more than a bespoke
+    shape per failure class.
+
+    Route attribution is fail-closed for the same reason as
+    :func:`_write_unattributed_run_files`, and more strongly here: no rung
+    ran, no backend was selected and no model was called, so there is nothing
+    to attribute even wrongly. ``route_attributed`` is false and no backend,
+    model, tier or endpoint key is written at all.
+
+    ``terminal_failure_cause`` is written as ``None`` on purpose. All three
+    members of the delegation failure enum are provider-side and a broker
+    that never accepted the command says nothing about a provider -- see this
+    module's transport refusal model for the full reasoning. The cause a
+    reader needs is in ``transport_refusal``, typed.
+    """
+    run_dir = (state_root / "runs" / run_id).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    correlation_id = str(refusal.correlation_id)
+    refusal_fields = refusal.model_dump(mode="json")
+
+    # Empty rather than absent: the customer-facing answer file always
+    # exists, and a zero-byte one says "no answer was produced" in the same
+    # place a real answer would have been.
+    _atomic_write_text(run_dir / "result.txt", "")
+    _atomic_write_text(
+        run_dir / "receipt.json",
+        json.dumps(
+            {
+                "receipt_id": correlation_id,
+                "correlation_id": correlation_id,
+                "run_id": run_id,
+                "route_attributed": False,
+                "route_unattributed": (
+                    "transport failure: the command never reached the broker, "
+                    f"so no rung ran ({refusal.reason})"
+                ),
+                "status": EnumSkillResultStatus.FAILED.value,
+                "terminal_class": "transport",
+                "terminal_failure_cause": None,
+                "failure_reason": (
+                    f"{refusal.transport_error_type}: {refusal.transport_error}"
+                    if refusal.transport_error
+                    else refusal.transport_error_type
+                ),
+                "transport_refusal": refusal_fields,
+                "attempts": [],
+                "receipt": envelope,
+                **addressing.as_run_file_fields(),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    _atomic_write_text(
+        run_dir / "run.json",
+        json.dumps(
+            {
+                "run_id": run_id,
+                "correlation_id": correlation_id,
+                "routing_tier": None,
+                "route_attributed": False,
+                "prompt": prompt,
+                "task_type": task_type,
+                "task_type_resolution": task_type_resolution,
+                **addressing.as_run_file_fields(),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    click.echo(
+        "delegate artifacts (TRANSPORT FAILURE -- "
+        + refusal.reason
+        + ", no rung ran): "
+        + " ".join(
+            str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
+        ),
+        err=True,
+    )
+
+
+def _transport_refusal_from_receipt(
+    *,
+    envelope: dict[str, object],
+    addressing: ModelDelegateRunAddressing,
+    broker: str = "",
+    command_topic: str = "",
+) -> ModelDelegateTransportRefusal | None:
+    """Build a transport refusal from a receipt, or ``None`` if not transport.
+
+    The decision is read from the receipt's own typed
+    ``runtime_error_is_transport`` flag, which ``run_receipt_mode`` set by
+    ``isinstance`` against the infra transport error types at the moment it
+    caught the exception. Nothing here re-derives the classification by
+    matching a class name: a rename would silently stop matching, and the
+    symptom would be the silence this whole change removes.
+    """
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        return None
+    if not result.get("runtime_error_is_transport"):
+        return None
+
+    error_type = str(result.get("runtime_error_type") or "").strip()
+    if not error_type:
+        # The flag is only ever set beside a captured exception type, so an
+        # empty one means a hand-built or truncated envelope rather than a
+        # real transport failure. Refuse to write a refusal that cannot name
+        # what failed; the ordinary unresolved-terminal path still reports it.
+        return None
+
+    attempts_permitted, bound_seconds = _resolve_transport_bound()
+    duration_ms = envelope.get("duration_ms")
+
+    return ModelDelegateTransportRefusal(
+        reason="broker_unreachable",
+        correlation_id=uuid.UUID(str(envelope["correlation_id"])),
+        bus=addressing.bus,
+        locus=addressing.locus.value,
+        broker=broker,
+        command_topic=command_topic,
+        attempts_permitted=attempts_permitted,
+        bound_seconds=bound_seconds,
+        elapsed_seconds=(
+            float(duration_ms) / 1000.0
+            if isinstance(duration_ms, (int, float))
+            else 0.0
+        ),
+        transport_error_type=error_type,
+        transport_error=sanitize_error_string(str(result.get("error") or "")),
+    )
+
+
+def _resolve_transport_bound() -> tuple[int, float]:
+    """Resolve the connect retry policy the delegate's own transport reads.
+
+    Returns ``(attempts_permitted, bound_seconds)`` from the SAME declaration
+    :class:`EventBusKafka` resolves at connect time, rather than from a
+    literal duplicated here -- which is the drift AC-3 exists to prevent, and
+    would put a number in the refusal that was never in force.
+    """
+    bus_config = ModelKafkaEventBusConfig.default()
+    policy = ModelKafkaConnectRetryPolicy.from_bus_config(
+        bus_config,
+        attempt_timeout_seconds=float(bus_config.timeout_seconds),
+    )
+    return policy.total_attempts, policy.total_bound_seconds
+
+
 def _write_local_run_files(
     *,
     receipt: object,
@@ -684,6 +862,8 @@ def _write_local_run_files(
     drift_guard: ProtocolDriftGuardVerdict | None = None,
     require_budget_evidence: bool = False,
     require_contract_evidence: bool = False,
+    broker: str = "",
+    command_topic: str = "",
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -718,6 +898,39 @@ def _write_local_run_files(
     envelope = receipt_dump(mode="json")
     if not isinstance(envelope, dict):
         raise ValueError("delegate receipt did not serialize to an object")
+
+    # OMN-18925 / C16: a transport-class failure is written, not raised.
+    #
+    # This sits BEFORE _delegation_result deliberately. A run whose broker
+    # was never reached has no terminal to resolve, so the resolver below
+    # would raise DelegateTerminalUnresolvedError -- correctly, on its own
+    # terms -- and run_receipt_mode would catch that, print "receipt callback
+    # failed", and leave the caller with no run directory at all. That is the
+    # measured 2026-09-21 failure: every lane is told to read the terminal
+    # from receipt.json and on this path the file did not exist.
+    #
+    # The refusal is not a substitute for a terminal and invents nothing. It
+    # records that the command never reached the broker, which transport
+    # stage stopped it, and the deadline that was in force.
+    transport_refusal = _transport_refusal_from_receipt(
+        envelope=envelope,
+        addressing=addressing,
+        broker=broker,
+        command_topic=command_topic,
+    )
+    if transport_refusal is not None:
+        _write_transport_refusal_run_files(
+            refusal=transport_refusal,
+            run_id=str(envelope["run_id"]),
+            state_root=state_root,
+            prompt=prompt,
+            task_type=task_type,
+            task_type_resolution=task_type_resolution,
+            addressing=addressing,
+            envelope=envelope,
+        )
+        return
+
     # Scope this writer by the receipt's declared concrete type instead of
     # treating a generic fixture (or another node's result) as a malformed
     # delegation. A genuine delegation still fails closed below when route
@@ -831,7 +1044,11 @@ def _write_local_run_files(
     )
 
 
-def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str]:
+def resolve_default_bus(
+    *,
+    kafka_bootstrap: str | None = None,
+    workspace_root: Path | None = None,
+) -> ModelDelegateDefaultBus:
     """Resolve the bus ``--bus`` defaults to when the flag is omitted (OMN-17304).
 
     The CLI hosts a runtime instance, and per the OMN-17304 operator ruling a
@@ -845,9 +1062,10 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
        :func:`omnibase_infra.runtime.service_kernel.resolve_embedded_runtime_config`:
        the ``ONEX_CONTRACTS_DIR`` BOOTSTRAP pointer names a contracts
        directory whose ``runtime/runtime_config.yaml`` is the configured
-       authority; with no pointer (or no file), the SHIPPED tier-0 default
-       runtime config answers — in-memory bus, ``local`` profile. An
-       unconfigured install is still config-resolved.
+       authority; with no pointer, a bound ``workspace_root`` answers with its
+       checked-in tier-1 runtime config (OMN-19193); with neither, the SHIPPED
+       tier-0 default runtime config answers — in-memory bus, ``local``
+       profile. An unconfigured install is still config-resolved.
     2. ``config.event_bus.type`` from that configuration is passed as
        ``config_bus=`` — the tier the pre-ruling CLI skipped, which is what
        made ``~/.zshrc`` the transport authority.
@@ -876,9 +1094,10 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
     exact delegation topic; on the current path it is inert by construction.
 
     Returns:
-        ``(bus_type, reason)`` — the resolved transport and provenance naming
-        WHICH authority answered (the config file path, or the shipped tier-0
-        default), for the capture log and receipts.
+        The resolved transport, the provenance naming WHICH authority answered
+        (the config file path, or the shipped tier-0 default), and the lane
+        that same configuration binds a shared bus to (OMN-19193) -- one value,
+        because one configuration answered all three.
 
     Raises:
         ProtocolConfigurationError: the resolved runtime config exists but is
@@ -887,13 +1106,16 @@ def resolve_default_bus(*, kafka_bootstrap: str | None = None) -> tuple[str, str
     """
     from omnibase_infra.runtime.service_kernel import resolve_embedded_runtime_config
 
-    config, config_source = resolve_embedded_runtime_config()
-    return resolve_bus_type(
+    config, config_source = resolve_embedded_runtime_config(
+        workspace_root=workspace_root
+    )
+    bus, reason = resolve_bus_type(
         config_bus=str(config.event_bus.type),
         config_source=config_source,
         kafka_bootstrap=kafka_bootstrap,
         authority_topic=SUFFIX_DELEGATION_REQUEST,
     )
+    return ModelDelegateDefaultBus(bus=bus, reason=reason, lane=config.event_bus.lane)
 
 
 @contextmanager
@@ -1488,7 +1710,7 @@ def _timeout_receipt(
         "Lane this delegation is addressed to, e.g. 'dev'. Its broker and "
         "transport are read from the checked-in lane declaration "
         "omnimarket/config/ci_bus_lanes.yaml under the workspace root "
-        "(--omni-home / $OMNI_HOME); the refusal lists the declared lanes. "
+        "(--omnibase-path / $OMNIBASE_PATH); the refusal lists the declared lanes. "
         "Required whenever the resolved bus is kafka, unless you state a "
         "lane-internal address with --kafka-bootstrap. The broker address is "
         "NOT read from KAFKA_BOOTSTRAP_SERVERS (OMN-16871): on the launching "
@@ -1541,17 +1763,18 @@ def _timeout_receipt(
     ),
 )
 @click.option(
-    "--omni-home",
+    "--omnibase-path",
+    "omnibase_path",
     type=click.Path(path_type=Path),
     envvar="OMNIBASE_PATH",
     default=None,
     help=(
-        "Canonical OmniNode workspace root for the local omnimarket drift "
-        "check (OMN-13930). Bound to $OMNIBASE_PATH, the product name for "
-        "that root (OMN-16855/OMN-16852) -- the envvar binding is "
-        "load-bearing: without it the guard silently receives "
-        "omni_home=None and the canonical-clone check never fires, because "
-        "callers never pass this flag explicitly."
+        "Workspace root for the local omnimarket drift check (OMN-13930) and "
+        "the lane declaration. Bound to $OMNIBASE_PATH (OMN-16855/OMN-16852; "
+        "spelled for the product by OMN-19197) -- the envvar binding is "
+        "load-bearing: without it the guard receives no root and the "
+        "canonical-clone check never fires, because callers never pass this "
+        "flag explicitly. Optional; never required."
     ),
 )
 @click.option(
@@ -1586,7 +1809,7 @@ def delegate_command(
     timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
-    omni_home: Path | None,
+    omnibase_path: Path | None,
     allow_omnimarket_drift: bool,
 ) -> None:
     """Delegate PROMPT to a local LLM and print exactly one typed result.
@@ -1628,7 +1851,7 @@ def delegate_command(
             timeout=timeout,
             verbose=verbose,
             emit_socket=emit_socket,
-            omni_home=omni_home,
+            omni_home=omnibase_path,
             allow_drift=allow_omnimarket_drift,
         )
     except ValueError as exc:
@@ -1747,13 +1970,29 @@ def run_delegate(
                 "an explicit bootstrap override — pass --bus kafka too)."
             )
         try:
-            bus, reason = resolve_default_bus()
-        except EventBusResolutionAmbiguousError as exc:
+            default_bus = resolve_default_bus(workspace_root=omni_home)
+        except (EventBusResolutionAmbiguousError, ProtocolConfigurationError) as exc:
             # OMN-16678: an indeterminate probe is a REFUSAL, not a fallback.
-            # Surfaced as a ClickException so the caller gets the ambiguity and
-            # both remedies on stderr with a non-zero exit, instead of a
-            # traceback or a silently coin-flipped transport.
+            # OMN-19193: so is a bound workspace root that declares no runtime
+            # config. Surfaced as a ClickException so the caller gets the cause
+            # and the remedies on stderr with a non-zero exit, instead of a
+            # traceback or a silently chosen transport.
             raise click.ClickException(str(exc)) from exc
+        bus, reason = default_bus.bus, default_bus.reason
+        if bus == "kafka" and lane is None and default_bus.lane is not None:
+            # OMN-19193: the configuration that chose the shared bus also names
+            # which declared lane it is. Taken only on this branch, where the
+            # transport itself came from that configuration -- an explicit
+            # --bus never inherits it, and an explicit --lane outranks it. The
+            # lane still resolves through the lane declaration below, exactly
+            # as a typed --lane would.
+            lane = default_bus.lane
+            logger.info(
+                "onex delegate: lane %s taken from the configuration that "
+                "resolved the transport (%s)",
+                lane,
+                reason,
+            )
         if bus == "kafka":
             logger.info("onex delegate: auto-resolved event bus -> kafka (%s)", reason)
         else:
@@ -1882,6 +2121,7 @@ def run_delegate(
         # defect being closed is an invocation that silently ran in-process and
         # was then read as evidence about a lane it never reached, so this path
         # never degrades, it stops.
+        locus_probe_started = time.monotonic()
         try:
             locus_decision = resolve_delegate_locus(
                 requested=locus,
@@ -1897,6 +2137,59 @@ def run_delegate(
                 shared_bus_value=BUS_KAFKA,
             )
         except DelegateLocusRefusedError as exc:
+            # OMN-18925 / C16: the SECOND transport exit, and the one a
+            # genuinely unreachable broker takes. The probe refuses here
+            # before anything is published, which is correct and stays --
+            # what was wrong is that it left no artifact, so the negative
+            # control ("broker is down") and the positive one ("broker
+            # stalled mid-dispatch") produced different evidence shapes for
+            # the same class of problem, and the cheaper of the two produced
+            # none at all.
+            #
+            # The refusal is written against the CLI's own minted run_id
+            # because no receipt exists yet: nothing has run. Its reason is
+            # locus_probe_refused rather than broker_unreachable, because a
+            # probe that finds no live consumer group may be reporting a lane
+            # that is simply not running rather than a sick broker, and those
+            # two send a reader to different places.
+            attempts_permitted, bound_seconds = _resolve_transport_bound()
+            _write_transport_refusal_run_files(
+                refusal=ModelDelegateTransportRefusal(
+                    reason="locus_probe_refused",
+                    correlation_id=correlation_id,
+                    bus=bus,
+                    locus=(locus or EnumDelegateLocus.DEPLOYED_LANE.value),
+                    broker=resolved_bootstrap or "",
+                    attempts_permitted=attempts_permitted,
+                    bound_seconds=bound_seconds,
+                    elapsed_seconds=time.monotonic() - locus_probe_started,
+                    transport_error_type=type(exc).__name__,
+                    transport_error=sanitize_error_string(str(exc)),
+                ),
+                run_id=str(run_id),
+                state_root=state_root,
+                prompt=prompt,
+                task_type=resolved_task_type,
+                task_type_resolution=task_class.resolution.value,
+                addressing=ModelDelegateRunAddressing(
+                    locus=EnumDelegateLocus.DEPLOYED_LANE,
+                    bus=bus,
+                    lane=lane_target.lane if lane_target is not None else None,
+                    dispatch_target=None,
+                ),
+            )
+            if lane_target is not None:
+                # OMN-19193: a default workspace run lands on a declared lane,
+                # so a lane that is down refuses the operator's ordinary
+                # delegation. Name the lane, and name the one explicit way to
+                # run offline -- never fall to it.
+                raise click.ClickException(
+                    f"{exc} [lane '{lane_target.lane}', broker "
+                    f"{lane_target.bootstrap_servers}, declared in "
+                    f"{lane_target.declared_in}] To run offline on purpose, pass "
+                    "--bus inmemory: the explicit override, whose evidence stays "
+                    "in the local store."
+                ) from exc
             raise click.ClickException(str(exc)) from exc
 
         # OMN-18810: the four addressing facts the two written files record,
@@ -1977,6 +2270,13 @@ def run_delegate(
                         # entry. Both now read one derivation.
                         require_budget_evidence=receipt_evidence_demanded[0],
                         require_contract_evidence=receipt_evidence_demanded[1],
+                        # OMN-18925: the two facts a transport refusal needs
+                        # that addressing does not carry separately. Taken
+                        # from the decision that was PROVEN viable, so a
+                        # refusal names the broker the run actually addressed
+                        # rather than the flag as typed.
+                        broker=locus_decision.broker,
+                        command_topic=locus_decision.command_topic,
                     ),
                 )
         except DelegateTimeoutExceededError as exc:
