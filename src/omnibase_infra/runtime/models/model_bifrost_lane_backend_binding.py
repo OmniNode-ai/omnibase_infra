@@ -39,6 +39,9 @@ from omnibase_infra.runtime.models.enum_bifrost_lane_credential_kind import (
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_credential import (
     ModelBifrostLaneBackendCredential,
 )
+from omnibase_infra.runtime.models.model_bifrost_lane_backend_placement import (
+    ModelBifrostLaneBackendPlacement,
+)
 
 _CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
@@ -82,6 +85,9 @@ class ModelBifrostLaneBackendBinding(BaseModel):
     tier: str | None = Field(default=None, min_length=1)
     credential: ModelBifrostLaneBackendCredential | None = None
     capabilities: tuple[str, ...] = ()
+    #: OMN-19215. Where an ADDED backend sits in the routing tier ladder; passed
+    #: through to the rendered contract. None keeps it reachable by pin only.
+    placement: ModelBifrostLaneBackendPlacement | None = None
 
     @property
     def declares_new_backend(self) -> bool:
@@ -115,6 +121,20 @@ class ModelBifrostLaneBackendBinding(BaseModel):
                 "being an added backend: the base contract owns a declared "
                 "backend's capabilities"
             )
+        if self.placement is not None:
+            if not declared:
+                raise ValueError(
+                    f"backend {self.backend_key!r} declares a placement without "
+                    "being an added backend: a base-declared backend is already "
+                    "in the routing ladder (OMN-19215)"
+                )
+            if self.placement.max_context_tokens > self.context_window:
+                raise ValueError(
+                    f"backend {self.backend_key!r} placement offers "
+                    f"{self.placement.max_context_tokens} context tokens but the "
+                    f"backend declares a context_window of {self.context_window} "
+                    "(OMN-19215)"
+                )
 
         parsed = urlsplit(self.endpoint_url)
         try:

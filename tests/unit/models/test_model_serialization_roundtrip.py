@@ -77,6 +77,9 @@ from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_credential import (
     ModelBifrostLaneBackendCredential,
 )
+from omnibase_infra.runtime.models.model_bifrost_lane_backend_placement import (
+    ModelBifrostLaneBackendPlacement,
+)
 from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
 from omnibase_infra.runtime.models.model_contract_attach_gate_status import (
     ModelContractAttachGateStatus,
@@ -549,6 +552,14 @@ def _make_bifrost_lane_backend_credential() -> ModelBifrostLaneBackendCredential
     )
 
 
+def _make_bifrost_lane_backend_placement() -> ModelBifrostLaneBackendPlacement:
+    return ModelBifrostLaneBackendPlacement(
+        tier="cheap_cloud",
+        fallback_for=("cloud-primary",),
+        max_context_tokens=16_384,
+    )
+
+
 def _make_bifrost_lane_backend_binding() -> ModelBifrostLaneBackendBinding:
     """A lane-ADDED backend, so the round trip covers every optional field.
 
@@ -570,6 +581,7 @@ def _make_bifrost_lane_backend_binding() -> ModelBifrostLaneBackendBinding:
         tier="cheap_cloud",
         credential=_make_bifrost_lane_backend_credential(),
         capabilities=("code_generation",),
+        placement=_make_bifrost_lane_backend_placement(),
     )
 
 
@@ -604,6 +616,7 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     ModelBatchPublisherMetrics: _make_batch_publisher_metrics,
     ModelBifrostLaneBackendBinding: _make_bifrost_lane_backend_binding,
     ModelBifrostLaneBackendCredential: _make_bifrost_lane_backend_credential,
+    ModelBifrostLaneBackendPlacement: _make_bifrost_lane_backend_placement,
     ModelComponentHealth: _make_component_health,
     ModelContractAttachGateStatus: _make_contract_attach_gate_status,
     ModelDetailedHealthResponse: _make_detailed_health_response,
