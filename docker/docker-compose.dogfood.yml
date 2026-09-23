@@ -293,6 +293,15 @@ services:
         set -eu
         /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
         /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+        # OMN-19070 disk dials. On .105 this broker shares one Docker Desktop VM
+        # disk with the arm64 CI runner, which refuses every job under 5 GB free.
+        # An idle partition held a full 32 MiB preallocated segment for up to
+        # 14 days; 1 MiB steps plus a daily roll release it without a restart.
+        # retention_bytes caps the few partitions carrying real data at 1 GiB.
+        # Basis and measurements: tests/unit/infra/test_dogfood_redpanda_disk_dials_omn19070.py
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set segment_fallocation_step 1048576
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set log_segment_ms 86400000
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set retention_bytes 1073741824
     depends_on:
       redpanda:
         condition: service_healthy
