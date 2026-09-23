@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import omnimarket
 import pytest
 import yaml
 
@@ -119,6 +118,12 @@ def test_declared_route_cannot_weaken_single_hop_policy(
 
 
 def test_committed_market_resource_is_the_dogfood_pin_authority() -> None:
+    # Imported here, not at module scope: this is the one test in the module
+    # that reads the omnimarket package, and a module-scope import turned the
+    # other pure route-policy tests into a collection error wherever omnimarket
+    # is not installed (the infra unit suite forbids it, OMN-15620).
+    import omnimarket
+
     market_resource = (
         Path(omnimarket.__file__).resolve().parents[2] / "config" / "ci_bus_lanes.yaml"
     )

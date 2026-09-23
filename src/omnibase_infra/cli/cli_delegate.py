@@ -350,9 +350,9 @@ def _copy_evidence_bytes(source: Path, destination: Path) -> dict[str, object]:
 
 
 def _write_issued_delegation_evidence(
-    *,
     receipt: object,
     receipt_bytes: bytes,
+    *,
     payload_path: Path,
     state_root: Path,
     addressing: ModelDelegateRunAddressing,
@@ -2152,7 +2152,7 @@ def run_delegate(
         if candidate_content_floor:
             if omni_home is None:
                 raise OmnimarketDriftError(
-                    "content candidate dispatch requires --omni-home"
+                    "content candidate dispatch requires --omnibase-path"
                 )
             # The content floor binds the source snapshot and actual Core/Market
             # imports. The ordinary Git repair would replace those attested bytes.

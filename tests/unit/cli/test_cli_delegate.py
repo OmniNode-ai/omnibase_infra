@@ -1772,7 +1772,7 @@ def test_hidden_candidate_content_flag_is_forwarded_by_delegate_command(
         [
             "write a short note",
             "--candidate-content-floor",
-            "--omni-home",
+            "--omnibase-path",
             str(tmp_path),
             "--state-root",
             str(tmp_path / "state"),
@@ -1809,7 +1809,7 @@ def test_candidate_content_floor_missing_or_stale_refuses_before_dispatch(
         lambda **kwargs: receipt_calls.append(kwargs),
     )
 
-    with pytest.raises(click.ClickException, match="requires --omni-home"):
+    with pytest.raises(click.ClickException, match="requires --omnibase-path"):
         _run_with_stubbed_task_class(
             tmp_path=tmp_path,
             monkeypatch=monkeypatch,
