@@ -60,9 +60,26 @@ Usage
         --repo onex_change_control --repo omnimarket \\
         --stale-after-seconds 900 --apply --report report.json
 
-Exit code is always 0 on a completed scan (dry-run or apply); a per-repo
-fetch failure is recorded in the report and printed as a warning, and does
-not abort the scan of the remaining repos.
+Exit codes (OMN-19258)
+----------------------
+``0`` only when every target repo was read and every force-cancel the run
+attempted succeeded. ``1`` when any repo could not be read, any repo read
+back zero workflow runs, or any force-cancel failed. A failure does not abort
+the remaining repos, and the report is written before the exit either way, so
+a red run still carries its receipt.
+
+Before OMN-19258 this exited 0 on every completed scan and recorded fetch
+failures only inside the report. Measured 2026-09-23 over the retained
+history: 68 of 2,904 scheduled reports carried a fetch error for BOTH target
+repos (an API rate limit on the token's owning account), so on those runs the
+detector saw nothing and the job was green. An empty result from a sweep that
+could not read is not evidence of absence.
+
+The report's ``scanned`` map is the positive control for a clean result:
+``runs_read`` is how many workflow runs of ANY event the page returned for
+that repo, and ``active_pull_request_runs`` is how many of those the detector
+then considered. A repo with CI history always returns a full page, so
+``runs_read == 0`` means the read was blind, not that the repo was quiet.
 """
 
 from __future__ import annotations
@@ -184,9 +201,15 @@ def _run_gh(args: list[str]) -> str:
     return result.stdout
 
 
-def fetch_active_pull_request_runs(
-    owner: str, repo: str, limit: int
-) -> list[PullRequestRun]:
+@dataclass(frozen=True)
+class RepoScan:
+    """One repo's read: every run the page returned, and the active PR runs in it."""
+
+    runs_read: int
+    active_runs: list[PullRequestRun]
+
+
+def fetch_active_pull_request_runs(owner: str, repo: str, limit: int) -> RepoScan:
     """Fetch active (queued/in_progress) `pull_request`-event runs for `repo`.
 
     Deliberately a single, un-paginated page: the GitHub Actions runs API
@@ -201,6 +224,10 @@ def fetch_active_pull_request_runs(
     ``gh api --jq`` streams one compact JSON object per matched item (not a
     single JSON array), so the output is parsed line-by-line -- the same
     convention ``handler_runner_fleet_snapshot.py`` uses for its queue probe.
+
+    Every run on the page is streamed and the event/status filter is applied
+    here rather than in jq (OMN-19258), so the count of runs READ survives as
+    the positive control for an empty active set.
     """
     stdout = _run_gh(
         [
@@ -211,16 +238,20 @@ def fetch_active_pull_request_runs(
             "-f",
             f"per_page={limit}",
             "--jq",
-            '.workflow_runs[] | select(.event=="pull_request" and '
-            '(.status=="queued" or .status=="in_progress")) '
-            "| {id,status,created_at,head_sha,head_branch}",
+            ".workflow_runs[] | {id,event,status,created_at,head_sha,head_branch}",
         ]
     )
+    runs_read = 0
     runs: list[PullRequestRun] = []
     for line in stdout.strip().splitlines():
         if not line.strip():
             continue
+        runs_read += 1
         item = json.loads(line)
+        if item.get("event") != "pull_request":
+            continue
+        if item.get("status") not in ACTIVE_RUN_STATUSES:
+            continue
         head_branch = item.get("head_branch")
         if not head_branch:
             continue
@@ -234,7 +265,7 @@ def fetch_active_pull_request_runs(
                 created_at=str(item["created_at"]),
             )
         )
-    return runs
+    return RepoScan(runs_read=runs_read, active_runs=runs)
 
 
 def fetch_job_count(owner: str, repo: str, run_id: int) -> int:
@@ -300,7 +331,15 @@ def force_cancel_run(owner: str, repo: str, run_id: int) -> None:
         ],
         check=True,
         capture_output=True,
+        text=True,
     )
+
+
+def _error_text(exc: subprocess.CalledProcessError) -> str:
+    stderr = exc.stderr
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    return stderr.strip()[:500] if stderr else str(exc)
 
 
 def write_report(
@@ -312,6 +351,8 @@ def write_report(
     stale_after_seconds: float,
     candidates: list[CancellationCandidate],
     fetch_errors: dict[str, str],
+    scanned: dict[str, dict[str, int]],
+    cancel_errors: dict[str, str],
 ) -> None:
     report = {
         "generated_at": datetime.now(UTC).isoformat(),
@@ -319,8 +360,11 @@ def write_report(
         "repos": repos,
         "mode": "apply" if apply else "dry-run",
         "stale_after_seconds": stale_after_seconds,
+        "scanned": scanned,
         "cancellations": [asdict(candidate) for candidate in candidates],
         "fetch_errors": fetch_errors,
+        "cancel_errors": cancel_errors,
+        "ok": not fetch_errors and not cancel_errors,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -356,16 +400,23 @@ def main(argv: list[str] | None = None) -> int:
 
     all_runs: list[PullRequestRun] = []
     fetch_errors: dict[str, str] = {}
+    scanned: dict[str, dict[str, int]] = {}
     for repo in args.repos:
         try:
-            all_runs.extend(
-                fetch_active_pull_request_runs(args.owner, repo, args.limit)
-            )
+            scan = fetch_active_pull_request_runs(args.owner, repo, args.limit)
         except subprocess.CalledProcessError as exc:
-            fetch_errors[repo] = exc.stderr.strip()[:500] if exc.stderr else str(exc)
-            print(
-                f"[pr-ci-zombie-detector] WARNING: fetch failed for {repo}: {fetch_errors[repo]}"
+            fetch_errors[repo] = _error_text(exc)
+            continue
+        scanned[repo] = {
+            "runs_read": scan.runs_read,
+            "active_pull_request_runs": len(scan.active_runs),
+        }
+        if scan.runs_read == 0:
+            fetch_errors[repo] = (
+                "read 0 workflow runs: a repo with CI history always returns a "
+                "page, so this read cannot be told apart from a blind one"
             )
+        all_runs.extend(scan.active_runs)
 
     enriched_runs: list[PullRequestRun] = []
     for repo in {run.repo for run in all_runs}:
@@ -373,10 +424,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             enriched_runs.extend(with_newest_job_counts(args.owner, repo_runs))
         except subprocess.CalledProcessError as exc:
-            fetch_errors.setdefault(
-                repo, exc.stderr.strip()[:500] if exc.stderr else str(exc)
-            )
+            fetch_errors.setdefault(repo, _error_text(exc))
             enriched_runs.extend(repo_runs)
+
+    for repo, error in sorted(fetch_errors.items()):
+        print(f"::error::[pr-ci-zombie-detector] could not read {repo}: {error}")
 
     candidates = determine_zombie_cancellations(
         runs=enriched_runs,
@@ -385,7 +437,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if not candidates:
-        print("[pr-ci-zombie-detector] no wedged concurrency groups found")
+        print(
+            "[pr-ci-zombie-detector] no wedged concurrency groups found "
+            f"(scanned: {json.dumps(scanned, sort_keys=True)})"
+        )
+    cancel_errors: dict[str, str] = {}
     for candidate in candidates:
         print(
             "[pr-ci-zombie-detector] "
@@ -394,8 +450,17 @@ def main(argv: list[str] | None = None) -> int:
             f"reason={candidate.reason} unblocks_run={candidate.blocked_run_id} "
             f"(pending {candidate.blocked_run_pending_seconds:.0f}s)"
         )
-        if args.apply:
+        if not args.apply:
+            continue
+        try:
             force_cancel_run(args.owner, candidate.repo, candidate.run_id)
+        except subprocess.CalledProcessError as exc:
+            key = f"{candidate.repo}#{candidate.run_id}"
+            cancel_errors[key] = _error_text(exc)
+            print(
+                f"::error::[pr-ci-zombie-detector] force-cancel failed for {key}: "
+                f"{cancel_errors[key]}"
+            )
 
     if args.report:
         write_report(
@@ -406,9 +471,11 @@ def main(argv: list[str] | None = None) -> int:
             stale_after_seconds=args.stale_after_seconds,
             candidates=candidates,
             fetch_errors=fetch_errors,
+            scanned=scanned,
+            cancel_errors=cancel_errors,
         )
 
-    return 0
+    return 1 if fetch_errors or cancel_errors else 0
 
 
 if __name__ == "__main__":
