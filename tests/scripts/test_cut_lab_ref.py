@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,9 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CUT_LAB_REF = REPO_ROOT / "scripts" / "runtime_build" / "cut-lab-ref.sh"
+STAGE_PINNED_PROOF_ROOT = (
+    REPO_ROOT / "scripts" / "runtime_build" / "stage_pinned_proof_root.py"
+)
 
 LAB_REF_REPOS = (
     "omnibase_infra",
@@ -102,9 +106,38 @@ def test_dry_run_plan_stability_lane(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_dry_run_plan_dogfood_lane_is_isolated(tmp_path: Path) -> None:
-    """Dogfood resolves to its own compose project, never the shared dev lane."""
+    """Dogfood resolves to its own compose project, never the shared dev lane.
+
+    A dogfood build only runs from a proof root staged from a pinned snapshot
+    (OMN-19086), so the plan is taken against one.
+    """
     omni_home = _make_omni_home(tmp_path)
-    result = _run(omni_home, "--lane", "dogfood")
+    spi = omni_home / "omnibase_spi"
+    spi.mkdir()
+    _git(spi, "init", "-q", "-b", "dev")
+    _git(spi, "config", "user.email", "t@t.t")
+    _git(spi, "config", "user.name", "t")
+    (spi / "f.txt").write_text("x\n", encoding="utf-8")
+    _git(spi, "add", "-A")
+    _git(spi, "commit", "-q", "-m", "init")
+    proof_root = tmp_path / "proof-root"
+    staged = subprocess.run(
+        [
+            sys.executable,
+            str(STAGE_PINNED_PROOF_ROOT),
+            "stage",
+            "--dest",
+            str(proof_root),
+            "--source-root",
+            str(omni_home),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=scrub_git_location_env(os.environ),
+    )
+    assert staged.returncode == 0, staged.stderr
+    result = _run(proof_root, "--lane", "dogfood")
     assert result.returncode == 0, result.stderr
     assert "OMNIBASE_INFRA_COMPOSE_PROJECT=omnibase-infra-dogfood" in result.stderr
     assert "--profile dogfood" in result.stderr
