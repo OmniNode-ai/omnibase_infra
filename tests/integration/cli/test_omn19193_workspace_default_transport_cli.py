@@ -4,8 +4,8 @@
 """End-to-end CLI coverage: a default delegation on a registry workspace (OMN-19193).
 
 Through ``click``, with the workspace root bound the only way the product binds
-it: ``$OMNIBASE_PATH`` (the variable ``--omni-home`` reads, which the sanctioned
-wrapper exports), and no ``--bus``, ``--lane`` or ``--omni-home`` on the
+it: ``$OMNIBASE_PATH`` (the variable ``--omnibase-path`` reads, which the sanctioned
+wrapper exports), and no ``--bus``, ``--lane`` or ``--omnibase-path`` on the
 command line. The workspace carries its OWN tier-1 runtime config at
 ``config/onex/runtime/runtime_config.yaml``; this package ships no lab values
 (OMN-19184), so the file here is written by the test exactly as a workspace
@@ -127,7 +127,7 @@ def captured_dispatch(
 
 
 def _delegate(tmp_path: Path, root: Path) -> object:
-    # No --bus, no --lane, no --omni-home: the default invocation.
+    # No --bus, no --lane, no --omnibase-path: the default invocation.
     return CliRunner(env={"OMNIBASE_PATH": str(root)}).invoke(
         delegate_command,
         [

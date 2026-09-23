@@ -148,7 +148,7 @@ def _delegate(tmp_path: Path) -> object:
             "in-process",
             "--lane",
             "dev",
-            "--omni-home",
+            "--omnibase-path",
             str(_workspace(tmp_path / "workspace")),
             "--state-root",
             str(tmp_path / "state"),

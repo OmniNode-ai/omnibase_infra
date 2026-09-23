@@ -363,6 +363,16 @@ repos:
         files: ^(\.github/workflows/c29-customer-byo-key-delegation\.yml|scripts/ci/c29_customer_byo_key_probe\.py|tests/ci/test_c29_customer_byo_key_probe_omn19200\.py|tests/fixtures/omn19200/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19197: no internal-only parameter (an option spelled OMNI_HOME, or
+      # $OMNI_HOME in help) on any command this package registers under
+      # onex.cli -- the customer's `onex`. Carries its own positive control.
+      - id: customer-cli-no-internal-parameter
+        name: customer onex CLI carries no internal-only parameter (OMN-19197)
+        entry: uv run --frozen pytest tests/unit/cli/test_customer_cli_no_internal_parameter_omn19197.py -q
+        language: system
+        files: ^(pyproject\.toml|src/omnibase_infra/cli/.*\.py|tests/unit/cli/test_customer_cli_no_internal_parameter_omn19197\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: c11-negative-paths-grading
         name: C11 negative-paths grader (OMN-19175)
         entry: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q

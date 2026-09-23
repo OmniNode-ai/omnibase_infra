@@ -1710,7 +1710,7 @@ def _timeout_receipt(
         "Lane this delegation is addressed to, e.g. 'dev'. Its broker and "
         "transport are read from the checked-in lane declaration "
         "omnimarket/config/ci_bus_lanes.yaml under the workspace root "
-        "(--omni-home / $OMNI_HOME); the refusal lists the declared lanes. "
+        "(--omnibase-path / $OMNIBASE_PATH); the refusal lists the declared lanes. "
         "Required whenever the resolved bus is kafka, unless you state a "
         "lane-internal address with --kafka-bootstrap. The broker address is "
         "NOT read from KAFKA_BOOTSTRAP_SERVERS (OMN-16871): on the launching "
@@ -1763,17 +1763,18 @@ def _timeout_receipt(
     ),
 )
 @click.option(
-    "--omni-home",
+    "--omnibase-path",
+    "omnibase_path",
     type=click.Path(path_type=Path),
     envvar="OMNIBASE_PATH",
     default=None,
     help=(
-        "Canonical OmniNode workspace root for the local omnimarket drift "
-        "check (OMN-13930). Bound to $OMNIBASE_PATH, the product name for "
-        "that root (OMN-16855/OMN-16852) -- the envvar binding is "
-        "load-bearing: without it the guard silently receives "
-        "omni_home=None and the canonical-clone check never fires, because "
-        "callers never pass this flag explicitly."
+        "Workspace root for the local omnimarket drift check (OMN-13930) and "
+        "the lane declaration. Bound to $OMNIBASE_PATH (OMN-16855/OMN-16852; "
+        "spelled for the product by OMN-19197) -- the envvar binding is "
+        "load-bearing: without it the guard receives no root and the "
+        "canonical-clone check never fires, because callers never pass this "
+        "flag explicitly. Optional; never required."
     ),
 )
 @click.option(
@@ -1808,7 +1809,7 @@ def delegate_command(
     timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
-    omni_home: Path | None,
+    omnibase_path: Path | None,
     allow_omnimarket_drift: bool,
 ) -> None:
     """Delegate PROMPT to a local LLM and print exactly one typed result.
@@ -1850,7 +1851,7 @@ def delegate_command(
             timeout=timeout,
             verbose=verbose,
             emit_socket=emit_socket,
-            omni_home=omni_home,
+            omni_home=omnibase_path,
             allow_drift=allow_omnimarket_drift,
         )
     except ValueError as exc:

@@ -188,16 +188,17 @@ def _entry_point_module(value: str) -> str:
     ),
 )
 @click.option(
-    "--omni-home",
+    "--omnibase-path",
+    "omnibase_path",
     type=click.Path(path_type=Path),
     envvar="OMNIBASE_PATH",
     default=None,
     help=(
-        "Canonical OmniNode workspace root for the local omnimarket drift "
-        "check. Bound to $OMNIBASE_PATH, the product name for that root "
-        "(OMN-16855/OMN-16852; the binding itself is OMN-14560, mirroring "
-        "OMN-14531's 'onex skill' fix) -- without it the drift guard "
-        "silently receives omni_home=None and never fires."
+        "Workspace root for the local omnimarket drift check. Bound to "
+        "$OMNIBASE_PATH (OMN-16855/OMN-16852; the binding itself is "
+        "OMN-14560, mirroring OMN-14531's 'onex skill' fix; spelled for the "
+        "product by OMN-19197) -- without it the drift guard receives no "
+        "root and never fires. Optional; never required."
     ),
 )
 @click.option(
@@ -224,7 +225,7 @@ def run_node_by_name(
     verbose: bool,
     output_mode: str,
     emit_socket: Path | None,
-    omni_home: Path | None,
+    omnibase_path: Path | None,
     allow_omnimarket_drift: bool,
 ) -> None:
     """Run a packaged ONEX node on the local runtime, resolved by NAME.
@@ -247,12 +248,14 @@ def run_node_by_name(
     """
     try:
         check_omnimarket_drift(
-            omni_home=str(omni_home) if omni_home else None,
+            omni_home=str(omnibase_path) if omnibase_path else None,
             allow_drift=allow_omnimarket_drift,
             # OMN-17190: heal in-flight instead of handing a human a command to
             # type. Bound here rather than defaulted inside the guard so the
             # guard stays a pure function for every non-CLI caller.
-            reconcile=make_workspace_reconciler(str(omni_home) if omni_home else None),
+            reconcile=make_workspace_reconciler(
+                str(omnibase_path) if omnibase_path else None
+            ),
         )
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc

@@ -114,7 +114,7 @@ class TestLaneDeclarationLookup:
     def test_no_workspace_root_is_refused_naming_the_flag(self) -> None:
         with pytest.raises(DelegateLaneSelectionError) as exc:
             resolve_lane_declaration_path(None)
-        assert "--omni-home" in str(exc.value)
+        assert "--omnibase-path" in str(exc.value)
 
     def test_absent_declaration_is_refused_naming_the_path(
         self, tmp_path: Path
@@ -394,7 +394,7 @@ class TestCommandSurface:
                 "kafka",
                 "--locus",
                 "in-process",
-                "--omni-home",
+                "--omnibase-path",
                 str(_workspace(tmp_path)),
                 "--state-root",
                 str(tmp_path / "state"),
