@@ -47,6 +47,7 @@ from omnibase_infra.cli.cli_delegate import (
 )
 from omnibase_infra.cli.delegate_pre_publish_failure import (
     DelegatePrePublishFailureError,
+    describe_pre_publish_failure,
     pre_publish_failure_from_receipt,
 )
 from omnibase_infra.cli.delegate_terminal_resolver import (
@@ -124,7 +125,7 @@ _TIMEOUTLESS_CONTRACT = (
 
 
 @pytest.fixture(autouse=True)
-def _isolated_delegate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def stand_in_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Resolve the stand-in contract and keep the host's workspace out of it."""
     monkeypatch.delenv("OMNI_HOME", raising=False)
     monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
@@ -327,3 +328,40 @@ class TestPrePublishClassification:
         assert error is not None
         assert "before publish" in error
         assert _TERMINAL_SENTENCE not in error
+
+
+class TestDescribeNeverGuesses:
+    """When no field-level refusal exists, the message says so instead of naming one."""
+
+    def test_a_payload_the_model_accepts_names_no_field(
+        self, tmp_path: Path, stand_in_contract: Path
+    ) -> None:
+        payload = tmp_path / "payload.json"
+        payload.write_text(json.dumps({"prompt": "READY"}), encoding="utf-8")
+        envelope = _summary_receipt(workflow_result="failed", wire_correlation_id=None)
+
+        message = describe_pre_publish_failure(
+            envelope=envelope,
+            contract_path=stand_in_contract,
+            payload_path=payload,
+            capture_log_path=tmp_path / "capture.log",
+        )
+
+        assert "not a field-level refusal" in message
+        assert _MODEL_IMPORT_PATH in message
+        assert "capture.log" in message
+
+    def test_an_unreadable_contract_names_no_model(self, tmp_path: Path) -> None:
+        payload = tmp_path / "payload.json"
+        payload.write_text("{}", encoding="utf-8")
+        envelope = _summary_receipt(workflow_result="failed", wire_correlation_id=None)
+
+        message = describe_pre_publish_failure(
+            envelope=envelope,
+            contract_path=tmp_path / "absent.yaml",
+            payload_path=payload,
+            capture_log_path=tmp_path / "capture.log",
+        )
+
+        assert "could not be read" in message
+        assert "Cause: the request payload was refused" not in message

@@ -98,22 +98,22 @@ def pre_publish_failure_from_receipt(
 
 
 def pre_publish_failure_error(envelope: dict[str, object]) -> str:
-    """The base sentence, for a caller that has no payload or contract at hand."""
+    """The base sentence, for a caller that has no payload or contract at hand.
+
+    States no workflow result: the receipt validator rewrites a failed receipt
+    as ``error``, so the writer and the receipt would name different values
+    for the one run.
+    """
     result = envelope.get("result")
-    workflow_result = (
-        str(result.get("workflow_result") or "") if isinstance(result, dict) else ""
-    )
     runtime_error_type = (
         str(result.get("runtime_error_type") or "") if isinstance(result, dict) else ""
     )
     cause = f" ({runtime_error_type})" if runtime_error_type else ""
     return (
         f"delegate run {envelope.get('run_id')} failed before publish{cause}: "
-        f"the run ended with workflow result "
-        f"'{workflow_result or 'absent'}' and the runtime recorded no wire "
-        "correlation id, so no command reached the broker and "
-        "there is no delegation terminal to look for. The deployed lane is not "
-        "implicated."
+        "the run did not complete and the runtime recorded no wire correlation "
+        "id, so no command reached the broker and there is no delegation "
+        "terminal to look for. The deployed lane is not implicated."
     )
 
 
