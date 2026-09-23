@@ -103,6 +103,22 @@ Subcommands
     unreadable, malformed or ``FAIL`` receipt is a FAILURE naming the sha, never
     a skip.
 
+    ``--lane`` is ANY-OF: one PASS among them satisfies it. ``--require-lane``
+    (OMN-19312) is ALL-OF: every named lane must carry its own PASS, and no
+    other lane's PASS substitutes. The distinction is load-bearing: the push
+    path's unqualified call is satisfied by the onex-lab boot receipt the same
+    workflow emits, so a verdict can only bind delivery as a required lane.
+    ``--wait-seconds`` polls, bounded, for a required receipt that has not
+    landed yet, and expiry refuses. ``--resolve-runtime-ancestor`` asks required
+    lanes about the nearest runtime-affecting ancestor, by the release train's
+    OMN-18664 rule (loaded from ``release_train.py``, never restated).
+
+``workflow-verdict``
+    OMN-18866. For a check that has no sha-keyed receipt of its own (or whose
+    lane may not name itself in one, a governed lane), reads the newest
+    completed run of one workflow on one branch and exits non-zero unless it
+    concluded ``success`` within a freshness bound.
+
 STDLIB ONLY, and that is a requirement rather than a preference
 ------------------------------------------------------------
 Both call sites run on a bare runner with no project environment. The boot gate
@@ -127,6 +143,7 @@ could not be proven to.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import io
 import json
 import os
@@ -313,14 +330,41 @@ class EnumLabLane(StrEnum):
     host's own secret store bound and the lane's tenant minted. A receipt that
     conflated them would answer a question nobody asked.
 
+    ``COMPOSE_DEV_CHAIN`` and ``COMPOSE_DEV_CORPUS`` (OMN-19312) are VERDICT
+    lanes on the same ``.201`` compose dev lane, each with exactly one emitter:
+    the chain canary (``chain-canary.yml``, check C15) and the per-candidate
+    delegation corpus (check D11's dev-lane leg). They are separate values for
+    the ``ONEX_LAB_K3S`` reasons above -- one emitter per name, and a different
+    claim -- and for a third: the ``compose-dev`` receipt is also the release
+    train's premise, so folding either verdict into it would stop release cuts,
+    a surface the 2026-09-23T17:12:15Z operator ruling did not name (the shape
+    OMN-18872 was reverted for). A verdict lane binds delivery only when a
+    caller REQUIRES it with ``gate --require-lane``; it is not in
+    ``ANY_OF_DEFAULT_LANES``, so its PASS never satisfies the any-of lab-pass
+    premise on its own.
+
     No other value is admissible, and in particular no governed lane
     (``prod``, ``stability-test``, ``judge``, or a collaborator lane) can name
-    itself in a receipt. A lab pass is a statement about a lab.
+    itself in a receipt. A lab pass is a statement about a lab. A governed
+    lane's verdict is read state-keyed instead, with ``workflow-verdict``.
     """
 
     COMPOSE_DEV = "compose-dev"
     ONEX_LAB = "onex-lab"
     ONEX_LAB_K3S = "onex-lab-k3s"
+    COMPOSE_DEV_CHAIN = "compose-dev-chain"
+    COMPOSE_DEV_CORPUS = "compose-dev-corpus"
+
+
+#: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the three lab
+#: surfaces rule 24(b) means by "a passing lab receipt". The OMN-19312 verdict
+#: lanes are deliberately absent -- a chain canary PASS is not evidence that the
+#: candidate booted, and must never be able to stand in for that premise.
+ANY_OF_DEFAULT_LANES: Final[tuple[EnumLabLane, ...]] = (
+    EnumLabLane.COMPOSE_DEV,
+    EnumLabLane.ONEX_LAB,
+    EnumLabLane.ONEX_LAB_K3S,
+)
 
 
 class EnumLabPassResult(StrEnum):
@@ -3175,73 +3219,230 @@ def verify_emitted(path: Path, sha: str, lane: EnumLabLane, out: Any) -> int:
     return 0
 
 
-def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -> int:
-    """Fail closed unless a PASS receipt exists for the EXACT sha.
+#: How long ``gate --wait-seconds`` may poll at most. Six hours is the ceiling
+#: GitHub places on a hosted job; a larger request could only ever be cut off
+#: by the runner, which would read as a cancellation rather than as this gate's
+#: own refusal.
+MAX_WAIT_SECONDS: Final[int] = 6 * 60 * 60
+
+#: Default spacing of ``--wait-seconds`` polls. Each poll is one exact-name
+#: listing per lane, so this is gentle on the API while still being short next
+#: to the rebuild durations a waiting gate is waiting out.
+DEFAULT_POLL_SECONDS: Final[float] = 30.0
+
+
+@dataclass(frozen=True)
+class ModelLaneRead:
+    """What one read of one lane, for one subject sha, established.
+
+    ``kind`` separates the four outcomes a reader acts on differently:
+    ``receipt`` (a validated receipt was read; its verdict may still be FAIL),
+    ``absent`` (the surface was read and holds no artifact by that name),
+    ``unreadable`` (the surface or the artifact could not be read or parsed) and
+    ``mismatch`` (an artifact exists but its payload disagrees with its name).
+    Only ``absent`` and ``unreadable`` can change by waiting.
+    """
+
+    lane: EnumLabLane
+    subject_sha: str
+    kind: str
+    receipt: ModelLabPassReceipt | None = None
+    problem: str = ""
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.receipt is not None and self.receipt.result is EnumLabPassResult.PASS
+        )
+
+    @property
+    def may_still_arrive(self) -> bool:
+        return self.kind in {"absent", "unreadable"}
+
+
+def read_lane(repo: str, lane: EnumLabLane, sha: str) -> ModelLaneRead:
+    """Read the newest receipt for one lane and one EXACT sha. Never raises."""
+    name = artifact_name(lane, sha)
+    try:
+        artifacts = list_artifacts(repo, name)
+    except Exception as exc:  # noqa: BLE001
+        # Deliberately broad. Rule 16: a verification sweep that errors and is
+        # not caught reads as an absence of findings; here it would read as a
+        # traceback with no sha in it. Any failure to READ the surface is
+        # reported as "unreadable" against the named lane and fails the gate,
+        # which is the same verdict as a missing receipt.
+        return ModelLaneRead(lane, sha, "unreadable", problem=f"{lane.value}: {exc}")
+    if not artifacts:
+        return ModelLaneRead(
+            lane,
+            sha,
+            "absent",
+            problem=f"{lane.value}: no receipt artifact named {name}",
+        )
+    # Newest first: a re-run of the emitting job supersedes an earlier attempt
+    # for the same sha and lane, in both directions.
+    artifacts.sort(key=lambda a: str(a.get("created_at", "")), reverse=True)
+    try:
+        receipt = download_receipt(repo, int(artifacts[0]["id"]))
+    except Exception as exc:  # noqa: BLE001 - same reasoning as above
+        return ModelLaneRead(lane, sha, "unreadable", problem=f"{lane.value}: {exc}")
+    if receipt.sha != sha:
+        return ModelLaneRead(
+            lane,
+            sha,
+            "mismatch",
+            problem=(
+                f"{lane.value}: artifact {name} carries sha {receipt.sha}; "
+                "the name and the payload disagree"
+            ),
+        )
+    if receipt.lane != lane:
+        return ModelLaneRead(
+            lane,
+            sha,
+            "mismatch",
+            problem=(
+                f"{lane.value}: artifact {name} carries lane {receipt.lane.value}; "
+                "the name and the payload disagree"
+            ),
+        )
+    return ModelLaneRead(lane, sha, "receipt", receipt=receipt)
+
+
+def _read_all(
+    repo: str,
+    sha: str,
+    lanes: Sequence[EnumLabLane],
+    required: Sequence[EnumLabLane],
+    required_sha: str,
+) -> tuple[list[ModelLaneRead], list[ModelLaneRead]]:
+    any_of = [read_lane(repo, lane, sha) for lane in lanes]
+    cache = {(r.lane, r.subject_sha): r for r in any_of}
+    all_of: list[ModelLaneRead] = []
+    for lane in required:
+        key = (lane, required_sha)
+        if key not in cache:
+            cache[key] = read_lane(repo, lane, required_sha)
+        all_of.append(cache[key])
+    return any_of, all_of
+
+
+def _verdict(any_of: Sequence[ModelLaneRead], all_of: Sequence[ModelLaneRead]) -> bool:
+    any_of_ok = not any_of or any(r.passed for r in any_of)
+    return any_of_ok and all(r.passed for r in all_of)
+
+
+def evaluate_gate(
+    repo: str,
+    sha: str,
+    lanes: Sequence[EnumLabLane],
+    out: Any,
+    *,
+    required: Sequence[EnumLabLane] = (),
+    required_sha: str | None = None,
+    required_note: str = "",
+    wait_seconds: float = 0.0,
+    poll_seconds: float = DEFAULT_POLL_SECONDS,
+) -> int:
+    """Fail closed unless the lab-pass premise holds for the EXACT sha.
+
+    Two requirements, both of which must hold:
+
+    * ``lanes`` is ANY-OF (the rule 24(b) premise, unchanged since OMN-17530):
+      at least one of them carries a PASS receipt for ``sha``. An empty
+      ``lanes`` places no any-of requirement.
+    * ``required`` is ALL-OF (OMN-19312): EVERY one of them carries a PASS
+      receipt for ``required_sha`` (``sha`` unless a caller resolved an
+      ancestor with ``resolve_required_subject``). A PASS on any other lane,
+      in either set, never substitutes for a required lane's verdict -- that
+      substitution is the defect this requirement exists to remove: before it,
+      the onex-lab boot receipt alone satisfied every push delivery.
+
+    ``wait_seconds`` bounds a poll for REQUIRED lanes whose receipt is absent or
+    unreadable; the gate re-reads until the verdict passes, until no required
+    lane can still change by waiting, or until the bound expires. Expiry is a
+    refusal, never a pass. There is no force, skip or override of any kind.
 
     Every terminal branch prints the sha. "The gate failed" with no commit named
     is unactionable at 3am, and the whole point of a sha-keyed receipt is that
     the answer is about one commit.
     """
-    if not _SHA_RE.match(sha):
+    subject = sha if required_sha is None else required_sha
+    for label, value in (("commit", sha), ("required subject", subject)):
+        if not _SHA_RE.match(value):
+            print(
+                f"::error::lab-pass gate: {label} {value!r} is not a 40-character "
+                "lowercase commit sha. Refusing to resolve an abbreviated ref.",
+                file=out,
+            )
+            return 1
+    if not lanes and not required:
         print(
-            f"::error::lab-pass gate: {sha!r} is not a 40-character lowercase "
-            "commit sha. Refusing to resolve an abbreviated ref.",
+            f"::error::lab-pass gate FAILED for {sha}: no lane was named to read, "
+            "so nothing could establish a pass. Refusing rather than passing a "
+            "gate that checked nothing.",
+            file=out,
+        )
+        return 1
+    if wait_seconds < 0 or wait_seconds > MAX_WAIT_SECONDS:
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: --wait-seconds "
+            f"{wait_seconds:g} is outside 0..{MAX_WAIT_SECONDS}.",
             file=out,
         )
         return 1
 
-    found: list[ModelLabPassReceipt] = []
-    problems: list[str] = []
-
-    for lane in lanes:
-        name = artifact_name(lane, sha)
-        try:
-            artifacts = list_artifacts(repo, name)
-        except Exception as exc:  # noqa: BLE001
-            # Deliberately broad. Rule 16: a verification sweep that errors and
-            # is not caught reads as an absence of findings; here it would read
-            # as a traceback with no sha in it. Any failure to READ the surface
-            # is reported as "unreadable" against the named lane and fails the
-            # gate, which is the same verdict as a missing receipt.
-            problems.append(f"{lane.value}: {exc}")
-            continue
-        if not artifacts:
-            problems.append(f"{lane.value}: no receipt artifact named {name}")
-            continue
-        # Newest first: a re-run of the emitting job supersedes an earlier
-        # attempt for the same sha and lane.
-        artifacts.sort(key=lambda a: str(a.get("created_at", "")), reverse=True)
-        try:
-            receipt = download_receipt(repo, int(artifacts[0]["id"]))
-        except Exception as exc:  # noqa: BLE001 - same reasoning as above
-            problems.append(f"{lane.value}: {exc}")
-            continue
-        if receipt.sha != sha:
-            problems.append(
-                f"{lane.value}: artifact {name} carries sha {receipt.sha}; "
-                "the name and the payload disagree"
-            )
-            continue
-        if receipt.lane != lane:
-            problems.append(
-                f"{lane.value}: artifact {name} carries lane {receipt.lane.value}; "
-                "the name and the payload disagree"
-            )
-            continue
-        found.append(receipt)
+    deadline = time.monotonic() + wait_seconds
+    polls = 0
+    while True:
+        polls += 1
+        any_of, all_of = _read_all(repo, sha, lanes, required, subject)
+        if _verdict(any_of, all_of):
+            break
+        waiting_on = [r for r in all_of if r.may_still_arrive]
+        remaining = deadline - time.monotonic()
+        if not waiting_on or remaining <= 0:
+            break
+        pending = ", ".join(f"{r.lane.value}@{r.subject_sha[:12]}" for r in waiting_on)
+        print(
+            f"lab-pass gate: waiting for required lane(s) {pending} "
+            f"(poll {polls}, {int(remaining)} s of {wait_seconds:g} s left)",
+            file=out,
+        )
+        time.sleep(max(0.0, min(poll_seconds, remaining)))
 
     print(f"lab-pass gate (rule 24(b), OMN-17530) for sha {sha}", file=out)
     print(f"  repository : {repo}", file=out)
-    print(f"  lanes read : {', '.join(lane.value for lane in lanes)}", file=out)
-    for receipt in found:
-        print("", file=out)
-        print(render_receipt(receipt), file=out)
-    for problem in problems:
-        print(f"  unreadable : {problem}", file=out)
+    print(
+        f"  any-of     : {', '.join(lane.value for lane in lanes) or '(none)'}",
+        file=out,
+    )
+    if required:
+        print(
+            f"  all-of     : {', '.join(lane.value for lane in required)} "
+            f"(OMN-19312) for subject {subject}",
+            file=out,
+        )
+        if required_note:
+            print(f"  subject    : {required_note}", file=out)
+    if wait_seconds:
+        print(f"  waited     : up to {wait_seconds:g} s, {polls} read(s)", file=out)
+    rendered: set[tuple[EnumLabLane, str]] = set()
+    for read in [*any_of, *all_of]:
+        key = (read.lane, read.subject_sha)
+        if key in rendered:
+            continue
+        rendered.add(key)
+        if read.receipt is not None:
+            print("", file=out)
+            print(render_receipt(read.receipt), file=out)
+        else:
+            print(f"  unreadable : {read.problem}", file=out)
 
-    passing = [r for r in found if r.result == EnumLabPassResult.PASS]
-    if passing:
-        lanes_passing = ", ".join(r.lane.value for r in passing)
+    if _verdict(any_of, all_of):
+        lanes_passing = ", ".join(
+            dict.fromkeys(r.lane.value for r in [*any_of, *all_of] if r.passed)
+        )
         print("", file=out)
         print(
             f"lab-pass gate PASSED for {sha} on lane(s): {lanes_passing}.",
@@ -3255,33 +3456,167 @@ def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -
     # question for the lane, an INDETERMINATE is a question for the hop that
     # was supposed to establish the fact. Collapsing them into one sentence is
     # what made the 2026-09-16/17 receipts read as lane failures.
-    unestablished = [
-        (receipt, check)
-        for receipt in found
-        for check in receipt.checks
-        if check.outcome is EnumLabPassCheckOutcome.INDETERMINATE
-    ]
     print("", file=out)
-    for receipt, check in unestablished:
+    seen: set[tuple[EnumLabLane, str, str]] = set()
+    for read in [*any_of, *all_of]:
+        if read.receipt is None:
+            continue
+        for check in read.receipt.checks:
+            check_key = (read.lane, read.subject_sha, check.name)
+            if (
+                check.outcome is not EnumLabPassCheckOutcome.INDETERMINATE
+                or check_key in seen
+            ):
+                continue
+            seen.add(check_key)
+            print(
+                f"::error::lab-pass gate: for sha {read.subject_sha} on lane "
+                f"{read.lane.value}, check {check.name!r} is INDETERMINATE and "
+                f"asserts nothing about the lab lane: {check.evidence}. The sha is "
+                "refused because an unestablished check is not a pass, NOT because "
+                "the lane was shown to misbehave.",
+                file=out,
+            )
+
+    for read in all_of:
+        if read.passed:
+            continue
+        if read.receipt is not None:
+            why = f"its newest receipt is {read.receipt.result.value}"
+        elif read.kind == "absent":
+            why = (
+                f"no receipt exists after waiting {wait_seconds:g} s"
+                if wait_seconds
+                else "no receipt exists"
+            )
+        else:
+            why = read.problem
         print(
-            f"::error::lab-pass gate: for sha {sha} on lane "
-            f"{receipt.lane.value}, check {check.name!r} is INDETERMINATE and "
-            f"asserts nothing about the lab lane: {check.evidence}. The sha is "
-            "refused because an unestablished check is not a pass, NOT because "
-            "the lane was shown to misbehave.",
+            f"::error::lab-pass gate: REQUIRED lane {read.lane.value} does not pass "
+            f"for sha {read.subject_sha}: {why}. A required lane is all-of "
+            "(OMN-19312): a PASS on any other lane does not substitute for it.",
             file=out,
         )
-    print(
-        f"::error::lab-pass gate FAILED for {sha}: no PASS lab-pass receipt "
-        f"exists for this exact sha on any of {', '.join(lane.value for lane in lanes)}. "
-        "Rule 24(b) — the lab is the first place a change runs; staging is "
-        "promotion — so this candidate is not deliverable. This is not a skip: a "
-        "missing, unreadable, malformed, INDETERMINATE or FAIL receipt all fail "
-        "here, and there is no override flag. Exercise the sha on a lab lane and "
-        "let its emitter publish the receipt.",
-        file=out,
-    )
+
+    any_of_ok = not any_of or any(r.passed for r in any_of)
+    if not any_of_ok:
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: no PASS lab-pass receipt "
+            f"exists for this exact sha on any of "
+            f"{', '.join(lane.value for lane in lanes)}. "
+            "Rule 24(b) — the lab is the first place a change runs; staging is "
+            "promotion — so this candidate is not deliverable. This is not a skip: a "
+            "missing, unreadable, malformed, INDETERMINATE or FAIL receipt all fail "
+            "here, and there is no override flag. Exercise the sha on a lab lane and "
+            "let its emitter publish the receipt.",
+            file=out,
+        )
+    else:
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: a required lane does not "
+            "carry a PASS receipt. This is not a skip: a missing, unreadable, "
+            "malformed, INDETERMINATE or FAIL receipt on a required lane all fail "
+            "here, and there is no override flag. Fix what the lane measures and "
+            "let its emitter publish a PASS for this commit.",
+            file=out,
+        )
     return 1
+
+
+# ---------------------------------------------------------------------------
+# Which commit a REQUIRED lane's receipt is about (OMN-19312, reusing OMN-18664)
+# ---------------------------------------------------------------------------
+def _load_release_train() -> Any:
+    """``release_train.py``, loaded by path from beside this module.
+
+    Loaded lazily and only by ``--resolve-runtime-ancestor``: that module needs
+    PyYAML, and every other path through this file must stay stdlib-only
+    (``test_the_module_imports_nothing_outside_the_stdlib``). The rule is
+    REUSED, not restated -- a second copy of the nearest-runtime-affecting-
+    ancestor walk could disagree with the release train about which receipt
+    describes a commit.
+    """
+    name = "_lab_pass_release_train"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = Path(__file__).resolve().parent / "release_train.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        msg = f"cannot load the release train's ancestor rule from {path}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def resolve_required_subject(
+    sha: str,
+    *,
+    branch_commits: Callable[[], Sequence[str]],
+    runtime_affecting: Callable[[str], bool],
+) -> tuple[str, str]:
+    """The commit a required lane's receipt is asked for, and why.
+
+    Required verdict lanes emit only for RUNTIME-AFFECTING merges (their
+    emitters run after the dev lane rebuild, which fires only for those), while
+    delivery also fires for commits the classifier calls non-runtime. Asking
+    such a commit for its own receipt would block it forever. So the subject is
+    the nearest runtime-affecting commit at or below ``sha`` on first parent,
+    by the OMN-18664 rule ``release_train.resolve_lab_candidate`` owns: a
+    runtime-affecting ``sha`` resolves to itself, and inheritance crosses only
+    non-runtime-affecting commits -- the walk stops at the FIRST runtime-
+    affecting commit, so one between the subject and ``sha`` is impossible by
+    construction.
+
+    Every failure resolves to ``sha`` itself, which asks for the exact-commit
+    receipt and refuses rather than inherits. The note says which happened.
+    """
+    try:
+        train = _load_release_train()
+        candidate = train.resolve_lab_candidate(
+            sha, branch_commits=branch_commits, runtime_affecting=runtime_affecting
+        )
+    except Exception as exc:  # noqa: BLE001 - fail to the exact commit, named
+        return sha, f"{sha} itself: the ancestor rule could not run ({exc})"
+    if not candidate.sha:
+        return sha, f"{sha} itself: {candidate.unresolved_reason}"
+    if not candidate.skipped:
+        return candidate.sha, f"{sha} itself (runtime-affecting)"
+    skipped = ", ".join(s[:12] for s in candidate.skipped)
+    return candidate.sha, (
+        f"{candidate.sha}, the nearest runtime-affecting ancestor of {sha}, "
+        f"inherited across {len(candidate.skipped)} non-runtime-affecting "
+        f"commit(s): {skipped}"
+    )
+
+
+def resolve_required_subject_from_clone(
+    sha: str, clone: Path, runtime_path_validator: Path
+) -> tuple[str, str]:
+    """``resolve_required_subject`` over a local clone, with the TRIGGER's predicate.
+
+    The predicate is the one the rebuild trigger and the release train read:
+    ``scripts/runtime_change_classifier.py`` over omniclaude's deploy-gate
+    validator. A classifier that cannot be loaded resolves to the exact commit.
+    """
+    try:
+        train = _load_release_train()
+        predicate = train.load_runtime_affecting(clone, runtime_path_validator)
+    except Exception as exc:  # noqa: BLE001 - fail to the exact commit, named
+        return (
+            sha,
+            f"{sha} itself: the runtime-change classifier could not load ({exc})",
+        )
+    return resolve_required_subject(
+        sha,
+        branch_commits=lambda: train.default_branch_commits(clone, sha),
+        runtime_affecting=predicate,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3830,8 +4165,47 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         choices=[e.value for e in EnumLabLane],
-        help="repeatable; defaults to every lab lane",
+        help=(
+            "repeatable, ANY-OF: one PASS among these satisfies the rule 24(b) "
+            "premise. Defaults to compose-dev, onex-lab and onex-lab-k3s"
+        ),
     )
+    gate.add_argument(
+        "--require-lane",
+        action="append",
+        default=[],
+        choices=[e.value for e in EnumLabLane],
+        help=(
+            "repeatable, ALL-OF (OMN-19312): every named lane must carry its own "
+            "PASS receipt; no other lane's PASS substitutes"
+        ),
+    )
+    gate.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "poll up to this long for a REQUIRED lane's receipt that is absent "
+            f"or unreadable (0..{MAX_WAIT_SECONDS}); expiry refuses"
+        ),
+    )
+    gate.add_argument(
+        "--poll-seconds",
+        type=float,
+        default=DEFAULT_POLL_SECONDS,
+        help="spacing of the --wait-seconds polls",
+    )
+    gate.add_argument(
+        "--resolve-runtime-ancestor",
+        action="store_true",
+        help=(
+            "ask REQUIRED lanes for the nearest runtime-affecting first-parent "
+            "ancestor's receipt (the OMN-18664 release-train rule); needs "
+            "--clone and --runtime-path-validator"
+        ),
+    )
+    gate.add_argument("--clone", type=Path, default=None)
+    gate.add_argument("--runtime-path-validator", type=Path, default=None)
 
     verdict = sub.add_parser(
         "workflow-verdict",
@@ -4121,9 +4495,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         lanes = (
             [EnumLabLane(value) for value in args.lane]
             if args.lane
-            else list(EnumLabLane)
+            else list(ANY_OF_DEFAULT_LANES)
         )
-        return evaluate_gate(args.repo, args.sha, lanes, sys.stdout)
+        required = list(dict.fromkeys(EnumLabLane(v) for v in args.require_lane))
+        required_sha: str | None = None
+        required_note = ""
+        if args.resolve_runtime_ancestor:
+            if args.clone is None or args.runtime_path_validator is None:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: "
+                    "--resolve-runtime-ancestor needs --clone and "
+                    "--runtime-path-validator; refusing rather than guessing.",
+                    file=sys.stdout,
+                )
+                return 1
+            required_sha, required_note = resolve_required_subject_from_clone(
+                args.sha, args.clone, args.runtime_path_validator
+            )
+        return evaluate_gate(
+            args.repo,
+            args.sha,
+            lanes,
+            sys.stdout,
+            required=required,
+            required_sha=required_sha,
+            required_note=required_note,
+            wait_seconds=args.wait_seconds,
+            poll_seconds=args.poll_seconds,
+        )
     if args.command == "workflow-verdict":
         return evaluate_workflow_verdict(
             args.repo,
