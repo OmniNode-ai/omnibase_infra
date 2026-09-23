@@ -251,7 +251,8 @@ jobs:
       # both permission sets already existed. Same step shape as
       # evidence-autoclose-sweep.yml, which chose the same App under OMN-16832.
       #
-      # `repositories:` is pinned to exactly the three repos the script reads.
+      # `repositories:` is pinned to exactly the repos the script reads: the
+      # three `--repo` literals and the `--scheduled-repo` share below.
       # The autoclose sweep uses `owner:` because its repo list is resolved at
       # run time; this one is a literal in the run step below, so the narrower
       # scope is available and is the correct one.
@@ -266,6 +267,7 @@ jobs:
             omnibase_infra
             omniweb
             omnimarket
+            omni_home
           permission-administration: read
           permission-actions: read
           permission-checks: read
@@ -324,6 +326,16 @@ jobs:
       # resolution is the fix and is deliberately a separate change. The fleet
       # list governs the scheduled half, which is branch-agnostic.
       #
+      # THE REGISTRY REPOSITORY'S SCHEDULED HALF RUNS HERE (OMN-18942, AC-2).
+      # Measured 2026-09-23T17:45Z, the `.201` host token returns HTTP 404 on
+      # omni_home, so the reporter evaluated nothing there and nothing else did
+      # either. `--scheduled-repo` takes the policy's `scheduled_actions_repos`
+      # share, scheduled half only, into this run's report and dedup state; the
+      # host's `--repos-from-policy` selection excludes the same share, so each
+      # fleet repository still has exactly one scheduled evaluator. The onexbot
+      # installation already reads every repository; the mint above requests
+      # one more of them, and nothing is created or widened.
+      #
       # ALERT DEDUP (OMN-18942, measured 2026-09-23). Once the channel secrets
       # existed, every run re-posted the same unchanged findings. The evaluator
       # now reads the prior alert state from the `nonrequired-check-report`
@@ -365,6 +377,7 @@ jobs:
             --repo omniweb \
             --repo omnimarket \
             --no-scheduled \
+            --scheduled-repo omni_home \
             --policy config/runner_routing_policy.yaml \
             --report nonrequired-check-report.json \
             --prior-state-workflow pr-ci-zombie-detector.yml
