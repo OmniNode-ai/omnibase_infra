@@ -130,15 +130,12 @@ def test_dry_run_plan_dogfood_lane_is_isolated(tmp_path: Path) -> None:
     A dogfood build only runs from a proof root staged from a pinned snapshot
     (OMN-19086), so the plan is taken against one.
     """
+    # OMN-19072 folded omnibase_spi into SIBLING_CLONE_MANIFEST (the OMN-15137
+    # omission it fixed), so _make_omni_home's LAB_REF_REPOS loop already
+    # creates and initializes omnibase_spi here. An earlier revision of this
+    # test predated that fix and re-created it by hand; kept now it would
+    # collide with the directory _make_omni_home already made.
     omni_home = _make_omni_home(tmp_path)
-    spi = omni_home / "omnibase_spi"
-    spi.mkdir()
-    _git(spi, "init", "-q", "-b", "dev")
-    _git(spi, "config", "user.email", "t@t.t")
-    _git(spi, "config", "user.name", "t")
-    (spi / "f.txt").write_text("x\n", encoding="utf-8")
-    _git(spi, "add", "-A")
-    _git(spi, "commit", "-q", "-m", "init")
     proof_root = tmp_path / "proof-root"
     staged = subprocess.run(
         [

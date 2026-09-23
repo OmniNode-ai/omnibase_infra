@@ -151,8 +151,26 @@ def _clone_local(source_git_dir: Path, dest: Path) -> subprocess.CompletedProces
     )
 
 
-def _read_bash_array(path: Path, name: str) -> list[str]:
-    """Return the quoted or bare words of the bash array ``name=( ... )`` in ``path``."""
+_ARRAY_REF = re.compile(r"\$\{(\w+)\[@\]\}")
+
+
+def _read_bash_array(
+    path: Path, name: str, *, _seen: frozenset[str] = frozenset()
+) -> list[str]:
+    """Return the quoted or bare words of the bash array ``name=( ... )`` in ``path``.
+
+    A word that is itself an array expansion (``"${OTHER[@]}"``) is resolved
+    recursively rather than kept as a literal string: since OMN-19072,
+    ``cut-lab-ref.sh``'s ``LAB_REF_REPOS`` is exactly
+    ``("${SIBLING_LAB_TAG_REPOS[@]}")``, sourcing ``sibling_clone_manifest.sh``
+    for that array, which is itself two more arrays concatenated the same way.
+    A parser that treated the reference as a literal word would silently put
+    the string ``${SIBLING_LAB_TAG_REPOS[@]}`` in the required-repo set instead
+    of the repos it expands to -- the exact class of silent-wrong-tree defect
+    this ticket exists to prevent, just moved one level up. ``OTHER`` is looked
+    up first in ``path`` itself, then in every other ``*.sh`` file beside it,
+    since a referenced array may be defined in a file ``path`` only sources.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -164,7 +182,32 @@ def _read_bash_array(path: Path, name: str) -> list[str]:
     words = [w.strip("\"'") for w in body.split()]
     if not words:
         raise UsageError(f"array {name} in {path} is empty")
-    return words
+    if name in _seen:
+        raise UsageError(f"array {name} in {path} references itself")
+    seen = _seen | {name}
+
+    resolved: list[str] = []
+    for word in words:
+        ref = _ARRAY_REF.fullmatch(word)
+        if ref is None:
+            resolved.append(word)
+            continue
+        ref_name = ref.group(1)
+        candidates = [path, *sorted(p for p in path.parent.glob("*.sh") if p != path)]
+        for candidate in candidates:
+            try:
+                candidate_text = candidate.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if re.search(rf"^{re.escape(ref_name)}=\(", candidate_text, re.M):
+                resolved.extend(_read_bash_array(candidate, ref_name, _seen=seen))
+                break
+        else:
+            raise UsageError(
+                f"{path} array {name} references {ref_name!r}, which is not "
+                f"defined as an array in {path} or any *.sh file beside it"
+            )
+    return resolved
 
 
 def required_repos() -> list[str]:
