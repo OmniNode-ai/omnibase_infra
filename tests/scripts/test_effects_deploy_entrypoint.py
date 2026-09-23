@@ -155,7 +155,10 @@ def test_scoped_launcher_uses_shared_attribution_and_candidate_executor(
                 "MODE=execute; EFFECTS_PLAN='plan with spaces.json'",
                 "resolve_repo_root() { echo " + shlex.quote(str(tmp_path)) + "; }",
                 "resolve_compose_project() { echo omnibase-infra; }",
-                "check_command() { :; }",
+                # The real prerequisite check under set -u: a stub here hid a
+                # one-argument call that killed every live run (OMN-17991, .105).
+                function("check_command"),
+                "docker() { :; }",
                 'log_error() { echo "$*" >&2; }',
                 'guard_lane_deploy_attribution() { test "$MODE" = dry-run; echo ATTRIBUTION; }',
                 # The generic host-HEAD hotpatch gate must not be used for an image.

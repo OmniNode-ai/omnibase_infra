@@ -4150,8 +4150,8 @@ run_scoped_effects_deploy() {
         log_error "Effects-only plans are restricted to the compose-dev lane"
         return 64
     fi
-    check_command uv
-    check_command docker
+    check_command uv "scoped effects executor"
+    check_command docker "container runtime"
     # This is admission, not yet a deployment: even --execute evaluates the
     # attribution guard in check-only mode. The scoped receipt records the real
     # mutation and outcome after validation rather than a write-ahead claim.

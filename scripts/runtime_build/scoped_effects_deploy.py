@@ -203,6 +203,26 @@ def _healthy(container: Mapping[str, Any]) -> bool:
     )
 
 
+def _host_source(source: str) -> str:
+    # Docker Desktop reports one bind source as /host_mnt/<path> or <path>
+    # from one container creation to the next; both name the same host path.
+    return (
+        source.removeprefix("/host_mnt") if source.startswith("/host_mnt/") else source
+    )
+
+
+def _mounts(container: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return sorted(
+        (
+            {**mount, "Source": _host_source(mount["Source"])}
+            if mount.get("Type") == "bind"
+            else mount
+            for mount in container.get("Mounts", [])
+        ),
+        key=lambda mount: mount["Destination"],
+    )
+
+
 def _snapshot(containers: Sequence[dict[str, Any]], service: str) -> dict[str, object]:
     return {
         item["Id"]: {
@@ -215,9 +235,7 @@ def _snapshot(containers: Sequence[dict[str, Any]], service: str) -> dict[str, o
             "dead": bool(item["State"].get("Dead", False)),
             "health": item["State"].get("Health", {}).get("Status"),
             "exit_code": item["State"].get("ExitCode"),
-            "mounts": sorted(
-                item.get("Mounts", []), key=lambda mount: mount["Destination"]
-            ),
+            "mounts": _mounts(item),
         }
         for item in containers
         if item["Config"]["Labels"][_SERVICE_LABEL] != service
@@ -226,16 +244,17 @@ def _snapshot(containers: Sequence[dict[str, Any]], service: str) -> dict[str, o
 
 def _runtime_settings(container: Mapping[str, Any]) -> dict[str, object]:
     config = container.get("Config", {})
+    settings = {key: config.get(key) for key in _IMAGE_CONFIG_FIELDS}
+    # Compose builds Env from a map: its order is not stable across creations.
+    settings["Env"] = sorted(config.get("Env") or [])
     return {
-        "config": {key: config.get(key) for key in _IMAGE_CONFIG_FIELDS},
+        "config": settings,
         "host": {
             key: value
             for key, value in container.get("HostConfig", {}).items()
             if key not in {"ContainerIDFile", "Binds"}
         },
-        "mounts": sorted(
-            container.get("Mounts", []), key=lambda mount: mount["Destination"]
-        ),
+        "mounts": _mounts(container),
         "networks": sorted(container.get("NetworkSettings", {}).get("Networks", {})),
     }
 
@@ -266,7 +285,10 @@ def _assert_active_config(
         ("user", "User"),
         ("working_dir", "WorkingDir"),
     ):
-        if compose_key in desired and desired[compose_key] != config.get(inspect_key):
+        # Compose renders an unset command/entrypoint as null: image default.
+        if desired.get(compose_key) is not None and desired[compose_key] != config.get(
+            inspect_key
+        ):
             raise RuntimeError(
                 f"active effects {compose_key} differs from rendered compose"
             )
@@ -301,7 +323,9 @@ def _assert_active_config(
     actual_mounts = [
         (
             mount["Type"],
-            mount.get("Name") if mount["Type"] == "volume" else mount["Source"],
+            mount.get("Name")
+            if mount["Type"] == "volume"
+            else _host_source(mount["Source"]),
             mount["Destination"],
             mount["RW"],
         )
@@ -999,12 +1023,20 @@ def run_deploy(
             raise RuntimeError(
                 "live Market payload differs from its immutable image; unrecorded patch may be lost"
             )
-        # The lane bind-mounts its contracts over the image's, and those mounts
-        # are frozen in the admitted snapshot: the live declared set is what the
-        # candidate will run with, so the broker must carry both sets.
+        # A scoped rollout cannot provision topics, so what the candidate
+        # declares beyond the healthy running target must already exist. The
+        # declared set is a regex over shipped YAML/JSON (examples, other
+        # runtimes' nodes): the whole set is absent from real lanes, and the
+        # healthy target is the evidence for the part it shares. The lane's
+        # contract mounts are frozen in the admitted snapshot and re-verified
+        # after replacement.
         _assert_topics(
             current,
-            sorted({*candidate["required_topics"], *live_before["required_topics"]}),
+            sorted(
+                set(candidate["required_topics"]).difference(
+                    live_before["required_topics"]
+                )
+            ),
             runner,
         )
         retention_tag = (

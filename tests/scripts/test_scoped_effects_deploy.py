@@ -138,6 +138,9 @@ class DockerBoundary:
             # The lane bind-mounts ../contracts over /app/contracts, so the live
             # declared topic set is the lane's, not the image's.
             probe["required_topics"] = [TOPIC, LANE_TOPIC]
+        if live and self.mode == "missing_topic":
+            # The candidate declares TOPIC; the running target does not.
+            probe["required_topics"] = [LANE_TOPIC]
         if self.mode == "market_live_drift" and live and image == OLD_IMAGE:
             probe["market_payload_fingerprint"] = "d" * 64
         if self.mode == "market_after_drift" and live and image == NEW_IMAGE:
@@ -446,7 +449,6 @@ def test_success_only_replaces_effects_and_keeps_rollback(
         "lineage",
         "market_live_drift",
         "lock_stolen",
-        "lane_topic_missing",
     ],
 )
 def test_refusal_never_recreates(
@@ -813,12 +815,68 @@ def test_lane_mounted_contracts_are_admitted_and_their_topics_verified(
     assert result["installed_evidence"]["required_topics"] == [TOPIC, LANE_TOPIC]
 
 
-def test_lane_mounted_topic_absent_from_broker_refuses(
+def test_declared_topics_the_healthy_target_shares_need_not_be_on_the_broker(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    # The declared set is a regex over shipped YAML/JSON: it includes examples
+    # and other runtimes' nodes. A long-running full lane on .105 lacked 118 of
+    # ~1270 declared topics, so requiring the whole set refused every real lane
+    # (live proof, OMN-17991). Only what the candidate declares beyond the
+    # healthy running target is a new broker requirement.
+    _, docker, _ = scenario
+    docker.mode = "lane_topic_missing"
+    result = _execute(executor, scenario)
+    assert result["status"] == "PASSED", result.get("error")
+
+
+def test_topic_the_candidate_adds_beyond_the_target_must_be_on_the_broker(
     executor: Any, scenario: tuple[Any, DockerBoundary, Path]
 ) -> None:
     _, docker, _ = scenario
-    docker.mode = "lane_topic_missing"
+    docker.mode = "missing_topic"
     result = _execute(executor, scenario)
     assert result["status"] == "REFUSED"
     assert "required broker topics are absent" in result["error"]
     assert not any("up" in call for call in docker.calls)
+
+
+def test_docker_desktop_host_mount_prefix_is_the_same_bind_source(
+    executor: Any,
+) -> None:
+    # Docker Desktop reports a bind source as /host_mnt/<path> or <path> from
+    # one creation to the next (live proof, .105, OMN-17991): an unchanged
+    # rollback failed its own settings verification on that string alone.
+    def container(source: str) -> dict[str, Any]:
+        return {
+            "Config": {},
+            "HostConfig": {},
+            "Mounts": [
+                {
+                    "Type": "bind",
+                    "Source": source,
+                    "Destination": "/app/skills",
+                    "RW": False,
+                }
+            ],
+            "NetworkSettings": {"Networks": {}},
+        }
+
+    before = container("/host_mnt/Users/lab/skills")
+    assert executor._runtime_settings(before) == executor._runtime_settings(
+        container("/Users/lab/skills")
+    )
+    assert executor._runtime_settings(before) != executor._runtime_settings(
+        container("/Users/lab/other")
+    )
+
+
+def test_compose_environment_order_is_not_a_settings_change(executor: Any) -> None:
+    # Compose builds a container's Env from a map, so the order differs from
+    # one creation to the next: an unchanged rollback failed verification on
+    # ordering alone (live proof, .105, OMN-17991).
+    def container(env: list[str]) -> dict[str, Any]:
+        return {"Config": {"Env": env}, "HostConfig": {}, "Mounts": []}
+
+    before = executor._runtime_settings(container(["A=1", "B=2"]))
+    assert before == executor._runtime_settings(container(["B=2", "A=1"]))
+    assert before != executor._runtime_settings(container(["B=3", "A=1"]))
