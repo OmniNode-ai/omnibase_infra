@@ -666,6 +666,17 @@ repos:
         files: ^(scripts/ci/(run_on_gate_runner|gate_runner_supervisor)\.sh|scripts/hooks/prepush_smart_tests\.sh|tests/ci/test_gate_runner_detached_entrypoint\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19206: the runner image must keep Playwright chromium's system
+      # libraries, because a job on the fleet cannot apt-install them. This pins
+      # the package list and the build smoke's in-image ldconfig assertion; the
+      # same file runs in CI (it is under `testpaths`).
+      - id: runner-image-playwright-chromium-libs
+        name: runner image Playwright chromium libraries (OMN-19206)
+        entry: uv run --frozen pytest tests/ci/test_runner_image_playwright_chromium_libs_omn19206.py -q
+        language: system
+        files: ^(docker/runners/Dockerfile|\.github/workflows/runner-image-build-smoke\.yml|tests/ci/test_runner_image_playwright_chromium_libs_omn19206\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-17214: every subscription path the auto-wiring loop can select must
       # register a consumer-flow counter. `_make_event_bus_callback` got that
       # seam from OMN-16777; `_make_raw_event_projection_callback` -- the branch

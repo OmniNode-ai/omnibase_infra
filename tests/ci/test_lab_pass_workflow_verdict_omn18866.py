@@ -284,7 +284,14 @@ _DELIVER = Path(".github/workflows/deliver-dev-candidate-to-staging.yml")
 def _gate_step() -> dict[str, Any]:
     workflow = yaml.safe_load(_DELIVER.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["lab-pass-gate"]["steps"]
-    matches = [s for s in steps if "workflow-verdict" in str(s.get("run", ""))]
+    # OMN-19311 added a second workflow-verdict step (D11), so the C15 step is
+    # found by the workflow it reads rather than by the subcommand alone.
+    matches = [
+        s
+        for s in steps
+        if "workflow-verdict" in str(s.get("run", ""))
+        and "chain-canary.yml" in str(s.get("run", ""))
+    ]
     assert len(matches) == 1, "the lab-pass-gate job must read the C15 verdict once"
     return dict(matches[0])
 

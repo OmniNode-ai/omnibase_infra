@@ -659,10 +659,12 @@ def test_the_reporter_calls_the_fleet_probe_from_collect() -> None:
 
 def test_the_scheduled_sweep_has_exactly_one_caller() -> None:
     """Two surfaces evaluating the same runs into different destinations is the
-    divergence a shared evaluator exists to prevent."""
+    divergence a shared evaluator exists to prevent. Since the registry
+    repository moved to the Actions job (scheduled_actions_repos), "one caller"
+    is per repository; test_fleet_scheduled_share_omn18942 pins the partition."""
     assert "--no-scheduled" in ZOMBIE_WORKFLOW.read_text(), (
-        "the GitHub Actions job evaluates scheduled runs again; it has no "
-        "destination for them and the .201 reporter already owns that sweep"
+        "the GitHub Actions job evaluates its --repo list's scheduled runs "
+        "again; the .201 reporter already owns those repositories' sweep"
     )
 
 
@@ -786,6 +788,8 @@ echo '{"workflows": []}'
         "omni_home",
         "omnibase_infra",
     ]
+    # Both repositories in the host's share, so the host selection reads both.
+    policy_doc["route"]["nonrequired_check_alert"]["scheduled_actions_repos"] = []
     policy = tmp_path / "policy.yaml"
     policy.write_text(yaml.safe_dump(policy_doc))
     report = tmp_path / "report.json"

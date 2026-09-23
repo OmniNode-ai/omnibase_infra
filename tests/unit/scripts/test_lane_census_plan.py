@@ -56,6 +56,9 @@ MANIFEST = PLAN.load_manifest(_MANIFEST_PATH)
 #
 # This is the lab compose lane only. Production is the AWS `onex-prod` namespace.
 _RETIRED_PROD_LANE: dict[str, Any] = {
+    # OMN-19088 added the one field the manifest schema now requires; the lane ran
+    # on the lab host until its removal. Nothing else in this spec moved.
+    "hosts": ["lab-201"],
     "compose_file": "docker/docker-compose.prod.yml",
     "compose_project": "omnibase-infra-prod",
     "network": "omnibase-infra-prod-network",
@@ -80,6 +83,10 @@ _RETIRED_PROD_LANE: dict[str, Any] = {
 }
 
 MANIFEST["lanes"]["prod"] = copy.deepcopy(_RETIRED_PROD_LANE)
+
+# OMN-19088: the planner resolves the host it runs on through the manifest's
+# hosts registry. The lab host's hostname, as the census reports it there.
+_LAB_HOST = "omninode-pc"
 
 
 def _container(
@@ -134,6 +141,7 @@ def test_healthy_prod_lane_no_drift() -> None:
     """A fully-running prod lane with its network present yields zero drift."""
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": _healthy_prod_containers(),
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -166,6 +174,7 @@ def test_tonight_prod_red_fixture_runtime_absent_and_network_detached() -> None:
     ]
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": surviving,
         "networks": [],  # broker network detached
         "runtime_tag": None,
@@ -204,6 +213,7 @@ def test_worker_replicas_zero_silent_drop_is_drift() -> None:
     containers = [c for c in containers if c["Names"] != "omninode-prod-runtime-worker"]
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": containers,
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -225,6 +235,7 @@ def test_oneshot_failed_exit_nonzero_is_critical_drift() -> None:
             c["Status"] = "Exited (1) 5 minutes ago"
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": containers,
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -243,6 +254,7 @@ def test_oneshot_stuck_running_is_warning_drift() -> None:
             c["Status"] = "Up 6 hours"
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": containers,
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -268,6 +280,7 @@ def test_keepalive_migration_gate_running_is_not_drift() -> None:
     assert gate["State"] == "running", "helper must model the keepalive as Running"
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": containers,
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -287,6 +300,7 @@ def test_keepalive_exited_nonzero_is_still_critical_drift() -> None:
             c["Status"] = "Exited (137) 5 minutes ago"
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": containers,
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -325,6 +339,7 @@ def test_unexpected_lane_labeled_container_is_drift() -> None:
     containers.append(_container("omninode-prod-rogue-shadow", lane="prod"))
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": containers,
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -352,6 +367,7 @@ def test_image_tag_mismatch_is_drift() -> None:
             c["Image"] = "omninode-runtime:0.30.0-stale"
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": containers,
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -365,6 +381,7 @@ def test_optional_dev_lane_entirely_down_is_not_drift() -> None:
     """The optional dev lane being fully down must NOT ticket (developer lane)."""
     envelope = {
         "lane": "dev",
+        "host": _LAB_HOST,
         "containers": [],
         "networks": [],
         "runtime_tag": None,
@@ -377,6 +394,7 @@ def test_optional_dev_lane_partially_up_is_drift() -> None:
     """A partially-up optional lane IS reconciled (one service up, one missing)."""
     envelope = {
         "lane": "dev",
+        "host": _LAB_HOST,
         "containers": [
             _container("omninode-runtime", lane="dev"),
             # omninode-runtime-effects missing
@@ -394,15 +412,34 @@ def test_optional_dev_lane_partially_up_is_drift() -> None:
 def test_unknown_lane_raises() -> None:
     with pytest.raises(ValueError):
         PLAN.build_plan(
-            {"lane": "does-not-exist", "containers": [], "networks": []}, MANIFEST
+            {
+                "lane": "does-not-exist",
+                "host": _LAB_HOST,
+                "containers": [],
+                "networks": [],
+            },
+            MANIFEST,
         )
 
 
 def test_all_lanes_default_excludes_nothing_required() -> None:
     """With lane=None all manifest lanes are checked."""
-    envelope = {"lane": None, "containers": [], "networks": [], "runtime_tag": None}
+    envelope = {
+        "lane": None,
+        "host": _LAB_HOST,
+        "containers": [],
+        "networks": [],
+        "runtime_tag": None,
+    }
     plan = PLAN.build_plan(envelope, MANIFEST)
-    assert set(plan["lanes_checked"]) == set(MANIFEST["lanes"].keys())
+    # OMN-19088: every lane is either checked on this host or reported
+    # not-applicable because the manifest declares it for another host. None is
+    # silently dropped.
+    checked = set(plan["lanes_checked"])
+    not_applicable = set(plan["lanes_not_applicable"])
+    assert checked.isdisjoint(not_applicable)
+    assert checked | not_applicable == set(MANIFEST["lanes"].keys())
+    assert "prod" in checked
 
 
 def test_tag_parsing_handles_registry_host_port() -> None:
@@ -432,6 +469,7 @@ def test_profile_gated_absent_is_not_drift() -> None:
 
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": _healthy_prod_containers(),
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -458,6 +496,7 @@ def test_profile_gated_running_is_warning_drift() -> None:
     containers.append(_container(gated, lane="prod"))
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": containers,
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
@@ -485,6 +524,7 @@ def test_profile_gated_running_is_not_reported_unexpected() -> None:
     containers.append(_container(gated, lane="prod"))
     envelope = {
         "lane": "prod",
+        "host": _LAB_HOST,
         "containers": containers,
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
