@@ -63,9 +63,7 @@ from omnibase_infra.runtime.boundary_failure_terminal import (
 )
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
-_THIS_MODULE = (
-    "tests.unit.runtime.auto_wiring.test_omn17397_unaccepted_task_class_terminal"
-)
+_THIS_MODULE = "tests.integration.runtime.test_omn17397_unaccepted_task_class_terminal"
 _SUBSCRIBE_TOPIC = "onex.cmd.omnimarket.delegate-skill.v1"  # onex-topic-allow: verbatim from the live R-DELEG-26 trace
 _SUCCESS_TOPIC = "onex.evt.omnimarket.delegate-skill-completed.v1"  # onex-topic-allow: verbatim from the live R-DELEG-26 trace
 _FAILURE_TOPIC = "onex.evt.omnimarket.delegate-skill-failed.v1"  # onex-topic-allow: verbatim from the live R-DELEG-26 trace
@@ -206,7 +204,7 @@ async def _drive_unaccepted_task_class(
     return seen
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_unaccepted_task_class_terminal_names_its_cause_and_code(
     contract_path: Path,
@@ -244,7 +242,7 @@ def _no_dispatcher_result(
     )
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("failure_class", "error_code"),
     [
@@ -273,7 +271,7 @@ def test_no_dispatcher_drop_carries_the_engine_code_and_is_not_retryable(
     assert terminal.retryable is False
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_a_failed_dispatch_keeps_its_retryable_derivation() -> None:
     """Positive control: only the no-dispatcher shape is pinned non-retryable.
 
