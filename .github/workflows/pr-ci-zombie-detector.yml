@@ -259,6 +259,18 @@ jobs:
       # is precisely the failure OMN-18254 spent three days on. Per-repo branch
       # resolution is the fix and is deliberately a separate change. The fleet
       # list governs the scheduled half, which is branch-agnostic.
+      #
+      # ALERT DEDUP (OMN-18942, measured 2026-09-23). Once the channel secrets
+      # existed, every run re-posted the same unchanged findings. The evaluator
+      # now reads the prior alert state from the `nonrequired-check-report`
+      # artifact of this workflow's most recent earlier completed run, via the
+      # Actions API, and suppresses an unchanged-or-lower finding inside the
+      # policy's `alert_dedup_window_hours`, recording each suppression in the
+      # report and the step summary. The read rides GH_TOKEN, the App token
+      # minted above, which already carries `permission-actions: read` on this
+      # repository -- no new credential, no workflow permission widened, and
+      # the state is the same artifact the next reader audits. An absent or
+      # unreadable prior state suppresses NOTHING: every finding posts, marked.
       - name: Evaluate non-required check failure rates
         env:
           # Cross-repo reads (omniweb is private) need Checks on a private
@@ -290,7 +302,8 @@ jobs:
             --repo omnimarket \
             --no-scheduled \
             --policy config/runner_routing_policy.yaml \
-            --report nonrequired-check-report.json
+            --report nonrequired-check-report.json \
+            --prior-state-workflow pr-ci-zombie-detector.yml
 
       - name: Assert the report is present and non-empty
         if: always()
