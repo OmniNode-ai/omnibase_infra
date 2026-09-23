@@ -660,11 +660,20 @@ async def _scan_terminal(
             consumer.seek(
                 partition, max(begins[partition], ends[partition] - per_partition)
             )
+        # "Not found" is a claim only once every partition has been read up to
+        # the high watermark captured above. A window that expires first read
+        # PART of the topic, and that is an unobserved terminal, not an absent
+        # one: the first scheduled run on dev (35787593146) graded R-DELEG-12
+        # FAIL at a broker-host load near 300 for a terminal that sat at
+        # partition 0 offset 809 the whole time. Reported as an error, which
+        # grades SKIP -- still red, and named for what actually happened.
+        scanned = 0
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
             batches = await consumer.getmany(timeout_ms=1_000, max_records=500)
             for records in batches.values():
                 for record in records:
+                    scanned += 1
                     if not record.value or needle not in record.value:
                         continue
                     envelope = _maybe_json(record.value.decode("utf-8", "replace"))
@@ -676,7 +685,20 @@ async def _scan_terminal(
                         and payload.get("correlation_id") == correlation_id
                     ):
                         return TerminalObservation(payload)
-        return TerminalObservation()
+            caught_up = True
+            for partition in partitions:
+                if await consumer.position(partition) < ends[partition]:
+                    caught_up = False
+                    break
+            if caught_up:
+                return TerminalObservation()
+        return TerminalObservation(
+            error=(
+                f"the scan did not reach the end of {topic!r} inside "
+                f"{wait_seconds:.0f}s ({scanned} records read), so an absent "
+                "terminal is not established"
+            )
+        )
     except Exception as exc:  # noqa: BLE001 - reported, never a verdict
         return TerminalObservation(error=f"topic scan failed: {type(exc).__name__}")
     finally:
@@ -722,7 +744,7 @@ def observe_live(
     healthy_run = _observe_run(base_url, healthy, **kwargs)
     dying_run = _observe_run(base_url, dying, **kwargs)
     terminal = (
-        _read_terminal(terminal_topic, healthy.correlation_id, wait_seconds=60.0)
+        _read_terminal(terminal_topic, healthy.correlation_id, wait_seconds=120.0)
         if _status_of(healthy_run.receipt) == "completed"
         else TerminalObservation(error="not read: the healthy run did not complete")
     )
