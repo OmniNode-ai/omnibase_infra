@@ -489,8 +489,9 @@ class DeployConsumer:
 
         # Step 6a: Lineage fence (OMN-19270). A command whose ref is a strict
         # ancestor of the build the lane already runs would roll the lane
-        # back. That is what a stale, replayed redeploy did on 2026-09-23, when
-        # a command stranded upstream since 12:09Z arrived at 15:50Z. Refused
+        # back. That is what a stale redeploy did on 2026-09-23: a command at
+        # an infra commit from 10:32Z was accepted at 14:32Z, and it rebuilt a
+        # lane that was already on a newer commit. Refused
         # with a typed reason and committed past, so it is acknowledged rather
         # than left to block the commands behind it. A signed rollback
         # declaration is exempt. Every comparison the host cannot make lets

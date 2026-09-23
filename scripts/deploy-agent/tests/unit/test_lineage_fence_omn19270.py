@@ -5,9 +5,12 @@
 THE INCIDENT
 ------------
 On 2026-09-23 the .201 dev lane was running infra ``0edf5c914``. Job
-``e074126b`` carried ``git_ref=533b19c2``, an ancestor of that build, and the
-agent accepted it and recreated the lane onto it at 16:01:15Z. The lane went
-backwards. The accept protocol had no step that compared a command's ref with
+``ab27aedd`` carried ``git_ref=c159b7118``, an ancestor of that build, and the
+agent accepted it and rebuilt the lane onto it at 14:46:42Z. The lane went
+backwards. The next command, ``e074126b`` at ``533b19c2``, was behind
+``0edf5c914`` too. Had the first command been refused, the lane would still
+have been at ``0edf5c914`` when the second arrived, and the fence refuses that
+one as well. The accept protocol had no step that compared a command's ref with
 what the lane was running.
 
 WHAT THESE TESTS PIN

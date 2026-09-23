@@ -4,12 +4,16 @@
 
 WHAT THIS COST, MEASURED
 ------------------------
-On the .201 dev lane at 2026-09-23T15:50:24Z the agent accepted job
-``e074126b`` (``scope=full``, ``git_ref=533b19c23b63``, an infra commit from
-12:09:47Z that had been stranded upstream for hours), rebuilt, and at 16:01:15Z
-recreated the lane onto it. The lane had been running ``0edf5c914``, a
-descendant of ``533b19c2``, so the deploy moved the lane BACKWARDS by every
-commit in between. About an hour later ``602b1d61`` did the same thing again.
+On 2026-09-23 the .201 dev lane's runtime image tags record each build's
+infra ref. Job ``c009462c`` built the lane at ``0edf5c914`` (image
+``20260923T141329Z-0edf5c91``). At 14:32:21Z the agent accepted job
+``ab27aedd`` (``scope=full``, ``git_ref=c159b7118``, an infra commit from
+10:32:14Z whose command had waited in the queue for hours) and rebuilt the lane
+onto it (``20260923T144642Z-c159b711``). ``c159b7118`` is a strict ancestor of
+``0edf5c914``, so that deploy moved the lane BACKWARDS by every commit in
+between. The next command, ``e074126b`` at ``533b19c23``, was also behind
+``0edf5c914``. The lane did not return to ``0edf5c914`` until ``602b1d61``
+completed at 17:18:52Z, nearly three hours after the rollback.
 
 Nothing in the accept protocol could have refused it. ``coalesce`` folds a
 prefix of commands that arrived TOGETHER, so a stale command that arrives alone
