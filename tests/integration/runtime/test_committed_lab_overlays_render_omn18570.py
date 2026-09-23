@@ -51,7 +51,6 @@ _LOCAL_201_BACKENDS = ("local-coder", "local-heavy-reasoning")
 _ENDPOINT_URL_ENV = {
     "local-coder": "LLM_CODER_URL",
     "local-heavy-reasoning": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
-    "local-ds-v4-flash": "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
 }
 
 
