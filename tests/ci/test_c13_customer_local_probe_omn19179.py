@@ -377,6 +377,26 @@ def test_the_customer_overlay_carries_the_declared_response_budget() -> None:
     8192 passed. The budget is an argument, and its default is the one that passed.
     """
     overlay = probe.bifrost_overlay_yaml("served-model", 8000, 8192)
-    assert "    max_tokens: 8192\n" in overlay
-    assert '    model_name: "served-model"\n' in overlay
+    assert overlay.count("    max_tokens: 8192\n") == len(probe.LOCAL_BACKEND_IDS)
+    assert overlay.count('    model_name: "served-model"\n') == len(
+        probe.LOCAL_BACKEND_IDS
+    )
     assert "http://127.0.0.1:8000/v1/chat/completions" in overlay
+
+
+@pytest.mark.unit
+def test_the_overlay_declares_every_shipped_local_backend() -> None:
+    """The shipped routing sends prose classes to local-heavy-reasoning.
+
+    Declaring only local-coder would leave the document class with no model
+    and make the probe red for a configuration reason, not a C13 reason.
+    """
+    overlay = probe.bifrost_overlay_yaml("m", 8000, 8192)
+    for backend_id in ("local-coder", "local-heavy-reasoning"):
+        assert f"  - backend_id: {backend_id}\n" in overlay
+
+
+@pytest.mark.unit
+def test_the_customer_writes_the_documented_file_and_nothing_else() -> None:
+    """OMN-16200: one documented file under HOME, no environment binding."""
+    assert probe.OVERLAY_RELATIVE_PATH == ".omninode/delegation/bifrost_overrides.yaml"
