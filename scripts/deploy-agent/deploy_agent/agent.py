@@ -70,6 +70,7 @@ from deploy_agent.lane_lock_client import (
     lane_lock,
 )
 from deploy_agent.lane_policy import load_allowed_lanes_from_env
+from deploy_agent.lineage_fence import DockerProvenanceReader
 from deploy_agent.loaded_code import record_loaded_code_sha
 from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
@@ -78,8 +79,16 @@ from deploy_agent.publisher import (
     publish_result,
 )
 from deploy_agent.queue_depth import LagSampler
+from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 
 logger = logging.getLogger(__name__)
+
+
+def _runtime_container_for_lane(lane: EnumRuntimeLane) -> str:
+    """The lane's main runtime container, whose image records its build (OMN-19270)."""
+    container_name, _ = lane_config_for(lane).runtime_health_targets[0]
+    return container_name
+
 
 STATE_DIR = Path(
     os.environ.get("DEPLOY_AGENT_STATE_DIR", "/data/omninode/deploy-agent/state/jobs")
@@ -398,6 +407,12 @@ class DeployAgent:
             ancestry_resolver=GitAncestryResolver(REPO_DIR),
             on_superseded=self._publish_superseded,
             on_rejected=self._publish_rejection_notice,
+            # OMN-19270. The lineage fence compares each command's ref with
+            # the infra_vcs_ref the lane's runtime image was built from. It
+            # asks the resolver above, so it and coalescing share one fetch
+            # cooldown.
+            running_build_ref=DockerProvenanceReader(_runtime_container_for_lane),
+            tracking_ref=load_tracking_remote_ref_from_env(),
         )
 
         # Step 6b: keep the lag sample current DURING a rebuild (OMN-18990).

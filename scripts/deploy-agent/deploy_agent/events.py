@@ -636,6 +636,37 @@ class ModelVerifyRecreate(BaseModel):
         return line
 
 
+class ModelRollbackDeclaration(BaseModel):
+    """A signed declaration that a command deliberately moves a lane off its lineage.
+
+    OMN-19270. The agent refuses a command whose ``git_ref`` is a strict
+    ancestor of the build the lane already runs, or has diverged from it, so a
+    stale or replayed command can no longer roll the lane backwards. That
+    fence must not also remove the way to recover from a bad build: a command
+    carrying this declaration is exempt from it and built as asked.
+
+    Both fields are required and must say something. A rollback nobody can
+    attribute is indistinguishable from the replay the fence exists to refuse,
+    so ``actor`` names the person or lane that asked, and ``reason`` is what a
+    later reader of the journal needs in order to know why the lane went
+    backwards. The declaration travels inside the signed command body, so it
+    cannot be added to a command in transit.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    actor: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _fields_are_not_blank(self) -> ModelRollbackDeclaration:
+        for name in ("actor", "reason"):
+            if not getattr(self, name).strip():
+                msg = f"rollback {name} is blank; a rollback must name its {name}"
+                raise ValueError(msg)
+        return self
+
+
 class ModelRebuildRequested(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID
@@ -657,6 +688,9 @@ class ModelRebuildRequested(BaseModel):
     # pin the stability-proven digest (enforced below).
     image_ref: str | None = None
     image_digest: str | None = None
+    # OMN-19270: present only on a deliberate rollback. Without it the lineage
+    # fence in the consumer refuses a ref behind, or off, the running build.
+    rollback: ModelRollbackDeclaration | None = None
 
     @model_validator(mode="after")
     def validate_services_subset(self) -> ModelRebuildRequested:
@@ -691,6 +725,16 @@ class EnumRejectionReason(StrEnum):
 
     ``SUPERSEDED`` is the only one that is not a refusal of the command: the
     work it asked for IS being done, by the newer command named alongside it.
+
+    ``SUPERSEDED_BY_RUNNING_BUILD`` and ``DIVERGENT_REF`` are the lineage fence
+    (OMN-19270). The first refuses a command whose ref is a strict git
+    ancestor of the build the lane already runs: the lane already carries that
+    work, and building it would roll the lane backwards. It is a token of its
+    own rather than ``SUPERSEDED`` because no newer COMMAND replaced it. The
+    replacement is the running build, which need not have come from a command
+    this agent recorded, so there is no correlation id to name. The second
+    refuses a ref that is neither an ancestor nor a descendant of the running
+    build and is not on the lane's tracking branch.
     """
 
     BUSY = "busy"
@@ -701,6 +745,8 @@ class EnumRejectionReason(StrEnum):
     LANE_NOT_ALLOWED = "lane_not_allowed"
     UNDECODABLE_PAYLOAD = "undecodable_payload"
     SUPERSEDED = "superseded"
+    SUPERSEDED_BY_RUNNING_BUILD = "superseded_by_running_build"
+    DIVERGENT_REF = "divergent_ref"
 
 
 class ModelRejectionNotice(BaseModel):

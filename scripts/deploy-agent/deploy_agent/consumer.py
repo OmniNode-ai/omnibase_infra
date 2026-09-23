@@ -90,6 +90,12 @@ from deploy_agent.lane_policy import (
     LaneNotAllowedError,
     assert_lane_allowed,
 )
+from deploy_agent.lineage_fence import (
+    EnumLineageVerdict,
+    ModelLineageDecision,
+    RunningBuildRefReader,
+    decide_lineage,
+)
 from deploy_agent.queue_depth import LagSampler, ModelControlTopicLag
 
 logger = logging.getLogger(__name__)
@@ -206,6 +212,10 @@ class DeployConsumer:
     #: AttributeError from the middle of a refusal, which would turn a handled
     #: rejection into an unhandled exception on the poll loop.
     on_rejected: RejectedHook | None = None
+    #: OMN-19270, on the same terms again: a consumer built without a reader
+    #: runs no lineage fence, which is the pre-change behaviour.
+    running_build_ref: RunningBuildRefReader | None = None
+    tracking_ref: str | None = None
 
     def __init__(
         self,
@@ -218,6 +228,8 @@ class DeployConsumer:
         ancestry_resolver: AncestryResolver | None = None,
         on_superseded: SupersededHook | None = None,
         on_rejected: RejectedHook | None = None,
+        running_build_ref: RunningBuildRefReader | None = None,
+        tracking_ref: str | None = None,
     ) -> None:
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
@@ -248,6 +260,11 @@ class DeployConsumer:
         self.ancestry_resolver = ancestry_resolver
         self.on_superseded = on_superseded
         self.on_rejected = on_rejected
+        # OMN-19270. The lineage fence reads the running build through this
+        # reader and compares refs through ``ancestry_resolver``; it runs only
+        # when both are present.
+        self.running_build_ref = running_build_ref
+        self.tracking_ref = tracking_ref
         logger.info(
             "Deploy agent lane fence: %s",
             ",".join(sorted(lane.value for lane in self.allowed_lanes)),
@@ -267,6 +284,8 @@ class DeployConsumer:
         4. Check the lane fence -> reject "lane_not_allowed"
         5. Check busy (has_active_job) -> reject "busy"
         6. Check dedup (is_duplicate) -> reject "duplicate"
+        6a. Lineage fence (OMN-19270) -> reject "superseded_by_running_build"
+            or "divergent_ref"
         7. Self-update boundary (OMN-16442) -- may not return
         8. Persist job state (accepted)
         9. Commit Kafka offset
@@ -468,6 +487,26 @@ class DeployConsumer:
             self._commit_through(msg)
             return None, self._reject(EnumRejectionReason.DUPLICATE, cmd=cmd)
 
+        # Step 6a: Lineage fence (OMN-19270). A command whose ref is a strict
+        # ancestor of the build the lane already runs would roll the lane
+        # back. That is what a stale, replayed redeploy did on 2026-09-23, when
+        # a command stranded upstream since 12:09Z arrived at 15:50Z. Refused
+        # with a typed reason and committed past, so it is acknowledged rather
+        # than left to block the commands behind it. A signed rollback
+        # declaration is exempt. Every comparison the host cannot make lets
+        # the command run as before.
+        lineage = self._lineage_decision(cmd)
+        if lineage is not None and lineage.verdict.refuses:
+            logger.warning(
+                "Rejecting command %s: %s", cmd.correlation_id, lineage.journal_line()
+            )
+            self._commit_through(msg)
+            if lineage.verdict is EnumLineageVerdict.STALE_ANCESTOR:
+                return None, self._reject(
+                    EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD, cmd=cmd
+                )
+            return None, self._reject(EnumRejectionReason.DIVERGENT_REF, cmd=cmd)
+
         # Step 6b: Coalesce (OMN-18143). The newest foldable command in the
         # batch runs; every one it replaces gets a durable terminal record and
         # a terminal event naming it. Everything below this point -- the
@@ -519,6 +558,29 @@ class DeployConsumer:
             len(superseded_ids),
         )
         return runner_cmd, None
+
+    def _lineage_decision(
+        self, cmd: ModelRebuildRequested
+    ) -> ModelLineageDecision | None:
+        """The lineage fence's verdict for ``cmd``, or ``None`` when it is off.
+
+        Off means this consumer was built without a running-build reader or
+        without an ancestry resolver, which is every test that does not ask
+        for the fence. The verdict is journalled whether it refuses or not, so
+        an accepted command still records which comparison let it through.
+        """
+        if self.running_build_ref is None or self.ancestry_resolver is None:
+            return None
+        reader = self.running_build_ref
+        decision = decide_lineage(
+            cmd,
+            read_running_ref=lambda: reader(cmd.runtime_lane),
+            contains=self.ancestry_resolver,
+            tracking_ref=self.tracking_ref,
+        )
+        if not decision.verdict.refuses:
+            logger.info("%s %s", cmd.correlation_id, decision.journal_line())
+        return decision
 
     @staticmethod
     def _command_payload(msg: Any) -> dict[str, Any]:
