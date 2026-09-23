@@ -1620,11 +1620,22 @@ class DeployExecutor:
         # without this the terminal event named one repository's commit and left
         # the other three to be inferred from the image.
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
+        # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
+        # stages, so every RUN after it takes the value as build environment
+        # and a new timestamp misses the cache for the whole image. The
+        # dev-lane-only build (OMN-18108) is a second `compose build` of the
+        # same Dockerfile and args; stamping it with its own clock re-ran the
+        # full build from scratch (2% cached, 46 min at load 163 on .201,
+        # 2026-09-22) and killed two consecutive dev-lane rebuilds at the
+        # 3600s hard bound after the first build had already succeeded.
+        self.deploy_build_date: str | None = None
 
     def reset_deploy_observations(self) -> None:
         """Clear per-job observations at the start of a rebuild."""
         self.container_residue = []
         self.sibling_source_refs = {}
+        self.deploy_build_date = None
         self.recreate_supervision = []
         self.verify_recreate = []
         self.deps_convergence = []
@@ -3542,7 +3553,11 @@ class DeployExecutor:
 
         import datetime
 
-        build_date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if self.deploy_build_date is None:
+            self.deploy_build_date = datetime.datetime.now(datetime.UTC).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+        build_date = self.deploy_build_date
         runtime_version = _runtime_version_from_pyproject()
 
         compose_file_args: list[str] = []
