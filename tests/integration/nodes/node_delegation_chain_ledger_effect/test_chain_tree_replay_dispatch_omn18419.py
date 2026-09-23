@@ -737,3 +737,148 @@ async def test_a_redelivered_hop_is_recorded_once_through_the_real_dispatch(
     )
     assert all(row["replay_green"] for row in rows), _describe(rows)
     assert all(row["verifier_verdict"] == "pass" for row in rows), _describe(rows)
+
+
+# ---------------------------------------------------------------------------
+# OMN-18964: a RE-ROUTED delegation grades green through the real dispatch.
+#
+# The orchestrator issues a repeat routing request while consuming a failing
+# quality-gate-result or a retryable inference-response, and records that
+# envelope as its parent. Both parents are published here through the same
+# real projection path, so the chain writer reads them out of event_ledger
+# exactly as it does on the lane. Measured on the .201 dev lane before the
+# fix: every re-routed chain replayed red, every other chain green.
+# ---------------------------------------------------------------------------
+
+_TOPIC_QUALITY_GATE_RESULT = "onex.evt.omnibase-infra.quality-gate-result.v1"
+_TOPIC_INFERENCE_RESPONSE = "onex.evt.omnibase-infra.inference-response.v1"
+
+
+async def _publish_sequence_into_event_ledger(
+    *,
+    correlation_id: UUID,
+    postgres_dsn: str,
+    sequence: Sequence[tuple[str, UUID, UUID | None]],
+) -> None:
+    """Drive an explicit (topic, envelope, parent) sequence through the projection."""
+    container = MagicMock()
+    append_handler = HandlerLedgerAppend(container, postgres_dsn)
+    await append_handler.initialize({})
+    projection_handler = HandlerLedgerProjection(container)
+    bridge = IntentEffectDispatchBridge(append_handler)
+
+    base = datetime.now(UTC)
+    try:
+        for index, (topic, envelope_id, parent) in enumerate(sequence):
+            headers = ModelEventHeaders(
+                correlation_id=correlation_id,
+                message_id=envelope_id,
+                parent_message_id=parent,
+                event_type=topic,
+                source="omn18964-reroute-dispatch-proof",
+                timestamp=base + timedelta(seconds=index),
+            )
+            message = ModelEventMessage(
+                topic=topic,
+                key=str(correlation_id).encode("utf-8"),
+                value=json.dumps({"hop_index": index}).encode("utf-8"),
+                headers=headers,
+                partition=0,
+                offset=str(int(uuid4().int % (2**62))),
+            )
+            output = await projection_handler.handle(message)
+            intent = output.result
+            assert intent is not None, (
+                f"the ledger projection emitted no intent for {topic!r}; the "
+                "evidence this proof grades would not exist"
+            )
+            await bridge.execute(intent.payload, correlation_id=correlation_id)
+    finally:
+        await append_handler.shutdown()
+
+
+def _rerouted_sequence(
+    *, publish_reroute_parents: bool
+) -> list[tuple[str, UUID, UUID | None]]:
+    """Head, request, round 1, a gate re-route, an inference re-route, terminal."""
+    ids = {
+        name: uuid4()
+        for name in ("skill", "req", "rr1", "rd1", "qg", "rr2", "ir", "rr3")
+    }
+    terminal = uuid4()
+    sequence: list[tuple[str, UUID, UUID | None]] = [
+        (_TOPIC_DELEGATE_SKILL, ids["skill"], None),
+        (_TOPIC_DELEGATION_REQUEST, ids["req"], ids["skill"]),
+        (_TOPIC_ROUTING_REQUEST, ids["rr1"], ids["req"]),
+        (_TOPIC_ROUTING_DECISION, ids["rd1"], ids["rr1"]),
+    ]
+    if publish_reroute_parents:
+        # Its own parent (the gate request) is never projected or graded.
+        sequence.append((_TOPIC_QUALITY_GATE_RESULT, ids["qg"], uuid4()))
+    sequence.append((_TOPIC_ROUTING_REQUEST, ids["rr2"], ids["qg"]))
+    if publish_reroute_parents:
+        sequence.append((_TOPIC_INFERENCE_RESPONSE, ids["ir"], uuid4()))
+    sequence.append((_TOPIC_ROUTING_REQUEST, ids["rr3"], ids["ir"]))
+    sequence.append((_TOPIC_COMPLETED, terminal, ids["skill"]))
+    return sequence
+
+
+@pytest.mark.asyncio
+async def test_a_rerouted_chain_grades_green_through_the_real_dispatch(
+    db_pool: asyncpg.Pool,
+    postgres_dsn: str,
+    written_correlation_ids: list[UUID],
+) -> None:
+    """OMN-18964. Both re-route kinds close; the parent evidence is not a row."""
+    correlation_id = uuid4()
+    written_correlation_ids.append(correlation_id)
+
+    await _publish_sequence_into_event_ledger(
+        correlation_id=correlation_id,
+        postgres_dsn=postgres_dsn,
+        sequence=_rerouted_sequence(publish_reroute_parents=True),
+    )
+    await _dispatch_chain_writer(
+        correlation_id=correlation_id, postgres_dsn=postgres_dsn
+    )
+
+    rows = await _read_chain_rows(db_pool, correlation_id)
+    assert [row["hop"] for row in rows] == [
+        _TOPIC_DELEGATE_SKILL,
+        _TOPIC_DELEGATION_REQUEST,
+        _TOPIC_ROUTING_REQUEST,
+        _TOPIC_ROUTING_DECISION,
+        _TOPIC_ROUTING_REQUEST,
+        _TOPIC_ROUTING_REQUEST,
+        _TOPIC_COMPLETED,
+    ], f"re-route parent evidence must not be written as a hop:\n{_describe(rows)}"
+    assert all(row["replay_green"] for row in rows), (
+        f"a causally correct re-routed chain graded red:\n{_describe(rows)}"
+    )
+    assert all(row["verifier_verdict"] == "pass" for row in rows), _describe(rows)
+
+
+@pytest.mark.asyncio
+async def test_a_reroute_whose_parent_was_never_projected_grades_red(
+    db_pool: asyncpg.Pool,
+    postgres_dsn: str,
+    written_correlation_ids: list[UUID],
+) -> None:
+    """Negative control: the declaration alone does not green a re-route."""
+    correlation_id = uuid4()
+    written_correlation_ids.append(correlation_id)
+
+    await _publish_sequence_into_event_ledger(
+        correlation_id=correlation_id,
+        postgres_dsn=postgres_dsn,
+        sequence=_rerouted_sequence(publish_reroute_parents=False),
+    )
+    await _dispatch_chain_writer(
+        correlation_id=correlation_id, postgres_dsn=postgres_dsn
+    )
+
+    rows = await _read_chain_rows(db_pool, correlation_id)
+    greens = [row["replay_green"] for row in rows]
+    assert greens == [True, True, True, True, False, False, True], (
+        f"only the two re-routes may be red without their parents:\n{_describe(rows)}"
+    )

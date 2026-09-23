@@ -307,8 +307,15 @@ class HandlerDelegationChainLedger:
 
         The replay wants the parent relation, which is why the declaration is
         a single object rather than lists free to disagree.
+
+        OMN-18964: it also carries every declared re-route parent, which is
+        parent EVIDENCE rather than a hop. Left out of the read, a re-routed
+        hop's recorded parent is never selected and its edge cannot close.
         """
-        return tuple(topic for hop in self._declared_chain for topic in hop.topics)
+        topics = [topic for hop in self._declared_chain for topic in hop.topics]
+        for hop in self._declared_chain:
+            topics.extend(p for p in hop.reroute_parents if p not in topics)
+        return tuple(topics)
 
     def _observation_is_settled(self, observed_topics: Set[str]) -> bool:
         """Has every declared HOP been observed, by any of its names?
@@ -321,6 +328,9 @@ class HandlerDelegationChainLedger:
         `settle_attempts x settle_delay` budget on every single dispatch,
         success and failure alike, before writing a chain that was complete
         on the first read.
+
+        OMN-18964: re-route parents are not waited for either. Most chains
+        are never re-routed, so waiting for one would do the same damage.
         """
         return all(
             any(topic in observed_topics for topic in hop.topics)

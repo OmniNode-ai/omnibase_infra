@@ -40,8 +40,8 @@ says. The reader is imported lazily inside the function that needs it,
 because its package ``__init__`` constructs the chain-canary node and the CLI
 must not pay that at import time.
 
-The declaration is located under ``$OMNI_HOME`` -- resolved from the
-``--omni-home`` flag that ``onex delegate`` already binds to that variable for
+The declaration is located under the workspace root -- resolved from the
+``--omnibase-path`` flag (``$OMNIBASE_PATH``) that ``onex delegate`` binds for
 the omnimarket drift guard, so no new environment read enters the CLI. When it
 cannot be located the command is refused with the path it looked for. A
 released wheel carries no copy of the overlay (``omnimarket``'s packaging
@@ -98,8 +98,9 @@ def resolve_lane_declaration_path(omni_home: Path | None) -> Path:
     if omni_home is None:
         message = (
             "cannot locate the lane declaration: no workspace root is set. "
-            "Pass --omni-home <path to the omni_home workspace> (or export "
-            "$OMNI_HOME, which that flag binds to) so "
+            "Pass --omnibase-path <workspace root> (or export "
+            "$OMNIBASE_PATH, which that flag binds to; the sanctioned wrapper "
+            "omnibase_infra/scripts/onex binds it for you) so "
             f"{LANE_DECLARATION_RELATIVE_PATH} can be read. The broker "
             "address is never taken from the environment (OMN-16871)."
         )

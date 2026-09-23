@@ -96,6 +96,38 @@ scope:
     # no locator that resolves). Honest debt, not a case.
     - scripts/ci/check_trivyignore_expiry.py
     - scripts/ci/ci_env_digest.py
+    # OMN-19175: a PROBE, not a guard, and the same class as
+    # model_review_capability_canary.py two lines below and
+    # runner_fleet_canary.sh further down. It drives four negative paths
+    # against a deployed lane and grades them against expectations declared in
+    # its own source; there is no historical incident whose BYTES it replays,
+    # because the behaviour it asserts was landed preventively by OMN-18042 and
+    # never regressed. Capturing a fixture for an incident that did not happen
+    # is exactly the hand-typed approximation R2 exists to refuse, so the
+    # honest record is debt rather than a manufactured case. Its own grading
+    # logic IS proven offline, over recorded observations, in
+    # tests/ci/test_c11_negative_paths_probe_omn19175.py -- that is a
+    # regression suite, not an incident replay, and the two are not
+    # interchangeable.
+    - scripts/ci/c11_negative_paths_probe.py
+    # OMN-19195: the C12 producer and its in-container observer, a PROBE in
+    # the same class as the C11 entry above. The catalogue properties it reads
+    # were landed preventively (OMN-17353, OMN-18311) and have no historical
+    # incident whose bytes it could replay. Its grading is proven offline over
+    # a recorded lab observation in
+    # tests/ci/test_c12_provider_catalogue_probe_omn19195.py -- a regression
+    # suite, not an incident replay.
+    - scripts/ci/c12_provider_catalogue_observe.py
+    - scripts/ci/c12_provider_catalogue_probe.py
+    # OMN-19181: a PROBE, the C16 producer, and the same class as the C11 one
+    # above. Its grading IS driven by real bytes -- three observations captured
+    # read-only from the .201 dev lane's gateway_workflows rows and their bus terminals
+    # rows, including a live untyped 429 death and a run left 'published' for
+    # two days -- in tests/ci/test_c16_receipt_identity_probe_omn19181.py. They
+    # are recorded as a regression suite rather than a replay case because a
+    # psql read has no re-fetchable locator of the kind R3 requires; claiming
+    # one would be the free-text provenance this registry exists to refuse.
+    - scripts/ci/c16_receipt_identity_probe.py
     # OMN-17876: the offline contract canary is a new preventive evidence
     # projection; it deliberately cannot replay a live runner incident.
     - scripts/ci/model_review_capability_canary.py

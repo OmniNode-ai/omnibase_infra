@@ -340,6 +340,87 @@ repos:
       # control that makes removing the job-level suppression safe), that every
       # failure state still writes a non-empty record, and that the job carries
       # no suppression at either level.
+      # OMN-19175: the C11 negative-paths producer grades four refusals against
+      # expectations declared in its own source. Pins that the four cases and
+      # the control stay declared, that the header form stays pinned (bearer
+      # returns the same invalid code with a different detail, so two arms
+      # would collide on one code), that an unreachable endpoint cannot grade
+      # PASS, and that the malformed arm stays graded on the 422 envelope
+      # rather than on a code the platform never returns. Runs offline over
+      # recorded observations, so the grader is falsifiable here and not only
+      # on a lane.
+      # OMN-19200: the C29 customer-own-key producer grades a real customer
+      # session -- install, key registration, delegation -- from outside the
+      # process. Pins that a real working session grades PASS and the real
+      # documented-surface refusal grades FAIL, that an OmniNode lookup, an
+      # address nobody looked up, a blind tracer, a blind DNS decoder and a
+      # keyless success each fail. Runs offline over recorded observations. The
+      # job itself runs on the omnipc2 customer machine from omninode_infra.
+      - id: c29-customer-byo-key-grading
+        name: C29 customer-own-key grader (OMN-19200)
+        entry: uv run --frozen pytest tests/ci/test_c29_customer_byo_key_probe_omn19200.py -q
+        language: system
+        files: ^(scripts/ci/c29_customer_byo_key_probe\.py|tests/ci/test_c29_customer_byo_key_probe_omn19200\.py|tests/fixtures/omn19200/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-19197: no internal-only parameter (an option spelled OMNI_HOME, or
+      # $OMNI_HOME in help) on any command this package registers under
+      # onex.cli -- the customer's `onex`. Carries its own positive control.
+      - id: customer-cli-no-internal-parameter
+        name: customer onex CLI carries no internal-only parameter (OMN-19197)
+        entry: uv run --frozen pytest tests/unit/cli/test_customer_cli_no_internal_parameter_omn19197.py -q
+        language: system
+        files: ^(pyproject\.toml|src/omnibase_infra/cli/.*\.py|tests/unit/cli/test_customer_cli_no_internal_parameter_omn19197\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: c11-negative-paths-grading
+        name: C11 negative-paths grader (OMN-19175)
+        entry: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q
+        language: system
+        files: ^(\.github/workflows/chain-canary-c11-negative-paths\.yml|scripts/ci/c11_negative_paths_probe\.py|tests/ci/test_c11_negative_paths_probe_omn19175\.py|tests/fixtures/omn19175/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-19179: the C13 customer-local producer grades four clauses and
+      # three controls from observations taken outside the process. Pins that
+      # a blind tracer is an unproven zero rather than a pass, that the
+      # outbound control and the negative control are graded, that a package
+      # imported from a checkout fails. The workflow that runs it lives in
+      # omninode_infra, on the lab customer machine. Runs offline over a
+      # recorded clean-container session.
+      - id: c13-customer-local-grading
+        name: C13 customer-local grader (OMN-19179)
+        entry: uv run --frozen pytest tests/ci/test_c13_customer_local_probe_omn19179.py -q
+        language: system
+        files: ^(scripts/ci/c13_customer_local_probe\.py|tests/ci/test_c13_customer_local_probe_omn19179\.py|tests/fixtures/omn19179/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-19195: the C12 producer's grader. Pins that the recorded lab
+      # reading grades PASS, that each broken observation (a catalogue drifted
+      # from its platform contract, a Claude id, a house finding, an intake
+      # model no longer bound to the route, a negative-test injection that
+      # stopped biting) grades FAIL naming its check, and that an unreachable
+      # or stopped container is exit 2 and never a PASS. Offline over a
+      # recorded observation, so the grader is falsifiable here and not only on
+      # a lane.
+      - id: c12-provider-catalogue-grading
+        name: C12 provider-catalogue grader (OMN-19195)
+        entry: uv run --frozen pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q
+        language: system
+        files: ^(\.github/workflows/chain-canary-c12-provider-catalogue\.yml|scripts/ci/c12_provider_catalogue_(probe|observe)\.py|tests/ci/test_c12_provider_catalogue_probe_omn19195\.py|tests/fixtures/omn19195/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-19181: the C16 receipt-identity producer grades R-DELEG-11/12/26
+      # over observations captured from the .201 dev lane. Pins that the
+      # healthy capture can PASS, that SKIP fails the verdict (the SKIP/SKIP/
+      # PASS falsifier), that a receipt naming a provider or model the bus terminal does not
+      # fails, and that a dead run with an untyped cause or no terminal fails.
+      - id: c16-receipt-identity-grading
+        name: C16 receipt-identity grader (OMN-19181)
+        entry: uv run --frozen pytest tests/ci/test_c16_receipt_identity_probe_omn19181.py -q
+        language: system
+        files: ^(\.github/workflows/chain-canary-c16-receipt-identity\.yml|scripts/ci/c16_receipt_identity_probe\.py|tests/ci/test_c16_receipt_identity_probe_omn19181\.py|tests/fixtures/omn19181/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: lab-load-probe-honesty
         name: Lab-load probe reports honestly (OMN-18253)
         entry: uv run --frozen pytest tests/ci/test_lab_load_probe_omn18253.py -q

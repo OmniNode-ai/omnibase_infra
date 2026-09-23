@@ -50,6 +50,26 @@ So the hop stays one entry and gains ``alternatives``. ``topic`` remains the
 hop's CANONICAL name -- the name a ``parent`` citation resolves against and
 the name position-counting reads -- and ``alternatives`` names the other
 topics the same hop may legitimately be observed on. Five entries stay five.
+
+``reroute_parents`` and why the parent evidence is not a hop (OMN-18964)
+------------------------------------------------------------------------
+A delegation whose first draft misses the quality bar is RE-ROUTED: the
+orchestrator issues a second ``delegation-routing-request`` while consuming the
+failing ``quality-gate-result`` (the OMN-14234 free-tier best-of-N path). That
+repeat's recorded parent is the quality-gate-result envelope, and it is
+correct. With one declared parent per hop the edge could not close, and over
+30 chains on the .201 dev lane every re-routed chain replayed red while every
+other chain replayed green.
+
+``reroute_parents`` names the topics whose consumption may cause a REPEAT of
+this hop. They are parent EVIDENCE, not hops: the chain reads their envelopes
+so a re-route edge has something concrete to close against, and does not grade
+or count them. Declaring the quality-gate-result as a sixth hop would need its
+own declared, projected parent (the quality-gate request, then the inference
+leg behind it) or it would replay red itself, and it would make the declared
+hop count disagree with every chain that was not re-routed. The FIRST
+occurrence of a hop still closes against ``parent`` alone; a verdict on a
+routing cannot have caused that routing.
 """
 
 from __future__ import annotations
@@ -82,6 +102,17 @@ class ModelDeclaredChainHop(BaseModel):
             "None means this hop is declared to be the chain head, which the "
             "replay checks rather than assumes: a declared head that records "
             "a parent envelope is a replay failure, not a tolerated extra."
+        ),
+    )
+
+    reroute_parents: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Topics whose consumption may cause a REPEAT of this hop (a "
+            "re-route). Read as parent evidence, never graded or counted as "
+            "hops. The first occurrence of this hop closes against `parent` "
+            "only; a later occurrence may close against `parent` or any of "
+            "these."
         ),
     )
 
@@ -125,6 +156,18 @@ class ModelDeclaredChainHop(BaseModel):
                 f"declared hop {self.topic!r} repeats an alternative topic; a "
                 "duplicated alias cannot say which occurrence a match means"
             )
+        if any(not reroute for reroute in self.reroute_parents):
+            raise ValueError(
+                f"declared hop {self.topic!r} carries an empty re-route "
+                "parent; an unnamed parent cannot be matched against anything"
+            )
+        if set(self.reroute_parents) & set(self.topics):
+            raise ValueError(
+                f"declared hop {self.topic!r} names itself as a re-route "
+                "parent; a self-causing hop is not a chain"
+            )
+        if len(set(self.reroute_parents)) != len(self.reroute_parents):
+            raise ValueError(f"declared hop {self.topic!r} repeats a re-route parent")
         return self
 
 
