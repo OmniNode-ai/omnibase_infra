@@ -55,6 +55,12 @@ source "${SCRIPT_DIR_FOR_ENV}/runtime_build/compose_wait_timeout.sh"
 # shellcheck source=./runtime_build/lane_lock.sh
 source "${SCRIPT_DIR_FOR_ENV}/runtime_build/lane_lock.sh"
 
+# OMN-18349: the verify loop below waits past its fixed floor only while the
+# runtime container itself still reports `starting`, within the health budget
+# that container declares. Same helper-load block as the two files above.
+# shellcheck source=./runtime_build/runtime_health_wait.sh
+source "${SCRIPT_DIR_FOR_ENV}/runtime_build/runtime_health_wait.sh"
+
 OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
 OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
 OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
@@ -3555,17 +3561,45 @@ verify_deployment() {
     runtime_container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
 
     # 1. Health endpoint
+    #
+    # OMN-18349: HEALTH_CHECK_RETRIES x HEALTH_CHECK_INTERVAL (about 60 s) is a
+    # FLOOR, not the whole wait. On 2026-09-23 the stability-test runtime took
+    # about 73 s to boot 0.38.57; this loop gave up at 60 s, the deploy re-tagged
+    # every image to its pre-build id and the refresh wrote no receipt, while
+    # the new containers came up healthy. Past the floor the loop keeps polling
+    # only while docker reports the runtime container still `starting` (or
+    # already `healthy`), and only within the budget that container declares
+    # (start_period + retries x (interval + timeout)). Unhealthy, not running,
+    # restarted since the wait began, or absent stops it at once, so a
+    # crashing or crash-looping runtime still fails fast.
     log_info "Checking health endpoint (${HEALTH_CHECK_URL})..."
     local attempt=0
     local healthy=false
+    local health_budget_seconds
+    health_budget_seconds="$(runtime_health_budget_seconds "${runtime_container_name}")"
+    local health_wait_started=${SECONDS}
+    local runtime_started_baseline
+    runtime_started_baseline="$(runtime_started_at "${runtime_container_name}")"
+    local runtime_state=""
 
-    while (( attempt < HEALTH_CHECK_RETRIES )); do
+    while true; do
         attempt=$((attempt + 1))
         if curl -sf --connect-timeout 2 --max-time 5 "${HEALTH_CHECK_URL}" >/dev/null 2>&1; then
             healthy=true
             break
         fi
-        log_info "  Attempt ${attempt}/${HEALTH_CHECK_RETRIES} -- waiting ${HEALTH_CHECK_INTERVAL}s..."
+        if (( attempt >= HEALTH_CHECK_RETRIES )); then
+            runtime_state="$(runtime_health_state "${runtime_container_name}" "${runtime_started_baseline}")"
+            if ! runtime_health_keep_waiting \
+                "$(( SECONDS - health_wait_started ))" \
+                "${health_budget_seconds}" \
+                "${runtime_state}"; then
+                break
+            fi
+            log_info "  Attempt ${attempt} -- ${runtime_container_name} reports '${runtime_state}', within its declared ${health_budget_seconds}s health budget -- waiting ${HEALTH_CHECK_INTERVAL}s..."
+        else
+            log_info "  Attempt ${attempt}/${HEALTH_CHECK_RETRIES} -- waiting ${HEALTH_CHECK_INTERVAL}s..."
+        fi
         sleep "${HEALTH_CHECK_INTERVAL}"
     done
 
@@ -3577,7 +3611,7 @@ verify_deployment() {
         # tag rollback (see restore_latest_image_tags()).
         HEALTH_PROBES_PASSED=true
     else
-        log_error "Health check FAILED after ${HEALTH_CHECK_RETRIES} attempts."
+        log_error "Health check FAILED after ${attempt} attempts ($(( SECONDS - health_wait_started ))s; ${runtime_container_name} reports '${runtime_state:-unread}', declared health budget ${health_budget_seconds}s)."
         log_error "Service is not responding at ${HEALTH_CHECK_URL}"
         log_error "Check container logs: docker logs ${runtime_container_name}"
         exit 1
