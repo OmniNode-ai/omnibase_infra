@@ -865,6 +865,29 @@ jobs:
           echo "================================================================"
           uv run python scripts/batch_validate_node_contracts.py --verbose
 
+      # OMN-17423 AC4. The runtime CredentialRedactionFilter installed by
+      # service_kernel.configure_logging() is defense in depth; this gate is
+      # the enforcement layer, refusing the source pattern before a handler
+      # ever sees it. It scans the SHARED path AC2 covers, so a new log site
+      # in any runtime service is caught here rather than in a pod log.
+      # SYNC with the .pre-commit-config.yaml hook `check-no-credential-in-log`.
+      - name: Credential-in-log gate (OMN-17423)
+        run: |
+          echo "================================================================"
+          echo "Credential-in-log gate (OMN-17423)"
+          echo "================================================================"
+          uv run python scripts/ci/check_no_credential_in_log.py \
+            --root src/omnibase_infra
+
+      # Non-vacuity. Without this a gate whose matcher silently stopped
+      # matching would report "zero violations" and read exactly like success.
+      - name: Credential-in-log gate self-test (OMN-17423)
+        run: |
+          uv run python scripts/ci/check_no_credential_in_log.py \
+            --mode=self-test \
+            --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py \
+            --expected 9
+
   infra-node-handler-ownership:
     needs: occ-preflight
     name: Infra Node Handler Ownership

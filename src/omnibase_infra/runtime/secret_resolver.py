@@ -1568,7 +1568,7 @@ class SecretResolver:
         elif source.source_type == "infisical":
             if self._infisical_handler is None:
                 logger.warning(
-                    "Infisical handler not configured for secret: %s",
+                    "Infisical handler not configured for secret: %s",  # credential-log-allow: logs logical_name (the secret's NAME), not its value
                     logical_name,
                     extra={
                         "logical_name": logical_name,
@@ -1660,7 +1660,7 @@ class SecretResolver:
         elif source.source_type == "infisical":
             if self._infisical_handler is None:
                 logger.warning(
-                    "Infisical handler not configured for secret: %s",
+                    "Infisical handler not configured for secret: %s",  # credential-log-allow: logs logical_name (the secret's NAME), not its value
                     logical_name,
                     extra={
                         "logical_name": logical_name,
@@ -1815,7 +1815,7 @@ class SecretResolver:
                 # Path escapes secrets_dir - this is a path traversal attempt
                 # SECURITY: Log at ERROR level - potential attack indicator
                 logger.error(
-                    "Path traversal detected for secret: %s",
+                    "Path traversal detected for secret: %s",  # credential-log-allow: logs logical_name (the secret's NAME), not its value
                     logical_name,
                     extra={"logical_name": logical_name},
                 )

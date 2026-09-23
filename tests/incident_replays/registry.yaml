@@ -86,6 +86,31 @@ scope:
     - scripts/ci/canonical_handler_shape_baseline.py
     - scripts/ci/check_deploy_scope_dod.py
     - scripts/ci/check_integration_skips.py
+    # OMN-17423: the same class as check_trivyignore_expiry.py below -- a
+    # purely preventive control with no bad state to replay. AC4 of that
+    # ticket mandates a gate that refuses a log statement formatting a
+    # credential value; the gate exists and is non-vacuous (its self-test
+    # pins an exact count against a committed fixture of nine injected
+    # violations, and `run_self_test(fixture, 8)` returns 1).
+    #
+    # There is no real incident to capture, and that was MEASURED, not
+    # assumed. Running this gate over seven repos at their current heads and
+    # back through history -- 392 commits of omninode_infra's docker/onex-api
+    # and ~1,900 of omnibase_infra's src/ -- found ZERO first-party logger
+    # calls that format a credential value. Every hit was third-party code
+    # under .venv. That agrees with OMN-17423's own AC1 probe, which drove
+    # sentinels through the live dev request path on 2026-09-15 and found no
+    # fingerprint on any collected service log, and is why AC1 was rescoped
+    # to fallback (c) rather than closed on a RED-first capture.
+    #
+    # Fabricating a case would violate R2: an invented "this once happened"
+    # fixture has no locator that resolves. Baselining instead is the honest
+    # record, and it is debt -- if a credential-in-log incident ever does
+    # occur, its bytes belong in a case here and this line comes out.
+    #
+    # Operator ruling 2026-09-24 (Jake Brower), on the conflict between this
+    # rule and OMN-17423 AC4.
+    - scripts/ci/check_no_credential_in_log.py
     - scripts/ci/check_occ_companion_merged.py
     - scripts/ci/check_shell_hygiene.sh
     # OMN-16229: a genuinely new preventive control, not a replay of an
