@@ -77,3 +77,12 @@ backends:
       - code_generation
       - refactoring
       - documentation
+    # OMN-19215: placed in the local tier after the two .201 rungs it backs,
+    # so it answers only when .201 is unavailable or already tried, never
+    # ahead of it. 32768 is llama.cpp's per-slot n_ctx above.
+    placement:
+      tier: local
+      fallback_for:
+        - local-coder
+        - local-heavy-reasoning
+      max_context_tokens: 32768
