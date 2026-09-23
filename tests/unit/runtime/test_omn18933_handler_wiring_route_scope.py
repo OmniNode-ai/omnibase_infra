@@ -9,7 +9,6 @@ from typing import Protocol
 from unittest.mock import patch
 from uuid import uuid4
 
-import omnimarket
 import pytest
 import yaml
 
@@ -46,13 +45,24 @@ class _AddressedBus:
 async def test_handler_wiring_preserves_bus_identity_into_route_guard(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lane_file = (
-        Path(omnimarket.__file__).resolve().parents[2] / "config" / "ci_bus_lanes.yaml"
-    )
-    raw = yaml.safe_load(lane_file.read_text(encoding="utf-8"))
-    raw["lanes"]["dogfood"]["delegation_routes"][0]["consumer"] = (
-        "omnimarket.nodes.wrong"
-    )
+    # Spelled here, not read from an omnimarket checkout: the infra unit suite
+    # runs where omnimarket is not installed. The declared values themselves
+    # are pinned on the omnimarket side (OMN-18931).
+    raw = {
+        "lanes": {
+            "dogfood": {
+                "broker": "192.168.86.105:47092",
+                "security_protocol": "PLAINTEXT",
+                "delegation_routes": [
+                    {
+                        "consumer": "omnimarket.nodes.wrong",
+                        "terminal_route": "terminal_events",
+                        "repository_owner": "omnimarket",
+                    }
+                ],
+            }
+        }
+    }
     workspace = tmp_path / "workspace"
     overlay = workspace / "omnimarket" / "config" / "ci_bus_lanes.yaml"
     overlay.parent.mkdir(parents=True)

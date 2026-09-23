@@ -139,6 +139,11 @@ def resolve_bounded_delegation_route(
         ) from exc
 
     lanes = raw.get("lanes") if isinstance(raw, dict) else None
+    # Only a lane's declared external broker classifies a foreign environment.
+    # A topology's internal member is a compose-network name (``redpanda:9092``)
+    # that every compose lane shares, so it can confirm a lane that names
+    # itself, which validate_bounded_lane_broker_identity does below, but it
+    # never identifies one.
     targeted_brokers: set[str] = set()
     if isinstance(lanes, dict):
         for name in _BOUNDED_LANES:
@@ -148,18 +153,6 @@ def resolve_bounded_delegation_route(
             declared_broker = str(lane_data.get("broker") or "").strip()
             if declared_broker:
                 targeted_brokers.add(declared_broker)
-            raw_topology = lane_data.get("broker_topology")
-            if isinstance(raw_topology, dict):
-                try:
-                    topology = ModelBoundedLaneBrokerTopology.model_validate(
-                        raw_topology
-                    )
-                except ValidationError:
-                    # A malformed topology is refused when its named lane is
-                    # selected below. It has no trustworthy additional identity
-                    # to classify under another environment.
-                    continue
-                targeted_brokers.add(topology.internal_bootstrap_servers)
     if lane not in _BOUNDED_LANES and broker not in targeted_brokers:
         return None
     if lane not in _BOUNDED_LANES:

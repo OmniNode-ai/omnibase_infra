@@ -217,9 +217,20 @@ def test_targeted_broker_with_unexpected_environment_fails_closed(
         )
 
 
-def test_targeted_internal_broker_with_unexpected_environment_fails_closed(
-    tmp_path: Path,
+@pytest.mark.parametrize("environment", ["local", "prod", "stability-test"])
+def test_shared_internal_listener_name_does_not_claim_another_lane(
+    tmp_path: Path, environment: str
 ) -> None:
+    """``redpanda:9092`` is every compose lane's internal listener, not dogfood's.
+
+    The .201 dev lane's runtime bus reports environment ``local`` on
+    ``redpanda:9092`` (read from ``omninode-runtime`` on 2026-09-23). If the
+    dogfood topology's internal member counted as a dogfood-owned broker, every
+    delegation dispatch on that lane, and on any other compose lane, would be
+    refused as a bounded broker under an unexpected environment. A
+    compose-network name can only confirm a lane that has already named itself,
+    so it never classifies a foreign one.
+    """
     path = _overlay(tmp_path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     raw["lanes"]["dogfood"]["broker_topology"] = {
@@ -228,15 +239,17 @@ def test_targeted_internal_broker_with_unexpected_environment_fails_closed(
     }
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     bus = _AddressedBus()
-    bus.environment = "prod"
+    bus.environment = environment
     bus.bootstrap_servers = "redpanda:9092"
 
-    with pytest.raises(InfraUnavailableError, match="unexpected runtime environment"):
+    assert (
         resolve_bounded_delegation_route(
             transport=bus,
             selected_route=_route(),
             overlay_path_for_test=path,
         )
+        is None
+    )
 
 
 @pytest.mark.asyncio

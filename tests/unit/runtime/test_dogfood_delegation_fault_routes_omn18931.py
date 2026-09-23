@@ -117,29 +117,6 @@ def test_declared_route_cannot_weaken_single_hop_policy(
         )
 
 
-def test_committed_market_resource_is_the_dogfood_pin_authority() -> None:
-    # Imported here, not at module scope: this is the one test in the module
-    # that reads the omnimarket package, and a module-scope import turned the
-    # other pure route-policy tests into a collection error wherever omnimarket
-    # is not installed (the infra unit suite forbids it, OMN-15620).
-    import omnimarket
-
-    market_resource = (
-        Path(omnimarket.__file__).resolve().parents[2] / "config" / "ci_bus_lanes.yaml"
-    )
-    for backend_id, status in (("dogfood-fault-429", 429), ("dogfood-fault-503", 503)):
-        route = resolve_dogfood_delegation_fault_route(
-            environment="dogfood",
-            bootstrap_servers="192.168.86.105:47092",
-            backend_id=backend_id,
-            path_for_test=market_resource,
-        )
-        assert route.expected_http_status == status
-        assert route.endpoint_url == (
-            f"http://dogfood-delegation-fault-{status}:8080/v1/chat/completions"
-        )
-
-
 def test_fault_pin_accepts_only_explicit_internal_topology_identity(
     tmp_path: Path,
 ) -> None:
