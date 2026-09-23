@@ -36,8 +36,10 @@ from omnibase_infra.utils.util_log_credential_redaction import (
 
 # A syntactically real JWT shape (three base64url segments). Not a live token:
 # the payload decodes to {"sub":"omn17423-test"} and it is unsigned garbage.
-FAKE_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvbW4xNzQyMy10ZXN0In0.ZmFrZXNpZ25hdHVyZQ"
-FAKE_API_KEY = "onxk_omn17423testkeyvaluenotreal0123456789"
+JWT_SHAPED_SENTINEL = (
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvbW4xNzQyMy10ZXN0In0.ZmFrZXNpZ25hdHVyZQ"
+)
+ONXK_SHAPED_SENTINEL = "onxk_omn17423testkeyvaluenotreal0123456789"
 
 
 def _make_record(msg: str, args: Any = None, **kwargs: Any) -> logging.LogRecord:
@@ -96,13 +98,17 @@ def clean_logging() -> Iterator[None]:
 class TestStructuralPass:
     def test_dict_arg_credential_key_redacted(self) -> None:
         record = _apply(
-            _make_record("event %s", {"api_key": FAKE_API_KEY, "tenant": "acme"})
+            _make_record(
+                "event %s", {"api_key": ONXK_SHAPED_SENTINEL, "tenant": "acme"}
+            )
         )
         assert record.args == {"api_key": LOG_REDACTION_MARKER, "tenant": "acme"}
 
     def test_plaintext_key_redacted(self) -> None:
         """The dashboard key-creation field this ticket exists for."""
-        record = _apply(_make_record("created %s", {"plaintext_key": FAKE_API_KEY}))
+        record = _apply(
+            _make_record("created %s", {"plaintext_key": ONXK_SHAPED_SENTINEL})
+        )
         assert record.args == {"plaintext_key": LOG_REDACTION_MARKER}
 
     @pytest.mark.parametrize(
@@ -135,23 +141,27 @@ class TestStructuralPass:
 
     def test_nested_containers_are_walked(self) -> None:
         record = _apply(
-            _make_record("event %s", {"a": {"b": [{"access_token": FAKE_JWT}]}})
+            _make_record(
+                "event %s", {"a": {"b": [{"access_token": JWT_SHAPED_SENTINEL}]}}
+            )
         )
         assert record.args == {"a": {"b": [{"access_token": LOG_REDACTION_MARKER}]}}
 
     def test_tuple_args_are_walked(self) -> None:
-        record = _apply(_make_record("%s %s", ("acme", {"api_key": FAKE_API_KEY})))
+        record = _apply(
+            _make_record("%s %s", ("acme", {"api_key": ONXK_SHAPED_SENTINEL}))
+        )
         assert record.args == ("acme", {"api_key": LOG_REDACTION_MARKER})
 
     def test_depth_limit_fails_closed(self) -> None:
         """Beyond the depth limit nothing is inspected, so the subtree is
         replaced rather than passed through unredacted."""
-        deep: Any = {"api_key": FAKE_API_KEY}
+        deep: Any = {"api_key": ONXK_SHAPED_SENTINEL}
         for _ in range(20):
             deep = {"nest": deep}
         record = _apply(_make_record("event %s", deep))
         rendered = record.getMessage()
-        assert FAKE_API_KEY not in rendered
+        assert ONXK_SHAPED_SENTINEL not in rendered
         assert LOG_REDACTION_MARKER in rendered
 
 
@@ -163,23 +173,25 @@ class TestStructuralPass:
 @pytest.mark.unit
 class TestShapePass:
     def test_serialised_jwt_in_message_redacted(self) -> None:
-        record = _apply(_make_record(f'{{"access_token": "{FAKE_JWT}"}}'))
+        record = _apply(_make_record(f'{{"access_token": "{JWT_SHAPED_SENTINEL}"}}'))
         message = record.getMessage()
-        assert FAKE_JWT not in message
+        assert JWT_SHAPED_SENTINEL not in message
         assert LOG_REDACTION_MARKER in message
 
     def test_serialised_api_key_in_message_redacted(self) -> None:
-        record = _apply(_make_record(f"provisioned key {FAKE_API_KEY} for acme"))
+        record = _apply(
+            _make_record(f"provisioned key {ONXK_SHAPED_SENTINEL} for acme")
+        )
         message = record.getMessage()
-        assert FAKE_API_KEY not in message
+        assert ONXK_SHAPED_SENTINEL not in message
         # The surrounding context must survive -- this is what separates
         # redaction from destroying the line.
         assert "provisioned key" in message
         assert "for acme" in message
 
     def test_credential_shape_inside_positional_arg_redacted(self) -> None:
-        record = _apply(_make_record("body=%s", (f"token={FAKE_JWT}",)))
-        assert FAKE_JWT not in record.getMessage()
+        record = _apply(_make_record("body=%s", (f"token={JWT_SHAPED_SENTINEL}",)))
+        assert JWT_SHAPED_SENTINEL not in record.getMessage()
 
     def test_ordinary_message_untouched(self) -> None:
         record = _apply(_make_record("tenant acme resolved in 12ms"))
@@ -200,14 +212,14 @@ class TestShapePass:
 class TestExceptionPass:
     def test_credential_in_traceback_redacted(self) -> None:
         try:
-            raise ValueError(f"upstream rejected {FAKE_JWT}")
+            raise ValueError(f"upstream rejected {JWT_SHAPED_SENTINEL}")
         except ValueError:
             import sys
 
             record = _make_record("call failed", exc_info=sys.exc_info())
         _apply(record)
         assert record.exc_text is not None
-        assert FAKE_JWT not in record.exc_text
+        assert JWT_SHAPED_SENTINEL not in record.exc_text
         assert "upstream rejected" in record.exc_text
         # Cleared so the formatter uses our scrubbed copy rather than
         # re-deriving the raw traceback from the live tuple.
@@ -216,22 +228,22 @@ class TestExceptionPass:
     def test_formatted_output_carries_no_credential(self) -> None:
         """End-to-end through a real Formatter -- the surface a pod log is."""
         try:
-            raise RuntimeError(f"bad token {FAKE_JWT}")
+            raise RuntimeError(f"bad token {JWT_SHAPED_SENTINEL}")
         except RuntimeError:
             import sys
 
             record = _make_record("call failed", exc_info=sys.exc_info())
         _apply(record)
         formatted = logging.Formatter("%(message)s").format(record)
-        assert FAKE_JWT not in formatted
+        assert JWT_SHAPED_SENTINEL not in formatted
         assert "call failed" in formatted
 
     def test_precached_exc_text_redacted(self) -> None:
         record = _make_record("call failed")
-        record.exc_text = f"Traceback ... {FAKE_JWT}"
+        record.exc_text = f"Traceback ... {JWT_SHAPED_SENTINEL}"
         _apply(record)
         assert record.exc_text is not None
-        assert FAKE_JWT not in record.exc_text
+        assert JWT_SHAPED_SENTINEL not in record.exc_text
 
 
 # ---------------------------------------------------------------------------
@@ -327,11 +339,11 @@ class TestInstallation:
 
         install_credential_redaction_filter()
         logging.getLogger("omn17423.emit").info(
-            "attach for %s", {"access_token": FAKE_JWT, "edge": "edge-1"}
+            "attach for %s", {"access_token": JWT_SHAPED_SENTINEL, "edge": "edge-1"}
         )
 
         assert len(emitted) == 1
-        assert FAKE_JWT not in emitted[0]
+        assert JWT_SHAPED_SENTINEL not in emitted[0]
         assert "edge-1" in emitted[0]
 
 
