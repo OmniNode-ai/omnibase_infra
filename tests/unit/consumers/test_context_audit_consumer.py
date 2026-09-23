@@ -424,7 +424,7 @@ class _SettableClock(datetime):
     instant: datetime = datetime(2026, 9, 23, 21, 9, 14, tzinfo=UTC)
 
     @classmethod
-    def now(cls, tz: object = None) -> _SettableClock:  # type: ignore[override]
+    def now(cls, tz: object = None) -> _SettableClock:
         return cls.instant  # type: ignore[return-value]
 
 
