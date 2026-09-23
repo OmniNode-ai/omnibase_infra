@@ -1063,6 +1063,24 @@ repos:
       # Naming convention validation - file and class naming [OMN-1305]
       # Validates Handler*, Dispatcher*, Store*, Adapter*, etc. naming patterns
       # Runtime: <3s (single pass with caching)
+      # OMN-17423 AC4: refuse a log statement that formats a credential value.
+      # SYNC with the ci.yml steps "Credential-in-log gate (OMN-17423)" and
+      # its self-test. Runs on every commit touching Python so a new log site
+      # is caught at the keyboard, not in a pod log.
+      - id: check-no-credential-in-log
+        name: Credential-in-log gate (OMN-17423)
+        entry: uv run --frozen python scripts/ci/check_no_credential_in_log.py --root src/omnibase_infra
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: check-no-credential-in-log-self-test
+        name: Credential-in-log gate self-test (OMN-17423)
+        entry: uv run --frozen python scripts/ci/check_no_credential_in_log.py --mode=self-test --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py --expected 9
+        language: system
+        files: ^(scripts/ci/check_no_credential_in_log\.py|scripts/ci/tests/fixtures/credential_in_log_fixture\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: onex-validate-naming
         name: ONEX Naming Convention Validation
         entry: uv run --frozen python scripts/validation/validate_naming.py src/omnibase_infra --errors-only

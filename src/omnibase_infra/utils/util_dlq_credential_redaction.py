@@ -69,6 +69,11 @@ CREDENTIAL_FIELD_NAME_FRAGMENTS: Final[tuple[str, ...]] = (
     "authtoken",
     "apitoken",
     "apikey",
+    # OMN-17423: the dashboard key-creation path names the one-time cleartext
+    # value ``plaintext_key`` -- it matches none of the other fragments, so a
+    # dead-lettered key-create command carried it unredacted. Added here rather
+    # than in a second denylist so the log filter and this path agree.
+    "plaintextkey",
     "accesskey",
     "secretkey",
     "privatekey",
