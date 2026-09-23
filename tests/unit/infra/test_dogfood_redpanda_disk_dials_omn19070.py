@@ -17,8 +17,16 @@ Measured on a scratch single-node v24.2.7 broker on 2026-09-23. Ten
 one-message topics held 32780 KiB each. With ``segment_fallocation_step`` set to
 1048576, a new topic allocated 1024 KiB. Once the old segments passed the
 lowered segment age, each rolled, the closed segment was truncated to its
-real size, and the directory fell to 20 KiB. No broker restart was needed;
+real size, and the directory fell to 20 KiB, with no restart;
 ``rpk cluster config status`` read ``NEEDS-RESTART false``.
+
+Applied to the .105 broker the same day, the dials released 11.8 GB in two
+minutes and then stopped: 1047 segments stayed at 32 MiB. Each was the segment
+the broker opened for every partition at its last start (2026-09-19), carrying
+no record the age-based roll acts on. One broker restart closed them, truncated
+each to its real size and opened the next at the 1 MiB step, the same
+behaviour the scratch broker showed. Broker data fell from 63.49 GB to 6.49 GB
+and the VM disk from 6.5 GB free to 63.6 GB free.
 
 The dials, and the basis for each value:
 

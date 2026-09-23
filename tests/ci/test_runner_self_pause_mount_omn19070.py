@@ -83,8 +83,8 @@ def _mount_targets(service: dict[str, Any]) -> set[str]:
             targets.add(str(entry.get("target", "")))
             continue
         # short syntax: SOURCE:TARGET[:MODE]. The source may itself contain a
-        # `${VAR:-default}` or `${VAR:?message}` expansion, so split from the
-        # right on the known target rather than on the first colon.
+        # `${VAR:-default}` or `${VAR:?message}` expansion, whose colons make a
+        # split ambiguous, so match the two known targets instead.
         text = str(entry)
         for target in (_HOOK_TARGET, _PAUSE_TARGET):
             if f":{target}" in text:
