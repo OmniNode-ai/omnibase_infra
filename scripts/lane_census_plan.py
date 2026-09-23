@@ -38,6 +38,19 @@ Drift kinds (named exactly so the auto-ticket says precisely what is wrong):
                          `profile_gated`) is nevertheless running. The inverse
                          of container_absent: for this kind ABSENT is correct
                          and PRESENT is the drift (OMN-16803)
+  lane_on_undeclared_host — a lane is running on a host its `hosts:` list does
+                         not name (OMN-19088). Matched by declared container
+                         name, compose project label or lane label, running
+                         containers only
+
+Host scoping (OMN-19088): every lane declares the host(s) it runs on
+(`hosts:`, naming entries of the top-level `hosts:` registry). The census
+evaluates only the lanes declared for the host it runs on and reports the rest
+in `lanes_not_applicable`, rather than filing every service of every other
+host's lanes as absent. The host is resolved from the envelope's `host` (the
+driver passes `LANE_CENSUS_HOST`, default `hostname`) through the registry's
+aliases. A host the registry does not declare is REFUSED: evaluating every lane
+there is the defect this closes, and evaluating none would be a silent clean.
 
 Fail-fast policy: any drift on a non-optional lane is a hard signal. There is no
 warn-only mode (gates-block policy). The driver exits non-zero on drift.
@@ -45,6 +58,7 @@ warn-only mode (gates-block policy). The driver exits non-zero on drift.
 Input envelope (stdin JSON):
   {
     "lane": "<lane name>" | null,   # null => reconcile all non-optional lanes
+    "host": "<hostname or host id>", # required; resolved via the hosts registry
     "containers": [                 # `docker ps -a --format '{{json .}}'` rows,
       {"Names": "...", "State": "running"|"exited"|...,
        "Image": "repo:tag", "Labels": "k=v,k2=v2",
@@ -57,12 +71,18 @@ Input envelope (stdin JSON):
 
 Output (stdout JSON):
   {
-    "schema_version": "1.0.0",
-    "lanes_checked": ["prod", ...],
+    "schema_version": "1.1.0",
+    "host": "lab-201",                 # the resolved host id
+    "lanes_checked": ["prod", ...],    # lanes declared for this host
+    "lanes_not_applicable": ["dogfood", ...],  # lanes declared elsewhere
     "lanes_skipped_optional_down": ["prepr-1", ...],  # optional + entirely down
     "findings": [ {lane, kind, container, detail, severity}, ... ],
     "has_drift": true|false
   }
+
+``lanes_checked`` and ``lanes_not_applicable`` partition the requested lanes.
+A not-applicable lane produces no finding unless it is running here, which is
+``lane_on_undeclared_host``.
 
 ``lanes_skipped_optional_down`` is a subset of ``lanes_checked``: those lanes
 were looked at, found to be optional and entirely absent, and deliberately
@@ -81,7 +101,24 @@ from typing import Any
 
 import yaml
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+
+# Names that identify no single host and so may never be a host alias. Every
+# Docker Desktop host reports the daemon name `docker-desktop` (measured on the
+# .101, .105 and .200 hosts, 2026-09-23), so a census attributed by daemon name
+# would read one host's inventory as another's.
+_AMBIGUOUS_HOST_NAMES = frozenset({"docker-desktop", "localhost"})
+
+
+#: Exit status of ``main`` when the host is undeclared or the host declarations
+#: are malformed. Distinct from the driver's drift code 30 and its
+#: unobservable-inventory code 4: an unattributable census is neither.
+EXIT_HOST_UNDECLARED = 5
+
+
+class HostDeclarationError(ValueError):
+    """The manifest's host declarations are malformed, or this host is undeclared."""
+
 
 # Drift severities. critical => a required service is down / network gone (the
 # 2026-06-11 class of outage). warning => degraded but not lane-down.
@@ -104,6 +141,121 @@ def load_manifest(path: Path | None = None) -> dict[str, Any]:
     if not isinstance(data, dict) or "lanes" not in data:
         raise ValueError(f"lane manifest missing 'lanes': {manifest_path}")
     return data
+
+
+def _normalize_host(name: str) -> str:
+    """Lowercase short name: ``Stickybeatz.local`` and ``x.tailnet.ts.net`` -> first label."""
+    return name.strip().lower().rstrip(".").split(".", 1)[0]
+
+
+def validate_hosts(manifest: dict[str, Any]) -> None:
+    """Refuse a manifest whose host declarations cannot attribute a census.
+
+    Every lane must name at least one registered host, every alias must be
+    claimed by exactly one host, and no alias may be a name that identifies no
+    single host. A lane with no host would be evaluated nowhere, which is a
+    silent clean; an alias claimed twice would evaluate one host's lanes on
+    another.
+    """
+    registry = manifest.get("hosts")
+    if not isinstance(registry, dict) or not registry:
+        raise HostDeclarationError("lane manifest declares no 'hosts' registry")
+
+    claimed: dict[str, str] = {}
+    for host_id, spec in registry.items():
+        aliases = (spec or {}).get("aliases") or []
+        if not isinstance(aliases, list):
+            raise HostDeclarationError(f"host {host_id!r}: 'aliases' must be a list")
+        for name in [host_id, *aliases]:
+            key = _normalize_host(str(name))
+            if not key:
+                raise HostDeclarationError(f"host {host_id!r} declares an empty name")
+            if key in _AMBIGUOUS_HOST_NAMES:
+                raise HostDeclarationError(
+                    f"host {host_id!r} declares {name!r}, which identifies no single "
+                    "host (every Docker Desktop daemon reports 'docker-desktop')"
+                )
+            owner = claimed.get(key)
+            if owner is not None and owner != host_id:
+                raise HostDeclarationError(
+                    f"name {name!r} is claimed by both host {owner!r} and host "
+                    f"{host_id!r}; a census there cannot be attributed"
+                )
+            claimed[key] = host_id
+
+    for lane_name, lane_spec in manifest["lanes"].items():
+        hosts = lane_spec.get("hosts")
+        if not isinstance(hosts, list) or not hosts:
+            raise HostDeclarationError(
+                f"lane {lane_name!r} declares no 'hosts'; every lane must name the "
+                "host(s) it runs on"
+            )
+        for host_id in hosts:
+            if host_id not in registry:
+                raise HostDeclarationError(
+                    f"lane {lane_name!r} names host {host_id!r}, which the 'hosts' "
+                    "registry does not declare"
+                )
+
+
+def resolve_host(raw: str, manifest: dict[str, Any]) -> str:
+    """Resolve a hostname, daemon name or host id to exactly one host id."""
+    validate_hosts(manifest)
+    key = _normalize_host(raw or "")
+    if not key:
+        raise HostDeclarationError(
+            "no host given: the census must be told which host it runs on "
+            "(LANE_CENSUS_HOST, default `hostname`)"
+        )
+    for host_id, spec in manifest["hosts"].items():
+        names = [host_id, *((spec or {}).get("aliases") or [])]
+        if key in {_normalize_host(str(n)) for n in names}:
+            return str(host_id)
+    raise HostDeclarationError(
+        f"host {raw!r} is declared by no entry of the lane manifest's 'hosts' "
+        "registry. Declare it (with the lanes it runs) before running the census "
+        "there; evaluating every lane on an undeclared host is the OMN-19088 defect"
+    )
+
+
+def _undeclared_presence(
+    lane_name: str,
+    lane_spec: dict[str, Any],
+    host_id: str,
+    containers: list[tuple[str, dict[str, Any], dict[str, str]]],
+) -> list[dict[str, str]]:
+    """AC-2: a lane RUNNING on a host its declaration does not name is a finding.
+
+    Matched by declared container name, compose project label or lane label,
+    so a renamed container is still recognised by the project that started it.
+    Exited leftovers do not count: a lane is on a host when it runs there.
+    """
+    declared_names = {svc["name"] for svc in lane_spec.get("services", [])}
+    project = lane_spec.get("compose_project")
+    running_here = sorted(
+        name
+        for name, row, labels in containers
+        if _running(row.get("State", ""), row.get("Status", ""))
+        and (
+            name in declared_names
+            or (project and labels.get("com.docker.compose.project") == project)
+            or labels.get("com.omninode.lane") == lane_name
+        )
+    )
+    if not running_here:
+        return []
+    return [
+        _finding(
+            lane_name,
+            "lane_on_undeclared_host",
+            running_here[0],
+            f"lane {lane_name!r} is declared for host(s) "
+            f"{', '.join(lane_spec.get('hosts', []))} but is running on "
+            f"{host_id!r}: {', '.join(running_here)}. Stop it here, or declare "
+            f"{host_id!r} in the lane's 'hosts' in the same change",
+            _SEVERITY_CRITICAL,
+        )
+    ]
 
 
 def _running(state: str, status: str) -> bool:
@@ -364,15 +516,18 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
     networks = set(envelope.get("networks", []))
     runtime_tag = envelope.get("runtime_tag")
     default_pattern = manifest.get("default_image_tag_pattern", ".+")
+    host_id = resolve_host(str(envelope.get("host") or ""), manifest)
 
     actual_by_name: dict[str, dict[str, Any]] = {}
     lane_labels: dict[str, set[str]] = {}
+    labelled_rows: list[tuple[str, dict[str, Any], dict[str, str]]] = []
     for row in containers:
         name = (row.get("Names") or row.get("Name") or "").lstrip("/").strip()
         if not name:
             continue
         actual_by_name[name] = row
         labels = _labels_to_dict(row.get("Labels", ""))
+        labelled_rows.append((name, row, labels))
         lane_label = labels.get("com.omninode.lane")
         if lane_label:
             lane_labels.setdefault(lane_label, set()).add(name)
@@ -387,8 +542,15 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
 
     findings: list[dict[str, str]] = []
     checked: list[str] = []
+    not_applicable: list[str] = []
     skipped_optional_down: list[str] = []
     for lane_name, lane_spec in target_lanes.items():
+        if host_id not in lane_spec["hosts"]:
+            not_applicable.append(lane_name)
+            findings.extend(
+                _undeclared_presence(lane_name, lane_spec, host_id, labelled_rows)
+            )
+            continue
         checked.append(lane_name)
         if _is_optional_and_entirely_down(lane_spec, actual_by_name):
             skipped_optional_down.append(lane_name)
@@ -406,7 +568,9 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
 
     return {
         "schema_version": SCHEMA_VERSION,
+        "host": host_id,
         "lanes_checked": checked,
+        "lanes_not_applicable": not_applicable,
         "lanes_skipped_optional_down": skipped_optional_down,
         "findings": findings,
         "has_drift": len(findings) > 0,
@@ -417,11 +581,20 @@ def main() -> int:
     manifest_path = os.environ.get("LANE_MANIFEST")
     manifest = load_manifest(Path(manifest_path) if manifest_path else None)
     envelope = json.load(sys.stdin)
-    plan = build_plan(envelope, manifest)
+    # OMN-19088: the driver names the host in the environment; an envelope that
+    # already carries one (a replayed fixture) keeps its own.
+    envelope.setdefault("host", os.environ.get("LANE_CENSUS_HOST", ""))
+    try:
+        plan = build_plan(envelope, manifest)
+    except HostDeclarationError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return EXIT_HOST_UNDECLARED
     json.dump(plan, sys.stdout)
     sys.stdout.write("\n")
-    # Exit 0 always — the planner reports; the shell driver decides exit policy
-    # so the JSON plan is always emittable for dry-run/inspection.
+    # Exit 0 on any plan — the planner reports; the shell driver decides exit
+    # policy so the JSON plan is always emittable for dry-run/inspection. The
+    # one non-zero exit is an unattributable host (EXIT_HOST_UNDECLARED), for
+    # which no plan exists to emit.
     return 0
 
 
