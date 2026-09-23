@@ -103,6 +103,7 @@ __all__ = [
     "CAPTURE_DIR_NAME",
     "RUNS_DIR_NAME",
     "SPOOL_DIR_NAME",
+    "capture_log_path",
     "default_emit_socket_path",
     "run_receipt_mode",
 ]
@@ -474,6 +475,15 @@ def _extract_correlation_id(
 
 
 WORKFLOW_RESULT_FILENAME = "workflow_result.json"
+
+
+def capture_log_path(state_root: Path, node_name: str, run_id: str) -> Path:
+    """Where receipt mode writes one run's capture log.
+
+    The one spelling of this path, so a caller that has to NAME the capture log
+    to an operator (OMN-19131) names the file this module actually wrote.
+    """
+    return state_root.resolve() / CAPTURE_DIR_NAME / f"{node_name}-{run_id}.log"
 
 
 def resolve_run_state_root(state_root: Path, run_id: uuid.UUID) -> Path:
@@ -947,7 +957,7 @@ def _run_receipt_mode(
     # decided BEFORE the run because the started event fires before the body.
     lifecycle_correlation_id = uuid.uuid4()
     session_id = os.environ.get(_SESSION_ID_ENV) or None
-    capture_path = state_root / CAPTURE_DIR_NAME / f"{node_name}-{run_id}.log"
+    capture_path = capture_log_path(state_root, node_name, str(run_id))
     spool_dir = state_root / SPOOL_DIR_NAME
     # OMN-16533: the root the RUNTIME writes into is this run's own, so its
     # fixed-name workflow result is keyed by the run that produced it.
