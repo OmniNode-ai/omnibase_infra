@@ -74,6 +74,7 @@ import logging
 import os
 import sys
 import uuid
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -119,6 +120,7 @@ def build_rebuild_command(
     image_ref: str | None = None,
     image_digest: str | None = None,
     rollback: ModelRollbackDeclaration | None = None,
+    requested_at: datetime | None = None,
 ) -> ModelRebuildRequested:
     """Build the command as the contract model, resolving declared defaults.
 
@@ -139,6 +141,7 @@ def build_rebuild_command(
         image_ref=image_ref,
         image_digest=image_digest,
         rollback=rollback,
+        requested_at=requested_at,
     )
 
 
@@ -451,6 +454,10 @@ def main(argv: list[str] | None = None) -> int:
             image_ref=args.image_ref,
             image_digest=args.image_digest,
             rollback=_resolve_rollback(args.rollback_actor, args.rollback_reason),
+            # OMN-19270: the moment this command was requested, signed. A
+            # deliberate request is never superseded, so this is the record's
+            # honest publish time rather than a lever.
+            requested_at=datetime.now(UTC),
         )
         envelope = command_to_signed_envelope(
             command, os.environ.get(ENV_HMAC_SECRET, "")

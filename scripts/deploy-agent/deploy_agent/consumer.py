@@ -69,6 +69,7 @@ from kafka.structs import OffsetAndMetadata
 
 from deploy_agent.auth import verify_command
 from deploy_agent.coalesce import (
+    SHA_RE,
     AncestryResolver,
     ModelCoalescePlan,
     ModelQueuedCommand,
@@ -92,15 +93,29 @@ from deploy_agent.lane_policy import (
     assert_lane_allowed,
 )
 from deploy_agent.lineage_fence import (
+    ModelRunningBuild,
     RefResolver,
     RunningBuildReader,
-    SiblingAncestryResolver,
-    SiblingCloneAncestry,
     decide_lineage,
+    is_workspace_rebuild,
 )
 from deploy_agent.queue_depth import LagSampler, ModelControlTopicLag
 
 logger = logging.getLogger(__name__)
+
+
+def _broker_timestamp(msg: Any) -> datetime | None:
+    """The record's broker timestamp, the lineage fence's fallback publish time.
+
+    OMN-19270. On this topic it is set by the hop that FORWARDS the command,
+    just before this agent reads it, so it is never earlier than the running
+    build's start: a command that carries no ``requested_at`` is therefore never
+    superseded on time, which is the direction that builds.
+    """
+    raw = getattr(msg, "timestamp", None)
+    if not isinstance(raw, int) or raw < 0:
+        return None
+    return datetime.fromtimestamp(raw / 1000, tz=UTC)
 
 
 # OMN-16442. Invoked at the PRE_ACCEPT job boundary with a callback that rewinds
@@ -219,7 +234,6 @@ class DeployConsumer:
     #: runs no lineage fence, which is the pre-change behaviour.
     running_build: RunningBuildReader | None = None
     ref_resolver: RefResolver | None = None
-    sibling_ancestry: SiblingAncestryResolver | None = None
     tracking_ref: str | None = None
 
     def __init__(
@@ -235,7 +249,6 @@ class DeployConsumer:
         on_rejected: RejectedHook | None = None,
         running_build: RunningBuildReader | None = None,
         ref_resolver: RefResolver | None = None,
-        sibling_ancestry: SiblingAncestryResolver | None = None,
         tracking_ref: str | None = None,
     ) -> None:
         self.consumer = KafkaConsumer(
@@ -269,12 +282,10 @@ class DeployConsumer:
         self.on_rejected = on_rejected
         # OMN-19270. The lineage fence reads the running build through this
         # reader and compares infra refs through ``ancestry_resolver``; it runs
-        # only when both are present. Without a sibling resolver no command
-        # is superseded on a sibling ref, and without a ref resolver a
-        # symbolic ref builds as requested.
+        # only when both are present. Without a ref resolver a symbolic ref
+        # builds as requested.
         self.running_build = running_build
         self.ref_resolver = ref_resolver
-        self.sibling_ancestry = sibling_ancestry
         self.tracking_ref = tracking_ref
         logger.info(
             "Deploy agent lane fence: %s",
@@ -510,7 +521,7 @@ class DeployConsumer:
         # the tracking branch is refused. A signed rollback declaration is the
         # one way backwards. Every comparison the host cannot make lets the
         # command build as requested.
-        lineage = self._lineage_decision(cmd)
+        lineage = self._lineage_decision(cmd, msg)
         if lineage is not None and lineage.verdict.refuses:
             logger.warning(
                 "Rejecting command %s: %s", cmd.correlation_id, lineage.journal_line()
@@ -598,7 +609,7 @@ class DeployConsumer:
         return runner_cmd, None
 
     def _lineage_decision(
-        self, cmd: ModelRebuildRequested
+        self, cmd: ModelRebuildRequested, msg: Any
     ) -> ModelLineageDecision | None:
         """The lineage fence's verdict for ``cmd``, or ``None`` when it is off.
 
@@ -610,20 +621,54 @@ class DeployConsumer:
         if self.running_build is None or self.ancestry_resolver is None:
             return None
         reader = self.running_build
-        # Without a sibling resolver no sibling ref is proven contained, which
-        # is the direction that builds rather than supersedes.
-        sibling_ancestry = self.sibling_ancestry or SiblingCloneAncestry(None)
         decision = decide_lineage(
             cmd,
-            read_running_build=lambda: reader(cmd.runtime_lane),
+            read_running_build=lambda: self._with_producing_job(
+                reader(cmd.runtime_lane)
+            ),
             contains=self.ancestry_resolver,
-            contains_sibling=sibling_ancestry,
             resolve_ref=self.ref_resolver,
             tracking_ref=self.tracking_ref,
+            published_at=cmd.requested_at or _broker_timestamp(msg),
         )
         if not (decision.verdict.refuses or decision.verdict.supersedes):
             logger.info("%s %s", cmd.correlation_id, decision.journal_line())
         return decision
+
+    def _with_producing_job(
+        self, running: ModelRunningBuild | None
+    ) -> ModelRunningBuild | None:
+        """Attach the job that produced the running image, when it can be named.
+
+        OMN-19270. The job is the one whose accept-to-complete window contains
+        the image's ``build_time``. Its ``accepted_at`` is at or before the
+        moment the build staged its siblings, so it is the conservative start
+        to compare a command's publish time with. A job whose pinned ref names
+        a different commit than the image is not trusted as its producer.
+        """
+        if running is None or running.build_time is None:
+            return running
+        job = self.job_store.job_covering(running.build_time)
+        if job is None:
+            return running
+        pinned = str(job.command.get("git_ref", ""))
+        built = job.lineage.build_ref if job.lineage is not None else pinned
+        if SHA_RE.match(built) and built != running.infra_ref:
+            logger.info(
+                "lineage: job %s covers the running image's build time but built "
+                "%s, not %s; its start is not used",
+                job.correlation_id,
+                built,
+                running.infra_ref,
+            )
+            return running
+        return running.model_copy(
+            update={
+                "started_at": job.accepted_at,
+                "workspace_sourced": is_workspace_rebuild(job.command),
+                "producing_job": str(job.correlation_id),
+            }
+        )
 
     @staticmethod
     def _command_payload(msg: Any) -> dict[str, Any]:

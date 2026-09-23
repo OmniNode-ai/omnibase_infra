@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
@@ -639,20 +638,20 @@ class ModelVerifyRecreate(BaseModel):
 
 #: The build-context repository. ``git_ref`` is always a commit of this one.
 INFRA_REPOSITORY: Final = "omnibase_infra"
-_SIBLING_REPO_RE: Final = re.compile(r"^[a-z][a-z0-9_]*$")
-_SHA40_RE: Final = re.compile(r"^[0-9a-f]{40}$")
 
 
 class EnumLineageVerdict(StrEnum):
     """Where a command's refs sit relative to the build the lane runs (OMN-19270)."""
 
-    #: Every ref the command names is already in the running build. The
-    #: command is acknowledged as superseded and never built.
+    #: The running build already carries what this CI command was sent to
+    #: deliver: its infra ref is in the running build, and either it is an
+    #: infra merge or the running workspace build started after the command
+    #: was requested. Acknowledged as superseded and never built.
     CONTAINED = "contained"
     #: The infra ref descends from the running build: the normal forward deploy.
     DESCENDANT = "descendant"
-    #: The infra ref is the running build's, and something else the command
-    #: names is not shown to be running, so it builds.
+    #: The infra ref is the running build's, and the command is not shown to
+    #: be already delivered, so it builds.
     EQUAL = "equal"
     #: The infra ref is a strict ancestor of the running build. It is raised to
     #: the running ref, so the lane never builds backwards.
@@ -778,27 +777,25 @@ class ModelRebuildRequested(BaseModel):
     # OMN-19270: present only on a deliberate rollback. Without it the lineage
     # fence never builds a ref behind the running build, and refuses one off it.
     rollback: ModelRollbackDeclaration | None = None
-    # OMN-19270: sibling repository -> the commit this command exists to
-    # deliver, such as the merge sha of the omnimarket PR that triggered it.
-    # It is EVIDENCE for the lineage fence's containment check, never a build
-    # pin: a workspace build still stages each sibling from its dev branch,
-    # which contains the named commit. A sibling-triggered command that names
-    # nothing here cannot be proven already delivered, so it is never
-    # superseded, and it builds as it did before this field existed.
-    sibling_refs: dict[str, str] = Field(default_factory=dict)
+    # OMN-19270: when the command was first requested -- the moment its
+    # trigger published it, carried through every hop that forwards it. The
+    # lineage fence supersedes a sibling-triggered command only when the
+    # workspace build the lane runs STARTED after this moment: that build
+    # staged each sibling from its dev branch, which already held the merge
+    # the command was sent to deliver. Absent, the fence falls back to the
+    # record's broker timestamp, which is the forwarding hop's and so never
+    # earlier than the build it is compared with; a command without a
+    # producer-stamped time therefore builds, as it did before.
+    requested_at: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_sibling_refs(self) -> ModelRebuildRequested:
-        for repo, sha in self.sibling_refs.items():
-            if not _SIBLING_REPO_RE.match(repo) or repo == INFRA_REPOSITORY:
-                msg = (
-                    f"sibling_refs key {repo!r} is not a sibling repository name; "
-                    f"the infra ref is git_ref, never a sibling"
-                )
-                raise ValueError(msg)
-            if not _SHA40_RE.match(sha):
-                msg = f"sibling_refs[{repo!r}]={sha!r} is not a 40-hex commit sha"
-                raise ValueError(msg)
+    def validate_requested_at_is_aware(self) -> ModelRebuildRequested:
+        if self.requested_at is not None and self.requested_at.utcoffset() is None:
+            msg = (
+                f"requested_at={self.requested_at.isoformat()} carries no UTC "
+                "offset; a publish time compared across hosts must be aware"
+            )
+            raise ValueError(msg)
         return self
 
     @model_validator(mode="after")
@@ -836,10 +833,11 @@ class EnumRejectionReason(StrEnum):
     work it asked for IS being done, by the newer command named alongside it.
 
     ``SUPERSEDED_BY_RUNNING_BUILD`` and ``DIVERGENT_REF`` are the lineage fence
-    (OMN-19270). The first acknowledges a CI-triggered command every ref of
-    which -- the infra ``git_ref`` and each named sibling ref -- is already in
-    the build the lane runs. The lane already carries that work, so the command
-    is recorded ``superseded`` and never built. It is a token of its own rather
+    (OMN-19270). The first acknowledges a CI-triggered command whose work the
+    build the lane runs already carries: its infra ``git_ref`` is in that build,
+    and either it is an infra merge or that workspace build started after the
+    command was requested. The command is recorded ``superseded`` and never
+    built. It is a token of its own rather
     than ``SUPERSEDED`` because no newer COMMAND replaced it. The replacement
     is the running build, which need not have come from a command this agent
     recorded, so there is no correlation id to name. The second refuses a ref

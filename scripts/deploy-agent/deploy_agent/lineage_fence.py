@@ -8,7 +8,7 @@ On 2026-09-23 the .201 dev lane's runtime image tags record each build's
 infra ref. Job ``c009462c`` built the lane at ``0edf5c914`` (image
 ``20260923T141329Z-0edf5c91``). At 14:32:21Z the agent accepted job
 ``ab27aedd`` (``scope=full``, ``git_ref=c159b7118``, an infra commit from
-10:32:14Z whose command had waited in the queue for hours) and rebuilt the lane
+10:32:14Z whose command had waited upstream for hours) and rebuilt the lane
 onto it (``20260923T144642Z-c159b711``). ``c159b7118`` is a strict ancestor of
 ``0edf5c914``, so that deploy moved the lane BACKWARDS by every commit in
 between. The next command, ``e074126b`` at ``533b19c23``, was also behind
@@ -19,48 +19,63 @@ Behind those two came four more full rebuilds -- ``602b1d61``, ``5ce1f33e``,
 ``f645854b``, ``98bb76df`` -- each triggered by an omnimarket merge from
 13:37Z-13:51Z, each at infra ``0edf5c914``, and each accepted hours later.
 The trigger resolves the infra dev head when it publishes, so every ref was
-right when it was sent. By the time each ran, the lane already vendored the
-omnimarket merge it was sent to deliver. ``98bb76df``, the last, failed
-post-deploy verification and left the runtime container in ``Created``.
+right when it was sent. The wait was upstream: the publish monitor forwards
+one command at a time and waits for each to finish, so a command reaches
+this agent's topic milliseconds before it is accepted, however long it waited
+to get there. ``98bb76df``, the last, failed post-deploy verification and left
+the runtime container in ``Created``.
 
 Nothing in the accept protocol could have prevented any of it. ``coalesce``
 folds a prefix of commands that arrived TOGETHER, so a stale command that
 arrives alone is invisible to it. ``ref_fence`` refuses a stale branch ALIAS
 and by design lets every 40-hex SHA through. The image already records what
-it was built from (``infra_vcs_ref`` and each sibling's ``vcs_ref`` in
+it was built from (``infra_vcs_ref`` and ``build_time`` in
 ``/app/build-provenance.json``), but the agent never read it.
 
-THE RULE: ANCESTRY AGAINST PROVENANCE, NEVER ORDERING
-------------------------------------------------------
-Every decision is git ancestry against the running build's provenance, never a
-timestamp or an offset.
+THE RULE: THE BUILD THAT IS RUNNING NOW
+---------------------------------------
+Every decision compares the command with the build the lane runs NOW, never
+with a build that once succeeded: a lane can be rolled back after a good build,
+and a command superseded against a build that no longer runs would leave the
+lane behind.
 
-1. **Supersede what is already running.** A CI-triggered command
-   (``requested_by`` ``gha/<repo>/...``) whose infra ref AND every named
-   sibling ref are ancestors of, or equal to, the running build's refs is
-   ``CONTAINED``: recorded ``superseded``, acknowledged with
-   ``superseded_by_running_build``, never built.
+1. **Supersede what the running build already carries**, CI commands only
+   (``requested_by`` ``gha/<repo>/...``), and only when the command's infra ref
+   is an ancestor of, or equal to, the running infra ref, and one of:
 
-   A command is only superseded on proof. A command triggered by a SIBLING
-   that names no ref for that sibling (``sibling_refs``) cannot be shown to be
-   delivered already, and it builds. Its new code is the sibling's, staged at
-   build time, and superseding it on the infra ref alone would strand every
-   sibling merge that lands while infra is quiet. A command from anyone other
-   than CI -- an operator, lab-health triage -- is deliberate, and it is never
-   superseded, because a same-ref rebuild is how a wedged lane is recovered.
+   * the command is an infra merge (``gha/omnibase_infra/...``). Its whole
+     payload is the infra ref, and the running build already contains it; or
+   * the running build is a whole-workspace build -- ``scope`` full or runtime,
+     no service subset, no pinned image -- that STARTED after the command was
+     requested. A workspace build stages every sibling from its dev branch,
+     and the sibling merge that produced the command landed before the command
+     was published, so that build already vendors it.
+
+   The command is recorded ``superseded``, acknowledged with
+   ``superseded_by_running_build``, and never built.
+
+   "Requested" is the command's signed ``requested_at``. Without one it is the
+   record's broker timestamp, which the forwarding hop sets just before this
+   agent reads it: never earlier than the running build's start, so it never
+   over-supersedes. The running build's start is the ``accepted_at`` of the job
+   whose accept-to-complete window contains the image's ``build_time``: exactly
+   the job that produced the running image. When no single job matches, the
+   start is unknown and the command builds.
+
+   A command from anyone but CI -- an operator, lab-health triage -- is
+   deliberate, and it is never superseded: a same-ref rebuild is how a wedged
+   lane is recovered.
 
 2. **Never build backwards.** A command that is not superseded builds at the
-   newer of its ref and the running ref. An infra ref that is a strict
-   ancestor of the running build is ``RAISED`` to the running ref. Siblings need
-   no raise: a workspace build stages each from its dev branch, which is never
-   behind what the lane vendors.
+   newer of its infra ref and the running ref: a strict ancestor is ``RAISED``
+   to the running ref.
 
 3. **Diverged is refused unless it is the way home.** An infra ref that is
    neither ancestor nor descendant of the running build is ``DIVERGENT`` and
-   refused with ``divergent_ref``, unless it is on the lane's tracking branch.
-   That exception is ``RETURNS_TO_TRACKING``: a lane left on an off-branch
-   build, such as a pre-PR proof at a PR head, must not refuse every dev command
-   until someone declares a rollback.
+   refused with ``divergent_ref``, unless it is on the lane's tracking branch
+   (``RETURNS_TO_TRACKING``): a lane left on an off-branch build, such as a
+   pre-PR proof at a PR head, must not refuse every dev command until someone
+   declares a rollback.
 
 4. **A declared rollback is the only way backwards.** A command carrying a
    signed ``ModelRollbackDeclaration`` is built exactly as asked, and
@@ -71,10 +86,10 @@ timestamp or an offset.
    records it. Job ``c009462c`` asked for ``origin/dev`` and its record kept only
    the alias, so which commit it built had to be recovered from an image tag.
 
-6. **Missing provenance fails open.** A running build that cannot be read, an
-   alias that cannot be resolved, or an ancestry the clone cannot answer is
-   ``UNPROVEN``, and the command builds as requested. A lane that is down has
-   no container to read, and a lane that is down is exactly the lane that must
+6. **Missing facts fail open.** A running build that cannot be read, an alias
+   that cannot be resolved, or an ancestry the clone cannot answer is
+   ``UNPROVEN``, and the command builds as requested. A lane that is down has no
+   container to read, and a lane that is down is exactly the lane that must
    accept a rebuild.
 """
 
@@ -85,7 +100,7 @@ import logging
 import re
 import subprocess  # fixed argv, no shell, trusted docker and git binaries
 from collections.abc import Callable
-from pathlib import Path
+from datetime import datetime
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict
@@ -99,10 +114,12 @@ from deploy_agent.coalesce import (
 )
 from deploy_agent.events import (
     INFRA_REPOSITORY,
+    BuildSource,
     EnumLineageVerdict,
     EnumRuntimeLane,
     ModelLineageDecision,
     ModelRebuildRequested,
+    Scope,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,17 +137,28 @@ PROVENANCE_READ_TIMEOUT_SECONDS: Final = 15
 #: ``gha/<source repository>/pr-<n>``.
 _CI_REQUESTER_RE: Final = re.compile(r"^gha/([a-z][a-z0-9_]*)/")
 
+#: The scopes whose build rebuilds every workspace image, and so re-stages every
+#: sibling. Every core-profile service is a third-party image, so ``runtime``
+#: with no service subset rebuilds what ``full`` does.
+_WORKSPACE_SCOPES: Final = frozenset({Scope.FULL.value, Scope.RUNTIME.value})
+
 
 class ModelRunningBuild(BaseModel):
-    """What the lane's runtime image says it was built from."""
+    """The build the lane runs now, and the job that produced it."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     infra_ref: str
-    #: Sibling repository -> the commit the build vendored. A sibling the image
-    #: recorded as dirty, or did not record, is absent: nothing can be proven
-    #: contained in a tree nobody can name.
-    sibling_refs: dict[str, str] = {}
+    #: ``build_time`` from the image's provenance, or ``None`` when absent.
+    build_time: datetime | None = None
+    #: When the job that produced this image was accepted, or ``None`` when that
+    #: job could not be identified. It is at or before the moment the build
+    #: staged its siblings.
+    started_at: datetime | None = None
+    #: Whether that job rebuilt the whole workspace: ``scope`` full or runtime,
+    #: no service subset, no pinned image, ``build_source`` workspace.
+    workspace_sourced: bool = False
+    producing_job: str | None = None
 
 
 #: Returns the lane's running build, or ``None`` when it cannot be read.
@@ -139,10 +167,6 @@ RunningBuildReader = Callable[[EnumRuntimeLane], ModelRunningBuild | None]
 #: Resolves a symbolic ref to a 40-hex sha in the deploy clone, or ``None``.
 RefResolver = Callable[[str], str | None]
 
-#: ``(repository, earlier, later)`` -> whether ``earlier`` is an ancestor of,
-#: or equal to, ``later`` in that sibling's clone; ``None`` when unanswerable.
-SiblingAncestryResolver = Callable[[str, str, str], bool | None]
-
 
 def ci_source_repository(requested_by: str) -> str | None:
     """The repository whose merge the CI trigger published this command for."""
@@ -150,16 +174,27 @@ def ci_source_repository(requested_by: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _containment(
+def is_workspace_rebuild(command: dict[str, Any]) -> bool:
+    """Whether a job's command rebuilt the whole workspace, siblings included."""
+    return (
+        command.get("scope") in _WORKSPACE_SCOPES
+        and not command.get("services")
+        and not command.get("image_ref")
+        and not command.get("image_digest")
+        and command.get("build_source") == BuildSource.WORKSPACE.value
+    )
+
+
+def _already_carried(
     cmd: ModelRebuildRequested,
     running: ModelRunningBuild,
-    contains_sibling: SiblingAncestryResolver,
+    published_at: datetime | None,
 ) -> tuple[bool, str]:
-    """Whether every sibling ref ``cmd`` names is in ``running``, and why not.
+    """Whether the running build already carries what ``cmd`` was sent to deliver.
 
-    Called only once the infra ref is known to be contained. Returns the
-    reason in the negative case, because the journal line for a command that
-    builds must say why it was not superseded.
+    Called only once the infra ref is known to be at or behind the running
+    build. Returns the reason in the negative case, because the journal line for
+    a command that builds must say why it was not superseded.
     """
     source = ci_source_repository(cmd.requested_by)
     if source is None:
@@ -167,23 +202,32 @@ def _containment(
             f"requested by {cmd.requested_by!r}, not by a CI trigger; a "
             "deliberate request is never superseded"
         )
-    if source != INFRA_REPOSITORY and source not in cmd.sibling_refs:
+    if source == INFRA_REPOSITORY:
+        return True, "an infra merge whose ref is already in the running build"
+    if running.started_at is None:
         return False, (
-            f"triggered by a {source} merge but names no {source} ref, so it "
-            "cannot be proven already delivered"
+            "the job that produced the running build could not be identified, "
+            f"so it cannot be shown to carry the {source} merge"
         )
-    for repo, sha in sorted(cmd.sibling_refs.items()):
-        running_sha = running.sibling_refs.get(repo)
-        if running_sha is None:
-            return False, f"the running build records no clean {repo} revision"
-        if sha == running_sha:
-            continue
-        if contains_sibling(repo, sha, running_sha) is not True:
-            return False, (
-                f"{repo} {sha} is not shown to be in the running build's "
-                f"{repo} {running_sha}"
-            )
-    return True, "every ref the command names is already in the running build"
+    if not running.workspace_sourced:
+        return False, (
+            f"the running build ({running.producing_job}) did not rebuild the "
+            f"whole workspace, so it cannot be shown to carry the {source} merge"
+        )
+    if published_at is None:
+        return False, "the command carries no publish time to compare with"
+    if running.started_at <= published_at:
+        return False, (
+            f"the running build started at {running.started_at.isoformat()}, "
+            f"before this command was requested at {published_at.isoformat()}, "
+            f"so it may not carry the {source} merge"
+        )
+    return True, (
+        f"the running workspace build ({running.producing_job}) started at "
+        f"{running.started_at.isoformat()}, after this command was requested at "
+        f"{published_at.isoformat()}, and staged {source} from a dev branch that "
+        "already held the merge"
+    )
 
 
 def decide_lineage(
@@ -191,14 +235,16 @@ def decide_lineage(
     *,
     read_running_build: Callable[[], ModelRunningBuild | None],
     contains: AncestryResolver,
-    contains_sibling: SiblingAncestryResolver,
     resolve_ref: RefResolver | None,
     tracking_ref: str | None,
+    published_at: datetime | None,
 ) -> ModelLineageDecision:
     """Classify ``cmd`` against the running build. Pure apart from its callables.
 
     ``read_running_build`` is called only for a command the comparison applies
     to, so a promotion or a declared rollback never costs a ``docker exec``.
+    ``published_at`` is the command's ``requested_at``, or the record's broker
+    timestamp when it has none.
     """
     requested = cmd.git_ref
 
@@ -307,8 +353,8 @@ def decide_lineage(
             )
 
     # The infra ref is at or behind the running build.
-    contained, why = _containment(cmd, running, contains_sibling)
-    if contained:
+    carried, why = _already_carried(cmd, running, published_at)
+    if carried:
         return decision(
             EnumLineageVerdict.CONTAINED,
             why,
@@ -335,18 +381,14 @@ def decide_lineage(
     )
 
 
-def _clean_sibling_refs(provenance: dict[str, Any]) -> dict[str, str]:
-    siblings = (provenance.get("per_repo_vcs_provenance") or {}).get("siblings")
-    if not isinstance(siblings, dict):
-        return {}
-    refs: dict[str, str] = {}
-    for repo, record in siblings.items():
-        if not isinstance(record, dict) or record.get("vcs_dirty") is not False:
-            continue
-        sha = record.get("vcs_ref")
-        if isinstance(sha, str) and SHA_RE.match(sha):
-            refs[str(repo)] = sha
-    return refs
+def _parse_build_time(raw: object) -> datetime | None:
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return parsed if parsed.utcoffset() is not None else None
 
 
 class DockerProvenanceReader:
@@ -354,7 +396,9 @@ class DockerProvenanceReader:
 
     Every failure is ``None``: a container that is absent, stopped, or carries
     a provenance file this cannot parse has no ref to compare against, and the
-    caller's contract is that an unread build lets the command run.
+    caller's contract is that an unread build lets the command run. The job
+    that produced the image is not known here; the consumer, which holds the
+    job store, fills that in.
     """
 
     def __init__(
@@ -364,17 +408,7 @@ class DockerProvenanceReader:
         run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     ) -> None:
         self._container_for_lane = container_for_lane
-        self._run = run or self._default_run
-
-    @staticmethod
-    def _default_run(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            argv,
-            timeout=timeout,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        self._run = run or GitAncestryResolver._default_run
 
     def __call__(self, lane: EnumRuntimeLane) -> ModelRunningBuild | None:
         try:
@@ -420,7 +454,7 @@ class DockerProvenanceReader:
             )
             return None
         return ModelRunningBuild(
-            infra_ref=ref, sibling_refs=_clean_sibling_refs(provenance)
+            infra_ref=ref, build_time=_parse_build_time(provenance.get("build_time"))
         )
 
 
@@ -484,36 +518,3 @@ class GitRefResolver:
             logger.info("lineage: %r does not name a commit in %s", ref, self.repo_dir)
             return None
         return sha
-
-
-class SiblingCloneAncestry:
-    """Answers sibling ancestry in the clone the workspace build stages from.
-
-    The build stages ``<OMNI_HOME>/<repository>``, so that clone is the one
-    whose history the vendored ``vcs_ref`` came from. One ``GitAncestryResolver``
-    per repository keeps each clone's fetch cooldown separate. With no
-    ``OMNI_HOME``, or a clone that is not there, every answer is ``None``, and
-    a command is then never superseded on a sibling it could not check.
-    """
-
-    def __init__(
-        self,
-        omni_home: str | None,
-        *,
-        resolver_for: Callable[[str], AncestryResolver] | None = None,
-    ) -> None:
-        self._omni_home = omni_home
-        self._resolver_for = resolver_for or GitAncestryResolver
-        self._resolvers: dict[str, AncestryResolver] = {}
-
-    def __call__(self, repo: str, earlier: str, later: str) -> bool | None:
-        if not self._omni_home:
-            return None
-        clone = Path(self._omni_home) / repo
-        if not (clone / ".git").exists():
-            logger.info("lineage: no %s clone at %s to compare in", repo, clone)
-            return None
-        resolver = self._resolvers.get(repo)
-        if resolver is None:
-            resolver = self._resolvers[repo] = self._resolver_for(str(clone))
-        return resolver(earlier, later)

@@ -425,6 +425,30 @@ class JobStore:
                 continue
         return None
 
+    def job_covering(self, moment: datetime) -> JobState | None:
+        """The one job that was running at ``moment``, or ``None``.
+
+        OMN-19270. The lineage fence passes the running image's ``build_time``
+        here, to find the job that produced that image: the one whose
+        accept-to-complete window contains the moment the image was built.
+        Jobs run one at a time, so a match is unique. Zero matches (an image
+        built outside this agent) or several (a record this scan cannot trust)
+        are ``None``, and the fence then treats the running build's origin as
+        unknown. A superseded record never ran, so it never matches.
+        """
+        matches: list[JobState] = []
+        for path in self.state_dir.glob("*.json"):
+            try:
+                job = JobState.model_validate_json(path.read_text())
+            except Exception:  # noqa: BLE001
+                continue
+            if job.status == "superseded" or job.accepted_at > moment:
+                continue
+            if job.completed_at is not None and job.completed_at < moment:
+                continue
+            matches.append(job)
+        return matches[0] if len(matches) == 1 else None
+
     def update_phase(
         self, correlation_id: UUID, phase: Phase, phase_status: PhaseStatus
     ) -> JobState:

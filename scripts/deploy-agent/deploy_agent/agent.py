@@ -70,11 +70,7 @@ from deploy_agent.lane_lock_client import (
     lane_lock,
 )
 from deploy_agent.lane_policy import load_allowed_lanes_from_env
-from deploy_agent.lineage_fence import (
-    DockerProvenanceReader,
-    GitRefResolver,
-    SiblingCloneAncestry,
-)
+from deploy_agent.lineage_fence import DockerProvenanceReader, GitRefResolver
 from deploy_agent.loaded_code import record_loaded_code_sha
 from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
@@ -411,14 +407,12 @@ class DeployAgent:
             ancestry_resolver=GitAncestryResolver(REPO_DIR),
             on_superseded=self._publish_superseded,
             on_rejected=self._publish_rejection_notice,
-            # OMN-19270. The lineage fence compares each command's refs with
-            # the provenance the lane's runtime image was built from. Infra
-            # ancestry asks the resolver above, so it and coalescing share one
-            # fetch cooldown; sibling ancestry asks the clones the workspace
-            # build stages from.
+            # OMN-19270. The lineage fence compares each command with the
+            # provenance the lane's runtime image was built from, and with the
+            # job that built it. Infra ancestry asks the resolver above, so it
+            # and coalescing share one fetch cooldown.
             running_build=DockerProvenanceReader(_runtime_container_for_lane),
             ref_resolver=GitRefResolver(REPO_DIR),
-            sibling_ancestry=SiblingCloneAncestry(os.environ.get("OMNI_HOME")),
             tracking_ref=load_tracking_remote_ref_from_env(),
         )
 
