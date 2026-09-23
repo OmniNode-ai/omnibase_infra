@@ -61,7 +61,7 @@ def _run_guarded_command(state_root: Path, omni_home: Path) -> click.ClickExcept
             verbose=False,
             output_mode="default",
             emit_socket=None,
-            omni_home=omni_home,
+            omnibase_path=omni_home,
             allow_omnimarket_drift=False,
         )
     return exc_info.value

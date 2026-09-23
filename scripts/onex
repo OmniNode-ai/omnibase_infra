@@ -148,13 +148,13 @@ INFRA_DIR="$(dirname "$SCRIPT_DIR")"
 # right for the checkout this script is part of.
 OMNI_HOME="${OMNI_HOME:-$(dirname "$INFRA_DIR")}"
 
-# Bind the workspace root for the CLI (OMN-19193). The CLI's --omni-home binds
+# Bind the workspace root for the CLI (OMN-19193). The CLI's --omnibase-path binds
 # $OMNIBASE_PATH, not $OMNI_HOME, and this wrapper never passed either on -- so
 # every run through the sanctioned entrypoint read as `off-registry`, could not
 # find the lane declaration, and could not find the workspace's tier-1 runtime
 # config. This is a bootstrap pointer (WHERE configuration lives), the one kind
 # of env value the OMN-17304 ruling admits; it names no transport. An explicit
-# $OMNIBASE_PATH, or an explicit --omni-home, still wins.
+# $OMNIBASE_PATH, or an explicit --omnibase-path, still wins.
 export OMNIBASE_PATH="${OMNIBASE_PATH:-$OMNI_HOME}"
 
 # The DISPATCH venv, never the canonical clone's own `.venv` (OMN-17819).
