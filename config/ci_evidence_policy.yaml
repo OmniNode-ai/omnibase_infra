@@ -213,3 +213,19 @@ evidence_artifacts:
       - nonrequired-check-report.json
     rationale: >-
       The per-repo record of which non-required checks were evaluated, which contexts counted as required, and which crossed the threshold. A silent alerter and a correct one look identical from a green run, so this record is how anyone tells them apart afterwards.
+  # --- the PR CI zombie detector's receipt (OMN-16494, OMN-19258) ---------
+  #
+  # Declared for the same reason as the report above. Before OMN-19258 the
+  # detector exited 0 whatever it could read: 68 of 2,904 retained reports
+  # recorded that neither target repo could be read, on runs that were green.
+  # The receipt's `scanned` map is the only record of what a clean run looked
+  # at, so its absence is fatal.
+  - id: pr-ci-zombie-detector-report
+    workflow: .github/workflows/pr-ci-zombie-detector.yml
+    job: detect
+    producer_step: "Run zombie detector"
+    artifact_name: pr-ci-zombie-detector-report
+    required_paths:
+      - zombie-detector-report.json
+    rationale: >-
+      The per-run record of which repos the zombie detector read (runs read and active pull-request runs per repo), what it would or did force-cancel, and every read or cancel error. A blind detector and a quiet one look identical from a green run without it.
