@@ -40,15 +40,17 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # the execute path is exercisable in tests without a real Docker deploy).
 DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-${REPO_ROOT}/scripts/deploy-runtime.sh}"
 
-# Siblings whose clones are checked out to <ref> and (optionally) lab-tagged.
-# Mirrors SIBLING_REPOS in stage_workspace.sh plus the infra build-context repo.
-LAB_REF_REPOS=(
-    "omnibase_infra"
-    "omnibase_core"
-    "omnibase_compat"
-    "onex_change_control"
-    "omnimarket"
-)
+# The repos --cut-tag tags: SIBLING_LAB_TAG_REPOS from sibling_clone_manifest.sh,
+# which is every clone the sibling-pin preflight reads (SIBLING_CLONE_MANIFEST,
+# five repos including the omnibase_infra build context and omnibase_spi) plus
+# onex_change_control (SIBLING_EXTRA_TRACKED_REPOS). It is NOT the set the build
+# checks out to <ref>: stage_workspace.sh clean-checks-out only the three
+# source-vendored siblings (SIBLING_VENDORED_REPOS). OMN-19072: this used to be
+# a literal list of its own that omitted omnibase_spi, under a comment that
+# called it a mirror of stage_workspace.sh.
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+LAB_REF_REPOS=("${SIBLING_LAB_TAG_REPOS[@]}")
 
 # --- defaults -------------------------------------------------------------
 REF="origin/dev"

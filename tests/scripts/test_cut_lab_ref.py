@@ -25,12 +25,31 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CUT_LAB_REF = REPO_ROOT / "scripts" / "runtime_build" / "cut-lab-ref.sh"
 
+MANIFEST = REPO_ROOT / "scripts" / "runtime_build" / "sibling_clone_manifest.sh"
+
+
+def _manifest_array(name: str) -> tuple[str, ...]:
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail; source "$1"; printf "%s\\n" "${' + name + '[@]}"',
+            "_",
+            str(MANIFEST),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return tuple(result.stdout.split())
+
+
+# OMN-19072: the repos a lab tag must cover are every clone the pin preflight
+# reads (the manifest) plus the declared tag-only extras. Resolved from the
+# manifest rather than spelled here, so this test cannot keep a list of its own.
 LAB_REF_REPOS = (
-    "omnibase_infra",
-    "omnibase_core",
-    "omnibase_compat",
-    "onex_change_control",
-    "omnimarket",
+    *_manifest_array("SIBLING_CLONE_MANIFEST"),
+    *_manifest_array("SIBLING_EXTRA_TRACKED_REPOS"),
 )
 
 
@@ -171,6 +190,12 @@ def test_execute_cuts_lab_tag_and_delegates(tmp_path: Path) -> None:
     # redeploy overwrites rather than tripping the version-directory guard.
     assert "--force" in result.stderr
 
+    # OMN-19072 AC-2: the tag set is the manifest's clones plus the change-control
+    # repo. Before the fix cut-lab-ref.sh kept its own list and left
+    # omnibase_spi, a repo the pin preflight reads, untagged.
+    assert "omnibase_spi" in LAB_REF_REPOS
+    assert "onex_change_control" in LAB_REF_REPOS
+    assert len(LAB_REF_REPOS) == 6
     # A lab tag lab/dev/<utc>-<shortsha> was cut in every sibling clone at its dev SHA.
     tag_re = re.compile(r"^lab/dev/\d{8}T\d{6}Z-[0-9a-f]{12}$")
     for repo in LAB_REF_REPOS:
