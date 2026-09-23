@@ -30,7 +30,7 @@ and already guards against a drifted omnimarket co-install, so resolving the
 packaged task-class contract the same way is the established seam, not a new
 dependency. The declaration is the contract's; the evaluation is the caller's.
 
-THE THREE RULES, each a contract field rather than an implementation detail:
+THE RULES, each a contract field rather than an implementation detail:
 
 * **Presence, never frequency.** A phrase occurs or it does not. Counting is
   what let the bulk of a document outvote its purpose.
