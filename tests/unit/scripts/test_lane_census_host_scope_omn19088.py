@@ -30,6 +30,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -419,3 +420,33 @@ def test_the_driver_scopes_to_the_host_it_runs_on(tmp_path: Path) -> None:
     plan = json.loads(proc.stdout.splitlines()[0])
     assert plan["host"] == "lab-105"
     assert plan["lanes_checked"] == ["dogfood"]
+
+
+# --- the planner run on its own, as the manifest's hand recipe runs it ----------
+
+
+def _run_planner(host: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["LANE_CENSUS_HOST"] = host
+    return subprocess.run(
+        [sys.executable, str(_PLAN_PATH)],
+        input=json.dumps({"lane": None, "containers": [], "networks": []}),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+
+
+def test_the_planner_resolves_the_host_from_the_environment() -> None:
+    proc = _run_planner(_HOST_105)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["host"] == "lab-105"
+
+
+def test_the_planner_exits_5_on_an_undeclared_host() -> None:
+    proc = _run_planner("docker-desktop")
+    assert proc.returncode == PLAN.EXIT_HOST_UNDECLARED == 5
+    assert "docker-desktop" in proc.stderr
+    assert proc.stdout == ""

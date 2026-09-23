@@ -95,6 +95,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import sys
 from pathlib import Path
 from typing import Any
@@ -581,9 +582,12 @@ def main() -> int:
     manifest_path = os.environ.get("LANE_MANIFEST")
     manifest = load_manifest(Path(manifest_path) if manifest_path else None)
     envelope = json.load(sys.stdin)
-    # OMN-19088: the driver names the host in the environment; an envelope that
-    # already carries one (a replayed fixture) keeps its own.
-    envelope.setdefault("host", os.environ.get("LANE_CENSUS_HOST", ""))
+    # OMN-19088: the same host resolution as the driver — LANE_CENSUS_HOST, else
+    # this machine's hostname. An envelope that already carries a host (a
+    # replayed fixture) keeps its own.
+    envelope.setdefault(
+        "host", os.environ.get("LANE_CENSUS_HOST") or socket.gethostname()
+    )
     try:
         plan = build_plan(envelope, manifest)
     except HostDeclarationError as exc:
