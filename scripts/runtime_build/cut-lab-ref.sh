@@ -127,8 +127,18 @@ fi
 # carries a pin manifest, runs the verifier first and refuses a root that is
 # unpinned, dirty or off its pins, naming the repository and both shas. Runs in
 # the dry-run plan too, so a plan never promises a build the execute would refuse.
+#
+# A proof root builds with --hotpatch only. A ref build makes stage_workspace.sh
+# fetch from each clone's origin and reset to the ref, and a staged clone's origin
+# is the moving canonical clone, so the image would come from whatever that clone
+# holds at build time rather than from the pins this check just approved.
 PROOF_ROOT_VERIFIER="${SCRIPT_DIR}/stage_pinned_proof_root.py"
 if [[ "${LANE}" == "dogfood" || -f "${OMNI_HOME}/proof-root-pins.json" ]]; then
+    if [[ "${HOTPATCH}" != true ]]; then
+        err "a staged proof root builds with --hotpatch only: a --ref build re-fetches every"
+        err "  clone from its origin, the moving canonical clone, and discards the pins."
+        exit 1
+    fi
     log "proof root      : verifying ${OMNI_HOME} against its pin manifest"
     if ! "${PROOF_ROOT_PYTHON:-python3}" "${PROOF_ROOT_VERIFIER}" verify --root "${OMNI_HOME}"; then
         err "the staged proof root under ${OMNI_HOME} is unpinned, dirty or off its pins; not building."

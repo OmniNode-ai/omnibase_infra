@@ -40,7 +40,9 @@ WHAT THIS SCRIPT DOES
 
 ``cut-lab-ref.sh`` runs ``verify`` before any dogfood-lane build, and before any
 build whose ``OMNI_HOME`` carries a pin manifest, so the refusal is on the build
-path and not only in the runbook.
+path and not only in the runbook. It also refuses a ``--ref`` build of such a
+root: that path re-fetches every staged clone from its origin, which is the
+moving canonical clone, and resets it to the ref, discarding the pins.
 
 The repository set the build needs is read from the two scripts that already own
 it, never restated here: ``SIBLING_CLONE_MANIFEST`` in

@@ -137,7 +137,7 @@ def test_dry_run_plan_dogfood_lane_is_isolated(tmp_path: Path) -> None:
         env=scrub_git_location_env(os.environ),
     )
     assert staged.returncode == 0, staged.stderr
-    result = _run(proof_root, "--lane", "dogfood")
+    result = _run(proof_root, "--lane", "dogfood", "--hotpatch")
     assert result.returncode == 0, result.stderr
     assert "OMNIBASE_INFRA_COMPOSE_PROJECT=omnibase-infra-dogfood" in result.stderr
     assert "--profile dogfood" in result.stderr

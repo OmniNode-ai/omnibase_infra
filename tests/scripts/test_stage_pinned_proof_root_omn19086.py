@@ -437,3 +437,16 @@ def test_cut_lab_ref_verifies_any_lane_whose_root_carries_a_manifest(
 
     assert result.returncode == 1
     assert "REFUSE omnibase_infra: working tree not clean" in result.stderr
+
+
+def test_cut_lab_ref_refuses_a_ref_build_from_a_proof_root(tmp_path: Path) -> None:
+    """A ref build fetches from the moving canonical clone and would discard the pins."""
+    _, canonical = _make_upstream_and_canonical(tmp_path)
+    root = tmp_path / "proof-root"
+    _stage(root, canonical)
+
+    for lane in ("dogfood", "dev"):
+        result = _run_cut_lab_ref(root, "--lane", lane, "--ref", "origin/dev")
+        assert result.returncode == 1, (lane, result.stderr)
+        assert "builds with --hotpatch only" in result.stderr
+        assert "deploy command" not in result.stderr
