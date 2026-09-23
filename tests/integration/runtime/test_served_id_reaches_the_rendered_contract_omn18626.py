@@ -6,10 +6,12 @@ The unit tests beside this one each check one link of the chain. This checks
 that the chain joins up, end to end, on the artifact routing actually consumes:
 
     recorded /v1/models readback
-      -> _AUTHORIZED_BINDINGS
-        -> the committed lane overlay
-          -> the rendered contract's ``model_name``
-            -> the string POSTed as ``model``
+      -> the committed lane overlay
+        -> the rendered contract's ``model_name``
+          -> the string POSTed as ``model``
+
+(OMN-17099 removed the hardcoded authorization table that used to sit between
+the readback and the overlay; the overlay is now the only binding.)
 
 Why that end-to-end assertion is the one worth having. On 2026-09-17 every
 link in this chain was internally consistent and the whole chain was wrong: the
@@ -21,7 +23,7 @@ exist."`` on its local rung, and a climb to a metered cloud provider.
 
 The only site in this repository with an EXTERNAL referent is
 ``tests/fixtures/bifrost_served_models_probe.json`` -- a transcript of what the
-endpoint answered. So this file starts there, not at the table.
+endpoint answered. So this file starts there, not at the overlay.
 
 It also pins the cross-repo refusal that makes this a two-repo change. The
 renderer rejects a base contract whose ``model_name`` disagrees with the
@@ -42,9 +44,6 @@ import pytest
 import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
-from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
-    _AUTHORIZED_BINDINGS,
-)
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
@@ -77,7 +76,7 @@ def _recorded_served_ids(models_url: str) -> list[str]:
             return list(probe["served_model_ids"])
     raise AssertionError(
         f"{_PROBE_FIXTURE.name} carries no readback for {models_url!r}. "
-        "Every authorized endpoint must have one -- an unprobed binding is a "
+        "Every bound lab endpoint must have one -- an unprobed binding is a "
         "value with no external referent, which is how this drifts."
     )
 
@@ -102,10 +101,15 @@ def _write_base_contract(path: Path, *, model_name_for: dict[str, str]) -> None:
     )
 
 
-def _authorized_model_names() -> dict[str, str]:
+def _overlay_model_names() -> dict[str, str]:
+    """The served id the committed dev overlay binds, per backend."""
+    overlay = yaml.safe_load(
+        (_OVERLAY_DIR / "dev.bifrost.yaml").read_text(encoding="utf-8")
+    )
     return {
-        backend_id: _AUTHORIZED_BINDINGS[backend_id].served_model_id
-        for backend_id in _ENDPOINT_URL_ENV
+        backend["backend_id"]: backend["served_model_id"]
+        for backend in overlay["backends"]
+        if backend["backend_id"] in _ENDPOINT_URL_ENV
     }
 
 
@@ -113,16 +117,16 @@ def _authorized_model_names() -> dict[str, str]:
 def test_the_rendered_wire_model_is_an_id_the_endpoint_answered_with(
     overlay_name: str, tmp_path: Path
 ) -> None:
-    """End to end: recorded probe -> table -> overlay -> rendered model_name.
+    """End to end: recorded probe -> overlay -> rendered model_name.
 
-    Not "the overlay agrees with the table" -- that was true on 2026-09-17 while
-    both were wrong. This asserts the value the runtime will POST is one the
+    Not "the overlay agrees with the base contract" -- that kind of internal
+    agreement was true on 2026-09-17 while every copy was wrong. This asserts the value the runtime will POST is one the
     endpoint said it serves.
     """
     served = _recorded_served_ids(_LOCAL_201_MODELS_URL)
     source = tmp_path / "base.yaml"
     target = tmp_path / "rendered.yaml"
-    _write_base_contract(source, model_name_for=_authorized_model_names())
+    _write_base_contract(source, model_name_for=_overlay_model_names())
 
     rendered = render_bifrost_delegation_contract(
         source_path=source,
@@ -142,7 +146,7 @@ def test_the_rendered_wire_model_is_an_id_the_endpoint_answered_with(
             f"{_LOCAL_201_MODELS_URL} does not list ({served}). vLLM refuses an "
             f"unknown model by name, so this renders a rung that 404s on its "
             f"first call. Re-probe the endpoint and update the probe fixture, "
-            f"the binding table and every lane overlay in ONE commit."
+            f"and every lane overlay in ONE commit."
         )
 
 
@@ -156,7 +160,7 @@ def test_a_base_contract_naming_a_different_model_is_refused(tmp_path: Path) -> 
     it is asserted here BEHAVIOURALLY -- drive the real renderer with a real
     committed overlay and a base that names the retired id.
     """
-    stale = dict(_authorized_model_names())
+    stale = dict(_overlay_model_names())
     stale["local-coder"] = "Qwen3.6-35B-A3B"
 
     source = tmp_path / "base.yaml"
@@ -173,7 +177,7 @@ def test_a_base_contract_naming_a_different_model_is_refused(tmp_path: Path) -> 
     message = str(excinfo.value)
     assert "local-coder" in message
     assert "Qwen3.6-35B-A3B" in message
-    assert _AUTHORIZED_BINDINGS["local-coder"].served_model_id in message
+    assert _overlay_model_names()["local-coder"] in message
     assert not (tmp_path / "rendered.yaml").exists(), (
         "a refused render must leave no artifact behind -- a partial write is a "
         "contract the runtime would read"
@@ -196,7 +200,7 @@ def test_the_null_model_name_escape_is_available_and_is_not_how_this_is_fixed(
     repoint applied to one repo alone goes silent again. If you are reading this
     because you are tempted, the answer is to land both PRs together.
     """
-    nulled = dict(_authorized_model_names())
+    nulled = dict(_overlay_model_names())
     nulled["local-coder"] = None  # type: ignore[assignment]
 
     source = tmp_path / "base.yaml"
@@ -215,7 +219,4 @@ def test_the_null_model_name_escape_is_available_and_is_not_how_this_is_fixed(
     by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
     # The overlay still supplies the value, which is exactly why the escape is
     # dangerous: the artifact looks correct while the cross-check is gone.
-    assert (
-        by_id["local-coder"]["model_name"]
-        == _AUTHORIZED_BINDINGS["local-coder"].served_model_id
-    )
+    assert by_id["local-coder"]["model_name"] == _overlay_model_names()["local-coder"]

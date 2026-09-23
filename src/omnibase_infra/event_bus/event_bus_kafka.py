@@ -248,6 +248,7 @@ from omnibase_infra.event_bus.kafka_auth import (
     OAuthBearerTokenProvider,
     build_aiokafka_auth_kwargs,
 )
+from omnibase_infra.event_bus.kafka_connect_retry import connect_with_bounded_retry
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     resolve_lane_client_transport,
 )
@@ -264,6 +265,9 @@ from omnibase_infra.event_bus.models import (
     ModelPublishReceipt,
 )
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy import (
+    ModelKafkaConnectRetryPolicy,
+)
 from omnibase_infra.event_bus.topic_constants import is_dlq_topic
 from omnibase_infra.event_bus.topic_violation_alerter import TopicViolationAlerter
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
@@ -556,6 +560,11 @@ class EventBusKafka(
 
         # Producer lock for independent producer access (avoids deadlock with main lock)
         self._producer_lock = asyncio.Lock()
+        # OMN-18925: how many connect attempts the last successful start()
+        # needed. A broker that answers first time and one that answers on
+        # the third are different facts, and the second is the early
+        # warning the 2026-09-21 stall gave nobody.
+        self._connect_attempts = 0
 
         # Initialize DLQ mixin (metrics tracking, callback hooks)
         self._init_dlq()
@@ -778,8 +787,20 @@ class EventBusKafka(
         infrastructure — connection failures raise and must be treated as
         fatal by the caller.
 
+        OMN-18925: until this change the docstring above was false in its
+        most load-bearing word. The retry this promised did not exist on the
+        connect path — the class's retry loop wraps PUBLISH only — so a
+        broker stall longer than ``timeout_seconds`` failed the whole start
+        on the first try. The fields, the docstring and the publish-side loop
+        all agreed with each other and not with the code, which is precisely
+        why it survived so long. The connect is now retried under the shared
+        :class:`ModelKafkaConnectRetryPolicy`, and the circuit breaker still
+        records exactly ONE failure per exhausted ``start()`` rather than one
+        per attempt: a threshold of 5 must keep meaning five failed starts,
+        not two.
+
         Raises:
-            InfraTimeoutError: If connection times out
+            InfraTimeoutError: If every connect attempt times out
             InfraConnectionError: If connection fails after retries
         """
         if self._started:
@@ -799,8 +820,16 @@ class EventBusKafka(
                     operation="start", correlation_id=correlation_id
                 )
 
-            try:
-                # Apply producer configuration from config model
+            connect_policy = ModelKafkaConnectRetryPolicy.from_bus_config(
+                self._config,
+                attempt_timeout_seconds=float(self._timeout_seconds),
+            )
+
+            async def _connect() -> None:
+                # Apply producer configuration from config model. Rebuilt on
+                # every attempt: a producer whose start() failed is not
+                # documented as restartable, so reusing it would test a
+                # different path from the one a fresh connect takes.
                 self._producer = AIOKafkaProducer(
                     bootstrap_servers=self._bootstrap_servers,
                     acks=self._config.acks_aiokafka,
@@ -810,10 +839,20 @@ class EventBusKafka(
                     **self._build_client_version_kwargs(AIOKafkaProducer),
                     **self._build_auth_kwargs(),
                 )
+                await self._producer.start()
 
-                await asyncio.wait_for(
-                    self._producer.start(),
-                    timeout=self._timeout_seconds,
+            async def _cleanup_attempt() -> None:
+                async with self._producer_lock:
+                    if self._producer is not None:
+                        current, self._producer = self._producer, None
+                        await current.stop()
+
+            try:
+                self._connect_attempts = await connect_with_bounded_retry(
+                    policy=connect_policy,
+                    connect=_connect,
+                    cleanup=_cleanup_attempt,
+                    target=self._sanitize_bootstrap_servers(self._bootstrap_servers),
                 )
 
                 self._started = True

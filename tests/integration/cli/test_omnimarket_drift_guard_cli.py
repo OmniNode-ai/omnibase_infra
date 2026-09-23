@@ -45,6 +45,6 @@ def test_node_cli_keeps_drift_refusal_when_path_resolution_fails(
                 verbose=False,
                 output_mode="default",
                 emit_socket=None,
-                omni_home=tmp_path,
+                omnibase_path=tmp_path,
                 allow_omnimarket_drift=False,
             )

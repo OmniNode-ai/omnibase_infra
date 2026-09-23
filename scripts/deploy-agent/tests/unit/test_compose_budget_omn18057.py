@@ -82,29 +82,66 @@ class TestComposeDuration:
 
 
 class TestDerivationAgainstTheLiveComposeModel:
-    def test_ceiling_comes_from_the_gating_runtime_start_period(self) -> None:
+    """AMENDED 2026-09-21 (OMN-18843). The premise this class measured is gone.
+
+    Until today the runtime compose-up could not finish before
+    ``omninode-runtime`` reported healthy, because ``runtime-effects``,
+    ``runtime-worker`` and ``omninode-contract-resolver`` each declared
+    ``condition: service_healthy`` on it. The ceiling therefore had to cover
+    that service's 1800 s ``start_period`` plus its unhealthy-detection tail,
+    and these tests pinned exactly that.
+
+    OMN-18843 removed those three edges, because the wait they caused was the
+    defect: compose held all three consumers in ``State=created`` for the whole
+    healthcheck window and stranded the delegate-skill consumer group for
+    minutes on every redeploy. They are ``service_started`` now, which still
+    orders the pair and still inherits the main runtime's own preconditions
+    transitively.
+
+    **The derivation is unchanged and is not weakened.** No runtime-scope
+    service is the target of a ``service_healthy`` dependency any more, so
+    there is nothing for the ceiling to cover and it correctly falls to its
+    floor. The rule that produced 2100 s is still live and still general:
+    ``TestGatingRule`` below proves it with a positive and a negative control,
+    so the day a health gate returns to this scope the ceiling rises with it.
+    Lowering the ceiling is the POINT of the change rather than a side effect
+    of it -- a 2100 s bound existed only to accommodate a 1950 s stall that no
+    longer happens.
+    """
+
+    def test_no_runtime_scope_service_is_gated_on_health_any_more(self) -> None:
+        """The premise check, asserted rather than left implicit.
+
+        This is what makes falling to the floor correct instead of merely
+        observed. If an edge comes back, this fails first and names it, which
+        is a better failure than a ceiling quietly tracking it.
+        """
         budget = _derive(_LIVE_COMPOSE_FILES, SCOPE_SERVICES[Scope.RUNTIME])
-        assert budget.source_service == "omninode-runtime"
-        assert budget.source_start_period_seconds == 1800
-        assert budget.timeout_seconds == 1800 + RUNTIME_COMPOSE_UP_MARGIN_SECONDS
+        assert budget.gating_services == (), (
+            "A runtime-scope service is gated on another service's health "
+            "again. That is the OMN-18843 stall shape: compose holds the "
+            f"dependent in State=created for the whole window. Gated: "
+            f"{budget.gating_services}"
+        )
+        assert budget.source_service is None
+        assert budget.source_start_period_seconds == 0
+
+    def test_ceiling_is_the_floor_when_nothing_gates_on_health(self) -> None:
+        budget = _derive(_LIVE_COMPOSE_FILES, SCOPE_SERVICES[Scope.RUNTIME])
+        assert budget.timeout_seconds == RUNTIME_COMPOSE_UP_FLOOR_SECONDS
 
     def test_ceiling_exceeds_the_measured_minimum_viable_budget(self) -> None:
         """MEASURED 2026-09-08 (ledger :5076): 336s was the minimum that works.
 
-        The old 300s ceiling sat below it. Any derived ceiling must clear it.
+        The old 300s ceiling sat below it. Any derived ceiling must clear it,
+        and this is the assertion that keeps the floor honest now that the
+        floor is what governs. It is a stronger bound than it looks: 336 s was
+        measured WITH the health wait in the command, and OMN-18843 removed
+        that wait -- the same compose call returned in 76 s before the change
+        and 7 s after it, measured on the dogfood surface.
         """
         budget = _derive(_LIVE_COMPOSE_FILES, SCOPE_SERVICES[Scope.RUNTIME])
         assert budget.timeout_seconds > 336
-
-    def test_ceiling_covers_the_unhealthy_detection_tail(self) -> None:
-        """compose stops waiting on healthy OR unhealthy; unhealthy is later.
-
-        The compose file states the tail itself: start_period 1800s + interval
-        30s * retries 5 = 1950s. A ceiling below that kills the command while
-        compose is still legitimately waiting.
-        """
-        budget = _derive(_LIVE_COMPOSE_FILES, SCOPE_SERVICES[Scope.RUNTIME])
-        assert budget.timeout_seconds >= 1800 + 30 * 5
 
 
 class TestGatingRule:

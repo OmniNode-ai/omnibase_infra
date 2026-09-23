@@ -80,6 +80,11 @@ class ProjectionApplyCounters:
     def __init__(self, *, maxlen: int = RETAINED_APPLY_WINDOW_COUNT) -> None:
         self._lock = threading.Lock()
         self._registered: set[tuple[str, str]] = set()
+        # OMN-19081. The grain the contract DECLARES for each projection, as
+        # resolved at wiring time. A projection absent from this map, or
+        # mapped to None, is UNKNOWN: not exempt, and named as unresolved so a
+        # reader can tell "declares mutable" from "could not be resolved".
+        self._key_grain: dict[str, str | None] = {}
         self._consumed: dict[tuple[str, str], int] = {}
         self._upserted: dict[tuple[str, str], int] = {}
         self._refused: dict[tuple[str, str], int] = {}
@@ -91,12 +96,55 @@ class ProjectionApplyCounters:
 
     # ---------------------------------------------------------------- register
 
-    def register(self, projection: str, topic: str) -> None:
-        """Declare a projection dispatch so it emits a row every window."""
+    def register(
+        self, projection: str, topic: str, *, key_grain: str | None = None
+    ) -> None:
+        """Declare a projection dispatch so it emits a row every window.
+
+        OMN-19081. ``key_grain`` is the grain the projection's own contract
+        declares, resolved at wiring time and passed in rather than looked up
+        here, so this module reads no files and imports no contract.
+
+        ``None`` means UNKNOWN and is recorded as such. It is deliberately not
+        collapsed into "mutable": both are graded, but only one of them is a
+        statement the contract made, and the remedy for the other is a
+        contract edit.
+        """
         if not projection or not topic:
             return
         with self._lock:
             self._registered.add((projection, topic))
+            # First declaration wins per projection, except that a real grain
+            # upgrades a previously unknown one. A projection wired on several
+            # topics registers once per topic with the same contract answer.
+            if key_grain is not None or projection not in self._key_grain:
+                if self._key_grain.get(projection) is None:
+                    self._key_grain[projection] = key_grain
+
+    def immutable_grain_projections(self) -> tuple[str, ...]:
+        """Projections whose contract declares an immutable key grain.
+
+        The exemption set for ``projection_delta_dropped``, resolved from the
+        declaration rather than from a literal list in this repository.
+        """
+        with self._lock:
+            return tuple(
+                sorted(p for p, g in self._key_grain.items() if g == "immutable")
+            )
+
+    def grain_unresolved_projections(self) -> tuple[str, ...]:
+        """Registered projections whose declared grain could not be resolved.
+
+        Graded like a mutable grain, because silently exempting one would hide
+        a real accumulation behind a missing field, and named separately
+        because a reader who cannot tell the two apart cannot tell which
+        remedy applies.
+        """
+        with self._lock:
+            unresolved = {p for p, _ in self._registered}
+            return tuple(
+                sorted(p for p in unresolved if self._key_grain.get(p) is None)
+            )
 
     def registered_projections(self) -> tuple[str, ...]:
         """Every projection wired for dispatch in this process, sorted.

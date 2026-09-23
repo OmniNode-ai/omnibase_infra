@@ -44,6 +44,7 @@ Integration with Handlers:
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib
 import json
 import logging
@@ -181,6 +182,9 @@ from omnibase_infra.utils.util_runtime_packages import get_active_runtime_packag
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
+    from omnibase_core.models.contracts.subcontracts import (
+        ModelEventBusSubcontract,
+    )
     from omnibase_core.models.core.model_deployment_topology import (
         ModelDeploymentTopology,
     )
@@ -300,6 +304,51 @@ def _normalize_prefetch_policy(value: str) -> PrefetchPolicy:
             f"Invalid prefetch_policy {value!r}; expected one of: {allowed}"
         )
     return cast("PrefetchPolicy", policy)
+
+
+@functools.lru_cache(maxsize=1)
+def _command_topic_token() -> str:
+    """Return the taxonomy's token for command topics (today: ``cmd``).
+
+    Resolved from ``omnibase_core``'s canonical topic taxonomy rather than
+    written out here, so a rename of the token moves this with it instead of
+    leaving a stale literal behind (OMN-18843).
+    """
+    from omnibase_core.constants.constants_topic_taxonomy import (
+        get_topic_type_to_token,
+    )
+    from omnibase_core.enums import EnumTopicType
+
+    return get_topic_type_to_token()[EnumTopicType.COMMANDS]
+
+
+def _is_command_topic(topic: str) -> bool:
+    """True when ``topic`` is an ONEX COMMAND topic.
+
+    The ONEX grammar is ``onex.{kind}.{producer}.{name}.v{n}``, optionally
+    carried behind a transport-applied ``KAFKA_TOPIC_NAMESPACE`` prefix (see
+    ``omnibase_infra.topics.topic_namespace``). So the kind is read as the
+    segment that FOLLOWS the ``onex`` root rather than by matching a fixed
+    leading string, which keeps a namespaced topic classified correctly.
+
+    Used only to order subscription binds at boot (OMN-18843): command topics
+    have a live client blocked on them and a late bind reads to that client as
+    "no deployed orchestrator", while event topics have durable offsets and a
+    late bind costs latency only. Misclassifying a topic therefore changes bind
+    ORDER and never correctness.
+
+    Args:
+        topic: A resolved topic name.
+
+    Returns:
+        ``True`` if the topic's kind segment is the command token.
+    """
+    segments = topic.split(".")
+    try:
+        root = segments.index("onex")
+    except ValueError:
+        return False
+    return len(segments) > root + 1 and segments[root + 1] == _command_topic_token()
 
 
 def _requires_raw_event_projection_wiring(event_bus_section: object) -> bool:
@@ -6210,8 +6259,26 @@ class RuntimeHostProcess:
             topic_deny_patterns=topic_deny_patterns,
         )
 
-        # Wire subscriptions for each handler with a contract
-        wired_count = 0
+        # Wire subscriptions for each handler with a contract.
+        #
+        # OMN-18843: this is a COLLECT pass, not the wiring pass. Every
+        # subscription below costs a full Kafka consumer-group join, and the
+        # joins are serial: measured inside omninode-runtime-effects on the
+        # .201 dev lane 2026-09-21, 228 groups joined over 219 s at ~3.5 s
+        # each. In plain descriptor order the delegate-skill COMMAND topic
+        # landed 61 s after container start, and for those 61 s `onex delegate`
+        # refused pre-publish because its group was Empty -- a client was
+        # waiting on a surface that existed but had not bound yet.
+        #
+        # So the two kinds are wired in two passes, command topics first. This
+        # is an asymmetry between the kinds, not a preference between handlers:
+        # a command topic is a REQUEST surface with a live client blocked on it,
+        # where a late bind is a refusal, while an event topic is a fan-out with
+        # durable offsets, where a late bind costs latency and loses nothing.
+        # Ordering within each pass is unchanged (dict order is insertion
+        # order), so this reorders the two groups and nothing inside them.
+        _command_first: list[tuple[str, ModelEventBusSubcontract]] = []
+        _remaining: list[tuple[str, ModelEventBusSubcontract]] = []
         for handler_type, descriptor in self._handler_descriptors.items():
             contract_path_str = descriptor.contract_path
             if not contract_path_str:
@@ -6255,16 +6322,25 @@ class RuntimeHostProcess:
             # Load event_bus subcontract from contract YAML
             subcontract = load_event_bus_subcontract(contract_path, logger)
             if subcontract and subcontract.subscribe_topics:
-                await self._event_bus_wiring.wire_subscriptions(
-                    subcontract=subcontract,
-                    node_name=descriptor.name or handler_type,
-                )
-                wired_count += 1
-                logger.info(
-                    "Wired subscription(s) for handler '%s': topics=%s",
-                    descriptor.name or handler_type,
-                    subcontract.subscribe_topics,
-                )
+                _entry = (descriptor.name or handler_type, subcontract)
+                if any(_is_command_topic(_t) for _t in subcontract.subscribe_topics):
+                    _command_first.append(_entry)
+                else:
+                    _remaining.append(_entry)
+
+        # OMN-18843: the wiring pass. Command-topic handlers first.
+        wired_count = 0
+        for _node_name, _subcontract in (*_command_first, *_remaining):
+            await self._event_bus_wiring.wire_subscriptions(
+                subcontract=_subcontract,
+                node_name=_node_name,
+            )
+            wired_count += 1
+            logger.info(
+                "Wired subscription(s) for handler '%s': topics=%s",
+                _node_name,
+                _subcontract.subscribe_topics,
+            )
 
         if wired_count > 0:
             logger.info(

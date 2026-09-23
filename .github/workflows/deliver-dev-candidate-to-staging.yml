@@ -1096,6 +1096,45 @@ jobs:
             --lane compose-dev \
             | tee /tmp/lab-pass-gate-sibling.txt
 
+      # OMN-18866, operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending
+      # the 16:10:08Z every-check-blocks ruling): C15, this repository's chain
+      # canary, is bound to staging delivery NOW, red or green. It runs on EVERY
+      # delivery -- push, sibling-triggered and manual -- because the canary
+      # exercises the chain that this repository and the vendored omnimarket
+      # compose, and a delivery on any path carries both.
+      #
+      # WHY DELIVERY AND NOT MERGES: the canary probes the DEPLOYED .201 dev
+      # lane over host.docker.internal. A PR head cannot be deployed there
+      # before it merges, so a merge block would stop the fix itself. Merges
+      # stay open; the fix merges, the dev lane rebuilds, the next scheduled
+      # canary (or a re-run of one, which is a fresh measurement) goes green,
+      # and delivery resumes.
+      #
+      # WHY NOT A CHECK ON THE compose-dev RECEIPT: that is the OMN-18872 revert
+      # shape (PROBES_NOT_YET_WIRED in lab_pass_receipt.py), it would also stop
+      # release-cut, and on the push path it would not block at all because the
+      # own-sha gate above is any-of across lanes.
+      #
+      # STATE-KEYED: the newest completed SCHEDULED run on dev must be success
+      # and at most 3 hours old (a 2-hour cadence plus runner slack). A red,
+      # cancelled, timed-out, absent, stale or unreadable newest run refuses,
+      # naming the run. `--event schedule` admits re-runs of scheduled runs
+      # (same event, default inputs) and not manual dispatches, whose inputs
+      # can point the probe somewhere other than the lane. No `if:`, no force.
+      - name: Require a fresh green chain canary (C15, OMN-18866)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic \
+            python3 scripts/ci/lab_pass_receipt.py workflow-verdict \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow chain-canary.yml \
+            --branch dev \
+            --max-age-hours 3 \
+            --event schedule \
+            | tee /tmp/lab-pass-gate-chain-canary.txt
+
       - name: Summarise
         if: always()
         run: |
@@ -1114,6 +1153,13 @@ jobs:
                 || echo "(the sibling gate produced no output)"
               echo '```'
             fi
+            echo ""
+            echo "### Chain canary verdict (C15, OMN-18866)"
+            echo ""
+            echo '```'
+            cat /tmp/lab-pass-gate-chain-canary.txt 2>/dev/null \
+              || echo "(the chain canary verdict produced no output)"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
   dispatch-to-staging:

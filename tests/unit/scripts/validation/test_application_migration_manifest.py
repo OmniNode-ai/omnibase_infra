@@ -796,7 +796,20 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # which OMN-18693 restores with the exact content checksum recorded by
     # the lane. This restores a missing source declaration; it does not
     # alter any historical migration bytes or ledger row.
-    assert len(result.declarations) == 209
+    #
+    # 209 -> 211 for OMN-18903 (decision 2 of epic OMN-18850), which vendors
+    # TWO node-owned migrations in the same pair shape as every pair above:
+    # node_projection_ci_attempt_outcome/0000_create_ci_attempt_outcome.sql,
+    # the read model holding one row per (repository, pull request, head
+    # commit, check, run attempt) with its cause code, and
+    # 0001_grant_omninode_runtime_ci_attempt_outcome.sql, which ISSUES the
+    # grants the topology only declares. Two declarations rather than one for
+    # the same reason as every pair above: the create runs as the migration
+    # role and the grant names the runtime role.
+    #
+    # Vendored into omnibase_infra FIRST per the node-migration
+    # vendor-parity ordering, ahead of omnimarket#2730.
+    assert len(result.declarations) == 211
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

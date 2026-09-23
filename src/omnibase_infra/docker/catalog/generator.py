@@ -102,14 +102,21 @@ def _render_optional_directory_bind_mount(
 
 
 def _runtime_image_build() -> dict[str, object]:
-    """Return the canonical build stanza for the shared runtime image."""
+    """Return the canonical build stanza for the shared runtime image.
+
+    ``OMNI_HOME`` is deliberately absent (OMN-16852). It is an internal build
+    input that only a ``BUILD_SOURCE=workspace`` build reads, and every
+    sanctioned workspace build supplies it as ``--build-arg`` after refusing an
+    unset value. Rendering ``${OMNI_HOME:-}`` here only handed the build a
+    silent empty default; without it, the Dockerfile's workspace guard fails
+    fast when the value is missing.
+    """
     return {
         "context": "..",
         "dockerfile": "docker/Dockerfile.runtime",
         "args": {
             "BUILD_SOURCE": "${BUILD_SOURCE:-release}",
             "EXPECTED_BUILD_SOURCE": "${EXPECTED_BUILD_SOURCE:-release}",
-            "OMNI_HOME": "${OMNI_HOME:-}",
             "RUNTIME_VERSION": "${RUNTIME_VERSION:-0.1.0}",
             "BUILD_DATE": "${BUILD_DATE:-}",
             "VCS_REF": "${VCS_REF:-}",
