@@ -197,3 +197,17 @@ def test_a_malformed_placement_is_refused(placement: dict[str, object]) -> None:
         ModelBifrostLaneBackendBinding.model_validate(
             _added_binding(placement=placement)
         )
+
+
+@pytest.mark.unit
+def test_the_render_refuses_an_oversized_placement_with_a_typed_error(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ProtocolConfigurationError, match="local-second-host"):
+        _render(
+            tmp_path,
+            [
+                _base_binding(),
+                _added_binding(placement={**_PLACEMENT, "max_context_tokens": 65_536}),
+            ],
+        )
