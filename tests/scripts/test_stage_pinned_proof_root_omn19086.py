@@ -139,6 +139,20 @@ def _cli(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_the_script_parses_as_python_3_9() -> None:
+    """The .105 surface host runs this under its system Python 3.9.
+
+    The first lab run there died on ``from datetime import UTC`` (3.11+), which a
+    lint auto-fix had introduced. This pins the syntax floor; the runtime floor is
+    the stdlib-only, no-3.10-name rule in the module docstring.
+    """
+    import ast
+
+    source = SCRIPT.read_text(encoding="utf-8")
+    ast.parse(source, feature_version=(3, 9))
+    assert "from datetime import" not in source
+
+
 def test_required_set_is_read_from_the_owning_scripts() -> None:
     # spi is the repo that goes missing (OMN-15137) and the change-control repo is
     # the one only the hot-patch entrypoint names; both must be required.

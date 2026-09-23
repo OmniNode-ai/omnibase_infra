@@ -63,8 +63,8 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -281,7 +281,9 @@ def stage(
 
     manifest = {
         "schema": MANIFEST_SCHEMA,
-        "staged_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        # time.gmtime, not datetime.UTC: UTC is 3.11+, and the .105 surface host
+        # runs this under its system Python 3.9 (measured on the lab proof).
+        "staged_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "repos": {
             repo: {
                 "pin": plan[repo]["pin"],
