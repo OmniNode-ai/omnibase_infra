@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 class _Session:
     session_token: str = ""
-    api_key_id: str = ""
 
 
 def violations(value: str, access_token: str, session: _Session) -> None:
@@ -57,11 +56,12 @@ def violations(value: str, access_token: str, session: _Session) -> None:
     # (8) extra= dict keyed on the gateway token this ticket's probe traced
     logger.info("attached", extra={"gateway_token": "eyJ.a.b"})
 
-    # (9) prose-ambiguous bare word, ASSIGNED an interpolated value
-    logger.info("token=%s", value)
+    # (9) extra= dict keyed on a prose-ambiguous bare word. Unambiguous as a
+    # FIELD name, which is the only place bare words are consulted.
+    logger.info("resumed", extra={"token": value})
 
 
-def negatives(count: int, session: _Session, token_savings_pct: float) -> None:
+def negatives(count: int, rotation_ref: str, token_savings_pct: float) -> None:
     """Same vocabulary, zero violations. The gate's precision tests."""
 
     # An environment variable NAME in a status message leaks nothing.
@@ -70,12 +70,20 @@ def negatives(count: int, session: _Session, token_savings_pct: float) -> None:
 
     # Reference and metric fields carry forensic value and no secret.
     logger.info("issued keys", extra={"api_key_count": count})
-    logger.info("rotation done %s", {"api_key_id": session.api_key_id})
+    logger.info("rotation done %s", {"api_key_id": rotation_ref})
     logger.info("savings %s", token_savings_pct)
     logger.info("hashed %s", {"key_hash": "sha256:abc"})
 
-    # A bare word in prose is prose, not an assignment.
+    # A bare word in prose is prose. Bare words are never consulted in a
+    # format string -- see _format_string_hit.
     logger.warning("refresh token expired, re-minting")
+
+    # Three LIVE lines from onex-api on dev, each of which an earlier draft of
+    # this gate rejected. The interpolated value is a reason or a tenant id,
+    # never the credential the sentence names.
+    logger.warning("OIDC for api-keys router disabled: %s", rotation_ref)
+    logger.warning("Invalid tenant_id format in token: %s", rotation_ref)
+    logger.warning("Invalid tenant_id format in OIDC token: %s", rotation_ref)
 
     # A reviewed false positive, suppressed with a stated reason.
     logger.info(

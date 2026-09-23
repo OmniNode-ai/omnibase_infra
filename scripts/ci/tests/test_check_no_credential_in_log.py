@@ -51,6 +51,9 @@ class TestNameMatching:
             "client_secret",
             "password",
             "linear_api_key",
+            "admin_password",
+            "token",
+            "secret",
         ],
     )
     def test_credential_names_are_caught(self, name: str) -> None:
@@ -64,8 +67,12 @@ class TestNameMatching:
             "api_key_ref",
             "key_hash",
             "token_count",
+            "masked_token",
+            "matched_token",
             "token_savings_pct",
             "total_direct_tokens",
+            "named_credential",
+            "INFERENCE_TIMEOUT_LOG_TOKEN",
             "tokens_total_raw",
             "_token_threshold",
             "secrets_seeded",
@@ -73,7 +80,9 @@ class TestNameMatching:
         ],
     )
     def test_reference_and_metric_names_are_not_caught(self, name: str) -> None:
-        """Every one of these is live in ``src/`` today."""
+        """Every one of these is a live name in a logger call somewhere in the
+        org today -- omnibase_infra, omnimarket or onex-api. Six of them were
+        flagged by an earlier draft that matched bare words as a suffix."""
         assert gate._credential_hit(name) is None
 
 
@@ -87,7 +96,7 @@ class TestFormatStringMatching:
             "gateway_token: %s",
             'client_secret="%s"',
             "API_KEY=%s",
-            "token=%s",
+            "plaintext_key={}",
         ],
     )
     def test_assigned_credentials_are_caught(self, text: str) -> None:
@@ -101,14 +110,28 @@ class TestFormatStringMatching:
             "refresh token expired, re-minting",
             "api_key_id=%s",
             "tenant acme resolved in 12ms",
+            "failed to mint access_token for %s",
+            # Live lines in onex-api on dev. Each names a credential and
+            # interpolates something else -- a reason, a tenant id.
+            "OIDC for api-keys router disabled: %s",
+            "Invalid tenant_id format in token: %s",
+            "Invalid tenant_id format in OIDC token: %s",
         ],
     )
-    def test_env_var_names_and_prose_are_not_caught(self, text: str) -> None:
+    def test_names_without_an_assignment_are_not_caught(self, text: str) -> None:
         assert gate._format_string_hit(text) is None
 
-    def test_env_var_name_assigned_a_value_is_still_caught(self) -> None:
-        """An ALL-CAPS name is suppressed as a NAME, never as a value."""
+    def test_env_var_name_assigned_a_value_is_caught(self) -> None:
+        """Case is irrelevant; the assignment is what makes it a leak."""
         assert gate._format_string_hit("LINEAR_API_KEY=%s") is not None
+
+    def test_bare_word_in_a_format_string_is_a_documented_gap(self) -> None:
+        """``"token=%s"`` is NOT caught here, and that is deliberate: it is
+        indistinguishable from the three live onex-api lines above. The field
+        name rule still catches ``token`` as a key, and rules B/C still catch a
+        credential-named argument."""
+        assert gate._format_string_hit("token=%s") is None
+        assert gate._credential_hit("token") is not None
 
 
 @pytest.mark.unit

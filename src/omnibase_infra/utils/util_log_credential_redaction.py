@@ -51,8 +51,8 @@ from __future__ import annotations
 import logging
 import re
 import traceback
-from collections.abc import Iterable
-from typing import Any, Final
+from collections.abc import Iterable, Mapping
+from typing import Final
 
 from omnibase_infra.utils.util_dlq_credential_redaction import (
     is_credential_field_name,
@@ -91,8 +91,14 @@ def redact_credential_patterns(text: str) -> str:
     return text
 
 
-def _redact_value(value: Any, depth: int = 0) -> Any:
-    """Redact credential-keyed entries in ``value``, recursing into containers."""
+def _redact_value(value: object, depth: int = 0) -> object:
+    """Redact credential-keyed entries in ``value``, recursing into containers.
+
+    Typed ``object`` rather than ``Any``, matching
+    :mod:`util_dlq_credential_redaction`: a log record's args are arbitrary, but
+    ``Any`` would silence the isinstance narrowing below that decides what is
+    walked and what passes through.
+    """
     if depth >= _MAX_DEPTH:
         return LOG_REDACTION_MARKER
     if isinstance(value, dict):
@@ -113,6 +119,18 @@ def _redact_value(value: Any, depth: int = 0) -> Any:
     return value
 
 
+def _redact_mapping(mapping: Mapping[str, object]) -> dict[str, object]:
+    """Redact a log record's mapping args, keyed by credential field name."""
+    return {
+        key: (
+            LOG_REDACTION_MARKER
+            if is_credential_field_name(key)
+            else _redact_value(value)
+        )
+        for key, value in mapping.items()
+    }
+
+
 class CredentialRedactionFilter(logging.Filter):
     """Strip credential values from log records before they reach a handler.
 
@@ -127,12 +145,13 @@ class CredentialRedactionFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         # Pass 1 -- structural, before getMessage() renders anything.
-        if isinstance(record.args, dict):
-            record.args = _redact_value(record.args)
+        # ``LogRecord.args`` is a tuple or a Mapping by construction: a lone
+        # mapping argument is unwrapped by LogRecord itself, everything else
+        # stays a tuple. There is no third shape to handle.
+        if isinstance(record.args, Mapping):
+            record.args = _redact_mapping(record.args)
         elif isinstance(record.args, tuple):
             record.args = tuple(_redact_value(arg) for arg in record.args)
-        elif record.args is not None:
-            record.args = _redact_value(record.args)
 
         # Pass 2 -- shape, over the rendered message. Rendering can raise on a
         # malformed format string; a redaction filter must never be the reason

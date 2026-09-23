@@ -65,6 +65,11 @@ CREDENTIAL_FIELD_NAME_FRAGMENTS: Final[tuple[str, ...]] = (
     "refreshtoken",
     "idtoken",
     "sessiontoken",
+    # OMN-17423: the credential the 2026-09-15 effects-pod probe traced, and
+    # the one the OMN-18385 dead-letters carried. It reached the bare-word
+    # "token" fragment before, which is enough for a field NAME but not for a
+    # gate that only consults compound fragments in a format string.
+    "gatewaytoken",
     "bearertoken",
     "authtoken",
     "apitoken",

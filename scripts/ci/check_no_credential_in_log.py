@@ -17,19 +17,20 @@ switched off within a week. So:
 
   * a COMPOUND fragment (``access_token``, ``api_key``, ``client_secret``...)
     matches as a substring anywhere -- ``linear_api_key`` is a credential;
-  * a prose-ambiguous BARE word (``token``, ``secret``, ``password``...) must
-    END the name. ``gateway_token`` is a credential; ``token_savings_pct``,
-    ``total_direct_tokens`` and ``secrets_seeded`` are metrics and stay
-    loggable. In a format string a bare word must ADDITIONALLY be assigned an
-    interpolated value, because "refresh token expired" is a sentence.
+  * an ambiguous BARE word (``token``, ``secret``, ``credential``) must be the
+    WHOLE name. ``token`` is a credential; ``masked_token``,
+    ``token_savings_pct`` and ``secrets_seeded`` are markers and metrics, and
+    stay loggable. Bare words apply to field NAMES only, never to format
+    strings.
 
 Both lists are derived from the shared vocabulary rather than retyped, so a
 fragment added for the runtime filter is picked up here automatically.
 
-An ALL-CAPS token in a format string is an environment variable NAME, not a
-value -- "LINEAR_API_KEY is not set" leaks nothing. Those are suppressed
-UNLESS the name is immediately followed by an assignment to an interpolated
-value (``API_KEY=%s``), which is a leak regardless of case.
+A format string only leaks when a credential name is ASSIGNED an interpolated
+value (``api_key=%s``). Merely naming one is a status message -- "LINEAR_API_KEY
+is not set", "OIDC for api-keys router disabled: %s" -- where the interpolated
+value is a reason, not the credential. Bare words are not consulted in format
+strings at all; see ``_format_string_hit``.
 
 ESCAPE HATCH. ``# credential-log-allow: <reason>`` anywhere inside a logger
 call suppresses that call. The reason is required and shows up in the diff, so
@@ -85,25 +86,24 @@ _FRAGMENTS: Final[tuple[str, ...]] = _VOCAB.CREDENTIAL_FIELD_NAME_FRAGMENTS  # t
 _NON_CREDENTIAL_NAMES: Final[frozenset[str]] = _VOCAB.NON_CREDENTIAL_FIELD_NAMES  # type: ignore[attr-defined]
 _NON_CREDENTIAL_SUFFIXES: Final[tuple[str, ...]] = _VOCAB.NON_CREDENTIAL_FIELD_SUFFIXES  # type: ignore[attr-defined]
 
-# Bare words that are credential-bearing as a FIELD NAME but ordinary English
-# in a sentence. Excluded from format-string matching only.
-_PROSE_AMBIGUOUS: Final[frozenset[str]] = frozenset(
-    {
-        "secret",
-        "token",
-        "password",
-        "passwd",
-        "passphrase",
-        "authorization",
-        "credential",
-        "credentials",
-    }
+# Words this codebase uses for BOTH a credential and an opaque marker. Measured,
+# not guessed: matching them as a substring flags `masked_token` (a token that
+# is already masked), `matched_token` (a merge-hold marker), `cursor.token` (a
+# pagination cursor), `INFERENCE_TIMEOUT_LOG_TOKEN` (a log marker constant),
+# `secrets_seeded` and `named_credential` -- six false positives across
+# omnibase_infra, omnimarket and onex-api, and zero true positives. They are
+# matched as a WHOLE name only, and never inside a format string.
+#
+# `password`, `passphrase` and `authorization` are deliberately NOT here: this
+# platform never uses them for anything else, so they stay substring-matchable.
+_AMBIGUOUS_BARE: Final[frozenset[str]] = frozenset(
+    {"secret", "token", "credential", "credentials"}
 )
 
-# Derived, never hand-maintained: a fragment added to the shared tuple is
-# picked up here automatically unless it is explicitly prose-ambiguous.
-_FORMAT_STRING_FRAGMENTS: Final[tuple[str, ...]] = tuple(
-    fragment for fragment in _FRAGMENTS if fragment not in _PROSE_AMBIGUOUS
+# Derived, never hand-maintained: a fragment added to the shared vocabulary is
+# picked up here automatically unless it is explicitly ambiguous.
+_COMPOUND_FRAGMENTS: Final[tuple[str, ...]] = tuple(
+    fragment for fragment in _FRAGMENTS if fragment not in _AMBIGUOUS_BARE
 )
 
 _LOG_METHODS: Final[frozenset[str]] = frozenset(
@@ -112,7 +112,6 @@ _LOG_METHODS: Final[frozenset[str]] = frozenset(
 
 _NORMALISE_RE: Final[re.Pattern[str]] = re.compile(r"[^a-z0-9]+")
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z][A-Za-z0-9_.\-]*")
-_ENV_VAR_RE: Final[re.Pattern[str]] = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
 # ``name=%s`` / ``name: {value}`` -- an assignment to something interpolated.
 _ASSIGNED_VALUE_RE: Final[re.Pattern[str]] = re.compile(r"""^\s*[=:]\s*['"]?[%{]""")
 
@@ -143,68 +142,81 @@ def _is_exempt(normalised: str) -> bool:
     )
 
 
-def _bare_word_suffix(normalised: str) -> str | None:
-    """Return the bare credential word a name ENDS with, or None.
+def _bare_word_whole_name(normalised: str) -> str | None:
+    """Return the ambiguous word a name IS, or None.
 
-    Position carries the meaning. ``gateway_token`` and ``broker_secret`` name
-    the thing itself; ``token_savings_pct`` and ``secrets_seeded`` name a
-    measurement about it. Matching anywhere in the name conflates the two --
-    that is how a gate ends up flagging seven metrics and getting disabled.
+    Whole-name only. A first draft matched these as a suffix, which reads
+    plausibly -- ``gateway_token`` names the thing itself -- but measured
+    against real code it flagged six markers and no credentials. Genuine
+    compound credentials are covered by the compound fragments instead, which
+    is why ``gatewaytoken`` was added to the shared vocabulary rather than
+    left to this rule.
     """
-    for word in _PROSE_AMBIGUOUS:
-        if normalised == word or normalised.endswith(word):
-            return word
-    return None
+    return normalised if normalised in _AMBIGUOUS_BARE else None
 
 
 def _credential_hit(name: str) -> str | None:
     """Return the fragment that makes ``name`` credential-bearing, or None.
 
-    A compound fragment may match as a SUBSTRING -- ``linear_api_key`` and
-    ``tenant_access_token`` are both credentials. A prose-ambiguous bare word
-    must match the WHOLE normalised name: ``token`` is a credential,
-    ``token_savings_pct`` and ``secrets_seeded`` are metrics. The shared
+    A compound fragment may match as a SUBSTRING -- ``linear_api_key``,
+    ``tenant_access_token`` and ``admin_password`` are all credentials. An
+    ambiguous bare word must be the WHOLE normalised name: ``token`` is a
+    credential, ``masked_token`` and ``token_savings_pct`` are not. The shared
     reference exemptions are consulted first, so ``api_key_id`` and
     ``token_count`` never reach either rule.
     """
     normalised = _normalise(name)
     if not normalised or _is_exempt(normalised):
         return None
-    for fragment in _FORMAT_STRING_FRAGMENTS:
+    for fragment in _COMPOUND_FRAGMENTS:
         if fragment in normalised:
             return fragment
-    return _bare_word_suffix(normalised)
+    return _bare_word_whole_name(normalised)
 
 
 def _format_string_hit(text: str) -> str | None:
     """Return the fragment a format string leaks, or None.
 
-    Scans identifier-shaped tokens rather than doing a raw substring search, so
-    the environment-variable and assignment rules have a token to reason about.
+    A format string is PROSE with interpolation holes in it, and the only shape
+    that actually leaks is a credential name immediately ASSIGNED to a hole:
+    ``"api_key=%s"``. Everything else that merely mentions the word is a status
+    message -- ``"LINEAR_API_KEY is not set"``, ``"OIDC for api-keys router
+    disabled: %s"``, ``"failed to mint access_token for %s"`` -- where the
+    interpolated value is a reason or a tenant id, not the credential. The last
+    two are live lines in ``onex-api`` on ``dev``; requiring the assignment is
+    what tells them apart from a leak.
+
+    Prose-ambiguous bare words (``token``, ``secret``) are not consulted here at
+    all. ``"Invalid tenant_id format in token: %s"`` -- also live in
+    ``onex-api`` -- is indistinguishable from ``"token: %s"`` by trailing
+    context, and the value interpolated there is the tenant id. The cost is
+    that ``logger.info("token=%s", v)`` with a non-credential-named ``v`` is not
+    caught by THIS rule; a credential-named argument still is (rule C), an
+    f-string still is (rule B), and the runtime filter's shape pass still
+    redacts the rendered value. Bare words stay in force for FIELD names, where
+    they are unambiguous.
     """
     for match in _TOKEN_RE.finditer(text):
-        token = match.group(0)
-        normalised = _normalise(token)
+        normalised = _normalise(match.group(0))
         if not normalised or _is_exempt(normalised):
             continue
-
-        trailing = text[match.end() : match.end() + 8]
-        assigned = bool(_ASSIGNED_VALUE_RE.match(trailing))
-
-        compound = next((f for f in _FORMAT_STRING_FRAGMENTS if f in normalised), None)
+        if not _ASSIGNED_VALUE_RE.match(text[match.end() : match.end() + 8]):
+            continue
+        compound = next((f for f in _COMPOUND_FRAGMENTS if f in normalised), None)
         if compound is not None:
-            # An ALL-CAPS name in a status message is an environment variable
-            # NAME ("LINEAR_API_KEY is not set"), which leaks nothing --
-            # unless it is being assigned an interpolated value.
-            if _ENV_VAR_RE.fullmatch(token) and not assigned:
-                continue
             return compound
-
-        # A bare word in prose is prose. Only an assignment makes it a leak.
-        bare = _bare_word_suffix(normalised)
-        if bare is not None and assigned:
-            return bare
     return None
+
+
+def _joined_str_template(node: ast.JoinedStr) -> str:
+    """Render an f-string with its interpolations as ``{}`` placeholders."""
+    parts: list[str] = []
+    for value in node.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            parts.append(value.value)
+        else:
+            parts.append("{}")
+    return "".join(parts)
 
 
 def _expr_credential_name(node: ast.expr) -> str | None:
@@ -253,14 +265,15 @@ def _check_call(node: ast.Call) -> list[Finding]:
                                 first.lineno, name, f"f-string interpolates {name!r}"
                             )
                         )
-                elif isinstance(child, ast.Constant) and isinstance(child.value, str):
-                    hit = _format_string_hit(child.value)
-                    if hit:
-                        findings.append(
-                            Finding(
-                                first.lineno, hit, f"f-string literal names {hit!r}"
-                            )
-                        )
+            # Rebuild the f-string as a template so the assignment rule can see
+            # the hole. Scanning each literal chunk separately cannot: the chunk
+            # before an interpolation ends at "client_secret=", with the thing
+            # it is assigned sitting in the NEXT node.
+            hit = _format_string_hit(_joined_str_template(first))
+            if hit:
+                findings.append(
+                    Finding(first.lineno, hit, f"f-string literal names {hit!r}")
+                )
 
         # (C)/(D) positional args after the format string
         for arg in node.args[1:]:
