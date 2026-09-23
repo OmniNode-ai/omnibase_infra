@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """OMN-18570: tie ``parameter_count`` to the id the endpoint actually serves.
 
-This is the third field in ``AuthorizedLabBinding`` to drift on the .201 rungs,
-and the first one nothing was watching.
+This is the third field of a lab binding to drift on the .201 rungs, and the
+first one nothing was watching. (OMN-17099 moved the bindings out of a table in
+``src/`` into the committed lab lane overlays; this module now reads those.)
 
 OMN-16419 and OMN-16999 between them established that ``served_model_id`` and
 ``context_window`` are probe results, and
@@ -43,15 +44,38 @@ that demanded a figure there would push someone to encode a guess.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
+import yaml
 
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
-    _AUTHORIZED_BINDINGS,
-    ACTIVE_BACKEND_KEYS,
+    ModelBifrostLaneBackendBinding,
+)
+from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
+    ModelBifrostLaneOverlay,
 )
 
 pytestmark = pytest.mark.unit
+
+_LANE_OVERLAYS = sorted(
+    (Path(__file__).resolve().parents[3] / "docker" / "lane-overlays").glob(
+        "*.bifrost.yaml"
+    )
+)
+
+
+def _overlay_bindings() -> list[tuple[str, ModelBifrostLaneBackendBinding]]:
+    pairs: list[tuple[str, ModelBifrostLaneBackendBinding]] = []
+    for path in _LANE_OVERLAYS:
+        overlay = ModelBifrostLaneOverlay.model_validate(
+            yaml.safe_load(path.read_text(encoding="utf-8"))
+        )
+        pairs.extend((path.name, binding) for binding in overlay.backends)
+    return pairs
+
+
+_BINDINGS = _overlay_bindings()
 
 #: A parameter figure inside a model id: ``35B``, ``3B``, ``1.5B``.
 #:
@@ -95,20 +119,44 @@ def test_the_referent_helper_reads_a_moe_id_and_declines_an_opaque_one() -> None
     assert _expected_parameter_count("gpt-4o") is None
 
 
-@pytest.mark.parametrize("backend_key", sorted(ACTIVE_BACKEND_KEYS))
-def test_parameter_count_agrees_with_the_served_model_id(backend_key: str) -> None:
-    """A row may not state a parameter count its own served id contradicts."""
-    binding = _AUTHORIZED_BINDINGS[backend_key]
-    expected = _expected_parameter_count(binding.served_model_id)
-    if expected is None:
-        pytest.skip(
-            f"{binding.served_model_id!r} carries no parameter figure, so "
-            f"parameter_count {binding.parameter_count!r} stays a declaration"
+def _pair_id(pair: tuple[str, ModelBifrostLaneBackendBinding]) -> str:
+    return f"{pair[0]}:{pair[1].backend_key}"
+
+
+#: Bindings whose served id states a parameter figure, which the rule binds. The
+#: rest stay declarations and are listed by the test below rather than skipped
+#: one by one, so a collected-but-never-run parameter cannot accumulate here.
+_FIGURED = [
+    pair for pair in _BINDINGS if _expected_parameter_count(pair[1].advertised_model)
+]
+_DECLARED = [pair for pair in _BINDINGS if pair not in _FIGURED]
+
+
+def test_the_committed_overlays_carry_bindings_to_check() -> None:
+    """Positive control: an empty parametrization would pass the test below."""
+    assert _FIGURED, "no binding with a parameter figure under docker/lane-overlays"
+
+
+def test_bindings_without_a_figure_are_declarations_the_rule_declines() -> None:
+    """The declined set is stated, not skipped: each has no figure to read."""
+    for overlay_name, binding in _DECLARED:
+        assert _expected_parameter_count(binding.advertised_model) is None, (
+            f"{overlay_name}:{binding.backend_key}"
         )
+        assert binding.parameter_count, f"{overlay_name}:{binding.backend_key}"
+
+
+@pytest.mark.parametrize("pair", _FIGURED, ids=_pair_id)
+def test_parameter_count_agrees_with_the_served_model_id(
+    pair: tuple[str, ModelBifrostLaneBackendBinding],
+) -> None:
+    """A row may not state a parameter count its own served id contradicts."""
+    overlay_name, binding = pair
+    expected = _expected_parameter_count(binding.advertised_model)
     assert binding.parameter_count == expected, (
-        f"{backend_key!r} declares parameter_count "
-        f"{binding.parameter_count!r}, but its own served_model_id "
-        f"{binding.served_model_id!r} says {expected!r}. One of the two is "
+        f"{overlay_name} declares parameter_count {binding.parameter_count!r} "
+        f"for {binding.backend_key!r}, but its own served_model_id "
+        f"{binding.advertised_model!r} says {expected!r}. One of the two is "
         "left over from a previous deployment of this endpoint — re-probe "
         "GET /v1/models, bind the id it reports, and restate the parameter "
         "count from that id in the same commit. This is the OMN-16419 / "
