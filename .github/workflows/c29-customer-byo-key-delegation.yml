@@ -1,0 +1,167 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# c29-customer-byo-key-delegation.yml — OMN-19200
+#
+# WHAT THIS IS
+#   The PRODUCER for beta criterion C29: "Customer-local delegation to a
+#   provider with the customer's own key: clean machine, one provider key the
+#   customer supplies, the receipt names that provider and model, and no
+#   OmniNode cloud endpoint is contacted." This job's EXIT CODE is that
+#   criterion's verdict — the shape C11, C13 and C15 already set, which the
+#   board reads without a second grader anywhere.
+#
+#   C13 proves the other local case: a local model and zero provider calls.
+#   This one proves the main one — the customer's machine talking straight to
+#   a provider on the customer's key, with OmniNode nowhere in the path.
+#
+# THE MACHINE IS THE C13 MACHINE, NOT A SECOND DESIGN
+#   A fresh GitHub-hosted VM in this PUBLIC repository (hosted minutes in a
+#   private repository in this org have not started since 2026-09-02), no
+#   actions/checkout — a checkout of this repository is a checkout of one of
+#   the five distributions the delegation imports — the probe fetched by curl
+#   at this run's commit, and the published CLI installed the plugin
+#   quickstart's pipx way into a HOME that has never held anything. The
+#   customer's environment is built from nothing. Design of record: the
+#   m4-c13-probe DESIGN row in the omni_home ledger, OMN-19179.
+#
+# THE CUSTOMER WRITES NO ROUTING CONFIGURATION
+#   The two bindings a clean install refuses without point at the routing and
+#   backend contracts the package SHIPS. The customer's only act is to hand
+#   over their key, which is the claim under test.
+#
+# WHOSE KEY IS THIS
+#   LLM_GLM_API_KEY is OmniNode's own GLM key, already an Actions secret here
+#   for the hostile reviewer. It stands in for "the customer's own key"
+#   honestly, because what C29 grades is the PATH a key takes, not whose
+#   account pays: the provider cannot tell the two apart, and the probe proves
+#   the path from outside the process —
+#     * the key reaches the product only on `onex secret set`'s stdin, into
+#       the machine's local store; the customer environment carries no key
+#       variable at all (graded, not assumed);
+#     * the same prompt on the same machine BEFORE registration is a typed
+#       refusal that reaches no provider, so nothing ambient could have
+#       answered;
+#     * the receipt says the key was answered by the local store under a
+#       reference this session registered.
+#   What a house key cannot show is a key bought on a different plan working —
+#   that is a property of the provider's account, not of this product. The
+#   secret is never printed: the probe pops it from its own environment before
+#   spawning anything, and fails if its value appears in any captured output.
+#
+# NETWORK EVIDENCE IS DNS PLUS connect()
+#   strace records the stub resolver's own query and answer and every
+#   connect(), and the grader joins them: every external address the session
+#   touched must come from the session's own DNS answer for the provider host.
+#   An OmniNode name looked up anywhere, or an address nobody looked up, is a
+#   failure. Positive controls: the delegation must reach the provider, and a
+#   deliberate api.omninode.ai lookup under the same wrapper must be decoded
+#   and classified as OmniNode cloud.
+#
+# NO pull_request TRIGGER
+#   Same ruling as the C11 and C13 producers: the advisory-job-gate
+#   (OMN-18775) refuses a job that runs on pull requests without being a
+#   required context. Re-run on demand with workflow_dispatch.
+
+name: C29 customer-local delegation on the customer's own key
+
+on:
+  schedule:
+    # Twice a day at :53, clear of C11 (:17), C13 (:29) and the chain canary (:41).
+    - cron: '53 5,17 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: c29-customer-byo-key-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  C29_PROVIDER: glm
+
+jobs:
+  c29-customer-byo-key:
+    name: C29 customer-local delegation on the customer's own key (hosted clean machine)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Fetch the probe scripts at this commit (no repository checkout)
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/c29-probe"
+          for script in c29_customer_byo_key_probe.py assert_evidence_artifact.py; do
+            curl -fsSL --retry 3 -o "${RUNNER_TEMP}/c29-probe/${script}" \
+              "https://raw.githubusercontent.com/${REPO}/${SHA}/scripts/ci/${script}"
+          done
+          ls -la "${RUNNER_TEMP}/c29-probe"
+
+      - name: Install strace
+        run: |
+          set -euo pipefail
+          command -v strace || { sudo apt-get update -qq && sudo apt-get install -y -qq strace; }
+          strace -V | head -1
+
+      - name: Install the published CLI the way the quickstart says
+        # The plugin quickstart's pipx form, into a HOME that has never held
+        # anything, under an environment built from nothing.
+        run: |
+          set -euo pipefail
+          customer_home="${RUNNER_TEMP}/c29-customer/home"
+          mkdir -p "${customer_home}"
+          pipx_bin="$(command -v pipx)"
+          customer_pipx() {
+            env -i HOME="${customer_home}" PATH=/usr/local/bin:/usr/bin:/bin \
+              PIPX_HOME="${customer_home}/.local/pipx" PIPX_BIN_DIR="${customer_home}/.local/bin" \
+              "${pipx_bin}" "$@"
+          }
+          customer_pipx install --python /usr/bin/python3 omnibase-core
+          customer_pipx inject omnibase-core omnibase-infra omnimarket
+          test -x "${customer_home}/.local/bin/onex"
+
+      - name: Drive one customer session on the customer's key and grade it
+        env:
+          # Read by NAME; the probe pops it before spawning anything and hands
+          # it only to `onex secret set` on stdin.
+          C29_PROVIDER_KEY: ${{ secrets.LLM_GLM_API_KEY }}
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: a non-zero probe is the verdict and must still write
+          # its record before the job ends.
+          python3 "${RUNNER_TEMP}/c29-probe/c29_customer_byo_key_probe.py" run \
+            --provider "${C29_PROVIDER}" \
+            --key-env C29_PROVIDER_KEY \
+            --customer-home "${RUNNER_TEMP}/c29-customer/home" \
+            --customer-bin "${RUNNER_TEMP}/c29-customer/home/.local/bin" \
+            --workdir "${RUNNER_TEMP}/c29-customer/work" \
+            --trace-dir "${RUNNER_TEMP}/c29-customer/traces" \
+            --observations-out c29-observations.json \
+            --record c29-customer-byo-key.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+          status=$?
+          echo "probe exit status: ${status}"
+          exit "${status}"
+
+      - name: Assert the C29 record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 "${RUNNER_TEMP}/c29-probe/assert_evidence_artifact.py" \
+            --artifact c29-customer-byo-key \
+            --require c29-customer-byo-key.json
+
+      - name: Upload the C29 record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c29-customer-byo-key
+          path: |
+            c29-customer-byo-key.json
+            c29-observations.json
+          if-no-files-found: error
+          retention-days: 30

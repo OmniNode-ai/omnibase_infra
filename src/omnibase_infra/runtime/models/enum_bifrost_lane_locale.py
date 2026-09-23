@@ -30,11 +30,10 @@ class EnumBifrostLaneLocale(str, Enum):
 
     Values:
         LAB: The lane runs on the lab network (the ``.201`` compose lanes —
-            dev, stability-test, judge, collaborator lanes). Its overlay must
-            declare EXACTLY the active local backend IDs, each pinned to its
-            authorized host/port/model by ``_AUTHORIZED_BINDINGS``. This is the
-            pre-OMN-17502 rule, unchanged — only now stated in the file rather
-            than assumed by the schema.
+            dev, stability-test, judge, collaborator lanes). Its overlay binds
+            every local backend the base contract routes to, and may add fully
+            declared backends of its own (OMN-17099; before that ticket it had
+            to declare exactly a backend set hardcoded in the product).
         CLOUD: The lane runs where no lab backend is reachable (the onex-dev
             cluster lane; beta axiom 9 — cloud execution locale, BYOK). Its
             overlay declares ZERO local backends, and its delegation is served

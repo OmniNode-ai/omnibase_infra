@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 560
+    max_skips: 570
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -45,6 +45,21 @@ suites:
           node_ids:
             - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_reroute_whose_parent_was_never_projected_grades_red
             - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_rerouted_chain_grades_green_through_the_real_dispatch
+          measured_by: OMN-18903
+          delta: 10
+          reason: >-
+            The ten live-apply proofs for the ci_attempt_outcome read model. They drive the real vendored migration against a throwaway cluster the fixture builds with initdb, so the parallel splits collect them and skip them: that job installs no PostgreSQL server binaries, and the fixture skips by name rather than degrading to a weaker backend, because a skipped proof is visible and a downgraded one is not. Recorded here rather than made to run, because this is the established treatment of the whole EphemeralPostgres class and not an exemption for this ticket. Nine sibling modules use the same fixture -- 088, 094, 097, 098, 099, 100, 102, the live-events projection write path and the gateway link-health verdicts -- none of them is named in any workflow job either, and all nine are already inside the 558 this amendment raises. Adding a PostgreSQL server to the shared split job would move all ten at once and is a fleet change, not a change this pull request should make on its own. Stated plainly so nobody reads this entry as a proof that ran: this class executes in NO continuous-integration job on this repository today, which is a standing gap worth its own ticket. What stands behind these ten in the meantime is an out-of-band run of the same assertions against a real PostgreSQL 16.14 server, receipt .onex_state/prepr-proof/OMN-18903-mac-scratch:jev-ci-cause-2-20260921T235325Z/receipt.txt sha256 890c864c3056f554eee93a84733cc2dc651eeb02179f99a2088a14f172e55ec6, 32 of 32 assertions with four negative controls, linked from this pull request.
+          node_ids:
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_null_ticket_is_storable
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_zero_attempt_ordinal_is_refused
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_an_unknown_cause_code_is_refused
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_every_cause_code_is_accepted
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_reapplying_the_migration_converges
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_the_cursor_column_advances
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_the_same_attempt_twice_collides_on_the_key
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_the_timestamp_column_is_timezone_aware
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_two_attempts_of_one_check_are_two_rows
+            - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_two_checks_on_one_commit_are_two_rows
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -326,6 +341,16 @@ suites:
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_0034_refuses_early_and_names_the_failing_predicate
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_0034_still_refuses_a_non_member_and_names_the_other_predicate
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_usage_and_set_are_independent_predicates
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_null_ticket_is_storable
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_zero_attempt_ordinal_is_refused
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_an_unknown_cause_code_is_refused
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_every_cause_code_is_accepted
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_reapplying_the_migration_converges
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_the_cursor_column_advances
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_the_same_attempt_twice_collides_on_the_key
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_the_timestamp_column_is_timezone_aware
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_two_attempts_of_one_check_are_two_rows
+      - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_two_checks_on_one_commit_are_two_rows
       - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_mis_parented_hop_grades_red_and_its_siblings_do_not
       - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_redelivered_hop_is_recorded_once_through_the_real_dispatch
       - tests.integration.nodes.node_delegation_chain_ledger_effect.test_chain_tree_replay_dispatch_omn18419::test_a_reroute_whose_parent_was_never_projected_grades_red

@@ -181,6 +181,19 @@ def validate_runtime_config(
                     "non-production-safe transports (OMN-17304)"
                 )
 
+            # event_bus.lane (OMN-19193): a non-empty string naming a declared
+            # lane, legal only with a kafka transport -- same rule
+            # ModelEventBusConfig enforces.
+            if "lane" in event_bus:
+                lane_value = event_bus["lane"]
+                if not isinstance(lane_value, str) or not lane_value.strip():
+                    errors.append("event_bus.lane must be a non-empty string")
+                elif event_bus.get("type", "kafka") != "kafka":
+                    errors.append(
+                        f"event_bus.lane '{lane_value}' requires event_bus.type "
+                        "'kafka' — a lane names a broker (OMN-19193)"
+                    )
+
             # Validate event_bus.environment is string if present
             if "environment" in event_bus:
                 env_value = event_bus["environment"]

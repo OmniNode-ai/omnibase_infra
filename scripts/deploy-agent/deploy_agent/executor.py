@@ -3608,10 +3608,14 @@ class DeployExecutor:
             on_phase_update(build_phase, PhaseStatus.FAILED)
             # OMN-18615 (AC2): say what the build had DONE, not only what it
             # was allowed. subprocess.run communicates before re-raising, so
-            # the partial BuildKit progress output is on the exception --
-            # stderr is where compose writes it, stdout is the fallback.
+            # the partial BuildKit progress output is on the exception.
+            # OMN-19208: BOTH streams, never one-or-the-other. Compose v5
+            # (bake) writes the `#N DONE` progress to STDOUT and only its
+            # ` Image X Building` summary to stderr, so preferring a
+            # non-empty stderr read zero steps and called every kill a STALL
+            # (measured on .201: compose v5.1.0, buildx v0.31.1).
             progress = parse_build_progress(
-                _decode_stream(exc.stderr) or _decode_stream(exc.stdout)
+                "\n".join((_decode_stream(exc.stdout), _decode_stream(exc.stderr)))
             )
             raise RuntimeError(
                 f"{EnumBuildOutcome.BUDGET_EXHAUSTED.value}: runtime image "

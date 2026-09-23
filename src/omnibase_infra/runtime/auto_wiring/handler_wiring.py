@@ -2899,6 +2899,81 @@ def _raw_event_projection_enabled(
     )
 
 
+def _read_declared_key_grains(contract_path: Path) -> tuple[str, ...]:
+    """Every ``projection_api`` exposure's declared ``key_grain``, in order.
+
+    OMN-19081. The grain is a CONTRACT fact as of OMN-18908, and this replaces
+    the literal exemption tuple OMN-18910 shipped as an interim. A copy of a
+    declared fact in the consuming repository fails quietly in both
+    directions: a genuinely content-addressed exposure added tomorrow gets no
+    exemption unless somebody edits a tuple in another repository, and an
+    exposure wrongly added to the tuple gets a permanent exemption with no
+    evidence behind it.
+
+    This reads the raw contract YAML rather than importing ``omnimarket``, on
+    exactly the seam :func:`_read_dlq_topics` already establishes for
+    ``event_bus.dlq_topics`` and for the same reason: the typed contract model
+    does not carry the field, and the declaration is resolved from the
+    contract rather than hardcoded here.
+
+    Unlike ``_read_dlq_topics`` this NEVER raises. That function guards a DLQ
+    destination, where a broken contract must surface rather than degrade
+    silently; this one feeds an observability exemption, and a contract the
+    reader cannot parse must not be able to stop a projection from being
+    wired. An unreadable contract yields ``()``, which
+    :func:`resolve_key_grain` turns into UNKNOWN, which is graded and named
+    rather than silently exempted.
+
+    Returns ``()`` for a contract with no exposed ``projection_api``, so
+    "declares nothing" and "declares nothing readable" are the same empty
+    answer and neither is an exemption.
+    """
+    try:
+        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
+        import yaml  # type: ignore[import-untyped]
+
+        with open(contract_path) as f:
+            raw = yaml.safe_load(f)
+    except (OSError, Exception):  # noqa: BLE001 -- never fail wiring over this
+        return ()
+    if not isinstance(raw, dict):
+        return ()
+    section = raw.get("projection_api")
+    if not isinstance(section, dict) or not section.get("expose"):
+        return ()
+    listed = section.get("exposures")
+    exposures = (
+        [item for item in listed if isinstance(item, dict)]
+        if isinstance(listed, list)
+        else [section]
+    )
+    grains: list[str] = []
+    for exposure in exposures:
+        grain = exposure.get("key_grain")
+        if isinstance(grain, str) and grain:
+            grains.append(grain)
+    return tuple(grains)
+
+
+def resolve_key_grain(grains: tuple[str, ...]) -> str | None:
+    """One grain for a projection from its contract's declared exposures.
+
+    OMN-19081. ``None`` is UNKNOWN and is never a grain.
+
+    A projection is treated as immutable-grained only when it declares at
+    least one exposure and EVERY one of them is immutable. A contract
+    declaring both grains is NOT exempt: the delta its writer discarded might
+    belong to either exposure, and exempting it on the strength of the
+    immutable half would hide a real loss on the mutable half. Conservative in
+    the direction that grades rather than the direction that hides.
+    """
+    if not grains:
+        return None
+    if all(grain == "immutable" for grain in grains):
+        return "immutable"
+    return "mutable"
+
+
 def _read_dlq_topics(contract_path: Path) -> list[str]:
     """Read ``event_bus.dlq_topics`` from a contract YAML. Returns [] if absent.
 
@@ -4435,6 +4510,14 @@ class ProjectionDispatchSinks:
     # store. A store-carried binding wired in a process holding no resolver is
     # REFUSED by _resolve_binding_dsn, so this default is never load-bearing.
     secret_resolver: SecretResolver | None = None
+    # OMN-19081. The key grain this projection's own contract declares,
+    # resolved at wiring time by resolve_key_grain(_read_declared_key_grains).
+    # Another INPUT rather than a sink, carried here for the reason the
+    # docstring above already gives: this bundle is the parameter budget for
+    # this one factory, and another positional parameter is refused by the
+    # same gate that produced the bundle. None is UNKNOWN, and the drop
+    # dimension grades an unknown grain rather than exempting it.
+    key_grain: str | None = None
 
 
 def _make_undispatched_projection_callback(
@@ -4766,7 +4849,12 @@ def _make_projection_dispatch_callback(
 
         apply_counters = get_projection_apply_counters()
         for subscribe_topic in subscribe_topics:
-            apply_counters.register(handler_name, subscribe_topic)
+            # OMN-19081. The grain rides the registration, so the health
+            # monitor never reads a contract itself and never holds a copy of
+            # a fact the contract declares.
+            apply_counters.register(
+                handler_name, subscribe_topic, key_grain=sinks.key_grain
+            )
     except Exception:  # noqa: BLE001 -- never fail wiring over a counter
         logger.debug(
             "Projection apply counters unavailable at wiring for handler=%s",
@@ -11732,6 +11820,12 @@ def _prepare_handler_wiring(
                     terminal_event=projection_terminal_event,
                     dlq_topics=tuple(projection_dlq_topics),
                     secret_resolver=secret_resolver,
+                    # OMN-19081. Resolved from this contract's own
+                    # declaration, on the same raw-YAML seam _read_dlq_topics
+                    # uses. None is UNKNOWN and is graded, never exempted.
+                    key_grain=resolve_key_grain(
+                        _read_declared_key_grains(contract.contract_path)
+                    ),
                 ),
                 contract_name=contract.name,
             )
