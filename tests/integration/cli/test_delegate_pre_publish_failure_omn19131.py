@@ -63,7 +63,7 @@ from tests.fixtures.handler_correlated_noop import (
     ModelDelegateSkillFixtureTerminal,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 _TERMINAL_SENTENCE = "no resolvable delegation terminal"
 
