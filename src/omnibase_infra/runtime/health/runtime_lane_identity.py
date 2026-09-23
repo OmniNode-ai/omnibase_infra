@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,36 @@ ENV_RUNTIME_LANE = "ONEX_RUNTIME_LANE"
 KNOWN_LANES: frozenset[str] = frozenset({"compose-dev", "onex-lab", "onex-lab-k3s"})
 
 
+@lru_cache(maxsize=1)
+def _warn_absent_lane() -> None:
+    """Announce, ONCE for this process, that no lane was declared.
+
+    OMN-19144. The absent case is the one that actually happened and it was the
+    only one this module said nothing about: no deployment on any lane declared
+    the variable, so every health event the lab dev lane emitted carried
+    ``lane: null``, the lane-keyed projection dropped each one because a fact
+    whose lane cannot be named cannot be keyed, and the offsets committed
+    anyway. Consumer lag read 0 over a total loss. The consumer cannot tell a
+    lane-less emitter from a lane it does not hold; this process can, and is
+    the only thing in a position to say so.
+
+    Once per process, not once per call. The resolver runs on every health
+    emit, which is every check interval for the life of the container, and a
+    warning at that volume is the one that gets filtered out -- which is worse
+    than none, because a filtered line still reads as coverage. The fact being
+    reported is a property of the deployment, so stating it at first resolution
+    says everything a repeat would.
+    """
+    logger.warning(
+        "%s is not set — this runtime cannot name its lane, so its health "
+        "events carry lane=null and every lane-keyed consumer DROPS them "
+        "silently. Set it to one of %s in the deployment that runs this "
+        "process (OMN-19144).",
+        ENV_RUNTIME_LANE,
+        sorted(KNOWN_LANES),
+    )
+
+
 def resolve_runtime_lane(environ: dict[str, str] | None = None) -> str | None:
     """Return this runtime's declared lane, or ``None`` when it has none.
 
@@ -51,6 +82,7 @@ def resolve_runtime_lane(environ: dict[str, str] | None = None) -> str | None:
     source = os.environ if environ is None else environ
     raw = (source.get(ENV_RUNTIME_LANE) or "").strip().lower()
     if not raw:
+        _warn_absent_lane()
         return None
     if raw not in KNOWN_LANES:
         logger.warning(

@@ -49,6 +49,15 @@ class ModelDlqReplayRunResult(BaseModel):
     failed: int = Field(..., ge=0, description="Replay attempts that failed.")
     pending: int = Field(..., ge=0, description="Dry-run would-replay count.")
     dry_run: bool = Field(..., description="Whether this run published nothing.")
+    halted_partitions: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "OMN-19241: DLQ partitions this process has stopped attempting, as "
+            "'<dlq_topic>/<partition>@<offset>', because the record at that "
+            "offset failed max_record_failure_attempts times. Nothing on them "
+            "is replayed or committed until the runtime restarts."
+        ),
+    )
     results: tuple[ModelDlqReplayResult, ...] = Field(
         default=(), description="Per-message results in processing order."
     )

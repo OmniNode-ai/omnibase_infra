@@ -71,7 +71,11 @@ def _ledger(tmp_path: Path, entries: int, *, preamble: bool = True) -> Path:
     if preamble:
         head += ["Append-only. Newest at the bottom.", ""]
     text = "\n".join(head) + "\n".join(_entry(i) + "\n" for i in range(1, entries + 1))
-    path = tmp_path / "ROLLING_WORK_LEDGER.md"
+    # Not named ROLLING_WORK_LEDGER.md: that file name is governed by the
+    # rolling ledger row grammar (OMN-19256), which judges the row type first and
+    # fails closed where its omni_home module is absent, as it is in this repo's
+    # CI. Nothing this module tests is scoped by file name.
+    path = tmp_path / "WORK_LEDGER.md"
     path.write_text(text, encoding="utf-8")
     return path
 

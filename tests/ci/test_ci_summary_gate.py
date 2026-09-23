@@ -2167,13 +2167,14 @@ class TestExternalDefaultDenySweep:
 class TestExternalSweepExclusions:
     """AC-2 — the exclusion registry is closed-ended or it is an allowlist."""
 
-    def test_the_registry_holds_exactly_the_ten_measured_names(self) -> None:
+    def test_the_registry_holds_exactly_the_measured_names(self) -> None:
         """Under the strict bar, every by-design non-green name needs an entry.
 
         OMN-18960 shipped this empty beside a weaker conclusion set, which the
-        2026-09-21 ruling identified as a hidden allowlist. These ten are every
-        name the measurement found non-green on any head, and naming them is
-        what makes the tolerance reviewable.
+        2026-09-21 ruling identified as a hidden allowlist. The first ten are
+        every name the measurement found non-green on any head; the eleventh
+        (OMN-19218) is path-filtered and appeared on no measured head. Naming
+        them is what makes the tolerance reviewable.
         """
         assert set(EXTERNAL_SWEEP_EXCLUSIONS) == {
             "verify",
@@ -2186,13 +2187,15 @@ class TestExternalSweepExclusions:
             "Security Scan (Trivy)",
             "Image Size Analysis",
             "Hostile Reviewer (adversarial gate)",
+            "Enforce clean + promoted build source",
         }
 
     def test_every_entry_carries_a_reason_an_owner_and_both_dates(self) -> None:
+        added_late = {"Enforce clean + promoted build source": "2026-09-22"}
         for name, entry in EXTERNAL_SWEEP_EXCLUSIONS.items():
             assert entry.reason.strip(), name
             assert entry.ticket.startswith("OMN-"), name
-            assert entry.added == "2026-09-21", name
+            assert entry.added == added_late.get(name, "2026-09-21"), name
             assert entry.expires == "2026-12-20", name
 
     def test_no_entry_overlaps_the_registered_tuple(self) -> None:
@@ -2392,6 +2395,41 @@ class TestExternalSweepAgainstRealHeads:
         assert any("Verify dev lane applied the redeploy" in f for f in failures), (
             failures
         )
+
+    def test_the_lineage_enforce_job_skipped_on_a_pull_request_is_not_red(
+        self,
+    ) -> None:
+        """OMN-19218 AC1, on a real clean head plus the one row it lacked.
+
+        `prod-promotion-lineage.yml` runs on pull_request for paths that include
+        the deploy-agent executor, and its `Enforce clean + promoted build
+        source` job is gated on `workflow_call`, so on such a PR it is always
+        `skipped`. None of the measured heads touched those paths. The row is
+        cloned from a real pull-request row on the same head so its event
+        attribution is the real one; only the name, id and conclusion change.
+        """
+        head = _sweep_head("3894")
+        rows = _at_merge(head)
+        name = "Enforce clean + promoted build source"
+        assert all(r["name"] != name for r in rows)
+        template = next(r for r in rows if r["name"] == "Handler Contract Compliance")
+        skipped = {**template, "name": name, "id": -19218, "conclusion": "skipped"}
+
+        def _run(exclusions: dict[str, SweepExclusion]) -> list[str]:
+            failures, _f, _s, _e, _p = evaluate_external_sweep(
+                [*rows, skipped],
+                expected=EXPECTED_EXTERNAL_CONTEXTS,
+                in_run_names=frozenset(head["in_run_job_names"]),
+                self_name="CI Summary",
+                exclusions=exclusions,
+                events=check_run_event_index(head["workflow_runs"]),
+                now=NOW,
+            )
+            return failures
+
+        pre_fix = {k: v for k, v in EXTERNAL_SWEEP_EXCLUSIONS.items() if k != name}
+        assert _run(pre_fix) == [f"{name} (skipped)"]
+        assert _run(EXTERNAL_SWEEP_EXCLUSIONS) == []
 
     def test_flipping_one_real_row_flips_the_verdict(self) -> None:
         """A synthetic red on an otherwise-clean REAL payload, and back again."""

@@ -785,11 +785,25 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # here rather than an edit to the first.
     # 207 -> 209 for OMN-18987: the append-only 0043z predecessor and the
     # immutable 0044 delegation-shadow-comparisons restoration migration.
-    # 209 -> 210 for OMN-19013: the append-only delegation quality-reader
+    #
+    # 209 -> 211 for OMN-18903 (decision 2 of epic OMN-18850), which vendors
+    # TWO node-owned migrations in the same pair shape as every pair above:
+    # node_projection_ci_attempt_outcome/0000_create_ci_attempt_outcome.sql,
+    # the read model holding one row per (repository, pull request, head
+    # commit, check, run attempt) with its cause code, and
+    # 0001_grant_omninode_runtime_ci_attempt_outcome.sql, which ISSUES the
+    # grants the topology only declares. Two declarations rather than one for
+    # the same reason as every pair above: the create runs as the migration
+    # role and the grant names the runtime role.
+    #
+    # Vendored into omnibase_infra FIRST per the node-migration
+    # vendor-parity ordering, ahead of omnimarket#2730.
+    #
+    # 211 -> 212 for OMN-19013: the append-only delegation quality-reader
     # correction must be a first-class vendored application migration. Its
     # exact source bytes and manifest binding are pinned separately by
     # test_omn19013_terminal_construction_vendor.py.
-    assert len(result.declarations) == 210
+    assert len(result.declarations) == 212
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

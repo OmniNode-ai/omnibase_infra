@@ -281,6 +281,16 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # went red on the bot's pin-advance pull request naming both entries, the
     # deletion rode that commit, and the regeneration wrote nothing.
     #
+    # OMN-18903 added ci_attempt_outcome, and it was DELETED here by the pin
+    # advance to fcc374d5908f, which carries omnimarket#2730 -- the retiring
+    # pull request the entry named in its own comment. The node
+    # node_projection_ci_attempt_outcome now declares the relation in its
+    # db_io.db_tables with the same schema, access (read_write) and role
+    # (ci_attempts) the bridge carried. Same mechanism and same proof as the
+    # entries above: the expiry module went red on the bot's pin-advance pull
+    # request naming it, the deletion rode that pull request, and the
+    # regeneration wrote nothing.
+    #
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.

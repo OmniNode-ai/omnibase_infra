@@ -1,0 +1,108 @@
+{
+  "expected": {
+    "R-DELEG-11": "PASS",
+    "R-DELEG-12": "PASS",
+    "R-DELEG-26": "PASS"
+  },
+  "observations": {
+    "dying": {
+      "error": null,
+      "receipt": {
+        "provider": null,
+        "route": null,
+        "rule_evaluations": [],
+        "status": "failed",
+        "terminal_failure_class": "CustomerKeyRefusedError",
+        "terminal_failure_code": "ONEX_MARKET_CUSTOMER_PROVIDER_KEY_ABSENT",
+        "terminal_model_used": "none"
+      },
+      "status": {
+        "status": "failed",
+        "terminal_failure_class": "CustomerKeyRefusedError",
+        "terminal_failure_code": "ONEX_MARKET_CUSTOMER_PROVIDER_KEY_ABSENT"
+      },
+      "submit_status": 202
+    },
+    "healthy": {
+      "error": null,
+      "receipt": {
+        "provider": "local",
+        "route": "local-coder",
+        "rule_evaluations": [
+          {
+            "detail": null,
+            "enforcement": "blocking",
+            "passed": true,
+            "rule": "response_non_empty",
+            "threshold": null,
+            "threshold_unit": null
+          },
+          {
+            "detail": null,
+            "enforcement": "blocking",
+            "passed": true,
+            "rule": "final_artifact_only",
+            "threshold": null,
+            "threshold_unit": null
+          },
+          {
+            "detail": null,
+            "enforcement": "blocking",
+            "passed": true,
+            "rule": "no_refusal",
+            "threshold": null,
+            "threshold_unit": null
+          },
+          {
+            "detail": null,
+            "enforcement": "blocking",
+            "passed": true,
+            "rule": "short_form_adequacy",
+            "threshold": null,
+            "threshold_unit": null
+          }
+        ],
+        "status": "completed",
+        "terminal_failure_class": null,
+        "terminal_failure_code": null,
+        "terminal_model_used": "Qwen3.8-27B"
+      },
+      "status": {
+        "status": "completed",
+        "terminal_failure_class": null,
+        "terminal_failure_code": null
+      },
+      "submit_status": 202
+    },
+    "healthy_terminal": {
+      "error": null,
+      "payload": {
+        "attempts": [
+          {
+            "acceptance_decision": "climb",
+            "acceptance_reason": "acceptance_criteria_failed",
+            "model_id": "Qwen3.8-27B",
+            "tier": "local"
+          },
+          {
+            "acceptance_decision": "accept",
+            "acceptance_reason": "judge_unavailable_deterministic_floor",
+            "model_id": "Qwen3.8-27B",
+            "tier": "local"
+          }
+        ],
+        "correlation_id": "f8d87788-468c-4b3c-a189-e6e86cdb393d",
+        "model_name": "Qwen3.8-27B",
+        "provider": "local",
+        "status": "completed"
+      }
+    }
+  },
+  "provenance": {
+    "captured": "2026-09-22, read-only psql on the .201 dev lane (compose project omnibase-infra)",
+    "dying": "omninode_cloud.public.gateway_workflows, correlation_id=aa2c4548-3fe6-484d-bf54-6246d1c5c075 (workflow_id=51947987-4d21-41b4-9e94-1b887c39e4aa)",
+    "healthy": "omninode_cloud.public.gateway_workflows (receipt/status columns) and the onex.evt.omnimarket.delegate-skill-completed.v1 terminal as recorded byte-for-byte in omnibase_infra.public.event_ledger (status/provider/model_name/attempts fields only), correlation_id=f8d87788-468c-4b3c-a189-e6e86cdb393d (a chain-canary run)",
+    "receipt_note": "receipt and status bodies are the gateway_workflows columns render_workflow_receipt and get_workflow_status read; tenant ids, endpoint URLs and prompt text are omitted",
+    "why": "a completed canary run whose receipt names the route the bus terminal records, and a run that died with the typed CustomerKeyRefusedError cause"
+  }
+}

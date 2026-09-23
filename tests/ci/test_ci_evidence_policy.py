@@ -63,6 +63,12 @@ ASSERTION_SCRIPT = "assert_evidence_artifact.py"
 # artifact on a fully green run. With it, removing coverage costs a visible,
 # reviewed edit to a test file.
 EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
+    # OMN-19175: the C11 negative-paths record.
+    "c11-negative-paths",
+    # OMN-19195: the C12 provider-catalogue record.
+    "c12-provider-catalogue",
+    # OMN-19181: the C16 receipt-identity record.
+    "c16-receipt-identity",
     "lab-load",
     "lab-pass-receipt-compose-dev",
     # OMN-18572: the same lane, keyed by the OMNINODE_INFRA commit that changed
@@ -75,6 +81,9 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "lab-pass-receipt-onex-lab",
     "lab-pass-receipt-onex-lab-k3s",
     "nonrequired-check-report",
+    # OMN-19258: the zombie detector's receipt; its `scanned` map is the only
+    # record that tells a clean detector run from a blind one.
+    "pr-ci-zombie-detector-report",
     "saturation-record",
 )
 
