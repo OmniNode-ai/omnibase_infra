@@ -81,6 +81,9 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "lab-pass-receipt-onex-lab",
     "lab-pass-receipt-onex-lab-k3s",
     "nonrequired-check-report",
+    # OMN-19258: the zombie detector's receipt; its `scanned` map is the only
+    # record that tells a clean detector run from a blind one.
+    "pr-ci-zombie-detector-report",
     "saturation-record",
 )
 

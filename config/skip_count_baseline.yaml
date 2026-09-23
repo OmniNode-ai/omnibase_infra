@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 570
+    max_skips: 571
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -60,6 +60,13 @@ suites:
             - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_the_timestamp_column_is_timezone_aware
             - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_two_attempts_of_one_check_are_two_rows
             - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_two_checks_on_one_commit_are_two_rows
+        - measured_at: '2026-09-23'
+          measured_by: OMN-19091
+          delta: 1
+          reason: >-
+            One lab-alarm id, test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv. OMN-19091 makes the alarm import yaml and aiokafka in-process (a documented exception to its stdlib-only rule, ruled 2026-09-21 because a secret on argv does not satisfy the OMN-18867 consent), so the test proves both imports resolve from the literal brew interpreter the launchd agent names, with no virtualenv. That half needs /opt/homebrew/bin/python3.13 or /usr/local/bin/python3.13 on the host, which no Linux CI runner has, so it skips here with a named reason instead of passing without looking. The installer-text half (both brew paths named, no pydantic, the yaml import declared) runs before the skip on every host, CI included, and the import half runs on the Mac the alarm is installed on. Same class as the OMN-18867 live-ledger readback already in this list: host state CI cannot see.
+          node_ids:
+            - tests.ci.test_lab_alarm_omn18867::test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -74,6 +81,7 @@ suites:
       omn18863_seam_addendum: 'OMN-18863 structural fix adds 1 node id and 552 -> 553: the negative control in tests/ci/test_push_side_derivation_omn18863.py, which runs the new push-side derivation against a tree that is in sync and asserts it passes. It needs the .proof-dependencies/omnimarket checkout, so like the expiry module it executes in the Application Database Domain Enforcement (OMN-15361) job, which runs this module by name in its own pytest list, and is collected-but-skipped here. The other 13 tests in that module assert the refusal, the remedy text and the workflow wiring from committed state alone and run in every job.'
     node_ids:
       - tests.ci.test_lab_alarm_omn18867::test_the_live_ledger_authorizes_the_consented_channel
+      - tests.ci.test_lab_alarm_omn18867::test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv
       - tests.ci.test_changed_file_attribution_range_omn18058::test_deploy_scope_gate_passes_when_only_a_peer_touched_deploy_scope
       - tests.ci.test_changed_file_attribution_range_omn18058::test_positive_control_the_gate_still_refuses_the_branchs_own_deploy_scope
       - tests.ci.test_check_deploy_scope_dod::test_no_runtime_paths_skips

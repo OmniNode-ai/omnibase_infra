@@ -122,7 +122,11 @@ def terminal_row(lane: str = "omn18554-test") -> str:
 
 @pytest.fixture
 def ledger(tmp_path: Path) -> Path:
-    path = tmp_path / "ROLLING_WORK_LEDGER.md"
+    # Not named ROLLING_WORK_LEDGER.md: that file name is governed by the
+    # rolling ledger row grammar (OMN-19256), which judges the row type first and
+    # fails closed where its omni_home module is absent, as it is in this repo's
+    # CI. Nothing this module tests is scoped by file name.
+    path = tmp_path / "WORK_LEDGER.md"
     path.write_text("## §5 ACTION LOG (append-only)\n", encoding="utf-8")
     return path
 

@@ -3195,6 +3195,12 @@ def enforce_command_claims(ledger: Path, before: str, existed_before: bool) -> b
         if attribution_reason is not None:
             refusals.append(f"({attribution_reason}): {line.strip()}")
 
+    # OMN-19256: the row grammar, for the same reason -- an editor session is
+    # not a way to write a row type --append refuses. Not window-scoped.
+    grammar_reason = validate_grammar_payload("\n".join(added_lines), ledger)
+    if grammar_reason is not None:
+        refusals.append(f"({grammar_reason})")
+
     # OMN-18554: identical window handling to --append, for the same reason r5
     # gave — a gate one verb honours and the other narrates is not a gate. An
     # unresolvable window refuses any claim row this command added and reverts
@@ -3811,6 +3817,86 @@ def validate_friction_payload(payload: str, ledger: Path) -> str | None:
     return refusal
 
 
+# --- OMN-19256 / OMN-16728: the canonical row grammar ----------------------
+#
+# Operator ruling 2026-09-23T13:20:11Z: the rolling work ledger admits eleven
+# row types (CLAIM STATUS TERMINAL FRICTION CORRECTION RULING OPERATOR-CONSENT
+# MSG ACK HOLD RELEASE), each with its required fields; any other type, and any
+# row missing a required field, is refused on NEW rows. Legacy rows are never
+# re-validated. The OPERATOR-CONSENT half is OMN-16728: a consent row missing
+# either scope list is refused.
+#
+# Same arrangement as the two guards above: the DECIDING LOGIC is the committed
+# module docs/workflows/_shared/ledger_grammar.py in omni_home, whose real
+# bytes tests/test_ledger_lock_row_grammar.py runs in CI, and this is the thin
+# caller. Unlike those two it FAILS CLOSED when the module is absent: the
+# ruling allows no warn-only mode, and a clone checked out at a revision
+# without the module would otherwise switch the grammar off for every lane with
+# nothing but a stderr line to say so.
+#
+# The governed file names are repeated here, and only here, because the caller
+# must know them precisely when the module cannot be loaded. The omni_home test
+# asserts the two sets are equal.
+_LEDGER_GRAMMAR_PATH = _omni_home_shared() / "ledger_grammar.py"
+GRAMMAR_GOVERNED_LEDGER_NAMES = frozenset({"ROLLING_WORK_LEDGER.md"})
+
+
+def load_ledger_grammar() -> Any | None:
+    """Import the committed grammar, or None when it is absent. The caller
+    decides what absence means -- for a governed ledger, a refusal."""
+    if not _LEDGER_GRAMMAR_PATH.is_file():
+        return None
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "onex_ledger_grammar", _LEDGER_GRAMMAR_PATH
+    )
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def grammar_missing_reason() -> str:
+    return (
+        f"OMN-19256 row grammar not found at {_LEDGER_GRAMMAR_PATH}. Appends to "
+        f"{', '.join(sorted(GRAMMAR_GOVERNED_LEDGER_NAMES))} are refused until it is "
+        "present: the grammar fails closed and has no warn-only mode. Bring the "
+        "omni_home clone to a revision that carries docs/workflows/_shared/"
+        "ledger_grammar.py, or set OMNI_HOME to one. Nothing was written."
+    )
+
+
+def validate_grammar_payload(payload: str, ledger: Path) -> str | None:
+    """Pure half: row types and required fields. Runs before the lock."""
+    if ledger.name not in GRAMMAR_GOVERNED_LEDGER_NAMES:
+        return None
+    grammar = load_ledger_grammar()
+    if grammar is None:
+        return grammar_missing_reason()
+    # Annotated for the same reason as validate_ruling_payload above.
+    refusal: str | None = grammar.refusal_for_payload(
+        payload, ledger_display_name(ledger)
+    )
+    return refusal
+
+
+def validate_grammar_state(payload: str, ledger: Path) -> str | None:
+    """State half: an id= is declared once. Runs inside the held lock."""
+    if ledger.name not in GRAMMAR_GOVERNED_LEDGER_NAMES:
+        return None
+    grammar = load_ledger_grammar()
+    if grammar is None:
+        return grammar_missing_reason()
+    existing = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
+    refusal: str | None = grammar.refusal_for_state(
+        payload, existing, ledger_display_name(ledger)
+    )
+    return refusal
+
+
 # --- OMN-18433: the stranded-clone signal ---------------------------------
 #
 # On 2026-09-16 this clone sat on a branch whose pull request had already
@@ -4142,6 +4228,15 @@ def build_parser() -> argparse.ArgumentParser:
             "before --mutation-at. Exits 0 when the claim precedes the mutation, "
             "1 when it does not (or the token does not match the ledger), 2 on a "
             "malformed token"
+        ),
+    )
+    parser.add_argument(
+        "--print-grammar",
+        action="store_true",
+        help=(
+            "print the rolling ledger's canonical row grammar (OMN-19256) as JSON, "
+            "from the committed omni_home module, and exit; skills and readers cite "
+            "this rather than copying it"
         ),
     )
     parser.add_argument(
@@ -4511,6 +4606,15 @@ def main(argv: list[str] | None = None) -> int:
     validate_section_cap_args(parser, args)
     payload = read_append_payload(args)
 
+    # A read-only query about the grammar, answered before any action rule.
+    if args.print_grammar:
+        grammar = load_ledger_grammar()
+        if grammar is None:
+            print(f"ledger_lock: {grammar_missing_reason()}", file=sys.stderr)
+            return 2
+        print(grammar.grammar_json())
+        return 0
+
     # Verification is a read-only query about a token, not one of the three
     # mutating actions, so it is checked (and returns) before the
     # exactly-one-action rule applies.
@@ -4561,6 +4665,13 @@ def main(argv: list[str] | None = None) -> int:
     # one of the four that is scoped -- to claim rows, and to a declared window.
     payload_to_write: str | None = payload
     if payload is not None and replay_marker is None:
+        # OMN-19256: shape before content. A row of a type the ledger does not
+        # admit gets that answer first, not a lint about a field it should not
+        # have been written with.
+        grammar_reason = validate_grammar_payload(payload, args.ledger)
+        if grammar_reason is not None:
+            print(f"ledger_lock: {grammar_reason}", file=sys.stderr)
+            return 65
         quant_reason = validate_quantitative_claims_payload(payload)
         if quant_reason is not None:
             print(
@@ -4663,6 +4774,10 @@ def main(argv: list[str] | None = None) -> int:
                     friction_reason = validate_friction_payload(payload, args.ledger)
                     if friction_reason is not None:
                         print(f"ledger_lock: {friction_reason}", file=sys.stderr)
+                        return 65
+                    grammar_state_reason = validate_grammar_state(payload, args.ledger)
+                    if grammar_state_reason is not None:
+                        print(f"ledger_lock: {grammar_state_reason}", file=sys.stderr)
                         return 65
                 else:
                     # The marker lands FIRST, so the offset computed below is
