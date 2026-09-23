@@ -21,13 +21,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from scripts.ci import c29_customer_byo_key_probe as probe
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "omn19200"
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "c29-customer-byo-key-delegation.yml"
 
 
 def _load(name: str) -> dict[str, Any]:
@@ -90,7 +88,11 @@ def test_the_documented_registration_is_refused_today_and_grades_fail() -> None:
     record = probe.grade(_load("observations_documented_surface_refused.json"))
     assert record.verdict == "FAIL"
     names = _reasons(record, "names_provider")
-    assert any(probe.KEYLESS_REFUSAL_CODE in r for r in names)
+    # The provider-only customer: the OMN-16200 gate words OMN-19205's refusal.
+    assert any("No local model is declared" in r for r in names)
+    # The customer wrote no configuration at all.
+    evidence = next(c for c in record.clauses if c.name == "customer_key").evidence
+    assert set(evidence["customer_env_keys"]) == {"HOME", "PATH", "LANG", "TERM"}
     # Refused before any provider was reached, so the zero is unproven, not green.
     assert any("positive control failed" in r for r in _reasons(record, "no_omninode"))
     # The instrument itself was fine: the OmniNode control was decoded.
@@ -157,7 +159,16 @@ def test_a_keyless_delegation_that_succeeds_fails_the_negative_control() -> None
     reasons = _reasons(record, "no_omninode")
     assert record.verdict == "FAIL"
     assert any("negative control failed" in r and "succeeded" in r for r in reasons)
-    assert any(probe.KEYLESS_REFUSAL_CODE in r for r in reasons)
+    assert any("no typed ONEX refusal code" in r for r in reasons)
+
+
+@pytest.mark.unit
+def test_the_keyless_refusal_code_is_recorded() -> None:
+    evidence = next(
+        c for c in probe.grade(_working()).clauses if c.name == "no_omninode"
+    ).evidence
+    assert evidence["keyless_typed_refusal"] is True
+    assert evidence["keyless_refusal_code"] == "ONEX_CORE_041_INVALID_CONFIGURATION"
 
 
 @pytest.mark.unit
@@ -335,28 +346,13 @@ def test_redaction_replaces_the_key_and_records_where() -> None:
 
 
 @pytest.mark.unit
-def test_the_workflow_verdict_step_cannot_be_softened() -> None:
-    """AC1: the grading step's exit status is the job's, with nothing in between."""
-    text = WORKFLOW.read_text(encoding="utf-8")
-    doc = yaml.safe_load(text)
-    triggers = doc.get(True, doc.get("on"))
-    assert set(triggers) == {"schedule", "workflow_dispatch"}
-    assert triggers["workflow_dispatch"] in (None, {})  # no skip input
-    job = doc["jobs"]["c29-customer-byo-key"]
-    assert "continue-on-error" not in job
-    assert job["runs-on"] == "ubuntu-24.04"
-    steps = job["steps"]
-    assert not any("actions/checkout" in str(s.get("uses", "")) for s in steps)
-    grade_step = next(
-        s
-        for s in steps
-        if "c29_customer_byo_key_probe.py" in s.get("run", "")
-        and " run " in s.get("run", "")
-    )
-    assert "continue-on-error" not in grade_step
-    assert "|| true" not in grade_step["run"]
-    assert 'exit "${status}"' in grade_step["run"]
-    assert grade_step["env"]["C29_PROVIDER_KEY"] == "${{ secrets.LLM_GLM_API_KEY }}"
-    # The secret is bound to the grading step alone.
-    assert sum("secrets." in json.dumps(s) for s in steps) == 1
-    assert doc["env"]["C29_PROVIDER"] in probe.PROVIDERS
+def test_the_hosted_workflow_is_retired() -> None:
+    """The job runs on the omnipc2 customer machine, from omninode_infra.
+
+    Operator direction 2026-09-22: CI runs on our fleet, never GitHub-hosted,
+    and the no-checkout machine is omnipc2, whose runner group admits only
+    omninode_infra. A second copy of the job here would be a second verdict.
+    """
+    assert not (
+        REPO_ROOT / ".github" / "workflows" / "c29-customer-byo-key-delegation.yml"
+    ).exists()

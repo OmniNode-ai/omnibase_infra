@@ -57,22 +57,6 @@
 #   Four edits in one PR, all of them visible.
 version: 1
 evidence_artifacts:
-  # --- c29-customer-byo-key-delegation.yml: the C29 verdict (OMN-19200) ----
-  #
-  # The probe's EXIT CODE is the verdict; this record is how a reader sees the
-  # four clauses, the DNS names the session asked for and what every connect()
-  # was attributed to, without reading a log. An absent or empty record beside
-  # a green run would claim "no OmniNode endpoint was contacted" with nothing
-  # behind the claim, on a criterion whose whole subject is an absence.
-  - id: c29-customer-byo-key
-    workflow: .github/workflows/c29-customer-byo-key-delegation.yml
-    job: c29-customer-byo-key
-    producer_step: "Drive one customer session on the customer's key and grade it"
-    artifact_name: c29-customer-byo-key
-    required_paths:
-      - c29-customer-byo-key.json
-    rationale: >-
-      One clause each for the clean machine, the key's single way in, the provider and model the receipt names, and the absence of any OmniNode contact, with the evidence behind each: the registered references, where the delegation's key was answered from, the names looked up per step and the classification of every connect, and both positive controls and the keyless negative control taken in the same invocation. The key's value is never in it -- the probe redacts and fails on any occurrence -- so the record is safe to keep for thirty days.
   # --- chain-canary-c16-receipt-identity.yml: the C16 verdict (OMN-19181) --
   #
   # As with C11, the probe's EXIT CODE is the verdict and this record is how a
