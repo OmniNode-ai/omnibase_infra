@@ -184,6 +184,47 @@ class ModelCiBusLaneDsnReference(BaseModel):
         return value
 
 
+class ModelCiBusLaneBrokerTopology(BaseModel):
+    """A lane's declared listener pair (OMN-18931), shape only.
+
+    ``omnibase_infra.runtime.bounded_delegation_routes`` is the one component
+    that acts on it. This publisher never does, so it keeps no policy here.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    external_bootstrap_servers: str
+    internal_bootstrap_servers: str
+
+
+class ModelCiBusLaneDelegationRoute(BaseModel):
+    """A lane's declared delegation consumer route (OMN-18931), shape only."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    consumer: str
+    terminal_route: str
+    repository_owner: str
+
+
+class ModelCiBusLaneDelegationFaultRoute(BaseModel):
+    """A dogfood lane's declared fixed-status fault backend (OMN-18931).
+
+    Shape only. The admission policy lives in
+    ``omnibase_infra.runtime.dogfood_delegation_fault_routes``, which is the
+    component that acts on these rows.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    backend_id: str
+    endpoint_url: str
+    expected_http_status: int
+    requested_timeout_seconds: int
+    max_attempts: int
+    no_escalation: bool
+
+
 class ModelCiBusLane(BaseModel):
     """One checked-in CI control-bus lane declaration.
 
@@ -249,6 +290,12 @@ class ModelCiBusLane(BaseModel):
     # node_chain_canary_effect.lane_transport, and is deliberately not
     # duplicated here: two copies of a policy drift.
     ledger_readback: ModelCiBusLaneDsnReference | None = None
+    # OMN-18931. Optional and unread by this publisher, like the two blocks
+    # above: omnimarket declares them for the bounded delegation lanes, and
+    # omnibase_infra's runtime routing is the one component that acts on them.
+    broker_topology: ModelCiBusLaneBrokerTopology | None = None
+    delegation_routes: tuple[ModelCiBusLaneDelegationRoute, ...] = ()
+    delegation_fault_routes: tuple[ModelCiBusLaneDelegationFaultRoute, ...] = ()
 
     @field_validator("broker")
     @classmethod
@@ -342,11 +389,17 @@ ModelCiBusOverlay.model_rebuild(
     _types_namespace={
         "ModelCiBusLane": ModelCiBusLane,
         "ModelCiBusLaneDsnReference": ModelCiBusLaneDsnReference,
+        "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
+        "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
+        "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
     }
 )
 ModelCiBusLane.model_rebuild(
     _types_namespace={
         "ModelCiBusLaneDsnReference": ModelCiBusLaneDsnReference,
+        "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
+        "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
+        "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
     }
 )
 
