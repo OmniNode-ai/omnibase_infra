@@ -207,3 +207,75 @@ def test_execute_cuts_lab_tag_and_delegates(tmp_path: Path) -> None:
         assert _git(clone, "rev-parse", f"{tags[0]}^{{commit}}") == _git(
             clone, "rev-parse", "dev"
         )
+
+
+@pytest.mark.unit
+def test_ref_missing_in_a_sibling_falls_back_instead_of_aborting(
+    tmp_path: Path,
+) -> None:
+    """OMN-19072 review: a --ref that resolves in omnibase_infra but not in a
+    sibling -- a lab tag cut before omnibase_spi joined the tag set, or a raw
+    infra sha -- must not abort under set -e with the tag half-cut and the
+    deploy never run. The sibling is tagged at its own fallback ref, the same
+    fallback stage_workspace.sh checks siblings out at, and says so."""
+    omni_home = _make_omni_home(tmp_path)
+    old_tag = "lab/dev/20260901T000000Z-000000000000"
+    for repo in LAB_REF_REPOS:
+        if repo != "omnibase_spi":
+            _git(omni_home / repo, "tag", old_tag, "dev")
+    stub = tmp_path / "stub-deploy-runtime.sh"
+    stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(CUT_LAB_REF),
+            "--ref",
+            old_tag,
+            "--lane",
+            "dev",
+            "--cut-tag",
+            "--execute",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **scrub_git_location_env(os.environ),
+            "OMNI_HOME": str(omni_home),
+            "DEPLOY_RUNTIME": str(stub),
+            "DEPLOY_SIBLING_FALLBACK_REF": "dev",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    spi = omni_home / "omnibase_spi"
+    new_tags = [
+        t for t in _git(spi, "tag", "--list", "lab/dev/*").splitlines() if t != old_tag
+    ]
+    assert len(new_tags) == 1, new_tags
+    assert _git(spi, "rev-parse", f"{new_tags[0]}^{{commit}}") == _git(
+        spi, "rev-parse", "dev"
+    )
+    assert "omnibase_spi" in result.stderr and "falling back" in result.stderr
+
+
+@pytest.mark.unit
+def test_ref_missing_in_the_infra_clone_still_aborts(tmp_path: Path) -> None:
+    """The fallback is for siblings only: a --ref the build-context repo cannot
+    resolve names nothing to build, and must still refuse."""
+    omni_home = _make_omni_home(tmp_path)
+    stub = tmp_path / "stub-deploy-runtime.sh"
+    marker = tmp_path / "deploy_ran.marker"
+    stub.write_text(f"#!/usr/bin/env bash\ntouch {marker}\n", encoding="utf-8")
+    stub.chmod(0o755)
+    result = _run(
+        omni_home,
+        "--ref",
+        "no-such-ref-anywhere",
+        "--cut-tag",
+        "--execute",
+        deploy_runtime=stub,
+    )
+    assert result.returncode != 0
+    assert not marker.exists()

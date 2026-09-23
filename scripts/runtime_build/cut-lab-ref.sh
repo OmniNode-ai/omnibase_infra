@@ -145,6 +145,10 @@ compute_lab_tag_name() {
     echo "lab/${LANE}/${utc}-${short}"
 }
 
+# The ref a sibling is tagged at when <ref> does not resolve in it: the same
+# default stage_workspace.sh's RT-1 checkout falls back to.
+SIBLING_FALLBACK_REF="${DEPLOY_SIBLING_FALLBACK_REF:-origin/dev}"
+
 cut_lab_tags() {
     local tag="$1"
     local repo clone sha
@@ -156,8 +160,21 @@ cut_lab_tags() {
         fi
         if [[ "${HOTPATCH}" == true ]]; then
             sha="$(git -C "${clone}" rev-parse HEAD)"
-        else
+        elif [[ "${repo}" == "omnibase_infra" ]]; then
+            # The build context: a ref it cannot resolve names nothing to
+            # build, so this stays a hard failure under set -e.
             sha="$(git -C "${clone}" rev-parse "${REF}^{commit}")"
+        elif sha="$(git -C "${clone}" rev-parse "${REF}^{commit}" 2>/dev/null)"; then
+            : # <ref> resolves in this sibling (a branch or tag name).
+        else
+            # OMN-19072: a ref that exists only in omnibase_infra (a raw infra
+            # sha, or a lab tag cut before this sibling joined the tag set)
+            # must not abort here with the tag half-cut and the deploy never
+            # run. Tag the sibling at the same fallback stage_workspace.sh
+            # checks siblings out at, and say so.
+            sha="$(git -C "${clone}" rev-parse "${SIBLING_FALLBACK_REF}^{commit}")"
+            log "NOTE ${repo}: --ref '${REF}' does not resolve here -- falling back to"
+            log "  this sibling's own ${SIBLING_FALLBACK_REF} (${sha:0:12})."
         fi
         git -C "${clone}" tag -f "${tag}" "${sha}" >/dev/null
         log "tagged ${repo}: ${tag} -> ${sha:0:12}"
