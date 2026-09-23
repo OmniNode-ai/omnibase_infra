@@ -1794,3 +1794,299 @@ class TestFleetStatusTokenResolution:
         # dispatches jobs onto the fleet, so skipping its probe would reinstate
         # the saturation the throttle exists to prevent (OMN-16284).
         assert queue_depth_gate_for_operation("rerun-failed") is True
+
+
+# ---------------------------------------------------------------------------
+# OMN-18855 — the create operation
+#
+# The ticket's point is that a convention the next lane does not know about is
+# not an answer, so these assert the pacing is a property of the TOOL. The
+# AC3 tests below pass no pacing arguments at all: if pacing ever becomes
+# opt-in, they go red.
+# ---------------------------------------------------------------------------
+
+
+def make_specs(count: int):
+    from bulk_pr_throttle import CreateSpec
+
+    return [
+        CreateSpec(head=f"lane/branch-{i}", base="dev", title=f"chore: item {i}")
+        for i in range(1, count + 1)
+    ]
+
+
+class TestCreateOperationIsLoadCreating:
+    def test_create_is_in_the_operation_policy(self):
+        from bulk_pr_throttle import VALID_OPERATIONS
+
+        assert "create" in VALID_OPERATIONS
+
+    def test_create_takes_the_capacity_gate(self):
+        """AC1. Keyed to the operation, which is what makes AC3 possible."""
+        from bulk_pr_throttle import queue_depth_gate_for_operation
+
+        assert queue_depth_gate_for_operation("create") is True
+
+
+class TestCreatePacesAgainstTheLiveSignal:
+    def test_ac1_probes_the_fleet_once_per_wave(self):
+        """AC1: bounded batches with the signal read BETWEEN them."""
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        probes: list[int] = []
+
+        def fleet():
+            probes.append(1)
+            return idle_fleet()
+
+        created: list[str] = []
+
+        def apply(owner, repo, item, operation):
+            created.append(item.head)
+            return PrOutcome(pr_number=100 + len(created), success=True, detail="ok")
+
+        report = run_bulk_operation(
+            owner="OmniNode-ai",
+            repo="omnibase_infra",
+            create_specs=make_specs(12),
+            operation="create",
+            wave_size=5,
+            get_runner_fleet=fleet,
+            get_queue_depth=lambda: 3,
+            apply_pr_operation=apply,
+        )
+        assert len(report.waves) == 3  # 5 + 5 + 2, bounded
+        assert len(probes) == 3  # signal read before each wave
+        assert len(created) == 12
+
+    def test_ac1_receipt_records_heads_and_resulting_numbers(self):
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        def apply(owner, repo, item, operation):
+            return PrOutcome(pr_number=4242, success=True, detail="ok")
+
+        report = run_bulk_operation(
+            owner="o",
+            repo="r",
+            create_specs=make_specs(1),
+            operation="create",
+            get_runner_fleet=idle_fleet,
+            get_queue_depth=lambda: 1,
+            apply_pr_operation=apply,
+        )
+        wave = report.waves[0]
+        # No PR numbers existed at wave start; the heads identify the items.
+        assert wave.pr_numbers == ()
+        assert wave.wave_heads == ("lane/branch-1",)
+        assert wave.outcomes[0].pr_number == 4242
+
+
+class TestCreateFailsClosed:
+    def test_ac2_refuses_when_the_probe_cannot_be_read(self):
+        """AC2: unreadable signal refuses; it does not warn and proceed."""
+        from bulk_pr_throttle import RunnerFleetProbeError, run_bulk_operation
+
+        created: list[str] = []
+
+        def boom():
+            raise RuntimeError("fleet endpoint unreachable")
+
+        with pytest.raises(RunnerFleetProbeError):
+            run_bulk_operation(
+                owner="o",
+                repo="r",
+                create_specs=make_specs(4),
+                operation="create",
+                get_runner_fleet=boom,
+                get_queue_depth=lambda: 1,
+                apply_pr_operation=lambda *a: created.append(a) or None,
+            )
+        assert created == []  # zero PRs opened, which is the point
+
+    def test_ac2_refuses_when_the_fleet_is_starved(self):
+        """AC2: over-threshold signal refuses after the bounded wait."""
+        from bulk_pr_throttle import (
+            RunnerFleetStarvationTimeoutError,
+            run_bulk_operation,
+        )
+
+        created: list[str] = []
+
+        with pytest.raises(RunnerFleetStarvationTimeoutError):
+            run_bulk_operation(
+                owner="o",
+                repo="r",
+                create_specs=make_specs(4),
+                operation="create",
+                get_runner_fleet=starved_fleet,
+                get_queue_depth=lambda: 1,
+                apply_pr_operation=lambda *a: created.append(a) or None,
+                poll_seconds=1.0,
+                max_wait_seconds=0.0,
+                sleep_fn=lambda _s: None,
+            )
+        assert created == []
+
+    def test_ac2_positive_control_healthy_fleet_does_proceed(self):
+        """The control: these refusals are conditional, not unconditional."""
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        created: list[str] = []
+
+        def apply(owner, repo, item, operation):
+            created.append(item.head)
+            return PrOutcome(pr_number=1, success=True, detail="ok")
+
+        run_bulk_operation(
+            owner="o",
+            repo="r",
+            create_specs=make_specs(4),
+            operation="create",
+            get_runner_fleet=idle_fleet,
+            get_queue_depth=lambda: 1,
+            apply_pr_operation=apply,
+        )
+        assert len(created) == 4
+
+
+class TestCreateIsPacedWithoutOptIn:
+    def test_ac3_no_pacing_arguments_still_paces(self):
+        """AC3: the caller passes NO wave size and NO threshold."""
+        from bulk_pr_throttle import DEFAULT_WAVE_SIZE, PrOutcome, run_bulk_operation
+
+        probes: list[int] = []
+
+        def fleet():
+            probes.append(1)
+            return idle_fleet()
+
+        report = run_bulk_operation(
+            owner="o",
+            repo="r",
+            create_specs=make_specs(DEFAULT_WAVE_SIZE * 2),
+            operation="create",
+            get_runner_fleet=fleet,
+            get_queue_depth=lambda: 1,
+            apply_pr_operation=lambda o, r, i, op: PrOutcome(
+                pr_number=1, success=True, detail="ok"
+            ),
+        )
+        assert len(report.waves) == 2
+        assert all(len(w.wave_heads) <= DEFAULT_WAVE_SIZE for w in report.waves)
+        assert len(probes) == 2
+        assert report.queue_depth_gate_applied is True
+
+    def test_ac3_the_cap_applies_to_creates_too(self):
+        from bulk_pr_throttle import (
+            DEFAULT_MAX_TOTAL_PRS,
+            TotalPrLimitExceededError,
+            run_bulk_operation,
+        )
+
+        with pytest.raises(TotalPrLimitExceededError):
+            run_bulk_operation(
+                owner="o",
+                repo="r",
+                create_specs=make_specs(DEFAULT_MAX_TOTAL_PRS + 1),
+                operation="create",
+                get_runner_fleet=idle_fleet,
+                get_queue_depth=lambda: 1,
+                apply_pr_operation=lambda *a: None,
+            )
+
+
+class TestCreateInputRefusals:
+    def test_create_rejects_pr_numbers(self):
+        from bulk_pr_throttle import BulkPrThrottleError, run_bulk_operation
+
+        with pytest.raises(BulkPrThrottleError, match="not PR numbers"):
+            run_bulk_operation(
+                owner="o", repo="r", pr_numbers=[1, 2], operation="create"
+            )
+
+    def test_non_create_rejects_specs(self):
+        from bulk_pr_throttle import BulkPrThrottleError, run_bulk_operation
+
+        with pytest.raises(BulkPrThrottleError, match="only valid for operation"):
+            run_bulk_operation(
+                owner="o",
+                repo="r",
+                create_specs=make_specs(1),
+                operation="update-branch",
+            )
+
+    def test_create_requires_specs(self):
+        from bulk_pr_throttle import BulkPrThrottleError, run_bulk_operation
+
+        with pytest.raises(BulkPrThrottleError, match="create_specs must be non-empty"):
+            run_bulk_operation(owner="o", repo="r", operation="create")
+
+    def test_spec_with_blank_field_is_refused(self):
+        from bulk_pr_throttle import BulkPrThrottleError, CreateSpec
+
+        with pytest.raises(BulkPrThrottleError, match="missing 'head'"):
+            CreateSpec(head="  ", base="dev", title="t")
+
+    def test_parse_specs_rejects_unknown_fields(self):
+        from bulk_pr_throttle import BulkPrThrottleError, parse_create_specs
+
+        payload = json.dumps(
+            [{"head": "h", "base": "dev", "title": "t", "reviewers": ["x"]}]
+        )
+        with pytest.raises(BulkPrThrottleError, match="unknown field"):
+            parse_create_specs(payload)
+
+    def test_parse_specs_round_trips_a_valid_payload(self):
+        from bulk_pr_throttle import parse_create_specs
+
+        payload = json.dumps([{"head": "h", "base": "dev", "title": "t", "body": "b"}])
+        specs = parse_create_specs(payload)
+        assert len(specs) == 1
+        assert (specs[0].head, specs[0].base, specs[0].title, specs[0].body) == (
+            "h",
+            "dev",
+            "t",
+            "b",
+        )
+
+
+class TestCreateCliRefusals:
+    def test_cli_create_without_specs_exits_non_zero(self):
+        from bulk_pr_throttle import main
+
+        rc = main(["--owner", "o", "--repo", "r", "--operation", "create"])
+        assert rc == 1
+
+    def test_cli_create_with_prs_exits_non_zero(self):
+        from bulk_pr_throttle import main
+
+        rc = main(
+            [
+                "--owner",
+                "o",
+                "--repo",
+                "r",
+                "--operation",
+                "create",
+                "--prs",
+                "1,2",
+            ]
+        )
+        assert rc == 1
+
+    def test_cli_non_create_with_specs_exits_non_zero(self):
+        from bulk_pr_throttle import main
+
+        rc = main(
+            [
+                "--owner",
+                "o",
+                "--repo",
+                "r",
+                "--operation",
+                "update-branch",
+                "--create-specs",
+                "[]",
+            ]
+        )
+        assert rc == 1
