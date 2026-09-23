@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from deploy_agent.events import (
     DEPLOY_PHASE_ORDER,
+    ModelLineageDecision,
     ModelOnexApiDelivery,
     Phase,
     PhaseStatus,
@@ -114,6 +115,17 @@ class JobState(BaseModel):
     #: survives a restart -- loads as "no delivery recorded" rather than
     #: failing validation.
     onex_api_delivery: ModelOnexApiDelivery | None = None
+    #: OMN-19270. Set on a ``superseded`` record whose replacement is the build
+    #: the lane already runs rather than a queued command. Such a record names
+    #: the running infra sha in ``superseded_by_sha`` and no correlation id,
+    #: because the running build need not have come from a command this agent
+    #: recorded.
+    superseded_by_running_build: bool = False
+    #: OMN-19270. The lineage fence's decision for this command: the ref it
+    #: asked for, what a symbolic ref resolved to at accept time, the running
+    #: build it was compared with, and the ref it built. ``None`` on a record
+    #: written without the fence, or by an older agent.
+    lineage: ModelLineageDecision | None = None
 
     @model_validator(mode="after")
     def _supersession_fields_are_paired(self) -> JobState:
@@ -125,7 +137,20 @@ class JobState(BaseModel):
         superseded asserts a fact about a job that ran.
         """
         named = self.superseded_by_sha is not None
-        if named != (self.superseded_by_correlation_id is not None):
+        if self.superseded_by_running_build:
+            if (
+                self.status != "superseded"
+                or not named
+                or self.superseded_by_correlation_id is not None
+            ):
+                msg = (
+                    "a record superseded by the running build is status "
+                    "superseded, names the running sha and no correlation id; got "
+                    f"status={self.status!r} sha={self.superseded_by_sha!r} "
+                    f"correlation_id={self.superseded_by_correlation_id!r}"
+                )
+                raise ValueError(msg)
+        elif named != (self.superseded_by_correlation_id is not None):
             msg = (
                 "superseded_by_sha and superseded_by_correlation_id stand or "
                 f"fall together; got sha={self.superseded_by_sha!r}, "
@@ -268,6 +293,7 @@ class JobStore:
         correlation_id: UUID,
         command: dict[str, Any],
         superseded_correlation_ids: list[UUID] | None = None,
+        lineage: ModelLineageDecision | None = None,
     ) -> JobState:
         """Write the accepted record, naming any commands it replaced.
 
@@ -283,6 +309,44 @@ class JobStore:
             command=command,
             superseded_count=len(ids),
             superseded_correlation_ids=ids,
+            lineage=lineage,
+        )
+        self._save(job)
+        return job
+
+    def record_superseded_by_running_build(
+        self,
+        correlation_id: UUID,
+        command: dict[str, Any],
+        *,
+        lineage: ModelLineageDecision,
+    ) -> JobState:
+        """Write the terminal record of a command the running build already carries.
+
+        OMN-19270. Born terminal in one atomic write, for the reason
+        ``record_superseded`` gives. The event owed for it is published by the
+        consumer's rejection hook at once, and ``result_publish_pending`` keeps
+        the agent's retry loop paying that debt if the broker was away.
+        """
+        if lineage.running_ref is None:
+            msg = "a supersession by the running build must name the running ref"
+            raise ValueError(msg)
+        now = datetime.now(UTC)
+        job = JobState(
+            correlation_id=correlation_id,
+            command=command,
+            accepted_at=now,
+            completed_at=now,
+            status="superseded",
+            superseded_by_sha=lineage.running_ref,
+            superseded_by_running_build=True,
+            phase_results=reconcile_terminal_phase_results({}),
+            result_publish_pending=True,
+            lineage=lineage,
+            errors=[
+                f"superseded by the running build at {lineage.running_ref}: "
+                f"{lineage.detail}"
+            ],
         )
         self._save(job)
         return job

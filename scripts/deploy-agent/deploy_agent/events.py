@@ -4,10 +4,11 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
@@ -636,6 +637,92 @@ class ModelVerifyRecreate(BaseModel):
         return line
 
 
+#: The build-context repository. ``git_ref`` is always a commit of this one.
+INFRA_REPOSITORY: Final = "omnibase_infra"
+_SIBLING_REPO_RE: Final = re.compile(r"^[a-z][a-z0-9_]*$")
+_SHA40_RE: Final = re.compile(r"^[0-9a-f]{40}$")
+
+
+class EnumLineageVerdict(StrEnum):
+    """Where a command's refs sit relative to the build the lane runs (OMN-19270)."""
+
+    #: Every ref the command names is already in the running build. The
+    #: command is acknowledged as superseded and never built.
+    CONTAINED = "contained"
+    #: The infra ref descends from the running build: the normal forward deploy.
+    DESCENDANT = "descendant"
+    #: The infra ref is the running build's, and something else the command
+    #: names is not shown to be running, so it builds.
+    EQUAL = "equal"
+    #: The infra ref is a strict ancestor of the running build. It is raised to
+    #: the running ref, so the lane never builds backwards.
+    RAISED = "raised"
+    #: The infra ref has diverged from the running build and is on the lane's
+    #: tracking branch: a lane coming back to its lineage from an off-branch build.
+    RETURNS_TO_TRACKING = "returns_to_tracking"
+    #: A signed rollback declaration: the one way backwards, built as asked.
+    ROLLBACK_DECLARED = "rollback_declared"
+    #: A pinned image, which is a promotion and not a rebuild from a ref.
+    NOT_APPLICABLE = "not_applicable"
+    #: A comparison the host could not make. Built as requested: never block
+    #: recovery on a missing fact.
+    UNPROVEN = "unproven"
+    #: Diverged from the running build and not on the tracking branch. Refused.
+    DIVERGENT = "divergent"
+
+    @property
+    def refuses(self) -> bool:
+        return self is EnumLineageVerdict.DIVERGENT
+
+    @property
+    def supersedes(self) -> bool:
+        return self is EnumLineageVerdict.CONTAINED
+
+    @property
+    def permits_coalescing(self) -> bool:
+        """Whether the batch behind this command may fold into it.
+
+        Folding picks a NEWER command in the head's place, and that is only
+        known to be forward of the running build when the head itself was
+        compared and found at or ahead of it (or the comparison was never the
+        fence's to make). A raised or off-branch head builds alone.
+        """
+        return self in (
+            EnumLineageVerdict.DESCENDANT,
+            EnumLineageVerdict.EQUAL,
+            EnumLineageVerdict.NOT_APPLICABLE,
+            EnumLineageVerdict.UNPROVEN,
+        )
+
+
+class ModelLineageDecision(BaseModel):
+    """One command's lineage verdict, the refs it was reached from, and what builds.
+
+    Durable on the job record (``JobState.lineage``) as well as in the journal,
+    because the question it answers is asked afterwards: which commit did this
+    job build, and why that one. ``resolved_ref`` is set when the command named
+    a symbolic ref, which is resolved at accept time and built at that exact
+    sha, so the record and the build cannot disagree.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    verdict: EnumLineageVerdict
+    requested_ref: str
+    resolved_ref: str | None = None
+    running_ref: str | None = None
+    build_ref: str
+    detail: str
+
+    def journal_line(self) -> str:
+        resolved = f" resolved={self.resolved_ref}" if self.resolved_ref else ""
+        return (
+            f"lineage: {self.verdict.value} (requested={self.requested_ref}"
+            f"{resolved} running={self.running_ref or 'unread'} "
+            f"build={self.build_ref}): {self.detail}"
+        )
+
+
 class ModelRollbackDeclaration(BaseModel):
     """A signed declaration that a command deliberately moves a lane off its lineage.
 
@@ -689,8 +776,30 @@ class ModelRebuildRequested(BaseModel):
     image_ref: str | None = None
     image_digest: str | None = None
     # OMN-19270: present only on a deliberate rollback. Without it the lineage
-    # fence in the consumer refuses a ref behind, or off, the running build.
+    # fence never builds a ref behind the running build, and refuses one off it.
     rollback: ModelRollbackDeclaration | None = None
+    # OMN-19270: sibling repository -> the commit this command exists to
+    # deliver, such as the merge sha of the omnimarket PR that triggered it.
+    # It is EVIDENCE for the lineage fence's containment check, never a build
+    # pin: a workspace build still stages each sibling from its dev branch,
+    # which contains the named commit. A sibling-triggered command that names
+    # nothing here cannot be proven already delivered, so it is never
+    # superseded, and it builds as it did before this field existed.
+    sibling_refs: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_sibling_refs(self) -> ModelRebuildRequested:
+        for repo, sha in self.sibling_refs.items():
+            if not _SIBLING_REPO_RE.match(repo) or repo == INFRA_REPOSITORY:
+                msg = (
+                    f"sibling_refs key {repo!r} is not a sibling repository name; "
+                    f"the infra ref is git_ref, never a sibling"
+                )
+                raise ValueError(msg)
+            if not _SHA40_RE.match(sha):
+                msg = f"sibling_refs[{repo!r}]={sha!r} is not a 40-hex commit sha"
+                raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def validate_services_subset(self) -> ModelRebuildRequested:
@@ -727,14 +836,15 @@ class EnumRejectionReason(StrEnum):
     work it asked for IS being done, by the newer command named alongside it.
 
     ``SUPERSEDED_BY_RUNNING_BUILD`` and ``DIVERGENT_REF`` are the lineage fence
-    (OMN-19270). The first refuses a command whose ref is a strict git
-    ancestor of the build the lane already runs: the lane already carries that
-    work, and building it would roll the lane backwards. It is a token of its
-    own rather than ``SUPERSEDED`` because no newer COMMAND replaced it. The
-    replacement is the running build, which need not have come from a command
-    this agent recorded, so there is no correlation id to name. The second
-    refuses a ref that is neither an ancestor nor a descendant of the running
-    build and is not on the lane's tracking branch.
+    (OMN-19270). The first acknowledges a CI-triggered command every ref of
+    which -- the infra ``git_ref`` and each named sibling ref -- is already in
+    the build the lane runs. The lane already carries that work, so the command
+    is recorded ``superseded`` and never built. It is a token of its own rather
+    than ``SUPERSEDED`` because no newer COMMAND replaced it. The replacement
+    is the running build, which need not have come from a command this agent
+    recorded, so there is no correlation id to name. The second refuses a ref
+    that is neither an ancestor nor a descendant of the running build and is
+    not on the lane's tracking branch.
     """
 
     BUSY = "busy"

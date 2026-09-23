@@ -80,6 +80,7 @@ from deploy_agent.events import (
     TOPIC_REBUILD_REQUESTED,
     EnumRejectionReason,
     EnumRuntimeLane,
+    ModelLineageDecision,
     ModelRebuildRequested,
     ModelRejectionNotice,
     Scope,
@@ -91,14 +92,16 @@ from deploy_agent.lane_policy import (
     assert_lane_allowed,
 )
 from deploy_agent.lineage_fence import (
-    EnumLineageVerdict,
-    ModelLineageDecision,
-    RunningBuildRefReader,
+    RefResolver,
+    RunningBuildReader,
+    SiblingAncestryResolver,
+    SiblingCloneAncestry,
     decide_lineage,
 )
 from deploy_agent.queue_depth import LagSampler, ModelControlTopicLag
 
 logger = logging.getLogger(__name__)
+
 
 # OMN-16442. Invoked at the PRE_ACCEPT job boundary with a callback that rewinds
 # this consumer's committed offset to the command being examined. The hook is
@@ -214,7 +217,9 @@ class DeployConsumer:
     on_rejected: RejectedHook | None = None
     #: OMN-19270, on the same terms again: a consumer built without a reader
     #: runs no lineage fence, which is the pre-change behaviour.
-    running_build_ref: RunningBuildRefReader | None = None
+    running_build: RunningBuildReader | None = None
+    ref_resolver: RefResolver | None = None
+    sibling_ancestry: SiblingAncestryResolver | None = None
     tracking_ref: str | None = None
 
     def __init__(
@@ -228,7 +233,9 @@ class DeployConsumer:
         ancestry_resolver: AncestryResolver | None = None,
         on_superseded: SupersededHook | None = None,
         on_rejected: RejectedHook | None = None,
-        running_build_ref: RunningBuildRefReader | None = None,
+        running_build: RunningBuildReader | None = None,
+        ref_resolver: RefResolver | None = None,
+        sibling_ancestry: SiblingAncestryResolver | None = None,
         tracking_ref: str | None = None,
     ) -> None:
         self.consumer = KafkaConsumer(
@@ -261,9 +268,13 @@ class DeployConsumer:
         self.on_superseded = on_superseded
         self.on_rejected = on_rejected
         # OMN-19270. The lineage fence reads the running build through this
-        # reader and compares refs through ``ancestry_resolver``; it runs only
-        # when both are present.
-        self.running_build_ref = running_build_ref
+        # reader and compares infra refs through ``ancestry_resolver``; it runs
+        # only when both are present. Without a sibling resolver no command
+        # is superseded on a sibling ref, and without a ref resolver a
+        # symbolic ref builds as requested.
+        self.running_build = running_build
+        self.ref_resolver = ref_resolver
+        self.sibling_ancestry = sibling_ancestry
         self.tracking_ref = tracking_ref
         logger.info(
             "Deploy agent lane fence: %s",
@@ -487,26 +498,40 @@ class DeployConsumer:
             self._commit_through(msg)
             return None, self._reject(EnumRejectionReason.DUPLICATE, cmd=cmd)
 
-        # Step 6a: Lineage fence (OMN-19270). A command whose ref is a strict
-        # ancestor of the build the lane already runs would roll the lane
-        # back. That is what a stale redeploy did on 2026-09-23: a command at
-        # an infra commit from 10:32Z was accepted at 14:32Z, and it rebuilt a
-        # lane that was already on a newer commit. Refused
-        # with a typed reason and committed past, so it is acknowledged rather
-        # than left to block the commands behind it. A signed rollback
-        # declaration is exempt. Every comparison the host cannot make lets
-        # the command run as before.
+        # Step 6a: Lineage fence (OMN-19270). Compared with the build the lane
+        # already runs, by ancestry against its provenance. On 2026-09-23 a
+        # command at an infra commit from 10:32Z was accepted at 14:32Z and
+        # rebuilt a lane already on a newer commit, and four more full
+        # rebuilds re-delivered omnimarket merges the lane already vendored.
+        # A CI command whose every ref is already running is recorded
+        # superseded and acknowledged, so it neither runs nor blocks the
+        # commands behind it. Any other command at or behind the running
+        # build builds at the running ref, never behind it. A diverged ref off
+        # the tracking branch is refused. A signed rollback declaration is the
+        # one way backwards. Every comparison the host cannot make lets the
+        # command build as requested.
         lineage = self._lineage_decision(cmd)
         if lineage is not None and lineage.verdict.refuses:
             logger.warning(
                 "Rejecting command %s: %s", cmd.correlation_id, lineage.journal_line()
             )
             self._commit_through(msg)
-            if lineage.verdict is EnumLineageVerdict.STALE_ANCESTOR:
-                return None, self._reject(
-                    EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD, cmd=cmd
-                )
             return None, self._reject(EnumRejectionReason.DIVERGENT_REF, cmd=cmd)
+        if lineage is not None and lineage.verdict.supersedes:
+            logger.info(
+                "Superseding command %s: %s", cmd.correlation_id, lineage.journal_line()
+            )
+            self.job_store.record_superseded_by_running_build(
+                cmd.correlation_id,
+                command=self._command_payload(msg),
+                lineage=lineage,
+            )
+            self._commit_through(msg)
+            return None, self._reject(
+                EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD, cmd=cmd
+            )
+        if lineage is not None and not lineage.verdict.permits_coalescing:
+            lookahead = []
 
         # Step 6b: Coalesce (OMN-18143). The newest foldable command in the
         # batch runs; every one it replaces gets a durable terminal record and
@@ -540,12 +565,24 @@ class DeployConsumer:
                 e,
             )
 
-        # Step 8: Persist job state
+        # Step 8: Persist job state. The lineage decision is the head's, so it
+        # is recorded, and its build ref applied, only when the head is what
+        # runs. A folded runner descends from a head the fence found at or
+        # ahead of the running build, so it builds its own ref.
+        runner_lineage = lineage if runner_cmd is cmd else None
         self.job_store.accept(
             correlation_id=runner_cmd.correlation_id,
             command=self._command_payload(runner_msg),
             superseded_correlation_ids=superseded_ids,
+            lineage=runner_lineage,
         )
+        if (
+            runner_lineage is not None
+            and runner_lineage.build_ref != runner_cmd.git_ref
+        ):
+            runner_cmd = runner_cmd.model_copy(
+                update={"git_ref": runner_lineage.build_ref}
+            )
 
         # Step 9: Commit offset. The runner's offset is at or past every
         # superseded record's, so one commit covers the whole group.
@@ -567,19 +604,24 @@ class DeployConsumer:
 
         Off means this consumer was built without a running-build reader or
         without an ancestry resolver, which is every test that does not ask
-        for the fence. The verdict is journalled whether it refuses or not, so
-        an accepted command still records which comparison let it through.
+        for the fence. The verdict is journalled on every path, so an accepted
+        command still records which comparison let it through.
         """
-        if self.running_build_ref is None or self.ancestry_resolver is None:
+        if self.running_build is None or self.ancestry_resolver is None:
             return None
-        reader = self.running_build_ref
+        reader = self.running_build
+        # Without a sibling resolver no sibling ref is proven contained, which
+        # is the direction that builds rather than supersedes.
+        sibling_ancestry = self.sibling_ancestry or SiblingCloneAncestry(None)
         decision = decide_lineage(
             cmd,
-            read_running_ref=lambda: reader(cmd.runtime_lane),
+            read_running_build=lambda: reader(cmd.runtime_lane),
             contains=self.ancestry_resolver,
+            contains_sibling=sibling_ancestry,
+            resolve_ref=self.ref_resolver,
             tracking_ref=self.tracking_ref,
         )
-        if not decision.verdict.refuses:
+        if not (decision.verdict.refuses or decision.verdict.supersedes):
             logger.info("%s %s", cmd.correlation_id, decision.journal_line())
         return decision
 

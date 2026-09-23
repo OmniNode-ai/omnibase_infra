@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Refuse a rebuild whose ref is behind the build the lane already runs (OMN-19270).
+"""Never rebuild what the lane already runs, and never rebuild it backwards (OMN-19270).
 
 WHAT THIS COST, MEASURED
 ------------------------
@@ -15,78 +15,95 @@ between. The next command, ``e074126b`` at ``533b19c23``, was also behind
 ``0edf5c914``. The lane did not return to ``0edf5c914`` until ``602b1d61``
 completed at 17:18:52Z, nearly three hours after the rollback.
 
-Nothing in the accept protocol could have refused it. ``coalesce`` folds a
-prefix of commands that arrived TOGETHER, so a stale command that arrives alone
-is invisible to it. ``ref_fence`` refuses a stale branch ALIAS and by design
-lets every 40-hex SHA through, and the deploy-publish path pins SHAs. The
-image already records what it was built from (``infra_vcs_ref`` in
+Behind those two came four more full rebuilds -- ``602b1d61``, ``5ce1f33e``,
+``f645854b``, ``98bb76df`` -- each triggered by an omnimarket merge from
+13:37Z-13:51Z, each at infra ``0edf5c914``, and each accepted hours later.
+The trigger resolves the infra dev head when it publishes, so every ref was
+right when it was sent. By the time each ran, the lane already vendored the
+omnimarket merge it was sent to deliver. ``98bb76df``, the last, failed
+post-deploy verification and left the runtime container in ``Created``.
+
+Nothing in the accept protocol could have prevented any of it. ``coalesce``
+folds a prefix of commands that arrived TOGETHER, so a stale command that
+arrives alone is invisible to it. ``ref_fence`` refuses a stale branch ALIAS
+and by design lets every 40-hex SHA through. The image already records what
+it was built from (``infra_vcs_ref`` and each sibling's ``vcs_ref`` in
 ``/app/build-provenance.json``), but the agent never read it.
 
-THE RULE: ANCESTRY, NEVER ORDERING
------------------------------------
-"Older" is decided by git ancestry against the running build's
-``infra_vcs_ref``, never by a timestamp or an offset. Only a 40-hex SHA
-command is compared:
+THE RULE: ANCESTRY AGAINST PROVENANCE, NEVER ORDERING
+------------------------------------------------------
+Every decision is git ancestry against the running build's provenance, never a
+timestamp or an offset.
 
-``STALE_ANCESTOR`` (refused, ``superseded_by_running_build``)
-    The ref is a strict ancestor of the running build. The lane already runs
-    that work, and building it would roll the lane back.
+1. **Supersede what is already running.** A CI-triggered command
+   (``requested_by`` ``gha/<repo>/...``) whose infra ref AND every named
+   sibling ref are ancestors of, or equal to, the running build's refs is
+   ``CONTAINED``: recorded ``superseded``, acknowledged with
+   ``superseded_by_running_build``, never built.
 
-``DESCENDANT`` (accepted)
-    The running build is an ancestor of the ref. This is the normal forward
-    deploy.
+   A command is only superseded on proof. A command triggered by a SIBLING
+   that names no ref for that sibling (``sibling_refs``) cannot be shown to be
+   delivered already, and it builds. Its new code is the sibling's, staged at
+   build time, and superseding it on the infra ref alone would strand every
+   sibling merge that lands while infra is quiet. A command from anyone other
+   than CI -- an operator, lab-health triage -- is deliberate, and it is never
+   superseded, because a same-ref rebuild is how a wedged lane is recovered.
 
-``EQUAL`` (not refused here)
-    The ref IS the running build's ref. A command at the same infra ref is NOT
-    a duplicate build. A sibling-repository merge publishes the infra dev HEAD
-    as its ``git_ref`` and gets the sibling's new code only because the build
-    stages each sibling at build time. Refusing an equal ref would strand every
-    sibling merge that lands while infra is quiet. An equal-ref command
-    therefore goes through the existing duplicate path, which refuses the same
-    correlation id twice and nothing else.
+2. **Never build backwards.** A command that is not superseded builds at the
+   newer of its ref and the running ref. An infra ref that is a strict
+   ancestor of the running build is ``RAISED`` to the running ref. Siblings need
+   no raise: a workspace build stages each from its dev branch, which is never
+   behind what the lane vendors.
 
-``RETURNS_TO_TRACKING`` (accepted)
-    The ref and the running build have diverged, and the ref is on the lane's
-    own tracking branch. This is a lane coming back to its lineage after it ran
-    a build from off that branch.
+3. **Diverged is refused unless it is the way home.** An infra ref that is
+   neither ancestor nor descendant of the running build is ``DIVERGENT`` and
+   refused with ``divergent_ref``, unless it is on the lane's tracking branch.
+   That exception is ``RETURNS_TO_TRACKING``: a lane left on an off-branch
+   build, such as a pre-PR proof at a PR head, must not refuse every dev command
+   until someone declares a rollback.
 
-``DIVERGENT`` (refused, ``divergent_ref``)
-    The ref and the running build have diverged, and the ref is not shown to
-    be on the tracking branch. Building it would move the lane sideways onto
-    code nothing merged. The refusal stands when the tracking-branch check
-    cannot be answered, because an unproven exemption does not lift a proven
-    divergence.
+4. **A declared rollback is the only way backwards.** A command carrying a
+   signed ``ModelRollbackDeclaration`` is built exactly as asked, and
+   coalescing never folds it.
 
-``ROLLBACK_DECLARED`` (accepted)
-    The command carries a signed ``ModelRollbackDeclaration`` naming an actor
-    and a reason. Deliberate rollbacks MUST get through, or this fence would
-    remove the way to recover from a bad build.
+5. **A symbolic ref is resolved at accept time.** ``origin/dev`` is resolved in
+   the deploy clone after a fetch, and the job builds that exact sha and
+   records it. Job ``c009462c`` asked for ``origin/dev`` and its record kept only
+   the alias, so which commit it built had to be recovered from an image tag.
 
-WHAT FALLS BACK TO THE PRE-CHANGE BEHAVIOUR
--------------------------------------------
-``NOT_APPLICABLE`` covers a command that pins an image, which is a promotion of
-an exact artifact and not a rebuild from a ref, and a branch alias, which
-``ref_fence`` owns. ``UNPROVEN`` covers a running build whose ref cannot be read
-(a lane that is down has no container to read, and a lane that is down is
-exactly the lane that must accept a rebuild) and an ancestry question the clone
-cannot answer. Both are accepted, and both write a journal line. This is the
-same rule ``coalesce`` follows: a comparison the host cannot make degrades to
-running the command as before, rather than to a refusal nothing can correct.
+6. **Missing provenance fails open.** A running build that cannot be read, an
+   alias that cannot be resolved, or an ancestry the clone cannot answer is
+   ``UNPROVEN``, and the command builds as requested. A lane that is down has
+   no container to read, and a lane that is down is exactly the lane that must
+   accept a rebuild.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import subprocess  # fixed argv, no shell, trusted docker binary
+import re
+import subprocess  # fixed argv, no shell, trusted docker and git binaries
 from collections.abc import Callable
-from enum import StrEnum
-from typing import Final
+from pathlib import Path
+from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict
 
-from deploy_agent.coalesce import SHA_RE, AncestryResolver
-from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested
+from deploy_agent.coalesce import (
+    GIT_FETCH_TIMEOUT_SECONDS,
+    GIT_TIMEOUT_SECONDS,
+    SHA_RE,
+    AncestryResolver,
+    GitAncestryResolver,
+)
+from deploy_agent.events import (
+    INFRA_REPOSITORY,
+    EnumLineageVerdict,
+    EnumRuntimeLane,
+    ModelLineageDecision,
+    ModelRebuildRequested,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,155 +116,245 @@ BUILD_PROVENANCE_PATH: Final = "/app/build-provenance.json"
 #: freshness.
 PROVENANCE_READ_TIMEOUT_SECONDS: Final = 15
 
-#: Returns the infra commit the lane's running build was made from, or ``None``
-#: when it cannot be read. ``None`` is a measured absence, never a guess.
-RunningBuildRefReader = Callable[[EnumRuntimeLane], str | None]
+#: ``requested_by`` of a command the CI rebuild trigger published:
+#: ``gha/<source repository>/pr-<n>``.
+_CI_REQUESTER_RE: Final = re.compile(r"^gha/([a-z][a-z0-9_]*)/")
 
 
-class EnumLineageVerdict(StrEnum):
-    """Where a command's ref sits relative to the build the lane runs."""
-
-    DESCENDANT = "descendant"
-    EQUAL = "equal"
-    RETURNS_TO_TRACKING = "returns_to_tracking"
-    ROLLBACK_DECLARED = "rollback_declared"
-    NOT_APPLICABLE = "not_applicable"
-    UNPROVEN = "unproven"
-    STALE_ANCESTOR = "stale_ancestor"
-    DIVERGENT = "divergent"
-
-    @property
-    def refuses(self) -> bool:
-        return self in (EnumLineageVerdict.STALE_ANCESTOR, EnumLineageVerdict.DIVERGENT)
-
-
-class ModelLineageDecision(BaseModel):
-    """One command's lineage verdict and the facts it was reached from."""
+class ModelRunningBuild(BaseModel):
+    """What the lane's runtime image says it was built from."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    verdict: EnumLineageVerdict
-    requested_ref: str
-    running_ref: str | None
-    detail: str
+    infra_ref: str
+    #: Sibling repository -> the commit the build vendored. A sibling the image
+    #: recorded as dirty, or did not record, is absent: nothing can be proven
+    #: contained in a tree nobody can name.
+    sibling_refs: dict[str, str] = {}
 
-    def journal_line(self) -> str:
-        return (
-            f"lineage: {self.verdict.value} (requested={self.requested_ref} "
-            f"running={self.running_ref or 'unread'}): {self.detail}"
+
+#: Returns the lane's running build, or ``None`` when it cannot be read.
+RunningBuildReader = Callable[[EnumRuntimeLane], ModelRunningBuild | None]
+
+#: Resolves a symbolic ref to a 40-hex sha in the deploy clone, or ``None``.
+RefResolver = Callable[[str], str | None]
+
+#: ``(repository, earlier, later)`` -> whether ``earlier`` is an ancestor of,
+#: or equal to, ``later`` in that sibling's clone; ``None`` when unanswerable.
+SiblingAncestryResolver = Callable[[str, str, str], bool | None]
+
+
+def ci_source_repository(requested_by: str) -> str | None:
+    """The repository whose merge the CI trigger published this command for."""
+    match = _CI_REQUESTER_RE.match(requested_by)
+    return match.group(1) if match else None
+
+
+def _containment(
+    cmd: ModelRebuildRequested,
+    running: ModelRunningBuild,
+    contains_sibling: SiblingAncestryResolver,
+) -> tuple[bool, str]:
+    """Whether every sibling ref ``cmd`` names is in ``running``, and why not.
+
+    Called only once the infra ref is known to be contained. Returns the
+    reason in the negative case, because the journal line for a command that
+    builds must say why it was not superseded.
+    """
+    source = ci_source_repository(cmd.requested_by)
+    if source is None:
+        return False, (
+            f"requested by {cmd.requested_by!r}, not by a CI trigger; a "
+            "deliberate request is never superseded"
         )
+    if source != INFRA_REPOSITORY and source not in cmd.sibling_refs:
+        return False, (
+            f"triggered by a {source} merge but names no {source} ref, so it "
+            "cannot be proven already delivered"
+        )
+    for repo, sha in sorted(cmd.sibling_refs.items()):
+        running_sha = running.sibling_refs.get(repo)
+        if running_sha is None:
+            return False, f"the running build records no clean {repo} revision"
+        if sha == running_sha:
+            continue
+        if contains_sibling(repo, sha, running_sha) is not True:
+            return False, (
+                f"{repo} {sha} is not shown to be in the running build's "
+                f"{repo} {running_sha}"
+            )
+    return True, "every ref the command names is already in the running build"
 
 
 def decide_lineage(
     cmd: ModelRebuildRequested,
     *,
-    read_running_ref: Callable[[], str | None],
+    read_running_build: Callable[[], ModelRunningBuild | None],
     contains: AncestryResolver,
+    contains_sibling: SiblingAncestryResolver,
+    resolve_ref: RefResolver | None,
     tracking_ref: str | None,
 ) -> ModelLineageDecision:
     """Classify ``cmd`` against the running build. Pure apart from its callables.
 
-    ``read_running_ref`` is called only for a command the fence applies to, so
-    a promotion or an alias never costs a ``docker exec``.
+    ``read_running_build`` is called only for a command the comparison applies
+    to, so a promotion or a declared rollback never costs a ``docker exec``.
     """
     requested = cmd.git_ref
 
     def decision(
-        verdict: EnumLineageVerdict, detail: str, running: str | None = None
+        verdict: EnumLineageVerdict,
+        detail: str,
+        *,
+        build: str,
+        resolved: str | None = None,
+        running: str | None = None,
     ) -> ModelLineageDecision:
         return ModelLineageDecision(
             verdict=verdict,
             requested_ref=requested,
+            resolved_ref=resolved,
             running_ref=running,
+            build_ref=build,
             detail=detail,
         )
 
-    if cmd.rollback is not None:
-        return decision(
-            EnumLineageVerdict.ROLLBACK_DECLARED,
-            f"rollback declared by {cmd.rollback.actor!r}: {cmd.rollback.reason}",
-        )
     if cmd.image_ref or cmd.image_digest:
         return decision(
             EnumLineageVerdict.NOT_APPLICABLE,
             "the command pins an image, which is a promotion and not a rebuild "
             "from a ref",
+            build=requested,
         )
+
+    ref = requested
+    resolved: str | None = None
     if not SHA_RE.match(requested):
+        answer_sha = resolve_ref(requested) if resolve_ref is not None else None
+        if answer_sha is None or not SHA_RE.match(answer_sha):
+            return decision(
+                EnumLineageVerdict.UNPROVEN,
+                f"the symbolic ref {requested!r} could not be resolved at accept "
+                "time, so the command builds as requested",
+                build=requested,
+            )
+        ref = resolved = answer_sha
+
+    if cmd.rollback is not None:
         return decision(
-            EnumLineageVerdict.NOT_APPLICABLE,
-            "the ref is not a 40-hex commit sha; a branch alias is ref_fence's",
+            EnumLineageVerdict.ROLLBACK_DECLARED,
+            f"rollback declared by {cmd.rollback.actor!r}: {cmd.rollback.reason}",
+            build=ref,
+            resolved=resolved,
         )
 
-    running = read_running_ref()
-    if running is None or not SHA_RE.match(running):
+    running = read_running_build()
+    if running is None:
         return decision(
             EnumLineageVerdict.UNPROVEN,
-            "the running build's infra_vcs_ref could not be read, so there is "
-            "nothing to compare against and the command runs as before",
-            running,
+            "the running build's provenance could not be read, so the command "
+            "builds as requested",
+            build=ref,
+            resolved=resolved,
         )
-    if requested == running:
+    running_ref = running.infra_ref
+
+    def unproven(question: str) -> ModelLineageDecision:
         return decision(
-            EnumLineageVerdict.EQUAL,
-            "same infra ref as the running build; a sibling-triggered rebuild "
-            "carries new sibling code at the same ref, so only the correlation-id "
-            "duplicate check applies",
-            running,
+            EnumLineageVerdict.UNPROVEN,
+            f"{question} could not be established, so the command builds as requested",
+            build=ref,
+            resolved=resolved,
+            running=running_ref,
         )
 
-    behind = contains(requested, running)
-    if behind is None:
+    if ref == running_ref:
+        behind = False
+    else:
+        answer = contains(ref, running_ref)
+        if answer is None:
+            return unproven("whether the ref is an ancestor of the running build")
+        behind = answer
+        if not behind:
+            ahead = contains(running_ref, ref)
+            if ahead is None:
+                return unproven("whether the ref descends from the running build")
+            if ahead:
+                return decision(
+                    EnumLineageVerdict.DESCENDANT,
+                    "the ref descends from the running build",
+                    build=ref,
+                    resolved=resolved,
+                    running=running_ref,
+                )
+            if tracking_ref is not None and contains(ref, tracking_ref) is True:
+                return decision(
+                    EnumLineageVerdict.RETURNS_TO_TRACKING,
+                    f"the ref has diverged from the running build and is on "
+                    f"{tracking_ref}; the lane returns to its own lineage",
+                    build=ref,
+                    resolved=resolved,
+                    running=running_ref,
+                )
+            return decision(
+                EnumLineageVerdict.DIVERGENT,
+                "the ref has diverged from the running build and is not shown "
+                f"to be on the tracking branch {tracking_ref or '(undeclared)'}; "
+                "a deliberate deploy of it carries a rollback declaration",
+                build=ref,
+                resolved=resolved,
+                running=running_ref,
+            )
+
+    # The infra ref is at or behind the running build.
+    contained, why = _containment(cmd, running, contains_sibling)
+    if contained:
         return decision(
-            EnumLineageVerdict.UNPROVEN,
-            "whether the ref is an ancestor of the running build could not be "
-            "established",
-            running,
+            EnumLineageVerdict.CONTAINED,
+            why,
+            build=running_ref,
+            resolved=resolved,
+            running=running_ref,
         )
     if behind:
         return decision(
-            EnumLineageVerdict.STALE_ANCESTOR,
-            "the ref is a strict ancestor of the running build; building it "
-            "would roll the lane back",
-            running,
-        )
-
-    ahead = contains(running, requested)
-    if ahead is None:
-        return decision(
-            EnumLineageVerdict.UNPROVEN,
-            "whether the ref descends from the running build could not be established",
-            running,
-        )
-    if ahead:
-        return decision(
-            EnumLineageVerdict.DESCENDANT,
-            "the ref descends from the running build",
-            running,
-        )
-
-    if tracking_ref is not None and contains(requested, tracking_ref) is True:
-        return decision(
-            EnumLineageVerdict.RETURNS_TO_TRACKING,
-            f"the ref has diverged from the running build and is on "
-            f"{tracking_ref}; the lane returns to its own lineage",
-            running,
+            EnumLineageVerdict.RAISED,
+            "the ref is a strict ancestor of the running build, so it builds at "
+            f"the running ref instead of rolling the lane back; not superseded "
+            f"because {why}",
+            build=running_ref,
+            resolved=resolved,
+            running=running_ref,
         )
     return decision(
-        EnumLineageVerdict.DIVERGENT,
-        "the ref has diverged from the running build and is not shown to be on "
-        f"the tracking branch {tracking_ref or '(undeclared)'}; a deliberate "
-        "deploy of it carries a rollback declaration",
-        running,
+        EnumLineageVerdict.EQUAL,
+        f"same infra ref as the running build; not superseded because {why}",
+        build=ref,
+        resolved=resolved,
+        running=running_ref,
     )
 
 
+def _clean_sibling_refs(provenance: dict[str, Any]) -> dict[str, str]:
+    siblings = (provenance.get("per_repo_vcs_provenance") or {}).get("siblings")
+    if not isinstance(siblings, dict):
+        return {}
+    refs: dict[str, str] = {}
+    for repo, record in siblings.items():
+        if not isinstance(record, dict) or record.get("vcs_dirty") is not False:
+            continue
+        sha = record.get("vcs_ref")
+        if isinstance(sha, str) and SHA_RE.match(sha):
+            refs[str(repo)] = sha
+    return refs
+
+
 class DockerProvenanceReader:
-    """Reads ``infra_vcs_ref`` out of a lane's running runtime container.
+    """Reads the running build out of a lane's runtime container.
 
     Every failure is ``None``: a container that is absent, stopped, or carries
     a provenance file this cannot parse has no ref to compare against, and the
-    caller's contract is that an unread ref lets the command run.
+    caller's contract is that an unread build lets the command run.
     """
 
     def __init__(
@@ -269,7 +376,7 @@ class DockerProvenanceReader:
             check=False,
         )
 
-    def __call__(self, lane: EnumRuntimeLane) -> str | None:
+    def __call__(self, lane: EnumRuntimeLane) -> ModelRunningBuild | None:
         try:
             container = self._container_for_lane(lane)
             result = self._run(
@@ -294,7 +401,8 @@ class DockerProvenanceReader:
             )
             return None
         try:
-            ref = json.loads(result.stdout).get("infra_vcs_ref")
+            provenance = json.loads(result.stdout)
+            ref = provenance.get("infra_vcs_ref")
         except (ValueError, AttributeError) as exc:
             logger.info(
                 "lineage: %s in %s is not a JSON object (%s)",
@@ -311,4 +419,101 @@ class DockerProvenanceReader:
                 ref,
             )
             return None
-        return ref
+        return ModelRunningBuild(
+            infra_ref=ref, sibling_refs=_clean_sibling_refs(provenance)
+        )
+
+
+class GitRefResolver:
+    """Resolves a symbolic ref to the sha it names NOW, in the deploy clone.
+
+    Fetches first and unconditionally: the point is to record the commit the
+    job will build, and an alias resolved against a stale remote-tracking ref
+    names a commit the git phase's own fetch would move past. A failed fetch
+    is ``None`` rather than a resolution against what the clone happens to
+    hold, for the same reason; the command then builds as requested and the
+    git phase reports its own fetch failure.
+    """
+
+    def __init__(
+        self,
+        repo_dir: str,
+        *,
+        run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    ) -> None:
+        self.repo_dir = repo_dir
+        self._run = run or GitAncestryResolver._default_run
+
+    def __call__(self, ref: str) -> str | None:
+        try:
+            fetched = self._run(
+                ["git", "-C", self.repo_dir, "fetch", "--quiet", "--no-tags", "origin"],
+                timeout=GIT_FETCH_TIMEOUT_SECONDS,
+            )
+            if fetched.returncode != 0:
+                logger.info(
+                    "lineage: fetch into %s exited %d, so %r stays unresolved: %s",
+                    self.repo_dir,
+                    fetched.returncode,
+                    ref,
+                    (fetched.stderr or "")[:200],
+                )
+                return None
+            result = self._run(
+                [
+                    "git",
+                    "-C",
+                    self.repo_dir,
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    f"{ref}^{{commit}}",
+                ],
+                timeout=GIT_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001 - an unresolvable ref is unresolved
+            logger.info(
+                "lineage: %r could not be resolved (%s: %s)",
+                ref,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+        sha = (result.stdout or "").strip()
+        if result.returncode != 0 or not SHA_RE.match(sha):
+            logger.info("lineage: %r does not name a commit in %s", ref, self.repo_dir)
+            return None
+        return sha
+
+
+class SiblingCloneAncestry:
+    """Answers sibling ancestry in the clone the workspace build stages from.
+
+    The build stages ``<OMNI_HOME>/<repository>``, so that clone is the one
+    whose history the vendored ``vcs_ref`` came from. One ``GitAncestryResolver``
+    per repository keeps each clone's fetch cooldown separate. With no
+    ``OMNI_HOME``, or a clone that is not there, every answer is ``None``, and
+    a command is then never superseded on a sibling it could not check.
+    """
+
+    def __init__(
+        self,
+        omni_home: str | None,
+        *,
+        resolver_for: Callable[[str], AncestryResolver] | None = None,
+    ) -> None:
+        self._omni_home = omni_home
+        self._resolver_for = resolver_for or GitAncestryResolver
+        self._resolvers: dict[str, AncestryResolver] = {}
+
+    def __call__(self, repo: str, earlier: str, later: str) -> bool | None:
+        if not self._omni_home:
+            return None
+        clone = Path(self._omni_home) / repo
+        if not (clone / ".git").exists():
+            logger.info("lineage: no %s clone at %s to compare in", repo, clone)
+            return None
+        resolver = self._resolvers.get(repo)
+        if resolver is None:
+            resolver = self._resolvers[repo] = self._resolver_for(str(clone))
+        return resolver(earlier, later)
