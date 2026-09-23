@@ -281,48 +281,19 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # went red on the bot's pin-advance pull request naming both entries, the
     # deletion rode that commit, and the regeneration wrote nothing.
     #
+    # OMN-18903 added ci_attempt_outcome, and it was DELETED here by the pin
+    # advance to fcc374d5908f, which carries omnimarket#2730 -- the retiring
+    # pull request the entry named in its own comment. The node
+    # node_projection_ci_attempt_outcome now declares the relation in its
+    # db_io.db_tables with the same schema, access (read_write) and role
+    # (ci_attempts) the bridge carried. Same mechanism and same proof as the
+    # entries above: the expiry module went red on the bot's pin-advance pull
+    # request naming it, the deletion rode that pull request, and the
+    # regeneration wrote nothing.
+    #
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
-    #
-    # OMN-18903: ci_attempt_outcome, the per-attempt continuous-integration
-    # outcome read model, in exactly the window this manifest exists for. The
-    # migration is vendored here; the node that declares it in db_io.db_tables
-    # is omnimarket#2730, which cannot merge until this vendoring lands --
-    # its node-migration vendor-parity gate refuses a node migration with no
-    # counterpart on this repo's integration branch, naming both files. This
-    # repo in turn cannot derive the declaration from the committed pin,
-    # because the pin predates that node. Declaring it here breaks the cycle
-    # without pointing the pin at an unmerged commit, which is the one thing
-    # the OMN-18863 remedy is explicit that it must not do.
-    #
-    # Regenerating INSTEAD of adding this entry is the wrong move and the
-    # failure text says so: it would DELETE the shipped declaration while the
-    # vendored migration still grants the relation, which trips the OMN-18768
-    # reverse ratchet and refuses the projection binding at boot -- taking the
-    # whole runtime process down rather than one handler.
-    #
-    # Retired by the pin advance past omnimarket#2730. The expiry module goes
-    # red naming this relation on that advance; that redness is the
-    # instruction to delete these lines and the map entry together.
-    ContractTableDeclaration(
-        node="legacy_migration:ci_attempt_outcome",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_ci_attempt_outcome/"
-            "0000_create_ci_attempt_outcome.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="ci_attempt_outcome",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_ci_attempt_outcome/"
-                "0000_create_ci_attempt_outcome.sql"
-            ),
-            access="read_write",
-            role="ci_attempts",
-        ),
-    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
