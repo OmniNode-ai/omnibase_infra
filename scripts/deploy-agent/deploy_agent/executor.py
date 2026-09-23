@@ -1620,11 +1620,22 @@ class DeployExecutor:
         # without this the terminal event named one repository's commit and left
         # the other three to be inferred from the image.
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
+        # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
+        # stages, so every RUN after it takes the value as build environment
+        # and a new timestamp misses the cache for the whole image. The
+        # dev-lane-only build (OMN-18108) is a second `compose build` of the
+        # same Dockerfile and args; stamping it with its own clock re-ran the
+        # full build from scratch (2% cached, 46 min at load 163 on .201,
+        # 2026-09-22) and killed two consecutive dev-lane rebuilds at the
+        # 3600s hard bound after the first build had already succeeded.
+        self.deploy_build_date: str | None = None
 
     def reset_deploy_observations(self) -> None:
         """Clear per-job observations at the start of a rebuild."""
         self.container_residue = []
         self.sibling_source_refs = {}
+        self.deploy_build_date = None
         self.recreate_supervision = []
         self.verify_recreate = []
         self.deps_convergence = []
@@ -3542,7 +3553,11 @@ class DeployExecutor:
 
         import datetime
 
-        build_date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if self.deploy_build_date is None:
+            self.deploy_build_date = datetime.datetime.now(datetime.UTC).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+        build_date = self.deploy_build_date
         runtime_version = _runtime_version_from_pyproject()
 
         compose_file_args: list[str] = []
@@ -3608,10 +3623,14 @@ class DeployExecutor:
             on_phase_update(build_phase, PhaseStatus.FAILED)
             # OMN-18615 (AC2): say what the build had DONE, not only what it
             # was allowed. subprocess.run communicates before re-raising, so
-            # the partial BuildKit progress output is on the exception --
-            # stderr is where compose writes it, stdout is the fallback.
+            # the partial BuildKit progress output is on the exception.
+            # OMN-19208: BOTH streams, never one-or-the-other. Compose v5
+            # (bake) writes the `#N DONE` progress to STDOUT and only its
+            # ` Image X Building` summary to stderr, so preferring a
+            # non-empty stderr read zero steps and called every kill a STALL
+            # (measured on .201: compose v5.1.0, buildx v0.31.1).
             progress = parse_build_progress(
-                _decode_stream(exc.stderr) or _decode_stream(exc.stdout)
+                "\n".join((_decode_stream(exc.stdout), _decode_stream(exc.stderr)))
             )
             raise RuntimeError(
                 f"{EnumBuildOutcome.BUDGET_EXHAUSTED.value}: runtime image "

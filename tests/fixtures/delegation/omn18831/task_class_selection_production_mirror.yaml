@@ -24,31 +24,51 @@
 # contract affects routing. The contract declares no `selection_fallback`,
 # so an unclaimed prompt takes the evaluator's own DEFAULT_TASK_TYPE -- and
 # this file declares none either, for the same reason.
-version: omn18831-production-mirror
 execution_budgets:
-  code_generation: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  code_review: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  complex_reasoning: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  document: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  planning: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  reasoning: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  refactor: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  research: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  review: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  summarization: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
-  test: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
+  code_generation:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  code_review:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  complex_reasoning:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  document:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  planning:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  reasoning:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  refactor:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  research:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  review:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  summarization:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
+  test:
+    task_class_timeout_ceiling_seconds: 240
+    terminal_delivery_margin_seconds: 60
 task_classes:
   code_generation:
     gateway_exposure: public
     selection:
-      priority: 30
       max_words: 600
       phrases:
       - implement
       - port the
       - scaffold
+      priority: 30
       qualified_phrases:
-        within_words: 6
         phrases:
         - build a
         - build an
@@ -120,10 +140,10 @@ task_classes:
         - workflow
         - wrapper
         - yaml
+        within_words: 6
   code_review:
     gateway_exposure: public
     selection:
-      priority: 72
       phrases:
       - code review
       - review the diff
@@ -132,10 +152,10 @@ task_classes:
       - review this diff
       - review this patch
       - review this pr
+      priority: 72
   complex_reasoning:
     gateway_exposure: public
     selection:
-      priority: 70
       min_words: 40
       phrases:
       - argue against
@@ -146,10 +166,10 @@ task_classes:
       - trade-offs
       - tradeoffs
       - weigh the options
+      priority: 70
   document:
     gateway_exposure: public
     selection:
-      priority: 62
       phrases:
       - docstring
       - document
@@ -158,10 +178,10 @@ task_classes:
       - readme
       - write docs
       - write the docs
+      priority: 62
   planning:
     gateway_exposure: public
     selection:
-      priority: 75
       min_words: 40
       phrases:
       - backlog
@@ -173,10 +193,10 @@ task_classes:
       - prioritize
       - roadmap
       - sequence the work
+      priority: 75
   reasoning:
     gateway_exposure: public
     selection:
-      priority: 55
       min_words: 20
       phrases:
       - compare
@@ -186,10 +206,10 @@ task_classes:
       - reason about
       - why does
       - why is
+      priority: 55
   refactor:
     gateway_exposure: public
     selection:
-      priority: 45
       max_words: 600
       phrases:
       - clean up
@@ -200,10 +220,10 @@ task_classes:
       - refactor
       - rename
       - simplify
+      priority: 45
   research:
     gateway_exposure: public
     selection:
-      priority: 50
       phrases:
       - find out
       - investigate
@@ -212,20 +232,20 @@ task_classes:
       - survey
       - what does
       - what is
+      priority: 50
   review:
     gateway_exposure: public
     selection:
-      priority: 60
       phrases:
       - assess
       - audit
       - critique
       - evaluate
       - review
+      priority: 60
   summarization:
     gateway_exposure: public
     selection:
-      priority: 80
       min_words: 120
       phrases:
       - digest
@@ -240,10 +260,10 @@ task_classes:
       - what happened
       - write up
       - write-up
+      priority: 80
   test:
     gateway_exposure: public
     selection:
-      priority: 40
       max_words: 1500
       phrases:
       - add a test
@@ -251,19 +271,19 @@ task_classes:
       - assertionerror
       - failing test
       - pytest
-      - test case
-      - test cases
       - test failure
       - traceback
       - unit test
       - unit tests
       - write a test
       - write tests
+      priority: 40
       qualified_phrases:
-        within_words: 6
         phrases:
         - assertion
         - assertions
+        - test case
+        - test cases
         qualifiers:
         - assert
         - asserts
@@ -281,7 +301,8 @@ task_classes:
         - spec
         - specs
         - suite
-        - test
         - testing
         - tests
         - unittest
+        within_words: 6
+version: omn18831-production-mirror

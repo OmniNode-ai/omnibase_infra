@@ -75,6 +75,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - ci_attempt_outcome
               - consumer_flow_windows
               - delegate_skill_command_claims
               - dod_verify_runs
@@ -367,5 +368,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: eb3cf98addb2179229591fc57cd2ec07d952f870919061681cc908e82c2ded8f
+  sha256: 39199cdf87f28f9015c864e30515f36acec4fbf148d9d90a7cea066098b745f7
 topology_instance: onex-dev

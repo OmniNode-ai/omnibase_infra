@@ -75,6 +75,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - ci_attempt_outcome
               - consumer_flow_windows
               - delegate_skill_command_claims
               - dod_verify_runs

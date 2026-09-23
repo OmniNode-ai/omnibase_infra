@@ -1,0 +1,177 @@
+{
+    "files": {
+        "catalogue": "a7b29ec451f2fddf292242b47a44751051134f99d69dcaf180f760727f208433",
+        "catalogue_module": "64b3a34aedc77cbc14f025ff5b50570b617671c232dbdcf25bcaaf759314b3ec",
+        "house_validator": "3645da058bec7b598b8271540508c8e7e6c0033e57fb71b1e0322bd1e0535593",
+        "platform_contract": "1a05f09bb980ca93a05a29659eac0498c69e0857c77f3f31f7529bdb152a4486"
+    },
+    "finding_classes": {
+        "declared_house_ref": "declared_house_ref",
+        "house_rung_identity_collision": "house_rung_identity_collision",
+        "no_customer_registerable_key": "no_customer_registerable_key"
+    },
+    "forbidden_pattern": "anthropic|claude",
+    "intake": {
+        "Claude-3": {
+            "accepted": false,
+            "errors": [
+                {
+                    "loc": [
+                        "provider"
+                    ],
+                    "msg": "Value error, 'Claude-3' is not a provider a key may be registered for. Offered: glm, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+                    "type": "value_error"
+                }
+            ],
+            "exception": "ValidationError"
+        },
+        "anthropic": {
+            "accepted": false,
+            "errors": [
+                {
+                    "loc": [
+                        "provider"
+                    ],
+                    "msg": "Value error, 'anthropic' is not a provider a key may be registered for. Offered: glm, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+                    "type": "value_error"
+                }
+            ],
+            "exception": "ValidationError"
+        },
+        "gemini": {
+            "accepted": false,
+            "errors": [
+                {
+                    "loc": [
+                        "provider"
+                    ],
+                    "msg": "Value error, 'gemini' is not a provider a key may be registered for. Offered: glm, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+                    "type": "value_error"
+                }
+            ],
+            "exception": "ValidationError"
+        },
+        "glm": {
+            "accepted": true
+        },
+        "openai": {
+            "accepted": false,
+            "errors": [
+                {
+                    "loc": [
+                        "provider"
+                    ],
+                    "msg": "Value error, 'openai' is not a provider a key may be registered for. Offered: glm, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+                    "type": "value_error"
+                }
+            ],
+            "exception": "ValidationError"
+        },
+        "openrouter": {
+            "accepted": true
+        },
+        "vertex": {
+            "accepted": false,
+            "errors": [
+                {
+                    "loc": [
+                        "provider"
+                    ],
+                    "msg": "Value error, 'vertex' is not a provider a key may be registered for. Offered: glm, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+                    "type": "value_error"
+                }
+            ],
+            "exception": "ValidationError"
+        }
+    },
+    "negative": {
+        "claude_row": {
+            "claude_hits": [
+                "anthropic"
+            ],
+            "injected": "anthropic"
+        },
+        "empty_rungs_fail_closed": {
+            "raised": {
+                "message": "no platform rungs supplied; the house-keyed set would be empty and every conjunct would pass vacuously",
+                "type": "HouseCatalogueError"
+            }
+        },
+        "house_declared_ref": {
+            "findings": [
+                {
+                    "finding_class": "declared_house_ref",
+                    "provider": "openrouter"
+                }
+            ],
+            "provider": "openrouter",
+            "value": "llm.openrouter.api_key"
+        },
+        "house_rung_collision": {
+            "findings": [
+                {
+                    "finding_class": "house_rung_identity_collision",
+                    "provider": "openrouter"
+                }
+            ],
+            "provider": "openrouter",
+            "value": "openrouter-qwen3-coder-480b"
+        },
+        "no_registerable_key": {
+            "findings": [
+                {
+                    "finding_class": "no_customer_registerable_key",
+                    "provider": "c12probe"
+                }
+            ],
+            "provider": "c12probe"
+        },
+        "parity_missing": {
+            "dropped": "gemini",
+            "missing_from_catalogue": [
+                "gemini"
+            ],
+            "unbacked_in_catalogue": []
+        },
+        "parity_unbacked": {
+            "injected": "openai",
+            "missing_from_catalogue": [],
+            "unbacked_in_catalogue": [
+                "openai"
+            ]
+        }
+    },
+    "omnimarket_version": "0.4.199",
+    "route": {
+        "body_models": [
+            "omnimarket.projection.credential_publisher.ModelInferenceCredentialCreateRequest"
+        ],
+        "bound_to_catalogue_model": true,
+        "prefix": "/v1/tenants/me/inference-credentials"
+    },
+    "shipped": {
+        "claude_hits": [],
+        "house_entry": {
+            "findings": []
+        },
+        "house_keyed_slugs": [
+            "gemini",
+            "glm",
+            "openrouter",
+            "vertex"
+        ],
+        "not_offered": [
+            "gemini",
+            "vertex"
+        ],
+        "offered": [
+            "glm",
+            "openrouter"
+        ],
+        "parity_gap": {
+            "missing_from_catalogue": [],
+            "unbacked_in_catalogue": []
+        },
+        "rung_count": 10
+    }
+}
