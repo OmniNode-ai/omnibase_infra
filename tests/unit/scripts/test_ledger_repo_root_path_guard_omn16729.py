@@ -172,7 +172,11 @@ def test_a_repo_root_ledger_is_refused_for_a_wrapped_command(repo: Path) -> None
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit
 def test_a_tracking_shaped_ledger_inside_the_repo_still_appends(repo: Path) -> None:
-    ledger = repo / "docs" / "tracking" / "ROLLING_WORK_LEDGER.md"
+    # Not named ROLLING_WORK_LEDGER.md: that file name is governed by the
+    # rolling ledger row grammar (OMN-19256), which judges the row type first and
+    # fails closed where its omni_home module is absent, as it is in this repo's
+    # CI. Nothing this module tests is scoped by file name.
+    ledger = repo / "docs" / "tracking" / "WORK_LEDGER.md"
     ledger.parent.mkdir(parents=True)
     row = _row("CLAIM_UPDATE")
 
