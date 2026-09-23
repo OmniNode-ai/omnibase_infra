@@ -221,6 +221,7 @@ validate_build_source_config() { :; }
 guard_prod_promotion_lineage() { :; }
 resolve_compose_project() { printf '%s\\n' "${FAKE_COMPOSE_PROJECT}"; }
 guard_dogfood_deploy_root() { :; }
+guard_password_contract() { :; }
 guard_cold_bringup_lane_scope() { :; }
 guard_lane_deploy_attribution() { :; }
 guard_hotpatch_ledger() { :; }

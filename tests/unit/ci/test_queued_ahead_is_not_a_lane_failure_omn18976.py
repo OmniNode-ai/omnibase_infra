@@ -187,7 +187,12 @@ class TestTheGateReadsTheNewestReceipt:
 
         from scripts.ci import lab_pass_receipt
 
-        source = inspect.getsource(lab_pass_receipt.evaluate_gate)
+        # OMN-19312 moved the per-lane read out of evaluate_gate into
+        # read_lane, which evaluate_gate reaches through _read_all for both the
+        # any-of and the all-of lanes. The ordering is asserted where it lives.
+        assert "_read_all(" in inspect.getsource(lab_pass_receipt.evaluate_gate)
+        assert "read_lane(" in inspect.getsource(lab_pass_receipt._read_all)
+        source = inspect.getsource(lab_pass_receipt.read_lane)
         assert "created_at" in source, (
             "evaluate_gate no longer orders candidate artifacts by creation "
             "time, so a later receipt for a sha cannot supersede an earlier one"

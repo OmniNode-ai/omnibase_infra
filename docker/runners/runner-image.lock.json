@@ -1,8 +1,8 @@
 {
   "base_image_digest": "sha256:3ba65aa20f86a0fad9df2b2c259c613df006b2e6d0bfcc8a146afb8c525a9751",
   "gh_version": "2.67.0",
-  "identity_digest": "c52a9e515e580ea8f93f88b77f870855",
-  "image_version": 8,
+  "identity_digest": "91972c55a19b204e7edad4bea3b8f97c",
+  "image_version": 9,
   "kubectl_version": "1.32.1",
   "python_version": "3.12",
   "runner_version": "2.336.0",
