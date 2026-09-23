@@ -117,6 +117,15 @@
 #   return a non-empty answer and the pool's zero is measured rather than an
 #   errored-and-empty read. No lane was mutated: every command in this attestation
 #   is a read.
+# verified: 2026-09-23 via read-only ssh to each host, `hostname`, `docker info --format '{{.Name}}'`
+#   and `docker ps -a` grouped by com.docker.compose.project (OMN-19088), the attestation for
+#   the `hosts:` registry and every lane's `hosts:` list this PR adds. STATE AT THIS LINE:
+#   .201 hostname `omninode-pc`, daemon `omninode-pc`, projects omnibase-infra 33,
+#   omnibase-infra-stability-test 16, omnibase-infra-judge 7, omnibase-infra-lakshman 7,
+#   omninode-ci-bus 1 and no omnibase-infra-dogfood; .101 hostname `Stickybeatz.local`,
+#   .105 hostname `omnibook` and .200 hostname `Stickybeatz-Studio.local`, all three with
+#   daemon name `docker-desktop` and each carrying only omnibase-infra-dogfood (10, 12 and 10
+#   containers). No lane was mutated: every command was a read.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -166,8 +175,40 @@
 schema_version: "1.0.0"
 # Default image-tag pattern applied to a lane that does not override it.
 default_image_tag_pattern: '.+'
+# hosts — WHERE each lane runs (OMN-19088).
+#
+# Until this block existed every lane was implicitly "the host the census runs
+# on", which was true while every lane lived on one host. The interim pre-PR proof
+# protocol put dogfood-shaped surfaces on three other hosts, and a census run there
+# filed every service of every lane on the lab host as absent: 25 criticals on the
+# .101 host on 2026-09-21, against one lane that was actually there and clean.
+#
+# Each lane names its host ids in `hosts:`. The census resolves the host it runs on
+# (LANE_CENSUS_HOST, default `hostname`; the refresh workflow passes the docker
+# daemon name) through `aliases` below, compared as the lowercase first DNS label,
+# so `Stickybeatz.local` and `stickybeatz` are one name. It evaluates only the
+# lanes declared for that host, reports the rest `lanes_not_applicable`, and files
+# `lane_on_undeclared_host` for a lane found RUNNING on a host its list does not
+# name. A host with no entry here is REFUSED (exit 5), never evaluated as every
+# host and never as none.
+#
+# An alias may be claimed by one host only, and `docker-desktop` may never be one:
+# every Docker Desktop daemon reports that name (the .101, .105 and .200 hosts all
+# did on 2026-09-23), so it identifies none of them.
+#
+# A new surface host is declared HERE, with its lanes, before a census runs there.
+hosts:
+  lab-201:
+    aliases: [omninode-pc]
+  lab-101:
+    aliases: [stickybeatz]
+  lab-105:
+    aliases: [omnibook]
+  lab-200:
+    aliases: [stickybeatz-studio]
 lanes:
   stability-test:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.stability-test.yml
     compose_project: omnibase-infra-stability-test
     network: omnibase-infra-stability-test-network
@@ -288,6 +329,7 @@ lanes:
       - name: omninode-stability-test-contract-resolver
         kind: profile_gated
   judge:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.judge.yml
     compose_project: omnibase-infra-judge
     network: omnibase-infra-judge-network
@@ -327,6 +369,7 @@ lanes:
   # IS up, the listed services must be running. This avoids a noisy false-positive
   # ticket every time a developer stops their local stack.
   dev:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.generated.yml
     compose_project: omnibase-infra
     network: omnibase-infra_default
@@ -491,6 +534,7 @@ lanes:
   # a worker replica count for contract completeness; that is a contract-shape
   # requirement, not a declaration that a worker container exists here.
   lakshman:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.lakshman.yml
     compose_project: omnibase-infra-lakshman
     network: omnibase-infra-lakshman-network
@@ -527,6 +571,7 @@ lanes:
   # Prospective OMN-18693 dogfood boundary: owner Codex; optional lane only.
   # No production or runtime evidence is asserted here; it is not deployed.
   dogfood:
+    hosts: [lab-105, lab-101, lab-200]
     compose_file: docker/docker-compose.dogfood.yml
     compose_project: omnibase-infra-dogfood
     network: omnibase-infra-dogfood-network
@@ -643,6 +688,7 @@ lanes:
   # a plain yaml.safe_load and the census must be able to name a container
   # literally.
   prepr-1:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.prepr.yml
     compose_project: omnibase-infra-prepr-1
     network: omnibase-infra-network
@@ -697,6 +743,7 @@ lanes:
         kind: service
         replicas: 1
   prepr-2:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.prepr.yml
     compose_project: omnibase-infra-prepr-2
     network: omnibase-infra-network
@@ -809,6 +856,7 @@ lanes:
   # So: the project exists, its network exists, both ports it claims are now held by
   # it, and the credential works from where it will actually be used.
   ci-bus:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.ci-bus.yml
     compose_project: omninode-ci-bus
     network: omninode-ci-bus-network
