@@ -1,0 +1,84 @@
+# OMN-18942 (AC-4): a scheduled workflow that is red only while an injection
+# window is open, so the failure-rate alerter has a KNOWN red scheduled run to
+# deliver to the chat destination, on demand, without leaving a standing red.
+#
+# WHY A SCHEDULED WORKFLOW. The evaluator counts `event == schedule` runs only,
+# so a run dispatched by hand could not exercise the alerter and would only look
+# as if it had. There is deliberately no workflow_dispatch trigger.
+#
+# THE WINDOW. Green on every tick unless the repository Actions variable
+# ALERTER_CANARY_INJECT_RED_UNTIL holds a UTC time (YYYY-MM-DDTHH:MM:SSZ) still
+# in the future. The window closes on its own, so a forgotten injection cannot
+# leave a permanent red. A malformed value is red, so a typo cannot read green.
+# To inject one red tick:
+#
+#   gh variable set ALERTER_CANARY_INJECT_RED_UNTIL --repo OmniNode-ai/omnibase_infra \
+#     --body "<a UTC time about 70 minutes ahead>"
+#
+# HOURLY. A single injected red is 1 of 1 at first, above the 10% threshold, so
+# it alerts on the next sweep; about ten green ticks later it is below the
+# threshold and the alert resolves the same day instead of standing for the
+# seven-day window.
+#
+# The logic is inline, not a script under scripts/: it is a fixture for the
+# alerter, not an enforcement guard, and tests/ci/
+# test_alerter_injected_red_canary_omn18942.py executes these exact bytes for
+# all four cases (fixture pair: known-bad and valid inputs, both run).
+name: Alerter injected-red canary (OMN-18942)
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+
+permissions: {}
+
+concurrency:
+  group: alerter-injected-red-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Alerter injected-red canary
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    steps:
+      - name: Fail while an injection window is open, pass otherwise
+        env:
+          INJECT_RED_UNTIL: ${{ vars.ALERTER_CANARY_INJECT_RED_UNTIL }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+          from datetime import datetime, timezone
+
+          FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+          raw = os.environ.get("INJECT_RED_UNTIL", "").strip()
+          if not raw:
+              print("[alerter-canary] no injection window set; green")
+              sys.exit(0)
+          try:
+              until = datetime.strptime(raw, FORMAT).replace(tzinfo=timezone.utc)
+          except ValueError:
+              print(
+                  "::error title=Alerter canary misconfigured::"
+                  f"INJECT_RED_UNTIL={raw!r} is not a UTC timestamp in the form "
+                  f"{FORMAT}; failing rather than reading a mistyped injection "
+                  "as a clean run"
+              )
+              sys.exit(1)
+          if datetime.now(timezone.utc) < until:
+              print(
+                  "::error title=Alerter canary::INJECTED RED (OMN-18942 AC-4): "
+                  f"this scheduled run fails on purpose until {raw}, so the "
+                  "failure-rate alerter has a known red to deliver"
+              )
+              sys.exit(1)
+          print(f"[alerter-canary] injection window expired at {raw}; green")
+          PY

@@ -875,6 +875,49 @@ guard_dogfood_deploy_root() {
     fi
 }
 
+guard_password_contract() {
+    # Password format contract (OMN-19087). Runs before anything is built,
+    # synced or started, and in dry-run too, so a malformed credential is named
+    # up front instead of surfacing minutes later in the forward migration,
+    # after Postgres, Redpanda and Valkey already came up on it. The operator
+    # env was sourced with `set -a` at the top of this file, so the check reads
+    # exactly the values compose will interpolate.
+    #
+    # The contract itself (which of the five passwords is hex, which is
+    # url-safe, and why) lives in ONE place: scripts/preflight_password_contract.py.
+    # This function only runs it. Values are never printed.
+    local repo_root="$1"
+    local compose_project="$2"
+
+    local lane
+    lane="$(resolve_lane_name "${compose_project}")"
+
+    log_step "Password Format Contract (OMN-19087)"
+
+    local checker="${repo_root}/scripts/preflight_password_contract.py"
+    if [[ ! -f "${checker}" ]]; then
+        log_error "Password contract preflight not found: ${checker}"
+        log_error "Refusing to deploy lane '${lane}' without checking its credentials' format."
+        exit 1
+    fi
+
+    local python_bin=""
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the password contract preflight."
+        exit 1
+    fi
+
+    if ! "${python_bin}" "${checker}" --lane "${lane}"; then
+        log_error "Password contract preflight REFUSED this deploy (lane: ${lane}, ${compose_project})."
+        log_error "  Fix only the variables it names in ${OMNIBASE_OPERATOR_ENV_FILE}."
+        exit 1
+    fi
+}
+
 # Compose project -> lane (overlay) mapping lives in
 # scripts/runtime_build/compose_files.sh, sourced at the top of this file:
 # resolve_lane_name(), resolve_lane_overlay_filename() and
@@ -4192,6 +4235,10 @@ main() {
     local compose_project
     compose_project="$(resolve_compose_project)"
     guard_dogfood_deploy_root "${compose_project}"
+    # OMN-19087: the five compose passwords are checked against their stated
+    # format here, before attribution records a deploy and before anything is
+    # built or started.
+    guard_password_contract "${repo_root}" "${compose_project}"
     # OMN-15352: mirror into the global cleanup_on_exit() (a no-argument EXIT
     # trap handler) reads to resolve :latest image names on a failed deploy.
     DEPLOY_COMPOSE_PROJECT="${compose_project}"

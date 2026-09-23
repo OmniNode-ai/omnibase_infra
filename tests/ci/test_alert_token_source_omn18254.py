@@ -212,10 +212,11 @@ def test_the_minted_token_is_scoped_to_exactly_the_repos_the_sweep_reads() -> No
     )
 
     run = str(_step_named("Evaluate non-required check failure rates").get("run", ""))
+    # OMN-18942: `--scheduled-repo` entries are read by the same token.
     swept = {
-        line.strip().removeprefix("--repo ").strip().rstrip("\\").strip()
+        line.strip().split(" ", 1)[1].strip().rstrip("\\").strip()
         for line in run.splitlines()
-        if line.strip().startswith("--repo ")
+        if line.strip().startswith(("--repo ", "--scheduled-repo "))
     }
     assert swept, f"could not read the swept repo list from the run step: {run!r}"
     assert declared == swept, (
