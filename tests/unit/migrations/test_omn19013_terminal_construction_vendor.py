@@ -12,7 +12,7 @@ _FORWARD = _ROOT / "docker" / "migrations" / "forward"
 _VENDOR = _FORWARD / "nodes" / "node_projection_delegation"
 _MANIFEST = _FORWARD / "_ledger" / "application-migrations.tsv"
 _FILENAME = "0045_terminal_construction_outcome_metrics.sql"
-_SHA256 = "796979e03d010fbe187f3adc0d2700af343cad3cb95ca8eedf48698f2a9c2ea7"
+_SHA256 = "990973fe3d63d9e424789adee322190e8f4b6228a9357e4366df80545a8648e1"
 
 
 def _manifest_rows() -> dict[str, list[str]]:
@@ -82,3 +82,28 @@ def test_the_sibling_migration_is_a_positive_control() -> None:
         )
         == ()
     )
+
+
+def test_every_replaced_view_keeps_security_invoker() -> None:
+    """CREATE OR REPLACE VIEW resets a view's reloptions to the ones it names.
+
+    0040 made the delegation aggregate views ``security_invoker`` so that they
+    read under the caller's tenant RLS. A 0045 that replaced them without
+    re-asserting the option would silently turn them back into owner-rights
+    views. omnimarket's real-Postgres OMN-18139 test caught exactly that on the
+    first 0045 bytes; this pins the re-assertion on the vendored copy.
+    """
+    import re
+
+    sql = (_VENDOR / _FILENAME).read_text(encoding="utf-8")
+    replaced = set(re.findall(r"CREATE OR REPLACE VIEW (\w+) AS", sql))
+    reasserted = set(
+        re.findall(r"ALTER VIEW (\w+) SET \(security_invoker = true\);", sql)
+    )
+    assert replaced == {
+        "projection_delegation_summary",
+        "projection_delegation_model_routing",
+        "projection_delegation_quality_gate",
+    }
+    assert replaced <= reasserted
+    assert sql.rindex("security_invoker") < sql.rindex("COMMIT;")
