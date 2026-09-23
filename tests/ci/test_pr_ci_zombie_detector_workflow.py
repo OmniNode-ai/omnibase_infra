@@ -18,18 +18,26 @@ workflow half, over the PARSED document so a reshuffle that keeps the text but
 loses the property still fails:
 
 - no step of the detect job is conditional on a credential-presence output;
-- the credential step exits non-zero when the secret is empty;
+- the empty-token check exits non-zero when the minted token is empty;
 - the detector's GH_TOKEN carries no `||` fallback (a GITHUB_TOKEN fallback
   cannot reach another repo's runs, so it would read nothing, and before
   OMN-19258 that read as a clean sweep);
 - the receipt is uploaded even when the detector step fails, and a missing
   receipt is itself an error.
 
-The credential stays CROSS_REPO_PAT, deliberately: force-cancel needs Actions
-write on the target repo, and read live on 2026-09-23 both org App
-installations carry `actions: read` only. That is pinned as well, so a later
-edit that swaps in an App token without the permission change fails here
-instead of 403-ing on the first real wedge.
+The credential is the onexbot App token (OMN-19258 reopen, operator ruling
+2026-09-23 "yes it should"). Until then it was CROSS_REPO_PAT, a personal access
+token whose rate limit is its owner's personal quota shared with every other
+consumer (OMN-19101) -- the cause of the 68 blind runs above. The operator
+granted the onexbot installation `actions: write`, read back live at
+2026-09-23T15:06:01Z. These tests pin the move:
+
+- the detect job mints the onexbot App token with `permission-actions: write`
+  and no other permission, scoped to exactly the two repos the detector reads;
+- that scope equals the detector's `--repo` list (a repo in one and not the
+  other is either a 403 or unearned reach);
+- an empty minted token fails the job, proven by executing the step's shell;
+- CROSS_REPO_PAT appears nowhere in the detect job.
 """
 
 from __future__ import annotations
@@ -87,61 +95,121 @@ def test_no_step_publishes_a_skip_output() -> None:
         assert "SKIPPED" not in run
 
 
-def test_the_credential_step_fails_closed_on_an_empty_secret(tmp_path: Path) -> None:
-    """Execute the step's own shell with the secret empty, then present.
+APP_TOKEN_EXPR = "${{ steps.app-token.outputs.token }}"
+TARGET_REPOS = {"onex_change_control", "omnimarket"}
+
+
+def test_the_detect_job_mints_the_onexbot_app_token_with_actions_write() -> None:
+    step = _step("Mint the onexbot App token")
+    assert str(step.get("uses", "")).startswith("actions/create-github-app-token@"), (
+        f"the mint step must use actions/create-github-app-token: {step.get('uses')!r}"
+    )
+    assert step.get("id") == "app-token"
+    with_block = step.get("with")
+    assert isinstance(with_block, dict)
+    assert str(with_block.get("app-id")).strip() == "${{ secrets.ONEXBOT_APP_ID }}"
+    assert str(with_block.get("private-key")).strip() == (
+        "${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}"
+    )
+    assert with_block.get("owner") == "OmniNode-ai"
+    permissions = {
+        key: value
+        for key, value in with_block.items()
+        if str(key).startswith("permission-")
+    }
+    assert permissions == {"permission-actions": "write"}, (
+        "force-cancel needs Actions write, and the script's other two calls "
+        "(list runs, list a run's jobs) are Actions reads; no other permission "
+        f"is earned. Got {permissions!r}"
+    )
+
+
+def test_the_minted_token_is_scoped_to_exactly_the_detected_repos() -> None:
+    with_block = _step("Mint the onexbot App token").get("with")
+    assert isinstance(with_block, dict)
+    declared = {
+        line.strip()
+        for line in str(with_block.get("repositories", "")).splitlines()
+        if line.strip()
+    }
+    assert declared == TARGET_REPOS, (
+        f"the token must reach exactly {sorted(TARGET_REPOS)}; got {sorted(declared)}"
+    )
+    run = str(_step("Run zombie detector").get("run", ""))
+    swept = {
+        line.strip().removeprefix("--repo ").strip()
+        for line in run.splitlines()
+        if line.strip().startswith("--repo ")
+    }
+    assert swept == declared, (
+        f"token scope {sorted(declared)} and detector repos {sorted(swept)} must "
+        "be the same set: a repo detected but not scoped is a 403, a repo scoped "
+        "but not detected is unearned write reach"
+    )
+
+
+def test_cross_repo_pat_appears_nowhere_in_the_detect_job() -> None:
+    doc: dict[Any, Any] = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    rendered = yaml.safe_dump(doc["jobs"]["detect"])
+    assert "CROSS_REPO_PAT" not in rendered, (
+        "the detect job moved to the onexbot App token (OMN-19258); the PAT "
+        "shared its owner's personal rate quota (OMN-19101) and produced 68 "
+        "blind runs. It must not come back as a credential or a fallback."
+    )
+
+
+def test_an_empty_minted_token_fails_the_job(tmp_path: Path) -> None:
+    """Execute the step's own shell with the token empty, then present.
 
     Running it is the falsifier: a step that merely *mentions* `exit 1` in a
     branch that never fires would pass a text check and still go green.
     """
-    step = _step("Refuse a missing CROSS_REPO_PAT")
-    assert str(step["env"]["CROSS_REPO_PAT"]).strip() == (
-        "${{ secrets.CROSS_REPO_PAT }}"
-    )
+    step = _step("Refuse an empty minted token")
+    assert str(step["env"]["APP_TOKEN"]).strip() == APP_TOKEN_EXPR
     script = tmp_path / "step.sh"
     script.write_text(str(step["run"]), encoding="utf-8")
     base_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
 
     empty = subprocess.run(
         ["bash", str(script)],
-        env={**base_env, "CROSS_REPO_PAT": ""},
+        env={**base_env, "APP_TOKEN": ""},
         capture_output=True,
         text=True,
         check=False,
     )
-    assert empty.returncode != 0, "an empty CROSS_REPO_PAT must fail the job"
+    assert empty.returncode != 0, "an empty minted token must fail the job"
     assert "::error::" in empty.stdout
 
     present = subprocess.run(
         ["bash", str(script)],
-        env={**base_env, "CROSS_REPO_PAT": "placeholder-not-a-token"},
+        env={**base_env, "APP_TOKEN": "placeholder-not-a-token"},
         capture_output=True,
         text=True,
         check=False,
     )
     assert present.returncode == 0, (
-        "positive control: a present secret must pass the check, or the "
+        "positive control: a present token must pass the check, or the "
         f"assertion above proves nothing ({present.stdout!r} {present.stderr!r})"
     )
 
 
-def test_the_credential_check_runs_before_the_detector() -> None:
+def test_the_mint_and_its_check_run_before_the_detector() -> None:
     names = [str(s.get("name", "")) for s in _detect_steps()]
-    check = names.index("Refuse a missing CROSS_REPO_PAT")
+    mint = names.index("Mint the onexbot App token (OMN-19258)")
+    check = names.index("Refuse an empty minted token")
     run = names.index("Run zombie detector")
-    assert check < run
+    assert mint < check < run
 
 
-def test_detector_token_has_no_fallback_and_stays_on_the_write_capable_pat() -> None:
+def test_detector_token_is_the_minted_app_token_with_no_fallback() -> None:
     token = str(_step("Run zombie detector")["env"]["GH_TOKEN"])
     assert "||" not in token, (
         f"GH_TOKEN carries a fallback ({token!r}); GITHUB_TOKEN cannot read or "
         "cancel another repo's runs, so a fallback reads nothing"
     )
-    assert token.strip() == "${{ secrets.CROSS_REPO_PAT }}", (
-        "the detector force-cancels runs, which needs Actions write on the target "
-        "repo. Both org App installations carried `actions: read` only when read "
-        "on 2026-09-23; moving to an App token needs that permission granted "
-        f"first (OMN-19258, OMN-16373). Got {token!r}"
+    assert token.strip() == APP_TOKEN_EXPR, (
+        "the detector must authenticate with the onexbot App token minted in "
+        f"this job (OMN-19258). Got {token!r}"
     )
 
 
