@@ -143,6 +143,14 @@ jobs:
     name: Non-required check failure rate (OMN-18254, OMN-18322)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # OMN-18942: the alert dedup reads the previous run's uploaded report. A
+    # run that overlapped a still-running one would read the run before it and
+    # re-post whatever the running one is about to send, so runs of this job on
+    # one ref are serialised. Not cancel-in-progress: a cancelled run uploads no
+    # report, and the next run would fall back to older state.
+    concurrency:
+      group: nonrequired-check-failure-rate-${{ github.ref }}
+      cancel-in-progress: false
 
     steps:
       - name: Checkout (script and policy)
@@ -263,7 +271,7 @@ jobs:
       # ALERT DEDUP (OMN-18942, measured 2026-09-23). Once the channel secrets
       # existed, every run re-posted the same unchanged findings. The evaluator
       # now reads the prior alert state from the `nonrequired-check-report`
-      # artifact of this workflow's most recent earlier completed run, via the
+      # artifact of this workflow's most recent earlier run on this ref, via the
       # Actions API, and suppresses an unchanged-or-lower finding inside the
       # policy's `alert_dedup_window_hours`, recording each suppression in the
       # report and the step summary. The read rides GH_TOKEN, the App token

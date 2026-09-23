@@ -116,6 +116,7 @@ class _Harness:
         self.module = module
         self.tmp_path = tmp_path
         self.posts: list[dict[str, Any]] = []
+        self.runs_queries: list[str] = []
         self.summary = tmp_path / "summary.md"
         self.report = tmp_path / "report.json"
         heads = [f"sha{i}" for i in range(max([*failing.values(), 1]))]
@@ -137,6 +138,7 @@ class _Harness:
                     ]
                 }
             if path.startswith(f"repos/{SLUG}/actions/workflows/{WORKFLOW_FILE}/runs"):
+                self.runs_queries.append(path)
                 if runs_error:
                     raise RuntimeError(runs_error)
                 return {"workflow_runs": [{"id": CURRENT_RUN_ID}, {"id": PRIOR_RUN_ID}]}
@@ -186,6 +188,7 @@ class _Harness:
         monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(self.summary))
         monkeypatch.setenv("GITHUB_REPOSITORY", SLUG)
         monkeypatch.setenv("GITHUB_RUN_ID", str(CURRENT_RUN_ID))
+        monkeypatch.setenv("GITHUB_REF_NAME", "dev")
         if with_destination:
             monkeypatch.setenv("SLACK_BOT_TOKEN", "test-bot-token-not-real")
             monkeypatch.setenv("SLACK_CHANNEL_ID", "C0TEST")
@@ -654,3 +657,27 @@ def test_summary_table_cells_escape_the_key_separator(
     )
     harness.run(NOW)
     assert f"| check\\|{OWNER}/{REPO}\\|{CHECK} |" in harness.summary_text
+
+
+def test_the_prior_run_lookup_is_scoped_to_the_runs_own_branch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A feature-branch dispatch must not read or seed dev's alert state."""
+    module = _module()
+    harness = _Harness(
+        module, monkeypatch, tmp_path, failing={CHECK: 3}, prior_zip=None
+    )
+    harness.run(NOW)
+    assert harness.runs_queries, "the prior-run listing was never queried"
+    assert all("&branch=dev" in q for q in harness.runs_queries)
+    # Not filtered to completed: the previous run may still be in progress
+    # (its other job running) after its report was uploaded.
+    assert not any("status=" in q for q in harness.runs_queries)
+
+
+def test_the_alerter_job_cannot_overlap_itself() -> None:
+    """Overlapping runs would each read the run BEFORE the other and re-post."""
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job = doc["jobs"]["nonrequired-check-failure-rate"]
+    assert job["concurrency"]["cancel-in-progress"] is False
+    assert "github.ref" in job["concurrency"]["group"]

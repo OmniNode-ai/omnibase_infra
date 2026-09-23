@@ -81,6 +81,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 import zipfile
 from collections import Counter
@@ -455,9 +456,12 @@ def post_slack_alert(alerts: list[Any], *, text: str | None = None) -> bool:
 ALERT_STATE_SCHEMA = "nonrequired_check_alert_state/v1"
 REPORT_ARTIFACT = "nonrequired-check-report"
 REPORT_MEMBER = "nonrequired-check-report.json"
-# How many of this workflow's most recent completed runs are searched for a
-# report. A run that died before its upload has none, and the next-older one
-# still holds correct state about what was posted. 20 runs is roughly three
+# How many of this workflow's most recent runs are searched for a report. Not
+# filtered to completed runs: the alerter job serialises on a concurrency
+# group, so the previous run can still be in progress (its other job running)
+# after its report is uploaded, and an uploaded artifact is listable at once.
+# A run with no report yet (queued, or died before its upload) is skipped, and
+# the next-older one still holds correct state about what was posted. 20 runs is roughly three
 # hours at the ten-minute cadence; finding nothing in that span reads as
 # ABSENT, which posts.
 PRIOR_RUN_SEARCH_LIMIT = 20
@@ -555,8 +559,13 @@ def fetch_prior_alert_state(
     workflow_file: str,
     current_run_id: str | None,
     token: str | None,
+    branch: str | None = None,
 ) -> PriorAlertState:
     """The newest earlier run's report, from this workflow's own run history.
+
+    Scoped to ``branch`` (the run's own ref) so a manual dispatch from a
+    feature branch, carrying different code, neither reads nor seeds the
+    default branch's alert state.
 
     Never raises: every failure is an ``unreadable`` state carrying its reason,
     and an unreadable state posts every finding.
@@ -568,7 +577,8 @@ def fetch_prior_alert_state(
     try:
         runs_payload = _gh_json(
             f"repos/{repo_slug}/actions/workflows/{workflow_file}/runs"
-            f"?status=completed&per_page={PRIOR_RUN_SEARCH_LIMIT}",
+            f"?per_page={PRIOR_RUN_SEARCH_LIMIT}"
+            + (f"&branch={urllib.parse.quote(branch, safe='')}" if branch else ""),
             token,
         )
         runs = (
@@ -633,7 +643,7 @@ def fetch_prior_alert_state(
     return PriorAlertState(
         "absent",
         f"no {REPORT_ARTIFACT} artifact in the last {PRIOR_RUN_SEARCH_LIMIT} "
-        f"completed runs of {workflow_file}",
+        f"runs of {workflow_file}" + (f" on {branch}" if branch else ""),
         {},
     )
 
@@ -825,7 +835,7 @@ def render_dedup(record: dict[str, Any]) -> None:
     if prior["status"] == "unreadable":
         print(
             "::warning title=Alert dedup state unreadable::"
-            f"{prior['reason']}; every finding is posted this run"
+            f"{prior['reason']}; every finding is due this run"
         )
     for item in record["suppressed"]:
         print(
@@ -852,12 +862,12 @@ def render_dedup(record: dict[str, Any]) -> None:
         elif status == "unreadable":
             handle.write(
                 f"**prior alert state UNREADABLE** ({prior['reason']}): every "
-                "finding was posted, none suppressed.\n\n"
+                "finding is due, none suppressed.\n\n"
             )
         else:
             handle.write(
                 f"Prior alert state {status} ({prior['reason']}): every finding "
-                "was posted, none suppressed.\n\n"
+                "is due, none suppressed.\n\n"
             )
         delivered = record["delivered"]
         if record["dry_run"]:
@@ -1110,6 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
             args.prior_state_workflow,
             os.environ.get("GITHUB_RUN_ID"),
             token,
+            os.environ.get("GITHUB_REF_NAME"),
         )
     else:
         prior = PriorAlertState(
