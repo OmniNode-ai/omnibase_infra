@@ -584,10 +584,11 @@ def grade_zero_provider(obs: Mapping[str, Any]) -> Clause:
             clause.reasons.append(
                 "negative control failed: an unconfigured run reached the model server"
             )
-        if metrics.get("unconfigured_tokens_predicted_delta") not in (0, None):
-            clause.reasons.append(
-                "negative control failed: the model server generated tokens during the unconfigured run"
-            )
+        # The server's token counter over the unconfigured run is RECORDED, not
+        # graded. On the lab customer machine the model server is shared
+        # with other sessions, so a non-zero delta there can be someone else's
+        # request. The traced connect count above is exclusive to this process
+        # tree and is the negative control's proof.
     return clause
 
 
@@ -691,7 +692,7 @@ def routing_tiers_yaml(served_model: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def bifrost_overlay_yaml(served_model: str, model_port: int) -> str:
+def bifrost_overlay_yaml(served_model: str, model_port: int, max_tokens: int) -> str:
     """The customer's overlay: the shipped local backend, pointed at loopback."""
     return (
         'config_version: "2.1.0"\n'
@@ -703,7 +704,7 @@ def bifrost_overlay_yaml(served_model: str, model_port: int) -> str:
         f'    model_name: "{served_model}"\n'
         "    tier: local\n"
         "    timeout_ms: 240000\n"
-        "    max_tokens: 512\n"
+        f"    max_tokens: {max_tokens}\n"
     )
 
 
@@ -873,7 +874,9 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     # taken on a machine with no customer configuration at all.
     tiers_path.write_text(routing_tiers_yaml(args.served_model))
     overlay_path.write_text(
-        bifrost_overlay_yaml(args.served_model, int(args.model_port))
+        bifrost_overlay_yaml(
+            args.served_model, int(args.model_port), int(args.max_tokens)
+        )
     )
     # The negative control's own run directory is set aside so the configured
     # run's files are the only ones the three_files clause can find.
@@ -1043,6 +1046,11 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--server-build", default="")
     run.add_argument("--prompt", default="explain what a calendar app needs")
     run.add_argument("--step-timeout", default="600")
+    # The response budget the customer overlay gives the local backend. A
+    # reasoning model spends tokens before it answers, so a small budget turns a
+    # healthy model into an empty answer (measured on the lab customer machine, 2026-09-23: 512
+    # tokens exhausted, quality 0.0). It must also fit the server's context.
+    run.add_argument("--max-tokens", default="8192")
     run.add_argument("--observations-out", required=True)
     run.add_argument("--record", required=True)
     run.add_argument("--summary", default="")

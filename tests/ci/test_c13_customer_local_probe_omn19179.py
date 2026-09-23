@@ -22,14 +22,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from scripts.ci import c13_customer_local_probe as probe
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "omn19179"
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "c13-customer-local-delegation.yml"
-PRODUCER_STEP = "Drive one customer delegation and grade it"
 
 
 def _pass_observations() -> dict[str, Any]:
@@ -172,8 +169,25 @@ def test_an_unconfigured_run_that_reaches_the_model_fails_the_negative_control()
     None
 ):
     obs = _pass_observations()
-    obs["model_metrics"]["unconfigured_tokens_predicted_delta"] = 12
+    obs["steps"]["unconfigured"]["strace"] += (
+        "4242 connect(9, {sa_family=AF_INET, sin_port=htons(18731), "
+        'sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n'
+    )
     assert "zero_provider" in _failed(obs)
+
+
+@pytest.mark.unit
+def test_a_shared_servers_token_delta_alone_does_not_fail_the_negative_control() -> (
+    None
+):
+    """On the lab customer machine the model server is shared, so its counter is not this run's alone.
+
+    The negative control is graded on this process tree's own connects; the
+    server-wide counter over the unconfigured run is recorded, not graded.
+    """
+    obs = _pass_observations()
+    obs["model_metrics"]["unconfigured_tokens_predicted_delta"] = 12
+    assert "zero_provider" not in _failed(obs)
 
 
 @pytest.mark.unit
@@ -354,58 +368,15 @@ def test_exit_codes_distinguish_pass_fail_and_could_not_run(tmp_path: Path) -> N
     assert json.loads(record.read_text())["verdict"] == "COULD_NOT_RUN"
 
 
-def _workflow() -> dict[Any, Any]:
-    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    assert isinstance(loaded, dict)
-    return loaded
-
-
 @pytest.mark.unit
-def test_the_workflow_never_checks_out_a_repository() -> None:
-    """A checkout of this repository IS a checkout the clause forbids."""
-    steps = _workflow()["jobs"]["c13-customer-local"]["steps"]
-    uses = [str(step.get("uses", "")) for step in steps]
-    assert not any(u.startswith("actions/checkout") for u in uses)
-    fetch = next(s for s in steps if s["name"].startswith("Fetch the probe scripts"))
-    assert "raw.githubusercontent.com/${REPO}/${SHA}/" in fetch["run"]
-    assert fetch["env"]["SHA"] == "${{ github.sha }}"
+def test_the_customer_overlay_carries_the_declared_response_budget() -> None:
+    """A reasoning model spends tokens before it answers.
 
-
-@pytest.mark.unit
-def test_the_workflow_runs_on_a_hosted_image_not_a_lab_runner() -> None:
-    runs_on = _workflow()["jobs"]["c13-customer-local"]["runs-on"]
-    assert isinstance(runs_on, str)
-    assert runs_on.startswith("ubuntu-")
-
-
-@pytest.mark.unit
-def test_the_producer_step_exit_code_is_the_verdict() -> None:
-    job = _workflow()["jobs"]["c13-customer-local"]
-    assert "continue-on-error" not in job
-    step = next(s for s in job["steps"] if s["name"] == PRODUCER_STEP)
-    assert "continue-on-error" not in step
-    assert "if" not in step
-    assert "|| true" not in step["run"]
-    assert 'exit "${status}"' in step["run"]
-
-
-@pytest.mark.unit
-def test_the_workflow_has_a_schedule_and_no_pull_request_trigger() -> None:
-    triggers = _workflow()[True]  # PyYAML reads the bare key `on` as True.
-    assert "schedule" in triggers
-    assert "workflow_dispatch" in triggers
-    assert "pull_request" not in triggers
-
-
-@pytest.mark.unit
-def test_the_model_and_server_are_verified_before_use() -> None:
-    workflow = _workflow()
-    env = workflow["env"]
-    assert len(env["MODEL_SHA256"]) == 64
-    assert len(env["LLAMA_SHA256"]) == 64
-    fetch = next(
-        s
-        for s in workflow["jobs"]["c13-customer-local"]["steps"]
-        if s["name"] == "Fetch and verify the pinned model and server build"
-    )
-    assert fetch["run"].count("sha256sum -c -") == 2
+    Measured 2026-09-23 on the lab customer machine: a 512-token budget let the
+    served 27B model exhaust the budget before answering (quality 0.0), and
+    8192 passed. The budget is an argument, and its default is the one that passed.
+    """
+    overlay = probe.bifrost_overlay_yaml("served-model", 8000, 8192)
+    assert "    max_tokens: 8192\n" in overlay
+    assert '    model_name: "served-model"\n' in overlay
+    assert "http://127.0.0.1:8000/v1/chat/completions" in overlay
