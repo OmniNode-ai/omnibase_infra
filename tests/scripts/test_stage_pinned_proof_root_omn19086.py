@@ -354,6 +354,15 @@ def test_a_worktree_under_test_is_staged_at_its_own_commit(tmp_path: Path) -> No
         "feature",
         str(worktree),
     )
+    # `canonical/omnibase_infra` is a bare `git clone` of `upstream`: local
+    # identity config (`user.email`/`user.name`) is repo-local and is not
+    # copied by clone, and a worktree shares its parent repo's config. A CI
+    # runner with no global gitconfig then fails the commit below with exit
+    # 128 ("Author identity unknown"). Configure the identity the worktree
+    # actually commits under, the same way `_make_upstream_and_canonical`
+    # does for `upstream`.
+    _git(worktree, "config", "user.email", "t@t.t")
+    _git(worktree, "config", "user.name", "t")
     feature = _commit(worktree, "feature.py", "FEATURE = True\n")
 
     root = tmp_path / "proof-root"
