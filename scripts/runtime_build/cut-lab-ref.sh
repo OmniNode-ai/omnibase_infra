@@ -40,15 +40,17 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # the execute path is exercisable in tests without a real Docker deploy).
 DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-${REPO_ROOT}/scripts/deploy-runtime.sh}"
 
-# Siblings whose clones are checked out to <ref> and (optionally) lab-tagged.
-# Mirrors SIBLING_REPOS in stage_workspace.sh plus the infra build-context repo.
-LAB_REF_REPOS=(
-    "omnibase_infra"
-    "omnibase_core"
-    "omnibase_compat"
-    "onex_change_control"
-    "omnimarket"
-)
+# The repos --cut-tag tags: SIBLING_LAB_TAG_REPOS from sibling_clone_manifest.sh,
+# which is every clone the sibling-pin preflight reads (SIBLING_CLONE_MANIFEST,
+# five repos including the omnibase_infra build context and omnibase_spi) plus
+# onex_change_control (SIBLING_EXTRA_TRACKED_REPOS). It is NOT the set the build
+# checks out to <ref>: stage_workspace.sh clean-checks-out only the three
+# source-vendored siblings (SIBLING_VENDORED_REPOS). OMN-19072: this used to be
+# a literal list of its own that omitted omnibase_spi, under a comment that
+# called it a mirror of stage_workspace.sh.
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+LAB_REF_REPOS=("${SIBLING_LAB_TAG_REPOS[@]}")
 
 # --- defaults -------------------------------------------------------------
 REF="origin/dev"
@@ -171,6 +173,10 @@ compute_lab_tag_name() {
     echo "lab/${LANE}/${utc}-${short}"
 }
 
+# The ref a sibling is tagged at when <ref> does not resolve in it: the same
+# default stage_workspace.sh's RT-1 checkout falls back to.
+SIBLING_FALLBACK_REF="${DEPLOY_SIBLING_FALLBACK_REF:-origin/dev}"
+
 cut_lab_tags() {
     local tag="$1"
     local repo clone sha
@@ -182,8 +188,21 @@ cut_lab_tags() {
         fi
         if [[ "${HOTPATCH}" == true ]]; then
             sha="$(git -C "${clone}" rev-parse HEAD)"
-        else
+        elif [[ "${repo}" == "omnibase_infra" ]]; then
+            # The build context: a ref it cannot resolve names nothing to
+            # build, so this stays a hard failure under set -e.
             sha="$(git -C "${clone}" rev-parse "${REF}^{commit}")"
+        elif sha="$(git -C "${clone}" rev-parse "${REF}^{commit}" 2>/dev/null)"; then
+            : # <ref> resolves in this sibling (a branch or tag name).
+        else
+            # OMN-19072: a ref that exists only in omnibase_infra (a raw infra
+            # sha, or a lab tag cut before this sibling joined the tag set)
+            # must not abort here with the tag half-cut and the deploy never
+            # run. Tag the sibling at the same fallback stage_workspace.sh
+            # checks siblings out at, and say so.
+            sha="$(git -C "${clone}" rev-parse "${SIBLING_FALLBACK_REF}^{commit}")"
+            log "NOTE ${repo}: --ref '${REF}' does not resolve here -- falling back to"
+            log "  this sibling's own ${SIBLING_FALLBACK_REF} (${sha:0:12})."
         fi
         git -C "${clone}" tag -f "${tag}" "${sha}" >/dev/null
         log "tagged ${repo}: ${tag} -> ${sha:0:12}"

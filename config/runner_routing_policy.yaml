@@ -961,6 +961,30 @@ route:
       - omninode_infra
       - omniweb
       - onex_change_control
+    # WHICH CALLER EVALUATES EACH FLEET REPOSITORY'S SCHEDULED RUNS (OMN-18942).
+    #
+    # The scheduled sweep has two callers, and every fleet repository belongs to
+    # exactly one of them, so no scheduled run is evaluated or posted twice:
+    #
+    #   * the repositories listed here: the `nonrequired-check-failure-rate`
+    #     job in `.github/workflows/pr-ci-zombie-detector.yml`, passed as
+    #     `--scheduled-repo`, under the onexbot App token (installation
+    #     repository_selection `all`);
+    #   * every other entry of `fleet_repos`: the `.201` system reporter, whose
+    #     `--repos-from-policy` selection is fleet_repos minus this list.
+    #
+    # WHY omni_home IS HERE. Measured 2026-09-23T17:45Z: the `.201` host token
+    # returns HTTP 404 on omni_home, so the reporter rendered it as
+    # `sched/omni_home/source-unreadable` and evaluated nothing, and the Actions
+    # job ran `--no-scheduled`. The registry repository, the one this ticket
+    # names, was watched by nobody. Under a token that reads it, two of its three
+    # scheduled workflows were red on 8 of 8 runs. Moving it here needs no new
+    # credential and no widened one: the App installation already reads it.
+    #
+    # A repository moves back to the host by deleting it here and removing its
+    # `--scheduled-repo` line; the tests refuse a mismatch between the two.
+    scheduled_actions_repos:
+      - omni_home
     # ALERT DEDUP WINDOW (OMN-18942), in hours.
     #
     # Measured 2026-09-23: with the channel secrets set at 10:43Z, every

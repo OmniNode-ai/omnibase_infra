@@ -94,6 +94,9 @@ def _ticket_body(host: str, plan: Plan) -> str:
         "",
         f"Host: `{host}`",
         f"Lanes checked: {', '.join(lanes_checked)}",
+        # OMN-19088: lanes the manifest declares for another host. Not absent here.
+        f"Lanes not applicable on this host: "
+        f"{', '.join(plan.get('lanes_not_applicable', [])) or '(none)'}",
         "",
         "The desired-state lane census (deploy/lane-census/lane-manifest.yaml)",
         "does not match the live runtime. Drift items below name exactly what is",
@@ -136,9 +139,12 @@ def build_event(
         "event_type": "lane-census-drift",
         "topic": topic,
         "host": host,
+        # OMN-19088: the host id the manifest's registry resolved `host` to.
+        "host_id": plan.get("host"),
         "emitted_at": now.isoformat(),
         "severity": severity,
         "lanes_checked": plan.get("lanes_checked", []),
+        "lanes_not_applicable": plan.get("lanes_not_applicable", []),
         "lanes_skipped_optional_down": plan.get("lanes_skipped_optional_down", []),
         "drift_count": len(findings),
         "findings": findings,
@@ -175,8 +181,12 @@ def build_observed_event(
         "event_type": "lane-census-observed",
         "topic": topic,
         "host": host,
+        "host_id": plan.get("host"),
         "observed_at": now.isoformat(),
         "lanes_checked": plan.get("lanes_checked", []),
+        # OMN-19088. A lane declared for another host was not looked at here, so
+        # its absence from `lanes_checked` is scope, not a clean reading.
+        "lanes_not_applicable": plan.get("lanes_not_applicable", []),
         # OMN-18890. Carried on the OBSERVED event for the same reason the event
         # exists at all: "the census ran and saw nothing wrong here" and "the
         # census skipped this lane because it is optional and absent" are

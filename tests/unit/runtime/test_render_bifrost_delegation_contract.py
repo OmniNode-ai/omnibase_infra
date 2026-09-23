@@ -103,16 +103,11 @@ def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
         assert by_id[backend_id]["model_name"] == "Qwen3.8-27B"
         assert by_id[backend_id]["max_tokens"] == 65_536
         assert by_id[backend_id]["timeout_ms"] == 300_000
-    # OMN-16833 required this rung to render a COMPLETE endpoint_url; OMN-16999
-    # re-marked it serving=False after .200:8101 answered http=000, so it now
-    # renders the DISABLED shape instead: endpoint_url null (what
-    # `_load_bifrost_endpoints` skips) with model_name, max_tokens and
-    # timeout_ms preserved so the binding survives and the rung is restored by
-    # flipping one flag rather than being reconstructed.
-    assert by_id["local-ds-v4-flash"]["endpoint_url"] is None
+    # OMN-19251: the .200:8101 ds4-flash host is gone and the lane overlays no
+    # longer declare this backend, so it now renders unbound exactly like
+    # local-reasoner below — declared by the base contract, no live rung.
+    assert by_id["local-ds-v4-flash"].get("endpoint_url") is None
     assert by_id["local-ds-v4-flash"]["model_name"] == "deepseek-v4-flash"
-    assert by_id["local-ds-v4-flash"]["max_tokens"] == 65_536
-    assert by_id["local-ds-v4-flash"]["timeout_ms"] == 300_000
     # local-reasoner (.201:8001, GPU1 removed for RMA) stays unbound by design —
     # the renderer strips its stale env hint so it fails closed rather than
     # resolving a dead endpoint.

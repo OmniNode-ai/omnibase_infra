@@ -992,11 +992,29 @@ def load_policy(path: Path) -> dict[str, Any]:
         # OMN-18942. The window an unchanged finding is suppressed for after it
         # was posted. Required, not defaulted, like every key above it.
         "alert_dedup_window_hours",
+        # OMN-18942 (AC-2). The fleet repositories whose scheduled half the
+        # GitHub Actions job evaluates instead of the `.201` reporter. Required:
+        # a defaulted-empty list hands the registry repository back to a host
+        # token that cannot read it, which is the gap this key closes.
+        "scheduled_actions_repos",
     ):
         if key not in block:
             raise KeyError(
                 f"{path} route.nonrequired_check_alert is missing required key {key!r}"
             )
+    fleet = [str(r) for r in block["fleet_repos"]]
+    share = [str(r) for r in block["scheduled_actions_repos"] or []]
+    if len(set(share)) != len(share):
+        raise ValueError(
+            f"{path} scheduled_actions_repos carries a duplicate entry: {share}"
+        )
+    outside = sorted(set(share) - set(fleet))
+    if outside:
+        raise ValueError(
+            f"{path} scheduled_actions_repos names {outside}, which are not in "
+            "fleet_repos; a repository outside the fleet list has no governed "
+            "scheduled evaluator"
+        )
     return block
 
 
@@ -1014,8 +1032,20 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "read the repository list from the policy's route."
-            "nonrequired_check_alert.fleet_repos, so every caller watches the "
-            "same fleet (OMN-18942)"
+            "nonrequired_check_alert.fleet_repos, minus scheduled_actions_repos, "
+            "which the GitHub Actions job evaluates instead: this is the `.201` "
+            "reporter's share of the fleet (OMN-18942)"
+        ),
+    )
+    parser.add_argument(
+        "--scheduled-repo",
+        action="append",
+        default=[],
+        help=(
+            "repeatable; evaluate this repository's scheduled runs only, beside "
+            "the --repo list, in the same run, report and dedup state. Each must "
+            "be listed in the policy's scheduled_actions_repos, so a fleet "
+            "repository's scheduled runs have exactly one evaluator (OMN-18942)"
         ),
     )
     parser.add_argument(
@@ -1065,14 +1095,32 @@ def main(argv: list[str] | None = None) -> int:
     policy = load_policy(args.policy)
     if args.scheduled_only and args.no_scheduled:
         parser.error("--scheduled-only and --no-scheduled are mutually exclusive")
+    actions_share = [str(r) for r in policy["scheduled_actions_repos"] or []]
     if args.repos_from_policy:
         if args.repo:
             parser.error("--repo and --repos-from-policy are mutually exclusive")
-        repos = [str(r) for r in policy["fleet_repos"]]
+        repos = [str(r) for r in policy["fleet_repos"] if str(r) not in actions_share]
     else:
         repos = list(args.repo)
-    if not repos:
-        parser.error("no repositories selected: pass --repo or --repos-from-policy")
+    scheduled_repos = list(args.scheduled_repo)
+    stray = sorted(set(scheduled_repos) - set(actions_share))
+    if stray:
+        parser.error(
+            f"--scheduled-repo {', '.join(stray)} is not in the policy's "
+            "scheduled_actions_repos; the `.201` reporter owns its scheduled "
+            "runs, and a second evaluator would post them twice"
+        )
+    both = sorted(set(scheduled_repos) & set(repos))
+    if both:
+        parser.error(
+            f"{', '.join(both)} given both as --repo and as --scheduled-repo; "
+            "name each repository once"
+        )
+    if not repos and not scheduled_repos:
+        parser.error(
+            "no repositories selected: pass --repo, --repos-from-policy or "
+            "--scheduled-repo"
+        )
     threshold = int(policy["failure_threshold"])
     umbrella: dict[str, list[str]] = policy.get("umbrella_enforced_contexts") or {}
     scheduled_threshold_pct = float(policy["scheduled_failure_threshold_pct"])
@@ -1087,13 +1135,24 @@ def main(argv: list[str] | None = None) -> int:
     all_scheduled_alerts: list[ScheduledAlert] = []
     report: dict[str, Any] = {"schema": "nonrequired_check_report/v1", "repos": {}}
 
+    # Each repository's halves, decided once. `--repo` entries take the
+    # check-run half unless --scheduled-only, and the scheduled half unless
+    # --no-scheduled; `--scheduled-repo` entries take the scheduled half only
+    # (OMN-18942: the registry repository has no `dev` branch to read
+    # protection on, and the check-run half is not what it is watched for).
+    plan: list[tuple[str, bool, bool]] = [
+        (repo, not args.scheduled_only, not args.no_scheduled) for repo in repos
+    ] + [(repo, False, True) for repo in scheduled_repos]
+
     unreadable: list[str] = []
-    for repo in repos:
+    for repo, check_runs, scheduled in plan:
         slug = f"{args.owner}/{repo}"
         try:
             _evaluate_one_repo(
                 args=args,
                 repo=repo,
+                check_runs=check_runs,
+                scheduled=scheduled,
                 slug=slug,
                 token=token,
                 threshold=threshold,
@@ -1201,6 +1260,8 @@ def _evaluate_one_repo(
     *,
     args: argparse.Namespace,
     repo: str,
+    check_runs: bool,
+    scheduled: bool,
     slug: str,
     token: str | None,
     threshold: int,
@@ -1230,7 +1291,7 @@ def _evaluate_one_repo(
     required: set[str] = set()
     pages: list[dict[str, Any]] = []
     alerts: list[Alert] = []
-    if not args.scheduled_only:
+    if check_runs:
         protection = _gh_object(
             f"repos/{slug}/branches/{args.branch}/protection/required_status_checks",
             token,
@@ -1252,7 +1313,7 @@ def _evaluate_one_repo(
         all_alerts.extend(alerts)
 
     scheduled_report: dict[str, Any] = {}
-    workflows_iter = [] if args.no_scheduled else active_workflows(slug, token)
+    workflows_iter = active_workflows(slug, token) if scheduled else []
     for workflow in workflows_iter:
         workflow_id = workflow.get("id")
         workflow_path = str(workflow.get("path") or workflow.get("name") or "")
