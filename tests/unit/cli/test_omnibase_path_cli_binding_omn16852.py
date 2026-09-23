@@ -6,7 +6,7 @@
 ## What this pins and why it is a test rather than a convention
 
 Three packaged ``onex`` commands -- ``delegate``, ``node`` and ``skill`` --
-each declare a ``--omni-home`` option bound to an environment variable. That
+each declare a workspace-root option bound to an environment variable. That
 binding is the single parameter a person who is not the maintainer exports to
 point the omnimarket drift guard at a workspace root, and it is load-bearing
 by construction: no caller passes the flag explicitly, so an unbound option
@@ -25,7 +25,7 @@ one actually reaches the guard.
 ## Scope fence -- this is a PARAMETER rename, not a repository-wide one
 
 Only the environment variable a caller sets moves. The option's own spelling
-(``--omni-home``), the ``omni_home`` keyword threaded through the guard, and
+(since renamed ``--omnibase-path`` by OMN-19197), the ``omni_home`` keyword threaded through the guard, and
 every read that resolves the maintainer's own multi-repo registry checkout
 (the workspace reconciler, dispatch-venv purity, lane declarations, the
 machine-registry export) keep ``OMNI_HOME`` by the 2026-08-28 boundary ruling
@@ -111,10 +111,10 @@ def test_no_command_binds_the_retired_spelling(
 def test_workspace_root_option_binds_the_product_name(
     name: str, command: click.Command
 ) -> None:
-    """``--omni-home`` binds ``OMNIBASE_PATH`` on all three commands."""
+    """``--omnibase-path`` binds ``OMNIBASE_PATH`` on all three commands."""
     bound = _option_envvars(command)
-    assert bound.get("--omni-home") == WORKSPACE_ROOT_ENVVAR, (
-        f"`onex {name} --omni-home` binds {bound.get('--omni-home')!r}; "
+    assert bound.get("--omnibase-path") == WORKSPACE_ROOT_ENVVAR, (
+        f"`onex {name} --omnibase-path` binds {bound.get('--omnibase-path')!r}; "
         f"expected {WORKSPACE_ROOT_ENVVAR!r}."
     )
 

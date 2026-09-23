@@ -189,6 +189,21 @@
 # If you change EITHER fraction, redo this arithmetic for BOTH units.
 # vllm-embeddings.service is not yet repo-owned — tracked separately (OMN-17788).
 # ---------------------------------------------------------------------------
+#
+# ---------------------------------------------------------------------------
+# --speculative-config: MTP, num_speculative_tokens=2 (OMN-19183, 2026-09-23)
+# ---------------------------------------------------------------------------
+# Kept after a measured trial by lane rtx5090-mtp-retry (ticket OMN-19183):
+# fixture1 held 37/37 across 3 runs, fixture2 held the canonical 7/8 bar
+# across 3 runs against a nondeterministic fresh baseline of 7,6,3,6,6,6;
+# single-caller throughput +70% (c1 median 86.4 vs 50.86 tok/s) and
+# 4-concurrent throughput +46% (c4 median 284.6 vs 194.99 tok/s); acceptance
+# and long-context/tool-call probes both passed; KV budget dropped from
+# 216,946 to 177,163 tokens at 131k context (1.35x), which is accounted for
+# above and does not violate the co-residency budget. n=1 speculative tokens
+# was not needed. Full numbers: .201:/data/inference/eval-rtx5090-mtp/ and
+# Linear comment 8893ee84 on OMN-19183.
+# ---------------------------------------------------------------------------
 
 [Unit]
 Description=vLLM API - Qwen3.8-27B NVFP4 (RTX 5090, 128K)
@@ -229,6 +244,7 @@ ExecStart=/opt/vllm-0.27/venv/bin/python -m vllm.entrypoints.openai.api_server \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --kernel-config '{"enable_flashinfer_autotune":false,"enable_jit_warmup":false,"enable_cutedsl_warmup":false}' \
+    --speculative-config '{"method":"mtp","num_speculative_tokens":2}' \
     --trust-remote-code
 Restart=on-failure
 RestartSec=10

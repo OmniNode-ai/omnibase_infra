@@ -3285,6 +3285,201 @@ def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -
 
 
 # ---------------------------------------------------------------------------
+# workflow-verdict (OMN-18866, ruling 2026-09-23T17:12:15Z)
+# ---------------------------------------------------------------------------
+#: The widest freshness window a caller may ask for. The reader exists to bind
+#: a RECURRING measurement to a delivery; a window wide enough to span several
+#: of its cadences would turn "the newest measurement" into "some measurement",
+#: and a wider window is exactly how a stale green would be laundered past a
+#: fresh red. 72 hours covers a nightly with two missed nights and nothing more.
+WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS: Final[float] = 72.0
+
+#: How many completed runs are read. The newest attempt wins, and an attempt's
+#: start moves forward on a re-run, so the newest attempt is not necessarily the
+#: newest-CREATED run; reading a page rather than one row is what lets a re-run
+#: of an older run supersede a newer-created one, in both directions.
+WORKFLOW_VERDICT_PAGE: Final[int] = 50
+
+
+def _run_started(run: Mapping[str, Any]) -> datetime | None:
+    """The start of a run's LATEST attempt, which is when it last measured."""
+    raw = run.get("run_started_at") or run.get("created_at")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return _parse_ts(raw)
+    except ValueError:
+        return None
+
+
+def evaluate_workflow_verdict(
+    repo: str,
+    workflow: str,
+    branch: str,
+    max_age_hours: float,
+    events: Sequence[str],
+    out: Any,
+    *,
+    now: datetime | None = None,
+    dispatch_title_contains: str = "",
+) -> int:
+    """Fail closed unless the NEWEST completed measurement of a workflow is green.
+
+    Operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending the
+    16:10:08Z every-check-blocks ruling) binds four chronically red checks to a
+    blocking surface NOW, not once they go green. Two of them -- C15, this
+    repository's ``chain-canary.yml``, and D11, omnimarket's delegation
+    regression nightly -- measure a DEPLOYED lab lane on a schedule, so no PR
+    head can run them and a merge block would stop the fix itself. Their
+    surface is staging delivery, and until each emits a sha-keyed receipt of its
+    own (the design ``PROBES_NOT_YET_WIRED`` records), the only verdict that
+    exists is the workflow's own conclusion. This reads it.
+
+    STATE-KEYED, NOT SHA-KEYED, and said so in the output: the verdict is about
+    the lane the workflow measured, at the time it measured it, not about the
+    delivered commit. It is the same fact a board reads from a run conclusion.
+
+    NEWEST WINS, IN BOTH DIRECTIONS. The newest completed attempt among the
+    admitted events decides. A re-run is a fresh measurement: a red re-run
+    supersedes an earlier green and a green one an earlier red. There is no
+    "any green in the window" reading, because that is how a check that fails
+    three runs in four would pass.
+
+    FAIL-CLOSED EVERYWHERE, each refusal naming the run: an unreadable surface,
+    no admitted completed run, a newest conclusion other than ``success``
+    (``failure``, ``cancelled``, ``timed_out``, ``startup_failure``,
+    ``skipped``, ``neutral``, ``action_required``, ``stale`` -- a cancelled or
+    runner-starved run is an instrument fault, and it BLOCKS like any red), a
+    newest measurement older than ``max_age_hours``, or an unparseable start.
+    There is no override, and a manual dispatch with non-default inputs is not
+    admitted unless the caller admits its event.
+
+    ``dispatch_title_contains`` (OMN-19311, D11) narrows an admitted
+    ``workflow_dispatch`` further: such a run is a measurement only when its run
+    title carries the token. D11's nightly takes a ``lane`` input and renders it
+    into its ``run-name``; admitting its dispatches (the fast path to a fresh
+    measurement after a fix) without this would let a green dispatch aimed at
+    the dev lane stand in for the governed stability-test verdict, dropping the
+    red by changing what is measured. Runs of every other admitted event are
+    unaffected: a scheduled run takes no inputs and measures the default lane.
+    """
+    moment = now or datetime.now(tz=UTC)
+    admitted = tuple(dict.fromkeys(e.strip() for e in events if e.strip()))
+    label = f"{repo} {workflow} on {branch}"
+
+    def refuse(reason: str) -> int:
+        print(
+            f"::error::workflow verdict FAILED for {label}: {reason} "
+            "This is a blocking gate (operator ruling 2026-09-23T17:12:15Z): "
+            "delivery stops until the workflow's newest measurement is green "
+            "and fresh. There is no override flag; fix the defect it measures, "
+            "or the instrument, and let the next run (or a re-run, which is a "
+            "fresh measurement) decide.",
+            file=out,
+        )
+        return 1
+
+    print(f"workflow verdict (OMN-18866) for {label}", file=out)
+    if not (0 < max_age_hours <= WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS):
+        return refuse(
+            f"--max-age-hours {max_age_hours} is outside (0, "
+            f"{WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS:g}]; a window that wide "
+            "is not a freshness bound."
+        )
+    if not admitted:
+        return refuse("no event is admitted, so no run can decide the verdict.")
+
+    path = (
+        f"repos/{repo}/actions/workflows/{workflow}/runs"
+        f"?branch={branch}&status=completed&per_page={WORKFLOW_VERDICT_PAGE}"
+    )
+    try:
+        payload = json.loads(_gh_api(path).decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - rule 16: an unread surface is a refusal
+        return refuse(f"the run surface is unreadable: {exc}.")
+    runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
+    if not isinstance(runs, list):
+        return refuse("the run listing carries no 'workflow_runs' list.")
+
+    candidates = [
+        r
+        for r in runs
+        if isinstance(r, dict)
+        and r.get("status") == "completed"
+        and r.get("head_branch") == branch
+        and r.get("event") in admitted
+        and (
+            not dispatch_title_contains
+            or r.get("event") != "workflow_dispatch"
+            or dispatch_title_contains in str(r.get("display_title", ""))
+        )
+    ]
+    ignored = len(runs) - len(candidates)
+    print(
+        f"  events read : {', '.join(admitted)} "
+        f"({len(candidates)} completed run(s) admitted, {ignored} other(s) ignored)",
+        file=out,
+    )
+    if dispatch_title_contains:
+        print(
+            f"  dispatches  : admitted only when the run title carries "
+            f"{dispatch_title_contains!r}",
+            file=out,
+        )
+    if not candidates:
+        return refuse(
+            f"no completed {'/'.join(admitted)} run exists on {branch}; an absent "
+            "measurement is not a pass."
+        )
+
+    dated: list[tuple[datetime, Mapping[str, Any]]] = []
+    for run in candidates:
+        run_start = _run_started(run)
+        if run_start is None:
+            return refuse(f"completed run {run.get('id')} has no parseable start time.")
+        dated.append((run_start, run))
+    started, newest = max(dated, key=lambda pair: pair[0])
+    age_hours = (moment - started).total_seconds() / 3600.0
+    run_id = newest.get("id")
+    conclusion = str(newest.get("conclusion"))
+    head = str(newest.get("head_sha", "?"))
+    print(
+        f"  newest run  : {run_id} ({newest.get('event')}, attempt "
+        f"{newest.get('run_attempt', '?')}) conclusion={conclusion}",
+        file=out,
+    )
+    print(
+        f"  measured at : {started.isoformat()} (age {age_hours:.2f}h, bound "
+        f"{max_age_hours:g}h)",
+        file=out,
+    )
+    print(f"  run head    : {head} (the workflow file's sha, not the lane's)", file=out)
+    print(f"  run title   : {newest.get('display_title', '?')}", file=out)
+    print(f"  url         : {newest.get('html_url', '?')}", file=out)
+
+    if conclusion != "success":
+        return refuse(
+            f"its newest measurement, run {run_id} at {head}, concluded {conclusion!r}."
+        )
+    if age_hours > max_age_hours:
+        return refuse(
+            f"its newest measurement, run {run_id}, is {age_hours:.2f}h old, past "
+            f"the {max_age_hours:g}h bound; a stale green is not a current one."
+        )
+    if age_hours < -0.25:
+        return refuse(
+            f"run {run_id} starts {-age_hours:.2f}h in the future; the clock "
+            "reading cannot be trusted."
+        )
+    print(
+        f"workflow verdict PASSED for {label}: run {run_id} concluded success "
+        f"{age_hours:.2f}h ago.",
+        file=out,
+    )
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def _parse_ts(value: str) -> datetime:
@@ -3660,6 +3855,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="repeatable; defaults to every lab lane",
     )
 
+    verdict = sub.add_parser(
+        "workflow-verdict",
+        help=(
+            "fail closed unless the newest completed run of a workflow on a "
+            "branch concluded success within a freshness bound (OMN-18866)"
+        ),
+    )
+    verdict.add_argument("--repo", required=True)
+    verdict.add_argument("--workflow", required=True, help="the workflow file name")
+    verdict.add_argument("--branch", required=True)
+    verdict.add_argument("--max-age-hours", required=True, type=float)
+    verdict.add_argument(
+        "--event",
+        action="append",
+        required=True,
+        help=(
+            "repeatable; the run events admitted as a measurement. A run of any "
+            "other event is ignored, never counted as a pass."
+        ),
+    )
+    verdict.add_argument(
+        "--dispatch-title-contains",
+        default="",
+        help=(
+            "OMN-19311: an admitted workflow_dispatch run is a measurement only "
+            "when its run title carries this token (the lane it measured)"
+        ),
+    )
+
     verify = sub.add_parser(
         "verify",
         help="refuse a receipt file that is not the one this job emitted",
@@ -3930,6 +4154,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             else list(EnumLabLane)
         )
         return evaluate_gate(args.repo, args.sha, lanes, sys.stdout)
+    if args.command == "workflow-verdict":
+        return evaluate_workflow_verdict(
+            args.repo,
+            args.workflow,
+            args.branch,
+            args.max_age_hours,
+            args.event,
+            sys.stdout,
+            dispatch_title_contains=args.dispatch_title_contains,
+        )
 
     raise AssertionError(f"unreachable subcommand {args.command!r}")  # pragma: no cover
 

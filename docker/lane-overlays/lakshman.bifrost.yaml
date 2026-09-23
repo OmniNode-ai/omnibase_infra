@@ -7,20 +7,18 @@
 # resolves the overlay from the lane's own BIFROST_LANE_OVERLAY_PATH pin, and
 # this file is what that pin names for compose project omnibase-infra-lakshman.
 #
-# CONTENT IS NOT A LANE CHOICE. Every binding below is mechanically pinned by
-# the _AUTHORIZED_BINDINGS table in
-# src/omnibase_infra/runtime/models/model_bifrost_lane_backend_binding.py:
-# the schema requires exactly the active backend set, and for each backend the
-# exact authorized lab host/port/model/context-window. A schema-valid overlay
-# cannot bind anything else. These endpoints are the lab's SHARED local
+# OMN-17099: this file IS the binding. The product no longer ships a table of
+# lab hosts to check it against; the renderer checks each served id against the
+# base contract and requires every local rung the base contract routes to, and
+# tests/fixtures/bifrost_served_models_probe.json pins every endpoint here to a
+# recorded /v1/models readback. These endpoints are the lab's SHARED local
 # inference servers (host-level model servers, not services of any compose
 # lane), so routing this lane at them does not couple it to the dev lane. The
 # lane-scoped facts are the `lane:` attribution below and WHICH file the lane
 # mounts — both now name this lane explicitly.
-# onex-allow-internal-ip OMN-17150 reason="typed collaborator-lane delegation contract; values pinned by the authorized lab binding table"
+# onex-allow-internal-ip OMN-17150 reason="typed collaborator-lane delegation contract; values pinned by the recorded lab probe fixture"
 # OMN-17502: `locale: lab` states what the schema used to assume — this lane's
-# runtime sits on the lab network, so it declares the exact authorized local
-# backend set. A lane that runs elsewhere declares `locale: cloud` and zero
+# runtime sits on the lab network, so it binds the lab's local backends. A lane that runs elsewhere declares `locale: cloud` and zero
 # backends instead of mounting bindings it cannot reach.
 schema_version: "bifrost_lane_overlay.v3"
 lane: lakshman
@@ -40,7 +38,7 @@ backends:
     context_window: 131072
     max_tokens: 65536
     timeout_ms: 300000
-  # onex-allow-internal-ip OMN-17150 reason="typed collaborator-lane delegation contract; values pinned by the authorized lab binding table"
+  # onex-allow-internal-ip OMN-17150 reason="typed collaborator-lane delegation contract; values pinned by the recorded lab probe fixture"
   # OMN-16999: DECLARED, NOT SERVING. Re-probed 2026-09-05: GET
   # .200:8101/v1/models -> curl exit 7, http=000. Controls proving the probe ran
   # and the host is healthy: ping .200 = 2/2 packets 0.0% loss; TCP 22 OPEN,

@@ -66,10 +66,41 @@ def test_generated_runtime_compose_preserves_runtime_image_build() -> None:
     assert build["dockerfile"] == "docker/Dockerfile.runtime"
     assert build["args"]["BUILD_SOURCE"] == "${BUILD_SOURCE:-release}"
     assert build["args"]["EXPECTED_BUILD_SOURCE"] == "${EXPECTED_BUILD_SOURCE:-release}"
-    assert build["args"]["OMNI_HOME"] == "${OMNI_HOME:-}"
     assert build["args"]["GIT_SHA"] == "${GIT_SHA:-unknown}"
     assert build["args"]["VCS_REF"] == "${VCS_REF:-}"
     assert build["args"]["BUILD_DATE"] == "${BUILD_DATE:-}"
+
+
+@pytest.mark.unit
+def test_runtime_image_build_carries_no_silent_omni_home_default() -> None:
+    """OMN-16852 AC3: the render must not hand the build an empty OMNI_HOME.
+
+    ``OMNI_HOME`` is an internal build input (2026-08-28 boundary ruling): only
+    a ``BUILD_SOURCE=workspace`` build reads it, to stage sibling repositories
+    from the operator's registry, and every sanctioned workspace build passes it
+    as ``--build-arg`` after refusing an unset value (the deploy agent's
+    ``_build_source_args`` and ``deploy-runtime.sh``). A ``${OMNI_HOME:-}``
+    entry in the render added nothing but a silent empty default, so the
+    Dockerfile's own workspace guard is left to fail fast instead.
+    """
+    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
+    resolved = resolver.resolve(bundles=["runtime"])
+    compose = generate_compose(resolved)
+
+    rendered_build_args = [
+        (service_name, key, value)
+        for service_name, service in compose["services"].items()
+        for key, value in service.get("build", {}).get("args", {}).items()
+    ]
+    assert rendered_build_args, (
+        "positive control: the runtime bundle renders build args"
+    )
+    offenders = [
+        (service_name, key, value)
+        for service_name, key, value in rendered_build_args
+        if key == "OMNI_HOME" or "${OMNI_HOME:-" in str(value)
+    ]
+    assert not offenders, offenders
 
 
 @pytest.mark.unit

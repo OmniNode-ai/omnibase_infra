@@ -73,6 +73,21 @@ set -euo pipefail
 # Config
 # ---------------------------------------------------------------------------
 STATE_FILE="${RUNNER_MONITOR_STATE_FILE:-/tmp/runner-monitor-state.json}"
+# OMN-19169: how many CONSECUTIVE observations a changed actionable count must
+# survive before it is announced to Slack. The transition arms below used to be
+# pure edge triggers, so an input that oscillates on this monitor's own cadence
+# paged twice per oscillation: 46 of 165 notification-channel messages over 15h
+# on 2026-09-22 were this script alternating ALERT/RECOVERED on a transient
+# wedge, against a fleet its own log read as 60/60 healthy. The dwell counter
+# lives in STATE_FILE rather than in this process, which is also what makes the
+# TWO cron entries that run this script (a 3-minute monitor pass and a 10-minute
+# auto-bounce pass) cooperate on one announced state instead of racing it.
+# Detection, remediation and the state file are NOT delayed by this -- only the
+# Slack announcement is.
+ALERT_DWELL_CYCLES="${RUNNER_MONITOR_ALERT_DWELL_CYCLES:-3}"
+if ! [[ "${ALERT_DWELL_CYCLES}" =~ ^[0-9]+$ ]] || [[ "${ALERT_DWELL_CYCLES}" -lt 1 ]]; then
+    ALERT_DWELL_CYCLES=3
+fi
 COMPOSE_DIR="$HOME/.omnibase/runners/docker"
 COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.runners.yml"
 RUNNER_FLEET_CONFIG_PATH="${RUNNER_FLEET_CONFIG_PATH:-$HOME/.omnibase/runners/config/runner_fleet.yaml}"
@@ -1088,9 +1103,19 @@ Pending targets: ${target_list}" "danger"
 # ---------------------------------------------------------------------------
 prev_unhealthy_count=0
 prev_alert_count=0
+# OMN-19169: what Slack has already been TOLD, and how many consecutive
+# observations the current disagreement has survived. `announced_alert_count`
+# falls back to `alert_count` so the first run after this change ships does not
+# re-announce a state the channel already carries.
+announced_alert_count=0
+pending_alert_count=0
+pending_alert_streak=0
 if [[ -f "$STATE_FILE" ]]; then
     prev_unhealthy_count=$(jq -r '.unhealthy_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
     prev_alert_count=$(jq -r '.alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
+    announced_alert_count=$(jq -r '.announced_alert_count // .alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
+    pending_alert_count=$(jq -r '.pending_alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
+    pending_alert_streak=$(jq -r '.pending_alert_streak // 0' "$STATE_FILE" 2>/dev/null || echo 0)
 fi
 
 current_unhealthy_count=${#unhealthy_list[@]}
@@ -1155,11 +1180,56 @@ if [[ "${verify_runner_alert_present}" == true ]]; then
     current_alert_count=$((current_alert_count + 1))
 fi
 
+# ---------------------------------------------------------------------------
+# Announcement dwell (OMN-19169)
+# ---------------------------------------------------------------------------
+# The transition arms further down compare against `prev_alert_count`. They are
+# repointed at `announced_alert_count` -- what the channel already says -- and
+# their slack_post calls are gated on `announce_transition`. A disagreement
+# must repeat unchanged for ALERT_DWELL_CYCLES consecutive observations before
+# it is announced; anything shorter is a flap and is logged, never posted.
+announce_transition=false
+# What the channel currently says, captured BEFORE an announcement moves it --
+# the transition arms below must see the state they are transitioning FROM.
+previously_announced_alert_count="${announced_alert_count}"
+if [[ "${current_alert_count}" -eq "${announced_alert_count}" ]]; then
+    # Agreement with the channel: nothing is pending.
+    pending_alert_count="${current_alert_count}"
+    pending_alert_streak=0
+else
+    if [[ "${current_alert_count}" -eq "${pending_alert_count}" ]]; then
+        pending_alert_streak=$((pending_alert_streak + 1))
+    else
+        pending_alert_count="${current_alert_count}"
+        pending_alert_streak=1
+    fi
+    if [[ "${pending_alert_streak}" -ge "${ALERT_DWELL_CYCLES}" ]]; then
+        announce_transition=true
+    fi
+fi
+
+if [[ "${announce_transition}" == true ]]; then
+    log "DWELL: announcing ${announced_alert_count} -> ${current_alert_count} after ${pending_alert_streak}/${ALERT_DWELL_CYCLES} consecutive observation(s)."
+    announced_alert_count="${current_alert_count}"
+    pending_alert_streak=0
+elif [[ "${current_alert_count}" -ne "${announced_alert_count}" ]]; then
+    log "DWELL: holding ${announced_alert_count} -> ${current_alert_count} at ${pending_alert_streak}/${ALERT_DWELL_CYCLES} consecutive observation(s); no Slack post. Detection and auto-bounce are unaffected."
+fi
+
+# The transition arms read this; it is deliberately the ANNOUNCED state rather
+# than the previous observation, so an un-announced flap leaves no residue for
+# the next cycle -- and the second cron invocation reads the same value.
+prev_alert_count="${previously_announced_alert_count}"
+
 # Write current state
 jq -n \
     --argjson healthy "$healthy" \
     --argjson unhealthy_count "$current_unhealthy_count" \
     --argjson alert_count "$current_alert_count" \
+    --argjson announced_alert_count "$announced_alert_count" \
+    --argjson pending_alert_count "$pending_alert_count" \
+    --argjson pending_alert_streak "$pending_alert_streak" \
+    --argjson alert_dwell_cycles "$ALERT_DWELL_CYCLES" \
     --argjson remediation_target_count "$remediation_target_count" \
     --argjson wedge_count "$wedge_count" \
     --argjson crashloop_count "$crashloop_count" \
@@ -1189,6 +1259,10 @@ jq -n \
         healthy: $healthy,
         unhealthy_count: $unhealthy_count,
         alert_count: $alert_count,
+        announced_alert_count: $announced_alert_count,
+        pending_alert_count: $pending_alert_count,
+        pending_alert_streak: $pending_alert_streak,
+        alert_dwell_cycles: $alert_dwell_cycles,
         remediation_target_count: $remediation_target_count,
         wedge_count: $wedge_count,
         crashloop_count: $crashloop_count,
@@ -1444,8 +1518,10 @@ ${special_findings}\`\`\`"
 ${safe_bounce_block}
 \`\`\`"
     fi
-    slack_post "${msg}" "danger"
-    log "ALERT: ${current_alert_count} actionable issue(s), ${current_unhealthy_count} raw unhealthy (previous actionable 0). wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count} offline_idle_recreate=${offline_idle_recreate_count}. Slack notified."
+    if [[ "${announce_transition}" == true ]]; then
+        slack_post "${msg}" "danger"
+    fi
+    log "ALERT: ${current_alert_count} actionable issue(s), ${current_unhealthy_count} raw unhealthy (previous actionable 0). wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count} offline_idle_recreate=${offline_idle_recreate_count}. Slack posted=${announce_transition}."
     auto_bounce "${remediation_targets}"
 
 elif [[ $current_alert_count -gt 0 ]] && [[ $prev_alert_count -gt 0 ]] && [[ $current_alert_count -ne $prev_alert_count ]]; then
@@ -1474,19 +1550,23 @@ ${special_findings}\`\`\`"
 ${safe_bounce_block}
 \`\`\`"
     fi
-    slack_post "${msg}" "warning"
-    log "UPDATE: ${current_alert_count} actionable issue(s) (was ${prev_alert_count}), ${current_unhealthy_count} raw unhealthy. wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count} offline_idle_recreate=${offline_idle_recreate_count}. Slack notified."
+    if [[ "${announce_transition}" == true ]]; then
+        slack_post "${msg}" "warning"
+    fi
+    log "UPDATE: ${current_alert_count} actionable issue(s) (was ${prev_alert_count}), ${current_unhealthy_count} raw unhealthy. wedge=${wedge_count} crashloop=${crashloop_count} stuck_created=${stuck_created_count} offline_idle_recreate=${offline_idle_recreate_count}. Slack posted=${announce_transition}."
     auto_bounce "${remediation_targets}"
 
 elif [[ $current_alert_count -eq 0 ]] && [[ $prev_alert_count -gt 0 ]]; then
     # Transition: actionable alert cleared. Raw drift may remain and is logged.
-    slack_post "*[RUNNER RECOVERED]* No actionable runner-fleet issues remain
+    if [[ "${announce_transition}" == true ]]; then
+        slack_post "*[RUNNER RECOVERED]* No actionable runner-fleet issues remain
 
 Healthy: ${healthy}/${EXPECTED_RUNNERS} | Raw unhealthy: ${current_unhealthy_count}
 Online: ${online_count} | Busy: ${busy_count}
 Docker socket: $([ "$docker_ok" = true ] && echo 'OK' || echo 'FAILED')
 Host: ${RUNNER_HOST}" "good"
-    log "RECOVERED: actionable alert count cleared; ${current_unhealthy_count} raw unhealthy remain. Slack notified."
+    fi
+    log "RECOVERED: actionable alert count cleared; ${current_unhealthy_count} raw unhealthy remain. Slack posted=${announce_transition}."
 
 else
     # No state change — silent
