@@ -74,7 +74,17 @@ THE KEY IS REGISTERED THE WAY THE PRODUCT SAYS
     delegation, this probe is red, which is the finding.
     On 2026-09-22 it does not: the local store files ``llm.glm.api_key`` under
     provider ``llm.glm.api``, the BYOK substitution never fires, and the house-
-    shaped reference is refused on the customer-local surface (OMN-19205).
+    shaped reference is refused on the customer-local surface (OMN-19205). From
+    omnimarket 0.4.203 a provider-only customer sees that same refusal worded
+    as "No local model is declared on this machine" (the OMN-16200 gate re-words
+    it, and changes nothing else).
+
+THE CUSTOMER WRITES NO CONFIGURATION
+    Since omnimarket 0.4.203 a clean install resolves its routing contracts
+    from the packaged defaults. The customer environment is HOME, PATH, LANG and
+    TERM and nothing else, and this customer declares no local model: C29 is the
+    provider-only case. The only act is ``onex local init`` and handing over the
+    key.
 
 WHY STRACE, AND WHY DNS
     connect() is where an attempt becomes visible whether or not it succeeds,
@@ -144,8 +154,13 @@ OMNINODE_DOMAINS: Final[tuple[str, ...]] = ("omninode.ai", "omninode.com")
 #: Positive control 2: looked up under the tracer, must be classified OmniNode.
 OMNINODE_CONTROL_HOST: Final[str] = "api.omninode.ai"
 
-#: The typed refusal the keyless negative control must return.
-KEYLESS_REFUSAL_CODE: Final[str] = "ONEX_MARKET_CUSTOMER_PROVIDER_KEY_ABSENT"
+#: The keyless negative control must be a TYPED refusal: an ONEX error code in
+#: the result, not a fallthrough and not an untyped crash. Which code is not
+#: pinned -- on omnimarket 0.4.198-0.4.202 it was the customer-key terminus
+#: (``ONEX_MARKET_CUSTOMER_PROVIDER_KEY_ABSENT``), from 0.4.203 the OMN-16200
+#: gate re-words the same refusal as ``ONEX_CORE_041_INVALID_CONFIGURATION``.
+#: The code seen is recorded.
+KEYLESS_REFUSAL_CODE_RE: Final = re.compile(r"\[?(ONEX_[A-Z0-9_]+)\]?")
 
 #: The customer environment's whole vocabulary. Anything else in it -- above
 #: all a variable carrying a key -- would mean the key had a second way in.
@@ -155,8 +170,6 @@ ALLOWED_CUSTOMER_ENV_KEYS: Final[frozenset[str]] = frozenset(
         "PATH",
         "LANG",
         "TERM",
-        "DELEGATION_ROUTING_TIERS_PATH",
-        "BIFROST_CONTRACT_PATH",
     }
 )
 
@@ -773,10 +786,13 @@ def grade_no_omninode(obs: Mapping[str, Any], spec: ProviderSpec | None) -> Clau
     # Negative control: before a key exists, a typed refusal and no provider.
     keyless = steps.get("keyless")
     if keyless is not None:
-        text = (keyless.get("stdout") or "") + (keyless.get("stderr") or "")
-        typed = KEYLESS_REFUSAL_CODE in text
+        refusal = _find_refusal(_load_json(keyless.get("stdout"))) or ""
+        code = KEYLESS_REFUSAL_CODE_RE.search(refusal)
+        typed = code is not None
         clause.evidence["keyless_returncode"] = keyless.get("returncode")
         clause.evidence["keyless_typed_refusal"] = typed
+        clause.evidence["keyless_refusal_code"] = code.group(1) if code else None
+        clause.evidence["keyless_refusal"] = refusal[:400]
         if keyless.get("returncode") == 0:
             clause.reasons.append(
                 "negative control failed: a delegation with no key registered succeeded, so the "
@@ -784,7 +800,8 @@ def grade_no_omninode(obs: Mapping[str, Any], spec: ProviderSpec | None) -> Clau
             )
         if not typed:
             clause.reasons.append(
-                f"negative control failed: the keyless refusal does not carry {KEYLESS_REFUSAL_CODE}"
+                "negative control failed: the keyless run's result carries no typed ONEX "
+                "refusal code, so a refusal is not distinguishable from a crash"
             )
         keyless_kinds = per_step.get("keyless", {}).get("connect_kinds", {})
         if keyless_kinds.get("provider", 0):
@@ -828,7 +845,6 @@ def grade(obs: Mapping[str, Any], *, as_of: str | None = None) -> Record:
         "provider_host": spec.host if spec else None,
         "registration_ref": spec.registration_ref if spec else None,
         "installed": obs.get("installed"),
-        "config_bindings": obs.get("config_bindings"),
         "prompt": obs.get("prompt"),
     }
     return Record(
@@ -991,34 +1007,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         "LANG": "C.UTF-8",
         "TERM": "dumb",
     }
-    # The routing and backend contracts are the ones the package SHIPS. The
-    # customer points the two bindings a clean install refuses without at the
-    # installed files and writes no routing configuration of their own.
-    interpreter = (
-        onex.read_text(errors="replace").splitlines()[0].removeprefix("#!").strip()
-    )
-    locate = subprocess.run(
-        [
-            interpreter,
-            "-c",
-            "import omnimarket, os; print(os.path.dirname(omnimarket.__file__))",
-        ],
-        env=base_env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    if locate.returncode != 0 or not locate.stdout.strip():
-        raise ProbeInputError(
-            f"could not locate the installed omnimarket: {locate.stderr[-500:]}"
-        )
-    configs = Path(locate.stdout.strip()) / "configs"
-    bindings = {
-        "DELEGATION_ROUTING_TIERS_PATH": str(configs / "routing_tiers.yaml"),
-        "BIFROST_CONTRACT_PATH": str(configs / "bifrost_delegation.yaml"),
-    }
-    customer_env = {**base_env, **bindings}
+    customer_env = dict(base_env)
     timeout = int(args.step_timeout)
 
     def run(
@@ -1107,7 +1096,6 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         "provider": spec.slug,
         "prompt": args.prompt,
         "customer_env_keys": sorted(customer_env),
-        "config_bindings": bindings,
         "nameservers": read_nameservers(),
         "steps": steps,
         "registered_refs": registered_refs,
