@@ -354,13 +354,13 @@ repos:
       # process. Pins that a real working session grades PASS and the real
       # documented-surface refusal grades FAIL, that an OmniNode lookup, an
       # address nobody looked up, a blind tracer, a blind DNS decoder and a
-      # keyless success each fail, and that the workflow's grading step cannot
-      # be softened. Runs offline over recorded observations.
+      # keyless success each fail. Runs offline over recorded observations. The
+      # job itself runs on the omnipc2 customer machine from omninode_infra.
       - id: c29-customer-byo-key-grading
         name: C29 customer-own-key grader (OMN-19200)
         entry: uv run --frozen pytest tests/ci/test_c29_customer_byo_key_probe_omn19200.py -q
         language: system
-        files: ^(\.github/workflows/c29-customer-byo-key-delegation\.yml|scripts/ci/c29_customer_byo_key_probe\.py|tests/ci/test_c29_customer_byo_key_probe_omn19200\.py|tests/fixtures/omn19200/.*)$
+        files: ^(scripts/ci/c29_customer_byo_key_probe\.py|tests/ci/test_c29_customer_byo_key_probe_omn19200\.py|tests/fixtures/omn19200/.*)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-19197: no internal-only parameter (an option spelled OMNI_HOME, or
@@ -384,13 +384,14 @@ repos:
       # three controls from observations taken outside the process. Pins that
       # a blind tracer is an unproven zero rather than a pass, that the
       # outbound control and the negative control are graded, that a package
-      # imported from a checkout fails, and that the workflow never checks a
-      # repository out. Runs offline over a recorded clean-container session.
+      # imported from a checkout fails. The workflow that runs it lives in
+      # omninode_infra, on the lab customer machine. Runs offline over a
+      # recorded clean-container session.
       - id: c13-customer-local-grading
         name: C13 customer-local grader (OMN-19179)
         entry: uv run --frozen pytest tests/ci/test_c13_customer_local_probe_omn19179.py -q
         language: system
-        files: ^(\.github/workflows/c13-customer-local-delegation\.yml|scripts/ci/c13_customer_local_probe\.py|tests/ci/test_c13_customer_local_probe_omn19179\.py|tests/fixtures/omn19179/.*)$
+        files: ^(scripts/ci/c13_customer_local_probe\.py|tests/ci/test_c13_customer_local_probe_omn19179\.py|tests/fixtures/omn19179/.*)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-19195: the C12 producer's grader. Pins that the recorded lab

@@ -358,6 +358,11 @@ def classify_boundary_failure(
     retryable = not any(
         EnumNonRetryableErrorCategory.is_non_retryable(name) for name in candidates
     )
+    # OMN-17397: a raiser that KNOWS the record is refused identically on every
+    # delivery says so explicitly. It can only lower the derivation, in the same
+    # direction as the bias described above.
+    if getattr(exc, "retryable", None) is False:
+        retryable = False
     specific = next(
         (name for name in candidates if name not in _BOUNDARY_WRAPPER_CLASS_NAMES),
         None,

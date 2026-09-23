@@ -119,29 +119,20 @@ SOURCE_TREE_PROJECT_NAMES: Final[frozenset[str]] = frozenset(
 #: The three files OMN-16999 promises a local delegation writes.
 RUN_FILES: Final[tuple[str, ...]] = ("result.txt", "receipt.json", "run.json")
 
-#: The key a clean install refuses on first. Recorded, never graded: the
-#: negative control only requires that an unconfigured run refuses without
-#: reaching a model. OMN-16200 owns the documentation gap behind it.
-FIRST_REFUSAL_KEY: Final[str] = "DELEGATION_ROUTING_TIERS_PATH"
+#: The one documented customer configuration file (OMN-16200, omnimarket
+#: 0.4.203): the machine-local overlay, relative to the customer's HOME. A clean
+#: install that has not written it is refused before any model call, naming it.
+OVERLAY_RELATIVE_PATH: Final[str] = ".omninode/delegation/bifrost_overrides.yaml"
 
 #: The deliberate outbound connect for positive control 2. A literal address so
 #: the control itself needs no name lookup.
 OUTBOUND_CONTROL_HOST: Final[str] = "1.1.1.1"
 OUTBOUND_CONTROL_PORT: Final[int] = 443
 
-#: The tier names the shipped task-class contracts escalate through. A customer
-#: routing file must declare every one of them or the task-class tier_order
-#: refuses before dispatch (measured 2026-09-22); only ``local`` carries a
-#: model, so there is nothing above the local rung to climb to.
-DECLARED_TIER_NAMES: Final[tuple[str, ...]] = (
-    "local",
-    "cheap_cloud",
-    "cheap_frontier",
-    "claude",
-)
-
-#: The shipped backend the customer overlay repoints at the local server.
-LOCAL_BACKEND_ID: Final[str] = "local-coder"
+#: The shipped local backends the customer overlay points at their own model.
+#: The shipped routing sends code classes to ``local-coder`` and prose classes
+#: (``document`` among them) to ``local-heavy-reasoning``, so both are declared.
+LOCAL_BACKEND_IDS: Final[tuple[str, ...]] = ("local-coder", "local-heavy-reasoning")
 
 _INET_RE: Final = re.compile(
     r"sa_family=AF_INET, sin_port=htons\((?P<port>\d+)\), "
@@ -573,8 +564,9 @@ def grade_zero_provider(obs: Mapping[str, Any]) -> Clause:
     unconfigured = steps.get("unconfigured")
     if unconfigured is not None:
         clause.evidence["unconfigured_returncode"] = unconfigured.get("returncode")
-        clause.evidence["unconfigured_names_first_key"] = FIRST_REFUSAL_KEY in (
-            (unconfigured.get("stdout") or "") + (unconfigured.get("stderr") or "")
+        clause.evidence["unconfigured_names_overlay_file"] = (
+            "bifrost_overrides.yaml"
+            in ((unconfigured.get("stdout") or "") + (unconfigured.get("stderr") or ""))
         )
         if unconfigured.get("returncode") == 0:
             clause.reasons.append(
@@ -584,10 +576,11 @@ def grade_zero_provider(obs: Mapping[str, Any]) -> Clause:
             clause.reasons.append(
                 "negative control failed: an unconfigured run reached the model server"
             )
-        if metrics.get("unconfigured_tokens_predicted_delta") not in (0, None):
-            clause.reasons.append(
-                "negative control failed: the model server generated tokens during the unconfigured run"
-            )
+        # The server's token counter over the unconfigured run is RECORDED, not
+        # graded. On the lab customer machine the model server is shared
+        # with other sessions, so a non-zero delta there can be someone else's
+        # request. The traced connect count above is exclusive to this process
+        # tree and is the negative control's proof.
     return clause
 
 
@@ -664,47 +657,24 @@ def tokens_predicted(base_url: str) -> int:
     )
 
 
-def routing_tiers_yaml(served_model: str) -> str:
-    """The customer's routing file: every declared tier, a model on local only."""
-    lines = ["tiers:"]
-    for name in DECLARED_TIER_NAMES:
+def bifrost_overlay_yaml(served_model: str, model_port: int, max_tokens: int) -> str:
+    """The customer's overlay: the shipped local backends, pointed at loopback."""
+    lines = [
+        'config_version: "2.1.0"',
+        'schema_version: "bifrost_delegation.v1"',
+        "backends:",
+    ]
+    for backend_id in LOCAL_BACKEND_IDS:
         lines += [
-            f"  - name: {name}",
-            "    cost_per_1k_tokens: 0.0",
-            "    cost:",
-            "      cost_type: free_local",
+            f"  - backend_id: {backend_id}",
+            # A customer has no contract resolver: their own loopback model is what C13 names.
+            f'    endpoint_url: "http://127.0.0.1:{model_port}/v1/chat/completions"',  # url-authority-ok: customer loopback model
+            f'    model_name: "{served_model}"',
+            "    tier: local",
+            "    timeout_ms: 240000",
+            f"    max_tokens: {max_tokens}",
         ]
-        if name == "local":
-            lines += [
-                "    models:",
-                f"      - id: {served_model}",
-                f"        backend_id: {LOCAL_BACKEND_ID}",
-                "        max_context_tokens: 8192",
-                "        use_for: [code_generation, code_review, refactor, validator_generation, test,"
-                " research, reasoning, complex_reasoning, planning, review, document, escalation,"
-                " documentation, summarization]",
-                "        fast_path_threshold_tokens: 8192",
-            ]
-        else:
-            lines.append("    models: []")
-        lines += ["    eval_before_accept: false", "    max_retries: 0"]
     return "\n".join(lines) + "\n"
-
-
-def bifrost_overlay_yaml(served_model: str, model_port: int) -> str:
-    """The customer's overlay: the shipped local backend, pointed at loopback."""
-    return (
-        'config_version: "2.1.0"\n'
-        'schema_version: "bifrost_delegation.v1"\n'
-        "backends:\n"
-        f"  - backend_id: {LOCAL_BACKEND_ID}\n"
-        # A customer has no contract resolver: their own loopback model is what C13 names.
-        f'    endpoint_url: "http://127.0.0.1:{model_port}/v1/chat/completions"\n'  # url-authority-ok: customer loopback model
-        f'    model_name: "{served_model}"\n'
-        "    tier: local\n"
-        "    timeout_ms: 240000\n"
-        "    max_tokens: 512\n"
-    )
 
 
 _DIRECT_URL_SNIPPET: Final[str] = (
@@ -838,15 +808,11 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         "LANG": "C.UTF-8",
         "TERM": "dumb",
     }
-    config_dir = customer_home / ".config" / "c13-customer"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    tiers_path = config_dir / "routing_tiers.yaml"
-    overlay_path = config_dir / "bifrost_overrides.yaml"
-    configured_env = {
-        **base_env,
-        FIRST_REFUSAL_KEY: str(tiers_path),
-        "BIFROST_OVERLAY_PATH": str(overlay_path),
-    }
+    # The documented surface only (OMN-16200): one file under the customer's
+    # HOME, and no environment binding of any kind. The configured run uses the
+    # SAME environment as the negative control; the file is the only difference.
+    overlay_path = customer_home / OVERLAY_RELATIVE_PATH
+    configured_env = dict(base_env)
     timeout = int(args.step_timeout)
     steps: dict[str, Any] = {}
     steps["init"] = _run_step(
@@ -871,9 +837,11 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
 
     # Written only now, AFTER the negative control, so the refusal above was
     # taken on a machine with no customer configuration at all.
-    tiers_path.write_text(routing_tiers_yaml(args.served_model))
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
     overlay_path.write_text(
-        bifrost_overlay_yaml(args.served_model, int(args.model_port))
+        bifrost_overlay_yaml(
+            args.served_model, int(args.model_port), int(args.max_tokens)
+        )
     )
     # The negative control's own run directory is set aside so the configured
     # run's files are the only ones the three_files clause can find.
@@ -973,12 +941,11 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         },
         "customer_env_keys": sorted(configured_env),
         "config_surface": (
-            f"{FIRST_REFUSAL_KEY} and BIFROST_OVERLAY_PATH env bindings; a clean install names the first "
-            "in its own refusal, and no public guide documents either (OMN-16200)"
+            f"the documented machine-local overlay ~/{OVERLAY_RELATIVE_PATH} "
+            "(OMN-16200) and nothing else: no environment binding, shipped routing tiers"
         ),
         "customer_config": {
-            "routing_tiers.yaml": tiers_path.read_text(),
-            "bifrost_overrides.yaml": overlay_path.read_text(),
+            f"~/{OVERLAY_RELATIVE_PATH}": overlay_path.read_text(),
         },
         "steps": steps,
         "run_dir": str(run_dir) if run_dir else None,
@@ -1043,6 +1010,11 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--server-build", default="")
     run.add_argument("--prompt", default="explain what a calendar app needs")
     run.add_argument("--step-timeout", default="600")
+    # The response budget the customer overlay gives the local backend. A
+    # reasoning model spends tokens before it answers, so a small budget turns a
+    # healthy model into an empty answer (measured on the lab customer machine, 2026-09-23: 512
+    # tokens exhausted, quality 0.0). It must also fit the server's context.
+    run.add_argument("--max-tokens", default="8192")
     run.add_argument("--observations-out", required=True)
     run.add_argument("--record", required=True)
     run.add_argument("--summary", default="")

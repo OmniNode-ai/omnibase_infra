@@ -291,3 +291,98 @@ def test_route_is_presence_checked_only_and_says_so() -> None:
     payload["observations"]["healthy"]["receipt"]["route"] = "cloud-gemini-pro"
     assert _outcomes(payload)["R-DELEG-12"] == "PASS"
     assert "no route NAME to\n                compare it with" in (probe.__doc__ or "")
+
+
+class _FakeRecord:
+    def __init__(self, value: bytes) -> None:
+        self.value = value
+
+
+class _FakeConsumer:
+    """Stands in for AIOKafkaConsumer: one partition, a scripted fetch."""
+
+    batches: list[list[bytes]] = []
+    end = 0
+
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+        self._position = 0
+        self._batches = list(type(self).batches)
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+    def assignment(self) -> set[str]:
+        return {"p0"}
+
+    async def end_offsets(self, parts: list[str]) -> dict[str, int]:
+        return {p: type(self).end for p in parts}
+
+    async def beginning_offsets(self, parts: list[str]) -> dict[str, int]:
+        return dict.fromkeys(parts, 0)
+
+    def seek(self, _part: str, offset: int) -> None:
+        self._position = offset
+
+    async def position(self, _part: str) -> int:
+        return self._position
+
+    async def getmany(self, **_kwargs: Any) -> dict[str, list[_FakeRecord]]:
+        if not self._batches:
+            return {}
+        batch = self._batches.pop(0)
+        self._position += len(batch)
+        return {"p0": [_FakeRecord(v) for v in batch]}
+
+
+def _scan(
+    monkeypatch: pytest.MonkeyPatch, batches: list[list[bytes]], end: int
+) -> probe.TerminalObservation:
+    import asyncio
+    import sys
+    import types
+
+    _FakeConsumer.batches = batches
+    _FakeConsumer.end = end
+    fake = types.ModuleType("aiokafka")
+    fake.AIOKafkaConsumer = _FakeConsumer  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "aiokafka", fake)
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker.invalid:9092")
+    return asyncio.run(
+        probe._scan_terminal(
+            "terminal-topic", "cid-1", wait_seconds=2.0, max_records=100
+        )
+    )
+
+
+@pytest.mark.unit
+def test_a_scan_that_reaches_the_watermark_without_a_match_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other = json.dumps({"payload": {"correlation_id": "cid-2"}}).encode()
+    seen = _scan(monkeypatch, [[other, other]], end=2)
+    assert seen.error is None and seen.payload is None
+
+
+@pytest.mark.unit
+def test_a_scan_that_runs_out_of_window_is_unobserved_not_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run 35787593146: a slow broker must grade SKIP, never FAIL."""
+    seen = _scan(monkeypatch, [], end=5)
+    assert seen.payload is None
+    assert seen.error is not None and "did not reach the end" in seen.error
+    payload = _load()
+    payload["observations"]["healthy_terminal"] = {"payload": None, "error": seen.error}
+    assert _outcomes(payload)["R-DELEG-12"] == "SKIP"
+
+
+@pytest.mark.unit
+def test_a_scan_that_finds_the_terminal_returns_its_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mine = json.dumps({"payload": {"correlation_id": "cid-1", "provider": "local"}})
+    seen = _scan(monkeypatch, [[mine.encode()]], end=1)
+    assert seen.payload == {"correlation_id": "cid-1", "provider": "local"}
