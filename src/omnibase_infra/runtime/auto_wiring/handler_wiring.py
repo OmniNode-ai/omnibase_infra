@@ -340,11 +340,25 @@ class HandlerDispatchFailureError(Exception):
     prefers the specific code recovered from the flattened message and falls
     back to this only when the crash carried no ONEX code at all (a bare
     ``AttributeError``, say). ``None`` when the result carried no code.
+
+    OMN-17397: ``retryable=False`` is a statement the RAISER can make and the
+    classifier cannot derive. A record no dispatcher accepts is refused the
+    same way on every delivery, but its only class token is whatever the
+    validation detail spelled (``ValueError`` for a pydantic refusal), which
+    no retry classifier names. ``None`` leaves the derivation untouched; the
+    flag can only ever lower ``retryable``, never raise it.
     """
 
-    def __init__(self, message: str, *, failure_code: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str | None = None,
+        retryable: bool | None = None,
+    ) -> None:
         super().__init__(message)
         self.failure_code = failure_code
+        self.retryable = retryable
 
 
 class UndeliverableDispatchOutputError(Exception):
@@ -6664,7 +6678,18 @@ def _raise_if_no_dispatcher_drop(result: object, topic: str) -> None:
             detail,
         )
         return
-    raise HandlerDispatchFailureError(detail)
+    # OMN-17397: the engine already resolved the typed code --
+    # ENVELOPE_VALIDATION_FAILED for a payload a registered dispatcher refused
+    # (a task class no consumer accepts), ITEM_NOT_REGISTERED for a true wiring
+    # gap. Dropping it here left the caller's terminal with a class and no code.
+    # Either way the same record is refused identically on every delivery, so
+    # the terminal must not invite a retry.
+    error_code = result.error_code
+    raise HandlerDispatchFailureError(
+        detail,
+        failure_code=error_code.value if error_code is not None else None,
+        retryable=False,
+    )
 
 
 def _normalize_contract_dispatcher_scope(
