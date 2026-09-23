@@ -372,3 +372,86 @@ def test_builder_uses_the_process_group_fenced_runner(builder: Any) -> None:
     from scoped_effects_deploy import _run_command
 
     assert builder.build_candidate.__kwdefaults__["runner"] is _run_command
+
+
+def test_offline_image_probe_needs_no_writable_filesystem(builder: Any) -> None:
+    # Same live defect as the executor's probe: `uv run` cannot create its
+    # cache directory in a --read-only container (live proof, .105, OMN-17991).
+    seen: list[list[str]] = []
+
+    def runner(args: list[str], stdin: str | None, timeout: int) -> str:
+        seen.append(args)
+        assert stdin and "namespace['installed_package_root']" in stdin
+        return json.dumps({"package_digests": {}})
+
+    builder._probe(runner, "sha256:" + "1" * 64)
+    (args,) = seen
+    assert "--read-only" in args
+    assert args[args.index("--entrypoint") + 1] == "/app/.venv/bin/python"
+    assert args[args.index("sha256:" + "1" * 64) + 1 :] == ["-B", "-"]
+
+
+def test_source_digest_includes_wheel_force_included_files(
+    builder: Any, source_data: dict[str, Any], tmp_path: Path
+) -> None:
+    # omnibase_core force-includes architecture-handshakes/gitignore-baseline.yaml
+    # into its wheel (OMN-18033), so the installed tree carries a file the
+    # src/ tree never does. The workspace provenance already resolves that;
+    # a src/-only digest refused every real base (live proof, .105, OMN-17991).
+    from compute_workspace_provenance import _digest_files, _tracked_files
+
+    root = tmp_path / "sources"
+    pins = {}
+    for name in ("omnibase_core", "omnibase_compat", "omnimarket", "omnibase_infra"):
+        clone = root / name
+        package = clone / "src" / name
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text(f"PACKAGE = {name!r}\n")
+        pyproject = f"[project]\nname = '{name.replace('_', '-')}'\nversion = '1.0.0'\n"
+        if name == "omnibase_core":
+            (clone / "architecture-handshakes").mkdir()
+            (clone / "architecture-handshakes" / "gitignore-baseline.yaml").write_text(
+                "baseline: []\n"
+            )
+            pyproject += (
+                "[tool.hatch.build.targets.wheel.force-include]\n"
+                '"architecture-handshakes/gitignore-baseline.yaml" = '
+                '"omnibase_core/data/gitignore-baseline.yaml"\n'
+            )
+        (clone / "pyproject.toml").write_text(pyproject)
+        _git(clone, "init", "-q", "-b", "dev")
+        _git(clone, "config", "user.name", "Candidate fixture")
+        _git(clone, "config", "user.email", "candidate@example.test")
+        _git(clone, "add", "-A")
+        _git(clone, "commit", "-q", "-m", "immutable source fixture")
+        pins[name] = _git(clone, "rev-parse", "HEAD")
+    plan = builder.ModelEffectsCandidatePlan.model_validate_json(
+        json.dumps(
+            {
+                **source_data,
+                "source_root": str(root),
+                "source_pins": {k: v for k, v in pins.items() if k != "omnibase_infra"},
+                "infra_source_root": str(root / "omnibase_infra"),
+                "infra_source_sha": pins["omnibase_infra"],
+            }
+        )
+    )
+    digests = builder.validate_sources(plan)
+    core = root / "omnibase_core" / "src" / "omnibase_core"
+    installed = {
+        **_tracked_files(core),
+        "data/gitignore-baseline.yaml": b"baseline: []\n",
+    }
+    assert digests["omnibase_core"] == _digest_files(installed)
+    compat = root / "omnibase_compat" / "src" / "omnibase_compat"
+    assert digests["omnibase_compat"] == _digest_files(_tracked_files(compat))
+
+
+def test_in_image_proof_resolves_the_editable_project_tree(builder: Any) -> None:
+    # The in-image proof loop covers omnibase_infra, which the runtime image
+    # installs editable from /app/src; locate_file() names a site-packages path
+    # that does not exist, so every real candidate failed its own proof (live
+    # proof, .105, OMN-17991). It must share the probe's package resolution.
+    assert "installed_package_root(proof['repo'])" in builder._INSTALLER
+    assert "locate_file(proof['repo'])" not in builder._INSTALLER
+    assert "scoped_image_probe.py" in builder.PROOF_TOOLS

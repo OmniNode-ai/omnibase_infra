@@ -26,6 +26,7 @@ NEW_IMAGE = "sha256:" + "2" * 64
 INFRA_SOURCE = "7" * 40
 PINS = {"omnibase_core": "3" * 40, "omnibase_compat": "4" * 40, "omnimarket": "5" * 40}
 TOPIC = "onex.evt.omnimarket.closeout-proof-matrix-completed.v1"
+LANE_TOPIC = "onex.evt.runtime.node-graph-ready.v1"
 
 
 @pytest.fixture
@@ -133,6 +134,10 @@ class DockerBoundary:
                 probe["infra_source_ref"] = "9" * 12
             elif self.mode == "base_image":
                 probe["base_image_id"] = "sha256:" + "9" * 64
+        if live and self.mode in ("lane_mounted_topics", "lane_topic_missing"):
+            # The lane bind-mounts ../contracts over /app/contracts, so the live
+            # declared topic set is the lane's, not the image's.
+            probe["required_topics"] = [TOPIC, LANE_TOPIC]
         if self.mode == "market_live_drift" and live and image == OLD_IMAGE:
             probe["market_payload_fingerprint"] = "d" * 64
         if self.mode == "market_after_drift" and live and image == NEW_IMAGE:
@@ -200,8 +205,14 @@ class DockerBoundary:
             return self._probe(image)
         if args[:2] == ["docker", "exec"]:
             if "rpk" in args:
-                return "NAME PARTITIONS REPLICAS\n" + (
-                    "" if self.mode == "missing_topic" else f"{TOPIC} 1 1\n"
+                return (
+                    "NAME PARTITIONS REPLICAS\n"
+                    + ("" if self.mode == "missing_topic" else f"{TOPIC} 1 1\n")
+                    + (
+                        f"{LANE_TOPIC} 1 1\n"
+                        if self.mode == "lane_mounted_topics"
+                        else ""
+                    )
                 )
             cid = args[3] if args[2] == "-i" else args[2]
             result = self._probe(self.containers[cid]["Image"], live=True)
@@ -435,6 +446,7 @@ def test_success_only_replaces_effects_and_keeps_rollback(
         "lineage",
         "market_live_drift",
         "lock_stolen",
+        "lane_topic_missing",
     ],
 )
 def test_refusal_never_recreates(
@@ -748,3 +760,65 @@ def test_drift_refuses_before_offline_probes(
     with pytest.raises(RuntimeError):
         _execute(executor, scenario)
     assert not any(call[1] in ("run", "tag") or "up" in call for call in docker.calls)
+
+
+def test_offline_image_probe_needs_no_writable_filesystem(executor: Any) -> None:
+    # `uv run` inside a --read-only container fails creating /root/.cache/uv
+    # before the probe script runs: every real image was unprobeable (live
+    # proof on .105, OMN-17991). The venv interpreter needs no cache directory.
+    seen: list[list[str]] = []
+
+    def runner(args: list[str], stdin: str | None, timeout: int) -> str:
+        seen.append(args)
+        return json.dumps(
+            {
+                "source_pins": {},
+                "dependency_fingerprint": "d" * 64,
+                "shared_runtime_fingerprint": "e" * 64,
+                "market_payload_fingerprint": "f" * 64,
+                "infra_source_ref": INFRA_SOURCE,
+                "base_image_id": None,
+                "required_topics": [TOPIC],
+            }
+        )
+
+    executor._probe(runner, "print(1)", image=OLD_IMAGE)
+    executor._probe(runner, "print(1)", container=CURRENT_ID)
+    image_args, exec_args = seen
+    assert "--read-only" in image_args
+    entrypoint = image_args[image_args.index("--entrypoint") + 1]
+    assert entrypoint == "/app/.venv/bin/python"
+    assert image_args[image_args.index(OLD_IMAGE) + 1 :] == ["-"]
+    assert exec_args == [
+        "docker",
+        "exec",
+        "-i",
+        CURRENT_ID,
+        "/app/.venv/bin/python",
+        "-",
+    ]
+
+
+def test_lane_mounted_contracts_are_admitted_and_their_topics_verified(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    # The dev lane mounts ../contracts over /app/contracts, so the live topic
+    # set never equals the image's; refusing that made every real lane
+    # unadmittable (live proof, .105, OMN-17991). The mounts are frozen in the
+    # admitted snapshot, so the live set is what the candidate runs with.
+    _, docker, _ = scenario
+    docker.mode = "lane_mounted_topics"
+    result = _execute(executor, scenario)
+    assert result["status"] == "PASSED", result.get("error")
+    assert result["installed_evidence"]["required_topics"] == [TOPIC, LANE_TOPIC]
+
+
+def test_lane_mounted_topic_absent_from_broker_refuses(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    _, docker, _ = scenario
+    docker.mode = "lane_topic_missing"
+    result = _execute(executor, scenario)
+    assert result["status"] == "REFUSED"
+    assert "required broker topics are absent" in result["error"]
+    assert not any("up" in call for call in docker.calls)

@@ -536,6 +536,8 @@ def _probe(
     image: str | None = None,
     container: str | None = None,
 ) -> dict[str, Any]:
+    # The venv interpreter directly: `uv run` needs a writable cache directory,
+    # which a --read-only container does not have.
     if image is not None:
         args = [
             "docker",
@@ -546,24 +548,14 @@ def _probe(
             "none",
             "--read-only",
             "--entrypoint",
-            "uv",
+            "/app/.venv/bin/python",
             image,
         ]
     elif container is not None:
-        args = ["docker", "exec", "-i", container, "uv"]
+        args = ["docker", "exec", "-i", container, "/app/.venv/bin/python"]
     else:
         raise RuntimeError("probe requires a specific image or container")
-    args.extend(
-        (
-            "run",
-            "--no-project",
-            "--no-sync",
-            "--python",
-            "/app/.venv/bin/python",
-            "python",
-            "-",
-        )
-    )
+    args.append("-")
     value = json.loads(runner(args, script, 120))
     if not isinstance(value, dict) or not isinstance(value.get("source_pins"), dict):
         raise RuntimeError("image probe returned incomplete provenance")
@@ -1007,11 +999,14 @@ def run_deploy(
             raise RuntimeError(
                 "live Market payload differs from its immutable image; unrecorded patch may be lost"
             )
-        if live_before["required_topics"] != baseline["required_topics"]:
-            raise RuntimeError(
-                "live effects topic requirements differ from its immutable image"
-            )
-        _assert_topics(current, candidate["required_topics"], runner)
+        # The lane bind-mounts its contracts over the image's, and those mounts
+        # are frozen in the admitted snapshot: the live declared set is what the
+        # candidate will run with, so the broker must carry both sets.
+        _assert_topics(
+            current,
+            sorted({*candidate["required_topics"], *live_before["required_topics"]}),
+            runner,
+        )
         retention_tag = (
             f"onex-scoped-effects-rollback:{plan.ticket_id.lower()}-{run_id}"
         )

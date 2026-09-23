@@ -25,7 +25,12 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 from uuid import uuid4
 
-from compute_workspace_provenance import _content_parity_diff, _hash_tree
+from compute_workspace_provenance import (
+    _content_parity_diff,
+    _digest_files,
+    _force_included_files,
+    _tracked_files,
+)
 from deploy_source_ref import (
     RepoRefSelection,
     _assert_owned_clean_target,
@@ -97,7 +102,16 @@ def validate_sources(plan: ModelEffectsCandidatePlan) -> dict[str, str]:
             path.is_symlink() for path in package.rglob("*")
         ):
             raise ValueError(f"source package absent or symlinked: {row.repo}")
-        digests[row.repo] = _hash_tree(package)
+        files = _tracked_files(package)
+        if row.repo != "omnibase_infra":
+            # A sibling wheel carries its force-included files in the package
+            # (OMN-18033), exactly as the workspace provenance digests it; the
+            # image's own project is installed editable from src/ alone.
+            errors: list[str] = []
+            files.update(_force_included_files(row.path, row.repo, errors))
+            if errors:
+                raise ValueError(f"unresolvable force-include: {errors[0]}")
+        digests[row.repo] = _digest_files(files)
     return digests
 
 
@@ -122,8 +136,8 @@ def _probe(runner: CommandRunner, image: str) -> dict[str, Any]:
         "import importlib.metadata, json\nfrom pathlib import Path\n"
         f"namespace = {{'__name__': 'candidate_image_probe'}}\nexec({probe!r}, namespace)\n"
         "evidence = namespace['collect_image_evidence']()\n"
-        "evidence['package_digests'] = {name: namespace['tree_digest'](Path(str("
-        "importlib.metadata.distribution(name).locate_file(name)))) "
+        "evidence['package_digests'] = {name: namespace['tree_digest']("
+        "namespace['installed_package_root'](name)) "
         "for name in ('omnibase_core', 'omnibase_compat', 'omnimarket', 'omnibase_infra')}\n"
         "print(json.dumps(evidence, sort_keys=True))\n"
     )
@@ -138,14 +152,8 @@ def _probe(runner: CommandRunner, image: str) -> dict[str, Any]:
                 "none",
                 "--read-only",
                 "--entrypoint",
-                "uv",
-                image,
-                "run",
-                "--no-project",
-                "--no-sync",
-                "--python",
                 "/app/.venv/bin/python",
-                "python",
+                image,
                 "-B",
                 "-",
             ],
@@ -226,11 +234,17 @@ def validate_wheel(wheel: Path, source_package: Path, extracted: Path) -> str:
 
 # Runs only within the isolated Docker build. It imports the canonical hash
 # implementation, not its workspace-only main/local-install provenance policy.
+PROOF_TOOLS = (
+    "compute_workspace_provenance.py",
+    "resolve_workspace_pins.py",
+    "scoped_image_probe.py",
+)
 _INSTALLER = r"""
 import hashlib, importlib.metadata, json, os, stat, subprocess, sys
 from pathlib import Path
 sys.path.insert(0, '/candidate/proof-tools')
 from compute_workspace_provenance import _hash_tree
+from scoped_image_probe import installed_package_root
 
 root = Path('/app/.venv')
 payload = Path('/candidate')
@@ -275,8 +289,7 @@ subprocess.run([
 if unchanged_venv_digest() != before:
     raise RuntimeError('Market install changed other installed environment bytes')
 for proof in manifest['proofs']:
-    dist = importlib.metadata.distribution(proof['package'])
-    actual = _hash_tree(Path(dist.locate_file(proof['repo'])))
+    actual = _hash_tree(installed_package_root(proof['repo']))
     if actual != proof['staged_package_digest']:
         raise RuntimeError('installed package differs from source: ' + proof['repo'])
     proof['installed_package_digest'] = actual
@@ -427,7 +440,7 @@ def build_candidate(
         (payload / "install_market.py").write_text(_INSTALLER, encoding="utf-8")
         proof_tools = payload / "proof-tools"
         proof_tools.mkdir()
-        for name in ("compute_workspace_provenance.py", "resolve_workspace_pins.py"):
+        for name in PROOF_TOOLS:
             shutil.copy2(Path(__file__).with_name(name), proof_tools / name)
         suffix = f"{plan.ticket_id.lower()}-{uuid4().hex}"
         base_alias = f"onex-effects-candidate-base:{suffix}"

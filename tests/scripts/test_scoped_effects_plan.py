@@ -215,3 +215,103 @@ def test_shared_contract_activation_change_refuses_equivalence(
     dated = probe.shared_evidence(tmp_path)[0]
     contract.write_text(content + "effective_on: 2026-09-07\n")
     assert probe.shared_evidence(tmp_path)[0] != dated
+
+
+def image_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, url: str | None = None
+) -> importlib.metadata.PathDistribution:
+    """The runtime image's own project, installed editable from /app by uv sync."""
+    app = tmp_path / "app"
+    source = app / "src" / "omnibase_infra"
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text("VALUE = 1\n")
+    (source / "contract.yaml").write_text(
+        "event_bus:\n  publish_topics: [onex.evt.platform.infra-sample.v1]\n"
+    )
+    monkeypatch.setattr(probe, "IMAGE_PROJECT_ROOT", app, raising=False)
+    site = tmp_path / "site"
+    metadata = site / "omnibase_infra-1.0.dist-info"
+    metadata.mkdir(parents=True)
+    (metadata / "METADATA").write_text("Name: omnibase_infra\nVersion: 1.0\n")
+    (site / "_omnibase_infra.pth").write_text(f"{app / 'src'}\n")
+    (metadata / "direct_url.json").write_text(
+        json.dumps({"url": url or app.as_uri(), "dir_info": {"editable": True}})
+    )
+    files = [site / "_omnibase_infra.pth", *metadata.iterdir()]
+    (metadata / "RECORD").write_text(
+        "".join(f"{path.relative_to(site)},,\n" for path in files)
+    )
+    return importlib.metadata.PathDistribution(metadata)
+
+
+def test_image_project_editable_install_is_attested_by_its_source_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Every Dockerfile.runtime image installs omnibase_infra editable from /app;
+    # refusing it made every real image unprobeable (live proof, .105, OMN-17991).
+    dist = image_project(tmp_path, monkeypatch)
+    baseline = probe.dependency_digest([dist])
+    (tmp_path / "app" / "src" / "omnibase_infra" / "__init__.py").write_text(
+        "VALUE = 2\n"
+    )
+    assert probe.dependency_digest([dist]) != baseline
+
+
+def test_editable_install_outside_the_image_project_still_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dist = image_project(tmp_path, monkeypatch, url="file:///elsewhere")
+    with pytest.raises(ValueError, match="editable"):
+        probe.dependency_digest([dist])
+
+
+def test_installed_package_root_resolves_the_editable_image_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dists = {"omnibase_infra": image_project(tmp_path, monkeypatch)}
+    monkeypatch.setattr(probe.importlib.metadata, "distribution", dists.__getitem__)
+    root = tmp_path / "app" / "src" / "omnibase_infra"
+    assert probe.installed_package_root("omnibase_infra") == root
+    (root / "__init__.py").unlink()
+    (root / "contract.yaml").unlink()
+    root.rmdir()
+    with pytest.raises(ValueError, match="package tree absent"):
+        probe.installed_package_root("omnibase_infra")
+
+
+def test_shared_evidence_reads_the_editable_project_contracts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # locate_file() on an editable install points at a site-packages path that
+    # does not exist, and rglob() on it yields nothing: the infra contracts
+    # silently fell out of the topic universe and the shared fingerprint.
+    app = tmp_path / "app"
+    dists: dict[str, importlib.metadata.Distribution] = {
+        "omnibase_infra": image_project(tmp_path, monkeypatch)
+    }
+    for name in probe.SIBLINGS:
+        dists[name] = distribution(tmp_path / "site", name)
+    monkeypatch.setattr(probe.importlib.metadata, "distribution", dists.__getitem__)
+    (app / "contracts").mkdir()
+    (app / "config").mkdir()
+    (app / "entrypoint-runtime.sh").write_text("#!/bin/sh\nexec runtime\n")
+    _, topics = probe.shared_evidence(app)
+    assert topics == ["onex.evt.platform.infra-sample.v1"]
+
+
+def test_entry_points_stripped_by_the_image_build_are_fingerprinted_as_absent(
+    tmp_path: Path,
+) -> None:
+    # Dockerfile.runtime runs strip_runtime_entry_points, which deletes a legacy
+    # distribution's entry_points.txt without rewriting RECORD. Refusing that
+    # made every real image unprobeable (live proof, .105, OMN-17991).
+    dist = distribution(tmp_path)
+    entry_points = tmp_path / "demo-1.0.dist-info" / "entry_points.txt"
+    present = probe.dependency_digest([dist])
+    entry_points.unlink()
+    stripped = probe.dependency_digest([dist])
+    assert stripped != present
+    assert probe.dependency_digest([dist]) == stripped
+    (tmp_path / "demo" / "__init__.py").unlink()
+    with pytest.raises(ValueError, match="payload absent"):
+        probe.dependency_digest([dist])

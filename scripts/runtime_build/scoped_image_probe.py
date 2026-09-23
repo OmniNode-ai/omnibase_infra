@@ -21,6 +21,39 @@ from typing import Any
 
 SIBLINGS = ("omnibase_core", "omnibase_compat", "omnimarket")
 TOPIC = re.compile(r"\bonex\.(?:evt|cmd|intent)\.[a-z0-9_-]+\.[a-z0-9_.-]+\.v[0-9]+\b")
+# Dockerfile.runtime installs the image's own project editable from /app
+# (`uv sync`), so its bytes live under /app/src, not in site-packages. That one
+# install is attested by its source tree; every other editable still refuses.
+IMAGE_PROJECT_ROOT = Path("/app")
+IMAGE_PROJECT_DISTRIBUTION = "omnibase-infra"
+
+
+def _is_image_project(name: str, direct_url: str | None) -> bool:
+    """True for the image's own editable project; refuse any other editable."""
+    if not direct_url:
+        return False
+    value = json.loads(direct_url)
+    if not value.get("dir_info", {}).get("editable"):
+        return False
+    if (
+        name != IMAGE_PROJECT_DISTRIBUTION
+        or value.get("url") != IMAGE_PROJECT_ROOT.as_uri()
+    ):
+        raise ValueError(f"editable dependency cannot be attested: {name}")
+    return True
+
+
+def installed_package_root(name: str) -> Path:
+    """Locate installed package bytes, including the image's editable project."""
+    dist = importlib.metadata.distribution(name)
+    normalized = dist.metadata["Name"].lower().replace("_", "-")
+    if _is_image_project(normalized, dist.read_text("direct_url.json")):
+        root = IMAGE_PROJECT_ROOT / "src" / name
+    else:
+        root = Path(str(dist.locate_file(name)))
+    if not root.is_dir():
+        raise ValueError(f"required installed package tree absent: {name}")
+    return root
 
 
 def tree_digest(root: Path) -> str:
@@ -47,7 +80,8 @@ def dependency_digest(distributions: Iterable[importlib.metadata.Distribution]) 
 
     Install-location metadata and bytecode are excluded. Runtime-relevant
     metadata (including entry points) and all payload files remain included.
-    Editable/unrecorded distributions refuse explicitly.
+    Unrecorded distributions, and editables other than the image's own
+    project (hashed from its source tree), refuse explicitly.
     """
     digest = hashlib.sha256()
     named = sorted(
@@ -62,10 +96,11 @@ def dependency_digest(distributions: Iterable[importlib.metadata.Distribution]) 
     for name, dist in named:
         if name == "omnimarket":
             continue
-        direct_url = dist.read_text("direct_url.json")
-        if direct_url and json.loads(direct_url).get("dir_info", {}).get("editable"):
-            raise ValueError(f"editable dependency cannot be attested: {name}")
+        editable = _is_image_project(name, dist.read_text("direct_url.json"))
         digest.update(json.dumps([name, dist.version]).encode())
+        if editable:
+            source = IMAGE_PROJECT_ROOT / "src" / name.replace("-", "_")
+            digest.update(tree_digest(source).encode())
         # Distribution.files may silently omit missing payload files. Read the
         # wheel inventory itself so missing files fail rather than disappear.
         record = dist.read_text("RECORD")
@@ -88,9 +123,14 @@ def dependency_digest(distributions: Iterable[importlib.metadata.Distribution]) 
             ):
                 continue
             path = Path(str(dist.locate_file(rel)))
-            if not path.is_file():
-                raise ValueError(f"recorded dependency payload absent: {name}:{rel}")
             digest.update(str(rel).encode())
+            if not path.is_file():
+                # strip_runtime_entry_points (Dockerfile.runtime) deletes a
+                # legacy distribution's entry points without rewriting RECORD.
+                if rel.name == "entry_points.txt" and rel.parent.suffix == ".dist-info":
+                    digest.update(b"\0stripped")
+                    continue
+                raise ValueError(f"recorded dependency payload absent: {name}:{rel}")
             with path.open("rb") as stream:
                 while block := stream.read(1024 * 1024):
                     digest.update(block)
@@ -120,8 +160,7 @@ def source_pins(app: Path) -> dict[str, str]:
         if len(matching) != 1 or matching[0].get("status") != "verified":
             raise ValueError(f"missing/ambiguous package content proof: {name}")
         proof = matching[0]
-        dist = importlib.metadata.distribution(name)
-        actual = tree_digest(Path(str(dist.locate_file(name))))
+        actual = tree_digest(installed_package_root(name))
         if not (
             actual
             == proof["installed_package_digest"]
@@ -157,7 +196,7 @@ def shared_evidence(app: Path) -> tuple[str, list[str]]:
                 topics.update(TOPIC.findall(content.decode("utf-8")))
     for name in ("omnibase_core", "omnibase_infra", "omnibase_compat", "omnimarket"):
         dist = importlib.metadata.distribution(name)
-        package = Path(str(dist.locate_file(name)))
+        package = installed_package_root(name)
         if name == "omnimarket":
             # Plugin/CLI entry-point changes can activate work even when the
             # topic-name set is unchanged. Market payload is the allowed change;
@@ -253,15 +292,7 @@ def collect_image_evidence(app: Path = Path("/app")) -> dict[str, object]:
         "required_topics": topics,
         "infra_source_ref": infra_ref,
         "base_image_id": manifest.get("base_image_id"),
-        "market_payload_fingerprint": tree_digest(
-            Path(
-                str(
-                    importlib.metadata.distribution("omnimarket").locate_file(
-                        "omnimarket"
-                    )
-                )
-            )
-        ),
+        "market_payload_fingerprint": tree_digest(installed_package_root("omnimarket")),
     }
 
 
