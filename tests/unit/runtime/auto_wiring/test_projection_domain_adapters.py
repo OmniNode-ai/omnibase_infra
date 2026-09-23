@@ -4,7 +4,10 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
@@ -713,6 +716,55 @@ def test_unbound_authority_scopes_the_write_to_the_recorded_tenant() -> None:
     assert insert.args[1]["tenant_id"] == "beta-outside-every-compiled-map"
     conn.commit.assert_called_once_with()
     assert conn.autocommit is True
+
+
+def _tenant_relations_with_guc_policies() -> list[str]:
+    """Derive the complete active tenant-policy set from topology and migrations."""
+    repo_root = Path(__file__).resolve().parents[4]
+    script_path = (
+        repo_root / "scripts" / "validation" / "check_tenant_guc_domain_parity.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "tenant_guc_domain_inventory", script_path
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    policies, _ = module.net_corpus_state(  # type: ignore[attr-defined]
+        repo_root / "docker" / "migrations" / "forward"
+    )
+    domains = module.logical_domains(repo_root)  # type: ignore[attr-defined]
+    relations = sorted(
+        relation for relation in policies if domains.get(relation) == "tenant"
+    )
+    assert relations, "no active tenant GUC policies found; inventory is vacuous"
+    assert "delegation_events" in relations, "positive control missing from inventory"
+    return relations
+
+
+@pytest.mark.parametrize("table", _tenant_relations_with_guc_policies())
+def test_every_tenant_guc_relation_uses_the_recorded_write_scope(table: str) -> None:
+    """AC4: contract-derived tenant targets all use the shared GUC write seam."""
+    recorded_tenant = "beta-outside-every-compiled-map"
+    target = projection_database_target(table, schema="tenant", access="write")
+    conn, cursor = _connection("tenant_projection_writer")
+
+    with patch("psycopg2.connect", return_value=conn):
+        adapter = _adapter(target, authority=None)
+        adapter.upsert(
+            table,
+            "event_id",
+            {"event_id": uuid4(), "tenant_id": recorded_tenant},
+        )
+
+    scopes = [
+        call for call in cursor.execute.call_args_list if "set_config" in call.args[0]
+    ]
+    assert len(scopes) == 1, f"{table} must open exactly one tenant scope"
+    assert scopes[0].args[1] == ("app.tenant_id", recorded_tenant)
+    insert = cursor.execute.call_args_list[-1]
+    assert insert.args[1]["tenant_id"] == recorded_tenant
 
 
 def test_unbound_write_opens_no_scope_for_a_tenantless_row() -> None:

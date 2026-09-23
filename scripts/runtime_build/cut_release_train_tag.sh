@@ -13,11 +13,11 @@
 # creating the tag ref on GitHub so a `push: tags:` workflow trigger can fire.
 #
 # Tag scheme: lab/<lane>/<utc>-<shortsha>, lane in {dev, stability}. The tag
-# is cut LOCALLY on all 5 sibling clones (so a single tag name resolves in
-# all 5 repos) but CREATED ON GITHUB ON THE ANCHOR REPO ONLY
-# (omnibase_infra) -- the deploy step's own checkout only needs the other 4
+# is cut LOCALLY on every clone in TAG_REPOS (so a single tag name resolves in
+# each of them) but CREATED ON GITHUB ON THE ANCHOR REPO ONLY
+# (omnibase_infra) -- the deploy step's own checkout only needs the other
 # repos' tags to exist locally (git checkout <tag> works against a
-# local-only tag), and pushing to all 5 GitHub repos would add write surface
+# local-only tag), and pushing to every GitHub repo would add write surface
 # with no behavior difference (OMN-14889 Fork 2).
 #
 # REF RESOLUTION (OMN-14956): <ref> is resolved in the ANCHOR clone
@@ -25,7 +25,7 @@
 # guaranteed to live in. Each SIBLING clone tags at its own resolution of
 # <ref> when that resolves there (branch/tag names like origin/dev do), and
 # otherwise FALLS BACK, loudly, to the sibling's own origin/dev -- a raw
-# omnibase_infra commit SHA can never resolve in the other 4 repos, and the
+# omnibase_infra commit SHA can never resolve in the other repos, and the
 # pre-fix per-sibling `rev-parse <ref>` died exit 128 at omnibase_core
 # despite usage advertising `--ref <branch|tag|sha>` (run 29977699589).
 #
@@ -64,15 +64,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Siblings whose clones get the LOCAL tag. Mirrors LAB_REF_REPOS in
-# cut-lab-ref.sh and SIBLING_REPOS in stage_workspace.sh.
-TAG_REPOS=(
-    "omnibase_infra"
-    "omnibase_core"
-    "omnibase_compat"
-    "onex_change_control"
-    "omnimarket"
-)
+# Clones that get the LOCAL tag: the same set as cut-lab-ref.sh's --cut-tag,
+# SIBLING_LAB_TAG_REPOS from sibling_clone_manifest.sh (every clone the pin
+# preflight reads plus onex_change_control). OMN-19072: this used to be a literal
+# list of its own that omitted omnibase_spi.
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+TAG_REPOS=("${SIBLING_LAB_TAG_REPOS[@]}")
 
 # Only this repo's tag is created on GitHub (Fork 2 decision above).
 readonly ANCHOR_REPO="omnibase_infra"
@@ -179,7 +177,7 @@ if [[ "${MODE}" != "execute" ]]; then
     exit 0
 fi
 
-# --- execute: cut locally on all 5, create the GitHub ref on the anchor -----
+# --- execute: cut locally on every TAG_REPOS clone, GitHub ref on the anchor
 # OMN-14956: resolve --ref in the ANCHOR clone FIRST, with a named error --
 # the anchor is the only repo whose commit space --ref is guaranteed to live
 # in (usage advertises <branch|tag|sha>, and a raw sha only exists here).

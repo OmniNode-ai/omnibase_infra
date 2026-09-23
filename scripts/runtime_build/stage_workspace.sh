@@ -69,6 +69,19 @@
 #   5  DEPLOY_REF unset and no explicit opt-in -- refusing an unasserted build
 set -euo pipefail
 
+if [[ -z "${OMNI_HOME:-}" ]]; then
+    echo "ERROR: OMNI_HOME must be set for workspace-mode build" >&2
+    exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The sibling sets come from sibling_clone_manifest.sh, the single place they
+# are spelled (OMN-15137, OMN-19072): SIBLING_VENDORED_REPOS below, and
+# SIBLING_CLONE_MANIFEST for the pin preflight further down.
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+
 # OMN-13405: omnibase_core is staged FIRST so the Dockerfile workspace branch can
 # install the dev-HEAD core (which carries enum modules not yet in the released
 # 0.45.0 wheel pinned by omnibase_infra/uv.lock, e.g. enum_correction_failure_axis
@@ -76,18 +89,8 @@ set -euo pipefail
 # enum-LESS core wheel and omnimarket (installed --no-deps) imports a missing enum,
 # crash-looping projection-api + the runtime kernel. Order matters: core must be
 # staged/installed before compat/omnimarket so it is the resolved core for all.
-SIBLING_REPOS=(
-    "omnibase_core"
-    "omnibase_compat"
-    "omnimarket"
-)
-
-if [[ -z "${OMNI_HOME:-}" ]]; then
-    echo "ERROR: OMNI_HOME must be set for workspace-mode build" >&2
-    exit 1
-fi
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# SIBLING_VENDORED_REPOS carries that order; the parity test pins core first.
+SIBLING_REPOS=("${SIBLING_VENDORED_REPOS[@]}")
 
 # ---------------------------------------------------------------------------
 # RT-1 (OMN-14438): clean-ref checkout of every sibling BEFORE staging.
@@ -216,9 +219,8 @@ PIN_COMPARISON_OUT="workspace/sibling-pin-comparison.json"
 # of a second independently hardcoded list, so the two can never drift apart
 # again (the omnibase_spi gap this ticket fixes was exactly that drift: this
 # list already named omnibase-spi, but ensure_runner_clones.sh never
-# provisioned OMNI_HOME/omnibase_spi for it to find).
-# shellcheck source=./sibling_clone_manifest.sh
-source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+# provisioned OMNI_HOME/omnibase_spi for it to find). The manifest was sourced
+# at the top of this script.
 PREFLIGHT_REPO_ARGS=()
 for i in "${!SIBLING_CLONE_MANIFEST[@]}"; do
     PREFLIGHT_REPO_ARGS+=(

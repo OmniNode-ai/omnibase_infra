@@ -1039,3 +1039,320 @@ class TestTheProbeDoesNotRaceTheComposeRecreate:
         assert "--settle-budget-json" in text, (
             "the probe step must pass a budget, or it races the recreate again"
         )
+
+
+# ---------------------------------------------------------------------------
+# OMN-19312: all-of required lanes, the bounded wait and the runtime-ancestor
+# subject (the workflow-verdict reader is OMN-18866's, tested beside it). The instrument the D11 and C15 bindings stand on
+# (operator ruling 2026-09-23T17:12:15Z: every check blocks, bound now).
+# ---------------------------------------------------------------------------
+from scripts.ci.lab_pass_receipt import (
+    ANY_OF_DEFAULT_LANES,
+    MAX_WAIT_SECONDS,
+    resolve_required_subject,
+)
+
+ANCESTOR = "1111111111111111111111111111111111111111"
+MIDDLE = "2222222222222222222222222222222222222222"
+CHAIN = EnumLabLane.COMPOSE_DEV_CHAIN
+
+
+def _bodies(*receipts: ModelLabPassReceipt) -> dict[str, str]:
+    return {artifact_name(r.lane, r.sha): r.to_json() for r in receipts}
+
+
+def _gate(
+    surface: Any,
+    monkeypatch: Any,
+    *,
+    lanes: tuple[EnumLabLane, ...] = ANY_OF_DEFAULT_LANES,
+    required: tuple[EnumLabLane, ...] = (),
+    required_sha: str | None = None,
+    wait_seconds: float = 0.0,
+) -> tuple[int, str]:
+    monkeypatch.setattr("scripts.ci.lab_pass_receipt._gh_api", surface)
+    out = io.StringIO()
+    code = evaluate_gate(
+        REPO,
+        SHA,
+        list(lanes),
+        out,
+        required=list(required),
+        required_sha=required_sha,
+        wait_seconds=wait_seconds,
+        poll_seconds=30.0,
+    )
+    return code, out.getvalue()
+
+
+class TestRequireLaneIsAllOf:
+    def test_require_lane_refuses_a_chain_fail_beside_an_onex_lab_pass(
+        self, monkeypatch: Any
+    ) -> None:
+        """The falsifier the design names: known-bad refused, sha named."""
+        surface = _Surface(
+            _bodies(
+                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(lane=CHAIN, ok=False),
+            )
+        )
+        code, output = _gate(surface, monkeypatch, required=(CHAIN,))
+        assert code == 1
+        assert f"lab-pass gate FAILED for {SHA}" in output
+        assert "REQUIRED lane compose-dev-chain does not pass" in output
+        assert "its newest receipt is FAIL" in output
+
+    def test_require_lane_positive_control_any_of_alone_passes_the_same_inputs(
+        self, monkeypatch: Any
+    ) -> None:
+        """Today's any-of call passes on the exact inputs above. That is what
+        makes the refusal above a change, not a coincidence."""
+        surface = _Surface(
+            _bodies(
+                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(lane=CHAIN, ok=False),
+            )
+        )
+        code, _ = _gate(surface, monkeypatch)
+        assert code == 0
+
+    def test_require_lane_known_good_passes(self, monkeypatch: Any) -> None:
+        surface = _Surface(
+            _bodies(_receipt(lane=EnumLabLane.ONEX_LAB), _receipt(lane=CHAIN))
+        )
+        code, output = _gate(surface, monkeypatch, required=(CHAIN,))
+        assert code == 0
+        assert "compose-dev-chain" in output
+
+    def test_require_lane_absent_is_refused_as_no_receipt(
+        self, monkeypatch: Any
+    ) -> None:
+        surface = _Surface(_bodies(_receipt(lane=EnumLabLane.ONEX_LAB)))
+        code, output = _gate(surface, monkeypatch, required=(CHAIN,))
+        assert code == 1
+        assert "compose-dev-chain does not pass" in output
+        assert "no receipt exists" in output
+
+    def test_require_lane_every_required_lane_must_pass(self, monkeypatch: Any) -> None:
+        corpus = EnumLabLane.COMPOSE_DEV_CORPUS
+        surface = _Surface(
+            _bodies(
+                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(lane=CHAIN),
+                _receipt(lane=corpus, ok=False),
+            )
+        )
+        code, output = _gate(surface, monkeypatch, required=(CHAIN, corpus))
+        assert code == 1
+        assert "compose-dev-corpus does not pass" in output
+
+    def test_require_lane_still_needs_the_any_of_premise(
+        self, monkeypatch: Any
+    ) -> None:
+        surface = _Surface(_bodies(_receipt(lane=CHAIN)))
+        code, output = _gate(surface, monkeypatch, required=(CHAIN,))
+        assert code == 1
+        assert "no PASS lab-pass receipt exists for this exact sha" in output
+
+    def test_require_lane_verdict_lane_pass_does_not_satisfy_default_any_of(
+        self, monkeypatch: Any
+    ) -> None:
+        """A chain canary PASS is not evidence the candidate booted."""
+        assert CHAIN not in ANY_OF_DEFAULT_LANES
+        assert EnumLabLane.COMPOSE_DEV_CORPUS not in ANY_OF_DEFAULT_LANES
+        surface = _Surface(_bodies(_receipt(lane=CHAIN)))
+        code, _ = _gate(surface, monkeypatch)
+        assert code == 1
+
+    def test_require_lane_with_nothing_to_read_refuses(self, monkeypatch: Any) -> None:
+        code, output = _gate(_Surface({}), monkeypatch, lanes=())
+        assert code == 1
+        assert "gate that checked nothing" in output
+
+    def test_require_lane_cli_default_any_of_is_the_three_lab_surfaces(
+        self, monkeypatch: Any
+    ) -> None:
+        from scripts.ci import lab_pass_receipt as mod
+
+        seen: dict[str, Any] = {}
+
+        def fake_gate(repo: str, sha: str, lanes: Any, out: Any, **kw: Any) -> int:
+            seen.update(lanes=list(lanes), **kw)
+            return 0
+
+        monkeypatch.setattr(mod, "evaluate_gate", fake_gate)
+        assert (
+            mod.main(["gate", "--sha", SHA, "--require-lane", "compose-dev-chain"]) == 0
+        )
+        assert seen["lanes"] == list(ANY_OF_DEFAULT_LANES)
+        assert seen["required"] == [CHAIN]
+
+
+class _LandingSurface(_Surface):
+    """A surface on which one artifact appears after ``after`` listings of it."""
+
+    def __init__(
+        self, bodies: dict[str, str], late: dict[str, str], after: int
+    ) -> None:
+        super().__init__({**bodies, **late})
+        self.late = set(late)
+        self.after = after
+        self.listings = 0
+
+    def __call__(self, path: str) -> bytes:
+        if "/actions/artifacts?name=" in path:
+            name = path.split("name=")[1].split("&")[0]
+            if name in self.late:
+                self.listings += 1
+                if self.listings <= self.after:
+                    return json.dumps({"artifacts": []}).encode()
+        return super().__call__(path)
+
+
+class TestBoundedWait:
+    def test_wait_expiry_on_an_absent_required_receipt_refuses(
+        self, monkeypatch: Any
+    ) -> None:
+        _install_fake_clock(monkeypatch)
+        surface = _Surface(_bodies(_receipt(lane=EnumLabLane.ONEX_LAB)))
+        code, output = _gate(surface, monkeypatch, required=(CHAIN,), wait_seconds=120)
+        assert code == 1
+        assert "no receipt exists after waiting 120 s" in output
+        assert output.count("waiting for required lane(s) compose-dev-chain") == 4
+
+    def test_wait_reads_a_receipt_that_lands_inside_the_bound(
+        self, monkeypatch: Any
+    ) -> None:
+        _install_fake_clock(monkeypatch)
+        chain = _receipt(lane=CHAIN)
+        surface = _LandingSurface(
+            _bodies(_receipt(lane=EnumLabLane.ONEX_LAB)), _bodies(chain), after=2
+        )
+        code, output = _gate(surface, monkeypatch, required=(CHAIN,), wait_seconds=600)
+        assert code == 0
+        assert "3 read(s)" in output
+
+    def test_wait_does_not_wait_out_a_present_fail(self, monkeypatch: Any) -> None:
+        _install_fake_clock(monkeypatch)
+        surface = _Surface(
+            _bodies(_receipt(lane=EnumLabLane.ONEX_LAB), _receipt(lane=CHAIN, ok=False))
+        )
+        code, output = _gate(surface, monkeypatch, required=(CHAIN,), wait_seconds=600)
+        assert code == 1
+        assert "waiting for required" not in output
+
+    @pytest.mark.parametrize("bad", [-1.0, MAX_WAIT_SECONDS + 1.0])
+    def test_wait_out_of_bounds_refuses(self, monkeypatch: Any, bad: float) -> None:
+        code, output = _gate(
+            _Surface({}), monkeypatch, required=(CHAIN,), wait_seconds=bad
+        )
+        assert code == 1
+        assert "--wait-seconds" in output
+
+
+class TestRuntimeAncestorSubject:
+    def test_ancestor_runtime_affecting_head_resolves_to_itself(self) -> None:
+        subject, note = resolve_required_subject(
+            SHA,
+            branch_commits=lambda: [SHA, ANCESTOR],
+            runtime_affecting=lambda sha: True,
+        )
+        assert subject == SHA
+        assert "runtime-affecting" in note
+
+    def test_ancestor_inherits_only_across_non_runtime_commits(self) -> None:
+        subject, note = resolve_required_subject(
+            SHA,
+            branch_commits=lambda: [SHA, MIDDLE, ANCESTOR],
+            runtime_affecting=lambda sha: sha == ANCESTOR,
+        )
+        assert subject == ANCESTOR
+        assert "2 non-runtime-affecting" in note
+
+    def test_ancestor_a_runtime_commit_between_voids_the_older_receipt(
+        self, monkeypatch: Any
+    ) -> None:
+        """MIDDLE is runtime-affecting and has no receipt: ANCESTOR's PASS must
+        not be inherited across it, so the gate refuses."""
+        subject, _ = resolve_required_subject(
+            SHA,
+            branch_commits=lambda: [SHA, MIDDLE, ANCESTOR],
+            runtime_affecting=lambda sha: sha in {MIDDLE, ANCESTOR},
+        )
+        assert subject == MIDDLE
+        surface = _Surface(
+            _bodies(
+                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(sha=ANCESTOR, lane=CHAIN),
+            )
+        )
+        code, output = _gate(
+            surface, monkeypatch, required=(CHAIN,), required_sha=subject
+        )
+        assert code == 1
+        assert f"compose-dev-chain does not pass for sha {MIDDLE}" in output
+
+    def test_ancestor_receipt_satisfies_the_required_lane(
+        self, monkeypatch: Any
+    ) -> None:
+        surface = _Surface(
+            _bodies(
+                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(sha=ANCESTOR, lane=CHAIN),
+            )
+        )
+        code, _ = _gate(surface, monkeypatch, required=(CHAIN,), required_sha=ANCESTOR)
+        assert code == 0
+
+    def test_ancestor_walk_failure_falls_back_to_the_exact_commit(self) -> None:
+        def broken() -> list[str]:
+            raise RuntimeError("git rev-list exited 128")
+
+        subject, note = resolve_required_subject(
+            SHA, branch_commits=broken, runtime_affecting=lambda sha: True
+        )
+        assert subject == SHA
+        assert "rev-list" in note
+
+    def test_ancestor_flag_without_a_clone_refuses(self) -> None:
+        from scripts.ci.lab_pass_receipt import main
+
+        code = main(
+            [
+                "gate",
+                "--sha",
+                SHA,
+                "--require-lane",
+                "compose-dev-chain",
+                "--resolve-runtime-ancestor",
+            ]
+        )
+        assert code == 1
+
+
+class TestNoOverrideOnTheNewFlags:
+    def test_no_force_skip_or_override_on_the_new_flags(self) -> None:
+        from scripts.ci.lab_pass_receipt import build_parser
+
+        subparsers = next(
+            action
+            for action in build_parser()._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+        gate_options = {
+            option
+            for action in subparsers.choices["gate"]._actions
+            for option in action.option_strings
+        }
+        assert {"--require-lane", "--wait-seconds", "--resolve-runtime-ancestor"} <= (
+            gate_options
+        )
+        every_option = {
+            option
+            for parser in subparsers.choices.values()
+            for action in parser._actions
+            for option in action.option_strings
+        }
+        for option in every_option:
+            for banned in ("force", "skip", "allow", "ignore", "warn", "bypass"):
+                assert banned not in option, f"{option} reads as an override"

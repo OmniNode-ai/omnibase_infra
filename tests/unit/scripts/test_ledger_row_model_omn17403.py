@@ -102,7 +102,11 @@ def _ledger(tmp_path: Path, rows: int, *, headed_tail: bool = False) -> Path:
     )
     if headed_tail:
         text += "### 2026-09-30 — a headed row\n\nbody\n\n"
-    path = tmp_path / "ROLLING_WORK_LEDGER.md"
+    # Not named ROLLING_WORK_LEDGER.md: that file name is governed by the
+    # rolling ledger row grammar (OMN-19256), which judges the row type first and
+    # fails closed where its omni_home module is absent, as it is in this repo's
+    # CI. Nothing this module tests is scoped by file name.
+    path = tmp_path / "WORK_LEDGER.md"
     path.write_text(text, encoding="utf-8")
     return path
 
