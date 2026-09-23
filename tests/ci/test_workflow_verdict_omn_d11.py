@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19311 -- D11 blocks staging delivery through a workflow-verdict read.
+"""OMN-19311 -- D11 blocks staging delivery through the workflow-verdict reader.
 
 Operator ruling 2026-09-23T17:12:15Z: D11 (omnimarket
 ``delegation-regression-nightly.yml``, the Layer-2 golden corpus against the
 stability-test lane) is bound to a blocking surface now, while it is red. The
-surface is staging delivery, on every path.
+surface is staging delivery, on every path, read through the one
+``workflow-verdict`` reader (OMN-18866) with D11's own arguments.
 
 The falsifier pair, replayed from the live API shape:
 
@@ -13,15 +14,15 @@ The falsifier pair, replayed from the live API shape:
               breaks including I5 escalating to gemini-2.5-flash with 0/0
               tokens) refuses, and the refusal names the run id.
   stale     : a success 27 hours old refuses.
-  known-good: a fresh success admits.
+  known-good: a fresh scheduled success, or a fresh stability-test dispatch,
+              admits.
 
-plus the laundering control: a green dispatch aimed at the dev lane is not the
-stability-test verdict and does not admit.
+plus the laundering control this ticket adds to the reader: a green dispatch
+aimed at the dev lane is not the stability-test verdict and does not admit.
 """
 
 from __future__ import annotations
 
-import argparse
 import io
 import json
 from datetime import UTC, datetime, timedelta
@@ -31,23 +32,24 @@ from typing import Any
 import pytest
 import yaml
 
-from scripts.ci.lab_pass_receipt import (
-    ModelWorkflowVerdictRequest,
-    build_parser,
-    evaluate_workflow_verdict,
-    judge_workflow_runs,
-    main,
-)
+from scripts.ci.lab_pass_receipt import evaluate_workflow_verdict, main
 
 pytestmark = pytest.mark.unit
 
 WORKFLOW_PATH = Path(".github/workflows/deliver-dev-candidate-to-staging.yml")
 
-#: The live newest completed run at the time the binding landed, as the REST API
+REPO = "OmniNode-ai/omnimarket"
+WORKFLOW = "delegation-regression-nightly.yml"
+EVENTS = ("schedule", "workflow_dispatch")
+TOKEN = "lane=stability-test"
+
+#: The live newest completed run when the binding landed, as the REST API
 #: returned it (fields trimmed to the ones the reader uses).
 RUN_35832924275: dict[str, Any] = {
     "conclusion": "failure",
     "created_at": "2026-09-23T07:40:13Z",
+    "run_started_at": "2026-09-23T07:40:13Z",
+    "run_attempt": 1,
     "display_title": "Delegation Regression (nightly)",
     "event": "schedule",
     "head_branch": "dev",
@@ -60,235 +62,160 @@ RUN_35832924275: dict[str, Any] = {
 
 NOW = datetime(2026, 9, 23, 18, 0, 0, tzinfo=UTC)
 
-D11 = ModelWorkflowVerdictRequest(
-    repo="OmniNode-ai/omnimarket",
-    workflow="delegation-regression-nightly.yml",
-    branch="dev",
-    max_age_hours=26,
-    dispatch_title_contains="lane=stability-test",
-)
-
 
 def _run(
     run_id: int,
     *,
     conclusion: str = "success",
-    finished: datetime = NOW - timedelta(hours=2),
+    started: datetime = NOW - timedelta(hours=2),
     event: str = "schedule",
     title: str = "Delegation Regression (nightly) lane=stability-test",
-    branch: str = "dev",
-    status: str = "completed",
 ) -> dict[str, Any]:
-    stamp = finished.strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = started.strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
         "id": run_id,
         "conclusion": conclusion,
-        "created_at": (finished - timedelta(minutes=40)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "updated_at": stamp,
+        "created_at": stamp,
+        "run_started_at": stamp,
+        "run_attempt": 1,
         "event": event,
         "display_title": title,
-        "head_branch": branch,
+        "head_branch": "dev",
         "head_sha": "0" * 40,
-        "status": status,
-        "html_url": f"https://github.com/OmniNode-ai/omnimarket/actions/runs/{run_id}",
+        "status": "completed",
+        "html_url": f"https://github.com/{REPO}/actions/runs/{run_id}",
     }
 
 
-def _judge(runs: list[dict[str, Any]]) -> tuple[int, str]:
+def _read(
+    monkeypatch: Any, runs: list[dict[str, Any]], *, token: str = TOKEN
+) -> tuple[int, str]:
+    monkeypatch.setattr(
+        "scripts.ci.lab_pass_receipt._gh_api",
+        lambda _path: json.dumps({"workflow_runs": runs}).encode(),
+    )
     out = io.StringIO()
-    code = judge_workflow_runs(runs, D11, NOW, out)
+    code = evaluate_workflow_verdict(
+        REPO,
+        WORKFLOW,
+        "dev",
+        26,
+        EVENTS,
+        out,
+        now=NOW,
+        dispatch_title_contains=token,
+    )
     return code, out.getvalue()
 
 
-class TestJudge:
-    def test_the_live_red_run_refuses_and_names_the_run(self) -> None:
-        code, output = _judge([RUN_35832924275])
+class TestTheD11Verdict:
+    def test_the_live_red_run_refuses_and_names_the_run(self, monkeypatch: Any) -> None:
+        code, output = _read(monkeypatch, [RUN_35832924275])
         assert code == 1
         assert "35832924275" in output
         assert "'failure'" in output
-        assert "workflow verdict gate FAILED" in output
 
-    def test_an_older_green_does_not_rescue_a_newer_red(self) -> None:
-        older_green = _run(1, finished=NOW - timedelta(hours=20))
-        code, output = _judge([RUN_35832924275, older_green])
+    def test_a_27_hour_old_success_is_stale(self, monkeypatch: Any) -> None:
+        code, output = _read(monkeypatch, [_run(7, started=NOW - timedelta(hours=27))])
         assert code == 1
-        assert "35832924275" in output
+        assert "past the 26h bound" in output
 
-    def test_a_fresh_success_admits(self) -> None:
-        code, output = _judge([_run(42), RUN_35832924275])
+    def test_a_fresh_scheduled_success_admits(self, monkeypatch: Any) -> None:
+        code, output = _read(monkeypatch, [_run(42), RUN_35832924275])
         assert code == 0
-        assert "workflow verdict gate PASSED" in output
-        assert "run 42" in output
+        assert "run 42 concluded success" in output
 
-    def test_a_27_hour_old_success_is_stale(self) -> None:
-        code, output = _judge([_run(7, finished=NOW - timedelta(hours=27))])
-        assert code == 1
-        assert "beyond the 26h bound" in output
-        assert "7" in output
+    def test_a_stability_dispatch_is_a_new_measurement_and_counts(
+        self, monkeypatch: Any
+    ) -> None:
+        dispatch = _run(
+            100, event="workflow_dispatch", started=NOW - timedelta(minutes=50)
+        )
+        code, _ = _read(monkeypatch, [dispatch, RUN_35832924275])
+        assert code == 0
 
-    @pytest.mark.parametrize(
-        "conclusion",
-        ["cancelled", "timed_out", "skipped", "neutral", "startup_failure", ""],
-    )
-    def test_every_non_success_conclusion_refuses(self, conclusion: str) -> None:
-        code, _ = _judge([_run(9, conclusion=conclusion)])
-        assert code == 1
-
-    def test_no_runs_is_a_refusal_not_a_pass(self) -> None:
-        code, output = _judge([])
-        assert code == 1
-        assert "An absent verdict is not a pass" in output
-
-    def test_a_green_dev_lane_dispatch_cannot_launder_a_stability_red(self) -> None:
+    def test_a_green_dev_lane_dispatch_cannot_launder_a_stability_red(
+        self, monkeypatch: Any
+    ) -> None:
         dev_dispatch = _run(
             99,
             event="workflow_dispatch",
             title="Delegation Regression (nightly) lane=dev",
-            finished=NOW - timedelta(minutes=10),
+            started=NOW - timedelta(minutes=50),
         )
-        code, output = _judge([dev_dispatch, RUN_35832924275])
+        code, output = _read(monkeypatch, [dev_dispatch, RUN_35832924275])
         assert code == 1
         assert "35832924275" in output
-        assert "ignored" in output
-
-    def test_a_stability_dispatch_is_a_new_measurement_and_counts(self) -> None:
-        dispatch = _run(
-            100,
-            event="workflow_dispatch",
-            title="Delegation Regression (nightly) lane=stability-test",
-            finished=NOW - timedelta(minutes=10),
+        assert (
+            "admitted only when the run title carries 'lane=stability-test'" in output
         )
-        code, _ = _judge([dispatch, RUN_35832924275])
-        assert code == 0
 
-    def test_a_dispatch_with_no_lane_in_its_title_does_not_count(self) -> None:
+    def test_a_dispatch_with_no_lane_in_its_title_does_not_count(
+        self, monkeypatch: Any
+    ) -> None:
         untitled = _run(
             101,
             event="workflow_dispatch",
             title="Delegation Regression (nightly)",
-            finished=NOW - timedelta(minutes=10),
+            started=NOW - timedelta(minutes=50),
         )
-        code, _ = _judge([untitled])
+        code, _ = _read(monkeypatch, [untitled])
         assert code == 1
 
-    def test_another_branch_does_not_count(self) -> None:
-        code, _ = _judge([_run(5, branch="feature/x")])
-        assert code == 1
-
-    def test_an_in_progress_run_is_not_the_verdict(self) -> None:
-        running = _run(6, status="in_progress", conclusion="")
-        code, output = _judge([running, RUN_35832924275])
-        assert code == 1
-        assert "35832924275" in output
-
-    def test_an_unreadable_finish_time_refuses(self) -> None:
-        run = _run(8)
-        run["updated_at"] = "yesterday"
-        code, output = _judge([run])
-        assert code == 1
-        assert "unknown age" in output
-
-
-class TestTransport:
-    def test_the_read_is_scoped_to_completed_runs_on_the_branch(
+    def test_without_the_token_the_same_dispatch_would_have_laundered_it(
         self, monkeypatch: Any
     ) -> None:
-        seen: list[str] = []
-
-        def fake(path: str) -> bytes:
-            seen.append(path)
-            return json.dumps({"workflow_runs": [RUN_35832924275]}).encode()
-
-        monkeypatch.setattr("scripts.ci.lab_pass_receipt._gh_api", fake)
-        code = evaluate_workflow_verdict(D11, io.StringIO(), now=NOW)
-        assert code == 1
-        assert seen == [
-            "repos/OmniNode-ai/omnimarket/actions/workflows/"
-            "delegation-regression-nightly.yml/runs?branch=dev&status=completed"
-            "&per_page=50"
-        ]
-
-    def test_an_unreadable_surface_refuses(self, monkeypatch: Any) -> None:
-        def broken(path: str) -> bytes:
-            msg = "`gh api` exited 1: HTTP 403"
-            raise RuntimeError(msg)
-
-        monkeypatch.setattr("scripts.ci.lab_pass_receipt._gh_api", broken)
-        out = io.StringIO()
-        assert evaluate_workflow_verdict(D11, out, now=NOW) == 1
-        assert "unreadable" in out.getvalue()
-
-    def test_a_body_with_no_run_list_refuses(self, monkeypatch: Any) -> None:
-        monkeypatch.setattr(
-            "scripts.ci.lab_pass_receipt._gh_api", lambda _p: b'{"message": "x"}'
+        """Positive control: the token is what refuses the dev-lane dispatch."""
+        dev_dispatch = _run(
+            99,
+            event="workflow_dispatch",
+            title="Delegation Regression (nightly) lane=dev",
+            started=NOW - timedelta(minutes=50),
         )
-        assert evaluate_workflow_verdict(D11, io.StringIO(), now=NOW) == 1
+        code, _ = _read(monkeypatch, [dev_dispatch, RUN_35832924275], token="")
+        assert code == 0
 
-    def test_the_cli_refuses_the_live_red(self, monkeypatch: Any, capsys: Any) -> None:
+    def test_the_token_does_not_touch_scheduled_runs(self, monkeypatch: Any) -> None:
+        """A scheduled run takes no inputs: pre-run-name nights still count."""
+        old_title = dict(RUN_35832924275, conclusion="success")
+        old_title["run_started_at"] = "2026-09-23T07:40:13Z"
+        code, _ = _read(monkeypatch, [old_title])
+        assert code == 0
+
+    def test_the_cli_carries_the_token(self, monkeypatch: Any, capsys: Any) -> None:
+        dev_dispatch = _run(
+            99,
+            event="workflow_dispatch",
+            title="Delegation Regression (nightly) lane=dev",
+            started=datetime.now(tz=UTC) - timedelta(minutes=5),
+        )
         monkeypatch.setattr(
             "scripts.ci.lab_pass_receipt._gh_api",
-            lambda _p: json.dumps({"workflow_runs": [RUN_35832924275]}).encode(),
+            lambda _path: json.dumps(
+                {"workflow_runs": [dev_dispatch, RUN_35832924275]}
+            ).encode(),
         )
         code = main(
             [
                 "workflow-verdict",
                 "--repo",
-                "OmniNode-ai/omnimarket",
+                REPO,
                 "--workflow",
-                "delegation-regression-nightly.yml",
+                WORKFLOW,
                 "--branch",
                 "dev",
                 "--max-age-hours",
                 "26",
+                "--event",
+                "schedule",
+                "--event",
+                "workflow_dispatch",
                 "--dispatch-title-contains",
-                "lane=stability-test",
+                TOKEN,
             ]
         )
         assert code == 1
         assert "35832924275" in capsys.readouterr().out
-
-
-class TestRequest:
-    @pytest.mark.parametrize(
-        "kwargs",
-        [
-            {"repo": "omnimarket"},
-            {"workflow": "delegation-regression-nightly"},
-            {"branch": " "},
-            {"max_age_hours": 0},
-        ],
-    )
-    def test_a_malformed_request_is_refused(self, kwargs: dict[str, Any]) -> None:
-        base: dict[str, Any] = {
-            "repo": "OmniNode-ai/omnimarket",
-            "workflow": "delegation-regression-nightly.yml",
-            "branch": "dev",
-            "max_age_hours": 26,
-        }
-        base.update(kwargs)
-        with pytest.raises(ValueError):
-            ModelWorkflowVerdictRequest(**base)
-
-    def test_there_is_no_override_flag_on_the_verdict_reader(self) -> None:
-        subparsers = next(
-            action
-            for action in build_parser()._actions
-            if isinstance(action, argparse._SubParsersAction)
-        )
-        options = {
-            option
-            for action in subparsers.choices["workflow-verdict"]._actions
-            for option in action.option_strings
-        }
-        for banned in (
-            "--force",
-            "--skip",
-            "--allow-missing",
-            "--warn-only",
-            "--allow-stale",
-            "--allow-failure",
-        ):
-            assert banned not in options
 
 
 class TestWiring:
@@ -300,8 +227,11 @@ class TestWiring:
         return job
 
     def _d11_step(self) -> dict[str, Any]:
-        steps = self._gate_job()["steps"]
-        matches = [s for s in steps if "workflow-verdict" in str(s.get("run", ""))]
+        matches = [
+            s
+            for s in self._gate_job()["steps"]
+            if "delegation-regression-nightly.yml" in str(s.get("run", ""))
+        ]
         assert len(matches) == 1, "exactly one D11 verdict step is expected"
         step: dict[str, Any] = matches[0]
         return step
@@ -320,12 +250,23 @@ class TestWiring:
         assert "continue-on-error" not in token_step
         assert "continue-on-error" not in self._gate_job()
 
+    def test_the_d11_read_runs_before_any_receipt_read(self) -> None:
+        """Its verdict is printed on every delivery, whatever the receipts say."""
+        runs = [str(s.get("run", "")) for s in self._gate_job()["steps"]]
+        d11 = next(i for i, r in enumerate(runs) if "delegation-regression" in r)
+        first_gate = next(
+            i for i, r in enumerate(runs) if "lab_pass_receipt.py gate" in r
+        )
+        assert d11 < first_gate
+
     def test_the_d11_read_names_the_governed_verdict(self) -> None:
         run = str(self._d11_step()["run"])
+        assert "workflow-verdict" in run
         assert "--repo OmniNode-ai/omnimarket" in run
-        assert "--workflow delegation-regression-nightly.yml" in run
         assert "--branch dev" in run
         assert "--max-age-hours 26" in run
+        assert "--event schedule" in run
+        assert "--event workflow_dispatch" in run
         assert '--dispatch-title-contains "lane=stability-test"' in run
         assert "set -euo pipefail" in run
 

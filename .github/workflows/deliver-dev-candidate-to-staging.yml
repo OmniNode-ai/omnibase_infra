@@ -1044,32 +1044,31 @@ jobs:
       #
       # WHY DELIVERY AND NOT MERGES. D11 needs a deployed lane; it cannot run
       # against a PR head (the pre-PR verify slots have no entrypoint). A merge
-      # gate keyed on it would refuse the very PR that fixes it. Delivery is
-      # the surface its verdict can bind without a deadlock: the fix merges,
+      # gate keyed on it would refuse the very PR that fixes it. The fix merges,
       # the stability-test lane redeploys through its own pre-authorized
       # procedure, the nightly runs (schedule, or a dispatch -- a new
       # measurement, not an override), and delivery resumes on its green.
       #
-      # WHY EVERY PATH, not only the sibling one. The push path builds the
-      # runtime with omnimarket vendored at its dev HEAD (sibling_ref: dev), so
-      # gating only omnimarket's own deliveries would let any push here carry
-      # the same omnimarket code to onex-dev. So this step has no `if:`.
+      # WHY EVERY PATH. The push path builds the runtime with omnimarket
+      # vendored at its dev HEAD (sibling_ref: dev), so gating only omnimarket's
+      # own deliveries would let any push here carry the same omnimarket code to
+      # onex-dev. So this step has no `if:`. It runs FIRST in the job so its
+      # verdict is always read and printed, whatever the receipts say.
       #
-      # STATE-KEYED, and it names what it read. The verdict is the newest
-      # completed run on omnimarket dev, fresh within 26 hours (a nightly plus
-      # slack). A failed, cancelled, stale, unreadable or absent run refuses.
-      # A dispatch aimed at another lane does not count: the nightly renders its
-      # lane into the run title, and only `lane=stability-test` qualifies, so a
-      # green dev-lane dispatch cannot stand in for the governed measurement.
-      # There is no force, skip or allow-list;
-      # tests/ci/test_workflow_verdict_omn_d11.py asserts it. The receiving
-      # deploy (omninode_infra lab_pass_gate.py) reads the same verdict
-      # independently.
+      # STATE-KEYED through the one workflow-verdict reader (OMN-18866): the
+      # newest completed run on omnimarket dev, fresh within 26 hours (a nightly
+      # plus slack). Scheduled runs and dispatches are both measurements, but a
+      # dispatch counts only when its run title carries `lane=stability-test`
+      # (the nightly renders its lane into its run-name), so a green dispatch
+      # aimed at the dev lane cannot stand in for the governed measurement. No
+      # force, skip or allow-list; tests/ci/test_workflow_verdict_omn_d11.py
+      # asserts the wiring. The receiver (omninode_infra lab_pass_gate.py)
+      # reads the same verdict independently.
       #
       # The token is an App installation token with `actions: read` on
-      # omnimarket alone -- the same App the sibling read below uses -- rather
-      # than this repository's GITHUB_TOKEN, whose scope is this repository.
-      # Absent App credentials fail the job; they do not skip the read.
+      # omnimarket alone -- the same App the sibling read below uses -- because
+      # this repository's GITHUB_TOKEN is scoped to this repository. Absent App
+      # credentials fail the job; they do not skip the read.
       - name: Obtain a read-only Actions token for omnimarket (D11, OMN-19311)
         id: d11-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -1085,14 +1084,16 @@ jobs:
           GH_TOKEN: ${{ steps.d11-token.outputs.token }}
         run: |
           set -euo pipefail
-          uv run --no-project \
+          uv run --no-project --with pydantic \
             python3 scripts/ci/lab_pass_receipt.py workflow-verdict \
             --repo OmniNode-ai/omnimarket \
             --workflow delegation-regression-nightly.yml \
             --branch dev \
             --max-age-hours 26 \
+            --event schedule \
+            --event workflow_dispatch \
             --dispatch-title-contains "lane=stability-test" \
-            | tee /tmp/d11-verdict.txt
+            | tee /tmp/lab-pass-gate-d11.txt
 
       - name: Read the lab-pass receipt for the delivered sha
         env:
@@ -1153,16 +1154,49 @@ jobs:
             --lane compose-dev \
             | tee /tmp/lab-pass-gate-sibling.txt
 
+      # OMN-18866, operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending
+      # the 16:10:08Z every-check-blocks ruling): C15, this repository's chain
+      # canary, is bound to staging delivery NOW, red or green. It runs on EVERY
+      # delivery -- push, sibling-triggered and manual -- because the canary
+      # exercises the chain that this repository and the vendored omnimarket
+      # compose, and a delivery on any path carries both.
+      #
+      # WHY DELIVERY AND NOT MERGES: the canary probes the DEPLOYED .201 dev
+      # lane over host.docker.internal. A PR head cannot be deployed there
+      # before it merges, so a merge block would stop the fix itself. Merges
+      # stay open; the fix merges, the dev lane rebuilds, the next scheduled
+      # canary (or a re-run of one, which is a fresh measurement) goes green,
+      # and delivery resumes.
+      #
+      # WHY NOT A CHECK ON THE compose-dev RECEIPT: that is the OMN-18872 revert
+      # shape (PROBES_NOT_YET_WIRED in lab_pass_receipt.py), it would also stop
+      # release-cut, and on the push path it would not block at all because the
+      # own-sha gate above is any-of across lanes.
+      #
+      # STATE-KEYED: the newest completed SCHEDULED run on dev must be success
+      # and at most 3 hours old (a 2-hour cadence plus runner slack). A red,
+      # cancelled, timed-out, absent, stale or unreadable newest run refuses,
+      # naming the run. `--event schedule` admits re-runs of scheduled runs
+      # (same event, default inputs) and not manual dispatches, whose inputs
+      # can point the probe somewhere other than the lane. No `if:`, no force.
+      - name: Require a fresh green chain canary (C15, OMN-18866)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic \
+            python3 scripts/ci/lab_pass_receipt.py workflow-verdict \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow chain-canary.yml \
+            --branch dev \
+            --max-age-hours 3 \
+            --event schedule \
+            | tee /tmp/lab-pass-gate-chain-canary.txt
+
       - name: Summarise
         if: always()
         run: |
           {
-            echo "### D11 delegation regression verdict (OMN-19311)"
-            echo ""
-            echo '```'
-            cat /tmp/d11-verdict.txt 2>/dev/null || echo "(the verdict read produced no output)"
-            echo '```'
-            echo ""
             echo "### Lab-pass gate (rule 24(b), OMN-17530)"
             echo ""
             echo '```'
@@ -1177,6 +1211,20 @@ jobs:
                 || echo "(the sibling gate produced no output)"
               echo '```'
             fi
+            echo ""
+            echo "### D11 delegation regression verdict (OMN-19311)"
+            echo ""
+            echo '```'
+            cat /tmp/lab-pass-gate-d11.txt 2>/dev/null \
+              || echo "(the D11 verdict produced no output)"
+            echo '```'
+            echo ""
+            echo "### Chain canary verdict (C15, OMN-18866)"
+            echo ""
+            echo '```'
+            cat /tmp/lab-pass-gate-chain-canary.txt 2>/dev/null \
+              || echo "(the chain canary verdict produced no output)"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
   dispatch-to-staging:
