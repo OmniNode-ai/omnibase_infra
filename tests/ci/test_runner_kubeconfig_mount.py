@@ -55,9 +55,8 @@ EXPECTED_MOUNT_SOURCE_EXPR = (
 )
 EXPECTED_KUBECONFIG_ENV = "/home/runner/.lab-credentials/lab-ci-reader.kubeconfig"
 # OMN-18411: fleet capped 88 -> 60 (CI burst drove one-minute load to 100.9 on
-# OMN-19077: capped 60 -> 40 (58 concurrent jobs crashed dockerd on .201).
 # the 32-core .201 host).
-FLEET_SERVICE_COUNT = 40
+FLEET_SERVICE_COUNT = 60
 
 
 def _load_compose() -> dict[str, Any]:
