@@ -95,8 +95,6 @@ from pydantic import (
 # command downstream.
 TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 
-_RUNTIME_LABEL = "runtime_change"
-
 # Lane-declared transport vocabulary (OMN-18012). The overlay
 # (omnimarket config/ci_bus_lanes.yaml) declares `security_protocol` and, for a
 # SASL protocol, `sasl_mechanism` beside each lane's broker. This publisher READS
@@ -801,11 +799,19 @@ load_runtime_path_classifier = (
     _runtime_change_classifier.load_runtime_path_classifier  # type: ignore[attr-defined]
 )
 classify_runtime_paths = _runtime_change_classifier.classify_runtime_paths  # type: ignore[attr-defined]
+inert_version_bump_paths = _runtime_change_classifier.inert_version_bump_paths  # type: ignore[attr-defined]
+git_manifest_reader = _runtime_change_classifier.git_manifest_reader  # type: ignore[attr-defined]
 
 
-def should_trigger(runtime_paths: list[str], labels: list[str]) -> bool:
-    """Return True for a runtime label or canonical deploy-path hit."""
-    return _RUNTIME_LABEL in labels or bool(runtime_paths)
+#: OMN-19318: the trigger's decision IS the shared runtime-affecting predicate
+#: (the path rule unioned with the merged pull request's ``runtime_change``
+#: label), the same function object the release train's proof-subject walk
+#: calls. A local predicate here is what let the walk step past a label-only
+#: merge this trigger rebuilt for; the test in
+#: tests/scripts/test_runtime_affecting_predicate_shared_omn19318.py fails if
+#: one comes back.
+RUNTIME_CHANGE_LABEL: str = _runtime_change_classifier.RUNTIME_CHANGE_LABEL  # type: ignore[attr-defined]
+should_trigger = _runtime_change_classifier.is_runtime_affecting  # type: ignore[attr-defined]
 
 
 #: The repository whose working tree IS the runtime image's build context. The
@@ -1119,6 +1125,17 @@ def emit_github_output(
     ),
 )
 @click.option(
+    "--source-checkout",
+    type=click.Path(path_type=Path, exists=True, file_okay=False),
+    default=None,
+    help=(
+        "A clone of the source repository holding --source-sha and its first "
+        "parent. With it, a root pyproject.toml/uv.lock change that is only a "
+        "version-inert package's own version is not lane state (OMN-19375); "
+        "without it, nothing is exempt."
+    ),
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     default=False,
@@ -1138,6 +1155,7 @@ def main(
     consumer_model: Path | None,
     runtime_path_validator: Path,
     runner_environment: str,
+    source_checkout: Path | None,
     dry_run: bool,
 ) -> None:
     """Publish a node_redeploy_orchestrator start command if a PR contains runtime changes.
@@ -1174,9 +1192,24 @@ def main(
         sys.exit(1)
     sibling_sha = "" if source_repo.strip() == OWN_REPO else source_sha
 
+    manifest_reader = (
+        git_manifest_reader(source_checkout, source_sha)
+        if source_checkout is not None
+        else None
+    )
+    if manifest_reader is not None:
+        inert = inert_version_bump_paths(files, manifest_reader)
+        if inert:
+            click.echo(
+                f"Version-only manifest change, not lane state (OMN-19375): "
+                f"{', '.join(inert)}"
+            )
+
     try:
         classifier = load_runtime_path_classifier(runtime_path_validator)
-        runtime_paths = classify_runtime_paths(files, classifier)
+        runtime_paths = classify_runtime_paths(
+            files, classifier, manifest_reader=manifest_reader
+        )
     except ValueError as exc:
         click.echo(f"ERROR: {exc}", err=True)
         sys.exit(1)

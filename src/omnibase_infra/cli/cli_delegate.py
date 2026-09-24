@@ -526,6 +526,10 @@ def _require_completed_terminal_evidence(
     """Refuse a completed receipt that lacks evidence its request required."""
     if result.status != "completed":
         return
+    if result.operational_outcome == "terminal_construction_failed":
+        raise DelegateTerminalUnresolvedError(
+            "completed delegation terminal cannot carry terminal_construction_failed"
+        )
     missing: list[str] = []
     if require_budget_evidence and result.budget_evidence is None:
         missing.append("budget_evidence")
@@ -536,6 +540,96 @@ def _require_completed_terminal_evidence(
             "completed delegation terminal omits required evidence: "
             + ", ".join(missing)
         )
+
+
+def _backend_pin_defect(
+    result: ModelDelegateTerminal,
+    *,
+    requested_backend_id: str | None,
+) -> str | None:
+    """Return the defect when a PINNED delegation did not run on its pin.
+
+    OMN-19124. ``backend_id`` has been a declared optional input on the
+    delegate node contract since OMN-15156, and the handler and both dispatch
+    ports have threaded it since; no flag on this CLI reached it, so the only
+    thing a caller could choose was a task class and the class chose the rung.
+    The flag that closes that gap needs STATED failure semantics, because the
+    port's own behaviour under a failing pin is surprising: a transport
+    failure on the pinned backend excludes the pinned backend's WHOLE TIER and
+    re-resolves the next hop through the normal ``tier_order``
+    (``port_local_delegation_dispatch._resolve_initial_backend``,
+    "Escalation-interaction note"). A caller who pinned a cheap rung to hold
+    spend down can therefore be served from an expensive one and, with a
+    silent pin, could not tell.
+
+    The chosen semantics is PIN-OR-REFUSE at the terminal: a COMPLETED
+    delegation whose accepted attempt did not run on the pinned backend is a
+    refusal — non-zero exit, the defect named — while the receipt is still
+    written so the run stays diagnosable.
+
+    Two cases are deliberately NOT pin violations:
+
+    * an unpinned request (``requested_backend_id is None``), which is every
+      caller that existed before this flag;
+    * a terminally failed run, which already reports its own cause. Reporting
+      "your pin was violated" for a run that reached no rung at all names the
+      wrong defect, and the unattributed writer exists to say what really
+      failed.
+
+    THE HONEST LIMIT, stated rather than implied: this does not PREVENT the
+    escalation spend. It makes that spend impossible to mistake for the pinned
+    run. Refusing to escalate off a pin at all is a change to the routing port
+    in ``omnimarket`` and is not in this layer's gift.
+    """
+    if requested_backend_id is None:
+        return None
+    if result.status != "completed":
+        return None
+    accepted = result.accepted_attempt
+    served = (accepted.backend_id or "").strip() if accepted is not None else ""
+    if served == requested_backend_id:
+        return None
+    return (
+        f"delegation was pinned to backend {requested_backend_id!r} but the "
+        f"accepted answer came from {served or '<no attributed backend>'!r}; "
+        "the pin selects the INITIAL attempt only and a transport failure on "
+        "it excludes its whole tier, so this run escalated off the pinned rung"
+    )
+
+
+def _backend_pin_receipt_block(
+    result: ModelDelegateTerminal | None,
+    *,
+    requested_backend_id: str | None,
+) -> dict[str, object]:
+    """Record WHETHER the rung was chosen by the caller or walked to.
+
+    OMN-19124 AC4. Without these keys a receipt whose accepted attempt names
+    ``cheap_cloud`` is indistinguishable from one that escalated there, so
+    "the pin worked" is not a falsifiable claim about any stored run.
+
+    ``backend_selection`` describes how the INITIAL rung was selected and is
+    derived from the request alone, so it is the same on a failed run as on a
+    successful one. ``backend_pin_honoured`` is the outcome and is ``None``
+    whenever there is nothing to honour — no pin, or no attributed route.
+    """
+    honoured: bool | None = None
+    if (
+        result is not None
+        and requested_backend_id is not None
+        and result.accepted_attempt is not None
+    ):
+        honoured = (
+            _backend_pin_defect(result, requested_backend_id=requested_backend_id)
+            is None
+        )
+    return {
+        "requested_backend_id": requested_backend_id,
+        "backend_selection": (
+            "cheapest_first" if requested_backend_id is None else "pinned"
+        ),
+        "backend_pin_honoured": honoured,
+    }
 
 
 def _receipt_evidence_requirements(
@@ -570,6 +664,7 @@ def _delegate_receipt_evidence_error(
     *,
     require_budget_evidence: bool = False,
     require_contract_evidence: bool = False,
+    requested_backend_id: str | None = None,
 ) -> str | None:
     """Return the evidence defect that must turn a delegate receipt into failure."""
     receipt_dump = getattr(receipt, "model_dump", None)
@@ -589,7 +684,12 @@ def _delegate_receipt_evidence_error(
         )
     except DelegateTerminalUnresolvedError as exc:
         return str(exc)
-    return None
+    # OMN-19124: the pin refusal is armed HERE, on the validator, and not in
+    # ``_require_completed_terminal_evidence`` above -- that helper runs in
+    # the run-file writer BEFORE anything is written, so a refusal raised
+    # there would suppress the very receipt that proves which rung answered.
+    # Refusing on the validator exits non-zero AND leaves the evidence.
+    return _backend_pin_defect(result, requested_backend_id=requested_backend_id)
 
 
 def _write_unattributed_run_files(
@@ -602,6 +702,7 @@ def _write_unattributed_run_files(
     task_type_resolution: str,
     addressing: ModelDelegateRunAddressing,
     drift_guard: ProtocolDriftGuardVerdict | None = None,
+    requested_backend_id: str | None = None,
 ) -> None:
     """Persist a terminally-failed delegation that attributed no route.
 
@@ -631,7 +732,10 @@ def _write_unattributed_run_files(
                 "route_attributed": False,
                 "route_unattributed": unattributed,
                 "status": envelope.get("status"),
+                "operational_outcome": result.operational_outcome,
+                "content_verdict": result.content_verdict,
                 "terminal_failure_cause": result.terminal_failure_cause,
+                "terminal_failure_reason": result.terminal_failure_reason,
                 "failure_reason": result.error_message,
                 "quality_gates_failed": list(result.quality_gates_failed),
                 "quality_gate_passed": result.quality_gate_passed,
@@ -641,6 +745,13 @@ def _write_unattributed_run_files(
                 "receipt": envelope,
                 **_budget_outcome_receipt_block(result),
                 **_response_contract_receipt_block(result),
+                # OMN-19124: a pinned run that reached no rung still says it
+                # was pinned. ``backend_pin_honoured`` is None here by
+                # construction -- there is no attributed route to honour --
+                # which is what distinguishes it from a violated pin.
+                **_backend_pin_receipt_block(
+                    result, requested_backend_id=requested_backend_id
+                ),
                 # OMN-18810: where a failed run RAN is the first question
                 # asked about it, and route attribution being fail-closed is
                 # exactly why it cannot be inferred from anything else here.
@@ -862,6 +973,7 @@ def _write_local_run_files(
     drift_guard: ProtocolDriftGuardVerdict | None = None,
     require_budget_evidence: bool = False,
     require_contract_evidence: bool = False,
+    requested_backend_id: str | None = None,
     broker: str = "",
     command_topic: str = "",
 ) -> None:
@@ -961,6 +1073,7 @@ def _write_local_run_files(
             task_type_resolution=task_type_resolution,
             addressing=addressing,
             drift_guard=drift_guard,
+            requested_backend_id=requested_backend_id,
         )
         return
 
@@ -1003,6 +1116,14 @@ def _write_local_run_files(
                 "receipt": envelope,
                 **_budget_outcome_receipt_block(result),
                 **_response_contract_receipt_block(result),
+                # OMN-19124: whether this rung was CHOSEN by the caller or
+                # walked to by the cheapest-first ladder. Without it a
+                # ``cheap_cloud`` receipt cannot be told from one that
+                # escalated there, so no stored run can falsify "the pin
+                # worked".
+                **_backend_pin_receipt_block(
+                    result, requested_backend_id=requested_backend_id
+                ),
                 # OMN-18810: the rung that answered is not the machine that
                 # ran it. Both files carry the same four addressing keys so
                 # neither can be read against the other.
@@ -1269,6 +1390,34 @@ def load_supported_criteria() -> frozenset[str] | None:
     return frozenset(str(item) for item in supported)
 
 
+def _validate_backend_pin(backend_id: str | None) -> str | None:
+    """Normalise ``--backend-id`` and refuse an empty one (OMN-19124).
+
+    Whitespace-only is refused rather than normalised to ``None``: a pin the
+    caller believes they set, silently dropped, walks the cheapest-first
+    ladder and answers — the exact silence this flag exists to remove.
+
+    The id itself is deliberately NOT validated against a list of known
+    backends. The routing contract is the source of truth for what backends
+    exist and the routing authority already raises loudly on an unresolvable
+    pin (``_resolve_initial_backend``: "a resolution failure on a caller's
+    EXPLICIT pin means the caller asked for a backend that doesn't exist, and
+    hiding that behind a silent fallback would defeat the whole point of
+    pinning"). A second, CLI-side copy of that vocabulary is a table that
+    goes stale and starts refusing backends the contract declares.
+    """
+    if backend_id is None:
+        return None
+    pinned = backend_id.strip()
+    if not pinned:
+        raise ValueError(
+            "--backend-id was given an empty value. Pass a backend id declared "
+            "by the routing contract, or omit the flag to use the "
+            "cheapest-first tier_order walk."
+        )
+    return pinned
+
+
 def _validate_criteria(criteria: tuple[str, ...]) -> tuple[str, ...]:
     """Refuse an unknown criterion here, naming the flag and the vocabulary."""
     if not criteria:
@@ -1357,6 +1506,7 @@ def _write_payload(
     response_contract: dict[str, object] | None = None,
     system_prompt: str | None = None,
     requested_timeout_seconds: int | None = None,
+    backend_id: str | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -1415,6 +1565,13 @@ def _write_payload(
         payload["system_prompt"] = system_prompt
     if requested_timeout_seconds is not None:
         payload["requested_timeout_seconds"] = requested_timeout_seconds
+    # OMN-19124: the caller's explicit rung pin, written under the field name
+    # the node contract already declares. Omitted entirely when unset, like
+    # every other optional field here, because ``ModelDelegateSkillRequest``
+    # declares ``extra="forbid"`` and a null would be a shape change on every
+    # existing caller's payload.
+    if backend_id is not None:
+        payload["backend_id"] = backend_id
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -1593,6 +1750,27 @@ def _timeout_receipt(
         "Alias for --task-type. The contract calls these TASK CLASSES, so the "
         "flag that selects one may be spelled either way; passing both is a "
         "usage error rather than a silent precedence rule."
+    ),
+)
+@click.option(
+    "--backend-id",
+    "backend_id",
+    type=str,
+    default=None,
+    help=(
+        "Pin the INITIAL attempt to this exact routing backend by id, "
+        "bypassing the cheapest-first tier_order walk (OMN-19124). The id is "
+        "the routing contract's own 'backend_id' (e.g. the cheap_cloud rung's "
+        "GLM backend); it is resolved by the routing authority, never by this "
+        "CLI, so an unknown id is that authority's loud refusal rather than a "
+        "silent fallback to the untargeted ladder. Omit it and resolution is "
+        "byte-for-byte what it was before this flag existed. PIN-OR-REFUSE: a "
+        "completed run whose accepted answer came from a DIFFERENT backend "
+        "exits non-zero naming both, because the pin selects only the first "
+        "attempt and a transport failure on it excludes its whole tier -- so "
+        "a pin that stayed silent could hand you an expensive rung's answer "
+        "while you believed you had held spend down. The receipt records the "
+        "pin and whether it was honoured either way."
     ),
 )
 @click.option(
@@ -1795,6 +1973,7 @@ def delegate_command(
     prompt: str,
     task_type: str | None,
     task_class_alias: str | None,
+    backend_id: str | None,
     criteria: tuple[str, ...],
     criteria_mode: str | None,
     response_contract: str | None,
@@ -1837,6 +2016,7 @@ def delegate_command(
         exit_code = run_delegate(
             prompt=prompt,
             task_type=_resolve_task_class_flag(task_type, task_class_alias),
+            backend_id=_validate_backend_pin(backend_id),
             acceptance_criteria=_validate_criteria(tuple(criteria)),
             criteria_mode=criteria_mode,
             response_contract=_load_response_contract(response_contract),
@@ -1863,6 +2043,7 @@ def run_delegate(
     *,
     prompt: str,
     task_type: str | None,
+    backend_id: str | None = None,
     acceptance_criteria: tuple[str, ...] = (),
     criteria_mode: str | None = None,
     response_contract: dict[str, object] | None = None,
@@ -2109,6 +2290,7 @@ def run_delegate(
             response_contract=response_contract,
             system_prompt=system_prompt,
             requested_timeout_seconds=timeout,
+            backend_id=backend_id,
             max_tokens=max_tokens,
             state_root=state_root,
             run_id=run_id,
@@ -2252,6 +2434,11 @@ def run_delegate(
                         _delegate_receipt_evidence_error,
                         require_budget_evidence=receipt_evidence_demanded[0],
                         require_contract_evidence=receipt_evidence_demanded[1],
+                        # OMN-19124: the pin refusal is armed on the SAME
+                        # validator as the evidence refusals, from the same
+                        # request value the payload was built from, so the
+                        # two cannot disagree about what was asked for.
+                        requested_backend_id=backend_id,
                     ),
                     receipt_callback=lambda receipt: _write_local_run_files(
                         receipt=receipt,
@@ -2270,6 +2457,11 @@ def run_delegate(
                         # entry. Both now read one derivation.
                         require_budget_evidence=receipt_evidence_demanded[0],
                         require_contract_evidence=receipt_evidence_demanded[1],
+                        # OMN-19124: the writer RECORDS the pin; the
+                        # validator above REFUSES on it. Both read the one
+                        # request value, so the receipt can never say the
+                        # pin held while the exit code says it did not.
+                        requested_backend_id=backend_id,
                         # OMN-18925: the two facts a transport refusal needs
                         # that addressing does not carry separately. Taken
                         # from the decision that was PROVEN viable, so a

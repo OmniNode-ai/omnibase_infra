@@ -1041,6 +1041,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - deploy-runner-creds:/home/runner/.runner-creds
     # OMN-14958: host-gateway alias so LANE_PROBE_HOST=host.docker.internal
     # reaches the lane ports published on the host (18085/8085 etc.).
@@ -1179,6 +1180,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - verify-runner-1-creds:/home/runner/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -1313,6 +1315,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - verify-runner-2-creds:/home/runner/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -1366,6 +1369,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - verify-runner-3-creds:/home/runner/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"
