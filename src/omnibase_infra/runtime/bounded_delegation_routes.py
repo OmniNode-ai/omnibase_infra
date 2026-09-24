@@ -48,9 +48,6 @@ from omnibase_infra.runtime.models.model_bounded_delegation_route_declaration im
 from omnibase_infra.runtime.models.model_bounded_lane_broker_topology import (
     ModelBoundedLaneBrokerTopology,
 )
-from omnibase_infra.runtime.protocols.protocol_addressed_broker_transport import (
-    ProtocolAddressedBrokerTransport,
-)
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.runtime_local_ingress import (
@@ -190,20 +187,28 @@ def _refuse_unbounded_declarations(lanes: dict[str, object]) -> None:
 
 def resolve_bounded_delegation_route(
     *,
-    transport: ProtocolAddressedBrokerTransport,
+    transport: object,
     selected_route: ModelRuntimeLocalIngressRoute,
     overlay_path_for_test: Path | None = None,
 ) -> ModelBoundedDelegationRoute | None:
     """Validate the selected delegation contract against its declared lane row.
 
     Returns the resolved route when the runtime identity claims a bounded lane
-    and every declaration agrees; ``None`` when it claims none. Raises
+    and every declaration agrees; ``None`` when it claims none or the transport
+    has no broker address. Raises
     ``InfraUnavailableError`` on any refusal. ``overlay_path_for_test`` replaces
     the installed omnimarket resource for isolated tests only.
     """
 
-    environment = transport.environment.strip()
-    broker = transport.bootstrap_servers.strip()
+    # A transport is addressed when it reports both a runtime environment and a
+    # broker address (EventBusKafka does). An in-process bus reports an
+    # environment but no broker, so there is no lane broker to bound.
+    raw_environment = getattr(transport, "environment", None)
+    raw_broker = getattr(transport, "bootstrap_servers", None)
+    if not isinstance(raw_environment, str) or not isinstance(raw_broker, str):
+        return None
+    environment = raw_environment.strip()
+    broker = raw_broker.strip()
     if not environment or not broker:
         raise InfraUnavailableError(
             "bounded delegation route requires non-empty runtime environment "

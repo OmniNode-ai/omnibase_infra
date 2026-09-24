@@ -24,9 +24,6 @@ from omnibase_infra.runtime.bounded_delegation_routes import (
 from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
 )
-from omnibase_infra.runtime.protocols.protocol_addressed_broker_transport import (
-    ProtocolAddressedBrokerTransport,
-)
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
     DEFAULT_EXECUTION_TIMEOUT_SECONDS,
     DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
@@ -312,19 +309,18 @@ class RuntimeDelegationDispatchPort:
         # identity and the selected consumer contract must agree BEFORE the
         # broker exists. A refusal raises here, so no command is published and no
         # terminal or projection row can exist for this correlation.
-        if isinstance(self._event_bus, ProtocolAddressedBrokerTransport):
-            bounded_route = resolve_bounded_delegation_route(
-                transport=self._event_bus,
-                selected_route=selected.route,
+        bounded_route = resolve_bounded_delegation_route(
+            transport=self._event_bus,
+            selected_route=selected.route,
+        )
+        if bounded_route is not None:
+            logger.info(
+                "bounded delegation route accepted before dispatch",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    **bounded_route.model_dump(mode="json"),
+                },
             )
-            if bounded_route is not None:
-                logger.info(
-                    "bounded delegation route accepted before dispatch",
-                    extra={
-                        "correlation_id": str(correlation_id),
-                        **bounded_route.model_dump(mode="json"),
-                    },
-                )
         request_payload: dict[str, object] = {
             "prompt": prompt,
             "task_type": task_type,

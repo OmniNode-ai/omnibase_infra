@@ -31,8 +31,14 @@ from omnibase_infra.runtime import bounded_delegation_routes as routes_module
 from omnibase_infra.runtime.bounded_delegation_routes import (
     resolve_bounded_delegation_route,
 )
-from omnibase_infra.runtime.protocols.protocol_addressed_broker_transport import (
-    ProtocolAddressedBrokerTransport,
+from omnibase_infra.runtime.models.model_bounded_delegation_route import (
+    ModelBoundedDelegationRoute,
+)
+from omnibase_infra.runtime.models.model_bounded_delegation_route_declaration import (
+    ModelBoundedDelegationRouteDeclaration,
+)
+from omnibase_infra.runtime.models.model_bounded_lane_broker_topology import (
+    ModelBoundedLaneBrokerTopology,
 )
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 
@@ -101,13 +107,17 @@ def test_kafka_bus_exposes_public_addressed_transport_identity() -> None:
         )
     )
 
-    assert isinstance(bus, ProtocolAddressedBrokerTransport)
     assert bus.bootstrap_servers == _DOGFOOD_BROKER
     assert bus.environment == "dogfood"
 
 
 def test_in_process_bus_has_no_broker_to_bound() -> None:
-    assert not isinstance(EventBusInmemory(), ProtocolAddressedBrokerTransport)
+    assert (
+        resolve_bounded_delegation_route(
+            transport=EventBusInmemory(), selected_route=_route()
+        )
+        is None
+    )
 
 
 def test_declared_row_resolves_with_every_identity_the_decision_read(
@@ -476,3 +486,37 @@ def test_unreadable_overlay_refuses_only_a_runtime_that_names_a_lane(
         )
         is None
     )
+
+
+def test_route_models_roundtrip_through_json() -> None:
+    """Each K6 model survives a strict JSON roundtrip unchanged."""
+    topology = ModelBoundedLaneBrokerTopology(
+        external_bootstrap_servers=_DOGFOOD_BROKER,
+        internal_bootstrap_servers=_INTERNAL,
+        runtime_environment="dogfood",
+    )
+    declaration = ModelBoundedDelegationRouteDeclaration(
+        consumer="omnimarket.nodes.node_delegation_orchestrator",
+        terminal_route="terminal_events",
+        repository_owner="omnimarket",
+    )
+    route = ModelBoundedDelegationRoute(
+        lane="dogfood",
+        broker=_DOGFOOD_BROKER,
+        runtime_environment="dogfood",
+        runtime_bootstrap_servers=_INTERNAL,
+        consumer=declaration.consumer,
+        terminal_route=declaration.terminal_route,
+        repository_owner=declaration.repository_owner,
+        command_topic="onex.cmd.omnibase-infra.delegation-request.v1",
+        terminal_events=(
+            "onex.evt.omnibase-infra.delegation-completed.v1",
+            "onex.evt.omnibase-infra.delegation-failed.v1",
+        ),
+        declaration_sha256="a" * 64,
+        manifest_sha256="a" * 64,
+        declaration_source="omnimarket==0.0.0",
+    )
+    for model in (topology, declaration, route):
+        encoded = model.model_dump_json()
+        assert type(model).model_validate_json(encoded) == model
