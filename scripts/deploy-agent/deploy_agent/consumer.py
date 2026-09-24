@@ -288,20 +288,22 @@ class DeployConsumer:
             return None, None
 
         # OMN-18143. The batch this poll ALREADY fetched is the look-ahead, and
-        # nothing beyond it is polled for.
+        # nothing beyond it is polled for. A queue deeper than one fetch simply
+        # coalesces across successive polls instead of in one, which is slower
+        # and equally correct.
         #
-        # That is a deliberate bound, not a shortcut. The fetch position is
-        # already past every record in this batch -- ``_commit_through``'s own
-        # docstring records what that costs -- so scanning records the client
-        # has in hand adds no exposure at all, while polling AGAIN to see
-        # further would advance the position over records this scan then
-        # declines to fold, widening exactly the window OMN-18613 measured a
-        # lost command in. A queue deeper than one fetch simply coalesces
-        # across successive polls instead of in one, which is slower and
-        # equally correct.
+        # OMN-19259. kafka-python has already moved the fetch position past
+        # EVERY record this poll returned, and it keeps no copy of the ones this
+        # call does not process: the next poll starts at the position, not at
+        # the first record nobody looked at. So every record behind the one
+        # processed here is moved back onto the fetch path explicitly -- on the
+        # processed partition by ``_commit_through``, on any other partition
+        # below, before processing, so that no exit from the accept protocol
+        # can leave a fetched record behind the position.
         ordered, lookahead_usable = self._order_batch(records)
         if not ordered:
             return None, None
+        self._return_other_partitions_to_fetch(records, ordered[0])
         return self._process_message(
             ordered[0], lookahead=ordered[1:] if lookahead_usable else []
         )
@@ -331,6 +333,29 @@ class DeployConsumer:
             )
             return ordered[:1], False
         return ordered, True
+
+    def _return_other_partitions_to_fetch(
+        self, records: dict[Any, list[Any]], head: Any
+    ) -> None:
+        """Seek every partition but the head's back to its first returned record.
+
+        A poll that returned records on more than one partition processes one
+        record of one partition, and the fetch position of every other
+        partition is already past everything it returned. Without this seek
+        those records are never fetched again by this process, and the next
+        commit on their partition skips them for good (OMN-19259). The control
+        topic has a single partition today; this refuses to depend on that
+        staying true, as ``_order_batch`` does.
+        """
+        for topic_partition, messages in records.items():
+            if not messages:
+                continue
+            if (topic_partition.topic, topic_partition.partition) == (
+                head.topic,
+                head.partition,
+            ):
+                continue
+            self.consumer.seek(topic_partition, min(m.offset for m in messages))
 
     def _reject(
         self,
@@ -654,10 +679,10 @@ class DeployConsumer:
     def _sample_lag(self) -> None:
         """Record how many control-topic records this agent has not dealt with.
 
-        Measured against the COMMITTED offset, not the fetch position. After a
-        poll that returned a batch the position is already past records
-        ``poll_and_accept`` left buffered and has never looked at, so a
-        position-based lag reports zero while commands wait -- the same
+        Measured against the COMMITTED offset, not the fetch position. Between
+        a poll that returned a batch and the processing of its first record,
+        the position is past records ``poll_and_accept`` has never looked at,
+        so a position-based lag reports zero while commands wait -- the same
         off-by-a-batch OMN-18613 found in ``_commit_through``, from the other
         side. Where this process has not committed anything yet the position is
         used and the basis says so, because a first-poll under-report by one
@@ -723,21 +748,33 @@ class DeployConsumer:
             )
 
     def _commit_through(self, msg: Any) -> None:
-        """Commit past THIS record and no further.
+        """Commit past THIS record and no further, and fetch from just after it.
 
         A bare ``self.consumer.commit()`` commits the consumer's POSITION for
         every assigned partition. After a ``poll()`` that returned a batch the
         position is past every record FETCHED, not past the one record
         ``_process_message`` was handed -- ``poll_and_accept`` deliberately
-        processes the first record and returns, leaving the rest buffered. So a
-        bare commit silently marks records the agent has never looked at as
-        done, and they are gone the moment the client buffer is discarded, which
-        the ``post_terminal`` self-update re-exec does routinely.
+        processes the first record and returns. So a bare commit silently marks
+        records the agent has never looked at as done.
 
         Measured 2026-09-17 (OMN-18613): accepting offset 262 committed 264,
-        past a buffered 263 carrying the rebuild command for omnimarket#2622.
+        past an unprocessed 263 carrying the rebuild command for omnimarket#2622.
         That command was never delivered again -- no job record, no acceptance
         line, no rejection line and no quarantine record.
+
+        THE COMMIT ALONE IS HALF THE FIX (OMN-19259). Bounding the commit
+        leaves 263 uncommitted, but kafka-python's fetch position is still past
+        it: the next ``poll()`` in this process starts at 264, and nothing holds
+        263 in memory for it. Only a group rejoin or a re-exec read from the
+        committed offset again, and the next record this process processes
+        commits past 263 for good. Measured in a replay against a real broker
+        with the pinned kafka-python 2.3.2: a dev command fetched behind a
+        refused head was never delivered, the committed offset stayed at the
+        refused record plus one, and a later accepted command made the loss
+        permanent. So the position is moved back to the same place the commit
+        names, and the records behind this one are fetched again by the next
+        poll. That costs a re-fetch of at most one poll batch per record
+        processed, on a topic whose records are a few hundred bytes each.
 
         Advancing past a record the agent REFUSES stays deliberate: step 4's own
         comment notes that re-reading a refused command forever "would stall
@@ -752,6 +789,7 @@ class DeployConsumer:
                 )
             }
         )
+        self.consumer.seek(topic_partition, msg.offset + 1)
         # OMN-18144: what the next lag sample measures against.
         if self.lag_sampler is not None:
             self.lag_sampler.note_commit(topic_partition, msg.offset + 1)
