@@ -141,7 +141,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import yaml
 
@@ -1508,6 +1508,44 @@ def render_report_human(decisions: Sequence[ModelTrainDecision]) -> str:
     return "\n".join(lines)
 
 
+# A Linear ticket reference as a conventional-commit scope: "feat(OMN-1234): ..."
+# or "fix(OMN-1234,ci): ...". Matches the scope's own OMN-<digits> token plus the
+# parens, so removing it collapses to "feat: ...".
+_SCOPE_TICKET_REF: Final[re.Pattern[str]] = re.compile(
+    r"\((?:[^()]*,)?(?<![A-Za-z0-9_])OMN-\d+\)(?=:)"
+)
+
+# A Linear ticket reference cited parenthetically elsewhere on the subject line,
+# e.g. "... thing (OMN-1234) (#1745)" -> "... thing (#1745)". Includes the space
+# that precedes the parenthetical so removal does not leave a double space.
+_INLINE_TICKET_REF: Final[re.Pattern[str]] = re.compile(
+    r"\s*\((?<![A-Za-z0-9_])OMN-\d+\)"
+)
+
+# Any remaining bare mention with no surrounding parens (rare, but the doc-content
+# scan's own TICKET_REFERENCE class matches this shape too, so it must fall here).
+_BARE_TICKET_REF: Final[re.Pattern[str]] = re.compile(r"(?<![A-Za-z0-9_])OMN-\d+\b")
+
+
+def _strip_ticket_references(subject: str) -> str:
+    """Drop bare ``OMN-<digits>`` ticket citations from a commit subject.
+
+    The published CHANGELOG is a public-facing doc, and a Linear ticket id is
+    internal tracking state, not reader-facing content -- exactly the class the
+    omnibase_core doc-content scan's TICKET_REFERENCE rule exists to keep out of
+    every doc file that is not under ``onex_change_control/`` or ``contracts/``
+    (``omnibase_core.validation.doc_content_scan.handler``). Every hand-cut
+    CHANGELOG entry already cites only the PR number for traceability (e.g.
+    ``(#1736)``); this mirrors that precedent mechanically instead of adding a
+    per-line ``doc-content-ok`` suppression marker, which would silence the scan
+    for the ticket ids too rather than just omitting them.
+    """
+    subject = _SCOPE_TICKET_REF.sub("", subject)
+    subject = _INLINE_TICKET_REF.sub("", subject)
+    subject = _BARE_TICKET_REF.sub("", subject)
+    return re.sub(r" {2,}", " ", subject).strip()
+
+
 def render_changelog_entry(
     *, package: str, version: str, previous_tag: str, subjects: Sequence[str]
 ) -> str:
@@ -1515,7 +1553,11 @@ def render_changelog_entry(
 
     Mirrors the shape the hand-cut releases use, because the release PR is read
     by people and a generated one that looks different reads as a different kind
-    of change.
+    of change. Every commit subject has its bare ``OMN-<digits>`` ticket
+    reference(s) stripped first (``_strip_ticket_references``) so the generated
+    CHANGELOG never trips the doc-content scan's TICKET_REFERENCE rule -- the
+    prior manual releases already omitted ticket ids from this section, citing
+    only the PR number.
     """
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     since = previous_tag or "the first commit"
@@ -1530,7 +1572,7 @@ def render_changelog_entry(
         "",
         f"### Included Since {since}",
     ]
-    lines.extend(f"- {subject}" for subject in subjects)
+    lines.extend(f"- {_strip_ticket_references(subject)}" for subject in subjects)
     lines.append("")
     return "\n".join(lines)
 
