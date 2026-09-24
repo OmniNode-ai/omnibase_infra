@@ -978,7 +978,8 @@ def _run_receipt_mode(
         # still has to be able to say where it was going to run.
         logger.info(
             "receipt_mode: execution locus=%s (%s); orchestrator contract=%s "
-            "from %s; command topic=%s broker=%s live lane consumers=%s",
+            "from %s; command topic=%s broker=%s live lane consumers=%s "
+            "consumer bind wait=%.1fs",
             locus_decision.locus.value,
             locus_decision.resolved_from,
             locus_decision.orchestrator_contract,
@@ -986,6 +987,7 @@ def _run_receipt_mode(
             locus_decision.command_topic,
             locus_decision.broker or "(none — in-process bus)",
             ", ".join(locus_decision.lane_consumer_groups) or "(none)",
+            locus_decision.consumer_bind_wait_seconds,
         )
 
     started = time.monotonic()
