@@ -152,6 +152,16 @@ scope:
     # suite, not an incident replay.
     - scripts/ci/provider_rung_canary_observe.py
     - scripts/ci/provider_rung_canary_probe.py
+    # OMN-19445: the daily R1/MD-14 front-door probe, a PROBE in the same
+    # class as provider-rung-canary above -- it measures live front-door
+    # state (one `onex delegate` call, graded by exit code), not a past
+    # incident's bytes. Its grading is proven offline over a stubbed
+    # subprocess call in tests/ci/test_r1_front_door_probe_omn19445.py -- a
+    # regression suite with positive controls, not an incident replay. A real
+    # replay case (the OMN-16932 stale --kafka-bootstrap SASL refusal, run
+    # f1a9f38f) would need committed bytes from that run's own log, which this
+    # PR did not fetch; tracked as follow-up debt here rather than fabricated.
+    - scripts/ci/r1_front_door_probe.py
     # OMN-19181: a PROBE, the C16 producer, and the same class as the C11 one
     # above. Its grading IS driven by real bytes -- three observations captured
     # read-only from the .201 dev lane's gateway_workflows rows and their bus terminals
