@@ -160,7 +160,6 @@ def _filter_manifest_for_runtime_profile(
     return ownership_result.manifest
 
 
-
 def _discover_contracts_for_runtime_profile() -> ProtocolAutoWiringManifestLike:
     """Discover and profile-filter, as one synchronous unit to hand to a thread.
 
