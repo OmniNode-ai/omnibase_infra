@@ -409,6 +409,21 @@ repos:
         files: ^(\.github/workflows/chain-canary-c12-provider-catalogue\.yml|scripts/ci/c12_provider_catalogue_(probe|observe)\.py|tests/ci/test_c12_provider_catalogue_probe_omn19195\.py|tests/fixtures/omn19195/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-16987: the provider-rung liveness canary's grader and observer.
+      # Pins that the recorded lab reading grades each rung as observed, that
+      # an unresolved key is never a pass and sends no authenticated request,
+      # that 200/401/429/connect-error/non-chat-body map to their verdicts,
+      # that no key material survives into the observation or the record, that
+      # z.ai 1310 and 1113 read differently, and that a wrong-key control that
+      # does not bite fails the run. Offline, over a recorded observation and a
+      # fake transport, so no key and no lane is touched here.
+      - id: provider-rung-canary-grading
+        name: Provider-rung liveness canary grader (OMN-16987)
+        entry: uv run --frozen pytest tests/ci/test_provider_rung_canary_probe_omn16987.py -q
+        language: system
+        files: ^(\.github/workflows/provider-rung-canary\.yml|scripts/ci/provider_rung_canary_(probe|observe)\.py|tests/ci/test_provider_rung_canary_probe_omn16987\.py|tests/fixtures/omn16987/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-19181: the C16 receipt-identity producer grades R-DELEG-11/12/26
       # over observations captured from the .201 dev lane. Pins that the
       # healthy capture can PASS, that SKIP fails the verdict (the SKIP/SKIP/
@@ -817,6 +832,20 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-19344 (plan row R7, rule RB): every forward migration declares its
+      # class (expand-only, forward-only, contract) in
+      # config/migration_classes.yaml; a destructive statement declared
+      # expand-only, an undeclared file, a stale entry, or a recorded down
+      # execution whose script bytes changed is refused. always_run because a
+      # vendored node migration arrives through the sync script, and the
+      # subject is the whole corpus, not the staged file list.
+      - id: onex-check-migration-class
+        name: ONEX Migration Class Declaration (OMN-19344)
+        entry: uv run --frozen python scripts/validation/check_migration_class.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-17298: a migration that turns ROW LEVEL SECURITY on for a relation
       # must leave a policy admitting somebody, and must not drop one inside a
       # DO block while recreating it after the block commits. The forward
@@ -1096,6 +1125,24 @@ repos:
       # Naming convention validation - file and class naming [OMN-1305]
       # Validates Handler*, Dispatcher*, Store*, Adapter*, etc. naming patterns
       # Runtime: <3s (single pass with caching)
+      # OMN-17423 AC4: refuse a log statement that formats a credential value.
+      # SYNC with the ci.yml steps "Credential-in-log gate (OMN-17423)" and
+      # its self-test. Runs on every commit touching Python so a new log site
+      # is caught at the keyboard, not in a pod log.
+      - id: check-no-credential-in-log
+        name: Credential-in-log gate (OMN-17423)
+        entry: uv run --frozen python scripts/ci/check_no_credential_in_log.py --root src/omnibase_infra
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: check-no-credential-in-log-self-test
+        name: Credential-in-log gate self-test (OMN-17423)
+        entry: uv run --frozen python scripts/ci/check_no_credential_in_log.py --mode=self-test --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py --expected 9
+        language: system
+        files: ^(scripts/ci/check_no_credential_in_log\.py|scripts/ci/tests/fixtures/credential_in_log_fixture\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: onex-validate-naming
         name: ONEX Naming Convention Validation
         entry: uv run --frozen python scripts/validation/validate_naming.py src/omnibase_infra --errors-only

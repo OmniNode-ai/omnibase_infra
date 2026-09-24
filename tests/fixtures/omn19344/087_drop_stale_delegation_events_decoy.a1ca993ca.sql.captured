@@ -1,0 +1,45 @@
+-- OMN-13362: drop the stale `delegation_events` decoy from the omnibase_infra DB.
+--
+-- The canonical delegation projection (node_projection_delegation, omnimarket)
+-- writes to `omnidash_analytics.delegation_events` — that is the live, growing
+-- table, applied through the node-owned migration tree under
+-- docker/migrations/forward/nodes/node_projection_delegation/ with
+-- NODE_POSTGRES_DB=omnidash_analytics (run-forward-migrations.sh).
+--
+-- A SECOND `delegation_events` exists in the `omnibase_infra` DB itself. It is a
+-- historical artifact from before the node-migration runner was repointed to
+-- omnidash_analytics: at that time NODE_POSTGRES_DB defaulted to POSTGRES_DB
+-- (=omnibase_infra), so the node migrations created the table there too. That
+-- copy stopped receiving writes (last write 2026-05-13, ~40 rows) and is read by
+-- nothing — but querying it is exactly what produced the 2026-06-19 Gate-Zero
+-- misdiagnosis ("writes stopped May 13"). Evidence:
+-- docs/evidence/2026-06-19-gate-zero/runtime-201.md.
+--
+-- This migration runs in the flat infra sequence against POSTGRES_DB
+-- (=omnibase_infra), so the DROP targets the decoy, never the live
+-- omnidash_analytics copy (a different database the flat runner never touches).
+-- No flat infra migration and no infra source reads delegation_events from the
+-- omnibase_infra DB, so the drop is safe. Idempotent for already-cleaned volumes.
+--
+-- OMN-13406: CASCADE is required. On a WARM omnibase_infra DB the decoy
+-- delegation_events carries dead dependent views, created in this same DB by the
+-- same pre-repointing default (NODE_POSTGRES_DB=POSTGRES_DB=omnibase_infra) that
+-- created the decoy table. The node migrations build these views FROM
+-- delegation_events:
+--   * projection_delegation_summary       (node:node_projection_delegation:0010_create_delegation_dashboard_projection_views.sql)
+--   * projection_delegation_model_routing (node:node_projection_delegation:0010_...)
+--   * projection_delegation_quality_gate  (node:node_projection_delegation:0010_...)
+--   * projection_delegation_token_usage   (node:node_projection_delegation:0010_...)
+--   * projection_delegation_savings       (node:node_projection_savings:076_create_delegation_savings_projection_view.sql)
+-- Every one of these is a DEAD copy that exists ONLY in the omnibase_infra DB; the
+-- LIVE views of the same names live in omnidash_analytics, are rebuilt there by
+-- those same node migrations under NODE_POSTGRES_DB=omnidash_analytics, and are
+-- NEVER touched by this flat infra migration (it runs only against POSTGRES_DB).
+-- A bare DROP refuses because of these dependents (Postgres exit 3) → forward
+-- migration fails → blocks 0017/0018/0019. CASCADE removes the decoy table and its
+-- dead dependent views together. On a cold/already-cleaned omnibase_infra DB there
+-- is no decoy and no dependents, so the CASCADE is a harmless no-op (IF EXISTS).
+-- The id-based runner (schema_migrations PRIMARY KEY, no checksum) skips this file
+-- on lanes that already applied it, so this edit re-runs nowhere already-migrated.
+
+DROP TABLE IF EXISTS public.delegation_events CASCADE;

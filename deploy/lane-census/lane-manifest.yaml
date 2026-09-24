@@ -206,6 +206,10 @@ hosts:
     aliases: [omnibook]
   lab-200:
     aliases: [stickybeatz-studio]
+  # OMN-19339: the .202 host (omnipc2), carrying only the sim-202 lane. `hostname`
+  # there reads `omnipc2` (read 2026-09-24T01:18Z over ssh, read-only).
+  lab-202:
+    aliases: [omnipc2]
 lanes:
   stability-test:
     hosts: [lab-201]
@@ -602,6 +606,68 @@ lanes:
         kind: service
         replicas: 1
       - name: omnimarket-dogfood-projection-api
+        kind: service
+        replicas: 1
+  # ---------------------------------------------------------------------------
+  # sim-202 — the isolated fault-injection stack on the .202 host (OMN-19339,
+  # unified verification plan row S2, track SIM)
+  # ---------------------------------------------------------------------------
+  # Its own Postgres, Redpanda and Valkey, never the .201 shared broker; no
+  # Keycloak, no Infisical, no runtime-worker. The compose file is an overlay on
+  # docker/docker-compose.dogfood.yml that renames every container, the network,
+  # every volume and the project, and republishes every port on the loopback
+  # address only. Its header carries the render command and the reasons.
+  #
+  # A PREMISE FOR NOTHING. It promotes nothing, sources no `stability-proven`
+  # digest, and is deliberately NOT in GOVERNED_LANES or GRANT_INTERLOCK_LANES
+  # (scripts/preflight_lane_deploy_attribution.py), for the reason the dev,
+  # collaborator and pre-PR lanes are not; tests/ci/test_sim_202_lane_boundary_omn19339.py
+  # pins that. Receipts it produces are simulation or pre-PR evidence only.
+  #
+  # `optional: true`: the stack is torn down between SIM runs and absent is a
+  # valid state. The moment any declared service runs it is reconciled normally.
+  #
+  # `hosts: [lab-202]` only. A census on .202 evaluates this lane and reports
+  # every .201 lane not-applicable (OMN-19088); a sim-202 container found on any
+  # other host is a `lane_on_undeclared_host` finding.
+  #
+  # PORT BLOCK, all bound to 127.0.0.1: runtime main 62085, effects 62086,
+  # projection API 62002, Postgres 62436, Valkey 62379, Redpanda Kafka 62092,
+  # Redpanda admin 62644; 62090 (gateway API) reserved and unbound. Read free on
+  # .202 at 2026-09-24T01:18Z (`ss -ltn`: listeners 22, 53, 631, 3389, 8000 and
+  # 8002 only).
+  sim-202:
+    hosts: [lab-202]
+    compose_file: docker/docker-compose.sim-202.yml
+    compose_project: omnibase-infra-sim-202
+    network: omnibase-infra-sim-202-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omnibase-infra-sim-202-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-sim-202-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-sim-202-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-sim-202-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-sim-202-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-sim-202-migration-gate
+        kind: keepalive
+      - name: omnibase-infra-sim-202-intelligence-migration
+        kind: oneshot
+      - name: omninode-sim-202-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-sim-202-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-sim-202-projection-api
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------

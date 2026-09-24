@@ -29,7 +29,7 @@
 #
 # Exit codes:
 #   0  plan printed (dry-run) or deploy succeeded
-#   1  usage / precondition error
+#   1  usage / precondition error (including a refused staged proof root)
 #   2  unknown / unsupported lane (e.g. prod)
 
 set -euo pipefail
@@ -119,6 +119,34 @@ OMNI_HOME="${OMNI_HOME:-}"
 if [[ -z "${OMNI_HOME}" ]]; then
     err "OMNI_HOME must be set (the sibling clones under it are the build source)."
     exit 1
+fi
+
+# --- staged proof root precondition (OMN-19086) ---------------------------
+# The dogfood lane only ever builds from a proof lane's private source root, and
+# a root copied from the canonical clones while their ten-minute pull fires is a
+# git directory at one commit over a working tree at another, which builds and
+# serves 200 without a word. So a dogfood build, and any build whose OMNI_HOME
+# carries a pin manifest, runs the verifier first and refuses a root that is
+# unpinned, dirty or off its pins, naming the repository and both shas. Runs in
+# the dry-run plan too, so a plan never promises a build the execute would refuse.
+#
+# A proof root builds with --hotpatch only. A ref build makes stage_workspace.sh
+# fetch from each clone's origin and reset to the ref, and a staged clone's origin
+# is the moving canonical clone, so the image would come from whatever that clone
+# holds at build time rather than from the pins this check just approved.
+PROOF_ROOT_VERIFIER="${SCRIPT_DIR}/stage_pinned_proof_root.py"
+if [[ "${LANE}" == "dogfood" || -f "${OMNI_HOME}/proof-root-pins.json" ]]; then
+    if [[ "${HOTPATCH}" != true ]]; then
+        err "a staged proof root builds with --hotpatch only: a --ref build re-fetches every"
+        err "  clone from its origin, the moving canonical clone, and discards the pins."
+        exit 1
+    fi
+    log "proof root      : verifying ${OMNI_HOME} against its pin manifest"
+    if ! "${PROOF_ROOT_PYTHON:-python3}" "${PROOF_ROOT_VERIFIER}" verify --root "${OMNI_HOME}"; then
+        err "the staged proof root under ${OMNI_HOME} is unpinned, dirty or off its pins; not building."
+        err "  stage it with: python3 ${PROOF_ROOT_VERIFIER} stage --dest <new root> --source-root <clones>"
+        exit 1
+    fi
 fi
 
 if [[ "${HOTPATCH}" == true ]]; then

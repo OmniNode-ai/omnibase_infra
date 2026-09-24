@@ -103,6 +103,20 @@ evidence_artifacts:
       - c12-provider-catalogue.json
     rationale: >-
       One row per check over the deployed catalogue (parity both directions, no Claude entry, no house entry, the intake route's binding) plus the negative-test injections run in the same process, with the image and the sha256 of the catalogue, the platform contract and both deployed modules. The injections are what make a green readable: a checker that always answers clean produces the same shipped reading, and only the injections tell the two apart.
+  # --- provider-rung-canary.yml: per-rung liveness (OMN-16987) --------------
+  #
+  # The probe's EXIT CODE is the verdict; this record is the per-rung table a
+  # reader (and a later router) reads without a log. An empty record beside a
+  # green run would claim every cloud rung authenticated with nothing behind it.
+  - id: provider-rung-canary
+    workflow: .github/workflows/provider-rung-canary.yml
+    job: provider-rung-canary
+    producer_step: "Probe every credentialed cloud rung and grade it"
+    artifact_name: provider-rung-canary
+    required_paths:
+      - provider-rung-canary.json
+    rationale: >-
+      One row per declared backend of the deployed delegation contract with its typed verdict (LIVE, AUTH_DEAD, QUOTA_DEAD with the contract's quota class, UNREACHABLE, UNRESOLVED, PROTOCOL_ERROR, HTTP_ERROR, or the skip reason), plus one wrong-key control per endpoint taken in the same run. The controls are what make a green readable: a probe that reads 200 whatever credential it sends produces the same LIVE rows, and only a refused wrong key tells the two apart.
   # --- dev-lane-liveness.yml: the lab saturation signal (OMN-18031) ---------
   #
   # This pair is the plan's named regression fixture. The probe was dead from
@@ -154,6 +168,20 @@ evidence_artifacts:
       - /tmp/lab-pass-receipt/receipt.json
     rationale: >-
       The onex-lab lab pass for the delivered sha. deliver-dev-candidate-to- staging.yml's lab-pass-gate job refuses the staging announcement without a PASS receipt for the exact sha (rule 24(b)).
+  # OMN-19233: the staging delivery gate's own verdict, one per run attempt.
+  # The compose-dev emitter's re-run selector (runtime-rebuild-trigger.yml,
+  # job rerun-refused-deliveries) reads it to decide whether a refused delivery
+  # is re-run once the subject's compose-dev PASS uploads, so its absence would
+  # silently leave a refused sha un-re-read.
+  - id: lab-pass-gate-verdict
+    workflow: .github/workflows/deliver-dev-candidate-to-staging.yml
+    job: lab-pass-gate
+    producer_step: "Read the lab-pass receipt for the delivered sha"
+    artifact_name: lab-pass-gate-verdict-${{ github.run_id }}-${{ github.run_attempt }}
+    required_paths:
+      - /tmp/lab-pass-gate-verdict/verdict.json
+    rationale: >-
+      The staging delivery gate's verdict for one run attempt (token, proof subject, first gate read). The compose-dev emitter re-runs a delivery refused PENDING, ABSENT or INDETERMINATE only on the strength of this record (plan PS-5, decision S).
   - id: lab-pass-receipt-compose-dev
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: verify-lane-converged

@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 571
+    max_skips: 572
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -67,6 +67,13 @@ suites:
             One lab-alarm id, test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv. OMN-19091 makes the alarm import yaml and aiokafka in-process (a documented exception to its stdlib-only rule, ruled 2026-09-21 because a secret on argv does not satisfy the OMN-18867 consent), so the test proves both imports resolve from the literal brew interpreter the launchd agent names, with no virtualenv. That half needs /opt/homebrew/bin/python3.13 or /usr/local/bin/python3.13 on the host, which no Linux CI runner has, so it skips here with a named reason instead of passing without looking. The installer-text half (both brew paths named, no pydantic, the yaml import declared) runs before the skip on every host, CI included, and the import half runs on the Mac the alarm is installed on. Same class as the OMN-18867 live-ledger readback already in this list: host state CI cannot see.
           node_ids:
             - tests.ci.test_lab_alarm_omn18867::test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv
+        - measured_at: '2026-09-23'
+          measured_by: OMN-19251
+          delta: 1
+          reason: >-
+            One `[NOTSET]` id, from an empty pytest.mark.parametrize. OMN-19251 deleted the last `serving: false` (dark) lab binding -- the dead local-ds-v4-flash rung on the retired .200:8101 host -- from every .201 lane overlay. tests/unit/runtime/test_bifrost_served_model_probe_fixture.py parametrizes test_non_serving_bindings_have_a_failed_probe_on_record over the dark-binding set collected from those overlays; with that set now empty, pytest auto-skips the parametrization with reason "got empty parameter set for (pair)" and reports the single `[NOTSET]` id below instead of silently vanishing. It is not a broken proof: the positive control beside it (test_the_lab_overlays_bind_a_serving_backend) still asserts a serving binding exists, and the parametrized test itself resumes running the moment a lane overlay declares a dark binding again -- an empty parametrization, not a deleted test.
+          node_ids:
+            - tests.unit.runtime.test_bifrost_served_model_probe_fixture::test_non_serving_bindings_have_a_failed_probe_on_record[NOTSET]
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -619,6 +626,7 @@ suites:
       - tests.unit.nodes.reducers.test_registration_reducer.TestPropertyBasedStateInvariants::test_state_node_id_consistency
       - tests.unit.nodes.test_registry_api_effect_handler_stubs::test_handler_raises_not_implemented[NOTSET]
       - tests.unit.runtime.test_bifrost_parameter_count_matches_served_id::test_parameter_count_agrees_with_the_served_model_id[local-ds-v4-flash]
+      - tests.unit.runtime.test_bifrost_served_model_probe_fixture::test_non_serving_bindings_have_a_failed_probe_on_record[NOTSET]
       - tests.unit.runtime.test_dispatch_result_applier_topic_routing.TestDelegationTopicRegistryNoDrift::test_applier_resolved_topics_match_owning_contract
       - tests.unit.runtime.test_event_bus_subscriber_container_resolution::test_delegation_plugin_falls_back_to_config_event_bus_when_container_absent
       - tests.unit.runtime.test_event_bus_subscriber_container_resolution::test_delegation_plugin_resolves_subscriber_bus_from_container

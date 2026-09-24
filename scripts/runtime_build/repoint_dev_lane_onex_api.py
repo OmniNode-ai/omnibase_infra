@@ -188,6 +188,32 @@ def choose(
     return max(pool, key=lambda c: c.sort_key)
 
 
+def resident_restamp_of(
+    previous: str, chosen: ModelCandidate, candidates: list[ModelCandidate]
+) -> ModelCandidate | None:
+    """The pinned image, when it is a resident build of the chosen image's commit.
+
+    OMN-19349. The lab-overlay applier builds a new ``<sha8>-<stamp>`` tag on
+    every deploy-agent job, so the newest candidate is usually the SAME
+    omninode_infra commit as the pin under a newer stamp. Treating that as an
+    advance recreated ``onex-api`` on every dev-lane job and took :8090 down
+    each time. On 2026-09-23 at 14:52Z the agent repointed
+    ``1b128e1d-...T141329Z`` to ``1b128e1d-...T144642Z`` and recreated the
+    container, with no code change behind it.
+
+    Only a RESIDENT pin counts. The pin is matched against the listing this run
+    just took. A pinned tag that image GC has collected renders a service that
+    cannot start, so moving to the newer stamp of the same commit is then a
+    repair, and it still advances.
+    """
+    if previous == chosen.reference:
+        return None
+    for candidate in candidates:
+        if candidate.reference == previous and candidate.sha8 == chosen.sha8:
+            return candidate
+    return None
+
+
 def inspect_resident(reference: str, *, docker: str) -> tuple[str, dict[str, str]]:
     """Image id and labels for a reference that must be resident RIGHT NOW.
 
@@ -451,7 +477,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         lines, index, previous = read_pin(args.env_file)
 
-        changed = previous != chosen.reference
+        restamp = resident_restamp_of(previous, chosen, candidates)
+        changed = previous != chosen.reference and restamp is None
         backup: Path | None = None
         if changed and args.execute:
             backup = write_pin(
@@ -481,6 +508,12 @@ def main(argv: list[str] | None = None) -> int:
         "backup": str(backup) if backup else None,
         **provenance,
     }
+    if restamp is not None:
+        result["reason"] = (
+            f"the pin {previous} is a resident build of omninode_infra "
+            f"{restamp.sha8}, the same commit as {chosen.reference}; a newer "
+            "stamp of an unchanged commit is not an advance (OMN-19349)"
+        )
     print(json.dumps(result, indent=2))
     return EXIT_OK
 
