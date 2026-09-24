@@ -84,8 +84,12 @@ EXIT_BOOT_FAILED=11
 EXIT_PROVENANCE_MISMATCH=12
 
 # The siblings a workspace build vendors, in the order the Dockerfile needs
-# them installed (core first -- OMN-13405).
-SIBLING_REPOS=(omnibase_core omnibase_compat omnimarket)
+# them installed (core first -- OMN-13405). Read from sibling_clone_manifest.sh,
+# the single place a sibling set is spelled (OMN-19072), so this slot stages
+# exactly what stage_workspace.sh stages.
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+SIBLING_REPOS=("${SIBLING_VENDORED_REPOS[@]}")
 
 log()  { printf '[prepr-verify-lane] %s\n' "$*" >&2; }
 fail() { local code="$1"; shift; printf '[prepr-verify-lane] REFUSED/FAILED: %s\n' "$*" >&2; exit "${code}"; }

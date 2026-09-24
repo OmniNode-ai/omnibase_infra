@@ -95,8 +95,6 @@ from pydantic import (
 # command downstream.
 TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 
-_RUNTIME_LABEL = "runtime_change"
-
 # Lane-declared transport vocabulary (OMN-18012). The overlay
 # (omnimarket config/ci_bus_lanes.yaml) declares `security_protocol` and, for a
 # SASL protocol, `sasl_mechanism` beside each lane's broker. This publisher READS
@@ -184,6 +182,47 @@ class ModelCiBusLaneDsnReference(BaseModel):
         return value
 
 
+class ModelCiBusLaneBrokerTopology(BaseModel):
+    """A lane's declared listener pair (OMN-18931), shape only.
+
+    ``omnibase_infra.runtime.bounded_delegation_routes`` is the one component
+    that acts on it. This publisher never does, so it keeps no policy here.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    external_bootstrap_servers: str
+    internal_bootstrap_servers: str
+
+
+class ModelCiBusLaneDelegationRoute(BaseModel):
+    """A lane's declared delegation consumer route (OMN-18931), shape only."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    consumer: str
+    terminal_route: str
+    repository_owner: str
+
+
+class ModelCiBusLaneDelegationFaultRoute(BaseModel):
+    """A dogfood lane's declared fixed-status fault backend (OMN-18931).
+
+    Shape only. The admission policy lives in
+    ``omnibase_infra.runtime.dogfood_delegation_fault_routes``, which is the
+    component that acts on these rows.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    backend_id: str
+    endpoint_url: str
+    expected_http_status: int
+    requested_timeout_seconds: int
+    max_attempts: int
+    no_escalation: bool
+
+
 class ModelCiBusLane(BaseModel):
     """One checked-in CI control-bus lane declaration.
 
@@ -249,6 +288,12 @@ class ModelCiBusLane(BaseModel):
     # node_chain_canary_effect.lane_transport, and is deliberately not
     # duplicated here: two copies of a policy drift.
     ledger_readback: ModelCiBusLaneDsnReference | None = None
+    # OMN-18931. Optional and unread by this publisher, like the two blocks
+    # above: omnimarket declares them for the bounded delegation lanes, and
+    # omnibase_infra's runtime routing is the one component that acts on them.
+    broker_topology: ModelCiBusLaneBrokerTopology | None = None
+    delegation_routes: tuple[ModelCiBusLaneDelegationRoute, ...] = ()
+    delegation_fault_routes: tuple[ModelCiBusLaneDelegationFaultRoute, ...] = ()
 
     @field_validator("broker")
     @classmethod
@@ -342,11 +387,17 @@ ModelCiBusOverlay.model_rebuild(
     _types_namespace={
         "ModelCiBusLane": ModelCiBusLane,
         "ModelCiBusLaneDsnReference": ModelCiBusLaneDsnReference,
+        "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
+        "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
+        "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
     }
 )
 ModelCiBusLane.model_rebuild(
     _types_namespace={
         "ModelCiBusLaneDsnReference": ModelCiBusLaneDsnReference,
+        "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
+        "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
+        "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
     }
 )
 
@@ -750,9 +801,15 @@ load_runtime_path_classifier = (
 classify_runtime_paths = _runtime_change_classifier.classify_runtime_paths  # type: ignore[attr-defined]
 
 
-def should_trigger(runtime_paths: list[str], labels: list[str]) -> bool:
-    """Return True for a runtime label or canonical deploy-path hit."""
-    return _RUNTIME_LABEL in labels or bool(runtime_paths)
+#: OMN-19318: the trigger's decision IS the shared runtime-affecting predicate
+#: (the path rule unioned with the merged pull request's ``runtime_change``
+#: label), the same function object the release train's proof-subject walk
+#: calls. A local predicate here is what let the walk step past a label-only
+#: merge this trigger rebuilt for; the test in
+#: tests/scripts/test_runtime_affecting_predicate_shared_omn19318.py fails if
+#: one comes back.
+RUNTIME_CHANGE_LABEL: str = _runtime_change_classifier.RUNTIME_CHANGE_LABEL  # type: ignore[attr-defined]
+should_trigger = _runtime_change_classifier.is_runtime_affecting  # type: ignore[attr-defined]
 
 
 #: The repository whose working tree IS the runtime image's build context. The

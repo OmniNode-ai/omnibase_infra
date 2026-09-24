@@ -298,7 +298,13 @@ declare -A CORE_CONTAINERS=(
 # during workspace staging, PLUS the omnibase_infra ambient clone itself (which
 # is NOT part of that sibling set -- deploy-runtime.sh reads git_sha from
 # wherever it is invoked FROM, i.e. this clone's own HEAD).
-readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_change_control omnimarket)
+# The clones this refresh records prior HEADs for and moves to the deployed
+# ref: SIBLING_LANE_REFRESH_REPOS from sibling_clone_manifest.sh, the single
+# place a sibling set is spelled (OMN-19072). Same membership as the literal
+# list it replaced; omnibase_spi is excluded there, by name, with its reason.
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+readonly ALL_TRACKED_REPOS=("${SIBLING_LANE_REFRESH_REPOS[@]}")
 
 # --- defaults ---------------------------------------------------------------
 # OMN-14958: the health-gate probe host is parameterized. `localhost` is only

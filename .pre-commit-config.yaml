@@ -666,6 +666,17 @@ repos:
         files: ^(scripts/ci/(run_on_gate_runner|gate_runner_supervisor)\.sh|scripts/hooks/prepush_smart_tests\.sh|tests/ci/test_gate_runner_detached_entrypoint\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19206: the runner image must keep Playwright chromium's system
+      # libraries, because a job on the fleet cannot apt-install them. This pins
+      # the package list and the build smoke's in-image ldconfig assertion; the
+      # same file runs in CI (it is under `testpaths`).
+      - id: runner-image-playwright-chromium-libs
+        name: runner image Playwright chromium libraries (OMN-19206)
+        entry: uv run --frozen pytest tests/ci/test_runner_image_playwright_chromium_libs_omn19206.py -q
+        language: system
+        files: ^(docker/runners/Dockerfile|\.github/workflows/runner-image-build-smoke\.yml|tests/ci/test_runner_image_playwright_chromium_libs_omn19206\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-17214: every subscription path the auto-wiring loop can select must
       # register a consumer-flow counter. `_make_event_bus_callback` got that
       # seam from OMN-16777; `_make_raw_event_projection_callback` -- the branch
@@ -802,6 +813,20 @@ repos:
       - id: onex-check-migration-append-only
         name: ONEX Migration Append-Only Check
         entry: uv run --frozen python scripts/validation/check_migration_append_only.py --staged --base origin/dev
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      # OMN-19344 (plan row R7, rule RB): every forward migration declares its
+      # class (expand-only, forward-only, contract) in
+      # config/migration_classes.yaml; a destructive statement declared
+      # expand-only, an undeclared file, a stale entry, or a recorded down
+      # execution whose script bytes changed is refused. always_run because a
+      # vendored node migration arrives through the sync script, and the
+      # subject is the whole corpus, not the staged file list.
+      - id: onex-check-migration-class
+        name: ONEX Migration Class Declaration (OMN-19344)
+        entry: uv run --frozen python scripts/validation/check_migration_class.py
         language: system
         pass_filenames: false
         always_run: true
@@ -1085,6 +1110,24 @@ repos:
       # Naming convention validation - file and class naming [OMN-1305]
       # Validates Handler*, Dispatcher*, Store*, Adapter*, etc. naming patterns
       # Runtime: <3s (single pass with caching)
+      # OMN-17423 AC4: refuse a log statement that formats a credential value.
+      # SYNC with the ci.yml steps "Credential-in-log gate (OMN-17423)" and
+      # its self-test. Runs on every commit touching Python so a new log site
+      # is caught at the keyboard, not in a pod log.
+      - id: check-no-credential-in-log
+        name: Credential-in-log gate (OMN-17423)
+        entry: uv run --frozen python scripts/ci/check_no_credential_in_log.py --root src/omnibase_infra
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: check-no-credential-in-log-self-test
+        name: Credential-in-log gate self-test (OMN-17423)
+        entry: uv run --frozen python scripts/ci/check_no_credential_in_log.py --mode=self-test --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py --expected 9
+        language: system
+        files: ^(scripts/ci/check_no_credential_in_log\.py|scripts/ci/tests/fixtures/credential_in_log_fixture\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: onex-validate-naming
         name: ONEX Naming Convention Validation
         entry: uv run --frozen python scripts/validation/validate_naming.py src/omnibase_infra --errors-only
