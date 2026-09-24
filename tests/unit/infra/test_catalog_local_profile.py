@@ -284,3 +284,51 @@ def test_injected_env_satisfies_a_runtime_requirement_but_never_an_infra_one(
     )
     resolved = CatalogResolver(catalog_dir=str(tmp_path)).resolve(["b"])
     assert resolved.required_env == {"SHARED_VAR"}
+
+
+def test_up_precleanup_removes_anonymous_volumes_of_removed_containers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Measured on .105: without -v every re-up orphaned the one-shots' volumes."""
+    services = tmp_path / "catalog" / "services"
+    services.mkdir(parents=True)
+    (services / "store.yaml").write_text(
+        yaml.safe_dump(_fixture_manifest("store", "infrastructure", [])),
+        encoding="utf-8",
+    )
+    (tmp_path / "catalog" / "bundles.yaml").write_text(
+        yaml.safe_dump({"b": {"description": "fixture", "services": ["store"]}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(os, "environ", {"PATH": os.environ.get("PATH", "")})
+    monkeypatch.setattr(catalog_cli, "_CATALOG_DIR", str(tmp_path / "catalog"))
+    monkeypatch.setattr(catalog_cli, "_DEFAULT_OUTPUT", str(tmp_path / "compose.yml"))
+    monkeypatch.setattr(catalog_cli, "_STACK_FILE", str(tmp_path / "stack.yml"))
+    env_file = tmp_path / "stack.env"
+    env_file.write_text("FIXTURE_ONLY=1\n", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    class _Done:
+        returncode = 0
+
+    def _fake_run(command: list[str], **_: object) -> _Done:
+        calls.append(list(command))
+        return _Done()
+
+    monkeypatch.setattr(catalog_cli.subprocess, "run", _fake_run)
+
+    assert catalog_cli.cmd_up(["b", "--env-file", str(env_file)]) == 0
+
+    rm_calls = [c for c in calls if "rm" in c]
+    assert rm_calls == [
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(tmp_path / "compose.yml"),
+            "rm",
+            "-f",
+            "--stop",
+            "-v",
+        ]
+    ]

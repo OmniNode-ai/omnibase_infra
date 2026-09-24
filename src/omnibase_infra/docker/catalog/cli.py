@@ -431,6 +431,10 @@ def cmd_up(args: list[str]) -> int:
 
     # Pre-cleanup: remove dead/exited containers to prevent restart delays (OMN-5468)
     # and name collisions when core infra is already running (OMN-5469).
+    # `-v` removes each removed container's ANONYMOUS volumes too (OMN-19496):
+    # the postgres-image one-shots declare VOLUME /var/lib/postgresql/data, and
+    # without it every re-`up` orphaned three anonymous volumes (measured on
+    # .105). Named volumes -- the stack's data -- are never touched by `rm -v`.
     subprocess.run(
         [
             "docker",
@@ -440,6 +444,7 @@ def cmd_up(args: list[str]) -> int:
             "rm",
             "-f",
             "--stop",
+            "-v",
         ],
         cwd=str(_REPO_ROOT),
         check=False,
