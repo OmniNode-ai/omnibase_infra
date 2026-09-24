@@ -110,22 +110,19 @@ class TestOmnimarketEventsPackageIsLaneState:
         assert trigger_module.find_lane_state_paths(DOCS_ONLY_FILES) == []
         assert not trigger_module.should_trigger([], [])
 
-    def test_a_sibling_omnimarket_directory_is_not_swept_in(
+    def test_a_sibling_omnimarket_directory_is_lane_state_too(
         self, trigger_module: Any
     ) -> None:
-        """The widening is scoped to events/, not all of src/omnimarket/.
+        """OMN-19378 widened this to the whole installed tree, deliberately.
 
-        Everything else in src/omnimarket/ is still decided by the canonical
-        deploy-gate classifier alone (unioned separately in
-        classify_runtime_paths); this module's own supplementary list must not
-        quietly grow into a second catch-all.
+        events/ is not special. The same handler fan-in holds for the other
+        directories the canonical list misses: measured against
+        src/omnimarket/nodes/*/handlers/ at omnimarket dev (2026-09-24),
+        routing/ is imported by 6 handler files, models/ by 25, enums/ by 19,
+        inference/ by 38. So the rest of src/omnimarket/ is lane state as well.
         """
-        assert (
-            trigger_module.find_lane_state_paths(
-                ["src/omnimarket/routing/some_unrelated_module.py"]
-            )
-            == []
-        )
+        path = "src/omnimarket/routing/some_unrelated_module.py"
+        assert trigger_module.find_lane_state_paths([path]) == [path]
 
 
 @pytest.mark.unit
