@@ -817,6 +817,20 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-19344 (plan row R7, rule RB): every forward migration declares its
+      # class (expand-only, forward-only, contract) in
+      # config/migration_classes.yaml; a destructive statement declared
+      # expand-only, an undeclared file, a stale entry, or a recorded down
+      # execution whose script bytes changed is refused. always_run because a
+      # vendored node migration arrives through the sync script, and the
+      # subject is the whole corpus, not the staged file list.
+      - id: onex-check-migration-class
+        name: ONEX Migration Class Declaration (OMN-19344)
+        entry: uv run --frozen python scripts/validation/check_migration_class.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # OMN-17298: a migration that turns ROW LEVEL SECURITY on for a relation
       # must leave a policy admitting somebody, and must not drop one inside a
       # DO block while recreating it after the block commits. The forward
