@@ -74,9 +74,10 @@ local:
     ONEX_ENVIRONMENT: local
     ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
     ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
-    # Same fail-closed wiring the dogfood lane and onex-dev bind: a handler the
-    # resolver cannot construct kills boot instead of being quarantined.
-    ONEX_WIRING_STRICT_MODE: "1"
+    # Wiring strictness is the dev lane's: unset, so a handler the resolver
+    # cannot construct is quarantined and reported, not fatal. Measured on the
+    # first laptop boot (.105, 2026-09-24): with "1" the main kernel exits on
+    # HandlerSavingsCorrelation's unresolvable pool parameter.
     # Delegation routing: the rendered Bifrost contract, this profile's own
     # typed lane overlay (mounted by inject_volumes), and the routing tiers the
     # runtime image bakes from the installed omnimarket package.

@@ -98,6 +98,10 @@ class CatalogManifest:
     tmpfs: list[str] = field(default_factory=list)
     container_name: str | None = None
     command: str | list[str] | None = None
+    # OMN-19496: overrides the image ENTRYPOINT. Without it a one-shot that runs
+    # a shell script on an image whose entrypoint wraps a CLI (redpanda's
+    # /entrypoint.sh wraps rpk) passes the script to that CLI as arguments.
+    entrypoint: list[str] | None = None
     restart: str = "unless-stopped"
     labels: dict[str, str] = field(default_factory=dict)
     resources: ResourceLimits | None = None

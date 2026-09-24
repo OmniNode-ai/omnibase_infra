@@ -171,6 +171,10 @@ def generate_compose(
         elif manifest.container_name:
             svc["container_name"] = manifest.container_name
 
+        # Entrypoint
+        if manifest.entrypoint is not None:
+            svc["entrypoint"] = list(manifest.entrypoint)
+
         # Command
         if manifest.command:
             svc["command"] = manifest.command

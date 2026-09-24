@@ -138,6 +138,7 @@ def _load_manifest(path: Path) -> CatalogManifest:
         depends_on=depends_on,
         container_name=raw.get("container_name"),
         command=raw.get("command"),
+        entrypoint=raw.get("entrypoint"),
         restart=raw.get("restart", "unless-stopped"),
         labels=raw.get("labels", {}),
         resources=resources,

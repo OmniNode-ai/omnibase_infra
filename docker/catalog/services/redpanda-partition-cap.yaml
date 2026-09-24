@@ -14,13 +14,23 @@ depends_on:
     condition: service_healthy
 restart: "no"
 resources: null
-command:
+# OMN-19496: the image ENTRYPOINT is /entrypoint.sh, which wraps rpk. Without
+# this override the script below reached rpk as arguments, rpk printed its help
+# and the one-shot exited 1 on its first ever boot (the laptop profile on .105).
+entrypoint:
   - /bin/sh
   - -c
+command:
   - |
     set -eu
     /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
     /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    # OMN-19070 disk dials, as on the dogfood lane: 1 MiB segment preallocation
+    # steps, a daily roll and a 1 GiB per-partition cap keep an idle broker from
+    # holding a 32 MiB preallocated segment per partition on a laptop's disk.
+    /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set segment_fallocation_step 1048576
+    /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set log_segment_ms 86400000
+    /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set retention_bytes 1073741824
 labels:
   com.omninode.service: redpanda-partition-cap
   com.omninode.layer: infrastructure
