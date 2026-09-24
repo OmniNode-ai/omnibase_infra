@@ -267,6 +267,23 @@ def _materialize_contract_mirror_topics(
             str(key): value for key, value in egress_object.items()
         }
 
+    # OMN-19439: the metadata scrub is resolved from the same contract block,
+    # for the same reason -- which fields cross is the contract's sole authority.
+    if forwarder.get("egress_metadata_scrub") is not None:
+        raise ValueError(
+            "resolved gateway config must not redeclare egress_metadata_scrub; "
+            "it is resolved from the node contract named by mirror_topic_set"
+        )
+    scrub_object = gateway_config.get("egress_metadata_scrub")
+    if scrub_object is not None:
+        if not isinstance(scrub_object, dict):
+            raise ValueError(
+                "gateway node contract egress_metadata_scrub must be a mapping"
+            )
+        forwarder["egress_metadata_scrub"] = {
+            str(key): value for key, value in scrub_object.items()
+        }
+
 
 def _materialize_contract_canary_config(
     raw: dict[str, object],

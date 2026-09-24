@@ -15,6 +15,9 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_canary_
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_cloud_bus_config import (
     ModelGatewayCloudBusConfig,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_egress_metadata_scrub import (
+    ModelGatewayEgressMetadataScrub,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_egress_redaction import (
     ModelGatewayEgressRedaction,
 )
@@ -74,6 +77,30 @@ def requires_egress_redaction(canonical_topic: str) -> bool:
     )
 
 
+# OMN-19439. Same fail-closed shape as the rule above, for the delegate-skill
+# terminals: every ``onex.evt.omnimarket.delegate-skill-*`` class carries the
+# delegated prompt and the model's answer, so any of them mirrored outbound
+# must be reduced to metadata by ``egress_metadata_scrub``. A new terminal class
+# added to the outbound set without the scrub fails config validation.
+_DELEGATE_SKILL_PRODUCER = "omnimarket"
+_DELEGATE_SKILL_EVENT_PREFIX = "delegate-skill-"
+
+
+def requires_metadata_scrub(canonical_topic: str) -> bool:
+    """Whether ``canonical_topic`` may cross only as scrubbed metadata."""
+    segments = canonical_topic.split(".")
+    if len(segments) != 5:
+        return False
+    if (segments[0], segments[1]) != (_ONEX_NAMESPACE, _EVENT_KIND):
+        return False
+    version = segments[4]
+    if not version.startswith("v") or not version[1:].isdigit():
+        return False
+    return segments[2] == _DELEGATE_SKILL_PRODUCER and segments[3].startswith(
+        _DELEGATE_SKILL_EVENT_PREFIX
+    )
+
+
 class ModelGatewayForwarderConfig(BaseModel):
     """Complete forwarder config for one attached tenant edge."""
 
@@ -101,6 +128,10 @@ class ModelGatewayForwarderConfig(BaseModel):
     # deployment predating the widening keeps its exact behaviour; the
     # cross-field validator below is what refuses an inconsistent pairing.
     egress_redaction: ModelGatewayEgressRedaction | None = None
+    # OMN-19439: metadata-only scrub for the delegate-skill terminals. Optional
+    # so a deployment that mirrors none of them is unchanged; the cross-field
+    # validator refuses a delegate-skill topic mirrored without it.
+    egress_metadata_scrub: ModelGatewayEgressMetadataScrub | None = None
     heartbeat_interval_seconds: int = Field(default=15, ge=1)
     max_silence_window_seconds: int = Field(default=60, ge=1)
     lag_threshold_messages: int = Field(default=500, ge=1)
@@ -149,7 +180,32 @@ class ModelGatewayForwarderConfig(BaseModel):
                 "reconnect_backoff_initial_seconds"
             )
         self._validate_egress_redaction_pairing()
+        self._validate_egress_metadata_scrub_pairing()
         return self
+
+    def _validate_egress_metadata_scrub_pairing(self) -> None:
+        """OMN-19439: the scrub and the outbound set must agree both ways."""
+        scrub = self.egress_metadata_scrub
+        outbound = set(self.mirror_topics.outbound)
+        if scrub is not None:
+            unmirrored = sorted(set(scrub.scrubbed_topics) - outbound)
+            if unmirrored:
+                raise ValueError(
+                    "egress_metadata_scrub.scrubbed_topics must all appear in "
+                    f"mirror_topics.outbound; missing: {unmirrored}"
+                )
+        scrubbed = set(scrub.scrubbed_topics) if scrub is not None else set()
+        unscrubbed = sorted(
+            topic
+            for topic in outbound
+            if requires_metadata_scrub(topic) and topic not in scrubbed
+        )
+        if unscrubbed:
+            raise ValueError(
+                "delegate-skill terminal topics may not be mirrored outbound "
+                "unless egress_metadata_scrub reduces them to metadata; "
+                f"unscrubbed: {unscrubbed}"
+            )
 
     def _validate_egress_redaction_pairing(self) -> None:
         """OMN-16979: the widening and the gate must agree, in both directions.
