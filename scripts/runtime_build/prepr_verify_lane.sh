@@ -295,9 +295,21 @@ for repo in "${SIBLING_REPOS[@]}"; do
     # assertion is about the TARGET, whose commit the gate keys on; a sibling
     # is vendored content and its dirt is a provenance fact the descriptor must
     # carry rather than a reason to block a branch that did not cause it.
+    # A dirty sibling is REFUSED, not recorded. It used to be recorded, on the
+    # reasoning that the gate keys on the target's commit and a sibling is
+    # vendored content. That reasoning is wrong under the pinned-sha staging
+    # rule: the image would contain content belonging to no commit in that
+    # repository, so the sibling commit written on the receipt would name a
+    # tree the build did not use. Recording the discrepancy does not make the
+    # artifact reproducible; refusing it does.
     if [[ "${SIBLING_DIRTY[${repo}]}" == "true" ]]; then
-        SIBLING_ORIGIN["${repo}"]="${SIBLING_ORIGIN[${repo}]}+dirty"
-        log "WARNING: sibling ${repo} at ${src} is DIRTY; recording it as such on the descriptor and in the build provenance manifest."
+        fail "${EXIT_REFUSED_DIRTY_WORKTREE}" \
+            "sibling ${repo} at ${src} is DIRTY and will not be vendored.
+  The slot records ${repo}@${SIBLING_COMMIT[${repo}]} on its receipt, and an
+  image built from uncommitted content in that tree does not correspond to
+  that commit. Commit or discard the change in ${src}.
+  Uncommitted paths:
+$(git -C "${src}" status --porcelain | sed 's/^/    /')"
     fi
     log "sibling ${repo} <- ${src} @ ${SIBLING_COMMIT[${repo}]} (${SIBLING_ORIGIN[${repo}]})"
 done
@@ -343,7 +355,7 @@ pool_build_lock_acquire() {
             --fd 8 --timeout "${LOCK_TIMEOUT}" \
             --lane "prepr-pool-build" --ref "${TARGET_COMMIT}" \
             --argv "slot ${SLOT} ${TARGET_REPO}@${TARGET_COMMIT}"; then
-        exec 8>&- 2>/dev/null || true
+        { exec 8>&-; } 2>/dev/null || true
         return 2
     fi
     POOL_LOCK_OWNED=1
@@ -352,7 +364,13 @@ pool_build_lock_acquire() {
 pool_build_lock_release() {
     [[ "${POOL_LOCK_OWNED}" == "1" ]] || return 0
     "${PY}" "${LANE_LOCK_PY}" release --compose-project "${POOL_BUILD_LOCK_PROJECT}" >/dev/null 2>&1 || true
-    exec 8>&- 2>/dev/null || true
+    # The redirection is on a GROUP, never on the exec itself. `exec 8>&-
+    # 2>/dev/null` is an exec with no command, so bash applies BOTH
+    # redirections to the shell permanently: stderr goes to /dev/null for the
+    # rest of the run. Measured on the first slot boot (2026-09-24): every log
+    # line after the build, the render verdict, and the refusal that said the
+    # slot did not start all vanished, and the run exited non-zero in silence.
+    { exec 8>&-; } 2>/dev/null || true
     POOL_LOCK_OWNED=0
     log "released the pool build lock."
 }
@@ -387,17 +405,73 @@ rm -rf "${STAGING_ROOT}"
 mkdir -p "${STAGING_ROOT}" "${SLOT_ENV_DIR}" "${TENANT_STATE_DIR}"
 chmod 700 "${SLOT_ENV_DIR}"
 
-rsync -a --delete \
-    --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
-    --exclude '.onex_state' --exclude 'node_modules' \
-    "${WORKTREE}/" "${STAGING_ROOT}/repo/"
+# Each tree is extracted from the OBJECT STORE at a resolved sha, never copied
+# out of a working directory.
+#
+# This replaces an rsync of the working tree, and the difference is not
+# stylistic. A copy of a working directory contains whatever is on disk at
+# that instant, which is only the commit when the tree happens to be clean --
+# and OMN-19086 measured that exact failure staying SILENT: a git directory
+# advanced to a new commit over an old working tree, 8,084 files differing,
+# no error anywhere. `git archive` cannot express that state. It serialises
+# the commit's tree and nothing else, so a working-tree change cannot reach
+# the build even if one appears between the check above and this line.
+#
+# It also removes the .git question entirely rather than excluding it: an
+# archive carries no repository metadata, so nothing in the snapshot can
+# answer a git query about the clone it came from.
+stage_commit_tree() {
+    local src="$1" commit="$2" dest="$3" label="$4"
+
+    # A BRANCH NAME IS NOT A PIN, and this refuses one outright.
+    #
+    # Today every caller passes a value this run already resolved with
+    # `rev-parse HEAD`, so it is a literal sha by construction and this guard
+    # never fires. It is here because "by construction" is a property of the
+    # current call sites and not of this function. A later edit that let a ref
+    # be supplied -- a flag, a config value, a default of `origin/dev` -- would
+    # make the archive re-resolve at extraction time, and the tree extracted
+    # would then be whatever that ref pointed at THEN rather than what the
+    # readback above verified. Another lane measured exactly that: two
+    # siblings moved between two builds while its readback still passed.
+    #
+    # The distinction is the whole point. A pin this run RECORDED is not the
+    # same thing as a pin RESOLVED AGAIN later, and only the first can be
+    # compared against what was verified.
+    if [[ ! "${commit}" =~ ^[0-9a-f]{40}$ ]]; then
+        fail "${EXIT_PROVENANCE_MISMATCH}" \
+            "${label} was handed '${commit}' as its pin, which is not a
+  40-character commit sha. A branch or any other movable ref is refused here:
+  git would re-resolve it at extraction time, so the tree built would not be
+  the tree the readback verified."
+    fi
+
+    local head
+    head="$(git -C "${src}" rev-parse HEAD)"
+    # Readback: the pin this run recorded must still be what the source names.
+    # A source that moved between resolution and staging would otherwise be
+    # staged under the OLD commit's name.
+    if [[ "${head}" != "${commit}" ]]; then
+        fail "${EXIT_PROVENANCE_MISMATCH}" \
+            "${label} at ${src} moved during staging: this run resolved
+  ${commit} and the source now reports ${head}. Refusing rather than staging
+  a tree under a commit that no longer names it."
+    fi
+    if [[ -n "$(git -C "${src}" status --porcelain)" ]]; then
+        fail "${EXIT_REFUSED_DIRTY_WORKTREE}" \
+            "${label} at ${src} became dirty during staging; refusing."
+    fi
+    rm -rf "${dest}"
+    mkdir -p "${dest}"
+    git -C "${src}" archive --format=tar "${commit}" | tar -x -C "${dest}"
+}
+
+stage_commit_tree "${WORKTREE}" "${TARGET_COMMIT}" "${STAGING_ROOT}/repo" "the target"
 
 mkdir -p "${STAGING_ROOT}/repo/workspace/sibling-repos"
 for repo in "${SIBLING_REPOS[@]}"; do
-    rsync -a --delete \
-        --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
-        --exclude '.onex_state' --exclude 'node_modules' \
-        "${SIBLING_SRC[${repo}]}/" "${STAGING_ROOT}/repo/workspace/sibling-repos/${repo}/"
+    stage_commit_tree "${SIBLING_SRC[${repo}]}" "${SIBLING_COMMIT[${repo}]}" \
+        "${STAGING_ROOT}/repo/workspace/sibling-repos/${repo}" "sibling ${repo}"
 done
 
 # Content digests of the snapshot itself. The commit above is read from the
@@ -478,6 +552,58 @@ log "snapshot staged; target content digest ${TARGET_SNAPSHOT_DIGEST:0:16}..."
 # render gate re-reads the result rather than trusting this ordering, because
 # an ordering argument in a comment is not a control.
 # -----------------------------------------------------------------------------
+# Provider and forge credentials are UNSET before the operator env is read,
+# never afterwards, and never "corrected" in the env file (OMN-19076).
+#
+# The compose files this slot layers interpolate these names, so a value in
+# the environment when compose runs is baked into the slot's containers.
+#
+# MEASURED, four arms, because the first version of this comment asserted a
+# mechanism that was wrong. With a shell exporting a value and the operator
+# env file setting one:
+#
+#   unset BEFORE the source -> the file's value.        Correct.
+#   unset AFTER the source  -> nothing at all.          Strips the FILE's
+#                                                       value too, so the
+#                                                       wrong order breaks
+#                                                       the slot rather than
+#                                                       leaking.
+#   no unset, file sets it  -> the file's value.        `set -a; source`
+#                                                       ASSIGNS, so it
+#                                                       overwrites the
+#                                                       shell. No leak here.
+#   no unset, file does NOT -> the SHELL's value.       The only leak shape,
+#                                                       and what this exists
+#                                                       for.
+#
+# So the scrub covers the names the operator env does not itself set, and the
+# ordering matters because the wrong order strips the ones it does.
+#
+# This is NOT the same mechanism as compose's own --env-file losing to an
+# ambient value, which is real and is what the consumer-group token defect
+# was. That file is read by compose; this one is assigned into the
+# environment. Conflating the two is what produced the wrong claim.
+#
+# Measured against the three layered files, with a positive control, because
+# the first two readings of this were false zeroes from a broken matcher:
+# GITHUB_TOKEN twice, and LINEAR_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY,
+# LLM_GLM_API_KEY and LOCAL_LLM_SHARED_SECRET once each. GH_TOKEN is unset
+# alongside GITHUB_TOKEN because one credential feeds both names.
+PREPR_SCRUBBED_CREDENTIAL_VARS=(
+    GITHUB_TOKEN
+    GH_TOKEN
+    LINEAR_API_KEY
+    GEMINI_API_KEY
+    GOOGLE_API_KEY
+    OPENROUTER_API_KEY
+    LLM_GLM_API_KEY
+    LOCAL_LLM_SHARED_SECRET
+)
+for _cred in "${PREPR_SCRUBBED_CREDENTIAL_VARS[@]}"; do
+    unset "${_cred}"
+done
+unset _cred
+
 OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
 if [[ ! -r "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
     fail "${EXIT_USAGE}" \
@@ -585,6 +711,15 @@ SLOT_SERVICES=(
     projection-registration-writer projection-savings-writer
     projection-tenant-credentials-writer projection-live-events-writer
 )
+# Every slot service that is BUILT from Dockerfile.runtime, which is all of
+# them but onex-api (image-referenced, see --with-gateway). Each one carries
+# its own `build:` in the layered files and so its own image tag
+# (<project>-<service>:latest), so building only omninode-runtime left the
+# other ten with no image and `up` then tried to build them itself, with none
+# of the workspace build args: the first slot boot (2026-09-24) died there on
+# `BUILD_SOURCE=workspace requires OMNI_HOME`. They share one Dockerfile, one
+# context and one arg set, so after the first the rest are cache hits.
+SLOT_BUILD_SERVICES=("${SLOT_SERVICES[@]}")
 PROFILES=(--profile prepr)
 if [[ "${WITH_GATEWAY}" == "1" ]]; then
     PROFILES+=(--profile prepr-gateway)
@@ -657,7 +792,7 @@ BUILD_ARGS=(
 log "building the runtime image from the snapshot, version ${RUNTIME_VERSION} (timeout ${BUILD_TIMEOUT}s) ..."
 if ! timeout "${BUILD_TIMEOUT}" env -C "${STAGING_ROOT}/repo" \
         docker compose -p "${COMPOSE_PROJECT}" "${COMPOSE_FILES[@]}" "${PROFILES[@]}" \
-        build --progress=plain "${BUILD_ARGS[@]}" omninode-runtime; then
+        build --progress=plain "${BUILD_ARGS[@]}" "${SLOT_BUILD_SERVICES[@]}"; then
     fail "${EXIT_BUILD_FAILED}" "the workspace build failed or timed out."
 fi
 pool_build_lock_release
@@ -675,18 +810,33 @@ pool_build_lock_release
 # list, a base-file edit that added an unsuffixed DSN -- all of them show up
 # here, and none of them would show up in a review of this script.
 # -----------------------------------------------------------------------------
-log "rendering and verifying the slot configuration ..."
-RENDERED="${SLOT_ENV_DIR}/rendered.json"
-compose "${PROFILES[@]}" config --format json > "${RENDERED}" 2>/dev/null \
-    || fail "${EXIT_PROVENANCE_MISMATCH}" "the slot configuration did not render."
+# The render is piped, never written.
+#
+# A rendered compose configuration expands EVERY interpolation, so with the
+# operator env loaded it contains the broker, database and Keycloak
+# credentials in clear. Writing it to disk -- even inside a mode-700 staging
+# directory -- leaves a credential file behind for as long as the slot lives,
+# and a teardown that missed it leaves one for longer. It is also the kind of
+# file that gets copied into an issue when someone is debugging.
+#
+# So it goes down a pipe into the verifier, which parses it, asserts on the
+# structure, and reports only NAMES and non-secret fields: service names,
+# container names, ports, volume names, the topic namespace, the
+# consumer-group token, and each DSN's database and principal. It never
+# prints a password and never persists the document. A test asserts the
+# entrypoint leaves no render on disk.
+log "rendering and verifying the slot configuration (piped, never written) ..."
 
-VERIFY_ARGS=(--rendered "${RENDERED}" --slot "${SLOT}")
+VERIFY_ARGS=(--rendered - --slot "${SLOT}")
 [[ "${WITH_GATEWAY}" == "1" ]] && VERIFY_ARGS+=(--expect-gateway)
-"${PY}" "${SCRIPT_DIR}/prepr_verify_rendered_slot.py" "${VERIFY_ARGS[@]}" \
-    || fail "${EXIT_PROVENANCE_MISMATCH}" \
-        "the rendered slot configuration does not match the slot policy. Nothing
-  was started. The mismatches are listed above; each one is a way this slot
-  would have reached the dev lane's own namespace."
+if ! compose "${PROFILES[@]}" config --format json 2>/dev/null \
+        | "${PY}" "${SCRIPT_DIR}/prepr_verify_rendered_slot.py" "${VERIFY_ARGS[@]}"; then
+    fail "${EXIT_PROVENANCE_MISMATCH}" \
+        "the rendered slot configuration does not match the slot policy, or it
+  did not render at all. Nothing was started. The mismatches are listed
+  above; each one is a way this slot would have reached the dev lane's own
+  namespace."
+fi
 
 # -----------------------------------------------------------------------------
 # 10. MIGRATE the slot's databases, then bring the slot up.
@@ -701,7 +851,10 @@ if ! compose --profile prepr-migrate run --rm --no-deps forward-migration; then
 fi
 
 log "starting the slot's services ..."
-compose "${PROFILES[@]}" up -d --no-deps "${SLOT_SERVICES[@]}" \
+# --no-build: every image was built in step 8 with the workspace args. A
+# service `up` finds unbuilt is a defect in that list, and building it here
+# would do so without those args, so fail instead.
+compose "${PROFILES[@]}" up -d --no-deps --no-build "${SLOT_SERVICES[@]}" \
     || fail "${EXIT_BOOT_FAILED}" "the slot did not start."
 
 # -----------------------------------------------------------------------------
