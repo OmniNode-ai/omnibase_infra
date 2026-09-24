@@ -1,0 +1,263 @@
+{
+  "config_version": "2.7.0",
+  "contract_path": "/app/data/delegation/bifrost_delegation.yaml",
+  "controls": [
+    {
+      "credential": "deliberately_invalid",
+      "endpoint_host": "generativelanguage.googleapis.com",
+      "endpoint_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "http_status": 400,
+      "latency_ms": 77,
+      "model_name": "gemini-2.5-flash",
+      "provider_error_code": "400",
+      "provider_error_message": "Please pass a valid API key",
+      "provider_error_status": "INVALID_ARGUMENT",
+      "request_sent": true
+    },
+    {
+      "credential": "deliberately_invalid",
+      "endpoint_host": "api.z.ai",
+      "endpoint_url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+      "http_status": 401,
+      "latency_ms": 273,
+      "model_name": "glm-5.3-flash",
+      "provider_error_code": "401",
+      "provider_error_message": "token expired or incorrect",
+      "request_sent": true
+    },
+    {
+      "credential": "deliberately_invalid",
+      "endpoint_host": "openrouter.ai",
+      "endpoint_url": "https://openrouter.ai/api/v1/chat/completions",
+      "http_status": 401,
+      "latency_ms": 39,
+      "model_name": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "provider_error_code": "401",
+      "provider_error_message": "Missing Authentication header",
+      "request_sent": true
+    }
+  ],
+  "declared": [
+    {
+      "backend_id": "local-coder",
+      "disposition": "SKIPPED_NO_SECRET_REF",
+      "endpoint_url": "http://192.168.86.201:8000/v1/chat/completions",
+      "model_name": "Qwen3.8-27B",
+      "probe_key": null,
+      "provider": "local",
+      "ref_name": null,
+      "tier": "local"
+    },
+    {
+      "backend_id": "local-heavy-reasoning",
+      "disposition": "SKIPPED_NO_SECRET_REF",
+      "endpoint_url": "http://192.168.86.201:8000/v1/chat/completions",
+      "model_name": "Qwen3.8-27B",
+      "probe_key": null,
+      "provider": "local",
+      "ref_name": null,
+      "tier": "local"
+    },
+    {
+      "backend_id": "local-embedding",
+      "disposition": "SKIPPED_NO_ENDPOINT",
+      "endpoint_url": null,
+      "model_name": "text-embedding-qwen3",
+      "probe_key": null,
+      "provider": "local",
+      "ref_name": null,
+      "tier": "local"
+    },
+    {
+      "backend_id": "cloud-gemini-pro",
+      "disposition": "PROBE",
+      "endpoint_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "model_name": "gemini-2.5-flash",
+      "probe_key": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions|gemini-2.5-flash|llm.gemini.api_key|None",
+      "provider": "gemini",
+      "ref_name": "llm.gemini.api_key",
+      "tier": "frontier_api"
+    },
+    {
+      "backend_id": "cloud-glm",
+      "disposition": "PROBE",
+      "endpoint_url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+      "model_name": "glm-5.3-flash",
+      "probe_key": "https://api.z.ai/api/coding/paas/v4/chat/completions|glm-5.3-flash|llm.glm.api_key|None",
+      "provider": "glm",
+      "ref_name": "llm.glm.api_key",
+      "tier": "cheap_cloud"
+    },
+    {
+      "backend_id": "cloud-glm-judge",
+      "disposition": "PROBE",
+      "endpoint_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "model_name": "gemini-2.5-flash",
+      "probe_key": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions|gemini-2.5-flash|llm.gemini.api_key|None",
+      "provider": "gemini",
+      "ref_name": "llm.gemini.api_key",
+      "tier": "judge"
+    },
+    {
+      "backend_id": "cloud-gemini-flash",
+      "disposition": "PROBE",
+      "endpoint_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "model_name": "gemini-2.5-flash-lite",
+      "probe_key": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions|gemini-2.5-flash-lite|llm.gemini.api_key|None",
+      "provider": "gemini",
+      "ref_name": "llm.gemini.api_key",
+      "tier": "cheap_cloud"
+    },
+    {
+      "backend_id": "cloud-vertex-gemini",
+      "disposition": "SKIPPED_NO_ENDPOINT",
+      "endpoint_url": null,
+      "model_name": "gemini-2.5-flash-lite",
+      "probe_key": null,
+      "provider": "vertex",
+      "ref_name": "llm.vertex.access_token",
+      "tier": "cheap_cloud"
+    },
+    {
+      "backend_id": "local-ds-v4-flash",
+      "disposition": "SKIPPED_NO_ENDPOINT",
+      "endpoint_url": null,
+      "model_name": "deepseek-v4-flash",
+      "probe_key": null,
+      "provider": "local",
+      "ref_name": null,
+      "tier": "local"
+    },
+    {
+      "backend_id": "openrouter-qwen3-coder-480b",
+      "disposition": "PROBE",
+      "endpoint_url": "https://openrouter.ai/api/v1/chat/completions",
+      "model_name": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "probe_key": "https://openrouter.ai/api/v1/chat/completions|nvidia/nemotron-3-ultra-550b-a55b:free|llm.openrouter.api_key|None",
+      "provider": "openrouter",
+      "ref_name": "llm.openrouter.api_key",
+      "tier": "cheap_frontier"
+    },
+    {
+      "backend_id": "local-omnipc2-chat",
+      "disposition": "SKIPPED_NO_SECRET_REF",
+      "endpoint_url": "http://192.168.86.202:8000/v1/chat/completions",
+      "model_name": "Qwen3.8-27B",
+      "probe_key": null,
+      "provider": "local",
+      "ref_name": null,
+      "tier": "local"
+    }
+  ],
+  "omnimarket_version": "0.4.215",
+  "probes": [
+    {
+      "backend_ids": [
+        "cloud-gemini-pro",
+        "cloud-glm-judge"
+      ],
+      "body_is_chat_completion": true,
+      "endpoint_host": "generativelanguage.googleapis.com",
+      "endpoint_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "http_status": 200,
+      "latency_ms": 566,
+      "model_echo": "gemini-2.5-flash",
+      "model_name": "gemini-2.5-flash",
+      "probe_key": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions|gemini-2.5-flash|llm.gemini.api_key|None",
+      "ref_name": "llm.gemini.api_key",
+      "request_sent": true,
+      "resolved": true,
+      "usage": {
+        "completion_tokens": 0,
+        "prompt_tokens": 8,
+        "total_tokens": 12
+      }
+    },
+    {
+      "backend_ids": [
+        "cloud-glm"
+      ],
+      "body_is_chat_completion": true,
+      "endpoint_host": "api.z.ai",
+      "endpoint_url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+      "http_status": 200,
+      "latency_ms": 2758,
+      "model_echo": "glm-5.3-flash",
+      "model_name": "glm-5.3-flash",
+      "probe_key": "https://api.z.ai/api/coding/paas/v4/chat/completions|glm-5.3-flash|llm.glm.api_key|None",
+      "ref_name": "llm.glm.api_key",
+      "request_sent": true,
+      "resolved": true,
+      "usage": {
+        "completion_tokens": 8,
+        "prompt_tokens": 19,
+        "total_tokens": 27
+      }
+    },
+    {
+      "backend_ids": [
+        "cloud-gemini-flash"
+      ],
+      "body_is_chat_completion": true,
+      "endpoint_host": "generativelanguage.googleapis.com",
+      "endpoint_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "http_status": 200,
+      "latency_ms": 297,
+      "model_echo": "gemini-2.5-flash-lite",
+      "model_name": "gemini-2.5-flash-lite",
+      "probe_key": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions|gemini-2.5-flash-lite|llm.gemini.api_key|None",
+      "ref_name": "llm.gemini.api_key",
+      "request_sent": true,
+      "resolved": true,
+      "usage": {
+        "completion_tokens": 1,
+        "prompt_tokens": 8,
+        "total_tokens": 9
+      }
+    },
+    {
+      "backend_ids": [
+        "openrouter-qwen3-coder-480b"
+      ],
+      "endpoint_host": "openrouter.ai",
+      "endpoint_url": "https://openrouter.ai/api/v1/chat/completions",
+      "model_name": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "probe_key": "https://openrouter.ai/api/v1/chat/completions|nvidia/nemotron-3-ultra-550b-a55b:free|llm.openrouter.api_key|None",
+      "ref_name": "llm.openrouter.api_key",
+      "request_sent": false,
+      "resolved": false
+    }
+  ],
+  "quota_policy": [
+    {
+      "codes": [
+        {
+          "code": "1310",
+          "disposition": "disable_until_reset"
+        },
+        {
+          "code": "1113",
+          "disposition": "disable_until_billing"
+        }
+      ],
+      "match_endpoint_host": "api.z.ai",
+      "provider_id": "zai"
+    },
+    {
+      "codes": [],
+      "match_endpoint_host": "openrouter.ai",
+      "provider_id": "openrouter"
+    },
+    {
+      "codes": [
+        {
+          "code": "429",
+          "disposition": "disable_until_reset"
+        }
+      ],
+      "match_endpoint_host": "generativelanguage.googleapis.com",
+      "provider_id": "google-gemini"
+    }
+  ],
+  "runtime_binds_contract": true
+}
