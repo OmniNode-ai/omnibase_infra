@@ -86,6 +86,8 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     # OMN-19258: the zombie detector's receipt; its `scanned` map is the only
     # record that tells a clean detector run from a blind one.
     "pr-ci-zombie-detector-report",
+    # OMN-16987: the provider-rung liveness canary's per-rung record.
+    "provider-rung-canary",
     "saturation-record",
 )
 

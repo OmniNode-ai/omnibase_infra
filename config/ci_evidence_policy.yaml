@@ -103,6 +103,20 @@ evidence_artifacts:
       - c12-provider-catalogue.json
     rationale: >-
       One row per check over the deployed catalogue (parity both directions, no Claude entry, no house entry, the intake route's binding) plus the negative-test injections run in the same process, with the image and the sha256 of the catalogue, the platform contract and both deployed modules. The injections are what make a green readable: a checker that always answers clean produces the same shipped reading, and only the injections tell the two apart.
+  # --- provider-rung-canary.yml: per-rung liveness (OMN-16987) --------------
+  #
+  # The probe's EXIT CODE is the verdict; this record is the per-rung table a
+  # reader (and a later router) reads without a log. An empty record beside a
+  # green run would claim every cloud rung authenticated with nothing behind it.
+  - id: provider-rung-canary
+    workflow: .github/workflows/provider-rung-canary.yml
+    job: provider-rung-canary
+    producer_step: "Probe every credentialed cloud rung and grade it"
+    artifact_name: provider-rung-canary
+    required_paths:
+      - provider-rung-canary.json
+    rationale: >-
+      One row per declared backend of the deployed delegation contract with its typed verdict (LIVE, AUTH_DEAD, QUOTA_DEAD with the contract's quota class, UNREACHABLE, UNRESOLVED, PROTOCOL_ERROR, HTTP_ERROR, or the skip reason), plus one wrong-key control per endpoint taken in the same run. The controls are what make a green readable: a probe that reads 200 whatever credential it sends produces the same LIVE rows, and only a refused wrong key tells the two apart.
   # --- dev-lane-liveness.yml: the lab saturation signal (OMN-18031) ---------
   #
   # This pair is the plan's named regression fixture. The probe was dead from
