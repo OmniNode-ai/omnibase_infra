@@ -26,10 +26,17 @@
 #   install-canonical-clone-git-hooks.sh --apply <repo>… # only the named canonical clones
 #
 # Registry roots (OMN-19388): the clones installed are the direct children of
-# `$OMNI_HOME` and of every entry of `ONEX_REGISTRY_ROOTS`, a colon-separated
-# list of absolute directories -- the same setting the hooks read to decide
-# what a canonical clone is. A named <repo> is looked up in every root. The live
-# hooks directory stays at `$OMNI_HOME/scripts/git-hooks` for every root.
+# `$OMNI_HOME`, of every entry of `ONEX_REGISTRY_ROOTS` (a colon-separated list
+# of absolute directories), and of every root already recorded in the roots
+# file. A named <repo> is looked up in every root. The live hooks directory
+# stays at `$OMNI_HOME/scripts/git-hooks` for every root.
+#
+# The roots file, `$OMNI_HOME/scripts/git-hooks/registry-roots`, records that
+# union (plus `omni_home=`) beside the live hooks, and the hooks read it, so the
+# guard holds for an actor whose environment carries neither variable: launchd,
+# `env -i`, a GUI git client. The union only grows: a re-run from a shell that
+# lacks ONEX_REGISTRY_ROOTS keeps every recorded root whose directory still
+# exists. To retire a root, remove its `root=` line by hand and re-run.
 #
 # Exit codes:
 #   0  every canonical clone is installed and current
@@ -46,6 +53,8 @@
 #     installer that reads a leaked variable does not install what it reports.
 #   * a target is a linked worktree rather than a canonical clone.
 #   * an `ONEX_REGISTRY_ROOTS` entry is empty, relative, or not a directory.
+#   * the existing roots file holds a line that is not omni_home=/root= with an
+#     absolute path.
 
 set -euo pipefail
 
@@ -166,34 +175,83 @@ done
 
 # Every registry root whose clones the hooks guard: OMNI_HOME first, then each
 # ONEX_REGISTRY_ROOTS entry, validated exactly as canonical_clone_paths.sh
-# validates it, and de-duplicated by physical path.
+# validates it, then every root the roots file already records -- all
+# de-duplicated by physical path.
+ROOTS_FILE="$LIVE_DIR/registry-roots"
 roots=("$OMNI_HOME")
 seen=("$(cd "$OMNI_HOME" && pwd -P)")
+add_root() {
+  local entry="$1" physical known
+  physical="$(cd "$entry" && pwd -P)"
+  for known in "${seen[@]}"; do
+    [[ "$known" == "$physical" ]] && return 0
+  done
+  roots+=("$entry")
+  seen+=("$physical")
+}
 if [[ -n "${ONEX_REGISTRY_ROOTS+set}" ]]; then
   rest="$ONEX_REGISTRY_ROOTS"
   while :; do
     entry="${rest%%:*}"
     [[ "$entry" == /* ]] || refuse "ONEX_REGISTRY_ROOTS=$ONEX_REGISTRY_ROOTS holds the entry '$entry', which is not an absolute path"
     [[ -d "$entry" ]] || refuse "ONEX_REGISTRY_ROOTS=$ONEX_REGISTRY_ROOTS holds the entry '$entry', which is not an existing directory"
-    physical="$(cd "$entry" && pwd -P)"
-    duplicate=0
-    for known in "${seen[@]}"; do
-      [[ "$known" == "$physical" ]] && duplicate=1
-    done
-    if [[ "$duplicate" == "0" ]]; then
-      roots+=("$entry")
-      seen+=("$physical")
-    fi
+    add_root "$entry"
     [[ "$rest" == *:* ]] || break
     rest="${rest#*:}"
   done
+fi
+if [[ -f "$ROOTS_FILE" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "" | "#"*) continue ;;
+    esac
+    key="${line%%=*}"
+    value="${line#*=}"
+    if [[ "$key" == "$line" ]] || [[ "$value" != /* ]] ||
+      [[ "$key" != "omni_home" && "$key" != "root" ]]; then
+      refuse "the roots file $ROOTS_FILE holds the line '$line'; every line must be omni_home=<absolute dir> or root=<absolute dir>. Fix or remove the line and re-run."
+    fi
+    if [[ "$key" == "root" && -d "$value" ]]; then
+      add_root "$value"
+    fi
+  done <"$ROOTS_FILE"
+fi
+
+printf '\n[3] registry roots file %s\n' "$ROOTS_FILE"
+desired_roots="$(
+  printf '# Written by install-canonical-clone-git-hooks.sh --apply (OMN-19388).\n'
+  printf '# The canonical-clone hooks read it, so the guard holds when their environment\n'
+  printf '# carries neither OMNI_HOME nor ONEX_REGISTRY_ROOTS. Regenerate; do not hand-edit.\n'
+  printf 'omni_home=%s\n' "${seen[0]}"
+  printf 'root=%s\n' "${seen[0]}"
+  # Sorted after the first, so the order the variable happens to list them in
+  # never reads as drift.
+  printf '%s\n' "${seen[@]:1}" | sed '/^$/d' | LC_ALL=C sort | sed 's/^/root=/'
+)"
+if [[ -f "$ROOTS_FILE" ]] && [[ "$(cat "$ROOTS_FILE")" == "$desired_roots" ]]; then
+  note "ok       ${#seen[@]} root(s): ${seen[*]}"
+else
+  if [[ -f "$ROOTS_FILE" ]]; then
+    note "DRIFTED  registry-roots (want ${#seen[@]} root(s): ${seen[*]})"
+  else
+    note "MISSING  registry-roots (an actor with no ONEX_REGISTRY_ROOTS sees only its OMNI_HOME)"
+  fi
+  pending=1
+  if [[ "$apply" == "1" ]]; then
+    mkdir -p "$LIVE_DIR"
+    tmp_roots="$(mktemp "$LIVE_DIR/.registry-roots.XXXXXX")"
+    printf '%s\n' "$desired_roots" >"$tmp_roots"
+    chmod 644 "$tmp_roots"
+    mv -f "$tmp_roots" "$ROOTS_FILE"
+    note "wrote registry-roots"
+  fi
 fi
 
 named_targets=0
 [[ ${#targets[@]} -eq 0 ]] || named_targets=1
 
 for root in "${roots[@]}"; do
-  printf '\n[3] canonical clones in %s\n' "$root"
+  printf '\n[4] canonical clones in %s\n' "$root"
   if [[ "$named_targets" == "0" ]]; then
     targets=()
     while IFS= read -r d; do targets+=("$(basename "$d")"); done < <(

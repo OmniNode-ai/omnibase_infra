@@ -75,30 +75,86 @@ is_under() {
 #                       see registry_roots_context
 #   is_canonical_clone  1 when the invoking tree is a canonical clone that the
 #                       family guards, 0 otherwise
+#   unresolved_root_note  non-empty when the clone was guarded by the position
+#                       rule (no resolvable root); a refusal prints it
 #
 # Returns 1 when there is no work tree at all, so a caller can `exit 0` early.
-# EXITS 1 (fails closed) when ONEX_REGISTRY_ROOTS is malformed.
+# EXITS 1 (fails closed) when ONEX_REGISTRY_ROOTS or the roots file is malformed.
 #
 # A LINKED worktree has --git-dir == <common>/worktrees/<name>, so it differs
 # from --git-common-dir; the MAIN worktree of a clone has them equal. That test
 # is path-layout independent, which is what makes the family correct on a host
 # whose registry lives somewhere other than the documented path.
+# The roots file (OMN-19388 r2).
+#
+# `install-canonical-clone-git-hooks.sh --apply` writes `registry-roots` beside
+# this library in the LIVE hooks directory: one `omni_home=<dir>` line and one
+# `root=<dir>` line per registry root, every path absolute and physical. It is
+# what makes the family hold with NO environment. The first revision read the
+# roots from ONEX_REGISTRY_ROOTS alone, so an actor that never sourced the shell
+# profile -- a launchd job, `bash -lc`, `env -i`, a GUI git client, any agent
+# whose environment was built without it -- saw only OMNI_HOME, and a commit in
+# a second-root clone was permitted without a word.
+#
+# The tracked source directory carries no roots file, and does not need one:
+# the file only ever adds roots. Its absence means "no roots recorded", which
+# the position rule in canonical_clone_context still covers.
+_canonical_clone_library_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+registry_roots_file="$_canonical_clone_library_dir/registry-roots"
+
+# read_registry_roots_file
+#
+# Populates, in the caller's scope, `file_omni_home` (may be empty) and the
+# array `file_roots` from $registry_roots_file. Fails CLOSED (exit 1) on a file
+# that exists but cannot be read, or on a line that is not `omni_home=<abs>`,
+# `root=<abs>`, blank, or a `#` comment. A recorded root that no longer exists
+# is skipped: there is nothing under a missing directory to guard, and a clone
+# moved out of it is caught by the position rule instead.
+read_registry_roots_file() {
+  file_omni_home=""
+  file_roots=()
+  [[ -e "$registry_roots_file" ]] || return 0
+  if [[ ! -r "$registry_roots_file" ]]; then
+    printf 'ERROR: the registry roots file %s exists but cannot be read. Re-run install-canonical-clone-git-hooks.sh --apply.\n' "$registry_roots_file" >&2
+    exit 1
+  fi
+  local line key value n=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    n=$((n + 1))
+    case "$line" in
+      "" | "#"*) continue ;;
+    esac
+    key="${line%%=*}"
+    value="${line#*=}"
+    if [[ "$key" == "$line" ]] || [[ "$value" != /* ]] ||
+      [[ "$key" != "omni_home" && "$key" != "root" ]]; then
+      printf 'ERROR: the registry roots file %s line %s reads "%s"; every line must be omni_home=<absolute dir> or root=<absolute dir>. Re-run install-canonical-clone-git-hooks.sh --apply.\n' "$registry_roots_file" "$n" "$line" >&2
+      exit 1
+    fi
+    if [[ "$key" == "omni_home" ]]; then
+      file_omni_home="$value"
+    elif [[ -d "$value" ]]; then
+      file_roots+=("$(cd "$value" && pwd -P)")
+    fi
+  done <"$registry_roots_file"
+  return 0
+}
+
 # registry_roots_context
 #
 # Populates, in the caller's scope, the array `registry_roots`: the physical
 # path of every directory whose descendants are canonical clones (OMN-19388).
 #
-# It always holds $omni_home, so a host that sets only OMNI_HOME behaves exactly
-# as before. ONEX_REGISTRY_ROOTS adds more: a colon-separated list of absolute
-# directory paths, read the way PATH is read. It exists because the registry is
-# moving to a second root while OMNI_HOME still names the first, and a guard
-# that knows only OMNI_HOME permits every commit in the second root's clones --
-# silently, since a permitted commit prints nothing.
+# It is the UNION of $omni_home, every ONEX_REGISTRY_ROOTS entry, and every root
+# the roots file records. A union rather than a precedence, because the guarded
+# set may only grow: an actor carrying a stale or narrower variable must not be
+# able to un-guard a root the installer recorded.
 #
-# Fail-fast (rule 8): an entry that is empty, relative, or not an existing
-# directory is a misconfiguration, never a guess. The hook EXITS 1 naming the
-# offending value, so every guarded git operation refuses loudly until it is
-# fixed, rather than guarding a smaller set than the operator declared.
+# Fail-fast (rule 8): an ONEX_REGISTRY_ROOTS entry that is empty, relative, or
+# not an existing directory is a misconfiguration, never a guess. The hook EXITS
+# 1 naming the offending value, so every guarded git operation refuses loudly
+# until it is fixed, rather than guarding a smaller set than the operator
+# declared.
 registry_roots_context() {
   registry_roots=()
   local physical_home
@@ -107,6 +163,7 @@ registry_roots_context() {
   else
     registry_roots+=("$omni_home")
   fi
+  registry_roots+=(${file_roots[@]+"${file_roots[@]}"})
 
   [[ -n "${ONEX_REGISTRY_ROOTS+set}" ]] || return 0
   local declared="$ONEX_REGISTRY_ROOTS"
@@ -129,6 +186,27 @@ registry_roots_context() {
     rest="${rest#*:}"
   done
   return 0
+}
+
+# own_hooks_path_is_this_family
+#
+# True when the invoking repository's OWN config (not a global or system one)
+# sets core.hooksPath to the directory this hook was invoked from. Only the
+# installer writes that setting, and it writes it only into canonical clones, so
+# it is the clone's own statement that it is one. A host-wide core.hooksPath
+# reaching an unrelated repository does not satisfy it, and neither does a
+# repository that never pointed at the family.
+own_hooks_path_is_this_family() {
+  local own invoked own_physical
+  own="$(git config --local --type=path --get core.hooksPath 2>/dev/null)" || return 1
+  [[ -n "$own" ]] || return 1
+  case "$own" in
+    /*) : ;;
+    *) own="$top_level/$own" ;;
+  esac
+  own_physical="$(cd "$own" 2>/dev/null && pwd -P)" || return 1
+  invoked="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)" || return 1
+  [[ "$own_physical" == "$invoked" ]]
 }
 
 canonical_clone_context() {
@@ -155,7 +233,14 @@ canonical_clone_context() {
   # back to the clone's own position -- `<registry>/<repo>/.git` -- which holds
   # for a canonical clone AND for every worktree linked to it, because both
   # share the same --git-common-dir. No hardcoded absolute paths (rule 6).
+  # With no OMNI_HOME, the roots file's recorded omni_home comes before the
+  # clone-position guess, so a refusal in a second-root clone names the
+  # sanctioned worktree root rather than one beside that clone.
+  read_registry_roots_file
   omni_home="${OMNI_HOME:-}"
+  if [[ -z "$omni_home" ]]; then
+    omni_home="$file_omni_home"
+  fi
   if [[ -z "$omni_home" ]]; then
     omni_home="$(cd "$git_common_dir/../.." && pwd -P)"
   fi
@@ -183,16 +268,35 @@ canonical_clone_context() {
     done
   fi
 
-  local inside_a_root=0
+  local inside_a_root=0 is_a_root=0
   if [[ "$exempt" == "0" ]]; then
     # `is_under` is a strict-descendant test, so a root's own tree is not
     # guarded here; only the clones inside each root are.
     for root in "${registry_roots[@]}"; do
-      if is_under "$top_level" "$root"; then
+      if [[ "$top_level" == "$root" ]]; then
+        is_a_root=1
+      elif is_under "$top_level" "$root"; then
         inside_a_root=1
         break
       fi
     done
+  fi
+
+  # The position rule: FAIL CLOSED on a clone this hook cannot place. A main
+  # work tree whose own config points at this family was put there by the
+  # installer as a canonical clone. If it lies in no root the hook can resolve
+  # -- the environment lacks the variable and the roots file is missing or
+  # stale, or the clone was moved -- guarding it is the only safe reading.
+  unresolved_root_note=""
+  if [[ "$exempt" == "0" && "$is_a_root" == "0" && "$inside_a_root" == "0" ]] &&
+    own_hooks_path_is_this_family; then
+    inside_a_root=1
+    # shellcheck disable=SC2034  # the caller's out-parameter; printed by each refusal
+    unresolved_root_note="This clone sits outside every registry root this hook can resolve
+(${registry_roots[*]}), yet its own core.hooksPath points at the
+canonical-clone guard, so it is guarded as a canonical clone (fail closed).
+Record its root: re-run install-canonical-clone-git-hooks.sh --apply with
+ONEX_REGISTRY_ROOTS naming it, which writes $registry_roots_file."
   fi
 
   # shellcheck disable=SC2034  # the caller's out-parameter; read in every sourcing hook
