@@ -18,17 +18,13 @@ landed fix does not cover, twice in one hour on 2026-09-15:
   floor (ledger ``docs/tracking/ROLLING_WORK_LEDGER.md:8210``).
 
 Both are the same shape: an answer graded against a rubric belonging to a task
-the caller never asked for. There are two causes and this module pins both.
+the caller never asked for. There are two causes; this module pins the second.
 
 CAUSE 1 — the fallback is the strictest prose class, not the most permissive.
-``research``'s blocking heuristics are ``no_refusal``, ``cites_sources``,
-``methodical_analysis`` and ``semantic_adequacy``. Two of those four demand a
-SHAPE (attribution, methodical structure) rather than a quality. A prompt no
-predicate claimed is by definition a prompt whose shape is unknown, so it must
-land on a class whose floors are shape-agnostic. ``document``'s are:
-``no_refusal``, ``accurate``, ``semantic_adequacy`` — three floors any
-well-formed prose answer can meet — and it still arms ``identifiers_grounded``,
-which is the property the original fallback choice was protecting.
+The fallback is the task-class contract's ``selection_fallback`` (OMN-19407:
+the CLI no longer holds a default of its own), so the properties it must
+satisfy are tested by the contract's owner against the live contract, in
+omnimarket ``tests/unit/inference/test_task_class_resolution_omn19407.py``.
 
 CAUSE 2 — the caller cannot state its own criteria. ``ModelDelegateSkillRequest``
 has carried ``acceptance_criteria``, ``quality_contract_mode``,
@@ -46,26 +42,14 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import _write_payload
-from omnibase_infra.cli.task_class_selection import (
-    DEFAULT_TASK_TYPE,
-    load_selection_fallback,
+from tests.helpers.cli_registry_stand_in.node_delegate_stand_in.model_stand_in_delegate_request import (
+    STAND_IN_CRITERIA,
+    ModelStandInDelegateRequest,
 )
 
 pytestmark = pytest.mark.unit
-
-_FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "delegation" / "omn18305"
-_PROBE_CONTRACT = _FIXTURES / "task_class_contracts_probe.yaml"
-_FLOORS = _FIXTURES / "task_class_floors.yaml"
-
-#: The rules whose verdict depends only on whether the answer is a well-formed,
-#: honest, responsive piece of prose — never on what SHAPE of task it answers.
-#: Read from the production contract's own ``quality_rules`` enforcement plus
-#: this declaration of which floors are shape-free; a fallback class may carry
-#: only these, because a prompt that reached the fallback has no known shape.
-SHAPE_AGNOSTIC_FLOORS = frozenset(
-    {"no_refusal", "accurate", "semantic_adequacy", "short_form_adequacy"}
-)
 
 #: The measured prompts, quoted from the two lanes that hit this on 2026-09-15.
 #: Neither is a research question and neither is a plan.
@@ -74,79 +58,6 @@ DRAFTING_PROMPT = (
     "verified fact table below, why these rows were ranked in this order. "
     "Do not introduce any fact that is not in the table."
 )
-
-
-class TestTheFallbackIsPermissiveNotStrict:
-    """CAUSE 1. The class an unclaimed prompt lands on carries shape-free floors only."""
-
-    def test_the_fallback_demands_no_shape_specific_floor(self) -> None:
-        """RED before the fix: the fallback was ``research``, which demands citations.
-
-        This is the whole of the ``lakshman-serving-cap-rulings-1456`` failure.
-        A prompt that no predicate claimed has, by construction, no declared
-        shape — so grading it on a shape floor refuses correct answers for not
-        being something nobody asked them to be.
-        """
-        floors = _blocking_floors_for(DEFAULT_TASK_TYPE)
-        assert floors, f"{DEFAULT_TASK_TYPE!r} declares no blocking floors at all"
-        assert floors <= SHAPE_AGNOSTIC_FLOORS, (
-            f"the fallback class {DEFAULT_TASK_TYPE!r} demands "
-            f"{sorted(floors - SHAPE_AGNOSTIC_FLOORS)}, which is a shape a prompt "
-            "that reached the fallback never declared"
-        )
-
-    def test_positive_control_the_two_measured_classes_fail_this_predicate(
-        self,
-    ) -> None:
-        """The predicate above is doing work: it rejects both measured rubrics.
-
-        Without this control, a predicate that accepted everything would pass
-        the test above and prove nothing.
-        """
-        assert not _blocking_floors_for("research") <= SHAPE_AGNOSTIC_FLOORS
-        assert not _blocking_floors_for("planning") <= SHAPE_AGNOSTIC_FLOORS
-        assert "cites_sources" in _blocking_floors_for("research")
-        assert "covers_dependencies" in _blocking_floors_for("planning")
-
-    def test_the_fallback_still_arms_the_grounding_check(self) -> None:
-        """The property the original ``research`` choice protected is not lost.
-
-        OMN-18297's ``identifiers_grounded`` check must stay armed on the
-        fallback: making the fallback permissive must not make it ungraded.
-        """
-        assert "identifiers_grounded" in _declared_heuristics(DEFAULT_TASK_TYPE)
-
-    def test_the_contract_declaration_wins_over_the_module_constant(self) -> None:
-        """The fallback is a contract decision; the constant is only its default.
-
-        The probe contract declares ``fallback_class``. Reading it must return
-        that, not ``DEFAULT_TASK_TYPE`` — otherwise the contract cannot move
-        the fallback without a code change, which is the AC2 property
-        OMN-18305 was closed on.
-        """
-        assert load_selection_fallback(_PROBE_CONTRACT) == "fallback_class"
-
-    def test_a_fallback_naming_a_class_the_contract_does_not_expose_is_refused(
-        self, tmp_path: Path
-    ) -> None:
-        """Fail closed rather than silently reverting to the constant."""
-        from omnibase_infra.cli.task_class_selection import TaskClassContractError
-
-        bad = tmp_path / "bad.yaml"
-        bad.write_text(
-            "version: probe\n"
-            "selection_fallback:\n"
-            "  task_class: not_a_declared_class\n"
-            "task_classes:\n"
-            "  only:\n"
-            "    gateway_exposure: public\n"
-            "    selection:\n"
-            "      priority: 1\n"
-            "      phrases: []\n",
-            encoding="utf-8",
-        )
-        with pytest.raises(TaskClassContractError, match="not_a_declared_class"):
-            load_selection_fallback(bad)
 
 
 class TestTheCallerCanStateItsOwnCriteria:
@@ -219,88 +130,6 @@ def _payload(tmp_path: Path, **kwargs: object) -> dict[str, object]:
     return loaded
 
 
-def _production_contract() -> dict[str, object]:
-    """The committed floors extract, so this runs with no omnimarket present."""
-    import yaml
-
-    raw = yaml.safe_load(_FLOORS.read_text(encoding="utf-8"))
-    assert isinstance(raw, dict)
-    return raw
-
-
-def _declared_heuristics(task_class: str) -> frozenset[str]:
-    contract = _production_contract()
-    classes = contract["task_classes"]
-    assert isinstance(classes, dict), "vocabulary fixture declares no task_classes"
-    entry = classes[task_class]
-    return frozenset(entry["definition_of_done"]["heuristic"])
-
-
-def _blocking_floors_for(task_class: str) -> frozenset[str]:
-    """The subset of a class's heuristics the contract marks ``blocking``."""
-    contract = _production_contract()
-    rules = contract["quality_rules"]
-    assert isinstance(rules, dict), "vocabulary fixture declares no quality_rules"
-    return frozenset(
-        name
-        for name in _declared_heuristics(task_class)
-        if isinstance(rules.get(name), dict)
-        and rules[name].get("enforcement") == "blocking"
-    )
-
-
-class TestFixtureMatchesTheLiveContract:
-    """The committed floors extract is not allowed to drift from omnimarket.
-
-    A committed copy of someone else's contract is a lie waiting to happen. It
-    can only be compared where omnimarket is resolvable, which is NOT the
-    ordinary omnibase_infra CI environment (OMN-15620's venv-purity gate
-    refuses to run this suite with omnimarket installed at all). So this test
-    says out loud that it did not run, rather than passing and reading as
-    proof — the same two-halves seam OMN-18305 recorded for the vocabulary.
-    """
-
-    def test_floors_extract_equals_the_live_contract(self) -> None:
-        import importlib.util
-
-        import yaml
-
-        spec = importlib.util.find_spec("omnimarket")
-        if spec is None or not spec.origin:
-            pytest.skip(
-                "omnimarket is not resolvable here, so the live contract cannot "
-                "be compared; this assertion did NOT run and is not evidence"
-            )
-        live_path = (
-            Path(spec.origin).resolve().parent
-            / "configs"
-            / "task_class_contracts.v1.yaml"
-        )
-        live = yaml.safe_load(live_path.read_text(encoding="utf-8"))
-        committed = _production_contract()
-
-        live_rules = {
-            name: entry.get("enforcement")
-            for name, entry in live["quality_rules"].items()
-        }
-        committed_rules = {
-            name: entry.get("enforcement")
-            for name, entry in committed["quality_rules"].items()  # type: ignore[union-attr]
-        }
-        assert committed_rules == live_rules
-
-        live_floors = {
-            name: list(entry["definition_of_done"]["heuristic"])
-            for name, entry in live["task_classes"].items()
-            if entry.get("gateway_exposure") == "public"
-        }
-        committed_floors = {
-            name: list(entry["definition_of_done"]["heuristic"])
-            for name, entry in committed["task_classes"].items()  # type: ignore[union-attr]
-        }
-        assert committed_floors == live_floors
-
-
 class TestTheFlagsThemselves:
     """``--task-class``/``--task-type`` collapse, and ``--response-contract`` parses."""
 
@@ -358,74 +187,59 @@ class TestTheFlagsThemselves:
         assert payload["quality_contract_mode"] == "replace_task_class"
 
 
-class TestCriteriaAreAClosedVocabulary:
-    """``--criteria`` is a declared slug set, and a typo is refused at the flag.
+class TestCriteriaAreCheckedByTheContractsInputModel:
+    """``--criteria`` is refused before dispatch, by the delegate contract's own model.
 
     MEASURED 2026-09-15, live against the real routing config: three free-text
     criteria produced a 265 ms pydantic ``ValidationError``, zero rungs
-    attempted, no answer, and no mention of which flag was wrong. The
-    vocabulary was always closed; only the error was unusable.
+    attempted, no answer, and no mention of which flag was wrong. OMN-19407:
+    the CLI keeps no slug list or slug pattern of its own; it validates the
+    request it is about to send with the input model the delegate node's
+    contract declares, read through the registry, and names the field.
     """
 
-    def test_a_free_text_criterion_is_refused_naming_the_flag(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from omnibase_infra.cli import cli_delegate
-
+    @pytest.fixture(autouse=True)
+    def _stand_in_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            cli_delegate, "load_supported_criteria", lambda: frozenset({"concise"})
+            cli_delegate, "_delegate_request_model", lambda: ModelStandInDelegateRequest
         )
+
+    def _request(self, **fields: object) -> dict[str, object]:
+        import uuid
+
+        return cli_delegate._request_payload(
+            prompt=DRAFTING_PROMPT,
+            task_type="document",
+            source="claude-code",
+            max_tokens=None,
+            correlation_id=uuid.uuid4(),
+            **fields,  # type: ignore[arg-type]
+        )
+
+    def test_a_free_text_criterion_is_refused_naming_the_field(self) -> None:
         with pytest.raises(ValueError) as excinfo:
-            cli_delegate._validate_criteria(("under 400 words",))
+            cli_delegate.validate_request_against_contract(
+                self._request(acceptance_criteria=("under 400 words",))
+            )
         message = str(excinfo.value)
-        assert "--criteria takes declared criterion slugs, not free text" in message
-        assert "'under 400 words'" in message
-        assert "concise" in message, "the refusal must list what IS allowed"
-
-    def test_a_declared_slug_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from omnibase_infra.cli import cli_delegate
-
-        monkeypatch.setattr(
-            cli_delegate,
-            "load_supported_criteria",
-            lambda: frozenset({"concise", "task_completed"}),
+        assert "acceptance_criteria" in message
+        assert "under 400 words" in message
+        assert ModelStandInDelegateRequest.__qualname__ in message, (
+            "the refusal must name the contract model that refused it"
         )
-        assert cli_delegate._validate_criteria(("concise", "task_completed")) == (
-            "concise",
-            "task_completed",
+        for slug in STAND_IN_CRITERIA:
+            assert slug in message, "the refusal must list what the model allows"
+
+    def test_every_slug_the_model_declares_passes(self) -> None:
+        cli_delegate.validate_request_against_contract(
+            self._request(acceptance_criteria=tuple(sorted(STAND_IN_CRITERIA)))
         )
 
-    def test_the_parameterised_slug_shape_is_accepted(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """``max_words_per_sentence_<N>`` is a pattern, not a listed name."""
-        from omnibase_infra.cli import cli_delegate
+    def test_a_mode_the_model_does_not_declare_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="quality_contract_mode"):
+            cli_delegate.validate_request_against_contract(
+                self._request(quality_contract_mode="replace_task_class")
+            )
 
-        monkeypatch.setattr(
-            cli_delegate, "load_supported_criteria", lambda: frozenset({"concise"})
-        )
-        assert cli_delegate._validate_criteria(("max_words_per_sentence_20",)) == (
-            "max_words_per_sentence_20",
-        )
-        with pytest.raises(ValueError):
-            cli_delegate._validate_criteria(("max_words_per_sentence_0",))
-
-    def test_unreadable_vocabulary_passes_through_rather_than_refusing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """No omnimarket means no vocabulary; dispatch fails for its own reason.
-
-        Refusing here would turn a missing co-install into a misleading
-        complaint about the caller's criteria.
-        """
-        from omnibase_infra.cli import cli_delegate
-
-        monkeypatch.setattr(cli_delegate, "load_supported_criteria", lambda: None)
-        assert cli_delegate._validate_criteria(("anything at all",)) == (
-            "anything at all",
-        )
-
-    def test_no_criteria_never_consults_the_vocabulary(self) -> None:
-        from omnibase_infra.cli import cli_delegate
-
-        assert cli_delegate._validate_criteria(()) == ()
+    def test_no_criteria_is_a_valid_request(self) -> None:
+        cli_delegate.validate_request_against_contract(self._request())

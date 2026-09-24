@@ -56,17 +56,6 @@ lanes:
     sasl_mechanism: SCRAM-SHA-256
 """
 
-#: The committed stand-in task-class vocabulary. Repo layering forbids an
-#: omnimarket dependency here, so the packaged task-class contract is absent
-#: and every delegation would refuse on THAT instead of on its identity.
-STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
-
 
 @pytest.fixture
 def onex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -77,11 +66,6 @@ def onex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
     monkeypatch.setenv("KAFKA_SASL_USERNAME", AMBIENT_PRINCIPAL)
     monkeypatch.setenv("KAFKA_SASL_PASSWORD", "ambient-value")
-    monkeypatch.setattr(
-        cli_delegate,
-        "resolve_task_class_contract_path",
-        lambda: STAND_IN_TASK_CLASS_CONTRACT,
-    )
     # The delegate orchestrator contract ships in omnimarket, which repo
     # layering forbids depending on here. Without this every delegation would
     # refuse on the missing node rather than on its identity -- the same

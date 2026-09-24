@@ -30,6 +30,13 @@ import pytest
 from click.testing import CliRunner
 
 from omnibase_infra.cli.cli_delegate import delegate_command
+from tests.helpers.cli_registry_stand_in import (
+    install_stand_in_registry,
+    wiring_authority,
+)
+from tests.helpers.cli_registry_stand_in.node_delegate_stand_in.model_stand_in_delegate_request import (
+    STAND_IN_CRITERIA,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -47,28 +54,16 @@ def _invoke(args: list[str]) -> object:
 
 class TestTheCriteriaFlagIsReachableAndChecked:
     def test_a_free_text_criterion_is_refused_with_a_usable_message(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
-        """RED before the fix: this reached dispatch and died in pydantic.
+        """RED before OMN-18305's residual: this reached dispatch and died in pydantic.
 
-        The refusal must name the flag and say what IS allowed, because the
-        caller's next action is to pick a different value for this flag. It
-        must also fire BEFORE the omnimarket drift guard, which is the next
-        thing in this command's path and which reports something unrelated.
-
-        The vocabulary is supplied here rather than resolved: this environment
-        has no omnimarket (repo layering forbids the dependency and the
-        OMN-15620 venv-purity gate refuses to run the suite with it present),
-        so the real resolution returns ``None`` and criteria pass through by
-        design. What is under test is the refusal, not the co-install.
+        The refusal must name the field and say what IS allowed, and it must
+        fire BEFORE the omnimarket drift guard, which is the next thing in
+        this command's path and which reports something unrelated. OMN-19407:
+        the vocabulary is the delegate contract's input model, read through
+        the registry -- here the stand-in node's model (see conftest).
         """
-        from omnibase_infra.cli import cli_delegate
-
-        monkeypatch.setattr(
-            cli_delegate,
-            "load_supported_criteria",
-            lambda: frozenset({"task_completed", "concise"}),
-        )
         result = _invoke(
             [
                 "draft two paragraphs of rationale prose",
@@ -79,38 +74,30 @@ class TestTheCriteriaFlagIsReachableAndChecked:
             ]
         )
         assert result.exit_code != 0
-        assert (
-            "--criteria takes declared criterion slugs, not free text" in result.output
-        )
-        assert "'under 400 words'" in result.output
-        assert "task_completed" in result.output, "the refusal must list the vocabulary"
+        assert "acceptance_criteria" in result.output
+        assert "under 400 words" in result.output
+        for slug in STAND_IN_CRITERIA:
+            assert slug in result.output, "the refusal must list the vocabulary"
         assert "omnimarket is NOT INSTALLED" not in result.output, (
             "the criterion refusal must precede the drift guard, or the caller "
             "is told about a co-install when their flag value is the problem"
         )
 
-    def test_without_a_resolvable_vocabulary_criteria_pass_through(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_a_declared_criterion_passes_the_contract_check(
+        self, tmp_path: Path
     ) -> None:
-        """Positive control for the refusal above, and the documented seam.
-
-        No omnimarket means no vocabulary. Refusing here would turn a missing
-        co-install into a misleading complaint about the caller's criteria, so
-        the command proceeds and fails on its own next guard instead.
-        """
-        from omnibase_infra.cli import cli_delegate
-
-        monkeypatch.setattr(cli_delegate, "load_supported_criteria", lambda: None)
+        """Positive control: the refusal above is not refusing every criterion."""
+        slug = sorted(STAND_IN_CRITERIA)[0]
         result = _invoke(
             [
                 "draft two paragraphs",
                 "--criteria",
-                "under 400 words",
+                slug,
                 "--state-root",
                 str(tmp_path),
             ]
         )
-        assert "--criteria takes declared criterion slugs" not in result.output
+        assert "acceptance_criteria" not in result.output
 
     def test_the_flags_exist_and_are_documented(self) -> None:
         """A flag nobody can discover is a flag nobody uses."""
@@ -183,14 +170,17 @@ class TestTheResponseContractFlag:
 
 
 class TestTheFallbackIsAnnouncedInHelp:
-    def test_help_names_the_fallback_class(self) -> None:
+    def test_help_names_the_contracts_fallback_class(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A class is being chosen for the caller; the help says which.
 
-        It named ``research`` before this change. That is the class whose
-        ``cites_sources`` floor refused a drafting prompt on every rung.
+        It named ``research`` before OMN-18305's residual, the class whose
+        ``cites_sources`` floor refused a drafting prompt on every rung. Since
+        OMN-19407 the fallback is the task-class contract's own declaration,
+        read when help is rendered, so the help names whatever it declares.
         """
-        from omnibase_infra.cli.task_class_selection import DEFAULT_TASK_TYPE
-
-        help_text = str(_invoke(["--help"]).output)
-        assert DEFAULT_TASK_TYPE in help_text
-        assert "the fallback when none" in help_text
+        authority = wiring_authority().model_copy(update={"fallback": "summarization"})
+        install_stand_in_registry(monkeypatch, authority)
+        help_text = " ".join(str(_invoke(["--help"]).output).split())
+        assert "selection_fallback (summarization)" in help_text

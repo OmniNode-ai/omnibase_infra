@@ -601,17 +601,12 @@ skills:
       # payload so the delegate node resolves it per-backend from its routing
       # contract (OMN-13161). Pass --max-tokens only as an explicit override.
       - {name: max-tokens, payload_field: max_tokens, arg_type: integer}
-    classifiers:
-      - target_field: task_type
-        source_field: prompt
-        fallback: research
-        rules:
-          - [["test", "pytest", "unit test", "assert"], test]
-          - [["document", "docstring", "readme", "explain how"], document]
-          - [["write", "create", "implement", "build", "generate"], code_generation]
-          - [["refactor", "cleanup", "simplify"], refactor]
-          - [["review", "audit", "check"], review]
-          - [["reason", "think through", "decide", "compare"], reasoning]
+    # OMN-19407: the task class is resolved by the task-class contract read
+    # through the registry (onex.contracts:task_class_authority), the same
+    # resolution `onex delegate` performs. No keyword table, no fallback here.
+    task_class:
+      target_field: task_type
+      prompt_field: prompt
   # ===================================================================
   # OMN-13712: convergence of node-proven WIRE-MAP skills.
   #

@@ -51,30 +51,10 @@ lanes:
 """
 
 
-#: The committed stand-in task-class vocabulary. Repo layering forbids an
-#: omnimarket dependency here, so the packaged task-class contract is absent
-#: and every delegation would refuse on THAT instead of on its addressing.
-#: Same stand-in ``tests/unit/cli/conftest.py`` uses, for the same reason.
-STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
-
-
 @pytest.fixture(autouse=True)
 def _ambient_env_names_the_governed_lane(monkeypatch: pytest.MonkeyPatch) -> None:
-    from omnibase_infra.cli import cli_delegate
-
     monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", AMBIENT_STABILITY_BROKER)
     monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
-    monkeypatch.setattr(
-        cli_delegate,
-        "resolve_task_class_contract_path",
-        lambda: STAND_IN_TASK_CLASS_CONTRACT,
-    )
 
 
 def _workspace(root: Path) -> Path:

@@ -233,6 +233,23 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn19407-onex-cli-kept-its-own-vocabulary
+    guard: scripts/validation/check_cli_registry_vocabulary.py
+    incident: OMN-19407
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn19407.py::test_the_same_guard_accepts_the_cli_that_reads_the_registry
+    artifact:
+      fixture: tests/fixtures/omn19407/cli_delegate.py.captured
+      sha256: ed879dd330394da11c06afafbadf8b5be28d333db49d2ae00eafe2bb7134184a
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@1888c0a83d77bd6383484cd0afbe741cad52a568:src/omnibase_infra/cli/cli_delegate.py
+      captured_at: '2026-09-24T17:40:00Z'
+      captured_by: lane cli-registry-only (OMN-19407)
+    test: tests/ci/test_incident_replay_omn19407.py::test_the_real_guard_refuses_the_cli_that_kept_its_own_lists
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A CLI THAT KEPT ITS OWN LIST while nothing refused it. On 2026-09-24 onex delegate offered eleven task classes from a hand-written TASK_TYPE_CHOICES tuple while the task-class contract declared fifteen, so documentation, validator_generation and escalation could not be named; DELEGATE_SOURCE_CHOICES and a literal --criteria-mode choice were further copies, each pinned by a test that held yet another copy. The operator ruled the same day that the CLI fetches everything from the registry. THE ARTIFACT IS NOT A RECONSTRUCTION -- it is the cli_delegate.py blob at dev 1888c0a83, re-fetchable at the recorded locator, and the real guard run over it names exactly those three copies. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every CLI module would replay this perfectly and block every CLI change, so the same guard is run over the real CLI package on the fixing branch and must accept it.
   - id: omn18942-fleet-failure-findings-delivered-to-nowhere
     guard: scripts/omninode-fleet-failure-probe.py
     incident: OMN-18942

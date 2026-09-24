@@ -350,6 +350,13 @@ jobs:
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
 
+      # OMN-19407: the onex CLI keeps no hand-written vocabulary (operator
+      # ruling 2026-09-24). Same checker as the `check-cli-registry-vocabulary`
+      # pre-commit hook, over the whole CLI package, so a bypassed local hook
+      # still fails the PR.
+      - name: onex CLI reads vocabularies from the registry (OMN-19407)
+        run: uv run python scripts/validation/check_cli_registry_vocabulary.py
+
       - name: Single-canonical in-memory event bus (OMN-13419)
         run: bash scripts/validation/check_no_infra_inmemory_import.sh
 
