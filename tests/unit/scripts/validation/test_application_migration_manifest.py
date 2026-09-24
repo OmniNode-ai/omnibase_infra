@@ -798,7 +798,12 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     #
     # Vendored into omnibase_infra FIRST per the node-migration
     # vendor-parity ordering, ahead of omnimarket#2730.
-    assert len(result.declarations) == 211
+    #
+    # 211 -> 212 for OMN-19013: the append-only delegation quality-reader
+    # correction must be a first-class vendored application migration. Its
+    # exact source bytes and manifest binding are pinned separately by
+    # test_omn19013_terminal_construction_vendor.py.
+    assert len(result.declarations) == 212
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
