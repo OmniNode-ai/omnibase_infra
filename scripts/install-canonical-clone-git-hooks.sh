@@ -25,6 +25,12 @@
 #   install-canonical-clone-git-hooks.sh --apply         # sync the hooks dir + point every clone at it
 #   install-canonical-clone-git-hooks.sh --apply <repo>… # only the named canonical clones
 #
+# Registry roots (OMN-19388): the clones installed are the direct children of
+# `$OMNI_HOME` and of every entry of `ONEX_REGISTRY_ROOTS`, a colon-separated
+# list of absolute directories -- the same setting the hooks read to decide
+# what a canonical clone is. A named <repo> is looked up in every root. The live
+# hooks directory stays at `$OMNI_HOME/scripts/git-hooks` for every root.
+#
 # Exit codes:
 #   0  every canonical clone is installed and current
 #   3  action pending (missing, drifted, or a clone not pointed at the hooks dir)
@@ -39,6 +45,7 @@
 #     the machine briefly refused commits from unregistered worktrees. An
 #     installer that reads a leaked variable does not install what it reports.
 #   * a target is a linked worktree rather than a canonical clone.
+#   * an `ONEX_REGISTRY_ROOTS` entry is empty, relative, or not a directory.
 
 set -euo pipefail
 
@@ -157,35 +164,66 @@ for row in "${HOOK_TYPES[@]}"; do
   fi
 done
 
-printf '\n[3] canonical clones\n'
-if [[ ${#targets[@]} -eq 0 ]]; then
-  while IFS= read -r d; do targets+=("$(basename "$d")"); done < <(
-    find "$OMNI_HOME" -mindepth 2 -maxdepth 2 -name .git -type d -print0 |
-      xargs -0 -n1 dirname | sort
-  )
+# Every registry root whose clones the hooks guard: OMNI_HOME first, then each
+# ONEX_REGISTRY_ROOTS entry, validated exactly as canonical_clone_paths.sh
+# validates it, and de-duplicated by physical path.
+roots=("$OMNI_HOME")
+seen=("$(cd "$OMNI_HOME" && pwd -P)")
+if [[ -n "${ONEX_REGISTRY_ROOTS+set}" ]]; then
+  rest="$ONEX_REGISTRY_ROOTS"
+  while :; do
+    entry="${rest%%:*}"
+    [[ "$entry" == /* ]] || refuse "ONEX_REGISTRY_ROOTS=$ONEX_REGISTRY_ROOTS holds the entry '$entry', which is not an absolute path"
+    [[ -d "$entry" ]] || refuse "ONEX_REGISTRY_ROOTS=$ONEX_REGISTRY_ROOTS holds the entry '$entry', which is not an existing directory"
+    physical="$(cd "$entry" && pwd -P)"
+    duplicate=0
+    for known in "${seen[@]}"; do
+      [[ "$known" == "$physical" ]] && duplicate=1
+    done
+    if [[ "$duplicate" == "0" ]]; then
+      roots+=("$entry")
+      seen+=("$physical")
+    fi
+    [[ "$rest" == *:* ]] || break
+    rest="${rest#*:}"
+  done
 fi
 
-for repo in "${targets[@]}"; do
-  clone="$OMNI_HOME/$repo"
-  if [[ ! -d "$clone/.git" ]]; then
-    note "SKIP     $repo (not a canonical clone: .git is not a directory)"
-    continue
+named_targets=0
+[[ ${#targets[@]} -eq 0 ]] || named_targets=1
+
+for root in "${roots[@]}"; do
+  printf '\n[3] canonical clones in %s\n' "$root"
+  if [[ "$named_targets" == "0" ]]; then
+    targets=()
+    while IFS= read -r d; do targets+=("$(basename "$d")"); done < <(
+      find "$root" -mindepth 2 -maxdepth 2 -name .git -type d -print0 |
+        xargs -0 -n1 dirname | sort
+    )
   fi
-  current="$(git -C "$clone" config --get core.hooksPath 2>/dev/null || true)"
-  if [[ "$current" == "$LIVE_HOOKS_DIR" ]]; then
-    note "ok       $repo"
-    continue
-  fi
-  if [[ -z "$current" ]]; then
-    note "UNSET    $repo (core.hooksPath is not set -- this clone enforces NOTHING)"
-  else
-    note "OTHER    $repo (core.hooksPath=$current)"
-  fi
-  pending=1
-  if [[ "$apply" == "1" ]]; then
-    git -C "$clone" config core.hooksPath "$LIVE_HOOKS_DIR"
-    note "pointed $repo at $LIVE_HOOKS_DIR"
-  fi
+
+  for repo in ${targets[@]+"${targets[@]}"}; do
+    clone="$root/$repo"
+    if [[ ! -d "$clone/.git" ]]; then
+      note "SKIP     $repo (not a canonical clone: .git is not a directory)"
+      continue
+    fi
+    current="$(git -C "$clone" config --get core.hooksPath 2>/dev/null || true)"
+    if [[ "$current" == "$LIVE_HOOKS_DIR" ]]; then
+      note "ok       $repo"
+      continue
+    fi
+    if [[ -z "$current" ]]; then
+      note "UNSET    $repo (core.hooksPath is not set -- this clone enforces NOTHING)"
+    else
+      note "OTHER    $repo (core.hooksPath=$current)"
+    fi
+    pending=1
+    if [[ "$apply" == "1" ]]; then
+      git -C "$clone" config core.hooksPath "$LIVE_HOOKS_DIR"
+      note "pointed $repo at $LIVE_HOOKS_DIR"
+    fi
+  done
 done
 
 printf '\n'

@@ -148,11 +148,13 @@ class TestMatchedPatternIsNamed:
         implementation of that repository's matcher here, which is exactly the
         divergence this module exists to prevent. Naming the source is honest;
         guessing the pattern would not be.
+
+        The path is outside ``src/omnimarket`` and ``src/omnibase_infra``, which
+        this module lists whole since OMN-19378.
         """
-        pairs = trigger_module.attribute_runtime_paths(["src/omnimarket/nodes/n/h.py"])
-        assert pairs == [
-            ("src/omnimarket/nodes/n/h.py", trigger_module.CANONICAL_CLASSIFIER_SOURCE)
-        ]
+        path = "src/omniintelligence/nodes/n/h.py"
+        pairs = trigger_module.attribute_runtime_paths([path])
+        assert pairs == [(path, trigger_module.CANONICAL_CLASSIFIER_SOURCE)]
 
     def test_directory_pattern_is_named_whole(self, trigger_module: Any) -> None:
         pairs = trigger_module.attribute_runtime_paths(["docker/migrations/0001.sql"])

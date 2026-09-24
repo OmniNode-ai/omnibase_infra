@@ -144,6 +144,14 @@ scope:
     # suite, not an incident replay.
     - scripts/ci/c12_provider_catalogue_observe.py
     - scripts/ci/c12_provider_catalogue_probe.py
+    # OMN-16987: the provider-rung liveness canary and its in-runtime
+    # observer, a PROBE in the same class as the C11 and C12 entries above. It
+    # measures live provider state, not a past incident's bytes; its grading is
+    # proven offline over a recorded lab observation and a fake transport in
+    # tests/ci/test_provider_rung_canary_probe_omn16987.py -- a regression
+    # suite, not an incident replay.
+    - scripts/ci/provider_rung_canary_observe.py
+    - scripts/ci/provider_rung_canary_probe.py
     # OMN-19181: a PROBE, the C16 producer, and the same class as the C11 one
     # above. Its grading IS driven by real bytes -- three observations captured
     # read-only from the .201 dev lane's gateway_workflows rows and their bus terminals
