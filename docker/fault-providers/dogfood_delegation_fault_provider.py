@@ -17,7 +17,8 @@ def parse_status(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--status", type=int, choices=sorted(_SUPPORTED_STATUSES), required=True
     )
-    return parser.parse_args(argv).status
+    status: int = parser.parse_args(argv).status
+    return status
 
 
 def error_payload(status: int) -> dict[str, object]:

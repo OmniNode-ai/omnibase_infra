@@ -61,7 +61,7 @@ def _readback_timeout_seconds(plan: dict[str, Any]) -> int:
     value = plan.get("readback_timeout_seconds", _DEFAULT_READBACK_TIMEOUT_SECONDS)
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError("execution plan readback_timeout_seconds must be positive")
-    return value
+    return int(value)
 
 
 def _run_readback(

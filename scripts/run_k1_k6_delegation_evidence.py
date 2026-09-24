@@ -57,7 +57,7 @@ def _string(value: Any, label: str) -> str:
 def _positive_int(value: Any, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{label} must be a positive integer")
-    return value
+    return int(value)
 
 
 def _validate_finalization_plan(
