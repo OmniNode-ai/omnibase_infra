@@ -127,13 +127,22 @@ def enumerate_forward_migrations(root: Path) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 
 
+#: Emitted into the stripped text where the lexer could not find the end of a
+#: literal or a dollar-quoted body. Everything after it is unreadable, so it is
+#: a finding in its own right: an unbalanced quote must never hide a DROP.
+_UNREADABLE: Final[str] = " __UNREADABLE__ "
+
+
 def _strip(sql: str) -> str:
-    """Comments removed, string literals emptied, dollar-quote delimiters split.
+    """Comments removed, string literals emptied, dollar-quoted bodies isolated.
 
     A dollar-quoted body (a DO block, a function body) is code the migration
-    runs or installs, so its CONTENT is kept and analysed; only the delimiters
-    become statement breaks. A single-quoted literal is data, so its content is
-    dropped: ``COMMENT ON ... IS 'drop x'`` is not a DROP.
+    runs or installs, so its CONTENT is analysed -- but lexed on its own, so an
+    apostrophe inside ``$$the agent's id$$`` cannot open a literal that swallows
+    the statements after the body. The delimiters become statement breaks. A
+    single-quoted literal is data, so its content is dropped: ``COMMENT ON ...
+    IS 'drop x'`` is not a DROP. ``E'...'`` literals honour backslash escapes.
+    An unterminated literal or body emits :data:`_UNREADABLE`.
     """
     out: list[str] = []
     i, n = 0, len(sql)
@@ -155,22 +164,38 @@ def _strip(sql: str) -> str:
             out.append(" ")
             continue
         if ch == "'":
+            escape = (
+                i > 0
+                and sql[i - 1] in "Ee"
+                and (i < 2 or not (sql[i - 2].isalnum() or sql[i - 2] == "_"))
+            )
             i += 1
+            closed = False
             while i < n:
-                if sql[i] == "'" and i + 1 < n and sql[i + 1] == "'":
+                if (escape and sql[i] == "\\") or (
+                    sql[i] == "'" and i + 1 < n and sql[i + 1] == "'"
+                ):
                     i += 2
                 elif sql[i] == "'":
                     i += 1
+                    closed = True
                     break
                 else:
                     i += 1
-            out.append("''")
+            out.append("''" if closed else _UNREADABLE)
             continue
         if ch == "$":
             m = re.match(r"\$([A-Za-z_][A-Za-z0-9_]*)?\$", sql[i:])
             if m:
+                tag = m.group(0)
+                end = sql.find(tag, i + len(tag))
+                if end == -1:
+                    out.append(_UNREADABLE)
+                    break
                 out.append(" ; ")
-                i += m.end()
+                out.append(_strip(sql[i + len(tag) : end]))
+                out.append(" ; ")
+                i = end + len(tag)
                 continue
         out.append(ch)
         i += 1
@@ -192,13 +217,22 @@ _QNAME: Final[str] = rf"{_IDENT}(?:\s*\.\s*{_IDENT})*"
 
 
 def _norm_name(name: str) -> str:
+    """``schema.relation``, lower-cased; an unqualified name is ``public.``."""
     parts = [p.strip().strip('"').lower() for p in name.split(".")]
-    return parts[-1]
+    if len(parts) == 1:
+        parts.insert(0, "public")
+    return ".".join(parts[-2:])
 
 
 def _created_tables(segments: Iterable[str]) -> set[str]:
+    """Tables this file certainly creates: a plain ``CREATE TABLE`` only.
+
+    ``CREATE TABLE IF NOT EXISTS`` is a no-op on a table that already exists, so
+    a tightening after it may land on a table older code reads; it earns no
+    exemption.
+    """
     pattern = re.compile(
-        rf"\bCREATE\s+(?:UNLOGGED\s+|TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?({_QNAME})"
+        rf"\bCREATE\s+(?:UNLOGGED\s+|TEMP(?:ORARY)?\s+)?TABLE\s+(?!IF\s+NOT\s+EXISTS\b)({_QNAME})"
     )
     created: set[str] = set()
     for seg in segments:
@@ -227,6 +261,7 @@ def _split_top_level(text: str, sep: str = ",") -> list[str]:
 
 #: Anywhere in a segment. Each is destructive or opaque whatever it targets.
 _DENY: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
+    ("unreadable text (unbalanced quote)", re.compile(r"__UNREADABLE__")),
     ("DROP", re.compile(r"\bDROP\b")),
     ("RENAME", re.compile(r"\bRENAME\b")),
     ("TRUNCATE", re.compile(r"\bTRUNCATE\b")),
@@ -236,6 +271,10 @@ _DENY: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
         re.compile(
             rf"(?<!\bON )\bUPDATE\s+(?:ONLY\s+)?{_QNAME}(?:\s+(?:AS\s+)?{_IDENT})?\s+SET\b"
         ),
+    ),
+    (
+        "ON CONFLICT DO UPDATE (data rewrite)",
+        re.compile(r"\bON\s+CONFLICT\b.*\bDO\s+UPDATE\b"),
     ),
     ("REVOKE", re.compile(r"\bREVOKE\b")),
     (
@@ -247,9 +286,110 @@ _DENY: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
         re.compile(r"\bCREATE\s+OR\s+REPLACE\b"),
     ),
     ("CREATE RULE", re.compile(r"\bCREATE\s+RULE\b")),
-    ("CALL (opaque procedure)", re.compile(r"^CALL\b|\bPERFORM\s+.*\bCALL\b")),
+    ("CALL (opaque procedure)", re.compile(r"\bCALL\s+[A-Z_\"]")),
     ("RESTRICTIVE policy", re.compile(r"\bAS\s+RESTRICTIVE\b")),
     ("SECURITY LABEL", re.compile(r"\bSECURITY\s+LABEL\b")),
+)
+
+#: A SELECT or PERFORM at the head of a statement (top level, or first in a
+#: plpgsql block or branch). Any function it calls, other than the read-only
+#: built-ins below, runs code the checker cannot read.
+_CALLING_STATEMENT: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|\b(?:BEGIN|THEN|ELSE|LOOP|DO)\s+)(?:SELECT|PERFORM)\b(.*)$"
+)
+#: A name followed by ``(``, unless it follows ``AS`` (a column-alias list such
+#: as ``unnest(...) AS k(key_position)`` is not a call).
+_CALL_SITE: Final[re.Pattern[str]] = re.compile(
+    r"(?<!\bAS )\b([A-Z_][A-Z0-9_]*(?:\.[A-Z_][A-Z0-9_]*)?)\s*\("
+)
+_READ_ONLY_CALLS: Final[frozenset[str]] = frozenset(
+    {
+        # SQL syntax that looks like a call.
+        "THEN",
+        "ELSE",
+        "WHEN",
+        "END",
+        "IN",
+        "EXISTS",
+        "ANY",
+        "ALL",
+        "VALUES",
+        "CAST",
+        "COALESCE",
+        "NULLIF",
+        "GREATEST",
+        "LEAST",
+        "CASE",
+        "AND",
+        "OR",
+        "NOT",
+        "FILTER",
+        "OVER",
+        "WHERE",
+        "ON",
+        "FROM",
+        "SELECT",
+        "ROW",
+        "ARRAY",
+        "DISTINCT",
+        "USING",
+        # Read-only built-ins.
+        "COUNT",
+        "MIN",
+        "MAX",
+        "SUM",
+        "AVG",
+        "BOOL_AND",
+        "BOOL_OR",
+        "ARRAY_AGG",
+        "STRING_AGG",
+        "NOW",
+        "FORMAT",
+        "TO_REGCLASS",
+        "TO_REGTYPE",
+        "TO_REGPROCEDURE",
+        "TO_REGNAMESPACE",
+        "TO_REGROLE",
+        "CURRENT_SETTING",
+        "SET_CONFIG",
+        "LOWER",
+        "UPPER",
+        "LENGTH",
+        "TRIM",
+        "CONCAT",
+        "REPLACE",
+        "SUBSTRING",
+        "QUOTE_IDENT",
+        "QUOTE_LITERAL",
+        "HAS_TABLE_PRIVILEGE",
+        "HAS_SCHEMA_PRIVILEGE",
+        "HAS_FUNCTION_PRIVILEGE",
+        "PG_HAS_ROLE",
+        "OBJ_DESCRIPTION",
+        "COL_DESCRIPTION",
+        "FORMAT_TYPE",
+        "PG_GET_FUNCTION_IDENTITY_ARGUMENTS",
+        "PG_GET_CONSTRAINTDEF",
+        "PG_GET_INDEXDEF",
+        "PG_GET_VIEWDEF",
+        "PG_ADVISORY_XACT_LOCK",
+        "PG_TRY_ADVISORY_XACT_LOCK",
+        "GEN_RANDOM_UUID",
+        "JSONB_BUILD_OBJECT",
+        "JSONB_TYPEOF",
+        "HAS_SEQUENCE_PRIVILEGE",
+        "HAS_DATABASE_PRIVILEGE",
+        "PG_GET_SERIAL_SEQUENCE",
+        "PG_GET_USERBYID",
+        "PG_GET_EXPR",
+        "ACLEXPLODE",
+        "UNNEST",
+        "LEFT",
+        "RIGHT",
+        "CHAR_LENGTH",
+        "CURRENT_DATABASE",
+        "CURRENT_SCHEMA",
+    }
 )
 
 _ALTER: Final[re.Pattern[str]] = re.compile(r"\bALTER\s+([A-Z]+(?:\s+[A-Z]+)?)\b")
@@ -277,7 +417,8 @@ def _alter_table_findings(seg: str, created: set[str]) -> list[str]:
         return ["ALTER TABLE (unparseable)"]
     table, actions = _norm_name(m.group(1)), m.group(2)
     if table in created:
-        # Created in this same file: no older composition has read it.
+        # Created by a plain CREATE TABLE in this same file: no older
+        # composition has read or written it.
         return []
     findings = []
     for action in _split_top_level(actions):
@@ -320,12 +461,29 @@ def _alter_findings(seg: str, created: set[str]) -> list[str]:
     return findings
 
 
+def _call_findings(seg: str) -> list[str]:
+    m = _CALLING_STATEMENT.search(seg)
+    if not m:
+        return []
+    opaque = sorted(
+        {
+            name
+            for name in _CALL_SITE.findall(m.group(1))
+            if name.split(".")[-1] not in _READ_ONLY_CALLS
+        }
+    )
+    return [
+        f"function call {name}() (runs code the checker cannot read)" for name in opaque
+    ]
+
+
 def destructive_findings(sql: str) -> list[str]:
     """Every statement in ``sql`` that makes it NOT expand-only.
 
     Empty means every statement is one of the additive shapes rule RB-1(b)
-    names. Conservative by construction: an unrecognised ALTER, dynamic SQL, or
-    an object replaced in place is a finding.
+    names. Conservative by construction: an unrecognised ALTER, dynamic SQL, a
+    call into code it cannot read, an object replaced in place, or text it
+    cannot lex is a finding.
     """
     segments = _segments(sql)
     created = _created_tables(segments)
@@ -335,6 +493,7 @@ def destructive_findings(sql: str) -> list[str]:
             if pattern.search(seg):
                 findings.append(label)
         findings.extend(_alter_findings(seg, created))
+        findings.extend(_call_findings(seg))
         for label, pattern in _ON_TABLE_OBJECTS:
             for m in pattern.finditer(seg):
                 if _norm_name(m.group(1)) not in created:
@@ -436,7 +595,8 @@ class ModelDownExecution:
                 msg = f"down execution for {self.migration!r}: {name} is required"
                 raise ValueError(msg)
         for name in ("forward_sha256", "down_sha256"):
-            if not _SHA256.match(getattr(self, name)):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _SHA256.match(value):
                 msg = f"down execution for {self.migration!r}: {name} must be a sha256 hex digest"
                 raise ValueError(msg)
         if not _LAB_SURFACE.match(self.surface):
@@ -464,7 +624,11 @@ def load_executions(path: Path) -> list[ModelDownExecution]:
         if not isinstance(row, dict):
             msg = f"{path}: every execution must be a mapping"
             raise ValueError(msg)
-        records.append(ModelDownExecution(**{str(k): v for k, v in row.items()}))
+        try:
+            records.append(ModelDownExecution(**{str(k): v for k, v in row.items()}))
+        except TypeError as exc:
+            msg = f"{path}: malformed execution record {row.get('migration')!r}: {exc}"
+            raise ValueError(msg) from exc
     return records
 
 

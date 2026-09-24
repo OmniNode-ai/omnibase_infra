@@ -17,7 +17,7 @@ executions:
     forward_sha256: da63eaf05f9c0036cc44ef036925997b88e463d20a6027ac2899589153db56f8
     down_sha256: d58b1ae6e4f6437b55818719f34c1685222c17c9f24e1fe6b74bb814d0f3287e
     surface: mac-scratch:wr-recovery
-    database: downproof_20260924012700 on container wr-recovery-scratchdb (created and dropped by this run)
-    executed_at: '2026-09-24T01:27:02Z'
+    database: downproof_20260924013957 on container wr-recovery-scratchdb (created and dropped by this run)
+    executed_at: '2026-09-24T01:39:58Z'
     outcome: PASS
-    evidence: 'forward exit 0; down exit 0; forward re-apply exit 0; catalog objects before=7 after-forward=54 after-down=7 after-reforward=54; down restored the pre-forward catalog exactly; prerequisites: forward/029_create_db_metadata.sql'
+    evidence: 'forward exit 0; down exit 0; forward re-apply exit 0; catalog objects before=11 after-forward=87 after-down=11 after-reforward=87; down restored the pre-forward catalog exactly; prerequisites: forward/029_create_db_metadata.sql'

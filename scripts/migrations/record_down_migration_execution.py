@@ -58,7 +58,9 @@ _CHECKER: Final[Path] = (
     REPO_ROOT / "scripts" / "validation" / "check_migration_class.py"
 )
 
-#: Every user-visible schema object whose presence a down-migration must undo.
+#: Every user-visible schema object, and every property of one (column type,
+#: nullability and default, constraints, index and view definitions, row-level
+#: security flags), that a down-migration must restore.
 SNAPSHOT_SQL: Final[str] = """
 SELECT 'rel:' || n.nspname || '.' || c.relname || ':' || c.relkind::text
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -80,8 +82,23 @@ UNION ALL
 SELECT 'pol:' || schemaname || '.' || tablename || '.' || policyname FROM pg_policies
 UNION ALL
 SELECT 'col:' || table_schema || '.' || table_name || '.' || column_name || ':' || data_type
+       || ':nullable=' || is_nullable || ':default=' || coalesce(column_default, '')
   FROM information_schema.columns
  WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+UNION ALL
+SELECT 'con:' || conrelid::regclass::text || '.' || conname || ':' || pg_get_constraintdef(oid)
+  FROM pg_constraint
+ WHERE connamespace NOT IN (SELECT oid FROM pg_namespace WHERE nspname IN ('pg_catalog', 'information_schema'))
+UNION ALL
+SELECT 'idx:' || schemaname || '.' || indexname || ':' || indexdef FROM pg_indexes
+ WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+UNION ALL
+SELECT 'view:' || schemaname || '.' || viewname || ':' || md5(definition) FROM pg_views
+ WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+UNION ALL
+SELECT 'rls:' || n.nspname || '.' || c.relname || ':' || c.relrowsecurity::text || ':' || c.relforcerowsecurity::text
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND c.relkind IN ('r', 'p')
 """
 
 Runner = Callable[[Sequence[str], str | None], subprocess.CompletedProcess[str]]

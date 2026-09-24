@@ -436,3 +436,74 @@ def test_duplicated_manifest_key_is_refused(gate: object, tmp_path: Path) -> Non
     )
     with pytest.raises(ValueError, match="duplicated migration key"):
         gate.load_manifest(path)  # type: ignore[attr-defined]
+
+
+# --------------------------------------------------------------------------
+# Review round (self-review on 0d998f429): each of these passed as additive
+# before the fix, and each would let an unsafe change be declared expand-only.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("sql", "needle"),
+    [
+        # An apostrophe inside a dollar-quoted literal must not open a string
+        # that hides the statements after it.
+        ("COMMENT ON TABLE t IS $$the agent's id$$; DROP TABLE legacy;", "DROP"),
+        # E'' literals honour backslash escapes.
+        ("COMMENT ON TABLE t IS E'it\\'s'; DROP TABLE legacy;", "DROP"),
+        # An unterminated literal is unreadable, never silently additive.
+        ("CREATE TABLE a (id int); COMMENT ON TABLE a IS 'oops", "unreadable"),
+        # IF NOT EXISTS may be a no-op on a table older code reads.
+        (
+            "CREATE TABLE IF NOT EXISTS t (id int); ALTER TABLE t ALTER COLUMN id SET NOT NULL;",
+            "ALTER COLUMN",
+        ),
+        (
+            "CREATE TABLE IF NOT EXISTS t (id int); CREATE UNIQUE INDEX u ON t (id);",
+            "UNIQUE INDEX",
+        ),
+        # A table created in another schema does not exempt public.foo.
+        (
+            "CREATE TABLE other.foo (x int); ALTER TABLE public.foo ALTER COLUMN x TYPE bigint;",
+            "ALTER COLUMN",
+        ),
+        # Calls into code the checker cannot read.
+        ("DO $$ BEGIN CALL do_things(); END $$;", "CALL"),
+        ("SELECT rewrite_everything();", "function call"),
+        ("DO $$ BEGIN PERFORM rewrite_everything(); END $$;", "function call"),
+        # An upsert overwrites existing rows.
+        (
+            "INSERT INTO t (k, v) VALUES ('a', 1) ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v;",
+            "ON CONFLICT DO UPDATE",
+        ),
+    ],
+)
+def test_review_round_shapes_are_findings(gate: object, sql: str, needle: str) -> None:
+    findings = gate.destructive_findings(sql)  # type: ignore[attr-defined]
+    assert any(needle in f for f in findings), (sql, findings)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT set_config('search_path', 'public', false);",
+        "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'r') "
+        "THEN CREATE ROLE r; END IF; END $$;",
+        "SELECT k.key_position FROM unnest(ARRAY[1]) AS k(key_position);",
+    ],
+)
+def test_read_only_calls_are_not_findings(gate: object, sql: str) -> None:
+    assert gate.destructive_findings(sql) == [], sql  # type: ignore[attr-defined]
+
+
+def test_malformed_execution_record_is_a_value_error(
+    gate: object, tmp_path: Path
+) -> None:
+    path = tmp_path / "executions.yaml"
+    path.write_text(
+        "schema_version: 1\nexecutions:\n  - migration: forward/x.sql\n    bogus: 1\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="malformed execution record"):
+        gate.load_executions(path)  # type: ignore[attr-defined]
