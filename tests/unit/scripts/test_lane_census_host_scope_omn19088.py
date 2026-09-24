@@ -75,6 +75,11 @@ _LANES_201 = {
     "ci-bus",
 }
 
+# OMN-19339: the .202 host carries the sim-202 lane and nothing else. From a
+# dogfood surface host it is as not-applicable as any .201 lane.
+_LANES_202 = {"sim-202"}
+_LANES_OFF_DOGFOOD_HOSTS = _LANES_201 | _LANES_202
+
 
 def _row(
     name: str,
@@ -240,7 +245,7 @@ def test_the_101_replay_reports_only_its_own_lane() -> None:
     plan = PLAN.build_plan(_dogfood_on(_HOST_101), MANIFEST)
     assert plan["host"] == "lab-101"
     assert plan["lanes_checked"] == ["dogfood"]
-    assert set(plan["lanes_not_applicable"]) == _LANES_201
+    assert set(plan["lanes_not_applicable"]) == _LANES_OFF_DOGFOOD_HOSTS
     assert plan["findings"] == []
     assert plan["has_drift"] is False
 
@@ -269,7 +274,7 @@ def test_two_hosts_each_return_findings_only_for_their_own_lanes() -> None:
     assert "dogfood" in plan_201["lanes_not_applicable"]
 
     assert {f["lane"] for f in plan_105["findings"]} <= {"dogfood"}
-    assert set(plan_105["lanes_not_applicable"]) == _LANES_201
+    assert set(plan_105["lanes_not_applicable"]) == _LANES_OFF_DOGFOOD_HOSTS
 
 
 def test_a_stopped_container_in_a_declared_lane_is_still_critical() -> None:

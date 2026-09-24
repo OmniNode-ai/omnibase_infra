@@ -70,6 +70,7 @@ from deploy_agent.lane_lock_client import (
     lane_lock,
 )
 from deploy_agent.lane_policy import load_allowed_lanes_from_env
+from deploy_agent.lineage_fence import DockerProvenanceReader, GitRefResolver
 from deploy_agent.loaded_code import record_loaded_code_sha
 from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
@@ -78,8 +79,16 @@ from deploy_agent.publisher import (
     publish_result,
 )
 from deploy_agent.queue_depth import LagSampler
+from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 
 logger = logging.getLogger(__name__)
+
+
+def _runtime_container_for_lane(lane: EnumRuntimeLane) -> str:
+    """The lane's main runtime container, whose image records its build (OMN-19270)."""
+    container_name, _ = lane_config_for(lane).runtime_health_targets[0]
+    return container_name
+
 
 STATE_DIR = Path(
     os.environ.get("DEPLOY_AGENT_STATE_DIR", "/data/omninode/deploy-agent/state/jobs")
@@ -398,6 +407,13 @@ class DeployAgent:
             ancestry_resolver=GitAncestryResolver(REPO_DIR),
             on_superseded=self._publish_superseded,
             on_rejected=self._publish_rejection_notice,
+            # OMN-19270. The lineage fence compares each command with the
+            # provenance the lane's runtime image was built from, and with the
+            # job that built it. Infra ancestry asks the resolver above, so it
+            # and coalescing share one fetch cooldown.
+            running_build=DockerProvenanceReader(_runtime_container_for_lane),
+            ref_resolver=GitRefResolver(REPO_DIR),
+            tracking_ref=load_tracking_remote_ref_from_env(),
         )
 
         # Step 6b: keep the lag sample current DURING a rebuild (OMN-18990).
@@ -1334,8 +1350,21 @@ class DeployAgent:
         )
 
     def _publish_rejection_notice(self, notice: ModelRejectionNotice) -> None:
-        """Instance seam the consumer's ``on_rejected`` hook is wired to."""
-        self.publish_rejection_notice(notice, publish=self._publish_rejection_event)
+        """Instance seam the consumer's ``on_rejected`` hook is wired to.
+
+        A supersession by the running build (OMN-19270) also has a job record
+        owing this event, so a publish that landed clears that debt here, and
+        the retry loop pays it otherwise.
+        """
+        published = self.publish_rejection_notice(
+            notice, publish=self._publish_rejection_event
+        )
+        if (
+            published
+            and notice.reason is EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD
+            and notice.correlation_id is not None
+        ):
+            self.job_store.mark_published(notice.correlation_id)
 
     def _publish_superseded(self, supersession: ModelSupersession) -> None:
         """AC6's terminal event: this command will not run, and here is what did.
@@ -1369,6 +1398,16 @@ class DeployAgent:
         it may be gone -- the job store outlives it, which is the reason the
         record carries both fields rather than only the log line naming them.
         """
+        if job.superseded_by_running_build:
+            # OMN-19270. The running build replaced it, and a running build is
+            # not a command: the event names no replacement.
+            return self._publish_rejection_event(
+                ModelRebuildRejected(
+                    correlation_id=job.correlation_id,
+                    reason=EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD,
+                    scope=Scope(job.command["scope"]),
+                )
+            )
         if job.superseded_by_sha is None or job.superseded_by_correlation_id is None:
             # Refused by JobState's own validator, so this is unreachable
             # through any write path; it is here because an unreachable branch
