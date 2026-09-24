@@ -227,6 +227,7 @@ migrations:
   forward/nodes/node_projection_delegation/0043z_preflight_delegation_shadow_comparisons.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN; ALTER TABLE ADD PRIMARY KEY; ALTER TABLE ADD UNIQUE; ALTER TABLE ENABLE ROW LE
   forward/nodes/node_projection_delegation/0044_restore_delegation_shadow_comparisons.sql: forward-only # ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL
   forward/nodes/node_projection_delegation/0045_terminal_construction_outcome_metrics.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
+  forward/nodes/node_projection_delegation/0046_delegation_events_cohort_key.sql: expand-only
   forward/nodes/node_projection_delegation_inference_response/0001_create_projection_delegation_inference_response_text.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PROJECTION_DELEGATION_INFERENCE_RESPONSE_TEXT_PKEY; ALTER TABLE ADD CONSTR
   forward/nodes/node_projection_delegation_inference_response/0002_inference_response_text_tenant_rekey.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; UPDATE
   forward/nodes/node_projection_delegation_inference_response/0003_inference_response_text_rls_tenant_isolation.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP

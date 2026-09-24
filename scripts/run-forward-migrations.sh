@@ -198,18 +198,71 @@ slot_skip_role_seam() {
 # quoted or lower-case `on database`) is refused, since a form that cannot be
 # confined is a form that reaches a database outside the fence.
 #
+# THE PRINCIPALS, TOO (OMN-19404). Confining the database names alone left the
+# GRANTEES pointing at the dev lane: forward 099 then ran `GRANT CONNECT ON
+# DATABASE omnidash_analytics_prepr1 TO omninode_runtime`, which hands the DEV
+# principal the slot's database and the slot's own omninode_runtime_prepr1
+# nothing. The fourth slot boot died on exactly that: `permission denied for
+# database omnidash_analytics_prepr1`. And 096 and 103 ran `ALTER ROLE` on the
+# dev lane's role_omnidash and tenant_projection_writer from a slot's run. So
+# every identifier token that is a principal provision_db_slot.sh mints a slot
+# twin for is rewritten to that twin, wherever it appears in a statement: a
+# grantee, a CREATE/ALTER ROLE target, a policy's role list, a SET ROLE, and
+# the role argument of an assertion, which then asserts on the slot principal
+# instead of passing on the dev lane's state. A whole token only, so a longer
+# identifier that merely starts with a role name is never touched. Roles the
+# provisioner does not mint (app_dashboard, role_omniweb) are left as written;
+# a slot has no principal of that name to point them at.
+#
+# An assertion that names the database as a STRING, `datname = '<db>'` or the
+# database argument of has_database_privilege, is rewritten with it. Leaving it
+# would assert the slot principal's CONNECT on the dev database, which is now
+# false by design and would fail the file. A quoted database name anywhere else
+# is data (`owner_service = 'omnibase_infra'`) and is never touched.
+#
+# SLOT_MANAGED_ROLES mirrors the roles scripts/provision_db_slot.sh derives,
+# SERVICE_DB_MAP's roles and LOGIN_ONLY_ROLES, and is pinned equal to them by
+# tests/unit/infra/test_forward_migration_slot_role_confinement.py.
+SLOT_MANAGED_ROLES="role_omnibase role_omniintelligence role_omniclaude role_omnimemory role_omninode role_omnidash omninode_runtime tenant_projection_writer chain_canary_reader"
+
 # The caller runs this in a command substitution, so a refusal is signalled by
 # exit status and the caller must stop on it; the copy is the caller's to
 # remove.
 slot_migration_file() {
   _smf_src="$1"
+  _smf_roles_ere="$(printf '%s' "$SLOT_MANAGED_ROLES" | tr ' ' '|')"
   if [ "$SLOT_ACTIVE" -ne 1 ] \
-     || ! grep -Eiq '^[[:space:]]*\\(connect|c)([[:space:]]|$)|on[[:space:]]+database[[:space:]]' "$_smf_src"; then
+     || ! grep -Eiq "^[[:space:]]*\\\\(connect|c)([[:space:]]|\$)|on[[:space:]]+database[[:space:]]|datname|has_database_privilege|(^|[^A-Za-z0-9_])(${_smf_roles_ere})([^A-Za-z0-9_]|\$)" "$_smf_src"; then
     printf '%s\n' "$_smf_src"
     return 0
   fi
   _smf_out="$(mktemp "${TMPDIR:-/tmp}/slot-migration.XXXXXX")" || return 1
-  if ! awk -v slot="$ONEX_DB_SLOT" '
+  if ! awk -v slot="$ONEX_DB_SLOT" -v roles="$SLOT_MANAGED_ROLES" -v q="'" '
+      # Every token of s that is a managed role gains the slot suffix. The token
+      # class includes digits and upper case so matching is maximal-munch: a
+      # longer identifier is one token and never compares equal to a role.
+      function suffix_roles(s,    out, tok) {
+        out = ""
+        while (match(s, /[A-Za-z0-9_]+/)) {
+          tok = substr(s, RSTART, RLENGTH)
+          out = out substr(s, 1, RSTART - 1)
+          if (tok in role) tok = tok "_" slot
+          out = out tok
+          s = substr(s, RSTART + RLENGTH)
+        }
+        return out s
+      }
+      # The quoted database name ending each match of re gains the suffix,
+      # inside its quotes.
+      function suffix_quoted_db(s, re,    out) {
+        out = ""
+        while (match(s, re)) {
+          out = out substr(s, 1, RSTART + RLENGTH - 2) "_" slot q
+          s = substr(s, RSTART + RLENGTH)
+        }
+        return out s
+      }
+      BEGIN { n = split(roles, r, " "); for (i = 1; i <= n; i++) role[r[i]] = 1 }
       /^[[:space:]]*\\(connect|c)([[:space:]]|$)/ {
         if (NF != 2 || $2 !~ /^[a-z_][a-z0-9_]*$/) {
           printf "[forward-migration] slot_fence_refusal: %s line %d: `%s` is not a bare database-name \\connect and cannot be confined to the slot\n", FILENAME, FNR, $0 > "/dev/stderr"
@@ -227,14 +280,18 @@ slot_migration_file() {
           out = out substr(line, 1, RSTART + RLENGTH - 1) "_" slot
           line = substr(line, RSTART + RLENGTH)
         }
-        print out line
+        line = out line
+        line = suffix_quoted_db(line, "datname[ \t]*=[ \t]*" q "[a-z_][a-z0-9_]*" q)
+        line = suffix_quoted_db(line, "has_database_privilege[(][^,()]*,[ \t]*" q "[a-z_][a-z0-9_]*" q)
+        print suffix_roles(line)
       }
       END { exit bad }
     ' "$_smf_src" > "$_smf_out"; then
     rm -f "$_smf_out"
     return 4
   fi
-  if ! awk '
+  if ! awk -v q="'" '
+      BEGIN { lit = "(datname[ \t]*=[ \t]*|has_database_privilege[(][^,()]*,[ \t]*)" q "[^" q "]*" q }
       /^[[:space:]]*\\(connect|c)[[:space:]]/ { print $2; next }
       /^[[:space:]]*--/ { next }
       {
@@ -242,6 +299,12 @@ slot_migration_file() {
         while (match(line, /on[ \t]+database[ \t]+[^ \t;]+/)) {
           n = split(substr(line, RSTART, RLENGTH), parts, /[ \t]+/)
           print parts[n]
+          line = substr(line, RSTART + RLENGTH)
+        }
+        line = tolower($0)
+        while (match(line, lit)) {
+          n = split(substr(line, RSTART, RLENGTH), parts, q)
+          print parts[n - 1]
           line = substr(line, RSTART + RLENGTH)
         }
       }
@@ -254,7 +317,7 @@ slot_migration_file() {
   fi
   # printf, not echo: a POSIX sh echo reads the backslash-c in the text as
   # "stop output here" and truncates the line.
-  printf '%s\n' "[forward-migration]   slot '${ONEX_DB_SLOT}': confined the database name(s) in $(basename "$_smf_src") to the slot" >&2
+  printf '%s\n' "[forward-migration]   slot '${ONEX_DB_SLOT}': confined the database and principal name(s) in $(basename "$_smf_src") to the slot" >&2
   printf '%s\n' "$_smf_out"
 }
 # ---- END slot \connect rewrite (OMN-18893) ----
