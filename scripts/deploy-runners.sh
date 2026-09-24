@@ -1226,6 +1226,19 @@ runner_is_idle() {
     # Anything else -- API failure, unknown runner, docker failure, the two
     # signals disagreeing -- returns non-zero and the caller skips.
     local name="${1}"
+
+    # OMN-19274 follow-up: a container that is not running at all cannot be
+    # mid-job, so it is idle by construction -- and the GitHub-state check
+    # below can never read it "online" to confirm that, which otherwise
+    # locks a runner already left offline (by a prior recreate that failed
+    # to restore credentials -- exactly the OMN-19206 rollout's
+    # omninode-runner-3/4) out of ever being reachable again, migration
+    # token or not. Checked first, ahead of the two-signal busy check, on
+    # purpose: a stopped container has no signals to disagree over.
+    local running
+    running=$(ssh "${RUNNER_HOST}" "docker inspect --format '{{.State.Running}}' ${name} 2>/dev/null" 2>/dev/null)
+    [[ "${running}" == "false" ]] && return 0
+
     local state status busy
     state=$(github_runner_state "${name}")
     status="${state%% *}"

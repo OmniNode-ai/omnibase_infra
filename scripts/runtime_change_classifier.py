@@ -23,6 +23,14 @@ would mean the train could inherit a receipt across a commit the trigger
 considered runtime-affecting -- a cut on a lane proof that does not describe the
 code being cut. There is exactly one list, and it lives here.
 
+The same holds for the whole predicate, not just the list (OMN-19318): the
+trigger also fires on the merged pull request's ``runtime_change`` label, and
+until OMN-19318 the train did not read it, so a label-only merge was walked
+past. :func:`is_runtime_affecting` is the one union of both signals, and both
+callers load this module under ONE ``sys.modules`` name
+(``_omnibase_infra_runtime_change_classifier``) so they hold the same function
+object rather than two copies of it.
+
 WHY IT IS STDLIB-ONLY, DELIBERATELY
 -----------------------------------
 ``trigger_rebuild_on_merge.py`` imports click and pydantic at module scope and
@@ -42,7 +50,7 @@ from __future__ import annotations
 import fnmatch
 import importlib.util
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -263,6 +271,63 @@ def attribute_runtime_paths(runtime_paths: list[str]) -> list[tuple[str, str]]:
 def format_runtime_path_attribution(attributed: list[tuple[str, str]]) -> str:
     """Render the attribution for one log line: ``path <- pattern`` per hit."""
     return ", ".join(f"{path} <- {pattern}" for path, pattern in attributed)
+
+
+#: The pull request label that marks a merge runtime-affecting whatever its
+#: paths say (OMN-19318). Spelled once, here; the trigger and the train read it.
+RUNTIME_CHANGE_LABEL = "runtime_change"
+
+#: A label source: the labels themselves, or a zero-argument reader that
+#: fetches them. A reader is only called when the paths do not already decide.
+LabelSource = Sequence[str] | Callable[[], Sequence[str]]
+
+
+class LabelReadError(RuntimeError):
+    """The merged pull request's labels could not be read.
+
+    Runtime-affecting is then UNDECIDED, and this is the explicit token for
+    that. A caller must not read it as "no label": that is the fail-OPEN
+    direction, in which the proof-subject walk inherits an older receipt across
+    a merge the trigger rebuilt for.
+    """
+
+
+def is_runtime_affecting(runtime_paths: Sequence[str], labels: LabelSource) -> bool:
+    """THE runtime-affecting predicate (OMN-19318, plan row D15, PS-1).
+
+    A merge is runtime-affecting when the path rule marks it (``runtime_paths``
+    is the output of :func:`classify_runtime_paths`) OR the merged pull request
+    that produced it carries :data:`RUNTIME_CHANGE_LABEL`.
+
+    Both callers use this one function object: the rebuild trigger's
+    ``should_trigger`` IS this function, and the release train's per-commit
+    predicate (which ``resolve_lab_candidate`` walks with) calls it. Before
+    OMN-19318 the train read paths only, so a label-only merge was rebuilt and
+    verified by the trigger while the walk stepped past it to an older subject.
+
+    ``labels`` may be a reader. It is not called when a runtime path already
+    decides the answer. A reader that raises, or returns something other than a
+    list of strings, raises :class:`LabelReadError` rather than answering.
+    """
+    if runtime_paths:
+        return True
+    if callable(labels):
+        try:
+            read = labels()
+        except LabelReadError:
+            raise
+        except Exception as exc:
+            msg = f"the merged pull request's labels could not be read: {exc}"
+            raise LabelReadError(msg) from exc
+    else:
+        read = labels
+    if isinstance(read, str) or not all(isinstance(label, str) for label in read):
+        msg = (
+            "the merged pull request's labels could not be read: expected a list "
+            f"of label names, got {read!r}"
+        )
+        raise LabelReadError(msg)
+    return RUNTIME_CHANGE_LABEL in {label.strip() for label in read}
 
 
 def classify_runtime_paths(
