@@ -1,9 +1,13 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""OMN-19077: the .201 general runner pool is capped at 40 and runs in one
-aggregate cgroup (``omnirunners.slice``), and ``deploy-runners.sh`` can scale
-the pool DOWN one idle runner at a time.
+"""OMN-19077: the .201 general runner pool (60 runners, unchanged by this
+ticket per the 2026-09-24 operator ruling, ROLLING_WORK_LEDGER.md:3794) runs
+in one aggregate cgroup (``omnirunners.slice``), and ``deploy-runners.sh`` can
+scale the pool DOWN one idle runner at a time when a future cap is warranted.
+The 40-runner cap this ticket originally proposed was reverted; the tests
+below exercise the slice-install and idle-scale-down mechanisms generically
+(against a stubbed runner count) and do not assert the live fleet size.
 
 Why these properties and not others:
 

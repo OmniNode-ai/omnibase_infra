@@ -33,6 +33,15 @@
 # Installed by scripts/deploy-runners.sh (install_runner_slice) before any
 # runner is created or recreated, and read back there; the deploy fails closed
 # if the live values differ from this file.
+#
+# COUNT. The pool is 60 runners (config/runner_fleet.yaml expected_count),
+# not the 40 an earlier draft of OMN-19077 proposed. Operator ruling
+# 2026-09-24 (ROLLING_WORK_LEDGER.md:3794): 60 is the correct steady-state
+# count, and containment -- not a headcount cut -- is the fix for the
+# 2026-09-22 incident. The limits below are unchanged by that ruling: they
+# bound the pool IN AGGREGATE regardless of how many containers are in it, so
+# the same four values hold the host to the same ceiling at 60 runners as
+# they would at 40 -- a full pool just contends harder for the same budget.
 [Unit]
 Description=OmniNode general CI runner pool (OMN-19077)
 Before=slices.target

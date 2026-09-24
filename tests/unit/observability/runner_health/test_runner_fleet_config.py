@@ -27,12 +27,14 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     assert config.runner_name_prefix == "omninode-runner"
     # OMN-18411: capped 88 -> 60 after a CI burst drove one-minute load to
     # 100.9 on the 32-core host -- the registered runner count is the
-    # worst-case concurrent-job ceiling. OMN-19077: capped 60 -> 40 after 58
-    # concurrent jobs drove IO pressure to 52.8 and crashed dockerd. All 40
-    # are always-on steady-state (no burst tier), so burst_count ==
-    # expected_count.
-    assert config.expected_count == 40
-    assert config.burst_count == 40
+    # worst-case concurrent-job ceiling. OMN-19077 proposed capping 60 -> 40
+    # after 58 concurrent jobs drove IO pressure to 52.8 and crashed dockerd;
+    # operator ruling 2026-09-24 (ROLLING_WORK_LEDGER.md:3794) kept the fleet
+    # at 60 and fixed the incident with the aggregate omnirunners.slice
+    # cgroup instead. All 60 are always-on steady-state (no burst tier), so
+    # burst_count == expected_count.
+    assert config.expected_count == 60
+    assert config.burst_count == 60
 
 
 def test_runner_compose_matches_configured_count() -> None:
@@ -468,11 +470,16 @@ def test_runner_compose_healthcheck_uses_egress_script() -> None:
         assert resolved_test == ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
 
 
-def test_runner_compose_reconciled_to_capacity_capped_40_fleet() -> None:
-    """OMN-19077 (after OMN-18411): the repo compose must match the .201 fleet
-    of 40 always-on steady-state runners, so `deploy-runners.sh` cannot
-    resurrect runners beyond 40. All 40 runners are steady (no burst profiles)
-    and each mounts the OMN-12433 egress healthcheck script.
+def test_runner_compose_reconciled_to_capacity_capped_60_fleet() -> None:
+    """OMN-18411, reaffirmed by OMN-19077's operator ruling 2026-09-24
+    (ROLLING_WORK_LEDGER.md:3794): the repo compose must match the .201 fleet
+    of 60 always-on steady-state runners, so `deploy-runners.sh` cannot
+    orphan-remove or resurrect runners beyond 60. All 60 runners are steady
+    (no burst profiles) and each mounts the OMN-12433 egress healthcheck
+    script. OMN-19077 also proposed cutting the count to 40; the operator
+    ruled the count stays at 60 and the 2026-09-22 incident is fixed by the
+    aggregate omnirunners.slice cgroup (see the test below), not a headcount
+    cut.
 
     Capped down from 88 (OMN-15978) after a CI burst drove one-minute load to
     100.9 on the 32-core `.201` host: idle runners cost nothing, so the
@@ -490,25 +497,25 @@ def test_runner_compose_reconciled_to_capacity_capped_40_fleet() -> None:
         for name, definition in compose["services"].items()
         if re.fullmatch(r"omninode-runner-\d+", name)
     }
-    assert len(runner_services) == 40, "expected exactly 40 runner services"
-    # Contiguous runner-1 .. runner-40, no gaps.
+    assert len(runner_services) == 60, "expected exactly 60 runner services"
+    # Contiguous runner-1 .. runner-60, no gaps.
     indices = sorted(int(name.rsplit("-", 1)[1]) for name in runner_services)
-    assert indices == list(range(1, 41))
+    assert indices == list(range(1, 61))
 
     hc_mount = "./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
     for name, definition in runner_services.items():
-        # All 40 are steady-state: no burst profile gating any runner.
+        # All 60 are steady-state: no burst profile gating any runner.
         assert "profiles" not in definition, f"{name} unexpectedly profile-gated"
         assert hc_mount in definition["volumes"], f"{name} missing healthcheck mount"
         assert definition["volumes"][-1] == (
             f"runner-{name.rsplit('-', 1)[1]}-creds:/home/runner/.runner-creds"
         )
 
-    # A backing named volume exists for each of the 40 runners.
+    # A backing named volume exists for each of the 60 runners.
     volume_names = {
         name for name in compose["volumes"] if re.fullmatch(r"runner-\d+-creds", name)
     }
-    assert len(volume_names) == 40
+    assert len(volume_names) == 60
 
 
 def test_every_general_pool_runner_runs_in_the_aggregate_slice() -> None:

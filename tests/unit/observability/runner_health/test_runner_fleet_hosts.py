@@ -44,7 +44,7 @@ def _config() -> ModelRunnerFleetConfig:
 # `py/incomplete-url-substring-sanitization` alerts this file first raised were
 # exactly that false shape. `.get()` says the same thing and does not.
 EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
-    ("omninode-pc.tail75df5e.ts.net", "amd64", 40),
+    ("omninode-pc.tail75df5e.ts.net", "amd64", 60),
     ("stickybeatz-2.tail75df5e.ts.net", "arm64", 1),
     ("omnibook.tail75df5e.ts.net", "arm64", 1),
 )
@@ -111,7 +111,7 @@ def test_declared_total_sums_only_the_hosts_carrying_that_class() -> None:
     """
     config = _config()
 
-    assert config.declared_total("action") == 40
+    assert config.declared_total("action") == 60
     assert config.declared_total("verify") >= 1
     # A class nothing declares is zero, not an error and not the whole fleet.
     assert config.declared_total("no-such-class") == 0

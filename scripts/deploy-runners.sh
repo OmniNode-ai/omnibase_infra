@@ -416,7 +416,7 @@ if [[ -n "${TARGET_HOST}" && "${TARGET_HOST}" != "${RUNNER_HOST}" ]]; then
     RUNNER_HOST_ARCH="$(runner_host_field "${TARGET_HOST}" arch)"
     RUNNER_HOST="${TARGET_HOST}"
     # Each non-primary host brings its own compose file. The primary host's
-    # file hand-writes 40 literal service blocks bound to its own container
+    # file hand-writes 60 literal service blocks bound to its own container
     # names, so reusing it on a second host would collide on every one of them.
     COMPOSE_FILE="docker/docker-compose.runners-${RUNNER_NAME_PREFIX}.yml"
     [[ -f "${COMPOSE_FILE}" ]] || {
