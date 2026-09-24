@@ -67,9 +67,6 @@ databases:
             privileges: [CONNECT]
           - object_type: SCHEMA
             privileges: [USAGE]
-            schema: tenant
-          - object_type: SCHEMA
-            privileges: [USAGE]
             schema: platform_catalog
         login: true
       omninode_runtime:
@@ -158,9 +155,6 @@ databases:
             privileges: [CONNECT]
           - object_type: SCHEMA
             privileges: [USAGE]
-            schema: tenant
-          - object_type: SCHEMA
-            privileges: [USAGE]
             schema: platform_catalog
         login: true
       tenant_projection_writer:
@@ -168,9 +162,6 @@ databases:
         grants:
           - object_type: DATABASE
             privileges: [CONNECT]
-          - object_type: SCHEMA
-            privileges: [USAGE]
-            schema: tenant
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: public
@@ -220,9 +211,6 @@ databases:
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: public
-          - object_type: SCHEMA
-            privileges: [USAGE]
-            schema: tenant
         login: true
     schemas:
       action_authorization_claim:
@@ -235,9 +223,6 @@ databases:
         domain: PLATFORM_CATALOG
         owner: owner_platform_catalog
       public:
-        domain: TENANT
-        owner: owner_onex_tenant
-      tenant:
         domain: TENANT
         owner: owner_onex_tenant
   omnibase_infra:

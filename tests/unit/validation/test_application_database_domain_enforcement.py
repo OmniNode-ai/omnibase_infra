@@ -14,12 +14,13 @@ from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDo
 from omnibase_infra.topology.application_database import load_topology_profile
 from omnibase_infra.topology.physical_schema_mapping import (
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
-    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+    physical_grant_schema_for_table,
 )
 from omnibase_infra.validation.application_database_domain_enforcement import (
     CANONICAL_TENANT_PREDICATE,
     application_database_created_catalog_identities,
     application_database_function_definition_sha256,
+    application_database_sql_target_requirements,
     lint_application_database_sql,
     load_application_database_ownership_identities,
     validate_application_database_catalog_census,
@@ -101,7 +102,7 @@ def _declaration(
     resolved_schema = (
         schema
         or {
-            EnumDatabaseSchemaDomain.TENANT: "tenant",
+            EnumDatabaseSchemaDomain.TENANT: "public",
             EnumDatabaseSchemaDomain.OMNINODE_INTERNAL: "omninode_internal",
             EnumDatabaseSchemaDomain.PLATFORM_CATALOG: "platform_catalog",
         }[domain]
@@ -251,7 +252,7 @@ def _security_definer_function() -> ModelApplicationDatabaseRelationState:
         function_state=ModelApplicationDatabaseFunctionState(
             owner="owner_onex_tenant",
             security_definer=True,
-            search_path=("pg_catalog", "tenant", "pg_temp"),
+            search_path=("pg_catalog", "public", "pg_temp"),
             public_execute=False,
             audit_id=f"OMN-15361:tenant-report:{'a' * 64}",
             definition_sha256="a" * 64,
@@ -616,7 +617,7 @@ def test_security_definer_requires_pg_temp_last_and_audit_bound_definition() -> 
         function_state=ModelApplicationDatabaseFunctionState(
             owner="owner_onex_tenant",
             security_definer=True,
-            search_path=("pg_catalog", "tenant"),
+            search_path=("pg_catalog", "public"),
             public_execute=False,
             audit_id="OMN-15361:tenant-report",
             tenant_isolation_evidence=_evidence(),
@@ -734,17 +735,17 @@ def test_red_control_security_definer_volatility_drift() -> None:
     function_state = green.function_state
     assert function_state is not None
     drifted_hash = application_database_function_definition_sha256(
-        schema="tenant",
+        schema="public",
         name="tenant_report",
         signature="()",
         language="sql",
-        source_body="SELECT count(*)::integer FROM tenant.events",
+        source_body="SELECT count(*)::integer FROM public.events",
         parsed_sql_body=None,
         security_definer=True,
         leakproof=False,
         volatility="s",
         parallel="u",
-        config=("search_path=pg_catalog, tenant, pg_temp",),
+        config=("search_path=pg_catalog, public, pg_temp",),
         kind="f",
         strict=False,
         returns_set=False,
@@ -962,12 +963,12 @@ def test_catalog_census_expected_set_is_manifest_authoritative_and_signature_exa
 ):
     states = (_tenant_table(),)
     relation_identity = ModelApplicationDatabaseCatalogIdentity(
-        schema="tenant",
+        schema="public",
         name="events",
         kind=EnumApplicationInventoryObjectKind.TABLE,
     )
     overload_a = ModelApplicationDatabaseCatalogIdentity(
-        schema="tenant",
+        schema="public",
         name="safe_report",
         kind=EnumApplicationInventoryObjectKind.FUNCTION,
         function_signature="()",
@@ -1001,11 +1002,30 @@ def test_catalog_census_expected_set_is_manifest_authoritative_and_signature_exa
 
 
 def test_red_control_public_application_table() -> None:
-    assert "public" in "\n".join(
-        lint_application_database_sql(
-            "CREATE TABLE public.events (id uuid);", _TOPOLOGY
+    """OMN-17887: `public` is the TENANT domain's schema, and only TENANT's.
+
+    The blanket "prohibited in public" refusal is gone because a TENANT relation
+    now lives in `public` (test_green_relation_set_... proves that passes). What
+    stays refused is any NON-TENANT relation placed there: it contradicts the
+    typed topology's declared domain for `public`. A `public` CREATE is also
+    still projected into the created-catalog census, so the SQL gate holds it to
+    exactly one ownership declaration.
+    """
+    for domain in (
+        EnumDatabaseSchemaDomain.OMNINODE_INTERNAL,
+        EnumDatabaseSchemaDomain.PLATFORM_CATALOG,
+    ):
+        misplaced = _non_tenant_table(domain).model_copy(
+            update={"declaration": _declaration(domain=domain, schema="public")}
         )
-    )
+        assert "typed topology domain" in _violations(misplaced), domain
+
+    assert tuple(
+        (identity.schema, identity.name, identity.kind.value)
+        for identity in application_database_created_catalog_identities(
+            "CREATE TABLE public.events (id uuid);"
+        )
+    ) == (("public", "events", "table"),)
 
 
 def test_red_control_unqualified_application_table() -> None:
@@ -1014,11 +1034,11 @@ def test_red_control_unqualified_application_table() -> None:
     )
     assert "schema-qualified" in "\n".join(
         lint_application_database_sql(
-            'CREATE TABLE "tenant.events" (id uuid);', _TOPOLOGY
+            'CREATE TABLE "omninode_internal.events" (id uuid);', _TOPOLOGY
         )
     )
     assert not lint_application_database_sql(
-        "CREATE TABLE tenant.events (id uuid PRIMARY KEY);", _TOPOLOGY
+        "CREATE TABLE omninode_internal.events (id uuid PRIMARY KEY);", _TOPOLOGY
     )
 
 
@@ -1051,11 +1071,11 @@ def test_red_control_unknown_topology_schema() -> None:
         "DELETE FROM events;",
         "TRUNCATE TABLE events;",
         "SELECT * FROM events;",
-        "MERGE INTO events USING tenant.incoming ON false WHEN NOT MATCHED THEN DO NOTHING;",
+        "MERGE INTO events USING omninode_internal.incoming ON false WHEN NOT MATCHED THEN DO NOTHING;",
         "COPY events TO STDOUT;",
         "GRANT SELECT ON TABLE events TO app_dashboard;",
         "CREATE INDEX events_payload_idx ON events (payload);",
-        "CREATE TABLE tenant.children (parent_id uuid REFERENCES parents(id));",
+        "CREATE TABLE omninode_internal.children (parent_id uuid REFERENCES parents(id));",
     ],
 )
 def test_unqualified_application_relation_targets_are_rejected(
@@ -1069,17 +1089,17 @@ def test_unqualified_application_relation_targets_are_rejected(
 @pytest.mark.parametrize(
     "statement",
     [
-        "CREATE MATERIALIZED VIEW tenant.event_rollup AS SELECT 1;",
-        "CREATE SEQUENCE tenant.event_seq;",
-        "CREATE DOMAIN tenant.tenant_slug AS text;",
-        "CREATE EXTENSION hstore WITH SCHEMA tenant;",
-        "ALTER TABLE tenant.events ADD COLUMN payload jsonb;",
-        "INSERT INTO tenant.events (id) VALUES ('00000000-0000-0000-0000-000000000001');",
-        "UPDATE tenant.events SET payload = '{}'::jsonb;",
-        "DELETE FROM tenant.events;",
-        "TRUNCATE TABLE tenant.events;",
-        "MERGE INTO tenant.events USING tenant.incoming ON false WHEN NOT MATCHED THEN DO NOTHING;",
-        "CREATE TABLE tenant.children (parent_id uuid REFERENCES tenant.parents(id));",
+        "CREATE MATERIALIZED VIEW omninode_internal.event_rollup AS SELECT 1;",
+        "CREATE SEQUENCE omninode_internal.event_seq;",
+        "CREATE DOMAIN omninode_internal.tenant_slug AS text;",
+        "CREATE EXTENSION hstore WITH SCHEMA omninode_internal;",
+        "ALTER TABLE omninode_internal.events ADD COLUMN payload jsonb;",
+        "INSERT INTO omninode_internal.events (id) VALUES ('00000000-0000-0000-0000-000000000001');",
+        "UPDATE omninode_internal.events SET payload = '{}'::jsonb;",
+        "DELETE FROM omninode_internal.events;",
+        "TRUNCATE TABLE omninode_internal.events;",
+        "MERGE INTO omninode_internal.events USING omninode_internal.incoming ON false WHEN NOT MATCHED THEN DO NOTHING;",
+        "CREATE TABLE omninode_internal.children (parent_id uuid REFERENCES omninode_internal.parents(id));",
     ],
 )
 def test_qualified_application_relation_targets_are_accepted(statement: str) -> None:
@@ -1087,16 +1107,28 @@ def test_qualified_application_relation_targets_are_accepted(statement: str) -> 
 
 
 def test_public_unlogged_application_table_is_rejected() -> None:
-    assert "public" in "\n".join(
+    """OMN-17887: UNLOGGED cannot hide a CREATE from either check.
+
+    In the retired `tenant` schema it is refused as an unknown topology schema;
+    in `public` (the TENANT domain's schema) it is still a created identity the
+    SQL gate holds to exactly one ownership declaration.
+    """
+    assert "'tenant.events' uses unknown topology schema" in "\n".join(
         lint_application_database_sql(
-            "CREATE UNLOGGED TABLE public.events (id uuid);", _TOPOLOGY
+            "CREATE UNLOGGED TABLE tenant.events (id uuid);", _TOPOLOGY
         )
     )
+    assert tuple(
+        (identity.schema, identity.name, identity.kind.value)
+        for identity in application_database_created_catalog_identities(
+            "CREATE UNLOGGED TABLE public.events (id uuid);"
+        )
+    ) == (("public", "events", "table"),)
 
 
 def test_qualified_ctes_table_functions_and_system_catalog_reads_are_accepted() -> None:
     assert not lint_application_database_sql(
-        "WITH recent AS (SELECT * FROM tenant.events) SELECT * FROM recent;",
+        "WITH recent AS (SELECT * FROM omninode_internal.events) SELECT * FROM recent;",
         _TOPOLOGY,
     )
     assert not lint_application_database_sql(
@@ -1110,20 +1142,20 @@ def test_qualified_ctes_table_functions_and_system_catalog_reads_are_accepted() 
         "WITH x AS (SELECT 1) UPDATE events SET payload = 'x';",
         "WITH x AS (SELECT 1) INSERT INTO events (payload) SELECT 1 FROM x;",
         "WITH x AS (SELECT 1) MERGE INTO events USING x ON false WHEN NOT MATCHED THEN DO NOTHING;",
-        "SELECT * FROM tenant.events, unqualified;",
-        "DROP TABLE tenant.events, unqualified;",
+        "SELECT * FROM omninode_internal.events, unqualified;",
+        "DROP TABLE omninode_internal.events, unqualified;",
         "CREATE POLICY tenant_policy ON events USING (true);",
-        "CREATE TRIGGER tenant_trigger BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION tenant.audit();",
+        "CREATE TRIGGER tenant_trigger BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION omninode_internal.audit();",
         "REFRESH MATERIALIZED VIEW events;",
-        "CREATE TABLE tenant.child PARTITION OF parent FOR VALUES IN (1);",
+        "CREATE TABLE omninode_internal.child PARTITION OF parent FOR VALUES IN (1);",
         "WITH changed AS (UPDATE events SET payload = 'x' RETURNING *) SELECT * FROM changed;",
         "WITH events AS (SELECT * FROM events) SELECT * FROM events;",
-        "DROP FUNCTION tenant.safe_report(), rogue();",
-        "DROP PROCEDURE tenant.refresh_cache(), rogue();",
-        "DROP AGGREGATE tenant.total(integer), rogue(integer);",
+        "DROP FUNCTION omninode_internal.safe_report(), rogue();",
+        "DROP PROCEDURE omninode_internal.refresh_cache(), rogue();",
+        "DROP AGGREGATE omninode_internal.total(integer), rogue(integer);",
         "ALTER FOREIGN TABLE rogue ADD COLUMN payload text;",
-        "DROP FOREIGN TABLE tenant.remote_events, rogue;",
-        "CREATE TABLE tenant.child (id uuid) INHERITS (tenant.parent, rogue);",
+        "DROP FOREIGN TABLE omninode_internal.remote_events, rogue;",
+        "CREATE TABLE omninode_internal.child (id uuid) INHERITS (omninode_internal.parent, rogue);",
     ],
 )
 def test_adversarial_unqualified_sql_forms_fail_closed(statement: str) -> None:
@@ -1140,23 +1172,27 @@ def test_adversarial_unqualified_sql_forms_fail_closed(statement: str) -> None:
             "schema-qualified",
             id="explain-unqualified-mutation",
         ),
+        # OMN-17887: these three rows used `public.<name>` as the refused
+        # source. `public` is now the TENANT domain's declared schema (held to
+        # ownership, see test_alternate_target_forms_reading_public_are_held_to_
+        # ownership), so they refuse the retired `tenant` schema instead.
         pytest.param(
-            "CREATE VIEW tenant.events_copy AS TABLE public.events;",
-            "public",
-            id="as-table-public-read",
+            "CREATE VIEW omninode_internal.events_copy AS TABLE tenant.events;",
+            "'tenant.events' uses unknown topology schema",
+            id="as-table-retired-schema-read",
         ),
         pytest.param(
-            "CREATE TABLE tenant.events_copy (LIKE public.events INCLUDING ALL);",
-            "public",
-            id="like-public-relation",
+            "CREATE TABLE omninode_internal.events_copy (LIKE tenant.events INCLUDING ALL);",
+            "'tenant.events' uses unknown topology schema",
+            id="like-retired-schema-relation",
         ),
         pytest.param(
-            "ALTER TABLE tenant.events INHERIT public.parent_events;",
-            "public",
-            id="inherit-public-relation",
+            "ALTER TABLE omninode_internal.events INHERIT tenant.parent_events;",
+            "'tenant.parent_events' uses unknown topology schema",
+            id="inherit-retired-schema-relation",
         ),
         pytest.param(
-            "CREATE TRIGGER audit BEFORE INSERT ON tenant.events "
+            "CREATE TRIGGER audit BEFORE INSERT ON omninode_internal.events "
             "FOR EACH ROW EXECUTE FUNCTION audit_event();",
             "schema-qualified",
             id="unqualified-trigger-function",
@@ -1172,7 +1208,7 @@ def test_adversarial_unqualified_sql_forms_fail_closed(statement: str) -> None:
             id="dynamic-sql-target",
         ),
         pytest.param(
-            "CREATE TYPE tenant.event_span AS RANGE (SUBTYPE = timestamptz);",
+            "CREATE TYPE omninode_internal.event_span AS RANGE (SUBTYPE = timestamptz);",
             "MULTIRANGE_TYPE_NAME",
             id="implicit-multirange-identity",
         ),
@@ -1186,10 +1222,47 @@ def test_valid_postgres_alternate_target_forms_fail_closed(
 
 
 @pytest.mark.parametrize(
+    ("statement", "location"),
+    [
+        pytest.param(
+            "CREATE VIEW omninode_internal.events_copy AS TABLE public.events;",
+            ("public", "events"),
+            id="as-table-public-read",
+        ),
+        pytest.param(
+            "CREATE TABLE omninode_internal.events_copy (LIKE public.events INCLUDING ALL);",
+            ("public", "events"),
+            id="like-public-relation",
+        ),
+        pytest.param(
+            "ALTER TABLE omninode_internal.events INHERIT public.parent_events;",
+            ("public", "parent_events"),
+            id="inherit-public-relation",
+        ),
+    ],
+)
+def test_alternate_target_forms_reading_public_are_held_to_ownership(
+    statement: str,
+    location: tuple[str, str],
+) -> None:
+    """OMN-17887: a `public` source in an alternate form is still a real target.
+
+    The lint no longer refuses `public.<name>`, so each form must emit the exact
+    ownership requirement the SQL gate refuses when no single owner answers.
+    """
+    assert location in {
+        requirement.location
+        for requirement in application_database_sql_target_requirements(
+            statement, _TOPOLOGY
+        )
+    }
+
+
+@pytest.mark.parametrize(
     "statement",
     [
         "SELECT 'from users'::text;",
-        "INSERT INTO tenant.events (payload) VALUES ('join public.events');",
+        "INSERT INTO omninode_internal.events (payload) VALUES ('join public.events');",
         "SELECT $$update events set payload = 'x'$$::text;",
     ],
 )
@@ -1203,35 +1276,35 @@ def test_sql_keywords_inside_literals_are_not_treated_as_relation_targets(
     ("statement", "expected"),
     [
         (
-            "CREATE FOREIGN TABLE tenant.remote_events (id uuid) SERVER remote;",
-            (("tenant", "remote_events", "foreign_table", None),),
+            "CREATE FOREIGN TABLE omninode_internal.remote_events (id uuid) SERVER remote;",
+            (("omninode_internal", "remote_events", "foreign_table", None),),
         ),
         (
-            "CREATE AGGREGATE tenant.total(integer) (SFUNC = int4pl, STYPE = integer);",
-            (("tenant", "total", "aggregate", "(integer)"),),
+            "CREATE AGGREGATE omninode_internal.total(integer) (SFUNC = int4pl, STYPE = integer);",
+            (("omninode_internal", "total", "aggregate", "(integer)"),),
         ),
         (
-            "CREATE FUNCTION tenant.rank_state(integer) RETURNS integer LANGUAGE internal WINDOW AS 'window_rank';",
-            (("tenant", "rank_state", "window_function", "(integer)"),),
+            "CREATE FUNCTION omninode_internal.rank_state(integer) RETURNS integer LANGUAGE internal WINDOW AS 'window_rank';",
+            (("omninode_internal", "rank_state", "window_function", "(integer)"),),
         ),
         (
-            "CREATE TYPE tenant.iso_code (INPUT = textin, OUTPUT = textout);",
-            (("tenant", "iso_code", "base_type", None),),
+            "CREATE TYPE omninode_internal.iso_code (INPUT = textin, OUTPUT = textout);",
+            (("omninode_internal", "iso_code", "base_type", None),),
         ),
         (
-            "CREATE TYPE tenant.event_span AS RANGE (SUBTYPE = timestamptz, MULTIRANGE_TYPE_NAME = tenant.event_spans);",
+            "CREATE TYPE omninode_internal.event_span AS RANGE (SUBTYPE = timestamptz, MULTIRANGE_TYPE_NAME = omninode_internal.event_spans);",
             (
-                ("tenant", "event_span", "range_type", None),
-                ("tenant", "event_spans", "multirange_type", None),
+                ("omninode_internal", "event_span", "range_type", None),
+                ("omninode_internal", "event_spans", "multirange_type", None),
             ),
         ),
         (
-            "CREATE EXTENSION hstore WITH SCHEMA tenant;",
-            (("tenant", "hstore", "extension", None),),
+            "CREATE EXTENSION hstore WITH SCHEMA omninode_internal;",
+            (("omninode_internal", "hstore", "extension", None),),
         ),
         (
-            "CREATE DOMAIN tenant.tenant_slug AS text CHECK (VALUE <> '');",
-            (("tenant", "tenant_slug", "type", None),),
+            "CREATE DOMAIN omninode_internal.tenant_slug AS text CHECK (VALUE <> '');",
+            (("omninode_internal", "tenant_slug", "type", None),),
         ),
     ],
 )
@@ -1309,17 +1382,17 @@ def test_function_definition_fingerprint_covers_security_relevant_catalog_state(
     None
 ):
     definition: dict[str, object] = {
-        "schema": "tenant",
+        "schema": "public",
         "name": "safe_report",
         "signature": "()",
         "language": "sql",
-        "source_body": "SELECT count(*)::integer FROM tenant.events",
+        "source_body": "SELECT count(*)::integer FROM public.events",
         "parsed_sql_body": None,
         "security_definer": True,
         "leakproof": False,
         "volatility": "v",
         "parallel": "u",
-        "config": ("search_path=pg_catalog, tenant, pg_temp",),
+        "config": ("search_path=pg_catalog, public, pg_temp",),
         "kind": "f",
         "strict": False,
         "returns_set": False,
@@ -1370,65 +1443,95 @@ def _physically_public_bridge_manifest(
     return manifest
 
 
-def test_physically_public_bridge_covers_internal_family_not_only_tenant(
+# OMN-17887: a relation that was in the deleted tenant bridge set until the
+# operator ruling retired the `tenant` schema. Named literally because the set
+# it came from no longer exists to be imported.
+_FORMER_TENANT_BRIDGE_RELATION = "delegation_events"
+
+
+def _located_identities(manifest: Path, name: str) -> list[tuple[str, str]]:
+    return [
+        (identity.schema, identity.name)
+        for identity in load_application_database_ownership_identities((manifest,))
+        if identity.name == name
+    ]
+
+
+def test_physically_public_bridge_covers_internal_family_and_tenant_is_public(
     tmp_path: Path,
 ) -> None:
-    """OMN-16993: a relation declared at its LOGICAL schema resolves at `public`.
+    """OMN-16993 / OMN-17887: every owned relation resolves where SQL names it.
 
-    Deployable SQL must target the PHYSICAL relation, which for both
-    ``TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359`` and
-    ``INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359`` still lives bare in
-    ``public`` until the governed OMN-15359 cutover. Before OMN-16993 the
-    resolver bridged the tenant family only, so any NEW deployable SQL touching
-    one of the 41 internal physically-public relations resolved to ZERO
-    ownership declarations and could not be made to pass: declaring
-    ``schema: public`` in the owning repo's manifest is rejected upstream as a
-    conflicting-schema declaration against the node contract.
+    Deployable SQL must target the PHYSICAL relation. For
+    ``INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359`` that is still bare
+    ``public`` until the governed OMN-15359 cutover, so a relation declared at
+    its LOGICAL ``omninode_internal`` schema must bridge to ``public``. Without
+    that, NEW deployable SQL touching one of those relations resolves to ZERO
+    ownership declarations and cannot be made to pass.
+
+    The tenant family no longer needs a bridge: OMN-17887 made ``public`` the
+    TENANT domain's schema, so a tenant relation is declared ``schema: public``
+    directly and must resolve at ``public`` exactly once.
     """
-    tenant_name = sorted(TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359)[0]
     internal_name = sorted(INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359)[0]
+    internal_manifest = _physically_public_bridge_manifest(
+        tmp_path, schema="omninode_internal", name=internal_name
+    )
+    internal_located = set(_located_identities(internal_manifest, internal_name))
+    assert ("omninode_internal", internal_name) in internal_located, internal_located
+    assert ("public", internal_name) in internal_located, (
+        f"omninode_internal.{internal_name} did not bridge to its physical public "
+        "identity; deployable SQL targeting public."
+        f"{internal_name} would resolve to zero ownership declarations"
+    )
 
-    for schema, name in (
-        ("tenant", tenant_name),
-        ("omninode_internal", internal_name),
-    ):
-        manifest = _physically_public_bridge_manifest(
-            tmp_path, schema=schema, name=name
-        )
-        identities = load_application_database_ownership_identities((manifest,))
-        located = {
-            (identity.schema, identity.name)
-            for identity in identities
-            if identity.name == name
-        }
-        assert (schema, name) in located, (schema, name, located)
-        assert ("public", name) in located, (
-            f"{schema}.{name} did not bridge to its physical public identity; "
-            "deployable SQL targeting public."
-            f"{name} would resolve to zero ownership declarations"
-        )
+    tenant_name = _FORMER_TENANT_BRIDGE_RELATION
+    tenant_manifest = _physically_public_bridge_manifest(
+        tmp_path, schema="public", name=tenant_name
+    )
+    assert _located_identities(tenant_manifest, tenant_name) == [
+        ("public", tenant_name)
+    ]
 
 
-def test_physically_public_families_are_disjoint_so_the_bridge_cannot_double_count(
+def test_tenant_schema_is_retired_so_nothing_bridges_or_resolves_through_it(
     tmp_path: Path,
 ) -> None:
-    """OMN-16993: the bridge preserves `exactly one ownership declaration`.
+    """OMN-17887: the `tenant` schema is retired, not silently re-aliased.
 
-    The bridge records a ``public`` twin per declaration. If a name appeared in
-    BOTH physically-public families it could be declared once at ``tenant`` and
-    once at ``omninode_internal`` and produce two ``public`` twins, turning the
-    gate's "exactly one declaration" requirement into a duplicate-declaration
-    failure. Disjointness is what makes that impossible, so it is asserted
-    rather than assumed.
+    This replaces the OMN-16993 disjointness check between the tenant and
+    internal bridge families: the tenant family is gone, so the risk it guarded
+    -- one name bridging from two logical schemas into two ``public`` twins --
+    now reduces to the ``tenant`` half never bridging at all. A relation still
+    declared at ``tenant`` must NOT gain a ``public`` twin (that would let a
+    stale declaration own a real public relation), the physical grant mapping
+    must not route ``tenant`` to ``public``, and the typed topology must refuse
+    ``tenant`` as an unknown schema in SQL.
     """
-    overlap = (
-        TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
-        & INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    name = _FORMER_TENANT_BRIDGE_RELATION
+    assert name not in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+
+    stale_manifest = _physically_public_bridge_manifest(
+        tmp_path, schema="tenant", name=name
     )
-    assert not overlap, sorted(overlap)
+    located = _located_identities(stale_manifest, name)
+    assert ("public", name) not in located, located
+    assert located == [("tenant", name)]
+
+    assert physical_grant_schema_for_table("tenant", name) == "tenant"
+    assert "tenant" not in {
+        schema_name
+        for database in _TOPOLOGY.databases.values()
+        for schema_name in database.schemas
+    }
+    assert "unknown topology schema" in "\n".join(
+        lint_application_database_sql(
+            f"ALTER TABLE tenant.{name} ADD COLUMN payload text;", _TOPOLOGY
+        )
+    )
 
 
-def test_relation_outside_both_families_does_not_bridge_to_public(
+def test_relation_outside_the_internal_family_does_not_bridge_to_public(
     tmp_path: Path,
 ) -> None:
     """OMN-16993: the bridge is scoped, not a blanket public twin for everything.
@@ -1438,7 +1541,6 @@ def test_relation_outside_both_families_does_not_bridge_to_public(
     ``public.<name>`` resolve an owner for a relation that does not exist there.
     """
     name = "omn16993_not_physically_public_fixture"
-    assert name not in TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
     assert name not in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
 
     manifest = _physically_public_bridge_manifest(

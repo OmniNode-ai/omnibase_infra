@@ -118,7 +118,7 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
     monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
-        projection_database_target("delegation_events", schema="tenant"),
+        projection_database_target("delegation_events", schema="public"),
         (TOPIC,),
     )
     engine = MessageDispatchEngine()
@@ -158,8 +158,9 @@ async def test_dispatch_engine_keeps_verified_authority_out_of_band(
         "SELECT set_config(%s, %s, true)",
         ("app.tenant_id", str(tenant_id)),
     )
-    # OMN-16239: physical schema, not the declared one -- delegation_events is
-    # still bridged to public until OMN-15359 relocates the tenant family.
+    # OMN-16239/OMN-17887: the physical schema. delegation_events is a
+    # TENANT-domain relation declared `public`, the TENANT domain's schema for
+    # good (the `tenant` schema is retired).
     assert 'INSERT INTO "public"."delegation_events"' in calls[2][0]
     assert calls[2][1]["correlation_id"] == envelope.envelope_id  # type: ignore[index]
     assert calls[2][1]["tenant_id"] == tenant_id  # type: ignore[index]
@@ -197,7 +198,7 @@ async def test_dispatch_without_verified_capability_records_but_never_selects(
     monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
-        projection_database_target("delegation_events", schema="tenant"),
+        projection_database_target("delegation_events", schema="public"),
         (TOPIC,),
     )
     claimed_tenant = uuid4()
@@ -239,7 +240,7 @@ async def test_dispatch_without_verified_capability_fails_at_db_role_validation(
     monkeypatch.setenv("ONEX_TENANT_DB_URL", "postgresql://fixture")
     callback = _make_projection_dispatch_callback(
         _TenantProjectionHandler(),
-        projection_database_target("delegation_events", schema="tenant"),
+        projection_database_target("delegation_events", schema="public"),
         (TOPIC,),
     )
     claimed_tenant = uuid4()
@@ -268,7 +269,7 @@ async def test_mixed_target_internal_operation_does_not_resolve_tenant_authority
         ModelDbTableDeclaration(
             name="delegation_events",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration="proof/tenant.sql",
             access="read_write",
             role="tenant",
