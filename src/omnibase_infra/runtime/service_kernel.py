@@ -208,6 +208,9 @@ from omnibase_infra.topics import (
 )
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_log_credential_redaction import (
+    install_credential_redaction_filter,
+)
 from omnibase_infra.utils.util_runtime_packages import is_runtime_package_active
 
 logger = logging.getLogger(__name__)
@@ -5508,6 +5511,22 @@ def configure_logging() -> None:
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # OMN-17423: attach the credential redaction filter to every handler
+    # basicConfig just installed. This is the single shared bootstrap for
+    # omninode-runtime, -effects and -worker (all three run the `onex-runtime`
+    # entrypoint -> kernel:main -> here), so installing once here covers every
+    # runtime service in the credential path by construction. Per-service
+    # filters were rejected on 2026-09-15: one service being covered is not
+    # evidence about the other three.
+    #
+    # Installed AFTER basicConfig deliberately -- there is no handler to filter
+    # before it. Idempotent, so a re-entrant bootstrap adds nothing.
+    handlers_filtered = install_credential_redaction_filter()
+    logging.getLogger(__name__).debug(
+        "Credential redaction filter installed on %d log handler(s)",
+        handlers_filtered,
     )
 
 

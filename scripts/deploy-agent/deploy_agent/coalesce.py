@@ -36,6 +36,12 @@ bare "not coalesced":
     Commands for different lanes are never coalesced. They mutate different
     compose projects; folding them would drop a deploy of one lane entirely.
 
+``ROLLBACK_DECLARED``
+    A command carrying a signed rollback declaration (OMN-19270) is never
+    folded, in either direction. A rollback exists to move the lane off the
+    build a newer command would put back, so a newer command running in its
+    place would undo the one deploy that was deliberate.
+
 ``NOT_FULL_SCOPE``
     Only ``scope=full`` folds into ``scope=full``. The scope decides WHICH
     services are recreated, so folding a ``core`` command into a ``full`` one
@@ -145,6 +151,7 @@ class EnumCoalesceRefusal(StrEnum):
     """
 
     DIFFERENT_LANE = "different_lane"
+    ROLLBACK_DECLARED = "rollback_declared"
     NOT_FULL_SCOPE = "not_full_scope"
     SERVICES_DIFFER = "services_differ"
     BUILD_SOURCE_DIFFERS = "build_source_differs"
@@ -268,6 +275,8 @@ def _refusal_for(
     """
     if candidate.runtime_lane != head.runtime_lane:
         return EnumCoalesceRefusal.DIFFERENT_LANE
+    if head.rollback is not None or candidate.rollback is not None:
+        return EnumCoalesceRefusal.ROLLBACK_DECLARED
     if head.scope is not Scope.FULL or candidate.scope is not Scope.FULL:
         return EnumCoalesceRefusal.NOT_FULL_SCOPE
     if list(candidate.services) != list(head.services):

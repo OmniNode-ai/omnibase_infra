@@ -64,7 +64,6 @@ _LOCAL_201_MODELS_URL = "http://192.168.86.201:8000/v1/models"  # onex-allow-int
 _ENDPOINT_URL_ENV = {
     "local-coder": "LLM_CODER_URL",
     "local-heavy-reasoning": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
-    "local-ds-v4-flash": "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
 }
 
 

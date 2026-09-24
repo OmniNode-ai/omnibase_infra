@@ -237,6 +237,58 @@ VERIFY_RECREATE_POLL_SECONDS = 10
 # number, so the subprocess ceiling and the client's own ceiling cannot drift.
 RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS = 10
 
+# OMN-19374: the helpers deploy-runtime.sh already uses to honour a runtime
+# container's DECLARED start budget (OMN-18349). Verification sources the same
+# file rather than restating the budget arithmetic and the state vocabulary in
+# Python, so the two deploy paths cannot disagree about when a runtime is still
+# starting. Resolved against the deploy clone, like every other script this
+# executor shells out to.
+RUNTIME_HEALTH_WAIT_HELPERS = (
+    Path(REPO_DIR) / "scripts" / "runtime_build" / "runtime_health_wait.sh"
+)
+
+
+def _run_runtime_health_helper(
+    function: str, *args: str
+) -> subprocess.CompletedProcess[str] | None:
+    """Call one function from ``RUNTIME_HEALTH_WAIT_HELPERS`` (OMN-19374).
+
+    The file is SOURCED, never executed, so each call is one ``bash -c`` that
+    sources it and runs the named function with its arguments as positional
+    parameters -- nothing is interpolated into the script text. ``None`` when
+    bash itself could not run or overran the probe bound; callers read that as
+    "unreadable", which never extends a wait.
+    """
+    try:
+        return _run(
+            [
+                "bash",
+                "-c",
+                'source "$1" && shift && "$@"',
+                "runtime_health_wait",
+                str(RUNTIME_HEALTH_WAIT_HELPERS),
+                function,
+                *args,
+            ],
+            timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _runtime_health_helper(function: str, *args: str) -> str:
+    """The helper's stdout, stripped, or ``""`` when it did not exit 0."""
+    result = _run_runtime_health_helper(function, *args)
+    if result is None or result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _runtime_health_helper_ok(function: str, *args: str) -> bool:
+    """Whether a predicate helper returned 0."""
+    result = _run_runtime_health_helper(function, *args)
+    return result is not None and result.returncode == 0
+
 
 def _verify_recreate_sleep(seconds: float) -> None:
     """Sleep between readiness probes (OMN-18640).
@@ -4470,6 +4522,14 @@ class DeployExecutor:
         pending_timeout: subprocess.TimeoutExpired | None = None
         for service, port, check, timed_out in probes:
             if check.status == "fail" and lane in VERIFY_RECREATE_LANES:
+                check, timed_out = self._await_declared_start(
+                    lane=lane,
+                    service=service,
+                    port=port,
+                    failed=check,
+                    timed_out=timed_out,
+                )
+            if check.status == "fail" and lane in VERIFY_RECREATE_LANES:
                 check, timed_out = self._force_recreate_and_reverify(
                     lane=lane,
                     service=service,
@@ -4552,6 +4612,125 @@ class DeployExecutor:
             ),
             timed_out,
         )
+
+    def _await_declared_start(
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        service: str,
+        port: int,
+        failed: ModelHealthCheck,
+        timed_out: subprocess.TimeoutExpired | None,
+    ) -> tuple[ModelHealthCheck, subprocess.TimeoutExpired | None]:
+        """Keep probing a runtime docker still reports ``starting``, within its budget.
+
+        OMN-19374. MEASURED from this agent's journal on the dev lane,
+        2026-09-23T22:39Z to 2026-09-24T09:01Z: ten consecutive full deploys
+        probed ``:8085/health`` once, 189-276 s after the runtime family was
+        started, found it failing, and force-recreated ``omninode-runtime``;
+        each NEW container then answered after 280-291 s. The one job whose
+        gateway leg happened to run long (05743d11, probe at +685 s) passed with
+        no recreate. The runtime was starting, not broken -- it declares an
+        1800 s start period -- and the recreate threw away a container seconds
+        from ready, restarted its clock, and swapped the container id under the
+        compose-dev receipt's ``probe_generation_bound`` read.
+
+        The readings come from ``RUNTIME_HEALTH_WAIT_HELPERS``, the helpers
+        ``deploy-runtime.sh`` waits on (OMN-18349), so both deploy paths share
+        one budget and one state vocabulary. Waiting continues ONLY while docker
+        reports the container ``starting`` and the helper's own
+        ``runtime_health_keep_waiting`` agrees. Anything else -- unhealthy, not
+        running, restarted since the wait began, no healthcheck, an unreadable
+        container, a spent budget -- returns the failed check unchanged and the
+        caller's single recreate runs exactly as before. That is deliberately
+        narrower than the helper, which also waits on ``healthy``: a container
+        docker calls healthy while its host port stays dead is the OMN-18640
+        wedge, and that one must still reach the recreate without delay.
+        """
+        container = self._compose_service_container(lane, service)
+        if not container:
+            return failed, timed_out
+        budget_reading = _runtime_health_helper(
+            "runtime_health_budget_seconds", container
+        )
+        budget = int(budget_reading) if budget_reading.isdigit() else 0
+        if budget <= 0:
+            return failed, timed_out
+        baseline = _runtime_health_helper("runtime_started_at", container)
+
+        attempts = max(1, budget // VERIFY_RECREATE_POLL_SECONDS)
+        started = time.monotonic()
+        check = failed
+        state = ""
+        for _attempt in range(attempts):
+            state = _runtime_health_helper("runtime_health_state", container, baseline)
+            elapsed = int(time.monotonic() - started)
+            if state != "starting" or not _runtime_health_helper_ok(
+                "runtime_health_keep_waiting", str(elapsed), str(budget), state
+            ):
+                break
+            _verify_recreate_sleep(VERIFY_RECREATE_POLL_SECONDS)
+            check, timed_out = self._probe_runtime_health(service=service, port=port)
+            if check.status == "pass":
+                break
+        waited = round(time.monotonic() - started, 1)
+        if check.status == "pass":
+            logger.info(
+                "%s passed after %ss inside %s's declared %ss start budget "
+                "(docker reported starting); not recreated",
+                failed.endpoint,
+                waited,
+                service,
+                budget,
+            )
+            return (
+                check.model_copy(
+                    update={
+                        "detail": (
+                            f"passed after waiting {waited}s inside the container's "
+                            f"declared {budget}s start budget (docker reported "
+                            f"starting); not recreated (OMN-19374)"
+                        )
+                    }
+                ),
+                None,
+            )
+        logger.warning(
+            "%s still failing after %ss; docker reports %s as %r against its "
+            "declared %ss start budget",
+            failed.endpoint,
+            waited,
+            service,
+            state or "unread",
+            budget,
+        )
+        return check, timed_out
+
+    def _compose_service_container(self, lane: EnumRuntimeLane, service: str) -> str:
+        """Resolve one compose service on this lane to its container id, or ``""``.
+
+        By compose's own labels rather than a container name, because on the
+        dev lane ``runtime_health_targets`` carries SERVICE names. More than one
+        match is ambiguous and reads as unresolved.
+        """
+        try:
+            result = _run(
+                [
+                    "docker",
+                    "ps",
+                    "-q",
+                    "--no-trunc",
+                    "--filter",
+                    f"label=com.docker.compose.project={lane_config_for(lane).compose_project}",
+                    "--filter",
+                    f"label=com.docker.compose.service={service}",
+                ],
+                timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        ids = result.stdout.split() if result.returncode == 0 else []
+        return ids[0] if len(ids) == 1 else ""
 
     def _force_recreate_and_reverify(
         self,

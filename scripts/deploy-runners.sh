@@ -309,6 +309,12 @@ ADD_SERVICES=""
 # PRIMARY host, which is what every pre-inventory invocation meant, so an
 # existing call site is unchanged.
 TARGET_HOST=""
+# OMN-19274. Empty means no migration: --rolling skips (never recreates) a
+# runner whose CURRENT rendered label set has no matching credential-cache
+# entry. A path here opts a --rolling run into registering exactly those
+# skipped runners with a real token, one at a time, still busy-checked. Read
+# from a FILE, never argv or env, so the token never lands in `ps` or a log.
+TOKEN_FILE=""
 
 for arg in "$@"; do
     case "${arg}" in
@@ -318,6 +324,7 @@ for arg in "$@"; do
         --rolling)    ROLLING_DEPLOY=true ;;
         --limit=*)    ROLL_LIMIT="${arg#*=}" ;;
         --only=*)     ROLL_ONLY="${arg#*=}" ;;
+        --token-file=*) TOKEN_FILE="${arg#*=}" ;;
         --add=*)      ADD_SERVICES="${arg#*=}" ; ADD_SERVICES="${ADD_SERVICES//,/ }" ;;
         --host=*)     TARGET_HOST="${arg#*=}" ;;
         --help|-h)
@@ -333,6 +340,12 @@ for arg in "$@"; do
             echo "                --limit=1 is the canary step of a fleet roll."
             echo "  --only=NAME   With --rolling: converge exactly one fleet service,"
             echo "                for a runner that stayed busy through every pass."
+            echo "  --token-file=PATH  With --rolling: a file holding a GitHub Actions"
+            echo "                registration token (never argv/env). Runners whose"
+            echo "                current label set has no matching credential cache"
+            echo "                would otherwise be SKIPPED -- with this, they are"
+            echo "                migrated one at a time (still busy-checked) using this"
+            echo "                token, instead of being left untouched."
             echo "  --add=LIST    Additively stand up the named DECLARED non-general-pool"
             echo "                services: 'up -d --no-deps LIST' with NEITHER"
             echo "                --force-recreate NOR --remove-orphans, no cron installs,"
@@ -402,6 +415,17 @@ else
 fi
 export RUNNER_HOST_ARCH
 
+if [[ -n "${TOKEN_FILE}" ]]; then
+    [[ -f "${TOKEN_FILE}" ]] || {
+        echo "[deploy-runners] ERROR: --token-file=${TOKEN_FILE} does not exist." >&2
+        exit 1
+    }
+    [[ -s "${TOKEN_FILE}" ]] || {
+        echo "[deploy-runners] ERROR: --token-file=${TOKEN_FILE} is empty." >&2
+        exit 1
+    }
+fi
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -453,6 +477,50 @@ encode_token() {
     local token="${1}"
     # -w 0 prevents line wrapping (macOS base64 wraps at 76 chars by default)
     echo -n "${token}" | base64 -w 0 2>/dev/null || echo -n "${token}" | base64 -b 0 2>/dev/null || echo -n "${token}" | base64
+}
+
+# ---------------------------------------------------------------------------
+# OMN-19274 -- credential-cache pre-flight for --rolling
+# ---------------------------------------------------------------------------
+#
+# entrypoint.sh restores a runner's registration from a per-runner named
+# volume, keyed on sha256(RUNNER_LABELS:GITHUB_ORG_URL) (see its _cache_key()).
+# A --force-recreate always picks up the CURRENTLY rendered compose env, so a
+# runner recreated after RUNNER_LABELS changes needs a cache entry under the
+# NEW key -- which only exists if that runner has been registered (with a
+# real token) since the label change. --rolling deliberately passes an empty
+# RUNNER_TOKEN (steady-state recreates never need one), so before OMN-19274 a
+# runner missing that entry force-recreated straight into
+# "No credentials found and RUNNER_TOKEN is not set", stranded offline with
+# no automatic way back (discovered rolling OMN-19206's runner image onto
+# .201: two runners, both with intact OLD-key credentials, both still
+# registered under the old label set on GitHub, were left down this way).
+#
+# These two helpers let roll_one_runner() check BEFORE recreating, so it can
+# skip (never touching the runner) instead of recreating into an outage.
+
+# Render one service's compose config remotely and print its would-be cache
+# key. Two services can differ (docker-compose.model-review-canary.yml pins
+# omninode-runner-1's RUNNER_LABELS to a legacy set), so this is computed per
+# service rather than assumed fleet-uniform.
+_runner_cache_key_for_service() {
+    local name="${1}"
+    local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
+    local rendered labels org
+    rendered=$(ssh "${RUNNER_HOST}" "${compose_cmd} config ${name} 2>/dev/null") || return 1
+    labels=$(printf '%s\n' "${rendered}" | awk -F': ' '/^[[:space:]]*RUNNER_LABELS:/ {print $2; exit}')
+    org=$(printf '%s\n' "${rendered}" | awk -F': ' '/^[[:space:]]*GITHUB_ORG_URL:/ {print $2; exit}')
+    [[ -n "${labels}" && -n "${org}" ]] || return 1
+    printf '%s:%s' "${labels}" "${org}" | sha256sum | awk '{print $1}'
+}
+
+# True (rc 0) iff ${name}'s creds volume already holds a directory for
+# ${key}. Peeks via the fleet's own image (already present, so this adds no
+# pull) rather than execing into the live runner container.
+_runner_cache_ready() {
+    local name="${1}" key="${2}"
+    ssh "${RUNNER_HOST}" "docker run --rm --entrypoint test -v ${name}-creds:/data:ro omninode-runner:latest -d /data/${key}" \
+        >/dev/null 2>&1
 }
 
 # ---------------------------------------------------------------------------
@@ -1158,6 +1226,19 @@ runner_is_idle() {
     # Anything else -- API failure, unknown runner, docker failure, the two
     # signals disagreeing -- returns non-zero and the caller skips.
     local name="${1}"
+
+    # OMN-19274 follow-up: a container that is not running at all cannot be
+    # mid-job, so it is idle by construction -- and the GitHub-state check
+    # below can never read it "online" to confirm that, which otherwise
+    # locks a runner already left offline (by a prior recreate that failed
+    # to restore credentials -- exactly the OMN-19206 rollout's
+    # omninode-runner-3/4) out of ever being reachable again, migration
+    # token or not. Checked first, ahead of the two-signal busy check, on
+    # purpose: a stopped container has no signals to disagree over.
+    local running
+    running=$(ssh "${RUNNER_HOST}" "docker inspect --format '{{.State.Running}}' ${name} 2>/dev/null" 2>/dev/null)
+    [[ "${running}" == "false" ]] && return 0
+
     local state status busy
     state=$(github_runner_state "${name}")
     status="${state%% *}"
@@ -1203,6 +1284,42 @@ roll_one_runner() {
     if ! runner_is_idle "${name}"; then
         log "  ${name} became busy (or its state is unknown) -- skipped."
         return 2
+    fi
+
+    # OMN-19274 pre-flight: would the recreate be able to restore credentials?
+    # A recreate always picks up the CURRENTLY rendered label set (env is
+    # frozen at creation), so check THAT key's cache entry, not whatever key
+    # the running container was created with. Read-only; safe under
+    # --dry-run too, matching the existing busy-probe behaviour (dry-run
+    # probes are real, nothing is ever recreated here).
+    local key=""
+    key=$(_runner_cache_key_for_service "${name}") || {
+        warn "  ${name}: could not render its compose config to compute a cache key -- skipping rather than guessing."
+        return 3
+    }
+    if ! _runner_cache_ready "${name}" "${key}"; then
+        if [[ -z "${TOKEN_FILE}" ]]; then
+            log "  ${name}: no credential-cache entry for its current label set (key=${key:0:12}...) and no --token-file given -- SKIPPING (left on its current container, untouched)."
+            return 3
+        fi
+        log "  ${name}: no credential-cache entry for its current label set (key=${key:0:12}...) -- migrating with the supplied token."
+        if "${DRY_RUN}"; then
+            log "[DRY RUN] would run (migration): ${compose_cmd} up -d --force-recreate --no-deps ${name} (RUNNER_TOKEN from --token-file)"
+            return 0
+        fi
+        local mig_token mig_token_b64
+        mig_token=$(<"${TOKEN_FILE}")
+        [[ -n "${mig_token}" ]] || err "--token-file=${TOKEN_FILE} is empty."
+        mig_token_b64=$(encode_token "${mig_token}")
+        ssh "${RUNNER_HOST}" "
+            set -euo pipefail
+            RUNNER_TOKEN=\$(echo '${mig_token_b64}' | base64 -d)
+            export RUNNER_TOKEN
+            cd ${RUNNER_HOST_DIR}
+            ${compose_cmd} up -d --force-recreate --no-deps --no-build ${name}
+        " || return 1
+        wait_for_runner_online "${name}" || return 1
+        return 0
     fi
 
     log "  Recreating ${name} ..."
@@ -1262,6 +1379,7 @@ rolling_deploy() {
     fi
 
     local pass=0 done_count=0 failed="" rc
+    local skip_migration=()
     while [[ "${#pending[@]}" -gt 0 ]] && [[ "${pass}" -le "${ROLL_SKIP_RETRY_PASSES}" ]]; do
         [[ "${pass}" -eq 0 ]] || log "--- retry pass ${pass} for ${#pending[@]} runner(s) that were busy earlier ---"
         local next=()
@@ -1279,6 +1397,12 @@ rolling_deploy() {
                        return 0
                    fi ;;
                 2) next+=("${name}") ;;
+                # OMN-19274: no cache entry for the runner's current label set
+                # and no --token-file given. Never recreated, never retried --
+                # a busy runner can become idle on the next pass, but a
+                # missing cache entry will not, so retrying it would just
+                # repeat the same read-only probe for nothing.
+                3) skip_migration+=("${name}") ;;
                 *) failed="${name}"; break ;;
             esac
         done
@@ -1295,6 +1419,10 @@ rolling_deploy() {
     if [[ "${#pending[@]}" -gt 0 ]]; then
         warn "Still busy after ${ROLL_SKIP_RETRY_PASSES} retry pass(es), NOT rolled: ${pending[*]}"
         warn "Re-run with --rolling to converge; a runner already rolled is recreated again, which is idempotent."
+    fi
+    if [[ "${#skip_migration[@]}" -gt 0 ]]; then
+        warn "Skipped (no credential-cache entry for the current label set, no --token-file given): ${skip_migration[*]}"
+        warn "Re-run with --rolling --token-file=PATH to migrate exactly these, one at a time, still busy-checked."
     fi
 }
 

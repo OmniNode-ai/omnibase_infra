@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19339: Typed Bifrost delegation overlay for the sim-202 lane, the isolated
+# fault-injection stack on the .202 host.
+#
+# ZERO LOCAL BACKENDS, BY DESIGN. The lane's isolation property is that nothing
+# it runs opens a connection to a .201 listener (plan row S2, seam SIM.1). The
+# dogfood lane this stack is built on binds its two local rungs to the .201
+# model server, so mounting that lane's overlay here would give the stack a
+# route to .201 the moment anything delegated through it. It would also put
+# fault-injection traffic on the .201 5090, which is reserved for the M4 proofs.
+#
+# It also binds nothing on .202's own model server. C13 and C14 read that server
+# at proof time under a 240-second per-call budget, and routing SIM work to it
+# is row S5's decision, made per run with its own slot and schedule limits, not
+# something a long-running stack should do on its own.
+#
+# `locale: cloud` is the schema's way of stating "no lab backend is reachable
+# from this lane" (OMN-17502). The renderer then disables every local backend
+# and refuses a render that still binds one, so the absence is enforced, not
+# assumed. No cloud credential is supplied to this lane, so a delegation
+# attempted through it fails rather than reaching any model.
+schema_version: "bifrost_lane_overlay.v3"
+lane: sim-202
+locale: cloud
+backends: []
