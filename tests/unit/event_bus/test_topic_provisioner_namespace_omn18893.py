@@ -204,6 +204,9 @@ async def test_ensure_topic_exists_takes_a_canonical_name_to_the_physical_one(
     )
     with _patched_admin(broker):
         assert await provisioner.ensure_topic_exists(topic_name=_TOPICS[0]) is True
+        # The canonical name existing on the broker (the dev lane's topic) is
+        # not this lane's topic: the physical one was created.
+        assert broker.created == [f"prepr1.{_TOPICS[0]}"]
         # Idempotent: an already-physical name is not prefixed twice.
         assert (
             await provisioner.ensure_topic_exists(topic_name=f"prepr1.{_TOPICS[0]}")
