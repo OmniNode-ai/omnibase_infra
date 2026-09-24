@@ -4625,7 +4625,7 @@ class DeployExecutor:
         """Keep probing a runtime docker still reports ``starting``, within its budget.
 
         OMN-19374. MEASURED from this agent's journal on the dev lane,
-        2026-09-23T23:36Z to 2026-09-24T09:01Z: ten consecutive full deploys
+        2026-09-23T22:39Z to 2026-09-24T09:01Z: ten consecutive full deploys
         probed ``:8085/health`` once, 189-276 s after the runtime family was
         started, found it failing, and force-recreated ``omninode-runtime``;
         each NEW container then answered after 280-291 s. The one job whose

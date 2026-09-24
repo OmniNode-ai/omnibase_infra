@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """A runtime still inside its declared start budget is waited for, not recreated.
 
-OMN-19374. MEASURED from the dev-lane agent's own journal, 2026-09-23T23:36Z to
+OMN-19374. MEASURED from the dev-lane agent's own journal, 2026-09-23T22:39Z to
 2026-09-24T09:01Z: ten consecutive full deploys (jobs 433f0c32, 19e67acc,
 594a8aad, 98d35bb2, 0805d076, e4d36317, 2f0fb536, ff4dc5de, d80d3ca9,
 5132f2aa) each probed ``:8085/health`` ONCE, 189-276 s after the runtime
