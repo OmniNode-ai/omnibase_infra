@@ -822,6 +822,17 @@ class EventBusKafka(
         return self._environment
 
     @property
+    def bootstrap_servers(self) -> str:
+        """Return the configured broker endpoint as public transport identity.
+
+        Together with ``environment`` this is the runtime identity the bounded
+        delegation route gate matches against a lane declaration (OMN-18933).
+        Credentials (a ``user:pass@`` prefix) are stripped, as everywhere else
+        this class exposes the value, because callers log it.
+        """
+        return self._sanitize_bootstrap_servers(self._bootstrap_servers)
+
+    @property
     def health_emitter(self) -> ConsumerHealthEmitter | None:
         """Get the consumer health emitter (OMN-5518).
 
