@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -27,16 +27,10 @@ from omnibase_infra.runtime.models.model_delegation_terminal_evidence import (
 from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
 )
-from omnibase_infra.runtime.protocol_addressed_broker_transport import (
-    ProtocolAddressedBrokerTransport,
-)
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
     DEFAULT_EXECUTION_TIMEOUT_SECONDS,
     DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
     ProtocolDelegationDispatchPort,
-)
-from omnibase_infra.runtime.protocols.protocol_delegation_terminal_evidence_sink import (
-    ProtocolDelegationTerminalEvidenceSink,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
     ModelRuntimeLocalIngressRoute,
@@ -46,6 +40,12 @@ from omnibase_infra.runtime.runtime_local_ingress import (
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
 logger = logging.getLogger(__name__)
+
+# Persists final-run terminal evidence once dispatch has received the terminal
+# (OMN-18931). A plain callable, not a Protocol: omnibase_infra adds no protocols.
+DelegationTerminalEvidenceSink = Callable[
+    [ModelDelegationTerminalEvidence], Awaitable[None]
+]
 
 _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
@@ -233,7 +233,7 @@ class RuntimeDelegationDispatchPort:
         routes: Mapping[str, ModelRuntimeLocalIngressRoute] | None = None,
         command_topic: str | None = None,
         response_topic: str | None = None,
-        terminal_evidence_sink: ProtocolDelegationTerminalEvidenceSink | None = None,
+        terminal_evidence_sink: DelegationTerminalEvidenceSink | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._package_names = (
@@ -339,7 +339,9 @@ class RuntimeDelegationDispatchPort:
             # dogfood fault route on the dogfood broker, with that route's exact
             # no-escalation and timeout policy. The consumer re-checks the same
             # declaration, so a raw broker record cannot bypass this producer gate.
-            if not isinstance(self._event_bus, ProtocolAddressedBrokerTransport):
+            bus_environment = getattr(self._event_bus, "environment", None)
+            bus_broker = getattr(self._event_bus, "bootstrap_servers", None)
+            if not isinstance(bus_environment, str) or not isinstance(bus_broker, str):
                 raise InfraUnavailableError(
                     "a delegation backend pin requires a runtime bus that exposes "
                     "its configured broker and environment identity"
@@ -349,8 +351,8 @@ class RuntimeDelegationDispatchPort:
             )
 
             fault_route = resolve_dogfood_delegation_fault_route(
-                environment=self._event_bus.environment,
-                bootstrap_servers=self._event_bus.bootstrap_servers,
+                environment=bus_environment,
+                bootstrap_servers=bus_broker,
                 backend_id=backend_id,
             )
             if no_escalation is not fault_route.no_escalation:
@@ -464,6 +466,7 @@ class RuntimeDelegationDispatchPort:
 
 
 __all__ = [
+    "DelegationTerminalEvidenceSink",
     "ProtocolDelegationDispatchPort",
     "RuntimeDelegationDispatchPort",
 ]
