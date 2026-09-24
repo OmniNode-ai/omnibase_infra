@@ -101,7 +101,29 @@ services:
       - --smp
       - "1"
       - --memory
-      - ${REDPANDA_MEMORY:-8G}
+      # OMN-19077 (operator consent ROLLING_WORK_LEDGER.md:3220): the
+      # stability-test lane reads its OWN dial, the OMN-19085 pattern already
+      # applied to the dev lane (DEV_REDPANDA_MEMORY in docker-compose.infra.yml).
+      # It used to read the shared REDPANDA_MEMORY, whose live value (24G) comes
+      # from the host-global operator env file and is in no tracked file, so the
+      # stability broker reserved a 24G seastar arena on a 91 GB host that also
+      # carries the dev, judge and collaborator brokers and the CI runner pool.
+      # With --lock-memory unset the kernel pages the untouched arena out onto
+      # the docker-data NVMe: measured 2026-09-24, 6.5 h after its last
+      # recreate, this broker already held 1.9 GB resident plus 4.0 GB swapped
+      # and was still growing, while the dev broker, 26 h after its cut to 12G,
+      # had touched its whole 12G (1.9 GB resident + 10.5 GB swapped).
+      #
+      # 12G is the level the dev broker runs at. Sized against the judge broker
+      # on the same host, which serves 1537 partitions on 2G (1.3 MB per
+      # partition); this broker holds about 7200 partitions, so 12G is 1.7 MB
+      # per partition, more headroom per partition than a configuration already
+      # proven here. The value is a Compose DEFAULT, so it needs no host env
+      # edit, and it takes effect at this lane's next governed recreate of the
+      # broker (deploy-runtime.sh's broker warmup runs `up -d --no-deps redpanda`,
+      # which recreates it when its rendered config changes). Raise it back by
+      # setting STABILITY_TEST_REDPANDA_MEMORY.
+      - ${STABILITY_TEST_REDPANDA_MEMORY:-12G}
       - --reserve-memory
       - "0M"
       - --node-id
