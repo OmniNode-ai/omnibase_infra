@@ -15,6 +15,8 @@
 #      kernel services, with autoheal disarmed in the same block.
 #   6. OMN-16025 — the infra routing-decision projection consumer, which was
 #      declared in docker/catalog and in no compose file, so it ran on no lane.
+#   7. OMN-19415 — the declared connection capacity of this lane's Postgres,
+#      the one server the pre-PR verify slots share.
 #
 # The header used to say "it carries exactly ONE thing". That stopped being
 # true at (2) and is corrected here rather than left to mislead the next reader
@@ -356,6 +358,43 @@ x-dev-lane-consumer-poll-env: &dev_lane_consumer_poll_env
 x-dev-lane-identity-env: &dev_lane_identity_env
   ONEX_RUNTIME_LANE: "compose-dev"
 services:
+  # ===========================================================================
+  # (7) DECLARED POSTGRES CAPACITY -- OMN-19415
+  # ===========================================================================
+  # This lane's Postgres is the one SERVER the pre-PR verify slots share (epic
+  # OMN-18888): each slot gets its own databases and principals on it, not its
+  # own server. It ran the stock max_connections of 100 (3 superuser-reserved),
+  # declared nowhere. Measured on 2026-09-24 by a read-only 2-second
+  # pg_stat_activity sampler on the lab host:
+  #   * this lane ALONE reached 93 at 16:50:07Z, five minutes after a runtime
+  #     redeploy (omninode-runtime, runtime-worker, runtime-effects and
+  #     tenant-projection-writer at 18/13/13/13 as `postgres`), then idled back
+  #     to about 31;
+  #   * one booting slot held 63 at 16:27:12Z, the server sat at 100/100, and
+  #     this lane's runtime logged 1171 refusals in four minutes;
+  #   * after the next redeploy (17:20:08Z) this lane saturated the server with
+  #     NO slot running: 99 at 17:24:40Z, omninode-runtime climbing to 27 until
+  #     refused, 176 refusals, all in omninode-runtime.
+  # Sized from the budget in scripts/provision_db_slot.sh: dev lane 140 + 2
+  # slots x 118 (every slot principal carries a CONNECTION LIMIT, so a slot
+  # cannot exceed its share) + 3 superuser-reserved = 379. `--apply` refuses to
+  # provision a slot on a server below that figure, and
+  # tests/unit/infra/test_db_slot_connection_budget.py pins this value against
+  # the same arithmetic.
+  #
+  # HERE AND NOT IN THE BASE: stability-test, sim-202 and prod layer their
+  # postgres over the base block and would inherit a base `command:`, recreating
+  # their servers for capacity only this lane's slots need.
+  #
+  # TAKES EFFECT ON RECREATE ONLY. deploy-runtime.sh's ensure_core_infra_ready
+  # runs `up -d --no-deps --wait postgres valkey` on every --restart, so the
+  # first dev-lane restart after this lands recreates this container and drops
+  # every connection on the lane for the length of a Postgres restart.
+  postgres:
+    command:
+      - postgres
+      - -c
+      - max_connections=400
   # ===========================================================================
   # (6a) BROKER READINESS THAT READS A PARTITION -- OMN-18789
   # ===========================================================================
