@@ -16,8 +16,9 @@ branching in the command (ticket deliverable 2). Each entry declares:
   exactly like ``onex node``),
 - how the skill's CLI arguments map onto fields of the node's contract input
   model (name, type, default, required),
-- optional keyword classifiers (the delegate skill's ``task_type``
-  auto-classification, expressed as data rather than inline logic),
+- optionally, which payload fields carry a task class resolved by the
+  task-class contract through the registry (the delegate skill's
+  ``task_type``; OMN-19407 replaced the keyword classifier that was here),
 - static payload fields the node requires regardless of args.
 
 .. versionadded:: OMN-13097
@@ -28,7 +29,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from omnibase_infra.cli.model_skill_arg_spec import ModelSkillArgSpec
-from omnibase_infra.cli.model_skill_classifier import ModelSkillClassifier
+from omnibase_infra.cli.model_skill_task_class_resolution import (
+    ModelSkillTaskClassResolution,
+)
 
 __all__ = ["ModelSkillMapping"]
 
@@ -76,9 +79,12 @@ class ModelSkillMapping(BaseModel):
         default_factory=dict,
         description="Payload fields injected regardless of supplied args.",
     )
-    classifiers: tuple[ModelSkillClassifier, ...] = Field(
-        default=(),
-        description="Keyword classifiers applied to still-unset fields.",
+    task_class: ModelSkillTaskClassResolution | None = Field(
+        default=None,
+        description=(
+            "When set, the task class is resolved by the task-class contract "
+            "read through the registry, as `onex delegate` resolves it."
+        ),
     )
 
     @model_validator(mode="after")

@@ -291,6 +291,7 @@ def cli(ctx: click.Context, bootstrap_servers: str) -> None:
 @click.option(
     "--outcome",
     required=True,
+    # cli-own-vocabulary: the outcomes this relay's hooks report; core ModelGitHookEvent.outcome is free text
     type=click.Choice(["pass", "fail", "allowed", "blocked"], case_sensitive=False),
     help="Hook outcome.",
 )

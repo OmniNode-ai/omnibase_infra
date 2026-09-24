@@ -167,6 +167,7 @@ def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
 @click.command("run")
 @click.option(
     "--suite",
+    # cli-own-vocabulary: the suites this command itself defines
     type=click.Choice(["smoke", "idempotency", "failure"]),
     required=True,
     help="Test suite to execute.",

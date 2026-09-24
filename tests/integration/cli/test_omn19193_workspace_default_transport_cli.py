@@ -56,14 +56,6 @@ lanes:
     security_protocol: PLAINTEXT
 """
 
-STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
-
 
 _WORKSPACE_RUNTIME_CONFIG = """
 event_bus:
@@ -104,11 +96,6 @@ def captured_dispatch(
     monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", AMBIENT_STABILITY_BROKER)
     monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
     monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
-    monkeypatch.setattr(
-        cli_delegate,
-        "resolve_task_class_contract_path",
-        lambda: STAND_IN_TASK_CLASS_CONTRACT,
-    )
     monkeypatch.setattr(
         cli_delegate,
         "_resolve_packaged_contract",

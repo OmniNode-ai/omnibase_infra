@@ -66,6 +66,7 @@ def validate_architecture_cmd(directory: str, max_violations: int | None) -> Non
 @click.option(
     "--mode",
     default="strict",
+    # cli-own-vocabulary: this command's own validator modes
     type=click.Choice(["strict", "migration_audit"], case_sensitive=False),
     help="Validation mode: strict (default) or migration_audit for legacy corpus sweeps.",
 )

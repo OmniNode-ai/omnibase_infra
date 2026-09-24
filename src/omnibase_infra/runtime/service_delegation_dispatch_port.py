@@ -253,10 +253,8 @@ class RuntimeDelegationDispatchPort:
         # change. Defaulted rather than required until the caller passes them:
         # a new argument lands consumer-first or is excluded when unset.
         #
-        # The values are the contract default, kept honest against
-        # `DEFAULT_EXECUTION_BUDGET` by
-        # `tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py`
-        # rather than by an import, because runtime does not depend on cli.
+        # The port and its protocol are pinned to one default by
+        # `tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py`.
         execution_timeout_seconds: int = DEFAULT_EXECUTION_TIMEOUT_SECONDS,
         terminal_delivery_margin_seconds: int = DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
         output_schema_key: str | None = None,

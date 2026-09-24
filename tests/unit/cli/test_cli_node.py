@@ -138,11 +138,11 @@ def test_missing_packaged_contract_reports_convention_violation(tmp_path: Path) 
 
     with (
         patch(
-            "omnibase_infra.cli.cli_node.entry_points",
+            "omnibase_infra.cli.contract_registry._entry_points",
             return_value=[_FakeEP()],
         ),
         patch(
-            "omnibase_infra.cli.cli_node.importlib.util.find_spec",
+            "omnibase_infra.cli.contract_registry.importlib.util.find_spec",
             return_value=spec,
         ),
     ):
@@ -172,11 +172,11 @@ def test_packaged_contract_resolution_does_not_import_node_module(
 
     with (
         patch(
-            "omnibase_infra.cli.cli_node.entry_points",
+            "omnibase_infra.cli.contract_registry._entry_points",
             return_value=[_FakeEP()],
         ),
         patch(
-            "omnibase_infra.cli.cli_node.importlib.util.find_spec",
+            "omnibase_infra.cli.contract_registry.importlib.util.find_spec",
             return_value=spec,
         ) as find_spec,
     ):

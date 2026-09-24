@@ -76,6 +76,7 @@ class ModelDelegateTransportRefusal(BaseModel):
             "answered' at a glance."
         ),
     )
+    # cli-own-vocabulary: refusal reasons onex delegate itself invents; no contract owns them
     reason: Literal["broker_unreachable", "locus_probe_refused"] = Field(
         ...,
         description=(

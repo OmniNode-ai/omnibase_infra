@@ -7,7 +7,7 @@ The skill subcommand resolves the declarative skill→node mapping
 (``skill_mapping.yaml``), builds the backing node's input payload from the
 skill's CLI args, and dispatches through the proven receipt-mode path. These
 tests assert the DECLARATIVE LAYER (registry validity, arg parsing, payload
-construction, classifiers) directly, plus the command wiring through a stubbed
+construction, task-class resolution) directly, plus the command wiring through a stubbed
 ``run_receipt_mode`` so we verify the constructed payload without standing up
 a live runtime.
 """
@@ -21,24 +21,31 @@ import tomllib
 from pathlib import Path
 from uuid import uuid4
 
+import click
 import pytest
 from click.testing import CliRunner
 
 from omnibase_infra.cli import cli_skill
 from omnibase_infra.cli.cli_skill import (
-    _apply_classifiers,
     _parse_skill_args,
+    _resolve_task_class,
     load_skill_registry,
     run_skill_by_name,
 )
 from omnibase_infra.cli.enum_skill_arg_type import EnumSkillArgType
 from omnibase_infra.cli.model_skill_arg_spec import ModelSkillArgSpec
-from omnibase_infra.cli.model_skill_classifier import ModelSkillClassifier
 from omnibase_infra.cli.model_skill_mapping import ModelSkillMapping
 from omnibase_infra.cli.model_skill_mapping_registry import ModelSkillMappingRegistry
+from omnibase_infra.cli.model_skill_task_class_resolution import (
+    ModelSkillTaskClassResolution,
+)
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     check_omnimarket_drift,
+)
+from tests.helpers.cli_registry_stand_in import (
+    StandInTaskClassAuthority,
+    install_stand_in_registry,
 )
 
 pytestmark = pytest.mark.unit
@@ -692,66 +699,89 @@ def test_static_payload_merged() -> None:
     assert payload == {"source": "claude-code", "prompt": "hello"}
 
 
-def test_classifier_assigns_first_match() -> None:
-    classifier = ModelSkillClassifier(
-        target_field="task_type",
-        source_field="prompt",
-        rules=(
-            (("test", "pytest"), "test"),
-            (("write", "implement"), "code_generation"),
-        ),
-        fallback="research",
+def _task_class_mapping() -> ModelSkillMapping:
+    return _mapping_with(
+        task_class=ModelSkillTaskClassResolution(
+            target_field="task_type", prompt_field="prompt"
+        )
     )
-    mapping = _mapping_with(classifiers=(classifier,))
-    payload: dict[str, object] = {"prompt": "please write a pytest"}
-    _apply_classifiers(mapping, payload)  # type: ignore[arg-type]
-    # "test"/"pytest" group comes first → wins over "write".
-    assert payload["task_type"] == "test"
 
 
-def test_classifier_fallback_when_no_match() -> None:
-    classifier = ModelSkillClassifier(
-        target_field="task_type",
-        source_field="prompt",
-        rules=((("write",), "code_generation"),),
-        fallback="research",
+def _probe_authority() -> StandInTaskClassAuthority:
+    """Class names that exist in no production contract (OMN-19407)."""
+    return StandInTaskClassAuthority(
+        public=frozenset({"probe_public_alpha", "probe_public_beta"}),
+        internal=frozenset({"probe_internal_gamma"}),
+        unroutable={"probe_unroutable_delta": "no tier offers probe-capability"},
+        phrases={"probe_public_beta": ("betaword",)},
+        fallback="probe_public_alpha",
     )
-    mapping = _mapping_with(classifiers=(classifier,))
+
+
+def test_task_class_is_chosen_by_the_contracts_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_stand_in_registry(monkeypatch, _probe_authority())
+    payload: dict[str, object] = {"prompt": "please betaword the parser"}
+    _resolve_task_class(_task_class_mapping(), payload)  # type: ignore[arg-type]
+    assert payload["task_type"] == "probe_public_beta"
+
+
+def test_unclaimed_prompt_takes_the_contracts_declared_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_stand_in_registry(monkeypatch, _probe_authority())
     payload: dict[str, object] = {"prompt": "tell me about the weather"}
-    _apply_classifiers(mapping, payload)  # type: ignore[arg-type]
-    assert payload["task_type"] == "research"
+    _resolve_task_class(_task_class_mapping(), payload)  # type: ignore[arg-type]
+    assert payload["task_type"] == "probe_public_alpha"
 
 
-def test_classifier_does_not_override_explicit_value() -> None:
-    classifier = ModelSkillClassifier(
-        target_field="task_type",
-        source_field="prompt",
-        rules=((("write",), "code_generation"),),
-        fallback="research",
-    )
-    mapping = _mapping_with(classifiers=(classifier,))
-    payload: dict[str, object] = {"prompt": "write code", "task_type": "document"}
-    _apply_classifiers(mapping, payload)  # type: ignore[arg-type]
-    assert payload["task_type"] == "document"
+def test_explicit_internal_class_is_admitted_and_unroutable_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_stand_in_registry(monkeypatch, _probe_authority())
+    payload: dict[str, object] = {"prompt": "x", "task_type": "probe_internal_gamma"}
+    _resolve_task_class(_task_class_mapping(), payload)  # type: ignore[arg-type]
+    assert payload["task_type"] == "probe_internal_gamma"
+    refused: dict[str, object] = {"prompt": "x", "task_type": "probe_unroutable_delta"}
+    with pytest.raises(click.ClickException, match="no tier offers probe-capability"):
+        _resolve_task_class(_task_class_mapping(), refused)  # type: ignore[arg-type]
 
 
-def test_delegate_mapping_classifies_and_builds_payload() -> None:
-    """End-to-end declarative-layer check for the worst-case skill."""
+def test_unreadable_task_class_contract_is_a_refusal_by_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_stand_in_registry(monkeypatch, None)
+    with pytest.raises(click.ClickException, match="task_class_authority"):
+        _resolve_task_class(  # type: ignore[arg-type]
+            _task_class_mapping(), {"prompt": "hello"}
+        )
+
+
+def test_delegate_mapping_resolves_through_the_contract_and_builds_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end declarative-layer check for the worst-case skill.
+
+    Before OMN-19407 this skill carried its own keyword table and filed this
+    prompt as ``test`` while ``onex delegate`` resolved it through the contract.
+    """
+    install_stand_in_registry(monkeypatch, _probe_authority())
     registry = load_skill_registry()
     delegate = registry.get("delegate")
     assert delegate is not None
+    assert delegate.task_class is not None
     payload = _parse_skill_args(
         delegate, ("write", "a", "unit", "test", "for", "the", "parser")
     )
-    _apply_classifiers(delegate, payload)
+    _resolve_task_class(delegate, payload)
     assert payload["prompt"] == "write a unit test for the parser"
     assert payload["source"] == "claude-code"
     # No --max-tokens override supplied: the field is omitted from the payload so
     # the delegate node resolves it per-backend from its routing contract
     # (OMN-13161 — no hardcoded CLI-side default).
     assert "max_tokens" not in payload
-    # "unit test" / "test" keyword group wins.
-    assert payload["task_type"] == "test"
+    assert payload["task_type"] == "probe_public_alpha"
 
 
 def test_command_unknown_skill_fails() -> None:
