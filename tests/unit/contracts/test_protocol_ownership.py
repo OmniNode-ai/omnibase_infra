@@ -103,6 +103,15 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "RowLookup": "services/cost_api/handlers.py",  # [DI] OMN-10334 narrow row adapter for asyncpg.Record/test rows
     # [DI] Publisher callable boundary for HandlerBaselinesBatchCompute (OMN-3039)
     "ProtocolPublisher": "nodes/node_baselines_batch_compute/handlers/handler_baselines_batch_compute.py",
+    # [NODE] OMN-19085 one-method read seam (undrained count per topic) the DLQ
+    # replay handler asks before it starts a topic's consumer, so a trigger with
+    # nothing to drain never joins the replay group. Declared beside its only
+    # consumer; DlqGroupBacklogProbe in engine_dlq_replay is the one runtime
+    # implementation and unit tests supply a fake. Infra-local, not spi: bound to
+    # this node's onex-dlq-replay group, not a cross-repo contract. Same prior art
+    # as ProtocolDlqAdminTransport above: narrow the client so the logic is
+    # testable without a broker.
+    "ProtocolDlqBacklogProbe": "nodes/node_dlq_replay_effect/handlers/handler_dlq_replay.py",
     # [DI] OMN-7404 narrow duck-typed classifier interface injected into RoutingGate
     # (predict_proba(features) -> float); no ML-library dependency, no Task 7
     # RoutingClassifier artifact required to exist.
