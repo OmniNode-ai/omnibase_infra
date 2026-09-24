@@ -798,7 +798,16 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     #
     # Vendored into omnibase_infra FIRST per the node-migration
     # vendor-parity ordering, ahead of omnimarket#2730.
-    assert len(result.declarations) == 211
+    #
+    # 211 -> 213 for OMN-15358: two independent grant-only migrations that
+    # each declare into a node the cutover to app_dashboard needs SELECT on,
+    # not a create+grant pair. 0006_grant_app_dashboard_overlay.sql (node
+    # node_delegation_routing_reducer) and 091_grant_app_dashboard_savings_series.sql
+    # (node node_projection_savings) each grant SELECT on that node's table(s)
+    # to app_dashboard -- role_omnidash owned both relations, and ownership
+    # does not travel to the cutover role. One declaration per file, matching
+    # every grant-only migration already in this ledger.
+    assert len(result.declarations) == 213
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
