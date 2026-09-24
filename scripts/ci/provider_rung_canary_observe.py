@@ -83,6 +83,10 @@ MAX_TIMEOUT_SECONDS = 30.0
 INVALID_KEY = "onex-rung-canary-deliberately-invalid-key-0000"  # nosec B105
 
 REDACTED = "<redacted>"
+# Error text is kept to this length, and only AFTER the key sent with the
+# request has been scrubbed from it: truncating first could cut a quoted key
+# in half and leave a prefix no exact-match scrub would find.
+MESSAGE_CAP = 300
 
 SKIPPED_NO_ENDPOINT = "SKIPPED_NO_ENDPOINT"
 SKIPPED_NO_SECRET_REF = "SKIPPED_NO_SECRET_REF"
@@ -228,14 +232,13 @@ async def observe_probes(
         secrets.add(value)
         out["secret_resolved"] = True
         out["request_sent"] = True
-        out.update(
-            post(
-                probe["endpoint_url"],
-                payload_for(probe["model_name"]),
-                _headers(probe["extra_headers"], value),
-                probe["timeout_seconds"],
-            )
+        facts = post(
+            probe["endpoint_url"],
+            payload_for(probe["model_name"]),
+            _headers(probe["extra_headers"], value),
+            probe["timeout_seconds"],
         )
+        out.update(settle(facts, value, count=True))
         results.append(out)
 
     controls: list[dict[str, Any]] = []
@@ -252,16 +255,36 @@ async def observe_probes(
             "credential": "deliberately_invalid",
             "request_sent": True,
         }
-        ctl.update(
-            post(
-                endpoint,
-                payload_for(probe["model_name"]),
-                _headers(probe["extra_headers"], INVALID_KEY),
-                probe["timeout_seconds"],
-            )
+        facts = post(
+            endpoint,
+            payload_for(probe["model_name"]),
+            _headers(probe["extra_headers"], INVALID_KEY),
+            probe["timeout_seconds"],
         )
+        ctl.update(settle(facts, INVALID_KEY, count=False))
         controls.append(ctl)
     return results, controls
+
+
+def settle(facts: dict[str, Any], sent_key: str, *, count: bool) -> dict[str, Any]:
+    """Scrub the key that was sent out of every string fact, THEN cap the text.
+
+    A provider quoting the credential back is counted (``key_echoes``) when the
+    key is a real one, so the grader can fail the run on it; the deliberately
+    invalid control key is scrubbed without being counted.
+    """
+    out: dict[str, Any] = {}
+    echoes = 0
+    for name, value in facts.items():
+        if isinstance(value, str) and sent_key:
+            echoes += value.count(sent_key)
+            value = value.replace(sent_key, REDACTED)
+        if name == "provider_error_message" and isinstance(value, str):
+            value = value[:MESSAGE_CAP]
+        out[name] = value
+    if count and echoes:
+        out["key_echoes"] = echoes
+    return out
 
 
 def error_fields(body: Any) -> dict[str, Any]:
@@ -273,11 +296,13 @@ def error_fields(body: Any) -> dict[str, Any]:
     """
     if isinstance(body, list) and body:
         body = body[0]
+    if isinstance(body, str):
+        return {"provider_error_message": body}
     if not isinstance(body, dict):
         return {}
     err = body.get("error", body)
     if not isinstance(err, dict):
-        return {"provider_error_message": str(err)[:300]}
+        return {"provider_error_message": str(err)}
     out: dict[str, Any] = {}
     code = err.get("code")
     if code is not None:
@@ -287,7 +312,7 @@ def error_fields(body: Any) -> dict[str, Any]:
         out["provider_error_status"] = str(status)
     message = err.get("message")
     if message is not None:
-        out["provider_error_message"] = str(message)[:300]
+        out["provider_error_message"] = str(message)
     return out
 
 
@@ -335,7 +360,7 @@ def deployed_post() -> PostFn:
             try:
                 body: Any = exc.response.json()
             except ValueError:
-                body = exc.response.text[:300]
+                body = exc.response.text
             return response_fields(
                 exc.response.status_code,
                 body,
@@ -404,7 +429,14 @@ def observe(contract_path: str, secrets: set[str]) -> dict[str, Any]:
         load_bifrost_delegation_config,
     )
 
-    config = load_bifrost_delegation_config(config_path=Path(contract_path))
+    # The runtime's own pair: an explicitly bound overlay is merged exactly as
+    # the runtime's routing merges it, so the canary probes the endpoints and
+    # keys the runtime would actually use.
+    overlay = os.environ.get("BIFROST_OVERLAY_PATH") or None
+    config = load_bifrost_delegation_config(
+        config_path=Path(contract_path),
+        overlay_path=Path(overlay) if overlay else None,
+    )
     backends = [b.model_dump(mode="json") for b in config.backends]
     rows, probes = plan(backends)
     secrets.add(INVALID_KEY)
@@ -416,6 +448,7 @@ def observe(contract_path: str, secrets: set[str]) -> dict[str, Any]:
     obs = {
         "omnimarket_version": importlib.metadata.version("omnimarket"),
         "contract_path": contract_path,
+        "overlay_path": overlay,
         # The runtime's own binding, compared here so the grader can refuse a
         # reading taken from a contract the runtime does not route with.
         "runtime_binds_contract": os.environ.get("BIFROST_CONTRACT_PATH")

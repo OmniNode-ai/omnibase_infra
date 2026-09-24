@@ -168,9 +168,19 @@ def expected_disposition(row: dict[str, Any]) -> str:
     return PROBE
 
 
+def _host_matches(host: Any, rule_host: Any) -> bool:
+    """The runtime's own matching: case-insensitive, exact or a subdomain."""
+    if not isinstance(host, str) or not isinstance(rule_host, str) or not rule_host:
+        return False
+    h, r = host.lower(), rule_host.lower()
+    return h == r or h.endswith("." + r)
+
+
 def quota_class(obs: dict[str, Any], host: Any, code: Any) -> str | None:
     for rule in obs.get("quota_policy") or []:
-        if not isinstance(rule, dict) or rule.get("match_endpoint_host") != host:
+        if not isinstance(rule, dict) or not _host_matches(
+            host, rule.get("match_endpoint_host")
+        ):
             continue
         for c in rule.get("codes") or []:
             if isinstance(c, dict) and str(c.get("code")) == str(code):
@@ -353,12 +363,17 @@ def grade(obs: dict[str, Any]) -> Record:
         )
 
     redactions = obs.get("redactions", 0)
+    echoes = {
+        str(p.get("backend_ids")): p.get("key_echoes")
+        for p in probes
+        if p.get("key_echoes")
+    }
     record.checks.append(
         Check(
             "no_key_material_echoed",
-            redactions in (0, None),
-            f"{redactions!r} occurrences of a resolved key were scrubbed from the "
-            "observation; a provider echoed a credential back",
+            redactions in (0, None) and not echoes,
+            f"{redactions!r} occurrences of a resolved key scrubbed from the "
+            f"observation line; per-rung provider echoes {echoes}",
         )
     )
     return record
@@ -459,6 +474,7 @@ def _observed_summary(obs: dict[str, Any]) -> dict[str, Any]:
         "omnimarket_version": obs.get("omnimarket_version"),
         "config_version": obs.get("config_version"),
         "contract_path": obs.get("contract_path"),
+        "overlay_path": obs.get("overlay_path"),
         "runtime_binds_contract": obs.get("runtime_binds_contract"),
         "quota_policy": obs.get("quota_policy"),
     }

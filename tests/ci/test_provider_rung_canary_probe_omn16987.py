@@ -369,7 +369,7 @@ def test_no_key_material_in_the_observation_or_the_record(tmp_path: Path) -> Non
     assert SENTINEL not in line
     assert observer.INVALID_KEY not in line
     parsed = json.loads(line)
-    assert parsed["redactions"] == 1
+    assert parsed["probes"][0]["key_echoes"] == 1
     replay = tmp_path / "obs.json"
     replay.write_text(line, encoding="utf-8")
     record_path = tmp_path / "rec.json"
@@ -397,6 +397,27 @@ def test_no_key_material_in_the_observation_or_the_record(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
+def test_a_key_quoted_across_the_message_cap_is_not_left_half_scrubbed() -> None:
+    """The cap is applied after the scrub: a key straddling it cannot survive
+    as a prefix."""
+    pad = "x" * (observer.MESSAGE_CAP - 10)
+
+    def echo(url: str, headers: dict[str, str]) -> dict[str, Any]:
+        quoted = headers["Authorization"].removeprefix("Bearer ")
+        return observer.response_fields(
+            401, {"error": {"code": 401, "message": pad + quoted + " rejected"}}, 3
+        )
+
+    fake = _FakeTransport({"llm.x.api_key": SENTINEL}, echo)
+    obs, line = _run(_ONE, fake)
+    assert SENTINEL[:10] not in line
+    message = obs["probes"][0]["provider_error_message"]
+    assert len(message) <= observer.MESSAGE_CAP
+    assert obs["probes"][0]["key_echoes"] == 1
+    assert "no_key_material_echoed" in _failed(probe.grade(obs))
+
+
+@pytest.mark.unit
 def test_a_live_rung_leaves_no_key_anywhere(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -419,6 +440,23 @@ def test_a_live_rung_leaves_no_key_anywhere(
 
 
 # ---------------------------------------------------------------- AC5 quota codes
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("api.z.ai", "disable_until_reset"),
+        ("API.Z.AI", "disable_until_reset"),
+        ("eu.api.z.ai", "disable_until_reset"),
+        ("notapi.z.ai", None),
+        ("z.ai", None),
+    ],
+)
+def test_quota_host_matching_follows_the_runtime(
+    host: str, expected: str | None
+) -> None:
+    assert probe.quota_class(_recorded(), host, "1310") == expected
 
 
 @pytest.mark.unit
