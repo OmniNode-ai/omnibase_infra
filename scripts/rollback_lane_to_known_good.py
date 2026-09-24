@@ -708,7 +708,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     refs: dict[str, str] = {}
     while time.monotonic() < deadline:
         observed = read_provenance(args.lane_host, lane)
-        refs = {name: str(p.get("infra_vcs_ref")) for name, p in observed.items()}
+        refs = {
+            name: str(p["infra_vcs_ref"])
+            for name, p in observed.items()
+            if p.get("infra_vcs_ref")
+        }
         if refs and all(ref == target for ref in refs.values()):
             print(
                 f"serving_at={_utc()} every runtime container reads infra_vcs_ref={target}:"
