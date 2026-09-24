@@ -1061,3 +1061,76 @@ def test_every_pin_this_run_records_is_resolved_from_head_exactly_once() -> None
         "means a pin is being resolved more than once, and two resolutions of "
         "the same ref can disagree."
     )
+
+
+# ---------------------------------------------------------------------------
+# Two defects the first slot boot found (2026-09-24, omnibase_infra#3944)
+# ---------------------------------------------------------------------------
+
+_BARE_EXEC_WITH_STDERR = re.compile(r"^\s*exec\s+\d*[<>]&-\s+2>")
+
+
+def _stderr_survives(fd_close: str) -> bool:
+    """Run ``fd_close`` in bash, then report whether a later stderr line arrives."""
+    proc = subprocess.run(
+        ["bash", "-c", f"exec 8>/dev/null; {fd_close}; echo marker >&2"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return "marker" in proc.stderr
+
+
+def test_the_stderr_detector_is_proven_against_the_real_behaviour() -> None:
+    """Positive control for the pin below, measured rather than assumed.
+
+    The bare form really does send stderr to /dev/null for the rest of the
+    shell, and the grouped form really does not. Without this, the regex below
+    could forbid a harmless spelling and permit the harmful one.
+    """
+    harmful = "exec 8>&- 2>/dev/null || true"
+    safe = "{ exec 8>&-; } 2>/dev/null || true"
+    assert not _stderr_survives(harmful)
+    assert _stderr_survives(safe)
+    assert _BARE_EXEC_WITH_STDERR.match(harmful)
+    assert not _BARE_EXEC_WITH_STDERR.match(safe)
+
+
+def test_closing_a_lock_descriptor_never_silences_the_rest_of_the_run() -> None:
+    """`exec N>&- 2>/dev/null` sends every later log line and refusal to /dev/null.
+
+    On the first boot it hid the render verdict and the "did not start"
+    refusal, and the run exited non-zero with nothing on its log.
+    """
+    offenders = [
+        ln.strip()
+        for ln in _entrypoint_code().splitlines()
+        if _BARE_EXEC_WITH_STDERR.match(ln)
+    ]
+    assert not offenders, (
+        "an exec with no command applies its redirections to the shell "
+        f"permanently; group it as `{{ exec N>&-; }} 2>/dev/null`: {offenders}"
+    )
+
+
+def test_every_slot_service_is_built_with_the_workspace_args_and_up_never_builds() -> (
+    None
+):
+    """Building only omninode-runtime left ten services with no image.
+
+    `up` then built them itself with none of the workspace build args and died
+    on `BUILD_SOURCE=workspace requires OMNI_HOME`.
+    """
+    body = _entrypoint_code()
+    build_lines = [ln for ln in body.splitlines() if "build --progress=plain" in ln]
+    assert len(build_lines) == 1, build_lines
+    assert '"${SLOT_BUILD_SERVICES[@]}"' in build_lines[0]
+    assert 'SLOT_BUILD_SERVICES=("${SLOT_SERVICES[@]}")' in body
+    # onex-api is image-referenced and must be appended AFTER the build list is
+    # taken, or the build would try to build an image it only references.
+    assert body.index('SLOT_BUILD_SERVICES=("${SLOT_SERVICES[@]}")') < body.index(
+        "SLOT_SERVICES+=(onex-api)"
+    )
+    up_lines = [ln for ln in body.splitlines() if " up -d " in ln]
+    assert up_lines, "no `up -d` found; the pin would pass vacuously"
+    assert all("--no-build" in ln for ln in up_lines), up_lines

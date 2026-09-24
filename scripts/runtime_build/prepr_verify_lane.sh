@@ -355,7 +355,7 @@ pool_build_lock_acquire() {
             --fd 8 --timeout "${LOCK_TIMEOUT}" \
             --lane "prepr-pool-build" --ref "${TARGET_COMMIT}" \
             --argv "slot ${SLOT} ${TARGET_REPO}@${TARGET_COMMIT}"; then
-        exec 8>&- 2>/dev/null || true
+        { exec 8>&-; } 2>/dev/null || true
         return 2
     fi
     POOL_LOCK_OWNED=1
@@ -364,7 +364,13 @@ pool_build_lock_acquire() {
 pool_build_lock_release() {
     [[ "${POOL_LOCK_OWNED}" == "1" ]] || return 0
     "${PY}" "${LANE_LOCK_PY}" release --compose-project "${POOL_BUILD_LOCK_PROJECT}" >/dev/null 2>&1 || true
-    exec 8>&- 2>/dev/null || true
+    # The redirection is on a GROUP, never on the exec itself. `exec 8>&-
+    # 2>/dev/null` is an exec with no command, so bash applies BOTH
+    # redirections to the shell permanently: stderr goes to /dev/null for the
+    # rest of the run. Measured on the first slot boot (2026-09-24): every log
+    # line after the build, the render verdict, and the refusal that said the
+    # slot did not start all vanished, and the run exited non-zero in silence.
+    { exec 8>&-; } 2>/dev/null || true
     POOL_LOCK_OWNED=0
     log "released the pool build lock."
 }
@@ -705,6 +711,15 @@ SLOT_SERVICES=(
     projection-registration-writer projection-savings-writer
     projection-tenant-credentials-writer projection-live-events-writer
 )
+# Every slot service that is BUILT from Dockerfile.runtime, which is all of
+# them but onex-api (image-referenced, see --with-gateway). Each one carries
+# its own `build:` in the layered files and so its own image tag
+# (<project>-<service>:latest), so building only omninode-runtime left the
+# other ten with no image and `up` then tried to build them itself, with none
+# of the workspace build args: the first slot boot (2026-09-24) died there on
+# `BUILD_SOURCE=workspace requires OMNI_HOME`. They share one Dockerfile, one
+# context and one arg set, so after the first the rest are cache hits.
+SLOT_BUILD_SERVICES=("${SLOT_SERVICES[@]}")
 PROFILES=(--profile prepr)
 if [[ "${WITH_GATEWAY}" == "1" ]]; then
     PROFILES+=(--profile prepr-gateway)
@@ -777,7 +792,7 @@ BUILD_ARGS=(
 log "building the runtime image from the snapshot, version ${RUNTIME_VERSION} (timeout ${BUILD_TIMEOUT}s) ..."
 if ! timeout "${BUILD_TIMEOUT}" env -C "${STAGING_ROOT}/repo" \
         docker compose -p "${COMPOSE_PROJECT}" "${COMPOSE_FILES[@]}" "${PROFILES[@]}" \
-        build --progress=plain "${BUILD_ARGS[@]}" omninode-runtime; then
+        build --progress=plain "${BUILD_ARGS[@]}" "${SLOT_BUILD_SERVICES[@]}"; then
     fail "${EXIT_BUILD_FAILED}" "the workspace build failed or timed out."
 fi
 pool_build_lock_release
@@ -836,7 +851,10 @@ if ! compose --profile prepr-migrate run --rm --no-deps forward-migration; then
 fi
 
 log "starting the slot's services ..."
-compose "${PROFILES[@]}" up -d --no-deps "${SLOT_SERVICES[@]}" \
+# --no-build: every image was built in step 8 with the workspace args. A
+# service `up` finds unbuilt is a defect in that list, and building it here
+# would do so without those args, so fail instead.
+compose "${PROFILES[@]}" up -d --no-deps --no-build "${SLOT_SERVICES[@]}" \
     || fail "${EXIT_BOOT_FAILED}" "the slot did not start."
 
 # -----------------------------------------------------------------------------
