@@ -1224,6 +1224,84 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+  # OMN-19233, plan PS-5 item 2 (operator ruling 2026-09-23, decision S): the
+  # staging delivery gate requires the compose-dev receipt of the delivered
+  # sha's proof subject, and a delivery that read before this lane's receipt
+  # existed refused PENDING or ABSENT. Delivery is push-triggered behind a
+  # `paths:` filter, so nothing else ever re-reads a refused sha. This job is
+  # the re-read: after the compose-dev receipts of this run are written (this
+  # merge's own, and any re-emitted for merges queued behind it), it re-runs the
+  # failed jobs of the newest delivery run whose gate refused PENDING, ABSENT or
+  # INDETERMINATE for one of those subjects within the 14,400 s bound.
+  #
+  # It reads each subject's receipt back through the gate's own reader and acts
+  # only on a PASS, so a FAIL never re-runs anything. Only the newest delivery
+  # run is ever re-run: an older one would deliver older code over newer.
+  #
+  # `actions: write` is the one capability it adds, and it is held here, in a
+  # job of its own, not by the self-hosted emitter jobs above. It checks out the
+  # trusted base ref, never the merge ref, like the verify job. A refused re-run
+  # request fails this job loudly (a delivery nobody re-reads stays refused).
+  # advisory-ok: OMN-19233 post-merge re-read of a refused delivery; the delivery gate itself blocks
+  rerun-refused-deliveries:
+    name: Re-run staging deliveries refused while this subject's receipt was pending
+    needs: [trigger-rebuild, verify-lane-converged, reemit-queued-receipts]
+    if: >-
+      always() &&
+      needs.trigger-rebuild.outputs.published == 'true' &&
+      needs.trigger-rebuild.outputs.runtime_lane == 'dev' &&
+      needs.verify-lane-converged.result != 'skipped' &&
+      needs.verify-lane-converged.result != 'cancelled'
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
+      }}
+    # A few API reads and at most one POST per subject.
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout the re-run selector from the trusted base ref
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-rerun-refused-deliveries
+          cache-enabled: "false"
+          install-args: --frozen
+          shared-env-enabled: "true"
+
+      - name: Re-run refused staging deliveries whose subject now has a compose-dev PASS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          # Passed through env and parsed in Python, never interpolated into the
+          # script body (the workflow script-injection shape).
+          REEMIT_CANDIDATES: ${{ needs.verify-lane-converged.outputs.reemit_candidates }}
+        run: |
+          set -euo pipefail
+          SUBJECTS=(--subject "${SOURCE_SHA}")
+          while IFS= read -r sha; do
+            if [ -n "${sha}" ]; then
+              SUBJECTS+=(--subject "${sha}")
+            fi
+          done < <(python3 -c 'import json, os; [print(c["sha"]) for c in json.loads(os.environ.get("REEMIT_CANDIDATES") or "[]")]')
+          uv run python scripts/ci/lab_pass_receipt.py rerun-refused-deliveries \
+            --repo "${GITHUB_REPOSITORY}" \
+            "${SUBJECTS[@]}" \
+            --workflow deliver-dev-candidate-to-staging.yml \
+            --branch dev \
+            --overall-bound-seconds 14400
+
   verify-lab-overlay-converged:
     name: Verify the k3s onex-lab overlay applied the merged sha
     needs: [trigger-rebuild, verify-lane-converged]

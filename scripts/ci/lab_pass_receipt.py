@@ -3078,6 +3078,16 @@ def _gh_api(path: str) -> bytes:
     return completed.stdout
 
 
+def _gh_api_post(path: str) -> None:
+    """One POST against the GitHub REST API. A non-zero exit RAISES (rule 16)."""
+    argv = ["gh", "api", "-X", "POST", path]
+    completed = subprocess.run(argv, capture_output=True, check=False)
+    if completed.returncode != 0:
+        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+        msg = f"`gh api -X POST {path}` exited {completed.returncode}: {stderr}"
+        raise ReceiptLookupError(msg)
+
+
 def list_artifacts(repo: str, name: str) -> list[dict[str, Any]]:
     """Exact-name artifact query. A transport failure raises; it never returns []."""
     raw = _gh_api(f"repos/{repo}/actions/artifacts?name={name}&per_page=100")
@@ -3231,6 +3241,88 @@ MAX_WAIT_SECONDS: Final[int] = 6 * 60 * 60
 DEFAULT_POLL_SECONDS: Final[float] = 30.0
 
 
+class EnumGateToken(StrEnum):
+    """Why the gate refused, one token per outcome a reader acts on (OMN-19233).
+
+    Plan PS-5 (decision S, 2026-09-23) separates the refusals that a later
+    compose-dev PASS can change from the ones it cannot:
+
+    * ``PENDING``: no receipt for the subject, and its rebuild is in flight;
+    * ``ABSENT``: no receipt for the subject, and nothing is in flight (the
+      PS-3 R1 path: a queued attempt 1 wrote none, a re-run attempt may);
+    * ``INDETERMINATE``: a receipt whose only non-passing checks are
+      INDETERMINATE (PS-3 R2), which asserts nothing about the lane;
+    * ``FAIL``: a receipt carrying at least one FAIL check. It stands until the
+      subject changes; no re-run is triggered for it;
+    * ``UNREADABLE``: the surface or the artifact could not be read, or its name
+      and payload disagree;
+    * ``ANY_OF_UNMET``: the rule 24(b) any-of premise failed on the exact sha;
+    * ``TIMED_OUT``: the read is past the overall bound from the delivery run's
+      first gate read. Never a pass, even when a PASS has since arrived.
+    """
+
+    PASS = "PASS"
+    PENDING = "PENDING"
+    ABSENT = "ABSENT"
+    INDETERMINATE = "INDETERMINATE"
+    FAIL = "FAIL"
+    UNREADABLE = "UNREADABLE"
+    ANY_OF_UNMET = "ANY_OF_UNMET"
+    TIMED_OUT = "TIMED_OUT"
+
+
+#: Most severe first. The run's overall token is the most severe of its lanes'.
+_TOKEN_SEVERITY: Final[tuple[EnumGateToken, ...]] = (
+    EnumGateToken.TIMED_OUT,
+    EnumGateToken.FAIL,
+    EnumGateToken.UNREADABLE,
+    EnumGateToken.ANY_OF_UNMET,
+    EnumGateToken.INDETERMINATE,
+    EnumGateToken.ABSENT,
+    EnumGateToken.PENDING,
+)
+
+#: The refusals a later compose-dev PASS for the same subject can turn into a
+#: pass, and so the only ones the emitter re-runs a delivery for (PS-5 item 2).
+RERUN_ELIGIBLE_TOKENS: Final[frozenset[EnumGateToken]] = frozenset(
+    {EnumGateToken.PENDING, EnumGateToken.ABSENT, EnumGateToken.INDETERMINATE}
+)
+
+#: PS-5 item 3, the overall bound, measured from the delivery run's first gate
+#: read. Basis: the larger measured compose-dev queue bound (10,963 s,
+#: 3e4aaded's first attempt at queue position 5) plus one verify-lane-converged
+#: run at its 45-minute ceiling (2,700 s) = 13,663 s, rounded up to four hours.
+#: Changing it is a ruling, not a tuning.
+DELIVERY_OVERALL_BOUND_SECONDS: Final[int] = 14_400
+
+VERDICT_SCHEMA: Final[str] = "lab_pass_gate_verdict.v1"
+
+
+def verdict_artifact_name(run_id: int, run_attempt: int) -> str:
+    """The artifact a delivery run's gate verdict is uploaded under, per attempt."""
+    return f"lab-pass-gate-verdict-{run_id}-{run_attempt}"
+
+
+def _utc_stamp(value: datetime) -> str:
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def classify_receipt_token(receipt: ModelLabPassReceipt) -> EnumGateToken:
+    """The token a present receipt earns: PASS, FAIL or INDETERMINATE-only."""
+    if receipt.result is EnumLabPassResult.PASS:
+        return EnumGateToken.PASS
+    if any(c.outcome is EnumLabPassCheckOutcome.FAIL for c in receipt.checks):
+        return EnumGateToken.FAIL
+    return EnumGateToken.INDETERMINATE
+
+
+def _most_severe(tokens: Sequence[EnumGateToken]) -> EnumGateToken:
+    for token in _TOKEN_SEVERITY:
+        if token in tokens:
+            return token
+    return EnumGateToken.PASS
+
+
 @dataclass(frozen=True)
 class ModelLaneRead:
     """What one read of one lane, for one subject sha, established.
@@ -3343,6 +3435,13 @@ def evaluate_gate(
     required_note: str = "",
     wait_seconds: float = 0.0,
     poll_seconds: float = DEFAULT_POLL_SECONDS,
+    rebuild_pending: Callable[[str], bool] | None = None,
+    first_read_at: datetime | None = None,
+    overall_bound_seconds: float | None = None,
+    now: Callable[[], datetime] | None = None,
+    verdict_out: Path | None = None,
+    run_id: int | None = None,
+    run_attempt: int | None = None,
 ) -> int:
     """Fail closed unless the lab-pass premise holds for the EXACT sha.
 
@@ -3363,33 +3462,71 @@ def evaluate_gate(
     lane can still change by waiting, or until the bound expires. Expiry is a
     refusal, never a pass. There is no force, skip or override of any kind.
 
+    OMN-19233 (plan PS-5, decision S): every refusal carries one token
+    (:class:`EnumGateToken`). A required compose-dev read with no receipt is
+    PENDING when ``rebuild_pending(subject)`` says the subject's rebuild is in
+    flight and ABSENT otherwise. With ``overall_bound_seconds``, a read more
+    than that many seconds after ``first_read_at`` (the delivery run's first
+    gate read; this read when ``None``) refuses TIMED_OUT whatever the receipts
+    say. ``verdict_out`` receives the verdict as JSON, which the compose-dev
+    emitter's re-run selector reads.
+
     Every terminal branch prints the sha. "The gate failed" with no commit named
     is unactionable at 3am, and the whole point of a sha-keyed receipt is that
     the answer is about one commit.
     """
     subject = sha if required_sha is None else required_sha
+    clock = now if now is not None else (lambda: datetime.now(UTC))
+
+    def _record(token: EnumGateToken, lane_tokens: Mapping[str, str]) -> None:
+        if verdict_out is None:
+            return
+        read_at = clock()
+        first = first_read_at if first_read_at is not None else read_at
+        body = {
+            "schema": VERDICT_SCHEMA,
+            "repo": repo,
+            "sha": sha,
+            "subject": subject,
+            "required_lanes": [lane.value for lane in required],
+            "lanes": dict(lane_tokens),
+            "token": token.value,
+            "first_read_at": _utc_stamp(first),
+            "read_at": _utc_stamp(read_at),
+            "elapsed_seconds": int((read_at - first).total_seconds()),
+            "bound_seconds": overall_bound_seconds,
+            "run_id": run_id,
+            "run_attempt": run_attempt,
+        }
+        verdict_out.parent.mkdir(parents=True, exist_ok=True)
+        verdict_out.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+
     for label, value in (("commit", sha), ("required subject", subject)):
         if not _SHA_RE.match(value):
             print(
                 f"::error::lab-pass gate: {label} {value!r} is not a 40-character "
-                "lowercase commit sha. Refusing to resolve an abbreviated ref.",
+                "lowercase commit sha. Refusing to resolve an abbreviated ref. "
+                "token=UNREADABLE",
                 file=out,
             )
+            _record(EnumGateToken.UNREADABLE, {})
             return 1
     if not lanes and not required:
         print(
             f"::error::lab-pass gate FAILED for {sha}: no lane was named to read, "
             "so nothing could establish a pass. Refusing rather than passing a "
-            "gate that checked nothing.",
+            "gate that checked nothing. token=UNREADABLE",
             file=out,
         )
+        _record(EnumGateToken.UNREADABLE, {})
         return 1
     if wait_seconds < 0 or wait_seconds > MAX_WAIT_SECONDS:
         print(
             f"::error::lab-pass gate FAILED for {sha}: --wait-seconds "
-            f"{wait_seconds:g} is outside 0..{MAX_WAIT_SECONDS}.",
+            f"{wait_seconds:g} is outside 0..{MAX_WAIT_SECONDS}. token=UNREADABLE",
             file=out,
         )
+        _record(EnumGateToken.UNREADABLE, {})
         return 1
 
     deadline = time.monotonic() + wait_seconds
@@ -3411,8 +3548,49 @@ def evaluate_gate(
         )
         time.sleep(max(0.0, min(poll_seconds, remaining)))
 
+    # OMN-19233: one token per required lane, and the overall bound.
+    lane_tokens: dict[str, EnumGateToken] = {}
+    lane_notes: dict[str, str] = {}
+    for read in all_of:
+        if read.passed:
+            lane_tokens[read.lane.value] = EnumGateToken.PASS
+        elif read.receipt is not None:
+            lane_tokens[read.lane.value] = classify_receipt_token(read.receipt)
+        elif read.kind == "absent":
+            token = EnumGateToken.ABSENT
+            if read.lane is EnumLabLane.COMPOSE_DEV and rebuild_pending is not None:
+                try:
+                    if rebuild_pending(read.subject_sha):
+                        token = EnumGateToken.PENDING
+                        lane_notes[read.lane.value] = (
+                            "a rebuild run for this subject is in flight"
+                        )
+                    else:
+                        lane_notes[read.lane.value] = (
+                            "no rebuild run for this subject is in flight"
+                        )
+                except Exception as exc:  # noqa: BLE001 - named, and still refuses
+                    lane_notes[read.lane.value] = (
+                        f"whether a rebuild is in flight could not be read ({exc}), "
+                        "so this is ABSENT, not PENDING"
+                    )
+            lane_tokens[read.lane.value] = token
+        else:
+            lane_tokens[read.lane.value] = EnumGateToken.UNREADABLE
+    read_at = clock()
+    first = first_read_at if first_read_at is not None else read_at
+    elapsed = (read_at - first).total_seconds()
+    timed_out = overall_bound_seconds is not None and elapsed > overall_bound_seconds
+
     print(f"lab-pass gate (rule 24(b), OMN-17530) for sha {sha}", file=out)
     print(f"  repository : {repo}", file=out)
+    if overall_bound_seconds is not None:
+        print(
+            f"  bound      : first gate read {_utc_stamp(first)}, this read "
+            f"{_utc_stamp(read_at)}, {int(elapsed)} s of {overall_bound_seconds:g} s "
+            "(OMN-19233, PS-5)",
+            file=out,
+        )
     print(
         f"  any-of     : {', '.join(lane.value for lane in lanes) or '(none)'}",
         file=out,
@@ -3439,7 +3617,7 @@ def evaluate_gate(
         else:
             print(f"  unreadable : {read.problem}", file=out)
 
-    if _verdict(any_of, all_of):
+    if _verdict(any_of, all_of) and not timed_out:
         lanes_passing = ", ".join(
             dict.fromkeys(r.lane.value for r in [*any_of, *all_of] if r.passed)
         )
@@ -3448,6 +3626,7 @@ def evaluate_gate(
             f"lab-pass gate PASSED for {sha} on lane(s): {lanes_passing}.",
             file=out,
         )
+        _record(EnumGateToken.PASS, {k: v.value for k, v in lane_tokens.items()})
         return 0
 
     # OMN-18573. An INDETERMINATE check is named on its own line, with the sha
@@ -3491,14 +3670,39 @@ def evaluate_gate(
             )
         else:
             why = read.problem
+        note = lane_notes.get(read.lane.value)
+        if note:
+            why = f"{why} ({note})"
         print(
             f"::error::lab-pass gate: REQUIRED lane {read.lane.value} does not pass "
-            f"for sha {read.subject_sha}: {why}. A required lane is all-of "
+            f"for sha {read.subject_sha}: {why}. "
+            f"token={lane_tokens[read.lane.value].value}. A required lane is all-of "
             "(OMN-19312): a PASS on any other lane does not substitute for it.",
             file=out,
         )
 
     any_of_ok = not any_of or any(r.passed for r in any_of)
+    refusals = [t for t in lane_tokens.values() if t is not EnumGateToken.PASS]
+    if not any_of_ok:
+        refusals.append(EnumGateToken.ANY_OF_UNMET)
+    if timed_out:
+        refusals.append(EnumGateToken.TIMED_OUT)
+        print(
+            f"::error::lab-pass gate: the read at {_utc_stamp(read_at)} is "
+            f"{int(elapsed)} s after this delivery run's first gate read at "
+            f"{_utc_stamp(first)}, past the {overall_bound_seconds:g} s bound "
+            "(OMN-19233, PS-5). token=TIMED_OUT. A PASS that has arrived since "
+            "does not pass a read past the bound; a new delivery run reads afresh.",
+            file=out,
+        )
+    overall = _most_severe(refusals)
+    print(
+        f"::error::lab-pass gate REFUSED for {sha}: token={overall.value} "
+        f"subject={subject} lanes="
+        + (", ".join(f"{k}:{v.value}" for k, v in lane_tokens.items()) or "(none)"),
+        file=out,
+    )
+    _record(overall, {k: v.value for k, v in lane_tokens.items()})
     if not any_of_ok:
         print(
             f"::error::lab-pass gate FAILED for {sha}: no PASS lab-pass receipt "
@@ -3509,6 +3713,17 @@ def evaluate_gate(
             "missing, unreadable, malformed, INDETERMINATE or FAIL receipt all fail "
             "here, and there is no override flag. Exercise the sha on a lab lane and "
             "let its emitter publish the receipt.",
+            file=out,
+        )
+    elif overall is EnumGateToken.TIMED_OUT and not any(
+        t is not EnumGateToken.PASS for t in lane_tokens.values()
+    ):
+        # Every lane reads PASS now; the refusal is the bound alone, and the
+        # TIMED_OUT line above says so. "A required lane does not carry a PASS"
+        # would be false here.
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: the read is past the overall "
+            "bound. This is not a skip, and there is no override flag.",
             file=out,
         )
     else:
@@ -3617,6 +3832,328 @@ def resolve_required_subject_from_clone(
         branch_commits=lambda: train.default_branch_commits(clone, sha),
         runtime_affecting=predicate,
     )
+
+
+# ---------------------------------------------------------------------------
+# Receipt timing on staging delivery (OMN-19233, plan PS-5, decision S)
+# ---------------------------------------------------------------------------
+def _parse_utc(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
+
+
+def _gh_json(path: str) -> Any:
+    try:
+        raw = _gh_api(path)
+    except ReceiptLookupError:
+        raise
+    except Exception as exc:
+        raise ReceiptLookupError(str(exc)) from exc
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        msg = f"`gh api {path}` did not return JSON: {exc}"
+        raise ReceiptLookupError(msg) from exc
+
+
+def resolve_first_gate_read(
+    repo: str,
+    run_id: int,
+    run_attempt: int,
+    job_name: str,
+    *,
+    now: Callable[[], datetime],
+) -> datetime:
+    """When the delivery run's gate first read, across all of its attempts.
+
+    The PS-5 bound is measured from the delivery run's FIRST gate read, so a
+    re-run (the emitter's, or a person's) must not restart it. Attempt 1 is its
+    own first read. A later attempt takes the earliest ``started_at`` of the gate
+    job in any earlier attempt, read from the run's own jobs listing, which a
+    caller cannot supply. A prior attempt whose gate job never started (skipped
+    because an earlier job failed) did not read, and does not count.
+
+    The job's start precedes the receipt read by the job's setup steps, so the
+    bound this measures is slightly EARLIER than the literal read: the
+    conservative direction. A listing that cannot be read raises
+    ``ReceiptLookupError``, and the caller refuses UNREADABLE.
+    """
+    if run_attempt <= 1:
+        return now()
+    starts: list[datetime] = []
+    for attempt in range(1, run_attempt):
+        payload = _gh_json(
+            f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"
+        )
+        jobs = payload.get("jobs") if isinstance(payload, dict) else None
+        if not isinstance(jobs, list):
+            msg = f"run {run_id} attempt {attempt}: the jobs listing carries no list"
+            raise ReceiptLookupError(msg)
+        for job in jobs:
+            if not isinstance(job, dict) or job.get("name") != job_name:
+                continue
+            if job.get("conclusion") == "skipped":
+                continue
+            started = _parse_utc(job.get("started_at"))
+            if started is not None:
+                starts.append(started)
+    return min(starts) if starts else now()
+
+
+@dataclass(frozen=True)
+class ModelDeliveryRun:
+    """One staging delivery run, as the re-run selector reads it."""
+
+    run_id: int
+    created_at: datetime
+    status: str
+    conclusion: str | None
+    run_attempt: int
+    #: The gate verdict uploaded by this run's LATEST attempt, or None.
+    verdict: Mapping[str, Any] | None
+
+
+def _ineligible(
+    run: ModelDeliveryRun,
+    subject: str,
+    *,
+    newest: ModelDeliveryRun,
+    now: datetime,
+    bound_seconds: float,
+) -> str:
+    if run is not newest:
+        return (
+            f"a newer delivery run {newest.run_id} exists; re-running this one "
+            "would deliver older code over it"
+        )
+    if run.status != "completed":
+        return f"still {run.status}; it will read afresh"
+    if run.conclusion != "failure":
+        return f"concluded {run.conclusion}, not a refusal"
+    verdict = run.verdict
+    if verdict is None:
+        return (
+            f"attempt {run.run_attempt} uploaded no gate verdict (the gate step "
+            "did not run), so nothing says it refused on compose-dev timing"
+        )
+    if (
+        verdict.get("run_id") != run.run_id
+        or verdict.get("run_attempt") != run.run_attempt
+    ):
+        return (
+            f"its verdict names run {verdict.get('run_id')} attempt "
+            f"{verdict.get('run_attempt')}, not attempt {run.run_attempt}"
+        )
+    if verdict.get("subject") != subject:
+        return f"it refused for subject {verdict.get('subject')}, not {subject}"
+    token = str(verdict.get("token"))
+    if token not in {t.value for t in RERUN_ELIGIBLE_TOKENS}:
+        if token == EnumGateToken.FAIL.value:
+            return "it refused on a FAIL check, which stands until the subject changes"
+        return f"it refused {token}, which a compose-dev PASS does not change"
+    first = _parse_utc(verdict.get("first_read_at"))
+    if first is None:
+        return "its verdict carries no readable first_read_at"
+    elapsed = (now - first).total_seconds()
+    if elapsed > bound_seconds:
+        return (
+            f"its first gate read was {int(elapsed)} s ago, past the "
+            f"{bound_seconds:g} s bound; a re-run would refuse TIMED_OUT"
+        )
+    return ""
+
+
+def select_refused_deliveries(
+    subject: str,
+    runs: Sequence[ModelDeliveryRun],
+    *,
+    now: datetime,
+    bound_seconds: float,
+) -> tuple[list[ModelDeliveryRun], list[str]]:
+    """The delivery runs a compose-dev PASS for ``subject`` should re-run.
+
+    PS-5 item 2: a run is re-run when its latest attempt's gate refused
+    PENDING, ABSENT or INDETERMINATE for this exact subject, inside the bound.
+    A FAIL refusal is never re-run. One rule beyond the plan: only the NEWEST
+    delivery run is ever eligible, because re-running an older one would
+    deliver older code over newer code on staging (and would cancel the newer
+    run in their shared concurrency group). Every run gets a reason line.
+    """
+    ordered = sorted(runs, key=lambda r: r.created_at, reverse=True)
+    selected: list[ModelDeliveryRun] = []
+    reasons: list[str] = []
+    for run in ordered:
+        why = _ineligible(
+            run, subject, newest=ordered[0], now=now, bound_seconds=bound_seconds
+        )
+        if why:
+            reasons.append(f"delivery run {run.run_id}: not re-run: {why}")
+            continue
+        selected.append(run)
+        reasons.append(
+            f"delivery run {run.run_id}: RE-RUN: attempt {run.run_attempt} refused "
+            f"{run.verdict.get('token') if run.verdict else ''} for subject "
+            f"{subject}, which now carries a compose-dev PASS"
+        )
+    return selected, reasons
+
+
+def read_gate_verdict(
+    repo: str, run_id: int, run_attempt: int
+) -> Mapping[str, Any] | None:
+    """The gate verdict one delivery attempt uploaded, or None when it has none."""
+    artifacts = list_artifacts(repo, verdict_artifact_name(run_id, run_attempt))
+    if not artifacts:
+        return None
+    artifacts.sort(key=lambda a: str(a.get("created_at", "")), reverse=True)
+    artifact_id = int(artifacts[0]["id"])
+    blob = _gh_api(f"repos/{repo}/actions/artifacts/{artifact_id}/zip")
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            members = [n for n in archive.namelist() if n.endswith("verdict.json")]
+            if len(members) != 1:
+                msg = (
+                    f"verdict artifact {artifact_id} carries {len(members)} "
+                    "verdict.json entries; exactly one is required."
+                )
+                raise ReceiptLookupError(msg)
+            body = json.loads(archive.read(members[0]).decode("utf-8"))
+    except (zipfile.BadZipFile, json.JSONDecodeError) as exc:
+        msg = f"verdict artifact {artifact_id} is unreadable: {exc}"
+        raise ReceiptLookupError(msg) from exc
+    if not isinstance(body, dict) or body.get("schema") != VERDICT_SCHEMA:
+        msg = f"verdict artifact {artifact_id} is not a {VERDICT_SCHEMA} document"
+        raise ReceiptLookupError(msg)
+    return body
+
+
+def read_delivery_runs(
+    repo: str, workflow: str, branch: str, *, limit: int = 20
+) -> list[ModelDeliveryRun]:
+    """Recent delivery runs, newest first. Only the newest can be re-run, so
+    only its verdict is fetched. A surface that cannot be read raises."""
+    payload = _gh_json(
+        f"repos/{repo}/actions/workflows/{workflow}/runs?branch={branch}"
+        f"&per_page={limit}"
+    )
+    raw_runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
+    if not isinstance(raw_runs, list):
+        msg = f"the {workflow} run listing carries no workflow_runs list"
+        raise ReceiptLookupError(msg)
+    runs: list[ModelDeliveryRun] = []
+    for raw in raw_runs:
+        created = _parse_utc(raw.get("created_at")) if isinstance(raw, dict) else None
+        if created is None:
+            msg = f"a {workflow} run carries no readable created_at: {raw!r}"
+            raise ReceiptLookupError(msg)
+        runs.append(
+            ModelDeliveryRun(
+                run_id=int(raw["id"]),
+                created_at=created,
+                status=str(raw.get("status")),
+                conclusion=raw.get("conclusion"),
+                run_attempt=int(raw.get("run_attempt") or 1),
+                verdict=None,
+            )
+        )
+    runs.sort(key=lambda r: r.created_at, reverse=True)
+    if runs and runs[0].status == "completed" and runs[0].conclusion == "failure":
+        newest = runs[0]
+        runs[0] = ModelDeliveryRun(
+            run_id=newest.run_id,
+            created_at=newest.created_at,
+            status=newest.status,
+            conclusion=newest.conclusion,
+            run_attempt=newest.run_attempt,
+            verdict=read_gate_verdict(repo, newest.run_id, newest.run_attempt),
+        )
+    return runs
+
+
+def rerun_refused_deliveries(
+    repo: str,
+    subjects: Sequence[str],
+    *,
+    workflow: str,
+    branch: str,
+    bound_seconds: float,
+    out: Any,
+    now: Callable[[], datetime],
+) -> int:
+    """The compose-dev emitter's half of PS-5: re-run what a PASS unblocks.
+
+    For each subject that now carries a compose-dev PASS (read back through the
+    same reader the gate uses, never assumed from the emitting job), re-run the
+    failed jobs of the delivery runs :func:`select_refused_deliveries` picks. A
+    subject whose receipt is not PASS re-runs nothing. An unreadable surface or
+    a refused re-run request fails the step, loudly: a delivery nobody re-reads
+    stays refused, and that must be visible.
+    """
+    failures = 0
+    runs: list[ModelDeliveryRun] | None = None
+    for subject in dict.fromkeys(subjects):
+        if not _SHA_RE.match(subject):
+            print(
+                f"::error::rerun-refused-deliveries: subject {subject!r} is not a "
+                "40-character lowercase commit sha",
+                file=out,
+            )
+            failures += 1
+            continue
+        read = read_lane(repo, EnumLabLane.COMPOSE_DEV, subject)
+        if not read.passed:
+            state = read.receipt.result.value if read.receipt is not None else read.kind
+            line = (
+                f"subject {subject}: compose-dev receipt is {state}, not PASS; "
+                "no delivery is re-run for it"
+            )
+            if read.kind in {"unreadable", "mismatch"}:
+                print(
+                    f"::error::rerun-refused-deliveries: {line}: {read.problem}",
+                    file=out,
+                )
+                failures += 1
+            else:
+                print(line, file=out)
+            continue
+        if runs is None:
+            try:
+                runs = read_delivery_runs(repo, workflow, branch)
+            except Exception as exc:  # noqa: BLE001 - reported, and fails the step
+                print(
+                    f"::error::rerun-refused-deliveries: the {workflow} runs could "
+                    f"not be read: {exc}",
+                    file=out,
+                )
+                return 1
+        selected, reasons = select_refused_deliveries(
+            subject, runs, now=now(), bound_seconds=bound_seconds
+        )
+        print(
+            f"subject {subject}: compose-dev receipt is PASS; required lane "
+            "compose-dev (OMN-19233)",
+            file=out,
+        )
+        for reason in reasons:
+            print(f"  {reason}", file=out)
+        for run in selected:
+            path = f"repos/{repo}/actions/runs/{run.run_id}/rerun-failed-jobs"
+            try:
+                _gh_api_post(path)
+            except Exception as exc:  # noqa: BLE001 - reported, and fails the step
+                print(
+                    f"::error::rerun-refused-deliveries: re-running delivery run "
+                    f"{run.run_id} failed: {exc}",
+                    file=out,
+                )
+                failures += 1
+                continue
+            print(f"  re-ran the failed jobs of delivery run {run.run_id}", file=out)
+    return 1 if failures else 0
 
 
 # ---------------------------------------------------------------------------
@@ -4228,6 +4765,49 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gate.add_argument("--clone", type=Path, default=None)
     gate.add_argument("--runtime-path-validator", type=Path, default=None)
+    gate.add_argument(
+        "--detect-pending",
+        action="store_true",
+        help=(
+            "OMN-19233: a required compose-dev receipt that is absent refuses "
+            "PENDING while the subject's rebuild run is in flight, ABSENT otherwise"
+        ),
+    )
+    gate.add_argument(
+        "--overall-bound-seconds",
+        type=float,
+        default=None,
+        help=(
+            "OMN-19233 (PS-5): refuse TIMED_OUT when this read is more than this "
+            "many seconds after the delivery run's first gate read"
+        ),
+    )
+    gate.add_argument("--run-id", type=int, default=None)
+    gate.add_argument("--run-attempt", type=int, default=None)
+    gate.add_argument(
+        "--gate-job-name",
+        default="",
+        help="the gate job's name, whose earliest start is the first gate read",
+    )
+    gate.add_argument(
+        "--verdict-out",
+        type=Path,
+        default=None,
+        help="write the gate verdict as JSON (the re-run selector reads it)",
+    )
+
+    rerun = sub.add_parser(
+        "rerun-refused-deliveries",
+        help=(
+            "OMN-19233 (PS-5 item 2): after a compose-dev PASS, re-run the staging "
+            "delivery that refused PENDING, ABSENT or INDETERMINATE for it"
+        ),
+    )
+    rerun.add_argument("--repo", default=DEFAULT_REPO)
+    rerun.add_argument("--subject", action="append", required=True)
+    rerun.add_argument("--workflow", required=True)
+    rerun.add_argument("--branch", default="dev")
+    rerun.add_argument("--overall-bound-seconds", type=float, required=True)
 
     verdict = sub.add_parser(
         "workflow-verdict",
@@ -4542,6 +5122,53 @@ def main(argv: Sequence[str] | None = None) -> int:
             required_sha, required_note = resolve_required_subject_from_clone(
                 args.sha, args.clone, args.runtime_path_validator
             )
+        first_read_at: datetime | None = None
+        if args.run_attempt is not None and args.run_attempt > 1:
+            if args.run_id is None or not args.gate_job_name:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: --run-attempt "
+                    f"{args.run_attempt} needs --run-id and --gate-job-name to find "
+                    "the first gate read. token=UNREADABLE",
+                    file=sys.stdout,
+                )
+                return 1
+            try:
+                first_read_at = resolve_first_gate_read(
+                    args.repo,
+                    args.run_id,
+                    args.run_attempt,
+                    args.gate_job_name,
+                    now=lambda: datetime.now(UTC),
+                )
+            except ReceiptLookupError as exc:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: this delivery "
+                    f"run's first gate read could not be read ({exc}), so the "
+                    "overall bound cannot be applied. token=UNREADABLE",
+                    file=sys.stdout,
+                )
+                if args.verdict_out is not None:
+                    # No lane named: evaluate_gate's own refusal branch records
+                    # the verdict as UNREADABLE, in the one verdict shape.
+                    evaluate_gate(
+                        args.repo,
+                        args.sha,
+                        [],
+                        io.StringIO(),
+                        required_sha=required_sha,
+                        verdict_out=args.verdict_out,
+                        run_id=args.run_id,
+                        run_attempt=args.run_attempt,
+                    )
+                return 1
+        rebuild_pending: Callable[[str], bool] | None = None
+        if args.detect_pending:
+            repo_name = args.repo.split("/")[-1]
+
+            def rebuild_pending(subject: str) -> bool:
+                train = _load_release_train()
+                return bool(train.default_rebuild_pending(repo_name, subject))
+
         return evaluate_gate(
             args.repo,
             args.sha,
@@ -4552,6 +5179,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             required_note=required_note,
             wait_seconds=args.wait_seconds,
             poll_seconds=args.poll_seconds,
+            rebuild_pending=rebuild_pending,
+            first_read_at=first_read_at,
+            overall_bound_seconds=args.overall_bound_seconds,
+            verdict_out=args.verdict_out,
+            run_id=args.run_id,
+            run_attempt=args.run_attempt,
+        )
+    if args.command == "rerun-refused-deliveries":
+        return rerun_refused_deliveries(
+            args.repo,
+            args.subject,
+            workflow=args.workflow,
+            branch=args.branch,
+            bound_seconds=args.overall_bound_seconds,
+            out=sys.stdout,
+            now=lambda: datetime.now(UTC),
         )
     if args.command == "workflow-verdict":
         return evaluate_workflow_verdict(
