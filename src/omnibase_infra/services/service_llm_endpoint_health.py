@@ -14,8 +14,12 @@ consuming probe resources on every tick.
 Architecture:
     - One circuit breaker **per probeable endpoint** (independent failure
       tracking)
-    - Probes hit ``GET /health`` first; if that returns non-2xx, falls back
-      to ``GET /v1/models`` (vLLM-style discovery)
+    - Probes hit the paths the backend DECLARES, in order (OMN-19129). A
+      backend that declares none falls back to ``GET /health`` then
+      ``GET /v1/models`` (vLLM-style discovery), which suits a local model
+      server and not a vendor surface
+    - Each probe carries the endpoint's bearer credential when it declares
+      one, resolved by variable name at probe time (OMN-19129)
     - Results are stored in a dict keyed by endpoint name
     - An optional ``ProtocolEventBusLike`` dependency enables Kafka emission
 
@@ -38,6 +42,11 @@ Related:
     - OMN-2249: SLO profiling baselines that inform health thresholds
     - OMN-2250: CIDR allowlist and HMAC signing for LLM HTTP transport
     - OMN-16900: auth-state classification and terminal-auth backoff
+    - OMN-19129: the probe now AUTHENTICATES and uses a declared path.
+      OMN-16900 resolved each endpoint's credential to decide probeability
+      and then discarded it, so every auth-gated backend was probed
+      anonymously, 401'd on every path including ones that do not exist, and
+      classified ``AUTH_FAILED`` on a credential that was fine.
     - MixinAsyncCircuitBreaker: Circuit breaker pattern
 
 .. versionadded:: 0.9.0
@@ -146,6 +155,39 @@ def _probe_paths(endpoint_url: str) -> tuple[str, str]:
         urlunsplit((parsed.scheme, parsed.netloc, health_path, "", "")),
         urlunsplit((parsed.scheme, parsed.netloc, models_path, "", "")),
     )
+
+
+def _declared_probe_urls(endpoint_url: str, probe_paths: tuple[str, ...]) -> list[str]:
+    """Join a base URL with the probe paths the backend declares (OMN-19129).
+
+    Synthesizing ``/health`` and ``/v1/models`` is right for a local
+    vLLM-style server and wrong for a vendor surface that serves neither.  The
+    GLM coding-plan base ``.../api/coding/paas/v4`` 404s on both synthesized
+    paths even with a valid credential, and serves ``/models``.  Where a
+    backend declares what it serves, that declaration wins.
+
+    Args:
+        endpoint_url: The endpoint base URL.
+        probe_paths: Declared paths, each relative to the base and each
+            beginning with ``/``.
+
+    Returns:
+        Absolute probe URLs in declaration order.
+    """
+    parsed = urlsplit(endpoint_url)
+    base_path = parsed.path.rstrip("/")
+    return [
+        urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                f"{base_path}/{path.lstrip('/')}",
+                "",
+                "",
+            )
+        )
+        for path in probe_paths
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +344,7 @@ class ServiceLlmEndpointHealth:
         topic_registry: ProtocolTopicRegistry | None = None,
         *,
         monotonic: Callable[[], float] = time.monotonic,
+        secret_resolver: Callable[[str], str | None] | None = None,
     ) -> None:
         """Initialize the health checker.
 
@@ -313,7 +356,30 @@ class ServiceLlmEndpointHealth:
                 If ``None``, uses ``ServiceTopicRegistry.from_defaults()``.
             monotonic: Monotonic clock used for auth-failure backoff windows.
                 Injected so backoff behaviour is testable without sleeping.
+            secret_resolver: Maps a credential variable NAME to its value, or
+                ``None`` when it does not resolve.  Required whenever
+                ``config.endpoint_auth_env`` is non-empty (OMN-19129).  The
+                resolver is called at probe time, so a credential restored
+                without a restart is picked up on the next cycle.
+
+        Raises:
+            ValueError: If any endpoint declares an auth variable but no
+                ``secret_resolver`` was supplied.  Probing an auth-gated
+                surface anonymously guarantees a 401 that is then misread as a
+                rejected credential, so this wiring gap fails loudly at
+                construction rather than quietly at every probe.
         """
+        if config.endpoint_auth_env and secret_resolver is None:
+            declared = sorted(config.endpoint_auth_env)
+            msg = (
+                f"Endpoint(s) {declared} declare an auth credential but no "
+                "'secret_resolver' was supplied. An auth-gated endpoint probed "
+                "without an Authorization header returns 401 for every path, "
+                "including paths that do not exist, which this service would "
+                "classify AUTH_FAILED (OMN-19129)."
+            )
+            raise ValueError(msg)
+        self._secret_resolver = secret_resolver
         if topic_registry is None:
             from omnibase_infra.topics.service_topic_registry import (
                 ServiceTopicRegistry,
@@ -574,7 +640,8 @@ class ServiceLlmEndpointHealth:
     ) -> ModelLlmEndpointStatus:
         """Probe a single endpoint with circuit breaker protection.
 
-        Tries ``GET /health`` first, then falls back to ``GET /v1/models``.
+        Probes the backend-declared paths, or the local-server synthesis
+        when it declares none, carrying its credential if it has one.
 
         Auth failures (401/403) are routed away from the circuit breaker and
         into the dedicated auth-backoff path: the breaker exists to protect a
@@ -614,7 +681,7 @@ class ServiceLlmEndpointHealth:
         # Probe the endpoint
         start_ns = time.perf_counter_ns()
         try:
-            probe_state, error = await self._http_probe(url)
+            probe_state, error = await self._http_probe(name, url)
             elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
 
             if probe_state is EnumLlmEndpointProbeState.HEALTHY:
@@ -745,72 +812,121 @@ class ServiceLlmEndpointHealth:
                 )
             return self._http_client
 
-    async def _http_probe(self, base_url: str) -> tuple[EnumLlmEndpointProbeState, str]:
+    def _auth_headers(self, name: str) -> tuple[dict[str, str], str]:
+        """Build the probe's Authorization header for one endpoint (OMN-19129).
+
+        The credential is resolved by NAME at call time and placed only in the
+        returned mapping.  It is never stored on the shared client, never
+        interpolated into a URL, and never returned in the diagnostic string —
+        the second element names the *variable*, never its value.
+
+        Args:
+            name: Logical endpoint name.
+
+        Returns:
+            ``(headers, unresolved_var)``.  ``headers`` is empty for an
+            endpoint that declares no credential.  ``unresolved_var`` is the
+            variable name when a declared credential did not resolve, and an
+            empty string otherwise.
+        """
+        auth_env = self._config.endpoint_auth_env.get(name)
+        if not auth_env:
+            return {}, ""
+        # Guarded by the constructor: a declared auth env implies a resolver.
+        resolver = self._secret_resolver
+        secret = resolver(auth_env) if resolver is not None else None
+        if not secret:
+            return {}, auth_env
+        return {"Authorization": f"Bearer {secret}"}, ""
+
+    async def _http_probe(
+        self,
+        name: str,
+        base_url: str,
+    ) -> tuple[EnumLlmEndpointProbeState, str]:
         """Perform the HTTP probe against an endpoint and classify the result.
 
-        Tries ``GET /health`` first.  If that returns a non-2xx status,
-        falls back to ``GET /v1/models`` (vLLM model listing).  If both
-        probes fail, the error message includes details from both attempts.
+        Probe paths come from the backend's declaration when it has one, and
+        otherwise from the ``/health`` then ``/v1/models`` synthesis that suits
+        a local vLLM-style server.  Each request carries the endpoint's bearer
+        credential when one is declared.
 
-        Classification (OMN-16900): when **both** probes come back 401/403 the
+        Classification (OMN-16900): when **every** probe comes back 401/403 the
         endpoint is reachable but our credential is rejected, which is an
         ``AUTH_FAILED`` condition rather than an outage.  Previously this case
         returned ``available=True`` on the theory that an auth wall proves
         reachability — which reported fully unusable endpoints as healthy while
         re-probing them every 30 seconds forever.
 
+        OMN-19129 closes the gap that made that classification unreliable: the
+        probe used to send no ``Authorization`` header at all, so an auth-gated
+        surface rejected it at the auth layer before routing, returning 401 for
+        every path including paths that do not exist.  Every backend with a
+        resolvable credential was therefore classified ``AUTH_FAILED`` on its
+        second probe, and the rung removed itself from the ladder while looking
+        like a credential nobody could fix.
+
         Args:
+            name: Logical endpoint name, used to resolve its declarations.
             base_url: The endpoint base URL (no trailing slash).
 
         Returns:
             ``(probe_state, error)`` where *error* is an empty string when the
             state is ``HEALTHY`` and a human-readable description otherwise.
+            The error never contains a credential value.
         """
+        headers, unresolved_var = self._auth_headers(name)
+        if unresolved_var:
+            # The declared credential stopped resolving. Report it as an auth
+            # condition naming the variable, and do not probe anonymously —
+            # an anonymous probe cannot distinguish this from a bad key.
+            return (
+                EnumLlmEndpointProbeState.AUTH_FAILED,
+                f"Declared credential '{unresolved_var}' did not resolve; "
+                "endpoint not probed",
+            )
+
         client = await self._get_http_client()
-        primary_error: str = ""
-        primary_was_auth = False
 
-        health_url, models_url = _probe_paths(base_url)
+        declared = self._config.endpoint_probe_paths.get(name)
+        if declared:
+            probe_urls = _declared_probe_urls(base_url, declared)
+            labels = [f"Declared {path}" for path in declared]
+        else:
+            health_url, models_url = _probe_paths(base_url)
+            probe_urls = [health_url, models_url]
+            labels = ["Primary /health", "Fallback model discovery"]
 
-        # Primary probe: /health
-        try:
-            resp = await client.get(health_url)
+        errors: list[str] = []
+        saw_auth_rejection = False
+
+        for label, probe_url in zip(labels, probe_urls, strict=True):
+            try:
+                resp = await client.get(probe_url, headers=headers)
+            except httpx.HTTPError as exc:
+                # Transport-class failures are an expected probe outcome and
+                # carry only the exception type into the error string.
+                errors.append(f"{label}: {type(exc).__name__}")
+                continue
+            # Anything that is NOT a transport failure is unexpected, and its
+            # message may embed a credential or a connection string. It is
+            # deliberately left to propagate to _probe_endpoint's catch-all,
+            # which runs it through sanitize_error_message first.
             if 200 <= resp.status_code < 300:
                 return EnumLlmEndpointProbeState.HEALTHY, ""
-            primary_was_auth = resp.status_code in _AUTH_STATUS_CODES
-            primary_error = f"Primary /health: HTTP {resp.status_code}"
-        except Exception as exc:  # noqa: BLE001 — boundary: returns degraded response
-            primary_error = f"Primary /health: {type(exc).__name__}"
-
-        # Fallback probe: model discovery.
-        try:
-            resp = await client.get(models_url)
-            if 200 <= resp.status_code < 300:
-                return EnumLlmEndpointProbeState.HEALTHY, ""
-            fallback_error = f"Fallback model discovery: HTTP {resp.status_code}"
+            errors.append(f"{label}: HTTP {resp.status_code}")
             if resp.status_code in _AUTH_STATUS_CODES:
-                # Reachable, but the credential is rejected. Terminal, not
-                # transient — a 404 /health on an auth-gated cloud route is
-                # normal, so the fallback verdict is the authoritative one.
-                return (
-                    EnumLlmEndpointProbeState.AUTH_FAILED,
-                    f"{primary_error}; {fallback_error}",
-                )
-            if primary_was_auth:
-                return (
-                    EnumLlmEndpointProbeState.AUTH_FAILED,
-                    f"{primary_error}; {fallback_error}",
-                )
-            return (
-                EnumLlmEndpointProbeState.UNAVAILABLE,
-                f"{primary_error}; {fallback_error}",
-            )
-        except httpx.HTTPError as exc:
-            fallback_error = f"Fallback model discovery: {type(exc).__name__}"
-            return (
-                EnumLlmEndpointProbeState.UNAVAILABLE,
-                f"{primary_error}; {fallback_error}",
-            )
+                saw_auth_rejection = True
+
+        error = "; ".join(errors)
+        # A 401/403 on any probed path, with the declared credential attached,
+        # is a credential verdict rather than an outage: it is deterministic
+        # and will not recover on its own. Unchanged from OMN-16900 — what
+        # OMN-19129 changes is that the credential is now actually attached,
+        # so this branch no longer fires on every auth-gated backend.
+        if saw_auth_rejection:
+            return EnumLlmEndpointProbeState.AUTH_FAILED, error
+        return EnumLlmEndpointProbeState.UNAVAILABLE, error
 
     async def _emit_health_event(
         self,
