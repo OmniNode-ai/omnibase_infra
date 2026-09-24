@@ -9,7 +9,8 @@ Usage:
     python -m omnibase_infra.docker.catalog.cli up runtime
     python -m omnibase_infra.docker.catalog.cli up runtime --seed
     python -m omnibase_infra.docker.catalog.cli up runtime --build
-    python -m omnibase_infra.docker.catalog.cli down
+    python -m omnibase_infra.docker.catalog.cli up local --env-file ~/.omnibase/local.env --build
+    python -m omnibase_infra.docker.catalog.cli down [--volumes]
     python -m omnibase_infra.docker.catalog.cli status
     python -m omnibase_infra.docker.catalog.cli seed
     python -m omnibase_infra.docker.catalog.cli read-stack
@@ -35,12 +36,21 @@ from omnibase_infra.docker.catalog.validator_healthcheck_semantic_probe import (
 from omnibase_infra.docker.catalog.validator_healthcheck_start_period import (
     validate_migration_gate_start_period,
 )
+from omnibase_infra.docker.catalog.validator_host_ports import (
+    find_duplicate_host_ports,
+)
 
 # Default paths relative to repo root
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 _HOME_ENV = Path.home() / ".omnibase" / ".env"
 _REPO_ENV = _REPO_ROOT / ".env"
+# OMN-19496: the rendered runtime policy contract. Manifests interpolate its
+# keys (ONEX_ACTIVE_RUNTIME_PACKAGES, DEV_RUNTIME_*_CAPABILITIES, ...) with
+# fail-closed ``${VAR:?}`` guards, and before OMN-19496 the catalog CLI never
+# loaded it, so every runtime render depended on the operator's own env file
+# happening to carry policy values. It is tracked and secret-free.
+_RUNTIME_POLICY_ENV = _REPO_ROOT / "docker" / "runtime-policy.env"
 
 
 def _load_env_file(env_file: Path) -> None:
@@ -59,6 +69,60 @@ def _load_env_file(env_file: Path) -> None:
             value = value.strip().strip("'\"")
             if key and key not in os.environ:
                 os.environ[key] = value
+
+
+def _load_stack_env(env_file: str | None) -> int:
+    """Load the env for one catalog invocation (OMN-19496).
+
+    With ``--env-file`` that file is the ONLY operator env source: the home and
+    repo files are not read, so a laptop profile renders from exactly the one
+    file its documentation names and never inherits a lab host's operator env.
+    Without it, the historical ``~/.omnibase/.env`` then repo ``.env`` order
+    applies. The runtime policy contract is loaded last in both cases. Values
+    already in the process environment always win, then earlier files.
+
+    Returns non-zero, with the reason on stderr, when a named env file is absent.
+    """
+    if env_file is not None:
+        path = Path(env_file).expanduser()
+        if not path.is_file():
+            print(
+                f"Env file not found: {path}. Create it from the template the "
+                "bundle documents (for the laptop profile: docker/local.env.example, "
+                "or run `make local-env`).",
+                file=sys.stderr,
+            )
+            return 1
+        placeholders = _placeholder_keys(path)
+        if placeholders:
+            print(
+                f"Env file {path} still carries template placeholders for: "
+                f"{', '.join(placeholders)}. Replace them (or delete the file and "
+                "run `make local-env`, which fills them).",
+                file=sys.stderr,
+            )
+            return 1
+        _load_env_file(path)
+    else:
+        _load_omnibase_env()
+    _load_env_file(_RUNTIME_POLICY_ENV)
+    return 0
+
+
+_TEMPLATE_PLACEHOLDER_PREFIX = "__REPLACE_WITH_"
+
+
+def _placeholder_keys(env_file: Path) -> list[str]:
+    """Keys in ``env_file`` whose value is still a template placeholder."""
+    keys: list[str] = []
+    for raw in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if _TEMPLATE_PLACEHOLDER_PREFIX in value:
+            keys.append(key.strip().removeprefix("export ").strip())
+    return keys
 
 
 def _load_omnibase_env() -> None:
@@ -84,8 +148,24 @@ _SEED_SCRIPT = str(_REPO_ROOT / "scripts" / "seed-infisical.py")
 _CONTRACTS_DIR = str(_REPO_ROOT / "src" / "omnibase_infra" / "nodes")
 
 
+def _refuse_host_port_clashes(bundles: list[str]) -> int:
+    """Refuse a stack in which two services publish one host port (OMN-19497)."""
+    resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
+    resolved = resolver.resolve(bundles=bundles)
+    clash = find_duplicate_host_ports(resolved.manifests)
+    if clash.ok:
+        return 0
+    print("Cannot render: duplicate host ports in the resolved stack:", file=sys.stderr)
+    for message in clash.messages():
+        print(f"  - {message}", file=sys.stderr)
+    return 1
+
+
 def _resolve_and_generate(bundles: list[str], output: str) -> int:
     """Resolve bundles, generate compose, write to output path."""
+    rc = _refuse_host_port_clashes(bundles)
+    if rc != 0:
+        return rc
     resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
     resolved = resolver.resolve(bundles=bundles)
     compose = generate_compose(resolved, environment=os.environ)
@@ -98,12 +178,46 @@ def _resolve_and_generate(bundles: list[str], output: str) -> int:
     return 0
 
 
-def _save_stack(bundles: list[str]) -> None:
-    """Persist selected bundles to .onex/stack.yml."""
+def _save_stack(bundles: list[str], env_file: str | None = None) -> None:
+    """Persist selected bundles (and the env file, if one was named) to .onex/stack.yml."""
     stack_path = Path(_STACK_FILE)
     stack_path.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, object] = {"bundles": bundles}
+    if env_file is not None:
+        data["env_file"] = str(Path(env_file).expanduser())
     with open(stack_path, "w") as f:
-        yaml.dump({"bundles": bundles}, f, default_flow_style=False)
+        yaml.dump(data, f, default_flow_style=False)
+
+
+def _load_stack_env_file() -> str | None:
+    """Return the env file the last ``up`` named, so down/status interpolate alike."""
+    stack_path = Path(_STACK_FILE)
+    if not stack_path.exists():
+        return None
+    with open(stack_path) as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        return None
+    env_file = data.get("env_file")
+    return str(env_file) if isinstance(env_file, str) and env_file else None
+
+
+def _pop_env_file(args: list[str]) -> tuple[list[str], str | None, bool]:
+    """Split ``--env-file PATH`` out of ``args``. Third value is False on a missing value."""
+    rest: list[str] = []
+    env_file: str | None = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--env-file":
+            if i + 1 >= len(args):
+                print("Missing value for --env-file", file=sys.stderr)
+                return rest, None, False
+            env_file = args[i + 1]
+            i += 2
+        else:
+            rest.append(args[i])
+            i += 1
+    return rest, env_file, True
 
 
 def _load_stack() -> list[str]:
@@ -121,7 +235,12 @@ def _load_stack() -> list[str]:
 
 def cmd_generate(args: list[str]) -> int:
     """Generate compose from selected bundles."""
-    _load_omnibase_env()
+    args, env_file, ok = _pop_env_file(args)
+    if not ok:
+        return 1
+    rc = _load_stack_env(env_file)
+    if rc != 0:
+        return rc
     output = _DEFAULT_OUTPUT
     bundles = []
     i = 0
@@ -141,9 +260,16 @@ def cmd_generate(args: list[str]) -> int:
 
 
 def cmd_validate(args: list[str]) -> int:
-    """Validate env vars for selected bundles."""
-    _load_omnibase_env()
+    """Validate env vars and host ports for selected bundles."""
+    args, env_file, ok = _pop_env_file(args)
+    if not ok:
+        return 1
+    rc = _load_stack_env(env_file)
+    if rc != 0:
+        return rc
     bundles = args if args else _load_stack()
+    if _refuse_host_port_clashes(bundles) != 0:
+        return 1
     resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
     resolved = resolver.resolve(bundles=bundles)
     result = validate_env(resolved.required_env)
@@ -272,16 +398,21 @@ def cmd_seed(_args: list[str]) -> int:
 
 def cmd_up(args: list[str]) -> int:
     """Validate, generate, and start compose stack."""
-    _load_omnibase_env()
+    args, env_file, ok = _pop_env_file(args)
+    if not ok:
+        return 1
+    rc = _load_stack_env(env_file)
+    if rc != 0:
+        return rc
     # Parse flags
     run_seed = "--seed" in args
     force_build = "--build" in args
     flag_args = {"--seed", "--build"}
-    bundles = [a for a in args if a not in flag_args] if args else _load_stack()
+    bundles = [a for a in args if a not in flag_args] or _load_stack()
 
     # Save stack selection (exclude flags from saved bundles)
     if bundles:
-        _save_stack(bundles)
+        _save_stack(bundles, env_file)
 
     # Validate
     resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
@@ -353,18 +484,28 @@ def cmd_up(args: list[str]) -> int:
     return 0
 
 
-def cmd_down(_args: list[str]) -> int:
-    """Stop compose stack."""
-    proc = subprocess.run(
-        ["docker", "compose", "-f", _DEFAULT_OUTPUT, "down"],
-        cwd=str(_REPO_ROOT),
-        check=False,
-    )
+def cmd_down(args: list[str]) -> int:
+    """Stop the compose project last rendered; ``--volumes`` also removes its volumes.
+
+    The generated file is interpolated by ``docker compose down`` too, so the
+    env the last ``up`` rendered from is loaded first (OMN-19496); without it a
+    render carrying ``${VAR:?}`` guards cannot even be torn down.
+    """
+    rc = _load_stack_env(_load_stack_env_file())
+    if rc != 0:
+        return rc
+    command = ["docker", "compose", "-f", _DEFAULT_OUTPUT, "down"]
+    if "--volumes" in args:
+        command.append("--volumes")
+    proc = subprocess.run(command, cwd=str(_REPO_ROOT), check=False)
     return proc.returncode
 
 
 def cmd_status(_args: list[str]) -> int:
     """Show compose stack status."""
+    rc = _load_stack_env(_load_stack_env_file())
+    if rc != 0:
+        return rc
     proc = subprocess.run(
         ["docker", "compose", "-f", _DEFAULT_OUTPUT, "ps"],
         cwd=str(_REPO_ROOT),

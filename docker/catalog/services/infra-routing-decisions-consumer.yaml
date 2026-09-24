@@ -15,8 +15,12 @@ operational_defaults:
   OMNIBASE_INFRA_ROUTING_DECISIONS_BATCH_TIMEOUT_MS: '1000'
   ONEX_LOG_LEVEL: INFO
   ONEX_ENVIRONMENT: local
+# OMN-19497: the external host port moved off a port another service in the
+# same resolved runtime bundle already published (8091: contract-resolver;
+# 8097: llm-cost-aggregation-consumer). docker compose refuses to start the
+# second claimant. The container port is unchanged.
 ports:
-  external: 8097
+  external: 8096
   internal: 8097
 healthcheck:
   test: curl -sf http://localhost:8097/health

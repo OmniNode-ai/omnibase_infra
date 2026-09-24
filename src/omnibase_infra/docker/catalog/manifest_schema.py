@@ -126,6 +126,16 @@ class Bundle:
     includes: list[str] = field(default_factory=list)
     inject_env: dict[str, str] = field(default_factory=dict)
     inject_required_env: list[str] = field(default_factory=list)
+    # OMN-19496: bind mounts added to every runtime-layer entry of the resolved
+    # stack, on the same rule as ``inject_env``. A laptop profile uses this to
+    # mount its own Bifrost lane overlay without editing shared manifests.
+    inject_volumes: list[str] = field(default_factory=list)
+    # OMN-19496: the compose project the bundle renders under. ``None`` keeps
+    # the historical ``omnibase-infra`` project and every historical name. A
+    # bundle that names its own project gets project-scoped container,
+    # network, volume and runtime-image names, so it can run beside any other
+    # compose project on the same Docker host.
+    project: str | None = None
 
     def resolve_includes(
         self,

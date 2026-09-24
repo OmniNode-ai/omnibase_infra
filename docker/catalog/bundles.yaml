@@ -25,7 +25,10 @@ core:
     - INFISICAL_ENCRYPTION_KEY
     - INFISICAL_AUTH_SECRET
 runtime-core:
-  description: "ONEX runtime core — 7 services with no env requirements beyond the 0.34.0 baseline (OMN-9332). Use `onex up runtime-core` to redeploy correctness fixes without also enabling integrations that need new secrets."
+  # OMN-19496: the "no env requirements" claim this description used to make was
+  # false -- the resolved bundle requires 15 vars, lab model URLs among them.
+  # The laptop profile is the `local` bundle below.
+  description: "ONEX runtime core — 7 runtime services plus their infrastructure dependencies (OMN-9332). Requires the operator env (POSTGRES_PASSWORD, VALKEY_PASSWORD, Keycloak and service-client secrets, model URLs); for a laptop use the `local` bundle."
   services:
     - omninode-runtime
     - runtime-effects
@@ -37,6 +40,84 @@ runtime-core:
   includes: []
   inject_env: {}
   inject_required_env: []
+# OMN-19496: the LAPTOP profile. One command (`make up-local`) boots postgres,
+# redpanda, valkey, the migrations and the migration gate, and the runtime main
+# and effects kernels built from docker/Dockerfile.runtime (which installs
+# omnimarket, so the delegate-skill command topic has a consumer). It renders
+# under its own compose project, so every container, network, volume and the
+# runtime image tag are prefixed `omnibase-infra-local-` and it can run beside
+# any other project on the same Docker host.
+#
+# Its env comes from ONE file, named with --env-file (template:
+# docker/local.env.example; `make local-env` writes it). The only operator
+# values are the two local passwords and the path of the model overlay. Every
+# lab and ops integration -- the deploy agent, GitHub, Linear, Slack, CI relays,
+# Keycloak, the Infisical identity -- is off: its variable is bound empty here,
+# never required. The model endpoint is the typed Bifrost lane overlay the file
+# ONEX_LOCAL_BIFROST_OVERLAY names (template:
+# docker/lane-overlays/local.bifrost.example.yaml); the renderer never reads an
+# endpoint from env, by design.
+local:
+  description: "Laptop profile — the ONEX stack plus your own runtime (main + effects) in containers, no lab or ops secrets (OMN-19496). `make up-local`."
+  project: omnibase-infra-local
+  services:
+    - postgres
+    - redpanda
+    - redpanda-partition-cap
+    - valkey
+    - forward-migration
+    - migration-gate
+    - omninode-runtime
+    - runtime-effects
+  includes: []
+  inject_env:
+    ONEX_ENVIRONMENT: local
+    ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
+    ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
+    # Same fail-closed wiring the dogfood lane and onex-dev bind: a handler the
+    # resolver cannot construct kills boot instead of being quarantined.
+    ONEX_WIRING_STRICT_MODE: "1"
+    # Delegation routing: the rendered Bifrost contract, this profile's own
+    # typed lane overlay (mounted by inject_volumes), and the routing tiers the
+    # runtime image bakes from the installed omnimarket package.
+    BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml
+    BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/local.bifrost.yaml
+    BIFROST_VERIFY_ENDPOINTS: "0"
+    DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
+    OMNIDASH_ANALYTICS_DB_URL: "postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+    OMNIMEMORY_ENABLED: "false"
+    # Legacy PluginLlm URLs. Delegation routes through the overlay above; these
+    # only need to be well-formed. Override in the env file if you use them.
+    LLM_CODER_URL: "${LLM_CODER_URL:-http://host.docker.internal:8000}"
+    LLM_CODER_FAST_URL: "${LLM_CODER_FAST_URL:-http://host.docker.internal:8000}"
+    LLM_EMBEDDING_URL: "${LLM_EMBEDDING_URL:-http://host.docker.internal:8002}"
+    LLM_DEEPSEEK_R1_URL: "${LLM_DEEPSEEK_R1_URL:-http://host.docker.internal:8000}"
+    # Local model egress: private ranges by default, so a model on your own
+    # machine or your own network is reachable.
+    LLM_ENDPOINT_CIDR_ALLOWLIST: "${LLM_ENDPOINT_CIDR_ALLOWLIST:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
+    LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST: "${LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST:?runtime policy contract must set LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST}"
+    LOCAL_LLM_SHARED_SECRET: "${LOCAL_LLM_SHARED_SECRET:-}"
+    # Lab and ops integrations: off.
+    ONEX_REGISTRATION_AUTO_ACK: "false"
+    KEYCLOAK_ADMIN_URL: ""
+    KEYCLOAK_REALM: ""
+    KEYCLOAK_ADMIN_CLIENT_ID: ""
+    KEYCLOAK_ADMIN_CLIENT_SECRET: ""
+    KEYCLOAK_ISSUER: ""
+    ONEX_SERVICE_CLIENT_ID: ""
+    ONEX_SERVICE_CLIENT_SECRET: ""
+    INFISICAL_ADDR: ""
+    INFISICAL_CLIENT_ID: ""
+    INFISICAL_CLIENT_SECRET: ""
+    INFISICAL_PROJECT_ID: ""
+    GITHUB_TOKEN: ""
+    GH_TOKEN: ""
+    LINEAR_API_KEY: ""
+    DEPLOY_AGENT_HMAC_SECRET: ""
+  inject_volumes:
+    - "${ONEX_LOCAL_BIFROST_OVERLAY:?ONEX_LOCAL_BIFROST_OVERLAY must name your model overlay file (template: docker/lane-overlays/local.bifrost.example.yaml)}:/app/config/delegation/local.bifrost.yaml:ro"
+  inject_required_env:
+    - ONEX_LOCAL_BIFROST_OVERLAY
 runtime-integrations:
   description: "Runtime external-integration services — Linear, CI, Slack webhooks (OMN-9332)"
   services:

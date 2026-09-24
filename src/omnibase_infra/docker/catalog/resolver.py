@@ -26,6 +26,10 @@ from omnibase_infra.docker.catalog.model_optional_directory_bind_mount import (
     ModelOptionalDirectoryBindMount,
 )
 
+#: The compose project every bundle rendered under before OMN-19496. A bundle
+#: that declares no ``project`` still renders here, with every historical name.
+DEFAULT_PROJECT = "omnibase-infra"
+
 
 @dataclass  # internal-dataclass-ok: docker-catalog-internal
 class ResolvedStack:
@@ -34,6 +38,8 @@ class ResolvedStack:
     manifests: dict[str, CatalogManifest]
     required_env: set[str]
     injected_env: dict[str, str]
+    injected_volumes: list[str] = field(default_factory=list)
+    project: str = DEFAULT_PROJECT
 
     @property
     def service_names(self) -> set[str]:
@@ -172,6 +178,8 @@ class CatalogResolver:
                     includes=bdef.get("includes", []),
                     inject_env=bdef.get("inject_env", {}),
                     inject_required_env=bdef.get("inject_required_env", []),
+                    inject_volumes=bdef.get("inject_volumes", []),
+                    project=bdef.get("project"),
                 )
 
     def resolve(self, bundles: list[str]) -> ResolvedStack:
@@ -190,6 +198,10 @@ class CatalogResolver:
         selected_entries: dict[str, CatalogManifest] = {}
         required_env: set[str] = set()
         injected_env: dict[str, str] = {}
+        injected_volumes: list[str] = []
+        bundle_required_env: set[str] = set()
+        project: str | None = None
+        project_owner = ""
 
         for bundle_name in all_bundle_names:
             if bundle_name not in self._bundles:
@@ -222,6 +234,21 @@ class CatalogResolver:
 
             # Add required env from bundle
             required_env.update(bundle.inject_required_env)
+            bundle_required_env.update(bundle.inject_required_env)
+
+            for volume in bundle.inject_volumes:
+                if volume not in injected_volumes:
+                    injected_volumes.append(volume)
+
+            if bundle.project is not None:
+                if project is not None and project != bundle.project:
+                    raise ValueError(
+                        f"Compose project conflict: bundle '{project_owner}' "
+                        f"renders under '{project}' and bundle '{bundle_name}' "
+                        f"under '{bundle.project}'. One stack is one project."
+                    )
+                project = bundle.project
+                project_owner = bundle_name
 
         # Transitively resolve service dependencies (BFS until no new deps found)
         pending: list[CatalogManifest] = list(selected_entries.values())
@@ -242,8 +269,24 @@ class CatalogResolver:
                         next_pending.append(dep_manifest)
             pending = next_pending
 
+        # OMN-19496: a bundle's ``inject_env`` value is what the generator
+        # renders for that var on every runtime-layer entry, over the entry's
+        # own ``${VAR:?}`` reference. Such a var is therefore satisfied by the
+        # bundle, not by the operator, when every selected entry that declares
+        # it is runtime-layer. An infrastructure entry never receives injected
+        # env, so a var it requires stays required, and a var a bundle lists in
+        # ``inject_required_env`` stays required by construction.
+        for var in list(required_env):
+            if var not in injected_env or var in bundle_required_env:
+                continue
+            requirers = [m for m in selected_entries.values() if var in m.required_env]
+            if requirers and all(m.layer == EnumInfraLayer.RUNTIME for m in requirers):
+                required_env.discard(var)
+
         return ResolvedStack(
             manifests=selected_entries,
             required_env=required_env,
             injected_env=injected_env,
+            injected_volumes=injected_volumes,
+            project=project or DEFAULT_PROJECT,
         )
