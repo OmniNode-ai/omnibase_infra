@@ -125,6 +125,7 @@ def _spawn_holder(ledger: Path, child_code: str) -> tuple[subprocess.Popen[str],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        start_new_session=True,
     )
     assert proc.stdout is not None
     line = proc.stdout.readline().strip()
@@ -140,15 +141,25 @@ def _kill(pid: int) -> None:
         os.kill(pid, signal.SIGKILL)
 
 
+def _kill_group(pgid: int) -> None:
+    """Reap everything a group-spawned holder started, its command included.
+
+    The holders are spawned with start_new_session=True, so the group id is
+    the holder's pid and outlives the holder while its command runs.
+    """
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(pgid, signal.SIGKILL)
+
+
 def _plant_dead_holder(ledger: Path) -> None:
     """A real holder takes the lock and is killed with SIGKILL while holding it."""
-    proc, child = _spawn_holder(
+    proc, _child = _spawn_holder(
         ledger,
         "import os, time; print(os.getpid(), flush=True); time.sleep(120)",
     )
     _kill(proc.pid)
     proc.wait(timeout=10)
-    _kill(child)
+    _kill_group(proc.pid)
 
 
 def _race_two_waiters_at_a_dead_holder(
@@ -314,6 +325,7 @@ def test_roll_and_append_exclude_each_other_through_the_cli(tmp_path: Path) -> N
         stderr=subprocess.PIPE,
         text=True,
         env=roll_env,
+        start_new_session=True,
     )
     assert roll.stdout is not None
     child = int(roll.stdout.readline().strip())
@@ -325,7 +337,7 @@ def test_roll_and_append_exclude_each_other_through_the_cli(tmp_path: Path) -> N
         )
         assert ledger.read_text(encoding="utf-8") == ""
     finally:
-        _kill(child)
+        _kill_group(roll.pid)
         roll.wait(timeout=30)
 
     # Positive control: with the roll gone, the same append lands.
@@ -347,10 +359,10 @@ def test_killed_holder_mid_append_leaves_no_lock_that_blocks_the_next_writer(
         "print(os.getpid(), flush=True)\n"
         "time.sleep(120)\n"
     )
-    proc, child = _spawn_holder(ledger, partial)
+    proc, _child = _spawn_holder(ledger, partial)
     _kill(proc.pid)
     proc.wait(timeout=10)
-    _kill(child)
+    _kill_group(proc.pid)
 
     result = _run_cli(ledger, "--timeout", "2s", "--append", _row())
     assert result.returncode == 0, (
@@ -383,4 +395,4 @@ def test_killed_holder_whose_command_outlives_it_does_not_keep_the_lock(
             f"\n{result.stderr}"
         )
     finally:
-        _kill(child)
+        _kill_group(proc.pid)
