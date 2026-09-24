@@ -4592,6 +4592,19 @@ jobs:
       # missing half: an artifact already declared at the base ref may not be
       # modified, deleted, or renamed except via an explicit new-ordinal
       # supersession that lands its successor in the same change.
+      # OMN-19344 (plan row R7, rule RB): every forward migration -- flat,
+      # node stream and intelligence -- declares expand-only, forward-only or
+      # contract in config/migration_classes.yaml, and a destructive statement
+      # declared expand-only is refused. Rule RB makes a rollback candidate
+      # eligible only when every migration applied after it is expand-only or
+      # has a recorded lab execution of its down-migration; an undeclared or
+      # misclassified migration would let the one-command rollback redeploy
+      # old code over a schema it cannot read. The recorded down executions in
+      # config/migration_down_executions.yaml are checked against the current
+      # bytes of both scripts in the same step.
+      - name: Check migration class declarations
+        run: uv run python scripts/validation/check_migration_class.py
+
       - name: Check node migration append-only immutability
         env:
           APPEND_ONLY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}
