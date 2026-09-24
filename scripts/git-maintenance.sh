@@ -19,8 +19,11 @@ set -euo pipefail
 # (e.g., staged integration branches, release trains) should add protection patterns or
 # perform repo-specific review before destructive execution.
 
-OMNI_HOME="${OMNI_HOME:-/Volumes/PRO-G40/Code/omni_home}"
-WORKTREE_ROOT="${WORKTREE_ROOT:-/Volumes/PRO-G40/Code/omni_worktrees}"
+# No machine-path defaults (rules 6 and 8, OMN-19396): OMNI_HOME is required,
+# and the worktree root is derived from it. The old fallback named a sibling
+# omni_worktrees beside the registry root, which is a stray root.
+OMNI_HOME="${OMNI_HOME:?OMNI_HOME must be set to the registry root; git-maintenance.sh has no default}"
+WORKTREE_ROOT="${WORKTREE_ROOT:-$OMNI_HOME/omni_worktrees}"
 DRY_RUN=true
 PRUNE_WORKTREES=false
 
