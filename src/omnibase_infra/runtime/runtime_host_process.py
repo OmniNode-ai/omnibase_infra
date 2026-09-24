@@ -5504,8 +5504,10 @@ class RuntimeHostProcess:
                   all registered handlers are healthy, AND at least one
                   handler is registered - a runtime without handlers is useless)
                 - degraded: True when process is running but some handlers
-                  failed to instantiate. Indicates partial functionality -
-                  the system is operational but not at full capacity.
+                  failed to instantiate, or the event bus holds a dispatch it
+                  abandoned at its deadline (OMN-19355). Indicates partial
+                  functionality - the system is operational but not at full
+                  capacity.
                 - is_running: Whether the process is running
                 - is_draining: Whether the process is in graceful shutdown drain
                   period, waiting for in-flight messages to complete (OMN-756).
@@ -5558,6 +5560,7 @@ class RuntimeHostProcess:
         # Get event bus health if available
         event_bus_health: dict[str, object] = {}
         event_bus_healthy = False
+        event_bus_degraded = False
 
         try:
             event_bus_health = await self._event_bus.health_check()
@@ -5573,6 +5576,13 @@ class RuntimeHostProcess:
                     context=context,
                 )
             event_bus_healthy = bool(event_bus_health.get("healthy", False))
+            # OMN-19355: the bus is up but holds a dispatch it abandoned at its
+            # deadline (see EventBusKafka.dispatch_deadline_status). That is
+            # reduced capacity, not an outage, until the orphan limit, where
+            # the bus reports healthy=False itself.
+            event_bus_degraded = event_bus_healthy and bool(
+                event_bus_health.get("degraded", False)
+            )
         except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
             # Create infrastructure error context for health check failure
             correlation_id = uuid4()
@@ -5636,7 +5646,9 @@ class RuntimeHostProcess:
         startup_in_progress = (
             self._is_starting and not self._is_running and event_bus_healthy
         )
-        degraded = (self._is_running and has_failed_handlers) or startup_in_progress
+        degraded = (
+            self._is_running and (has_failed_handlers or event_bus_degraded)
+        ) or startup_in_progress
 
         # Overall health is True only if running, event bus is healthy,
         # no handlers failed to instantiate, all registered handlers are healthy,
@@ -5644,6 +5656,7 @@ class RuntimeHostProcess:
         healthy = (
             self._is_running
             and event_bus_healthy
+            and not event_bus_degraded
             and not has_failed_handlers
             and handlers_all_healthy
             and not no_handlers_registered
