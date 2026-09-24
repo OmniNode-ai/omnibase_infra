@@ -14,8 +14,10 @@ WHAT IT COST. ``onex-api`` waits 10.0s for that response and then answers the
 customer 503. Eleven is larger than ten, so every heartbeat that arrived
 inside a sweep was refused BY CONSTRUCTION -- not because anything failed, but
 because the answer could not be computed until the sweep let go. Measured on
-2026-09-24 against ``onex-dev`` on i-06169517a92b45f86: two sweeps, 02:12:59
--> 02:13:10 and 02:18:10 -> 02:18:21, each ~11s, and in BOTH cases
+2026-09-24 against the ``onex-dev`` namespace on the staging node (the
+instance id is denylisted in this repo and lives on OMN-19373 with the rest of
+the capture): two sweeps, 02:12:59 -> 02:13:10 and 02:18:10 -> 02:18:21, each
+~11s, and in BOTH cases
 runtime-effects published the answer in the very second the sweep ended,
 after the caller had already abandoned it. 2 of 14 heartbeats over one 3m42s
 run at the designed 15s cadence; the healthy round trip is ~1s.

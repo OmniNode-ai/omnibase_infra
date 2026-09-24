@@ -690,9 +690,11 @@ class ServiceRuntimeHealthMonitor:
             # loop until it returns, and this loop is also the one answering
             # the gateway.
             #
-            # What that cost, measured on 2026-09-24 against ``onex-dev`` on
-            # i-06169517a92b45f86: ``onex-api`` publishes a heartbeat command
-            # and waits 10.0s for ``gateway-session.v1``. Any heartbeat that
+            # What that cost, measured on 2026-09-24 against the ``onex-dev``
+            # namespace on the staging node (the instance id is denylisted
+            # here; it is on OMN-19373 with the rest of the capture):
+            # ``onex-api`` publishes a heartbeat command and waits 10.0s for
+            # ``gateway-session.v1``. Any heartbeat that
             # arrived inside a sweep could not be answered before the budget
             # expired, so the customer got a 503 while the work was merely
             # late -- in both captured cases runtime-effects published the
