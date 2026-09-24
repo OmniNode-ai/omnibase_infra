@@ -160,6 +160,19 @@ def _filter_manifest_for_runtime_profile(
     return ownership_result.manifest
 
 
+
+def _discover_contracts_for_runtime_profile() -> ProtocolAutoWiringManifestLike:
+    """Discover and profile-filter, as one synchronous unit to hand to a thread.
+
+    BOTH NAMES ARE RESOLVED THROUGH THIS MODULE'S GLOBALS at call time, which
+    is what keeps the two existing patch points working: every test of this
+    monitor patches ``_discover_contracts`` and most patch
+    ``_filter_manifest_for_runtime_profile`` as well, and a version of this
+    that closed over either one would silently run the real scan under them.
+    """
+    return _filter_manifest_for_runtime_profile(_discover_contracts())
+
+
 class ConsumerGroupSnapshot(NamedTuple):
     """Minimal consumer group state used by runtime health checks."""
 
@@ -668,7 +681,32 @@ class ServiceRuntimeHealthMonitor:
         # conservative value: nothing excluded, so nothing is silenced.
         nonprojection_group_infixes: dict[str, str] = {}
         try:
-            manifest = _filter_manifest_for_runtime_profile(_discover_contracts())
+            # OFF THE EVENT LOOP (OMN-19373). Contract discovery is a fully
+            # synchronous scan: it walks every ``onex.nodes`` entry point,
+            # reads and parses the ``contract.yaml`` beside each one, and logs
+            # a line per contract. On the .201 runtime that is ~1,000
+            # contracts and it takes ABOUT ELEVEN SECONDS. Awaited inline it
+            # did not merely make this check slow -- it froze the whole
+            # process, because a synchronous call in a coroutine holds the
+            # loop until it returns, and this loop is also the one answering
+            # the gateway.
+            #
+            # What that cost, measured on 2026-09-24 against ``onex-dev`` on
+            # i-06169517a92b45f86: ``onex-api`` publishes a heartbeat command
+            # and waits 10.0s for ``gateway-session.v1``. Any heartbeat that
+            # arrived inside a sweep could not be answered before the budget
+            # expired, so the customer got a 503 while the work was merely
+            # late -- in both captured cases runtime-effects published the
+            # answer in the very second the sweep ended, after the caller had
+            # already abandoned it. 2 of 14 heartbeats over one 3m42s run at
+            # the designed 15s cadence; ~1s is the healthy round trip.
+            #
+            # This check runs every ``check_interval_seconds`` (300s), so the
+            # refusal recurred about every five minutes and no client cadence
+            # could avoid it. ``asyncio.to_thread`` is the same primitive this
+            # very method already uses for the Kafka admin call below; this
+            # line was the one blocking call in it that never got it.
+            manifest = await asyncio.to_thread(_discover_contracts_for_runtime_profile)
             contract_count = manifest.total_discovered
             discovery_error_count = manifest.total_errors
             subscribe_topics = set(manifest.all_subscribe_topics())
