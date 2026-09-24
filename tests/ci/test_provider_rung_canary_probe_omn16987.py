@@ -68,8 +68,8 @@ def _verdicts(record: probe.Record) -> dict[str, str]:
 def test_the_recorded_lab_reading_grades_each_rung_as_observed() -> None:
     record = probe.grade(_recorded())
     assert _verdicts(record) == {
-        "local-coder": probe.SKIPPED_NO_SECRET_REF,
-        "local-heavy-reasoning": probe.SKIPPED_NO_SECRET_REF,
+        "local-coder": probe.SKIPPED_NO_REF,
+        "local-heavy-reasoning": probe.SKIPPED_NO_REF,
         "local-embedding": probe.SKIPPED_NO_ENDPOINT,
         "cloud-gemini-pro": probe.LIVE,
         "cloud-glm": probe.LIVE,
@@ -78,7 +78,7 @@ def test_the_recorded_lab_reading_grades_each_rung_as_observed() -> None:
         "cloud-vertex-gemini": probe.SKIPPED_NO_ENDPOINT,
         "local-ds-v4-flash": probe.SKIPPED_NO_ENDPOINT,
         OPENROUTER: probe.UNRESOLVED,
-        "local-omnipc2-chat": probe.SKIPPED_NO_SECRET_REF,
+        "local-omnipc2-chat": probe.SKIPPED_NO_REF,
     }
     assert [c["verdict"] for c in record.controls] == [probe.AUTH_DEAD] * 3
 
@@ -170,7 +170,7 @@ def test_the_observer_plans_one_probe_per_distinct_rung() -> None:
         observer.PROBE,
         observer.PROBE,
         observer.SKIPPED_NO_ENDPOINT,
-        observer.SKIPPED_NO_SECRET_REF,
+        observer.SKIPPED_NO_REF,
         observer.PROBE,
     ]
     assert [p["backend_ids"] for p in probes] == [["a", "b"], ["c"], ["f"]]

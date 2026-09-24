@@ -89,7 +89,7 @@ REDACTED = "<redacted>"
 MESSAGE_CAP = 300
 
 SKIPPED_NO_ENDPOINT = "SKIPPED_NO_ENDPOINT"
-SKIPPED_NO_SECRET_REF = "SKIPPED_NO_SECRET_REF"
+SKIPPED_NO_REF = "SKIPPED_NO_SECRET_REF"
 PROBE = "PROBE"
 
 ResolveFn = Callable[[str, str | None], Awaitable[str | None]]
@@ -138,7 +138,7 @@ def plan(
         if not isinstance(endpoint, str) or not endpoint.strip():
             disposition = SKIPPED_NO_ENDPOINT
         elif ref is None:
-            disposition = SKIPPED_NO_SECRET_REF
+            disposition = SKIPPED_NO_REF
         else:
             disposition = PROBE
         key = probe_key(backend) if disposition == PROBE else None
