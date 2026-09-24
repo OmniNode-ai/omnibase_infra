@@ -209,6 +209,7 @@ git_common_dir=""
 is_linked_worktree=0
 omni_home=""
 is_canonical_clone=0
+unresolved_root_note=""
 canonical_clone_context || exit 0
 [[ "$is_canonical_clone" == "1" ]] || exit 0
 
@@ -293,6 +294,9 @@ To repair a clone that has already drifted, use the sanctioned path, which
 preserves the working tree as patches and appends a ledger row first:
   $omni_home/omniclaude/scripts/converge-canonical-clone.sh <repo> --execute
 EOF
+  if [[ -n "$unresolved_root_note" ]]; then
+    printf '\n%s\n' "$unresolved_root_note" >&2
+  fi
   exit 1
 }
 

@@ -175,11 +175,11 @@ services:
   # Docker daemon, not within a project. A second copy on a slot would race the
   # dev lane's own autoheal over the dev lane's containers.
   autoheal: *prepr_fenced
-  # The migration gate and the intelligence one-shots gate the DEV databases.
-  # A slot's databases are migrated by the forward-migration one-shot below,
-  # under its own profile, against the suffixed names.
+  # The migration gate and the intelligence API gate the DEV databases. A
+  # slot's databases are migrated by the forward-migration and
+  # intelligence-migration one-shots below, under their own profile, against
+  # the suffixed names.
   migration-gate: *prepr_fenced
-  intelligence-migration: *prepr_fenced
   intelligence-api: *prepr_fenced
   cloud-migration: *prepr_fenced
   cloud-migration-files: *prepr_fenced
@@ -208,7 +208,34 @@ services:
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-forward-migration"
     depends_on: !override []
     environment:
-      !!merge <<: [*prepr_slot_db_env, *prepr_slot_marker_env]
+      # Only the slot MARKER, deliberately NOT the slot DSN block. The runner
+      # derives the suffixed names ITSELF from the unsuffixed bases when
+      # ONEX_DB_SLOT is set (`PGDB="${PGDB}_${ONEX_DB_SLOT}"`), so handing it
+      # pre-suffixed names double-suffixes every one of them. Measured on the
+      # first live bring-up: it announced it was targeting
+      # `omnibase_infra_prepr1_prepr1`, a database that exists nowhere, and
+      # then spent thirty attempts reporting "postgres not ready" -- a
+      # connection failure that reads like an unreachable server rather than
+      # like a name this lane built wrong.
+      #
+      # It also needs the SUPERUSER connection rather than a slot principal:
+      # it runs the migrations, and the slot's own roles deliberately cannot.
+      # That is inherited unchanged from docker-compose.infra.yml, which is
+      # the other half of why this block merges nothing else.
+      !!merge <<: [*prepr_slot_marker_env]
+  # The slot's intelligence migration (OMN-19404). Same shape as the forward
+  # migration above and for the same reasons: its own `prepr-migrate` profile,
+  # the superuser connection inherited unchanged, and only the slot marker
+  # merged. ONEX_DB_SLOT makes scripts/run-intelligence-migrations.sh target
+  # omniintelligence_<slot> and refuse to create it. It used to be fenced,
+  # and then nothing created public.db_metadata in the slot's intelligence
+  # database, so the fourth slot boot (2026-09-24) failed stamping there.
+  intelligence-migration:
+    profiles: !override ["prepr-migrate"]
+    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-intelligence-migration"
+    depends_on: !override []
+    environment:
+      !!merge <<: [*prepr_slot_marker_env]
   # =========================================================================
   # THE SLOT'S TWELVE. Names, ports, volumes and namespace only -- every other
   # property is inherited, which is the whole reason this is an overlay.

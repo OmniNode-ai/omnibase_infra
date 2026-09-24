@@ -109,8 +109,38 @@ case "${LANE}" in
         err "  prod is Train 2 (grant-gated, PyPI-backed); judge is read-only."
         err "  cut-lab-ref drives dev / stability-test only."
         exit 2 ;;
+    prepr-*)
+        # OMN-18893: the ephemeral pre-PR verify pool is refused HERE BY NAME,
+        # rather than given an arm of its own, and the refusal is the point.
+        #
+        # Rule 24(e) sanctions building a branch workspace image through
+        # exactly one entrypoint. A pool arm in this script would be a SECOND
+        # path to build a slot, reachable with one argument, bypassing that
+        # entrypoint's declared-lane refusals, its attribution requirement,
+        # its pool-wide build lock, its pinned-sha snapshot and its
+        # rendered-config gate. The value of a single entrypoint is entirely
+        # in there being one.
+        #
+        # This arm exists because the generic "unknown lane" refusal below
+        # told a caller only that the name was not recognised, which reads
+        # like a typo or a missing feature. A pool lane IS recognised; it is
+        # declared in the lane manifest and it is deliberately not driven from
+        # here. Saying so, and naming where it is driven from, is the
+        # difference between a refusal a caller can act on and one that sends
+        # them looking for the arm to add.
+        err "lane '${LANE}' is a pre-PR verify POOL slot and is not driven from here."
+        err "  Pool slots are built only by scripts/runtime_build/prepr_verify_lane.sh,"
+        err "  which derives its compose project from a claimed slot number and"
+        err "  accepts no lane argument at all (rule 24(e))."
+        err "  Use:  prepr_verify_lane.sh --slot <n> --worktree <path> --reason <text>"
+        err "  Do NOT add a pool arm to this script: a second build path would"
+        err "  bypass that entrypoint's refusals, locks, pinned-sha staging and"
+        err "  rendered-config gate."
+        exit 2 ;;
     *)
         err "unknown lane '${LANE}'; expected dev, stability-test, or dogfood."
+        err "  (Pre-PR pool slots are refused by name above and are built by"
+        err "  scripts/runtime_build/prepr_verify_lane.sh instead.)"
         exit 2 ;;
 esac
 

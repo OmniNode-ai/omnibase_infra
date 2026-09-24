@@ -141,6 +141,31 @@ task_classes:
         - wrapper
         - yaml
         within_words: 6
+      vetoed_by:
+      - as prose
+      - changelog entry
+      - close comment
+      - closing comment
+      - commit message
+      - do not write code
+      - github comment
+      - in plain english
+      - in prose
+      - linear comment
+      - no code blocks
+      - plain prose
+      - pr body
+      - pr comment
+      - pr description
+      - problem statement
+      - pull request body
+      - pull request comment
+      - pull request description
+      - release notes
+      - slack message
+      - status update
+      - ticket comment
+      - ticket description
   code_review:
     gateway_exposure: public
     selection:
@@ -221,6 +246,31 @@ task_classes:
       - rename
       - simplify
       priority: 45
+      vetoed_by:
+      - as prose
+      - changelog entry
+      - close comment
+      - closing comment
+      - commit message
+      - do not write code
+      - github comment
+      - in plain english
+      - in prose
+      - linear comment
+      - no code blocks
+      - plain prose
+      - pr body
+      - pr comment
+      - pr description
+      - problem statement
+      - pull request body
+      - pull request comment
+      - pull request description
+      - release notes
+      - slack message
+      - status update
+      - ticket comment
+      - ticket description
   research:
     gateway_exposure: public
     selection:
@@ -305,4 +355,29 @@ task_classes:
         - tests
         - unittest
         within_words: 6
+      vetoed_by:
+      - as prose
+      - changelog entry
+      - close comment
+      - closing comment
+      - commit message
+      - do not write code
+      - github comment
+      - in plain english
+      - in prose
+      - linear comment
+      - no code blocks
+      - plain prose
+      - pr body
+      - pr comment
+      - pr description
+      - problem statement
+      - pull request body
+      - pull request comment
+      - pull request description
+      - release notes
+      - slack message
+      - status update
+      - ticket comment
+      - ticket description
 version: omn18831-production-mirror

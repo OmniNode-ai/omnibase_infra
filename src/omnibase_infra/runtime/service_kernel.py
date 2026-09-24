@@ -284,6 +284,36 @@ def _resolve_marketplace_skills_root() -> str:
     return os.environ.get(ENV_MARKETPLACE_SKILLS_ROOT, "").strip()
 
 
+def make_plugin_secret_resolver(
+    overlay_config: dict[str, str] | None,
+) -> Callable[[str], str | None]:
+    """Build the credential resolver handed to every domain plugin (OMN-19129).
+
+    The kernel owns secret resolution, so a plugin that needs a credential asks
+    for it by variable name through this callable instead of reading the
+    process environment itself. The overlay answers first wherever one is
+    loaded, because that is the authoritative view; the environment is the
+    fallback for legacy env-var boot, which is how the lab lanes run today (no
+    ``~/.omnibase/overlay.yaml`` is present on them).
+
+    Args:
+        overlay_config: The resolved boot overlay, or ``None`` in legacy mode.
+
+    Returns:
+        A callable mapping a credential variable name to its value, or ``None``
+        when it resolves in neither source.
+    """
+
+    def _resolve(name: str) -> str | None:
+        if overlay_config is not None:
+            from_overlay = overlay_config.get(name)
+            if from_overlay:
+                return from_overlay
+        return os.environ.get(name)
+
+    return _resolve
+
+
 def _contract_registry_subscription_wiring_disabled(
     runtime_profile: str | None = None,
 ) -> bool:
@@ -675,6 +705,7 @@ def _build_runtime_handler_dependencies(
     if kafka_bootstrap_servers:
         from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
             DLQConsumer,
+            DlqGroupBacklogProbe,
             DLQProducer,
             DLQQuarantineProducer,
             ModelDlqReplayEngineConfig,
@@ -714,6 +745,11 @@ def _build_runtime_handler_dependencies(
             },
             "producer": DLQProducer(primary_config),
             "quarantine_producer": DLQQuarantineProducer(primary_config),
+            # OMN-19085: lets a trigger whose topics the replay group has
+            # already committed skip the per-topic consumer start (a group
+            # join). The replay group and broker are the same for every
+            # declared topic, so one probe serves all of them.
+            "backlog_probe": DlqGroupBacklogProbe(primary_config),
         }
         # OMN-18111: only when the runtime actually HAS one. An explicit
         # ``"tracking": None`` and an absent key behave identically for the
@@ -2813,6 +2849,7 @@ async def bootstrap() -> int:
             kafka_bootstrap_servers=kafka_bootstrap_servers,
             runtime_profile=kernel_profile.name,
             overlay_config=_boot_overlay_config,
+            secret_resolver=make_plugin_secret_resolver(_boot_overlay_config),
         )
 
         # Activate plugins using two-pass lifecycle (OMN-2050, OMN-2089)

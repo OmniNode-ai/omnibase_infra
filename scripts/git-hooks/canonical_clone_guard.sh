@@ -67,6 +67,7 @@ git_common_dir=""
 is_linked_worktree=0
 omni_home=""
 is_canonical_clone=0
+unresolved_root_note=""
 if ! canonical_clone_context; then
   # Not inside a work tree (bare repo, or git internals) -- nothing to guard.
   exit 0
@@ -86,6 +87,9 @@ Canonical clones are pull/index mirrors. Create a worktree under:
 Override only for an intentional emergency:
   ALLOW_CANONICAL_CLONE_COMMIT=1 git ...
 EOF
+    if [[ -n "$unresolved_root_note" ]]; then
+      printf '\n%s\n' "$unresolved_root_note" >&2
+    fi
     exit 1
   fi
 fi

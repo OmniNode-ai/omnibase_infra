@@ -85,6 +85,7 @@ def _base_env(registry: Path) -> dict[str, str]:
     env.pop("ALLOW_CANONICAL_CLONE_COMMIT", None)
     env.pop("ONEX_CANONICAL_CONVERGE", None)
     env.pop("ONEX_WORKTREES_ROOT", None)
+    env.pop("ONEX_REGISTRY_ROOTS", None)
     # git EXPORTS repo-scoping variables into hook processes and they OVERRIDE
     # both `-C` and the cwd for every descendant git call. When this suite runs
     # from inside a hook these leak in and every `git` below would operate on
@@ -522,9 +523,14 @@ def test_the_sanctioned_convergence_env_var_permits_a_refused_move(
 def test_a_repo_outside_the_registry_is_untouched(
     registry: Path, upstream: Path, tmp_path: Path
 ) -> None:
-    """The hook must be inert everywhere but a canonical clone. `core.hooksPath`
-    is a host-wide install, so a false positive here would break ordinary work
-    on every unrelated repository on the machine."""
+    """The hook must be inert everywhere but a canonical clone. A host-wide
+    (global) `core.hooksPath` reaches every repository on the machine, so a
+    false positive here would break ordinary work on all of them.
+
+    A repository whose OWN config points at the family is a different case:
+    only the installer writes that, into canonical clones, so one outside every
+    resolvable root is guarded, fail closed (OMN-19388, covered in
+    test_canonical_clone_registry_roots.py)."""
     env = _base_env(registry)
     outside = tmp_path / "not_in_registry"
     assert (
@@ -533,12 +539,9 @@ def test_a_repo_outside_the_registry_is_untouched(
         ).returncode
         == 0
     )
-    assert (
-        _git(
-            "config", "core.hooksPath", str(HOOKS_DIR), cwd=outside, env=env
-        ).returncode
-        == 0
-    )
+    global_config = tmp_path / "global.gitconfig"
+    global_config.write_text(f"[core]\n\thooksPath = {HOOKS_DIR}\n", encoding="utf-8")
+    env["GIT_CONFIG_GLOBAL"] = str(global_config)
 
     result = _git("checkout", "-q", "-b", "anything", cwd=outside, env=env)
 
