@@ -15,10 +15,19 @@ runner_name_prefix: omninode-runner
 # burst drove one-minute load to 100.9 on the 32-core host -- the registered
 # runner count is the worst-case concurrent-job ceiling on a fixed-core box,
 # and idle runners cost nothing, so 88 registered runners is what let a burst
-# reach that load. 60 always-on steady-state runners. All 60 are steady (no
-# burst profiles), so burst_count == expected_count (no separate burst tier).
-expected_count: 60
-burst_count: 60
+# reach that load. Then capped 60 -> 40 (OMN-19077, operator consent
+# ROLLING_WORK_LEDGER.md:3220): on 2026-09-22 58 concurrent jobs on this host
+# drove IO pressure (full avg10) to 52.8 and load to 397 and crashed dockerd,
+# and every runner created 2026-09-16 had reached its full 6 GiB memory limit
+# with 2.7-5.3 GiB swapped, on the same NVMe as the docker data root and the
+# lab lanes' brokers. 40 is 1.25 runners per core, inside the 1-1.5 per core
+# rule of thumb the fleet runbook records for .201. The pool also runs inside
+# one aggregate cgroup (omnirunners.slice, docker/runners/systemd/) so that
+# CI yields memory and CPU to the lab lanes rather than competing as equals.
+# 40 always-on steady-state runners. All 40 are steady (no burst profiles),
+# so burst_count == expected_count (no separate burst tier).
+expected_count: 40
+burst_count: 40
 # OMN-17477 — DECLARED HOST INVENTORY.
 #
 # The five scalar fields above describe ONE host, which is what the fleet was
@@ -59,7 +68,7 @@ hosts:
   - host: omninode-pc.tail75df5e.ts.net
     arch: amd64
     runner_name_prefix: omninode-runner
-    expected_count: 60
+    expected_count: 40
     classes: [action]
   # .101 — Mac mini, M2 Pro, 12 cores. Docker Desktop, data root on an external
   # volume. Deploy/verify class first: those jobs are cloud-touching

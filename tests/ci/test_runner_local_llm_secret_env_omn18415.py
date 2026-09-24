@@ -55,7 +55,8 @@ SECRET_ENV_VAR = "LOCAL_LLM_SHARED_SECRET"
 CIDR_ENV_VAR = "LLM_ENDPOINT_CIDR_ALLOWLIST"
 REQUIRED_REVIEWER_ENV_VARS = (SECRET_ENV_VAR, CIDR_ENV_VAR)
 # OMN-18411: fleet capped 88 -> 60.
-FLEET_SERVICE_COUNT = 60
+# OMN-19077: capped 60 -> 40 (58 concurrent jobs crashed dockerd on .201).
+FLEET_SERVICE_COUNT = 40
 OUT_OF_SCOPE_SERVICES = (
     "omninode-deploy-runner",
     "omninode-customer-plane-runner-1",
