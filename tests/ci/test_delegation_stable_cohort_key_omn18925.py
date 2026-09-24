@@ -362,7 +362,6 @@ def test_offset489_capture_is_an_incomplete_key_negative_control() -> None:
     with pytest.raises(ValidationError) as error:
         ModelDelegationCohortKey.model_validate(fixture["observed_key_fields"])
 
-    rendered_error = str(error.value)
     assert set(fixture["unproven_key_dimensions"]) == {
         "build_identity",
         "consumer_identity",
@@ -370,8 +369,11 @@ def test_offset489_capture_is_an_incomplete_key_negative_control() -> None:
         "deadline_seconds",
         "retry_bounds",
     }
-    for field_name in fixture["unproven_key_dimensions"]:
-        assert field_name in rendered_error
+    # The refusal names exactly the dimensions the capture never proved: the
+    # ones it did prove (prompt, task type, explicit no-contract, the first
+    # hop) validate, so nothing about them is in the error.
+    refused = {str(item["loc"][0]) for item in error.value.errors()}
+    assert refused == set(fixture["unproven_key_dimensions"])
 
 
 def test_validator_cli_refuses_the_offset489_capture() -> None:

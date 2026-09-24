@@ -12,8 +12,8 @@
     "response_contract_sha256": null,
     "lane": "dev",
     "first_hop_identity": {
-      "backend_id": "61c35979-844a-5e90-882d-b8bbf5231b4c",
-      "model_id": "Qwen3.8-27B",
+      "backend": "61c35979-844a-5e90-882d-b8bbf5231b4c",
+      "model": "Qwen3.8-27B",
       "tier": "local",
       "provider": "local"
     }
