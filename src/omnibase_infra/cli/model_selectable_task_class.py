@@ -40,6 +40,7 @@ class ModelSelectableTaskClass(BaseModel):
     min_words: int | None = None
     max_words: int | None = None
     qualified_phrases: ModelQualifiedPhrases | None = None
+    vetoed_by: tuple[str, ...] = ()
 
     def shape_admits(self, word_count: int) -> bool:
         """Return whether a prompt of this length is eligible at all."""
@@ -80,6 +81,22 @@ class ModelSelectableTaskClass(BaseModel):
                     lowered_prompt, occurrence.span()
                 ):
                     return phrase
+        return None
+
+    def vetoing_phrase(self, lowered_prompt: str) -> str | None:
+        """Return the declared veto phrase this prompt names, if any (OMN-18831).
+
+        A veto names a requested PROSE artifact or a no-code instruction ("a
+        pull request description", "in prose"). The contract declares it on the
+        classes graded by deterministic acceptance, where a prompt that only
+        DESCRIBES code work ("the unit tests passed") would otherwise be graded
+        on compilation. Presence on word boundaries, like every other phrase;
+        longest first, so the reason names the most specific veto.
+        """
+        for phrase in sorted(self.vetoed_by, key=lambda item: (-len(item), item)):
+            normalized = phrase.lower()
+            if normalized and _phrase_pattern(normalized).search(lowered_prompt):
+                return phrase
         return None
 
     def _qualifier_near(self, lowered_prompt: str, span: tuple[int, int]) -> bool:

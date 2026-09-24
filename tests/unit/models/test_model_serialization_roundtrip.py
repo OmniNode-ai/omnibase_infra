@@ -255,6 +255,11 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelRsdLiveDelegationAuthorityEnvelope": "Explicit canonical roundtrip coverage in test_rsd_live_delegation_overlay.py",
     "ModelRsdLiveDelegationPreflightResult": "Explicit canonical roundtrip coverage in test_rsd_live_delegation_overlay.py",
     "ModelRsdLiveDelegationResultAnchor": "Explicit canonical roundtrip coverage in test_rsd_live_delegation_overlay.py",
+    # OMN-18933: the K6 bounded delegation route models, strict JSON roundtrips
+    # beside the pre-dispatch validator's own coverage.
+    "ModelBoundedDelegationRoute": "Explicit JSON roundtrip coverage in test_bounded_delegation_routes.py",
+    "ModelBoundedDelegationRouteDeclaration": "Explicit JSON roundtrip coverage in test_bounded_delegation_routes.py",
+    "ModelBoundedLaneBrokerTopology": "Explicit JSON roundtrip coverage in test_bounded_delegation_routes.py",
 }
 
 

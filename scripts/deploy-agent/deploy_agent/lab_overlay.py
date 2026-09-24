@@ -438,6 +438,33 @@ def _truncate(text: str, limit: int = 240) -> str:
     return collapsed[:limit] + "..."
 
 
+def _tail(text: str, limit: int = 600) -> str:
+    """The END of ``text``, collapsed -- where a failing script says why.
+
+    ``_truncate`` keeps the head, which for ``apply_lab_lane.sh`` is its banner
+    of namespace and image pins. OMN-19314: run 35849365129's record carried
+    that banner under the label "tail" and no reason for the exit 1, because
+    every FATAL line the script prints is at the end, on stderr.
+    """
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return "..." + collapsed[-limit:]
+
+
+def _apply_output_evidence(completed: subprocess.CompletedProcess[str]) -> str:
+    """Name the stream and quote its end. A failed apply reads stderr first,
+    since the script's FATAL, NOT READY and kubectl error lines all go there;
+    stdout is never empty, so ``stdout or stderr`` never reached them."""
+    stdout = str(completed.stdout or "")
+    stderr = str(completed.stderr or "")
+    if completed.returncode != 0 and stderr.strip():
+        return f"stderr tail: {_tail(stderr)}"
+    if stdout.strip():
+        return f"stdout tail: {_tail(stdout)}"
+    return f"stderr tail: {_tail(stderr)}" if stderr.strip() else "no output"
+
+
 def record_path(state_dir: Path, sha: str) -> Path:
     """Where one sha's record lives.
 
@@ -1214,7 +1241,7 @@ class LabOverlayApplier:
                         f"k8s/onex-lab/apply_lab_lane.sh exited "
                         f"{completed.returncode} with the four pins and the "
                         f"OMN-18168 store binding ({STORE_BINDING_ENVIRONMENT}); "
-                        f"tail: {_truncate(str(completed.stdout or completed.stderr))}"
+                        f"{_apply_output_evidence(completed)}"
                     ),
                 )
             )

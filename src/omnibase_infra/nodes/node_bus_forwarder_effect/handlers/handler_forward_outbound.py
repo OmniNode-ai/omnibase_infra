@@ -61,7 +61,7 @@ class HandlerForwardOutbound:
             raise ValueError("envelope tenant_id does not match attached tenant")
         if envelope.tenant_slug != identity.tenant_slug:
             raise ValueError("envelope tenant_slug does not match attached tenant")
-        if envelope.canonical_topic not in config.mirror_topics.outbound:
+        if envelope.canonical_topic not in config.declared_outbound_topics:
             raise ValueError("canonical_topic is not declared for outbound mirroring")
 
         # OMN-15792: routes through the single runtime topic resolver
