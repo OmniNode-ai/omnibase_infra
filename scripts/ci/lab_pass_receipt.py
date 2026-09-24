@@ -3596,17 +3596,24 @@ def resolve_required_subject(
 
 
 def resolve_required_subject_from_clone(
-    sha: str, clone: Path, runtime_path_validator: Path
+    sha: str, clone: Path, runtime_path_validator: Path, repo: str
 ) -> tuple[str, str]:
     """``resolve_required_subject`` over a local clone, with the TRIGGER's predicate.
 
     The predicate is the one the rebuild trigger and the release train read:
-    ``scripts/runtime_change_classifier.py`` over omniclaude's deploy-gate
-    validator. A classifier that cannot be loaded resolves to the exact commit.
+    ``is_runtime_affecting`` in ``scripts/runtime_change_classifier.py``, the
+    path rule over omniclaude's deploy-gate validator unioned with the merged
+    pull request's ``runtime_change`` label, read from ``repo`` (OMN-19318). A
+    classifier that cannot be loaded, and a label that cannot be read, resolve
+    to the exact commit.
     """
     try:
         train = _load_release_train()
-        predicate = train.load_runtime_affecting(clone, runtime_path_validator)
+        predicate = train.load_runtime_affecting(
+            clone,
+            runtime_path_validator,
+            labels_for=lambda commit: train.default_merged_pr_labels(repo, commit),
+        )
     except Exception as exc:  # noqa: BLE001 - fail to the exact commit, named
         return (
             sha,
@@ -4540,7 +4547,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 1
             required_sha, required_note = resolve_required_subject_from_clone(
-                args.sha, args.clone, args.runtime_path_validator
+                args.sha, args.clone, args.runtime_path_validator, args.repo
             )
         return evaluate_gate(
             args.repo,

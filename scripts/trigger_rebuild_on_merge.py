@@ -95,8 +95,6 @@ from pydantic import (
 # command downstream.
 TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 
-_RUNTIME_LABEL = "runtime_change"
-
 # Lane-declared transport vocabulary (OMN-18012). The overlay
 # (omnimarket config/ci_bus_lanes.yaml) declares `security_protocol` and, for a
 # SASL protocol, `sasl_mechanism` beside each lane's broker. This publisher READS
@@ -803,9 +801,15 @@ load_runtime_path_classifier = (
 classify_runtime_paths = _runtime_change_classifier.classify_runtime_paths  # type: ignore[attr-defined]
 
 
-def should_trigger(runtime_paths: list[str], labels: list[str]) -> bool:
-    """Return True for a runtime label or canonical deploy-path hit."""
-    return _RUNTIME_LABEL in labels or bool(runtime_paths)
+#: OMN-19318: the trigger's decision IS the shared runtime-affecting predicate
+#: (the path rule unioned with the merged pull request's ``runtime_change``
+#: label), the same function object the release train's proof-subject walk
+#: calls. A local predicate here is what let the walk step past a label-only
+#: merge this trigger rebuilt for; the test in
+#: tests/scripts/test_runtime_affecting_predicate_shared_omn19318.py fails if
+#: one comes back.
+RUNTIME_CHANGE_LABEL: str = _runtime_change_classifier.RUNTIME_CHANGE_LABEL  # type: ignore[attr-defined]
+should_trigger = _runtime_change_classifier.is_runtime_affecting  # type: ignore[attr-defined]
 
 
 #: The repository whose working tree IS the runtime image's build context. The
