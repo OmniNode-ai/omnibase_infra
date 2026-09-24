@@ -30,6 +30,12 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
+    EnumBifrostLaneLocale,
+)
+from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
+    ModelBifrostLaneOverlay,
+)
 from scripts.lane_census_plan import build_plan, resolve_host, validate_hosts
 from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
@@ -41,6 +47,7 @@ pytestmark = pytest.mark.ci
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
 OVERLAY_PATH = ROOT / "docker" / "docker-compose.sim-202.yml"
+BIFROST_OVERLAY_PATH = ROOT / "docker" / "lane-overlays" / "sim-202.bifrost.yaml"
 
 LANE = "sim-202"
 HOST_ID = "lab-202"
@@ -239,3 +246,20 @@ def test_a_201_lane_container_on_202_is_a_finding() -> None:
         f["lane"] == "dev" and f["kind"] == "lane_on_undeclared_host"
         for f in plan["findings"]
     ), plan["findings"]
+
+
+def test_sim_202_binds_no_model_server_on_any_lab_host() -> None:
+    """Seam SIM.1: no route to a .201 listener, and none to .202's model server.
+
+    The dogfood overlay binds the .201 model server; this lane mounts its own,
+    cloud-locale overlay with zero local backends, and never the dogfood file.
+    """
+    overlay = ModelBifrostLaneOverlay.model_validate(
+        yaml.safe_load(BIFROST_OVERLAY_PATH.read_text(encoding="utf-8"))
+    )
+    assert overlay.lane == LANE
+    assert overlay.locale is EnumBifrostLaneLocale.CLOUD
+    assert overlay.backends == ()
+    compose = OVERLAY_PATH.read_text(encoding="utf-8")
+    assert "dogfood.bifrost.yaml" not in compose
+    assert "192.168." not in compose

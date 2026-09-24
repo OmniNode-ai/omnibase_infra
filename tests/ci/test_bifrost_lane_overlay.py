@@ -174,6 +174,9 @@ _DEV_OVERLAY_PIN = "/app/config/delegation/dev.bifrost.yaml"
 _STANDALONE_RENDERING_LANE_FILES = {
     "judge": ROOT / "docker" / "docker-compose.judge.yml",
     "lakshman": ROOT / "docker" / "docker-compose.lakshman.yml",
+    # OMN-19339: an overlay on the dogfood file that replaces the runtime
+    # services' volumes wholesale, so it pins and mounts its own file.
+    "sim-202": ROOT / "docker" / "docker-compose.sim-202.yml",
 }
 
 

@@ -12,13 +12,16 @@
 #
 # HOW IT IS BUILT. This file is an OVERLAY on docker/docker-compose.dogfood.yml,
 # the standalone isolated-lane definition (OMN-18693). The service graph, the
-# runtime policy (the DOGFOOD_* values in docker/runtime-policy.env), the
-# database topology profile and the Bifrost lane overlay are the dogfood lane's,
-# unchanged. What this overlay replaces is everything that identifies a lane on
-# a host: the compose project, every container_name, the network name, every
-# volume name, every published port, and the com.omninode.lane label. Without
-# those the census on .202 would read these containers as the dogfood lane
-# running on a host it is not declared for.
+# runtime policy (the DOGFOOD_* values in docker/runtime-policy.env) and the
+# database topology profile are the dogfood lane's, unchanged. What this overlay
+# replaces is everything that identifies a lane on a host: the compose project,
+# every container_name, the network name, every volume name, every published
+# port, and the com.omninode.lane label. Without those the census on .202 would
+# read these containers as the dogfood lane running on a host it is not
+# declared for. It also replaces the Bifrost lane overlay: the dogfood one binds
+# the .201 model server, so the runtime services mount
+# docker/lane-overlays/sim-202.bifrost.yaml instead (cloud locale, no local
+# model rung) and never mount the dogfood file at all.
 #
 # Render it only as the pair, never alone:
 #
@@ -110,9 +113,18 @@ services:
     environment:
       ONEX_BOX_ID: omnipc2
       ONEX_RUNTIME_ADDRESS: runtime://omnipc2/dogfood/main
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/sim-202.bifrost.yaml
       OTEL_SERVICE_NAME: omninode-sim-202-runtime-main
     ports: !override
       - "127.0.0.1:62085:8085"
+    # Wholesale, so the dogfood overlay (which binds the .201 model server) is
+    # not mounted at all; see docker/lane-overlays/sim-202.bifrost.yaml.
+    volumes: !override
+      - dogfood_runtime_logs:/app/logs
+      - dogfood_runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/sim-202.bifrost.yaml:/app/config/delegation/sim-202.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     labels: !override
       - "com.omninode.lane=sim-202"
       - "com.omninode.ticket=OMN-19339"
@@ -125,9 +137,18 @@ services:
     environment:
       ONEX_BOX_ID: omnipc2
       ONEX_RUNTIME_ADDRESS: runtime://omnipc2/dogfood/effects
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/sim-202.bifrost.yaml
       OTEL_SERVICE_NAME: omninode-sim-202-runtime-effects
     ports: !override
       - "127.0.0.1:62086:8085"
+    # Wholesale, so the dogfood overlay (which binds the .201 model server) is
+    # not mounted at all; see docker/lane-overlays/sim-202.bifrost.yaml.
+    volumes: !override
+      - dogfood_effects_logs:/app/logs
+      - dogfood_effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/sim-202.bifrost.yaml:/app/config/delegation/sim-202.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     labels: !override
       - "com.omninode.lane=sim-202"
       - "com.omninode.ticket=OMN-19339"
