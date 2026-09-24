@@ -86,6 +86,31 @@ scope:
     - scripts/ci/canonical_handler_shape_baseline.py
     - scripts/ci/check_deploy_scope_dod.py
     - scripts/ci/check_integration_skips.py
+    # OMN-17423: the same class as check_trivyignore_expiry.py below -- a
+    # purely preventive control with no bad state to replay. AC4 of that
+    # ticket mandates a gate that refuses a log statement formatting a
+    # credential value; the gate exists and is non-vacuous (its self-test
+    # pins an exact count against a committed fixture of nine injected
+    # violations, and `run_self_test(fixture, 8)` returns 1).
+    #
+    # There is no real incident to capture, and that was MEASURED, not
+    # assumed. Running this gate over seven repos at their current heads and
+    # back through history -- 392 commits of omninode_infra's docker/onex-api
+    # and ~1,900 of omnibase_infra's src/ -- found ZERO first-party logger
+    # calls that format a credential value. Every hit was third-party code
+    # under .venv. That agrees with OMN-17423's own AC1 probe, which drove
+    # sentinels through the live dev request path on 2026-09-15 and found no
+    # fingerprint on any collected service log, and is why AC1 was rescoped
+    # to fallback (c) rather than closed on a RED-first capture.
+    #
+    # Fabricating a case would violate R2: an invented "this once happened"
+    # fixture has no locator that resolves. Baselining instead is the honest
+    # record, and it is debt -- if a credential-in-log incident ever does
+    # occur, its bytes belong in a case here and this line comes out.
+    #
+    # Operator ruling 2026-09-24 (Jake Brower), on the conflict between this
+    # rule and OMN-17423 AC4.
+    - scripts/ci/check_no_credential_in_log.py
     - scripts/ci/check_occ_companion_merged.py
     - scripts/ci/check_shell_hygiene.sh
     # OMN-16229: a genuinely new preventive control, not a replay of an
@@ -717,6 +742,22 @@ cases:
     test: tests/ci/test_incident_replay_omn17298.py::test_omn17298_replay_rejects_the_real_canary_0003_bytes
     why: >-
       This guard is newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The failure it catches shipped THREE times and passed every existing migration gate each time, because none of them reads the SQL: the manifest validator only asks whether a declared checksum matches its file, and check_migration_append_only.py only asks whether a declared file was edited. The shape is a DROP POLICY inside a `DO $$` block whose matching CREATE POLICY sits after `END$$`. The forward runner is `psql -v ON_ERROR_STOP=1 -f <file>` with NO --single-transaction (it says so itself), so `END$$` COMMITS and the relation is left, for a real interval, enforcing row-level security with zero policies -- which denies every row to every non-owner, non-BYPASSRLS principal and surfaces as SQLSTATE 42501, indistinguishable at the call site from a missing GRANT. That collision is not academic: it is what sent OMN-17298's own diagnosis to the wrong seam for its first hour. Instance 1 was migration 0032 (OMN-17288, superseded by 0033, applied on no lane). Instance 2 was the opening hypothesis of OMN-17298, falsified by live readback. Instance 3 is this artifact, found by running the new guard over the checked-in tree -- not by review -- and it is the only one of the three that ACTUALLY RAN: the .201 dev lane's platform_catalog.schema_migrations records node:node_canary_score_reducer:0003_capability_scores_tenant_id_to_uuid.sql applied 2026-08-17 02:30:59.157734+00 with checksum d1eeefff11fbec255216154ba26aa6f0f29602a0b6fd8fd89e8de5d8d3282b2c, which is byte-for-byte the sha256 of this fixture -- so these are provably the exact bytes a real database executed, not a reconstruction. The window was traversed and happened not to be interrupted; same-day readback shows the lane in the intended end state. The replay drives the real violations_for() over those verbatim bytes (captured via `git cat-file` from 211e81e5c, the commit that landed the file, and byte-identical to the current tree since it has never been rewritten) and requires a RULE B rejection. Its accept control in the same module is migration 0033's verbatim blob from 3f10ee5e4, independently sha256-pinned: 0033 is the remedy for the identical shape one node over, and its own header QUOTES the defective DROP POLICY / CREATE POLICY pair in prose, so a byte-blind matcher passes the reject case and fails the fix. Without that control a guard hard-wired to report a violation would replay this incident perfectly while condemning every correct migration.
+  - id: omn19344-destructive-migration-read-as-rollback-neutral
+    guard: scripts/validation/check_migration_class.py
+    incident: OMN-19344
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn19344/087_drop_stale_delegation_events_decoy.a1ca993ca.sql.captured
+      sha256: f1c5da54c354dd249df058d0aac0432d6099bf46e3ce479a951aafb0b68c8015
+    capture:
+      method: git-object
+      source: "git-object:OmniNode-ai/omnibase_infra@a1ca993cabe62e4b01fbb137a5ca8b00541430cd:docker/migrations/forward/087_drop_stale_delegation_events_decoy.sql"
+      captured_at: "2026-09-24T01:40:00Z"
+      captured_by: OMN-19344 wr-recovery lane
+    test: tests/ci/test_incident_replay_omn19344.py::test_omn19344_replay_rejects_087_declared_expand_only
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is that every gate in the tree passed migration 087 as rollback-neutral: no migration declared a machine-readable class, check_migrations_applied in lab_pass_receipt.py accepts a lane AHEAD of the delivered tree by design (OMN-18388), and no down-script exists for 087. So a rollback selector reading PASS lab-pass receipts would have treated any composition older than 087 as eligible, over a schema from which 087 had dropped public.delegation_events with CASCADE (the unified verification plan's review round 3, finding 1, which is what added rule RB). NOT A RECONSTRUCTION -- the .201 dev lane's omnibase_infra.public.schema_migrations records docker/087_drop_stale_delegation_events_decoy.sql applied 2026-07-31 06:44:26.707462+00 (read read-only 2026-09-24), after a1ca993ca, the last commit to touch the file (2026-06-21); the fixture is that commit's blob via git cat-file and hashes identically to the current tree. The replay drives the real violations_for() over those bytes declared expand-only and requires a rejection naming the DROP. THE DISCRIMINATOR is load-bearing: the same module accepts the same bytes declared forward-only and accepts migration 020, a real additive file, declared expand-only, so a guard hard-wired to refuse cannot pass it.
   - id: omn17374-topology-declared-grant-that-no-migration-issues
     guard: scripts/validation/check_topology_grant_delivery.py
     incident: OMN-17374

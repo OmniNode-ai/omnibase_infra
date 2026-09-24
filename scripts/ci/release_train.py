@@ -187,6 +187,34 @@ lab_pass_receipt = _load_sibling("lab_pass_receipt")
 #: click and pydantic at module scope.
 _CLASSIFIER_PATH = _REPO_ROOT / "scripts" / "runtime_change_classifier.py"
 
+#: The ONE ``sys.modules`` name the classifier is registered under, shared with
+#: ``trigger_rebuild_on_merge.py`` (OMN-19318). A second name would load a
+#: second module object, and so a second copy of the runtime-affecting
+#: predicate the two callers must never disagree about.
+_CLASSIFIER_MODULE_NAME = "_omnibase_infra_runtime_change_classifier"
+
+
+def _load_runtime_change_classifier() -> Any:
+    """The shared classifier module, under its one canonical name."""
+    existing = sys.modules.get(_CLASSIFIER_MODULE_NAME)
+    if existing is not None:
+        return existing
+    spec = importlib.util.spec_from_file_location(
+        _CLASSIFIER_MODULE_NAME, _CLASSIFIER_PATH
+    )
+    if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
+        msg = f"cannot load the runtime-change classifier at {_CLASSIFIER_PATH}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[_CLASSIFIER_MODULE_NAME] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(_CLASSIFIER_MODULE_NAME, None)
+        raise
+    return module
+
+
 #: How far back the ancestor walk goes before refusing. A bound rather than an
 #: unbounded walk because an unbounded one on a repo that has never emitted a
 #: receipt reads every commit in its history to reach the same refusal. 200
@@ -751,27 +779,79 @@ def resolve_lab_candidate(
     )
 
 
-def load_runtime_affecting(clone: Path, validator_path: Path) -> Callable[[str], bool]:
+def load_runtime_affecting(
+    clone: Path,
+    validator_path: Path,
+    *,
+    labels_for: Callable[[str], Sequence[str]],
+) -> Callable[[str], bool]:
     """Build the "is this commit runtime-affecting" predicate for one clone.
 
-    The predicate is the TRIGGER'S, reached through the module the trigger reads
-    its own patterns from, so the two cannot disagree about which merges produce
-    a receipt. Nothing about the union is restated here.
+    The predicate is the TRIGGER'S: ``is_runtime_affecting`` in the shared
+    classifier module, the same function object the trigger's ``should_trigger``
+    is (OMN-19318). It unions the path rule with the ``runtime_change`` label of
+    the merged pull request that produced the commit, read by ``labels_for``
+    (normally :func:`default_merged_pr_labels`). Nothing about the union is
+    restated here.
 
     Raises rather than returning a permissive default when the classifier module
     or the canonical deploy-gate validator cannot be loaded. A predicate that
     answered "not runtime-affecting" because it could not read the canonical
     list would inherit a receipt across a source change, which is the one
-    outcome this premise exists to prevent.
+    outcome this premise exists to prevent. For the same reason a label read
+    that fails raises ``LabelReadError`` out of the predicate, and
+    ``resolve_lab_candidate`` then resolves nothing and its caller falls back to
+    the exact head.
     """
-    classifier_module = _load_module_at(_CLASSIFIER_PATH, "runtime_change_classifier")
+    classifier_module = _load_runtime_change_classifier()
     canonical = classifier_module.load_runtime_path_classifier(validator_path)
 
     def _runtime_affecting(sha: str) -> bool:
         changed = default_changed_files(clone, sha)
-        return bool(classifier_module.classify_runtime_paths(changed, canonical))
+        runtime_paths = classifier_module.classify_runtime_paths(changed, canonical)
+        return bool(
+            classifier_module.is_runtime_affecting(
+                runtime_paths, lambda: labels_for(sha)
+            )
+        )
 
     return _runtime_affecting
+
+
+def default_merged_pr_labels(repo: str, sha: str) -> list[str]:
+    """Labels of the merged pull request(s) that introduced ``sha``, read live.
+
+    ``repo`` is ``owner/name``. The commit-to-pulls endpoint returns, for a
+    commit on the default branch, the merged pull request that introduced it;
+    labels of every MERGED pull request it returns are unioned, which errs
+    toward runtime-affecting. A label added after the merge counts too, for the
+    same reason. A commit no pull request produced (a bot push) has no labels.
+
+    Raises on any read failure, and on a response that is not a list, so the
+    predicate raises ``LabelReadError`` instead of reading "no label".
+    """
+    raw = subprocess.run(
+        ["gh", "api", f"repos/{repo}/commits/{sha}/pulls"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    pulls = json.loads(raw)
+    if not isinstance(pulls, list):
+        msg = f"commits/{sha[:12]}/pulls for {repo} is not a list: {raw[:200]!r}"
+        raise ValueError(msg)
+    labels: list[str] = []
+    for pull in pulls:
+        if not isinstance(pull, dict) or not pull.get("merged_at"):
+            continue
+        for label in pull.get("labels") or []:
+            name = label.get("name") if isinstance(label, dict) else None
+            if not isinstance(name, str):
+                msg = f"pull request label without a name for {sha[:12]}: {label!r}"
+                raise ValueError(msg)
+            if name not in labels:
+                labels.append(name)
+    return labels
 
 
 def default_branch_commits(clone: Path, head_ref: str) -> list[str]:
@@ -1586,7 +1666,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.runtime_path_validator is not None:
             try:
                 runtime_affecting = load_runtime_affecting(
-                    clone, args.runtime_path_validator
+                    clone,
+                    args.runtime_path_validator,
+                    labels_for=functools.partial(
+                        default_merged_pr_labels, f"OmniNode-ai/{name}"
+                    ),
                 )
                 head_ref = f"origin/{policy.default_branch}"
                 branch_commits = functools.partial(
