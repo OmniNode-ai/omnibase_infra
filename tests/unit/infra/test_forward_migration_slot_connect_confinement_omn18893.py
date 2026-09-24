@@ -99,7 +99,11 @@ def test_every_connect_in_the_corpus_is_confined_to_the_slot(
             else:
                 assert after == before, "a line naming no database changed"
     finally:
-        copy.unlink(missing_ok=True)
+        # Only ever remove the helper's temporary copy. When a regression
+        # hands back the migration itself, unlinking it would delete a corpus
+        # file from the working tree.
+        if copy.resolve() != migration.resolve() and FORWARD not in copy.parents:
+            copy.unlink(missing_ok=True)
 
 
 def test_outside_a_slot_the_file_is_applied_as_it_stands() -> None:
