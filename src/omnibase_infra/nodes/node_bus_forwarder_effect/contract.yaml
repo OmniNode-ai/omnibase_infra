@@ -7,13 +7,13 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 1
-  patch: 6
+  patch: 7
 node_version:
   major: 0
   minor: 1
-  patch: 6
+  patch: 7
 description: >
-  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16459 adds the contract-declared OUTBOUND https_ingest leg; the INBOUND leg remains a cloud-broker pull, so this does not retire the existing bastion on its own. OMN-16979 declares all seven capture classes outbound behind fail-closed egress_redaction admission. A governed record without an admitted upstream redaction_state is dropped at this boundary, never forwarded. The declaration alone does not activate runtime delivery; it keeps missing or regressed producer provenance fail-closed.
+  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16459 adds the contract-declared OUTBOUND https_ingest leg; the INBOUND leg remains a cloud-broker pull, so this does not retire the existing bastion on its own. OMN-16979 declares all seven capture classes outbound behind fail-closed egress_redaction admission. A governed record without an admitted upstream redaction_state is dropped at this boundary, never forwarded. The declaration alone does not activate runtime delivery; it keeps missing or regressed producer provenance fail-closed. OMN-18691 (phase 3, option B): the three cloud fields (`cloud_bus`, `mirror_topics`, `canary`) become optional and travel together -- a resolved config declares either all three (a tenant-edge deployment, byte-unchanged) or none (a mirror-only deployment carrying only the lane_mirror leg below), and a partial declaration or a config with neither the cloud legs nor a lane_mirror is refused at construction. The two handlers now read the two `declared_inbound_topics` / `declared_outbound_topics` properties, which return the mirror_topics sets when a cloud bus is declared and an empty set otherwise -- the "not declared for mirroring" refusal is unchanged in either case, it just has nothing to admit when there is no trust boundary to cross. No publisher is repointed by this contract change; deploying a mirror-only instance is a separate, consent-gated step.
 
 runtime_profiles:
   - canary
@@ -368,7 +368,7 @@ metadata:
   description: "Hybrid gateway local runtime bus forwarder"
   author: "OmniNode Team"
   created: "2026-06-10"
-  updated: "2026-09-04"
+  updated: "2026-09-23"
   tags:
     - gateway
     - event-bus
