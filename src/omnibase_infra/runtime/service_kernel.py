@@ -675,6 +675,7 @@ def _build_runtime_handler_dependencies(
     if kafka_bootstrap_servers:
         from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
             DLQConsumer,
+            DlqGroupBacklogProbe,
             DLQProducer,
             DLQQuarantineProducer,
             ModelDlqReplayEngineConfig,
@@ -714,6 +715,11 @@ def _build_runtime_handler_dependencies(
             },
             "producer": DLQProducer(primary_config),
             "quarantine_producer": DLQQuarantineProducer(primary_config),
+            # OMN-19085: lets a trigger whose topics the replay group has
+            # already committed skip the per-topic consumer start (a group
+            # join). The replay group and broker are the same for every
+            # declared topic, so one probe serves all of them.
+            "backlog_probe": DlqGroupBacklogProbe(primary_config),
         }
         # OMN-18111: only when the runtime actually HAS one. An explicit
         # ``"tracking": None`` and an absent key behave identically for the
