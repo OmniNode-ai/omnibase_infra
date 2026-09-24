@@ -844,6 +844,7 @@ class DeployAgent:
                     cid,
                     status="success",
                     settling_stage=EnumJobSettlingStage.LAB_OVERLAY,
+                    verify_recreate=self.executor.verify_recreate,
                 )
                 logger.info(
                     "Job %s completed successfully; settling (lab overlay)", cid
@@ -902,6 +903,7 @@ class DeployAgent:
                 status="failed",
                 errors=[str(e)],
                 settling_stage=EnumJobSettlingStage.PUBLISH,
+                verify_recreate=self.executor.verify_recreate,
             )
             # OMN-18545 -- THE REPAIR BUILD, AND WHY THE FAILING PATH NEEDED ONE
             # AT ALL.
