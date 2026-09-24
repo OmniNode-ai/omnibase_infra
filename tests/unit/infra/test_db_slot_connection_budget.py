@@ -14,7 +14,9 @@ Measured on the lab host on 2026-09-24 with a read-only two-second
 (``role_omnibase_prepr1`` peaked at 50, four slot containers at 14/14/14/9, most
 of them opened by pool floors and never used), the dev lane held 35-45, and the
 server sat at 100/100 while the dev runtime logged 1171 refusals in four
-minutes. The slot is a guest on that server; the dev lane paid for it.
+minutes. The slot is a guest on that server; the dev lane paid for it. The dev
+lane alone, with no slot running, reached 93 at 16:50:07Z just after a runtime
+redeploy, so the stock server had no room for any slot at all.
 
 THE FIX, AND WHY IT IS THREE PIECES
 -----------------------------------
@@ -24,10 +26,13 @@ THE FIX, AND WHY IT IS THREE PIECES
    by starving the dev lane.
 2. ``--apply`` refuses to provision a slot on a server that is not sized for
    the dev lane plus every pool slot, before it creates anything.
-3. ``docker/docker-compose.infra.yml`` declares ``max_connections``, and this
-   file pins that the declared value covers the same arithmetic the
-   provisioner enforces, with the slot count read from the pool's own policy
-   table rather than restated.
+3. ``docker/docker-compose.dev-lane.yml`` declares ``max_connections`` on the
+   dev lane's postgres, and this file pins that the declared value covers the
+   same arithmetic the provisioner enforces, with the slot count read from the
+   pool's own policy table rather than restated. It is declared in the dev-lane
+   overlay and NOT in the base ``docker-compose.infra.yml``, because
+   stability-test, sim-202 and prod layer their postgres over the base and
+   would inherit it.
 
 Ticket: OMN-19415. Parent epic: OMN-18888.
 """
@@ -49,13 +54,14 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROVISIONER = REPO_ROOT / "scripts" / "provision_db_slot.sh"
 INFRA_COMPOSE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
+DEV_LANE_COMPOSE = REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
 SLOT_POLICY = REPO_ROOT / "scripts" / "runtime_build" / "prepr_slot_policy.py"
 
 EXIT_SERVER_UNDERSIZED = 11
 
-# The superuser reservation is a server setting. The infra compose does not
-# override it, so the stock value applies; if the compose ever sets it, the
-# pin below reads the declared value instead.
+# The superuser reservation is a server setting. The dev-lane overlay does not
+# override it, so the stock value applies; if it ever sets it, the pin below
+# reads the declared value instead.
 STOCK_SUPERUSER_RESERVED = 3
 STOCK_RESERVED = 0
 
@@ -110,12 +116,36 @@ def _load_slot_policy() -> object:
     return module
 
 
+class _ComposeLoader(yaml.SafeLoader):
+    """A SafeLoader that tolerates compose's ``!override`` tag.
+
+    The dev-lane overlay uses ``!override``; this file reads one literal command
+    list and never merge semantics, so keeping the value and dropping the tag is
+    correct here.
+    """
+
+
+def _drop_tag(loader: yaml.SafeLoader, tag_suffix: str, node: yaml.Node) -> object:
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node, deep=True)
+    if isinstance(node, yaml.ScalarNode):
+        return loader.construct_scalar(node)
+    raise AssertionError(f"unhandled YAML node kind: {type(node).__name__}")
+
+
+_ComposeLoader.add_multi_constructor("!", _drop_tag)  # type: ignore[no-untyped-call]
+
+
 def _declared_postgres_settings() -> dict[str, int]:
-    services = yaml.safe_load(INFRA_COMPOSE.read_text())["services"]
-    command = services["postgres"].get("command")
+    loaded = yaml.load(DEV_LANE_COMPOSE.read_text(), Loader=_ComposeLoader)  # noqa: S506 - local tolerant SafeLoader subclass
+    services = loaded["services"]
+    command = (services.get("postgres") or {}).get("command")
     assert command, (
-        "docker-compose.infra.yml declares no postgres command, so the server runs "
-        "the stock max_connections of 100 -- the undeclared value this ticket found"
+        "docker-compose.dev-lane.yml declares no postgres command, so the dev "
+        "lane's server runs the stock max_connections of 100 -- the undeclared "
+        "value this ticket found"
     )
     text = command if isinstance(command, str) else " ".join(command)
     return {key: int(value) for key, value in re.findall(r"-c\s+([a-z_]+)=(\d+)", text)}
@@ -168,8 +198,14 @@ class TestThePoolSizeIsTheOneThePolicyDeclares:
 
 
 class TestTheServerIsSizedForThePool:
-    def test_the_infra_compose_declares_max_connections(self) -> None:
+    def test_the_dev_lane_overlay_declares_max_connections(self) -> None:
         assert "max_connections" in _declared_postgres_settings()
+
+    def test_the_base_compose_leaves_the_postgres_command_alone(self) -> None:
+        """Other lanes merge the base; a base command would recreate their servers."""
+        services = yaml.safe_load(INFRA_COMPOSE.read_text())["services"]
+        assert "postgres" in services, "positive control: the base defines postgres"
+        assert "command" not in services["postgres"]
 
     def test_the_declared_capacity_covers_the_dev_lane_and_every_slot(self) -> None:
         scope = _scope()
@@ -260,3 +296,32 @@ class TestApplyRefusesAnUndersizedServer:
             result.stderr,
         )
         assert "CREATE ROLE" not in log
+
+
+EXIT_ROLE_WITHOUT_BUDGET = 12
+
+
+class TestAnUnbudgetedPrincipalFailsClosed:
+    def test_a_role_missing_from_the_budget_table_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        text = PROVISIONER.read_text()
+        # The last entry of CONNECTION_BUDGET_MAP, with the map's closing quote.
+        entry = '\nchain_canary_reader:2"'
+        assert entry in text, "positive control: the budget entry being removed exists"
+        mutated = tmp_path / "provision_db_slot.sh"
+        mutated.write_text(text.replace(entry, '"', 1))
+        result = subprocess.run(
+            ["bash", str(mutated), "--print-scope"],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "ONEX_DB_SLOT": "prepr1"},
+            stdin=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == EXIT_ROLE_WITHOUT_BUDGET, (
+            result.stdout,
+            result.stderr,
+        )
+        assert "chain_canary_reader_prepr1" in result.stderr
