@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 572
+    max_skips: 583
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -74,6 +74,23 @@ suites:
             One `[NOTSET]` id, from an empty pytest.mark.parametrize. OMN-19251 deleted the last `serving: false` (dark) lab binding -- the dead local-ds-v4-flash rung on the retired .200:8101 host -- from every .201 lane overlay. tests/unit/runtime/test_bifrost_served_model_probe_fixture.py parametrizes test_non_serving_bindings_have_a_failed_probe_on_record over the dark-binding set collected from those overlays; with that set now empty, pytest auto-skips the parametrization with reason "got empty parameter set for (pair)" and reports the single `[NOTSET]` id below instead of silently vanishing. It is not a broken proof: the positive control beside it (test_the_lab_overlays_bind_a_serving_backend) still asserts a serving binding exists, and the parametrized test itself resumes running the moment a lane overlay declares a dark binding again -- an empty parametrization, not a deleted test.
           node_ids:
             - tests.unit.runtime.test_bifrost_served_model_probe_fixture::test_non_serving_bindings_have_a_failed_probe_on_record[NOTSET]
+        - measured_at: '2026-09-24'
+          measured_by: OMN-19411
+          delta: 11
+          reason: >-
+            Eleven parametrizations of test_lab_sync_fixture_produces_its_named_kind in tests/unit/scripts/test_lane_census_plan.py, one per lab-sync finding kind (T0.2, OMN-19411). The test is a strict xfail (reason="lab-sync kinds are declared, not evaluated: T1.2 OMN-19414, T1.3 OMN-19416"): OMN-19411 declares the eleven finding-kind specs and their fixtures but deliberately wires no evaluation path yet, so asserting a fixture produces its named finding must fail today. pytest's JUnit writer reports a strict xfail as <skipped type="pytest.xfail">, which is why the ratchet counts it rather than a <failure> -- confirmed locally: `pytest -k test_lab_sync_fixture_produces_its_named_kind --junitxml=...` emits exactly these 11 ids as skipped, 11 xfailed in the run summary. Strict means the marker fails the build the moment the test starts passing, so T1.2 (evaluation, OMN-19414) or T1.3 (OMN-19416) deleting the xfail marker is the same commit that removes these 11 ids from this baseline -- they are not left to grow silently, they are pinned to two named, already-open tickets.
+          node_ids:
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[broker_config_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[config_hash_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[container_restart_loop]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[container_unhealthy]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[desired_state_unreadable]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[package_version_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[revision_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_count_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_offline]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_workdir_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[undeclared_container]
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -635,6 +652,17 @@ suites:
       - tests.unit.runtime.test_message_dispatch_engine.TestMetrics::test_metrics_updated_on_category_mismatch
       - tests.unit.scripts.test_ci_bus_overlay_live_binding.TestLiveOverlayBinding::test_live_omnimarket_overlay_validates
       - tests.unit.scripts.test_ci_bus_overlay_live_binding.TestLiveOverlayBinding::test_live_overlay_declares_the_lane_the_publisher_uses
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[broker_config_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[config_hash_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[container_restart_loop]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[container_unhealthy]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[desired_state_unreadable]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[package_version_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[revision_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_count_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_offline]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_workdir_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[undeclared_container]
       - tests.unit.scripts.test_ledger_cost_sentence_omn18554::test_live_goal_source_declares_a_resolvable_stamp
       - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheFlagIsNotAGeneralWaiver::test_a_future_window_is_refused_as_a_blanket_waiver
       - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheFlagIsNotAGeneralWaiver::test_a_payload_with_no_timestamp_is_refused
