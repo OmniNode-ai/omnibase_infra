@@ -45,7 +45,7 @@ def _recorded() -> dict[str, Any]:
 
 def _without_openrouter() -> dict[str, Any]:
     obs = _recorded()
-    obs["backends"] = [b for b in obs["backends"] if b["backend_id"] != OPENROUTER]
+    obs["declared"] = [b for b in obs["declared"] if b["backend_id"] != OPENROUTER]
     obs["probes"] = [p for p in obs["probes"] if OPENROUTER not in p["backend_ids"]]
     obs["controls"] = [
         c for c in obs["controls"] if c["endpoint_host"] != "openrouter.ai"
@@ -103,7 +103,7 @@ def test_every_rung_live_and_every_control_refused_is_a_pass() -> None:
 @pytest.mark.unit
 def test_an_empty_observation_cannot_pass() -> None:
     assert probe.grade({}).verdict == "fail"
-    empty: dict[str, Any] = {"backends": [], "probes": [], "controls": []}
+    empty: dict[str, Any] = {"declared": [], "probes": [], "controls": []}
     record = probe.grade(empty)
     assert record.verdict == "fail"
     assert "every_credentialed_backend_probed" in _failed(record)
@@ -126,7 +126,7 @@ def test_coverage_is_rederived_not_read_from_the_observer() -> None:
     """An observer that marks a credentialed backend SKIPPED does not shrink
     what the grader expects."""
     obs = _without_openrouter()
-    for row in obs["backends"]:
+    for row in obs["declared"]:
         if row["backend_id"] == "cloud-glm":
             row["disposition"] = "SKIPPED_NO_SECRET_REF"
     obs["probes"] = [p for p in obs["probes"] if "cloud-glm" not in p["backend_ids"]]
@@ -174,7 +174,7 @@ def test_the_observer_plans_one_probe_per_distinct_rung() -> None:
         observer.PROBE,
     ]
     assert [p["backend_ids"] for p in probes] == [["a", "b"], ["c"], ["f"]]
-    assert probes[2]["secret_ref"] == "Y_API_KEY"
+    assert probes[2]["ref_name"] == "Y_API_KEY"
 
 
 # ---------------------------------------------------------------- AC2 verdicts
@@ -229,12 +229,12 @@ def test_the_observer_plans_one_probe_per_distinct_rung() -> None:
         ),
         ({"http_status": 503}, probe.HTTP_ERROR),
         ({"exception": "RuntimeError", "exception_family": "other"}, probe.PROBE_ERROR),
-        ({"secret_resolved": False, "request_sent": False}, probe.UNRESOLVED),
+        ({"resolved": False, "request_sent": False}, probe.UNRESOLVED),
         ({}, probe.PROBE_ERROR),
     ],
 )
 def test_classify(fact: dict[str, Any], verdict: str) -> None:
-    assert probe.classify({"secret_resolved": True, **fact}) == verdict
+    assert probe.classify({"resolved": True, **fact}) == verdict
 
 
 class _FakeTransport:
@@ -266,7 +266,7 @@ def _run(
         )
     )
     obs = {
-        "backends": _rows,
+        "declared": _rows,
         "probes": results,
         "controls": controls,
         "runtime_binds_contract": True,
@@ -320,7 +320,7 @@ def test_an_unresolved_key_sends_no_authenticated_request() -> None:
     assert [h["Authorization"] for _u, h in fake.posts] == [
         f"Bearer {observer.INVALID_KEY}"
     ]
-    assert obs["probes"][0]["secret_resolved"] is False
+    assert obs["probes"][0]["resolved"] is False
     assert obs["probes"][0]["request_sent"] is False
     record = probe.grade(obs)
     assert _verdicts(record)["cloud-x"] == probe.UNRESOLVED
@@ -432,7 +432,7 @@ def test_a_live_rung_leaves_no_key_anywhere(
     obs, line = _run(_ONE, fake)
     assert SENTINEL not in line
     assert "redactions" not in json.loads(line)
-    assert json.loads(line)["probes"][0]["secret_resolved"] is True
+    assert json.loads(line)["probes"][0]["resolved"] is True
     record = probe.grade(obs)
     assert SENTINEL not in json.dumps(record.to_dict(target={}, as_of="t", observed={}))
     out = capsys.readouterr()

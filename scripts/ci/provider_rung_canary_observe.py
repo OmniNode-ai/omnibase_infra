@@ -44,7 +44,7 @@ ONE REQUEST PER DISTINCT RUNG, PLUS ONE WRONG-KEY CONTROL PER ENDPOINT
 
 A DECLARED KEY THAT DOES NOT RESOLVE SENDS NOTHING
     No request is issued for such a rung (an unauthenticated call to a paid
-    provider is never a probe). The observation says ``secret_resolved:
+    provider is never a probe). The observation says ``resolved:
     false`` and the grader records ``UNRESOLVED``: never LIVE, never PASS.
 
 NO KEY MATERIAL LEAVES THIS PROCESS
@@ -149,7 +149,7 @@ def plan(
                 "tier": backend.get("tier"),
                 "endpoint_url": endpoint,
                 "model_name": backend.get("model_name"),
-                "secret_ref": ref,
+                "ref_name": ref,
                 "disposition": disposition,
                 "probe_key": key,
             }
@@ -168,7 +168,7 @@ def plan(
                 "backend_ids": [],
                 "endpoint_url": endpoint,
                 "model_name": backend.get("model_name"),
-                "secret_ref": ref,
+                "ref_name": ref,
                 "api_key_env": backend.get("api_key_env"),
                 "extra_headers": dict(backend.get("extra_headers") or {}),
                 "timeout_seconds": timeout,
@@ -199,7 +199,7 @@ def _public(probe: dict[str, Any]) -> dict[str, Any]:
         "endpoint_url": probe["endpoint_url"],
         "endpoint_host": urlsplit(str(probe["endpoint_url"])).hostname,
         "model_name": probe["model_name"],
-        "secret_ref": probe["secret_ref"],
+        "ref_name": probe["ref_name"],
     }
 
 
@@ -220,17 +220,17 @@ async def observe_probes(
     for probe in probes:
         out = _public(probe)
         try:
-            value = await resolve(probe["secret_ref"], probe["api_key_env"])
+            value = await resolve(probe["ref_name"], probe["api_key_env"])
         except Exception as exc:  # noqa: BLE001 - the refusal IS the observation
             value = None
             out["resolver_error"] = type(exc).__name__
         if not value:
-            out["secret_resolved"] = False
+            out["resolved"] = False
             out["request_sent"] = False
             results.append(out)
             continue
         secrets.add(value)
-        out["secret_resolved"] = True
+        out["resolved"] = True
         out["request_sent"] = True
         facts = post(
             probe["endpoint_url"],
@@ -454,7 +454,7 @@ def observe(contract_path: str, secrets: set[str]) -> dict[str, Any]:
         "runtime_binds_contract": os.environ.get("BIFROST_CONTRACT_PATH")
         == contract_path,
         "config_version": config.config_version,
-        "backends": rows,
+        "declared": rows,
         "probes": results,
         "controls": controls,
         "quota_policy": quota_policy(config),

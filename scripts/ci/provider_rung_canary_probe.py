@@ -162,7 +162,7 @@ def expected_disposition(row: dict[str, Any]) -> str:
     endpoint = row.get("endpoint_url")
     if not isinstance(endpoint, str) or not endpoint.strip():
         return SKIPPED_NO_ENDPOINT
-    ref = row.get("secret_ref")
+    ref = row.get("ref_name")
     if not isinstance(ref, str) or not ref.strip():
         return SKIPPED_NO_SECRET_REF
     return PROBE
@@ -190,7 +190,7 @@ def quota_class(obs: dict[str, Any], host: Any, code: Any) -> str | None:
 
 def classify(fact: dict[str, Any]) -> str:
     """One observed request, one verdict. Pure; the whole grading rule."""
-    if fact.get("secret_resolved") is False:
+    if fact.get("resolved") is False:
         return UNRESOLVED
     family = fact.get("exception_family")
     if family == "transport":
@@ -221,7 +221,7 @@ def classify(fact: dict[str, Any]) -> str:
 
 def grade(obs: dict[str, Any]) -> Record:
     record = Record()
-    rows = obs.get("backends")
+    rows = obs.get("declared")
     probes = obs.get("probes")
     controls = obs.get("controls")
     if not isinstance(rows, list) or not isinstance(probes, list):
@@ -274,7 +274,7 @@ def grade(obs: dict[str, Any]) -> Record:
             "provider": row.get("provider"),
             "tier": row.get("tier"),
             "model_name": row.get("model_name"),
-            "secret_ref": row.get("secret_ref"),
+            "ref_name": row.get("ref_name"),
             "disposition": disposition,
         }
         if disposition != PROBE:
@@ -299,7 +299,7 @@ def grade(obs: dict[str, Any]) -> Record:
                 "provider_error_message": fact.get("provider_error_message"),
                 "exception": fact.get("exception"),
                 "resolver_error": fact.get("resolver_error"),
-                "secret_resolved": fact.get("secret_resolved"),
+                "resolved": fact.get("resolved"),
                 "shared_probe_with": [
                     b for b in fact.get("backend_ids") or [] if b != backend_id
                 ],
