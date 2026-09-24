@@ -85,6 +85,7 @@ def _base_env(registry: Path) -> dict[str, str]:
     env.pop("ALLOW_CANONICAL_CLONE_COMMIT", None)
     env.pop("ONEX_CANONICAL_CONVERGE", None)
     env.pop("ONEX_WORKTREES_ROOT", None)
+    env.pop("ONEX_REGISTRY_ROOTS", None)
     # git EXPORTS repo-scoping variables into hook processes and they OVERRIDE
     # both `-C` and the cwd for every descendant git call. When this suite runs
     # from inside a hook these leak in and every `git` below would operate on

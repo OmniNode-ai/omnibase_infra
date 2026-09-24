@@ -69,16 +69,68 @@ is_under() {
 #   git_dir             absolute --git-dir
 #   git_common_dir      absolute --git-common-dir
 #   is_linked_worktree  1 when this is a LINKED worktree, 0 for a main one
-#   omni_home           registry root
+#   omni_home           registry root (the worktree root named in refusals
+#                       is $omni_home/omni_worktrees)
+#   registry_roots      array: every registry root whose clones are guarded,
+#                       see registry_roots_context
 #   is_canonical_clone  1 when the invoking tree is a canonical clone that the
 #                       family guards, 0 otherwise
 #
 # Returns 1 when there is no work tree at all, so a caller can `exit 0` early.
+# EXITS 1 (fails closed) when ONEX_REGISTRY_ROOTS is malformed.
 #
 # A LINKED worktree has --git-dir == <common>/worktrees/<name>, so it differs
 # from --git-common-dir; the MAIN worktree of a clone has them equal. That test
 # is path-layout independent, which is what makes the family correct on a host
 # whose registry lives somewhere other than the documented path.
+# registry_roots_context
+#
+# Populates, in the caller's scope, the array `registry_roots`: the physical
+# path of every directory whose descendants are canonical clones (OMN-19388).
+#
+# It always holds $omni_home, so a host that sets only OMNI_HOME behaves exactly
+# as before. ONEX_REGISTRY_ROOTS adds more: a colon-separated list of absolute
+# directory paths, read the way PATH is read. It exists because the registry is
+# moving to a second root while OMNI_HOME still names the first, and a guard
+# that knows only OMNI_HOME permits every commit in the second root's clones --
+# silently, since a permitted commit prints nothing.
+#
+# Fail-fast (rule 8): an entry that is empty, relative, or not an existing
+# directory is a misconfiguration, never a guess. The hook EXITS 1 naming the
+# offending value, so every guarded git operation refuses loudly until it is
+# fixed, rather than guarding a smaller set than the operator declared.
+registry_roots_context() {
+  registry_roots=()
+  local physical_home
+  if physical_home="$(cd "$omni_home" 2>/dev/null && pwd -P)"; then
+    registry_roots+=("$physical_home")
+  else
+    registry_roots+=("$omni_home")
+  fi
+
+  [[ -n "${ONEX_REGISTRY_ROOTS+set}" ]] || return 0
+  local declared="$ONEX_REGISTRY_ROOTS"
+  local entry physical rest="$declared"
+  while :; do
+    entry="${rest%%:*}"
+    case "$entry" in
+      /*) : ;;
+      *)
+        printf 'ERROR: ONEX_REGISTRY_ROOTS=%s holds the entry "%s", which is not an absolute path. Every entry must be an absolute registry-root directory, colon-separated; fix or unset the variable.\n' "$declared" "$entry" >&2
+        exit 1
+        ;;
+    esac
+    if ! physical="$(cd "$entry" 2>/dev/null && pwd -P)"; then
+      printf 'ERROR: ONEX_REGISTRY_ROOTS=%s holds the entry "%s", which is not an existing directory. Every entry must be an absolute registry-root directory, colon-separated; fix or unset the variable.\n' "$declared" "$entry" >&2
+      exit 1
+    fi
+    registry_roots+=("$physical")
+    [[ "$rest" == *:* ]] || break
+    rest="${rest#*:}"
+  done
+  return 0
+}
+
 canonical_clone_context() {
   top_level="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   if [[ -z "$top_level" ]]; then
@@ -108,7 +160,9 @@ canonical_clone_context() {
     omni_home="$(cd "$git_common_dir/../.." && pwd -P)"
   fi
 
-  local exempt=0
+  registry_roots_context
+
+  local exempt=0 root
   if [[ "$top_level" == "$omni_home" ]]; then
     # The registry meta-repo itself commits directly to its docs branch.
     exempt=1
@@ -120,13 +174,28 @@ canonical_clone_context() {
     exempt=1
   elif [[ "$is_linked_worktree" == "1" ]]; then
     exempt=1
+  else
+    for root in "${registry_roots[@]}"; do
+      if is_under "$top_level" "$root/omni_worktrees"; then
+        exempt=1
+        break
+      fi
+    done
+  fi
+
+  local inside_a_root=0
+  if [[ "$exempt" == "0" ]]; then
+    # `is_under` is a strict-descendant test, so a root's own tree is not
+    # guarded here; only the clones inside each root are.
+    for root in "${registry_roots[@]}"; do
+      if is_under "$top_level" "$root"; then
+        inside_a_root=1
+        break
+      fi
+    done
   fi
 
   # shellcheck disable=SC2034  # the caller's out-parameter; read in every sourcing hook
-  if [[ "$exempt" == "0" ]] && is_under "$top_level" "$omni_home"; then
-    is_canonical_clone=1
-  else
-    is_canonical_clone=0
-  fi
+  is_canonical_clone="$inside_a_root"
   return 0
 }
