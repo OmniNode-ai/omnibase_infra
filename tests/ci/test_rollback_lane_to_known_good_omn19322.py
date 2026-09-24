@@ -317,3 +317,98 @@ def test_receipt_without_a_bound_probe_revision_is_no_candidate(
     tool: object, checks: list[dict[str, object]]
 ) -> None:
     assert tool.probed_revision({"result": "PASS", "checks": checks}) == ""  # type: ignore[attr-defined]
+
+
+# ---- The redeploy path: the candidate merge's own rebuild-trigger run --------
+#
+# ``--execute`` publishes nothing itself. It reruns the Runtime Rebuild Trigger
+# run of the merge whose commit IS the candidate, so the redeploy-start command
+# is published by the same CI job, identity and bus credentials a dev merge
+# uses, pinned to that merge sha. It needs no local bus credential, which is
+# what lets someone who did not write the change run it from the invocation.
+
+_SHA = "c" * 40
+_HEAD = "d" * 40
+_MERGED = "2026-09-23T22:38:46Z"
+
+
+def _pr(**over: object) -> dict[str, object]:
+    pr: dict[str, object] = {
+        "number": 4016,
+        "merge_commit_sha": _SHA,
+        "merged_at": _MERGED,
+        "head": {"sha": _HEAD},
+        "base": {"ref": "dev"},
+    }
+    pr.update(over)
+    return pr
+
+
+def _run_rec(
+    run_id: int, *, verify: str = "success", **over: object
+) -> dict[str, object]:
+    run: dict[str, object] = {
+        "id": run_id,
+        "event": "pull_request",
+        "head_sha": _HEAD,
+        "created_at": "2026-09-23T22:38:49Z",
+        "status": "completed",
+        "jobs": [
+            {"name": "Trigger node_redeploy Start", "conclusion": "success"},
+            {"name": "Verify dev lane applied the redeploy", "conclusion": verify},
+        ],
+    }
+    run.update(over)
+    return run
+
+
+def test_trigger_run_of_the_candidate_merge_is_selected(tool: object) -> None:
+    run_id, reason = tool.select_trigger_run(_SHA, [_pr()], [_run_rec(7)])  # type: ignore[attr-defined]
+    assert run_id == 7, reason
+
+
+def test_no_merged_dev_pr_for_the_candidate_is_refused_by_name(tool: object) -> None:
+    run_id, reason = tool.select_trigger_run(  # type: ignore[attr-defined]
+        _SHA, [_pr(merge_commit_sha="e" * 40)], [_run_rec(7)]
+    )
+    assert run_id is None and _SHA[:12] in reason
+
+
+def test_a_main_merge_is_not_a_dev_lane_redeploy(tool: object) -> None:
+    run_id, _ = tool.select_trigger_run(  # type: ignore[attr-defined]
+        _SHA, [_pr(base={"ref": "main"})], [_run_rec(7)]
+    )
+    assert run_id is None
+
+
+def test_a_trigger_run_that_published_nothing_is_refused(tool: object) -> None:
+    run_id, reason = tool.select_trigger_run(  # type: ignore[attr-defined]
+        _SHA, [_pr()], [_run_rec(7, verify="skipped")]
+    )
+    assert run_id is None and "published" in reason
+
+
+def test_a_run_before_the_merge_or_of_another_head_is_not_the_merge_run(
+    tool: object,
+) -> None:
+    early = _run_rec(7, created_at="2026-09-23T22:00:00Z")
+    other = _run_rec(8, head_sha="f" * 40)
+    run_id, _ = tool.select_trigger_run(_SHA, [_pr()], [early, other])  # type: ignore[attr-defined]
+    assert run_id is None
+
+
+def test_newest_publishing_run_wins(tool: object) -> None:
+    older = _run_rec(7)
+    newer = _run_rec(9, created_at="2026-09-23T23:10:00Z")
+    run_id, _ = tool.select_trigger_run(_SHA, [_pr()], [older, newer])  # type: ignore[attr-defined]
+    assert run_id == 9
+
+
+def test_an_in_flight_trigger_run_blocks_the_redeploy(tool: object) -> None:
+    runs = [
+        {"id": 1, "status": "completed"},
+        {"id": 2, "status": "in_progress"},
+        {"id": 3, "status": "queued"},
+    ]
+    assert tool.inflight_trigger_runs(runs) == [2, 3]  # type: ignore[attr-defined]
+    assert tool.inflight_trigger_runs([{"id": 1, "status": "completed"}]) == []  # type: ignore[attr-defined]

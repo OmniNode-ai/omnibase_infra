@@ -15,10 +15,15 @@ OMN-19322 (unified verification plan rows R1 and R2). One command:
      database names resolved from the lane's topology catalog;
   4. keeps the newest candidate rule RB makes eligible (below) and prints why
      every newer one was refused, naming the migration and the database;
-  5. with ``--execute`` only, redeploys it through the sanctioned path -- the
-     same redeploy-start command the rebuild trigger publishes on every dev
-     merge, pinned to the candidate's 40-hex sha -- and reads the provenance of
-     every runtime container back until it names the candidate.
+  5. with ``--execute`` only, redeploys it through the sanctioned path: it
+     reruns the Runtime Rebuild Trigger run of the merge whose commit IS the
+     candidate, so the same CI job, identity and bus credentials that published
+     that merge's redeploy-start publish it again, pinned to the candidate's
+     40-hex sha. It needs no local bus credential. It refuses while any trigger
+     run is queued or running (one dev-lane deploy at a time), then reads the
+     provenance of every runtime container back until it names the candidate.
+     The rerun also re-runs that run's verify job, which emits a fresh
+     compose-dev receipt for the candidate sha from the lane as it now runs.
 
 Rule RB (plan section 4, workstream R):
   RB-1  a candidate is eligible when every migration applied on the lane that
@@ -44,15 +49,16 @@ readback reports the siblings as observed, not as restored. A receipt records
 no sibling refs today (plan P9's composition block is not built).
 
 There is no path to production or to a governed lane: ``--lane`` accepts
-``compose-dev`` and nothing else, and the redeploy command is published with
-``--base-branch dev``, which the rebuild trigger maps to the dev runtime lane
-only.
+``compose-dev`` and nothing else, and only a trigger run of a merge into
+``dev`` is ever rerun, which the rebuild trigger maps to the dev runtime lane
+only. GitHub keeps a run rerunnable for 30 days, so an older candidate is
+refused by name rather than redeployed some other way.
 
 Usage::
 
     uv run python scripts/rollback_lane_to_known_good.py --lane compose-dev \\
         --lane-host <ssh target of the lane host>          # select, redeploy nothing
-    ... --execute --runtime-path-validator <path>         # redeploy the selection
+    ... --execute                                         # redeploy the selection
 """
 
 from __future__ import annotations
@@ -81,7 +87,6 @@ OWN_REPO: Final[str] = "OmniNode-ai/omnibase_infra"
 _CHECKER_PATH: Final[Path] = (
     REPO_ROOT / "scripts" / "validation" / "check_migration_class.py"
 )
-_TRIGGER_PATH: Final[Path] = REPO_ROOT / "scripts" / "trigger_rebuild_on_merge.py"
 _TOPOLOGY: Final[Path] = (
     REPO_ROOT / "docker" / "catalog" / "database-topology" / "local.yaml"
 )
@@ -585,45 +590,140 @@ def probed_revision(receipt: Mapping[str, object]) -> str:
     return ""
 
 
-def _redeploy_via_trigger(
-    sha: str, args: argparse.Namespace, lane: ModelLaneSpec
-) -> None:
-    """Publish the same redeploy-start command a dev merge publishes, pinned to ``sha``."""
-    if args.runtime_path_validator is None:
-        raise SystemExit(
-            "--execute needs --runtime-path-validator (the trigger requires it)"
-        )
-    argv = [
-        sys.executable,
-        str(_TRIGGER_PATH),
-        "--changed-files",
-        "scripts/rollback_lane_to_known_good.py",
-        "--labels",
-        "runtime_change",
-        "--base-branch",
-        lane.base_branch,
-        "--source-sha",
-        sha,
-        "--source-repo",
-        OWN_REPO,
-        "--requested-by",
-        f"rollback_lane_to_known_good:{os.environ.get('USER', 'operator')}",
-        "--runtime-path-validator",
-        str(args.runtime_path_validator),
-    ]
-    if args.bus_lane:
-        argv += ["--bus-lane", args.bus_lane]
-    if args.bus_overlay:
-        argv += ["--bus-overlay", str(args.bus_overlay)]
-    result = subprocess.run(
-        argv, check=False, capture_output=True, text=True, timeout=180
+TRIGGER_WORKFLOW: Final[str] = "runtime-rebuild-trigger.yml"
+_TRIGGER_JOB: Final[str] = "Trigger node_redeploy Start"
+#: The job that runs only when the trigger job PUBLISHED a redeploy-start
+#: (``if: needs.trigger-rebuild.outputs.published == 'true'`` upstream of it).
+_VERIFY_JOB: Final[str] = "Verify dev lane applied the redeploy"
+_RAN: Final[frozenset[str]] = frozenset(
+    {"success", "failure", "cancelled", "timed_out"}
+)
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _records(value: object) -> list[Mapping[str, object]]:
+    return (
+        [v for v in value if isinstance(v, Mapping)] if isinstance(value, list) else []
     )
-    print(result.stdout.strip())
-    if result.returncode != 0:
-        print(result.stderr.strip(), file=sys.stderr)
-        raise SystemExit(
-            f"redeploy publish failed (exit {result.returncode}); lane untouched by this command"
+
+
+def select_trigger_run(
+    sha: str,
+    pulls: Sequence[Mapping[str, object]],
+    runs: Sequence[Mapping[str, object]],
+) -> tuple[int | None, str]:
+    """The Runtime Rebuild Trigger run that published the redeploy of ``sha``.
+
+    ``sha`` is a candidate composition, which is a dev merge commit. Its merge's
+    own trigger run published a redeploy-start pinned to exactly that sha, and a
+    rerun of that run publishes it again, through the same CI job, identity and
+    bus credentials a dev merge uses. So the redeploy path needs no local bus
+    credential and adds no second publisher.
+
+    ``pulls`` are the PRs GitHub associates with the commit; ``runs`` are that
+    workflow's runs, each with its ``jobs``. Returns ``(run id, why)``, or
+    ``(None, why not)`` naming the gap. A run qualifies when it is a
+    ``pull_request`` run of the merged PR's head, created at or after the merge,
+    whose trigger job succeeded and whose verify job ran (it runs only when a
+    redeploy was published). The newest qualifying run wins.
+    """
+    merged = [
+        pr
+        for pr in pulls
+        if pr.get("merge_commit_sha") == sha
+        and pr.get("merged_at")
+        and _mapping(pr.get("base")).get("ref") == "dev"
+    ]
+    if not merged:
+        return None, (
+            f"no merged dev PR has merge commit {sha[:12]}, so there is no rebuild-"
+            "trigger run that published its redeploy"
         )
+    pr = merged[0]
+    head = _mapping(pr.get("head")).get("sha")
+    merged_at = str(pr["merged_at"])
+    published: list[Mapping[str, object]] = []
+    for run in runs:
+        if run.get("event") != "pull_request" or run.get("head_sha") != head:
+            continue
+        if str(run.get("created_at", "")) < merged_at:
+            continue
+        jobs = {
+            str(j.get("name")): str(j.get("conclusion"))
+            for j in _records(run.get("jobs"))
+        }
+        if jobs.get(_TRIGGER_JOB) == "success" and jobs.get(_VERIFY_JOB) in _RAN:
+            published.append(run)
+    if not published:
+        return None, (
+            f"PR #{pr.get('number')} (merge {sha[:12]}) has no trigger run that "
+            "published a redeploy; rerunning one would publish nothing"
+        )
+    best = max(published, key=lambda r: str(r.get("created_at", "")))
+    return int(str(best["id"])), f"PR #{pr.get('number')} trigger run {best['id']}"
+
+
+_INFLIGHT: Final[frozenset[str]] = frozenset(
+    {"queued", "in_progress", "waiting", "requested", "pending"}
+)
+
+
+def inflight_trigger_runs(runs: Sequence[Mapping[str, object]]) -> list[int]:
+    """Trigger runs still queued or running: a deploy is already in flight."""
+    return [int(str(r["id"])) for r in runs if r.get("status") in _INFLIGHT]
+
+
+def _redeploy_via_rerun(sha: str) -> None:
+    """Rerun the candidate merge's own trigger run, which republishes its redeploy.
+
+    Any read that fails refuses: nothing is rerun on a partial read.
+    """
+    try:
+        run_id, why = _resolve_rerun(sha)
+    except RuntimeError as exc:
+        raise SystemExit(f"refused: {exc}; nothing was redeployed") from exc
+    if run_id is None:
+        raise SystemExit(f"refused: {why}; nothing was redeployed")
+    print(
+        f"redeploy path: rerun of {why} (the merge's own redeploy-start, pinned to {sha})"
+    )
+    result = _run(["gh", "run", "rerun", str(run_id), "--repo", OWN_REPO])
+    if result.returncode != 0:
+        raise SystemExit(
+            f"gh run rerun {run_id} failed (exit {result.returncode}): "
+            f"{result.stderr.strip()[:300]}; lane untouched by this command"
+        )
+
+
+def _resolve_rerun(sha: str) -> tuple[int | None, str]:
+    """Live reads for :func:`select_trigger_run`, refusing while a deploy is in flight."""
+    base = f"repos/{OWN_REPO}/actions/workflows/{TRIGGER_WORKFLOW}/runs"
+    busy: list[int] = []
+    for status in ("queued", "in_progress", "waiting"):
+        listing = _mapping(_gh_json(f"{base}?status={status}&per_page=100"))
+        busy += inflight_trigger_runs(_records(listing.get("workflow_runs")))
+    if busy:
+        return None, (
+            f"rebuild-trigger run(s) {busy} are in flight; one dev-lane deploy at a time"
+        )
+    pulls = _records(_gh_json(f"repos/{OWN_REPO}/commits/{sha}/pulls"))
+    runs: list[Mapping[str, object]] = []
+    for pr in pulls:
+        head = _mapping(pr.get("head")).get("sha")
+        if not head:
+            continue
+        listing = _mapping(
+            _gh_json(f"{base}?head_sha={head}&event=pull_request&per_page=100")
+        )
+        for run in _records(listing.get("workflow_runs")):
+            jobs = _mapping(
+                _gh_json(f"repos/{OWN_REPO}/actions/runs/{run['id']}/jobs?per_page=100")
+            )
+            runs.append({**run, "jobs": jobs.get("jobs", [])})
+    return select_trigger_run(sha, pulls, runs)
 
 
 def _utc() -> str:
@@ -642,9 +742,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-pages", type=int, default=3)
     parser.add_argument("--max-receipts", type=int, default=40)
     parser.add_argument("--execute", action="store_true")
-    parser.add_argument("--runtime-path-validator", type=Path, default=None)
-    parser.add_argument("--bus-lane", default="")
-    parser.add_argument("--bus-overlay", type=Path, default=None)
     parser.add_argument("--readback-timeout", type=int, default=5400)
     args = parser.parse_args(argv)
 
@@ -696,7 +793,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     published: list[str] = []
 
     def _redeploy(sha: str) -> None:
-        _redeploy_via_trigger(sha, args, lane)
+        _redeploy_via_rerun(sha)
         published.append(_utc())
 
     rc = act_on_selection(selection, execute=args.execute, redeploy=_redeploy)
