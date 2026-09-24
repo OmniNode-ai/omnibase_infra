@@ -192,6 +192,26 @@ LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
     # that makes it, not to this one -- stated as a residual rather than taken.
     "pyproject.toml",
     "uv.lock",
+    # OMN-19383: omnimarket's shared events package. Measured on
+    # omnimarket#2813's change to runtime_deployment.py (run 35961924174),
+    # which read "No rebuild trigger" although that module is imported by
+    # all ten canonical redeploy-node handlers -- orchestrator,
+    # deploy-publish-monitor effect, FSM reducer, prod-promotion-gate
+    # compute, grant-resolver effect, health-fact-resolver effect. The gap
+    # is the directory, not that one file: every other module under
+    # src/omnimarket/events/ has the same handler fan-in by construction
+    # (it exists so one node does not import another node's private
+    # package -- see runtime_deployment.py's own module docstring), and a
+    # spot-measured import count against src/omnimarket/nodes/*/handlers/*.py
+    # at omnimarket dev HEAD (2026-09-24) found at least one handler
+    # importer for every file in the directory (__init__.py 252,
+    # topics.py 160, delegation.py 80, verification.py 51, generation.py
+    # 52, github.py 49, ledger.py 31, runtime_deployment.py 10, and 30
+    # more). The canonical deploy-gate classifier is right to miss it for
+    # its own question (deploy EVIDENCE, not lane state), which is why
+    # this goes in the supplement rather than widening that list -- same
+    # reasoning as the pyproject.toml/uv.lock entries above (OMN-18671).
+    "src/omnimarket/events/**",
 )
 
 #: What a matched path is attributed to when no pattern in this module claims
