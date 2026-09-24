@@ -177,19 +177,26 @@ slot_skip_role_seam() {
 
 # ---- BEGIN slot \connect rewrite (OMN-18893) ----
 # Prints the path psql must apply for one migration file. Outside a slot that
-# is the file itself. Under a slot, a file that switches database with a
-# psql `\connect <db>` / `\c <db>` line is copied with each target rewritten to
-# `<db>_<slot>`, and the COPY is printed.
+# is the file itself. Under a slot, a file that names a database literally is
+# copied with each such name rewritten to `<db>_<slot>`, and the COPY is
+# printed. Two literal forms occur in the corpus and both are rewritten:
+#
+#   a psql `\connect <db>` / `\c <db>` line, which switches the session;
+#   `ON DATABASE <db>` in a statement, as in `GRANT CONNECT ON DATABASE <db>`,
+#   including inside an EXECUTE string.
 #
 # Suffixing PGDB and NODE_PGDB is not enough on its own, and this was measured
-# rather than reasoned: the first slot boot (2026-09-24, omnibase_infra#3944)
+# rather than reasoned. The first slot boot (2026-09-24, omnibase_infra#3944)
 # printed `targeting omnibase_infra_prepr1 / omnidash_analytics_prepr1` and
 # then applied the post-`\connect` bodies of forward 083, 096, 097, 098 and 099
 # to the DEV lane's own omnidash_analytics as the superuser, because a
-# `\connect` inside a file overrides the -d the runner passed. Every rewritten
-# name goes through slot_fence_assert, and a `\connect` in any form other than
-# a bare database name (a user, a host, a variable) is refused, since a form
-# this cannot rewrite is a form that reaches a database outside the fence.
+# `\connect` inside a file overrides the -d the runner passed. With only the
+# `\connect` form confined, the second boot showed the other one: 097 granted
+# CONNECT on the dev database by name, then asserted that CONNECT on the slot's
+# database and failed. Every name in the copy goes through slot_fence_assert,
+# and a form this cannot rewrite (a `\connect` with a user, host or variable, a
+# quoted or lower-case `on database`) is refused, since a form that cannot be
+# confined is a form that reaches a database outside the fence.
 #
 # The caller runs this in a command substitution, so a refusal is signalled by
 # exit status and the caller must stop on it; the copy is the caller's to
@@ -197,7 +204,7 @@ slot_skip_role_seam() {
 slot_migration_file() {
   _smf_src="$1"
   if [ "$SLOT_ACTIVE" -ne 1 ] \
-     || ! grep -Eq '^[[:space:]]*\\(connect|c)([[:space:]]|$)' "$_smf_src"; then
+     || ! grep -Eiq '^[[:space:]]*\\(connect|c)([[:space:]]|$)|on[[:space:]]+database[[:space:]]' "$_smf_src"; then
     printf '%s\n' "$_smf_src"
     return 0
   fi
@@ -212,22 +219,42 @@ slot_migration_file() {
         print $1 " " $2 "_" slot
         next
       }
-      { print }
+      /^[[:space:]]*--/ { print; next }
+      {
+        line = $0
+        out = ""
+        while (match(line, /ON DATABASE [a-z_][a-z0-9_]*/)) {
+          out = out substr(line, 1, RSTART + RLENGTH - 1) "_" slot
+          line = substr(line, RSTART + RLENGTH)
+        }
+        print out line
+      }
       END { exit bad }
     ' "$_smf_src" > "$_smf_out"; then
     rm -f "$_smf_out"
     return 4
   fi
-  if ! awk '/^[[:space:]]*\\(connect|c)[[:space:]]/ { print $2 }' "$_smf_out" \
+  if ! awk '
+      /^[[:space:]]*\\(connect|c)[[:space:]]/ { print $2; next }
+      /^[[:space:]]*--/ { next }
+      {
+        line = tolower($0)
+        while (match(line, /on[ \t]+database[ \t]+[^ \t;]+/)) {
+          n = split(substr(line, RSTART, RLENGTH), parts, /[ \t]+/)
+          print parts[n]
+          line = substr(line, RSTART + RLENGTH)
+        }
+      }
+    ' "$_smf_out" \
        | while IFS= read -r _smf_db; do
-           ( slot_fence_assert "$_smf_db" "psql connect target in $(basename "$_smf_src")" ) || exit 4
+           ( slot_fence_assert "$_smf_db" "database named in $(basename "$_smf_src")" ) || exit 4
          done; then
     rm -f "$_smf_out"
     return 4
   fi
   # printf, not echo: a POSIX sh echo reads the backslash-c in the text as
   # "stop output here" and truncates the line.
-  printf '%s\n' "[forward-migration]   slot '${ONEX_DB_SLOT}': confined the psql connect target(s) of $(basename "$_smf_src") to the slot" >&2
+  printf '%s\n' "[forward-migration]   slot '${ONEX_DB_SLOT}': confined the database name(s) in $(basename "$_smf_src") to the slot" >&2
   printf '%s\n' "$_smf_out"
 }
 # ---- END slot \connect rewrite (OMN-18893) ----

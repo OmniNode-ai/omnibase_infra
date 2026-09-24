@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 FORWARD = REPO_ROOT / "docker" / "migrations" / "forward"
 CONNECT_LINE = re.compile(r"^\s*\\(connect|c)(\s|$)")
+ON_DATABASE = re.compile(r"ON DATABASE ([a-z_][a-z0-9_]*)")
 
 pytestmark = pytest.mark.unit
 
@@ -52,12 +53,18 @@ def _rewrite(path: Path, *, slot_active: bool) -> subprocess.CompletedProcess[st
     )
 
 
+def _names_a_database(line: str) -> bool:
+    if CONNECT_LINE.match(line):
+        return True
+    return not line.lstrip().startswith("--") and bool(ON_DATABASE.search(line))
+
+
 def _connect_files() -> list[Path]:
     return sorted(
         p
         for p in FORWARD.rglob("*.sql")
         if any(
-            CONNECT_LINE.match(ln) for ln in p.read_text(encoding="utf-8").splitlines()
+            _names_a_database(ln) for ln in p.read_text(encoding="utf-8").splitlines()
         )
     )
 
@@ -66,6 +73,9 @@ def test_the_corpus_still_switches_database_inside_a_file() -> None:
     """Positive control: without a live ``\\connect`` the pins below prove nothing."""
     names = {p.name for p in _connect_files()}
     assert "083_create_log_entries.sql" in names, sorted(names)
+    # 103 names the dev database only in a GRANT, with no connect line; the
+    # second boot failed on exactly that form in 097.
+    assert "103_create_tenant_projection_writer_role.sql" in names, sorted(names)
 
 
 @pytest.mark.parametrize("migration", _connect_files(), ids=lambda p: p.name)
@@ -83,8 +93,11 @@ def test_every_connect_in_the_corpus_is_confined_to_the_slot(
         for before, after in zip(original, rewritten, strict=True):
             if CONNECT_LINE.match(before):
                 assert after.split()[1] == before.split()[1] + "_prepr1", after
+            elif _names_a_database(before):
+                expected = ON_DATABASE.sub(r"ON DATABASE \1_prepr1", before)
+                assert after == expected, after
             else:
-                assert after == before, "a line other than a \\connect changed"
+                assert after == before, "a line naming no database changed"
     finally:
         copy.unlink(missing_ok=True)
 
@@ -98,7 +111,13 @@ def test_outside_a_slot_the_file_is_applied_as_it_stands() -> None:
 
 @pytest.mark.parametrize(
     "line",
-    ["\\connect omnidash_analytics other_user", '\\connect :"DB"', "\\c"],
+    [
+        "\\connect omnidash_analytics other_user",
+        '\\connect :"DB"',
+        "\\c",
+        "grant connect on database omnidash_analytics to app_dashboard;",
+        'GRANT CONNECT ON DATABASE "omnidash_analytics" TO app_dashboard;',
+    ],
 )
 def test_a_connect_that_cannot_be_rewritten_is_refused(
     line: str, tmp_path: Path
