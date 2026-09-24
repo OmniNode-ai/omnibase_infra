@@ -74,6 +74,7 @@ import logging
 import os
 import sys
 import uuid
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -83,6 +84,7 @@ from deploy_agent.events import (
     BuildSource,
     EnumRuntimeLane,
     ModelRebuildRequested,
+    ModelRollbackDeclaration,
     Scope,
 )
 from deploy_agent.kafka_config import (
@@ -117,6 +119,8 @@ def build_rebuild_command(
     services: list[str],
     image_ref: str | None = None,
     image_digest: str | None = None,
+    rollback: ModelRollbackDeclaration | None = None,
+    requested_at: datetime | None = None,
 ) -> ModelRebuildRequested:
     """Build the command as the contract model, resolving declared defaults.
 
@@ -136,6 +140,8 @@ def build_rebuild_command(
         git_ref=git_ref or load_tracking_remote_ref_from_env(),
         image_ref=image_ref,
         image_digest=image_digest,
+        rollback=rollback,
+        requested_at=requested_at,
     )
 
 
@@ -266,6 +272,21 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Pinned image digest. REQUIRED for --runtime-lane prod.",
     )
+    parser.add_argument(
+        "--rollback-actor",
+        default=None,
+        help=(
+            "Declare this command a deliberate rollback, naming who asked for "
+            "it (OMN-19270). Without a declaration the agent refuses a "
+            "--git-ref behind, or diverged from, the build the lane runs. "
+            "Requires --rollback-reason."
+        ),
+    )
+    parser.add_argument(
+        "--rollback-reason",
+        default=None,
+        help="Why the lane is being rolled back. Signed into the command.",
+    )
     parser.add_argument("--requested-by", default="operator-manual")
     parser.add_argument("--correlation-id", default=None)
     parser.add_argument(
@@ -374,6 +395,21 @@ def _resolve_build_source(
     return build_source
 
 
+def _resolve_rollback(
+    actor: str | None, reason: str | None
+) -> ModelRollbackDeclaration | None:
+    """Both rollback flags or neither; half a declaration is refused here."""
+    if actor is None and reason is None:
+        return None
+    if not actor or not reason:
+        raise TriggerRefusedError(
+            "--rollback-actor and --rollback-reason are given together or not "
+            "at all.\n       A rollback the agent cannot attribute is the "
+            "stale replay its lineage fence refuses."
+        )
+    return ModelRollbackDeclaration(actor=actor, reason=reason)
+
+
 def _resolve_git_ref(raw: str | None) -> str:
     if raw:
         return raw
@@ -417,6 +453,11 @@ def main(argv: list[str] | None = None) -> int:
             services=list(args.services),
             image_ref=args.image_ref,
             image_digest=args.image_digest,
+            rollback=_resolve_rollback(args.rollback_actor, args.rollback_reason),
+            # OMN-19270: the moment this command was requested, signed. A
+            # deliberate request is never superseded, so this is the record's
+            # honest publish time rather than a lever.
+            requested_at=datetime.now(UTC),
         )
         envelope = command_to_signed_envelope(
             command, os.environ.get(ENV_HMAC_SECRET, "")
@@ -433,6 +474,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"build_source:   {command.build_source.value}")
     print(f"correlation_id: {command.correlation_id}")
     print(f"requested_by:   {command.requested_by}")
+    if command.rollback is not None:
+        print(
+            f"rollback:       actor={command.rollback.actor} "
+            f"reason={command.rollback.reason}  [signed]"
+        )
     # Printed, not signed: see the NOTE ON --reason in the wrapper's header.
     print(
         f"reason:         {args.reason or '(none)'}"
