@@ -176,6 +176,13 @@ config:
         - "required_quality_bar"
         - "score_vs_required_bar"
         - "terminal_failure_cause"
+        # A consume-boundary failure terminal (payload_type
+        # ModelBoundaryFailureTerminal) rides the failed topic; the
+        # cloud closes the workflow with its class and ONEX code. Both are
+        # grammar-checked codes, never text; failure_reason is text and
+        # does not cross.
+        - "failure_class"
+        - "failure_code"
         - "preamble_chars"
         - "metrics"
         - "escalation_count"
