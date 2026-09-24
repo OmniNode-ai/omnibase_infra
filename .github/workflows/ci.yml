@@ -3166,6 +3166,85 @@ jobs:
     with:
       mode: compose
 
+  # ============================================================================
+  # Laptop profile boot (OMN-19498)
+  # ----------------------------------------------------------------------------
+  # Boots the catalog bundle `local` (OMN-19496) exactly as its documentation
+  # tells a new engineer to -- `make local-env`, `make up-local` -- through
+  # reusable-runtime-boot.yml mode `catalog-local`, and fails unless the
+  # migration gate is healthy, both runtime kernels report /health "healthy"
+  # with is_running true, and the delegate-skill command topic has a consumer.
+  #
+  # Unlike runtime-boot-smoke above it EXECUTES on pull requests: on every
+  # pull request that touches the surfaces the laptop boot is made of (the
+  # catalog, the runtime image, the migrations, the boot-critical kernel and
+  # wiring code, this workflow), on every push to `dev` that does, and on every
+  # workflow_dispatch and merge_group. Unrelated pull requests skip it, which
+  # the CI Summary sweep accepts; a failure when it does run fails CI Summary.
+  # Widening the path set is a one-line change once it has a green record.
+  # ============================================================================
+  laptop-profile-paths:
+    name: Laptop profile paths changed (OMN-19498)
+    # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.paths.outputs.changed }}
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Diff against the base
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)
+              git fetch --no-tags origin "$PR_BASE_REF"
+              range="origin/${PR_BASE_REF}...HEAD"
+              ;;
+            push)
+              if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+              fi
+              range="${PUSH_BEFORE}..HEAD"
+              ;;
+            *)
+              echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+              ;;
+          esac
+          changed_files="$(git diff --name-only "$range")"
+          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
+          matched="$(printf '%s\n' "$changed_files" | grep -E "$pattern" || true)"
+          if [ -n "$matched" ]; then
+            echo "Laptop profile surfaces changed:"
+            printf '%s\n' "$matched"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No laptop profile surface changed in ${range}."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  runtime-boot-laptop-profile:
+    name: Runtime Boot Laptop Profile (catalog local)
+    needs: [laptop-profile-paths]
+    if: needs.laptop-profile-paths.outputs.changed == 'true'
+    uses: ./.github/workflows/reusable-runtime-boot.yml
+    with:
+      mode: catalog-local
+
   # ===========================================================================
   # OMN-15108 fan-out of OMN-14877 (omnibase_core#1478 pattern) / OMN-14430
   # ---------------------------------------------------------------------------

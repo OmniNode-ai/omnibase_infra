@@ -89,10 +89,17 @@ def _manifest(
 
 
 def _all_manifests() -> dict[str, CatalogManifest]:
+    # A bundle that names its own compose project (OMN-19496, the laptop
+    # profile `local`) is a standalone stack, never combined with the others,
+    # and its inject_env legitimately differs from theirs. Every service it
+    # selects is also selected by a shared bundle, so leaving it out of the
+    # union loses no manifest.
+    raw = yaml.safe_load(Path(CATALOG_DIR, "bundles.yaml").read_text())
     bundles = [
         name
-        for name in yaml.safe_load(Path(CATALOG_DIR, "bundles.yaml").read_text())
+        for name, spec in raw.items()
         if isinstance(name, str)
+        and not (isinstance(spec, dict) and spec.get("project"))
     ]
     return CatalogResolver(catalog_dir=CATALOG_DIR).resolve(bundles=bundles).manifests
 

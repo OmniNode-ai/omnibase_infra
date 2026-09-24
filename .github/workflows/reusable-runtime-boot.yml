@@ -39,7 +39,7 @@ on:
   workflow_call:
     inputs:
       mode:
-        description: "Execution mode: 'real' (probe live .201 stack) or 'compose' (bring up local stack)."
+        description: "Execution mode: 'real' (probe live .201 stack), 'compose' (bring up local stack) or 'catalog-local' (boot the laptop profile, catalog bundle local, as its documentation tells a new engineer to)."
         required: true
         type: string
       runtime_host:
@@ -66,6 +66,8 @@ on:
 jobs:
   boot:
     name: runtime-boot (mode=${{ inputs.mode }})
+    # OMN-19498: the laptop profile boots in its own job, boot-catalog-local.
+    if: inputs.mode != 'catalog-local'
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     # OMN-18205: this job executes docker, so its placement is governed by
     # OMNI_DOCKER_CI_RUNS_ON_JSON before the general trusted seam -- the same
@@ -962,3 +964,149 @@ jobs:
                 || echo "teardown: network ${net} already gone or busy"
             fi
           done
+
+  # ===========================================================================
+  # OMN-19498: boot the LAPTOP PROFILE (catalog bundle `local`, OMN-19496) the
+  # way its documentation tells a new engineer to -- `make local-env`, then
+  # `make up-local` -- and fail unless the migration gate is healthy, both
+  # runtime kernels report /health status "healthy" with is_running true, and
+  # a consumer group is live on the delegate-skill command topic.
+  #
+  # No self-skip: a runner without Docker Compose FAILS this job (the `compose`
+  # mode's green-with-a-warning path is the OMN-18811 AC4 finding this job does
+  # not repeat). Probes run through `docker exec`, never a host port, so they
+  # hold on a runner that shares the host Docker daemon from inside a container.
+  # ===========================================================================
+  boot-catalog-local:
+    name: runtime-boot (mode=catalog-local)
+    if: inputs.mode == 'catalog-local'
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Image build (cold) plus a cold runtime boot; the runtime's own
+    # start_period is 1800s, so the health wait below is bounded at 30 minutes.
+    timeout-minutes: 60
+    env:
+      LOCAL_PROJECT: omnibase-infra-local
+      DELEGATE_COMMAND_TOPIC: onex.cmd.omnimarket.delegate-skill.v1
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.6.14"
+          python-version: "3.12"
+          enable-cache: false
+
+      - name: Require Docker Compose (fail, never skip)
+        run: |
+          set -euo pipefail
+          docker info --format 'docker server {{.ServerVersion}}, {{.NCPU}} cpus, {{.MemTotal}} bytes'
+          docker compose version
+          command -v jq
+          command -v openssl
+
+      - name: Write the laptop env file and model overlay (make local-env)
+        run: |
+          set -euo pipefail
+          echo "LOCAL_ENV_FILE=${RUNNER_TEMP}/omnibase/local.env" >> "$GITHUB_ENV"
+          echo "LOCAL_OVERLAY_FILE=${RUNNER_TEMP}/omnibase/local.bifrost.yaml" >> "$GITHUB_ENV"
+          make local-env \
+            LOCAL_ENV_FILE="${RUNNER_TEMP}/omnibase/local.env" \
+            LOCAL_OVERLAY_FILE="${RUNNER_TEMP}/omnibase/local.bifrost.yaml"
+          # Names only: the file carries two generated passwords.
+          sed -e 's/=.*$/=<set>/' "${RUNNER_TEMP}/omnibase/local.env" | grep -v '^#' | grep .
+
+      - name: Boot the laptop profile (make up-local)
+        run: |
+          set -euo pipefail
+          make up-local LOCAL_ENV_FILE="$LOCAL_ENV_FILE" LOCAL_OVERLAY_FILE="$LOCAL_OVERLAY_FILE"
+
+      - name: Migration gate healthy
+        run: |
+          set -euo pipefail
+          gate="${LOCAL_PROJECT}-migration-gate"
+          for _ in $(seq 1 90); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' "$gate")"
+            echo "migration-gate: ${status}"
+            if [ "$status" = "healthy" ]; then exit 0; fi
+            if [ "$status" = "unhealthy" ]; then break; fi
+            sleep 10
+          done
+          docker logs --tail 80 "${LOCAL_PROJECT}-forward-migration" || true
+          echo "::error::migration gate did not become healthy"
+          exit 1
+
+      - name: Both runtime kernels report healthy and running (/health body)
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + 1800 ))
+          for svc in omninode-runtime runtime-effects; do
+            container="${LOCAL_PROJECT}-${svc}"
+            while :; do
+              body="$(docker exec "$container" curl -sS --max-time 10 http://localhost:8085/health 2>&1 || true)"
+              status="$(printf '%s' "$body" | jq -r '.status // empty' 2>/dev/null || true)"
+              running="$(printf '%s' "$body" | jq -r '.details.is_running // empty' 2>/dev/null || true)"
+              restarts="$(docker inspect --format '{{.RestartCount}}' "$container")"
+              echo "${svc}: status=${status:-none} is_running=${running:-none} restarts=${restarts}"
+              if [ "$status" = "healthy" ] && [ "$running" = "true" ]; then
+                break
+              fi
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                echo "last /health body: ${body}"
+                echo "::error::${svc} did not report healthy and running within 1800s"
+                exit 1
+              fi
+              sleep 20
+            done
+          done
+
+      - name: Delegate-skill command topic has a live consumer group
+        run: |
+          set -euo pipefail
+          broker="${LOCAL_PROJECT}-redpanda"
+          # The runtime names each consumer group after the node that owns it
+          # and the topic it consumes (...node_delegate_skill_orchestrator.
+          # consume.<version>.__t.<topic>), so the owner is read from the name
+          # and its liveness from describe: a group with no member is not live.
+          for _ in $(seq 1 30); do
+            group="$(docker exec "$broker" rpk group list 2>/dev/null \
+              | awk -v topic="__t.${DELEGATE_COMMAND_TOPIC}" \
+                  '$2 ~ /node_delegate_skill_orchestrator/ && index($2, topic) && $3 == "Stable" {print $2; exit}')"
+            if [ -n "$group" ]; then
+              describe="$(docker exec "$broker" rpk group describe "$group")"
+              printf '%s\n' "$describe" | head -12
+              members="$(printf '%s\n' "$describe" | awk '$1 == "MEMBERS" {print $2}')"
+              if [ "${members:-0}" -ge 1 ]; then
+                echo "live consumer group ${group} (${members} member) on ${DELEGATE_COMMAND_TOPIC}"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          docker exec "$broker" rpk group list | grep -i delegate || true
+          echo "::error::no live node_delegate_skill_orchestrator consumer group on ${DELEGATE_COMMAND_TOPIC}"
+          exit 1
+
+      - name: Container state and log tail (always)
+        if: always()
+        run: |
+          docker ps -a --filter "name=${LOCAL_PROJECT}" --format 'table {{.Names}}\t{{.Status}}' || true
+          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap; do
+            echo "::group::${svc} logs (tail)"
+            docker logs --tail 120 "${LOCAL_PROJECT}-${svc}" 2>&1 || true
+            echo "::endgroup::"
+          done
+
+      - name: Tear down the laptop profile and its volumes (always)
+        if: always()
+        run: |
+          make down-local-volumes || true
+          docker ps -a --filter "name=${LOCAL_PROJECT}" --format '{{.Names}}'

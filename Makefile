@@ -28,6 +28,7 @@
 #
 #     make up-local            # write ~/.omnibase/local.env + model overlay if absent, then boot
 #     make status-local        # migration gate, runtime /health bodies, delegate consumer group
+#     make delegate-local PROMPT="..."  # one delegation through your runtime on the local broker
 #     make down-local          # stop the laptop profile (keeps its volumes)
 #     make down-local-volumes  # stop it and delete its volumes (local data)
 #
@@ -44,7 +45,7 @@
 
 .PHONY: help up up-auth up-runtime down down-auth down-runtime down-all status \
         seed-keycloak seed-infisical _check-docker _check-env-file \
-        local-env up-local status-local down-local down-local-volumes
+        local-env up-local status-local delegate-local down-local down-local-volumes
 
 OMNIBASE_ENV_FILE ?= $(HOME)/.omnibase/.env
 LOCAL_ENV_FILE ?= $(HOME)/.omnibase/local.env
@@ -142,7 +143,12 @@ status-local: _check-docker ## Laptop profile: migration gate, runtime /health b
 	@echo "runtime effects /health:"; curl -sS --max-time 10 http://localhost:8086/health; echo
 	@echo "delegate-skill command topic consumer groups:"
 	@docker exec $(LOCAL_PROJECT)-redpanda rpk group list \
-	  | awk 'NR==1 || /delegate/' || true
+	  | awk 'NR==1 || /node_delegate_skill_orchestrator/' || true
+
+delegate-local: _check-docker ## Laptop profile: one delegation through your runtime on the local broker (PROMPT="...")
+	@test -n "$(PROMPT)" || { echo 'usage: make delegate-local PROMPT="Reply with exactly one word: hello"'; exit 2; }
+	docker exec $(LOCAL_PROJECT)-runtime-effects onex delegate "$(PROMPT)" \
+	  --bus kafka --kafka-bootstrap redpanda:9092 --locus deployed-lane
 
 down-local: _check-docker ## Laptop profile: stop it (keeps its volumes)
 	$(ONEX_CLI) down

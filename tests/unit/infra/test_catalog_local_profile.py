@@ -86,7 +86,9 @@ def test_laptop_required_env_check_can_fail() -> None:
     )
 
 
-def test_local_bundle_runs_both_runtime_kernels_and_the_migration_gate() -> None:
+def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gate() -> (
+    None
+):
     resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
     assert {
         "postgres",
@@ -100,7 +102,11 @@ def test_local_bundle_runs_both_runtime_kernels_and_the_migration_gate() -> None
     runtime = [
         n for n, m in resolved.manifests.items() if m.layer == EnumInfraLayer.RUNTIME
     ]
-    assert sorted(runtime) == ["omninode-runtime", "runtime-effects"]
+    assert sorted(runtime) == [
+        "omnimarket-projection-delegation",
+        "omninode-runtime",
+        "runtime-effects",
+    ]
 
 
 def test_local_render_scopes_every_docker_object_to_its_project() -> None:

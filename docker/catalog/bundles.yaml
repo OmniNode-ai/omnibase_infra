@@ -69,6 +69,9 @@ local:
     - migration-gate
     - omninode-runtime
     - runtime-effects
+    # The delegation_events writer. It is a standalone projection runner, not
+    # a kernel handler, on every lane that projects delegations.
+    - omnimarket-projection-delegation
   includes: []
   inject_env:
     ONEX_ENVIRONMENT: local
@@ -85,7 +88,11 @@ local:
     BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/local.bifrost.yaml
     BIFROST_VERIFY_ENDPOINTS: "0"
     DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
+    # Laptop limit, stated: every service connects as the postgres superuser,
+    # so row-level security and the tenant and internal non-superuser
+    # principals the lab lanes use are NOT exercised on a laptop.
     OMNIDASH_ANALYTICS_DB_URL: "postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+    ONEX_TENANT_DB_URL: "postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
     OMNIMEMORY_ENABLED: "false"
     # Legacy PluginLlm URLs. Delegation routes through the overlay above; these
     # only need to be well-formed. Override in the env file if you use them.
