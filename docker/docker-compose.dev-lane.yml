@@ -371,10 +371,13 @@ services:
   #     tenant-projection-writer at 18/13/13/13 as `postgres`), then idled back
   #     to about 31;
   #   * one booting slot held 63 at 16:27:12Z, the server sat at 100/100, and
-  #     this lane's runtime logged 1171 refusals in four minutes.
-  # Sized from the budget in scripts/provision_db_slot.sh: dev lane 110 + 2
+  #     this lane's runtime logged 1171 refusals in four minutes;
+  #   * after the next redeploy (17:20:08Z) this lane saturated the server with
+  #     NO slot running: 99 at 17:24:40Z, omninode-runtime climbing to 27 until
+  #     refused, 176 refusals, all in omninode-runtime.
+  # Sized from the budget in scripts/provision_db_slot.sh: dev lane 140 + 2
   # slots x 118 (every slot principal carries a CONNECTION LIMIT, so a slot
-  # cannot exceed its share) + 3 superuser-reserved = 349. `--apply` refuses to
+  # cannot exceed its share) + 3 superuser-reserved = 379. `--apply` refuses to
   # provision a slot on a server below that figure, and
   # tests/unit/infra/test_db_slot_connection_budget.py pins this value against
   # the same arithmetic.
@@ -391,7 +394,7 @@ services:
     command:
       - postgres
       - -c
-      - max_connections=360
+      - max_connections=400
   # ===========================================================================
   # (6a) BROKER READINESS THAT READS A PARTITION -- OMN-18789
   # ===========================================================================

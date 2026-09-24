@@ -146,7 +146,10 @@ chain_canary_reader"
 #   * the dev lane ALONE, with no slot running, reached 93 at 16:50:07Z, five
 #     minutes after a dev runtime redeploy (16:45:08Z): the same four containers
 #     at 18/13/13/13 as the `postgres` role, before idle pool members aged out
-#     back to about 31.
+#     back to about 31. After the next redeploy (17:20:08Z) it SATURATED the
+#     server on its own: 99 at 17:24:40Z with zero slot connections,
+#     omninode-runtime climbing 14 -> 18 -> 27 until refused, and 176 refusals
+#     at 17:24-17:25Z, every one of them in omninode-runtime.
 #
 # So a slot booting next to a fresh dev restart overflows a 100-connection
 # server on either side's demand alone. The fix is two bounds that together make
@@ -181,10 +184,12 @@ tenant_projection_writer:4
 chain_canary_reader:2"
 
 # The dev lane is not fenced by this tool and carries no per-role limit; this is
-# the share of the server the capacity preflight RESERVES for it. The measured
-# dev-only peak is 93 (16:50:07Z, post-redeploy transient); 110 leaves about 18%
-# over it.
-DEV_LANE_CONNECTION_BUDGET=110
+# the share of the server the capacity preflight RESERVES for it. Its
+# unconstrained post-redeploy peak is NOT known: at 17:24:40Z it hit the
+# 97-connection ceiling with the runtime still climbing, so the measurement is a
+# floor. 140 is that saturation point plus about 40%. Re-derive it from a
+# sampler run once the server is recreated with the declared capacity.
+DEV_LANE_CONNECTION_BUDGET=140
 
 # Must equal len(SLOTS) in scripts/runtime_build/prepr_slot_policy.py, pinned by
 # the OMN-19415 test. The preflight sizes the server for every slot of the pool
