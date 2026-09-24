@@ -48,6 +48,11 @@ databases:
             objects: []
             privileges:
               - USAGE
+            schema: public
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
             schema: platform_catalog
         login: true
       omninode_runtime:
@@ -151,6 +156,11 @@ databases:
             privileges:
               - CONNECT
             schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: public
           - object_type: SCHEMA
             objects: []
             privileges:
@@ -345,5 +355,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 68e5c03174aeb0d331770a53d697395d1068436b149ce2c8571f3ebf019389cb
+  sha256: 42fbd9f2da526c43a909beea4b25df416b52f100bddde270dbb01d199cebcf31
 topology_instance: onex-prod

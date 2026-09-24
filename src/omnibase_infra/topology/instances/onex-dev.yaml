@@ -67,6 +67,9 @@ databases:
             privileges: [CONNECT]
           - object_type: SCHEMA
             privileges: [USAGE]
+            schema: public
+          - object_type: SCHEMA
+            privileges: [USAGE]
             schema: platform_catalog
         login: true
       omninode_runtime:
@@ -153,6 +156,9 @@ databases:
         grants:
           - object_type: DATABASE
             privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: platform_catalog
