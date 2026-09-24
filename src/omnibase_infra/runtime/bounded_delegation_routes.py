@@ -28,6 +28,7 @@ this gate and returns ``None``.
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import logging
 from importlib import metadata, resources
@@ -82,8 +83,13 @@ def _record_sha256_hex(dist: metadata.Distribution) -> str | None:
     return None
 
 
+@functools.lru_cache(maxsize=1)
 def _read_packaged_overlay() -> tuple[bytes, str | None, str] | None:
-    """Read the installed omnimarket lane overlay, or None when not packaged."""
+    """Read the installed omnimarket lane overlay, or None when not packaged.
+
+    Cached for the process: the installed wheel changes only with a redeploy,
+    which restarts the runtime, and the RECORD scan is not free per dispatch.
+    """
     try:
         dist = metadata.distribution(_OVERLAY_DISTRIBUTION)
     except metadata.PackageNotFoundError:
