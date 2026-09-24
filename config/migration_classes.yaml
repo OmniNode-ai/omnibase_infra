@@ -305,6 +305,7 @@ migrations:
   forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql: forward-only # CREATE OR REPLACE; ALTER VIEW
   forward/nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql: expand-only
   forward/nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql: forward-only # CREATE OR REPLACE
+  forward/nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; ALTER TABLE NO FORCE/FORCE ROW LEVEL SECURITY inside one DO block
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only
   forward/nodes/node_projection_session_replay/0001_create_session_replay_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_S
