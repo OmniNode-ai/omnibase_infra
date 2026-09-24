@@ -94,10 +94,16 @@ def test_every_connect_in_the_corpus_is_confined_to_the_slot(
             if CONNECT_LINE.match(before):
                 assert after.split()[1] == before.split()[1] + "_prepr1", after
             elif _names_a_database(before):
-                expected = ON_DATABASE.sub(r"ON DATABASE \1_prepr1", before)
-                assert after == expected, after
+                # Managed principals on the same line are suffixed too
+                # (OMN-19404); only suffixes may be added.
+                assert after.replace("_prepr1", "") == before, after
+                assert [m.group(1) for m in ON_DATABASE.finditer(after)] == [
+                    m.group(1) + "_prepr1" for m in ON_DATABASE.finditer(before)
+                ], after
             else:
-                assert after == before, "a line naming no database changed"
+                # A line naming no database changes only by suffixing a
+                # managed principal (OMN-19404), which that module pins.
+                assert after.replace("_prepr1", "") == before, after
     finally:
         # Only ever remove the helper's temporary copy. When a regression
         # hands back the migration itself, unlinking it would delete a corpus
