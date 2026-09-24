@@ -60,23 +60,30 @@ from pydantic import ValidationError
 
 from omnibase_infra.cli.model_qualified_phrases import ModelQualifiedPhrases
 from omnibase_infra.cli.model_selectable_task_class import ModelSelectableTaskClass
+from omnibase_infra.cli.model_task_class_admission import ModelTaskClassAdmission
 from omnibase_infra.cli.model_task_class_execution_budget import (
     ModelTaskClassExecutionBudget,
 )
 from omnibase_infra.cli.model_task_type_resolution import ModelTaskTypeResolution
+from omnibase_infra.cli.model_unavailable_task_class import (
+    ModelUnavailableTaskClass,
+)
 from omnibase_infra.enums.enum_task_type_resolution import EnumTaskTypeResolution
 
 __all__ = [
     "EnumTaskTypeResolution",
     "ModelQualifiedPhrases",
     "ModelSelectableTaskClass",
+    "ModelTaskClassAdmission",
     "ModelTaskClassExecutionBudget",
     "ModelTaskTypeResolution",
+    "ModelUnavailableTaskClass",
     "TaskClassContractError",
     "DEFAULT_EXECUTION_BUDGET",
     "DEFAULT_TASK_TYPE",
     "load_selectable_task_classes",
     "load_selection_fallback",
+    "load_task_class_admission",
     "resolve_task_class_execution_budget",
     "resolve_task_class_contract_path",
     "resolve_task_type",
@@ -211,6 +218,81 @@ def load_selectable_task_classes(
     return tuple(selectable)
 
 
+#: The ``routing_availability`` fields the CLI quotes when it refuses a class.
+_ROUTING_AVAILABILITY_FIELDS = ("status", "missing_capability", "tracking", "reason")
+
+
+def load_task_class_admission(contract_path: Path) -> ModelTaskClassAdmission:
+    """Split every declared class into explicitly admitted and unroutable (OMN-13966).
+
+    Every class the contract declares is a real Market task class, public or
+    internal (OMN-15651), so an explicit ``--task-type`` may name any of them.
+    ``gateway_exposure`` governs the public Gateway and auto-selection, not a
+    caller who names a class. The one exception is a class the contract itself
+    declares unroutable with a ``routing_availability`` block (agent_delegation,
+    OMN-15961): it is refused with that block's words, never as unknown. A
+    block missing any of the fields the refusal quotes is a contract defect and
+    fails closed.
+    """
+    try:
+        raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise TaskClassContractError(
+            f"task-class contract at {contract_path} could not be read: {exc}"
+        ) from exc
+    if not isinstance(raw, dict) or not isinstance(raw.get("task_classes"), dict):
+        raise TaskClassContractError(
+            f"task-class contract at {contract_path} declares no task_classes map"
+        )
+
+    admitted: set[str] = set()
+    unavailable: list[ModelUnavailableTaskClass] = []
+    for key, entry in raw["task_classes"].items():
+        name = str(key)
+        if not isinstance(entry, dict):
+            raise TaskClassContractError(
+                f"task class {name!r} in {contract_path} is not a mapping"
+            )
+        declared = entry.get("routing_availability")
+        if declared is None:
+            admitted.add(name)
+            continue
+        if not isinstance(declared, dict):
+            raise TaskClassContractError(
+                f"task class {name!r} declares a routing_availability in "
+                f"{contract_path} that is not a mapping"
+            )
+        missing = [
+            field for field in _ROUTING_AVAILABILITY_FIELDS if not declared.get(field)
+        ]
+        if missing:
+            raise TaskClassContractError(
+                f"task class {name!r} declares routing_availability in "
+                f"{contract_path} without {', '.join(missing)}; an unroutable "
+                "class must say why, because the CLI refuses it in those words"
+            )
+        try:
+            unavailable.append(
+                ModelUnavailableTaskClass.model_validate(
+                    {
+                        "name": name,
+                        **{
+                            field: " ".join(str(declared[field]).split())
+                            for field in _ROUTING_AVAILABILITY_FIELDS
+                        },
+                    }
+                )
+            )
+        except ValidationError as exc:
+            raise TaskClassContractError(
+                f"task class {name!r} declares an invalid routing_availability "
+                f"in {contract_path}: {exc}"
+            ) from exc
+    return ModelTaskClassAdmission(
+        admitted=frozenset(admitted), unavailable=tuple(unavailable)
+    )
+
+
 def resolve_task_class_execution_budget(
     contract_path: Path,
     *,
@@ -331,25 +413,54 @@ def resolve_task_type(
     explicit: str | None,
     classes: tuple[ModelSelectableTaskClass, ...],
     fallback: str = DEFAULT_TASK_TYPE,
+    admission: ModelTaskClassAdmission | None = None,
 ) -> ModelTaskTypeResolution:
     """Resolve this run's task class and record how the decision was made.
 
     An explicit class always wins and is validated against the contract's own
     vocabulary, so a class the contract does not declare is refused by name
-    rather than dispatched and rejected downstream.
+    rather than dispatched and rejected downstream. With ``admission`` (the
+    CLI always passes it), that vocabulary is the contract's WHOLE class set:
+    an internal class is admitted by explicit name, and a class the contract
+    declares unroutable is refused with the contract's reason (OMN-13966).
+    Auto-selection reads only ``classes``, the public projection, either way.
     """
     vocabulary = sorted(entry.name for entry in classes)
     if explicit is not None:
-        if explicit not in set(vocabulary):
-            raise TaskClassContractError(
-                f"unknown task type {explicit!r}; the task-class contract "
-                f"exposes: {', '.join(vocabulary)}"
-            )
-        return ModelTaskTypeResolution(
-            task_type=explicit,
-            resolution=EnumTaskTypeResolution.EXPLICIT,
-            reason="explicitly selected with --task-type",
+        blocked = (
+            admission.unavailable_named(explicit) if admission is not None else None
         )
+        if blocked is not None:
+            raise TaskClassContractError(blocked.refusal())
+        if explicit in set(vocabulary):
+            return ModelTaskTypeResolution(
+                task_type=explicit,
+                resolution=EnumTaskTypeResolution.EXPLICIT,
+                reason="explicitly selected with --task-type",
+            )
+        if admission is not None and explicit in admission.admitted:
+            return ModelTaskTypeResolution(
+                task_type=explicit,
+                resolution=EnumTaskTypeResolution.EXPLICIT,
+                reason=(
+                    "explicitly selected with --task-type; an internal class, "
+                    "never chosen for a prompt and not admitted at the public "
+                    "Gateway"
+                ),
+            )
+        refusal = (
+            f"unknown task type {explicit!r}; the task-class contract "
+            f"exposes: {', '.join(vocabulary)}"
+        )
+        if admission is not None:
+            internal = sorted(admission.admitted - set(vocabulary))
+            unroutable = sorted(entry.name for entry in admission.unavailable)
+            refusal += (
+                f"; internal classes admitted by explicit name: "
+                f"{', '.join(internal) or '(none)'}; declared but not routable: "
+                f"{', '.join(unroutable) or '(none)'}"
+            )
+        raise TaskClassContractError(refusal)
 
     lowered = prompt.lower()
     word_count = len(prompt.split())

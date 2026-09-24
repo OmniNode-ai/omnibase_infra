@@ -14,6 +14,13 @@
 # Its execution budgets mirror the production declarations for this fixture's
 # public vocabulary, so every CLI path resolves a typed boundary.
 #
+# OMN-13966: it also carries the four INTERNAL classes, so the stand-in holds
+# the contract's whole class universe, not just its public projection. The
+# CLI admits every declared class by explicit name except one the contract
+# declares unroutable (agent_delegation's routing_availability block, copied
+# verbatim from production). tests/unit/cli/test_task_class_admission_omn13966.py
+# pins that partition, and omnimarket pins the LIVE contract to the same one.
+#
 # DRIFT GUARD: TestTaskTypeVocabulary asserts these names equal
 # cli_delegate.TASK_TYPE_CHOICES, which is itself asserted against the LIVE
 # contract whenever omnimarket is resolvable. Adding a class to the
@@ -31,6 +38,10 @@ execution_budgets:
   review: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
   summarization: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
   test: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
+  agent_delegation: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
+  documentation: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
+  escalation: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
+  validator_generation: {task_class_timeout_ceiling_seconds: 240, terminal_delivery_margin_seconds: 60}
 task_classes:
   code_generation:
     gateway_exposure: public
@@ -86,4 +97,32 @@ task_classes:
     gateway_exposure: public
     selection:
       priority: 1
+      phrases: []
+  agent_delegation:
+    gateway_exposure: internal
+    selection:
+      priority: 0
+      phrases: []
+    routing_availability:
+      status: pending_capability
+      missing_capability: agent_orchestration
+      tracking: "OMN-15961 WS-4/C6"
+      reason: >-
+        No routing tier can execute agentic/tool-using work; every tier is an
+        HTTP chat-completion backend. A text completion returned for this class
+        would be a dispatch report nobody executed.
+  documentation:
+    gateway_exposure: internal
+    selection:
+      priority: 0
+      phrases: []
+  escalation:
+    gateway_exposure: internal
+    selection:
+      priority: 0
+      phrases: []
+  validator_generation:
+    gateway_exposure: internal
+    selection:
+      priority: 0
       phrases: []

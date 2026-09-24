@@ -190,6 +190,7 @@ from omnibase_infra.cli.task_class_selection import (
     TaskClassContractError,
     load_selectable_task_classes,
     load_selection_fallback,
+    load_task_class_admission,
     resolve_task_class_contract_path,
     resolve_task_class_execution_budget,
     resolve_task_type,
@@ -1361,6 +1362,10 @@ def resolve_task_class(
         # default, whose docstring records the two properties any fallback
         # has to satisfy.
         fallback=load_selection_fallback(contract_path),
+        # OMN-13966: an explicit class is checked against every class the
+        # contract declares, not only the public projection, and a class the
+        # contract declares unroutable is refused in the contract's words.
+        admission=load_task_class_admission(contract_path),
     )
 
 
@@ -1733,9 +1738,11 @@ def _timeout_receipt(
     default=None,
     help=(
         "Task class for routing, validated at run time against the task-class "
-        "contract's public projection ("
+        "contract: its public classes ("
         + ", ".join(TASK_TYPE_CHOICES)
-        + "). Omit to resolve it from the contract's declared selection "
+        + ") and, by explicit name only, its internal classes; a class the "
+        "contract declares unroutable is refused with the contract's reason. "
+        "Omit to resolve it from the contract's declared selection "
         f"predicates; the fallback when none claims the prompt is "
         f"{DEFAULT_TASK_TYPE}. The chosen class and how it was chosen are "
         "printed on stderr and recorded in the run artifacts."
