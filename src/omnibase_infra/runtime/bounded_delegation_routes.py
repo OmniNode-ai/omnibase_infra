@@ -151,7 +151,12 @@ def _claimed_lane(
         lane_data = lanes.get(name)
         if not isinstance(lane_data, dict):
             continue
-        topology = _parse_topology(name, lane_data)
+        try:
+            topology = _parse_topology(name, lane_data)
+        except InfraUnavailableError:
+            # A malformed topology on one lane must not refuse runtimes that
+            # are not that lane; it is refused when that lane is claimed.
+            continue
         if (
             topology is not None
             and topology.runtime_environment == environment
@@ -226,19 +231,34 @@ def resolve_bounded_delegation_route(
     try:
         raw: object = yaml.safe_load(data.decode("utf-8"))
     except (UnicodeDecodeError, yaml.YAMLError) as exc:
-        raise InfraUnavailableError(
-            f"bounded delegation lane overlay is not valid YAML: {exc}"
-        ) from exc
+        raw = None
+        parse_error = f"is not valid YAML: {exc}"
+    else:
+        parse_error = "declares no lanes mapping"
     lanes = raw.get("lanes") if isinstance(raw, dict) else None
     if not isinstance(lanes, dict):
-        raise InfraUnavailableError(
-            "bounded delegation lane overlay declares no lanes mapping"
+        # An unreadable overlay cannot say which runtimes are bounded. It
+        # refuses a runtime that names a bounded lane and leaves the rest, which
+        # this gate never covered, running (every other lane, staging, prod).
+        if environment in BOUNDED_DELEGATION_LANES:
+            raise InfraUnavailableError(
+                f"bounded delegation lane overlay {parse_error}"
+            )
+        logger.warning(
+            "bounded delegation route gate not armed: the lane overlay %s "
+            "(runtime environment=%s broker=%s)",
+            parse_error,
+            environment,
+            broker,
         )
-    _refuse_unbounded_declarations(lanes)
+        return None
 
     lane = _claimed_lane(environment=environment, broker=broker, lanes=lanes)
     if lane is None:
         return None
+    # Scope hygiene is enforced for every bounded runtime: a route row on
+    # ci-bus or prod refuses here, never a runtime outside the gate.
+    _refuse_unbounded_declarations(lanes)
     lane_data = lanes.get(lane)
     if not isinstance(lane_data, dict):
         raise InfraUnavailableError(

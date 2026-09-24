@@ -411,3 +411,68 @@ def test_record_hash_is_read_from_the_installed_manifest(tmp_path: Path) -> None
     dist = metadata.PathDistribution(dist_info)
 
     assert routes_module._record_sha256_hex(dist) == hashlib.sha256(data).hexdigest()
+
+
+def test_kafka_bus_identity_never_carries_credentials() -> None:
+    bus = EventBusKafka(
+        config=ModelKafkaEventBusConfig(
+            bootstrap_servers=f"user:secret@{_DOGFOOD_BROKER}", environment="dogfood"
+        )
+    )
+
+    assert bus.bootstrap_servers == _DOGFOOD_BROKER
+
+
+def test_a_bad_declaration_elsewhere_leaves_an_unbounded_runtime_running(
+    tmp_path: Path,
+) -> None:
+    """A ci-bus route row or a malformed dogfood topology refuses bounded
+    runtimes only; stability-test, staging and prod were never in the gate."""
+    lanes = _with_topology()
+    lanes["ci-bus"] = {"broker": "inmemory", "delegation_routes": [{"consumer": "x"}]}
+    lanes["dogfood"]["broker_topology"]["unexpected"] = "key"  # type: ignore[index]
+
+    assert (
+        resolve_bounded_delegation_route(
+            transport=_AddressedBus("stability-test", _INTERNAL),
+            selected_route=_route(),
+            overlay_path_for_test=_write(tmp_path, lanes),
+        )
+        is None
+    )
+    with pytest.raises(InfraUnavailableError, match="ci-bus is transport-only"):
+        resolve_bounded_delegation_route(
+            transport=_AddressedBus(),
+            selected_route=_route(),
+            overlay_path_for_test=_write(tmp_path, lanes),
+        )
+    del lanes["ci-bus"]
+    with pytest.raises(InfraUnavailableError, match="broker topology is invalid"):
+        resolve_bounded_delegation_route(
+            transport=_AddressedBus(),
+            selected_route=_route(),
+            overlay_path_for_test=_write(tmp_path, lanes),
+        )
+
+
+@pytest.mark.parametrize("text", ["lanes: [unclosed\n", "default: inmemory\n"])
+def test_unreadable_overlay_refuses_only_a_runtime_that_names_a_lane(
+    tmp_path: Path, text: str
+) -> None:
+    path = tmp_path / "ci_bus_lanes.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(InfraUnavailableError, match="lane overlay"):
+        resolve_bounded_delegation_route(
+            transport=_AddressedBus(),
+            selected_route=_route(),
+            overlay_path_for_test=path,
+        )
+    assert (
+        resolve_bounded_delegation_route(
+            transport=_AddressedBus("judge", _INTERNAL),
+            selected_route=_route(),
+            overlay_path_for_test=path,
+        )
+        is None
+    )
