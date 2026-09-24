@@ -74,7 +74,14 @@ def test_worktree_root_defaults_to_omni_worktrees_inside_omni_home(
     tmp_path: Path,
 ) -> None:
     """With WORKTREE_ROOT unset, the root the script prunes is
-    $OMNI_HOME/omni_worktrees, and a sibling omni_worktrees is never touched."""
+    $OMNI_HOME/omni_worktrees, and a sibling omni_worktrees is never touched.
+
+    DRY-RUN ONLY, on purpose. Run against the pre-fix script (to prove RED),
+    this invocation falls back to that script's machine-path default; on a host
+    where that path exists, --execute would prune a real directory. That
+    happened once while this test was written (ledger FRICTION row, lane
+    stray-worktree-root-land, 2026-09-24). A dry run can delete nothing on any
+    version of the script."""
     registry = tmp_path / "omni_home"
     registry.mkdir()
     env = _base_env()
@@ -95,10 +102,10 @@ def test_worktree_root_defaults_to_omni_worktrees_inside_omni_home(
     stray_ticket.mkdir(parents=True)
     (stray_ticket / "marker.txt").write_text("stray\n", encoding="utf-8")
 
-    result = _run(env, "--execute", "--prune-worktrees")
+    result = _run(env, "--dry-run", "--prune-worktrees")
     assert result.returncode == 0, result.stderr
-    assert "[removed] OMN-INSIDE" in result.stdout, result.stdout
-    assert not inside.exists()
+    assert "[would remove] OMN-INSIDE" in result.stdout, result.stdout
+    assert inside.exists(), "a dry run must not remove anything"
     assert "OMN-STRAY" not in result.stdout, result.stdout
     assert (stray_ticket / "marker.txt").exists()
 
