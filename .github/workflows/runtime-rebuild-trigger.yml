@@ -1011,7 +1011,7 @@ jobs:
       # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
       # since the directory matches whether or not the receipt carries bytes.
       - name: Assert the compose-dev lab-pass receipt is present and non-empty
-        if: always()
+        if: always() && steps.converge.outputs.emit_receipt != 'false'
         run: |
           set -euo pipefail
           python3 scripts/ci/assert_evidence_artifact.py \
@@ -1025,7 +1025,7 @@ jobs:
       # consuming gate in the delivering repository catches the disagreement,
       # but an hour later and in another repo's logs. This asserts it here.
       - name: Assert the compose-dev receipt on disk is this job's own
-        if: always()
+        if: always() && steps.converge.outputs.emit_receipt != 'false'
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
         run: |
@@ -1034,8 +1034,20 @@ jobs:
             --path "${LAB_PASS_DIR}/receipt.json" \
             --sha "$MERGE_SHA" \
             --lane "$RECEIPT_LANE"
+
+      # OMN-19563: the two assertions above and this upload run under EXACTLY
+      # the emit step's condition. A queued merge writes no receipt (OMN-18976),
+      # but LAB_PASS_DIR still holds declared-groups.txt and lag-sample.json, so
+      # an upload under a bare always() succeeded and published
+      # lab-pass-receipt-compose-dev-<sha> with no receipt.json in it. The
+      # delivery gate reads that as UNREADABLE, not ABSENT, and the PS-5 re-run
+      # selector never re-runs an UNREADABLE refusal -- so the later PASS never
+      # reached staging (delivery runs 36127915167, 36136246781, 36138224554).
+      # A queued run now publishes nothing under the receipt's name, the gate
+      # reads ABSENT or PENDING, and the converging run re-runs the delivery.
+      # Pinned by tests/ci/test_lab_pass_receipt_upload_follows_emit.py.
       - name: Upload the compose-dev lab-pass receipt
-        if: always()
+        if: always() && steps.converge.outputs.emit_receipt != 'false'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # The NAME is the key scripts/ci/lab_pass_receipt.py's gate queries
