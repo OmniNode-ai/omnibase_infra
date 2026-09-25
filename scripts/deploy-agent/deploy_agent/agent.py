@@ -79,6 +79,7 @@ from deploy_agent.publisher import (
     publish_result,
 )
 from deploy_agent.queue_depth import LagSampler
+from deploy_agent.routing import ROUTED_LANES, build_router_from_env
 from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 
 logger = logging.getLogger(__name__)
@@ -220,6 +221,16 @@ class DeployAgent:
         # port binds and long before a command is polled. An agent that has
         # not declared which lanes it may deploy must not start at all.
         self._allowed_lanes = load_allowed_lanes_from_env()
+        # OMN-19506. A dev-lane agent is one of the dev instances in
+        # config/deploy_lane_routing.yaml, and it refuses to start when the
+        # table has no default, names an unknown instance, or cannot say which
+        # instance this host is (AC2). An agent fenced to other lanes routes
+        # nothing.
+        self._router = (
+            build_router_from_env(REPO_DIR)
+            if self._allowed_lanes & ROUTED_LANES
+            else None
+        )
         # OMN-18636. The one thread every blocking call in this process runs on.
         # See JOB_POOL_MAX_WORKERS and _offload for why it is one, and why the
         # event loop thread must be left with nothing to do but serve HTTP.
@@ -414,6 +425,7 @@ class DeployAgent:
             running_build=DockerProvenanceReader(_runtime_container_for_lane),
             ref_resolver=GitRefResolver(REPO_DIR),
             tracking_ref=load_tracking_remote_ref_from_env(),
+            router=self._router,
         )
 
         # Step 6b: keep the lag sample current DURING a rebuild (OMN-18990).

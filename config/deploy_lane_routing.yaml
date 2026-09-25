@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19506: which deploy-agent instance runs each dev rebuild command.
+#
+# Task B3 of the second-deploy-slot plan (knowledge-base-internal
+# beta/plans/2026-09-24-second-deploy-slot-plan.md, epic OMN-19500). Two
+# instances read the one control topic onex.cmd.deploy.rebuild-requested.v1.
+# The wire field runtime_lane stays `dev`; this table picks the instance by the
+# command's requesting repository (`gha/<repo>/...` in requested_by). An
+# instance skips a command routed to the other, committing its offset and
+# publishing nothing.
+#
+# READ AT THE COMMAND'S REF. Each instance reads this file as committed at the
+# command's git_ref, never the copy its own code loaded, so both hosts compute
+# the same route even when they self-update at different moments
+# (deploy_agent/routing.py; the TLA+ model and TLC logs are on OMN-19506).
+#
+# default_instance is pinned to dev-201 by a test: a symbolic ref, or a sha
+# that predates this file, routes to the default, so every version of the
+# table must agree on it.
+#
+# consumer_group: each instance must read EVERY record, so each has its own
+# group. dev-201 keeps the historical group name so the running .201 agent's
+# committed offsets carry over on its self-update; a new group would start at
+# `latest` and drop whatever was queued at that moment.
+#
+# NO ROUTE TO dev-202 YET. The omnimarket row below is the plan's target
+# ((dev, omnimarket) -> dev-202). It is added in the same change that brings the
+# dev-202 instance up (task B8), because a route to an instance that is not
+# running would stop every omnimarket rebuild: .201 would skip them and nothing
+# would accept them. Bring-up waits on decision 19 of the unified verification
+# plan (no clone and no .git on .202 while the C13, C14 and C29 producers run
+# bare there).
+#
+#   routes:
+#     - runtime_lane: dev
+#       requester_repository: omnimarket
+#       instance: dev-202
+default_instance: dev-201
+instances:
+  dev-201:
+    hostnames: [omninode-pc]
+    consumer_group: onex-deploy-agent
+  dev-202:
+    hostnames: [omnipc2]
+    consumer_group: onex-deploy-agent-dev-202
+routes: []
