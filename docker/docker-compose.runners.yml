@@ -1,6 +1,6 @@
 # docker-compose.runners.yml
 # OmniNode self-hosted GitHub Actions runners
-# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582 | Phase-A scale to 64: OMN-14029 | Saturation scale to 72: OMN-15978 | Reconciled to live 88: OMN-15978
+# Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582 | Phase-A scale to 64: OMN-14029 | Saturation scale to 72: OMN-15978 | Reconciled to live 88: OMN-15978 | Capped to 60: OMN-18411 | Kept at 60, aggregate-cgroup contained: OMN-19077 (operator ruling ROLLING_WORK_LEDGER.md:3794)
 #
 # Runs the full steady-state runner fleet. The fleet count is owned by
 # config/runner_fleet.yaml (expected_count). Each runner registers with GitHub
@@ -33,14 +33,32 @@
 #
 # Verify: cat /proc/sys/fs/inotify/max_user_watches
 #
-# Resource allocation per runner (RTX 5090 host with ample RAM):
-#   mem_limit: 6g     - per-runner memory limit (not a reservation); 88 runners
-#                       share the host's 91 GB, peak usage ~24 GB observed live
-#                       at 72 runners -- re-measure at 88 (residual, not blocking)
+# Resource allocation per runner (RTX 5090 host, 91 GB RAM shared with the lab lanes):
+#   mem_limit: 6g     - per-runner memory limit (not a reservation); 60 runners
+#                       share the host's 91 GB with the dev, stability-test,
+#                       judge and collaborator lanes. Measured 2026-09-24
+#                       (OMN-19077): every runner created 2026-09-16 had
+#                       memory.peak at this full 6 GiB and a swap peak of
+#                       2.7-5.3 GiB, so per-runner limits alone never bounded
+#                       the fleet -- see cgroup_parent below, which bounds the
+#                       pool IN AGGREGATE regardless of runner count. Operator
+#                       ruling 2026-09-24 (ROLLING_WORK_LEDGER.md:3794): 60 is
+#                       the correct steady-state count; containment, not a
+#                       headcount cut, is the fix for the 2026-09-22 incident.
 #   memswap_limit: 12g - bounded swap headroom for large CI spikes
-#   cpus: "2.0"       - per-runner CFS quota (not a reservation); 88 runners
+#   cpus: "2.0"       - per-runner CFS quota (not a reservation); 60 runners
 #                       share the host's 32 vCPUs (over-subscription tolerated)
 #   pids_limit: 4096  - prevents fork bombs from runaway test processes
+#   cgroup_parent: omnirunners.slice - OMN-19077. Puts the whole general pool
+#                       in ONE systemd slice whose AGGREGATE MemoryHigh /
+#                       MemoryMax / MemorySwapMax / CPUWeight are declared in
+#                       docker/runners/systemd/omnirunners.slice. Without it
+#                       each runner is a sibling of the lane containers in
+#                       system.slice and a CI burst is reclaimed from the lanes.
+#                       Installed and read back by scripts/deploy-runners.sh
+#                       (install_runner_slice) before any runner is created.
+#                       Like env, it is fixed at container creation: it reaches
+#                       a live runner only through a recreate (--rolling).
 #
 # NOTE: mem_limit/cpus/pids_limit are Compose v2 top-level resource keys.
 # Do NOT use deploy.resources - those are Swarm-only and silently ignored here.
@@ -51,6 +69,7 @@ x-runner-base: &runner-base
   memswap_limit: 12g
   cpus: "2.0"
   pids_limit: 4096
+  cgroup_parent: omnirunners.slice
   environment: &runner-env
     # OMN-17477 -- `arch-amd64` names this host's CPU in the fleet's own
     # vocabulary, the one that matches Docker's TARGETARCH and
@@ -1306,6 +1325,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - deploy-runner-creds:/home/runner/.runner-creds
     # OMN-14958: host-gateway alias so LANE_PROBE_HOST=host.docker.internal
     # reaches the lane ports published on the host (18085/8085 etc.).
@@ -1444,6 +1464,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - verify-runner-1-creds:/home/runner/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -1578,6 +1599,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - verify-runner-2-creds:/home/runner/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -1631,6 +1653,7 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - verify-runner-3-creds:/home/runner/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"

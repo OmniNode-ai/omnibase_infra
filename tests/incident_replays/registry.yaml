@@ -86,6 +86,31 @@ scope:
     - scripts/ci/canonical_handler_shape_baseline.py
     - scripts/ci/check_deploy_scope_dod.py
     - scripts/ci/check_integration_skips.py
+    # OMN-17423: the same class as check_trivyignore_expiry.py below -- a
+    # purely preventive control with no bad state to replay. AC4 of that
+    # ticket mandates a gate that refuses a log statement formatting a
+    # credential value; the gate exists and is non-vacuous (its self-test
+    # pins an exact count against a committed fixture of nine injected
+    # violations, and `run_self_test(fixture, 8)` returns 1).
+    #
+    # There is no real incident to capture, and that was MEASURED, not
+    # assumed. Running this gate over seven repos at their current heads and
+    # back through history -- 392 commits of omninode_infra's docker/onex-api
+    # and ~1,900 of omnibase_infra's src/ -- found ZERO first-party logger
+    # calls that format a credential value. Every hit was third-party code
+    # under .venv. That agrees with OMN-17423's own AC1 probe, which drove
+    # sentinels through the live dev request path on 2026-09-15 and found no
+    # fingerprint on any collected service log, and is why AC1 was rescoped
+    # to fallback (c) rather than closed on a RED-first capture.
+    #
+    # Fabricating a case would violate R2: an invented "this once happened"
+    # fixture has no locator that resolves. Baselining instead is the honest
+    # record, and it is debt -- if a credential-in-log incident ever does
+    # occur, its bytes belong in a case here and this line comes out.
+    #
+    # Operator ruling 2026-09-24 (Jake Brower), on the conflict between this
+    # rule and OMN-17423 AC4.
+    - scripts/ci/check_no_credential_in_log.py
     - scripts/ci/check_occ_companion_merged.py
     - scripts/ci/check_shell_hygiene.sh
     # OMN-16229: a genuinely new preventive control, not a replay of an
@@ -119,6 +144,24 @@ scope:
     # suite, not an incident replay.
     - scripts/ci/c12_provider_catalogue_observe.py
     - scripts/ci/c12_provider_catalogue_probe.py
+    # OMN-16987: the provider-rung liveness canary and its in-runtime
+    # observer, a PROBE in the same class as the C11 and C12 entries above. It
+    # measures live provider state, not a past incident's bytes; its grading is
+    # proven offline over a recorded lab observation and a fake transport in
+    # tests/ci/test_provider_rung_canary_probe_omn16987.py -- a regression
+    # suite, not an incident replay.
+    - scripts/ci/provider_rung_canary_observe.py
+    - scripts/ci/provider_rung_canary_probe.py
+    # OMN-19445: the daily R1/MD-14 front-door probe, a PROBE in the same
+    # class as provider-rung-canary above -- it measures live front-door
+    # state (one `onex delegate` call, graded by exit code), not a past
+    # incident's bytes. Its grading is proven offline over a stubbed
+    # subprocess call in tests/ci/test_r1_front_door_probe_omn19445.py -- a
+    # regression suite with positive controls, not an incident replay. A real
+    # replay case (the OMN-16932 stale --kafka-bootstrap SASL refusal, run
+    # f1a9f38f) would need committed bytes from that run's own log, which this
+    # PR did not fetch; tracked as follow-up debt here rather than fabricated.
+    - scripts/ci/r1_front_door_probe.py
     # OMN-19181: a PROBE, the C16 producer, and the same class as the C11 one
     # above. Its grading IS driven by real bytes -- three observations captured
     # read-only from the .201 dev lane's gateway_workflows rows and their bus terminals
@@ -717,6 +760,22 @@ cases:
     test: tests/ci/test_incident_replay_omn17298.py::test_omn17298_replay_rejects_the_real_canary_0003_bytes
     why: >-
       This guard is newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The failure it catches shipped THREE times and passed every existing migration gate each time, because none of them reads the SQL: the manifest validator only asks whether a declared checksum matches its file, and check_migration_append_only.py only asks whether a declared file was edited. The shape is a DROP POLICY inside a `DO $$` block whose matching CREATE POLICY sits after `END$$`. The forward runner is `psql -v ON_ERROR_STOP=1 -f <file>` with NO --single-transaction (it says so itself), so `END$$` COMMITS and the relation is left, for a real interval, enforcing row-level security with zero policies -- which denies every row to every non-owner, non-BYPASSRLS principal and surfaces as SQLSTATE 42501, indistinguishable at the call site from a missing GRANT. That collision is not academic: it is what sent OMN-17298's own diagnosis to the wrong seam for its first hour. Instance 1 was migration 0032 (OMN-17288, superseded by 0033, applied on no lane). Instance 2 was the opening hypothesis of OMN-17298, falsified by live readback. Instance 3 is this artifact, found by running the new guard over the checked-in tree -- not by review -- and it is the only one of the three that ACTUALLY RAN: the .201 dev lane's platform_catalog.schema_migrations records node:node_canary_score_reducer:0003_capability_scores_tenant_id_to_uuid.sql applied 2026-08-17 02:30:59.157734+00 with checksum d1eeefff11fbec255216154ba26aa6f0f29602a0b6fd8fd89e8de5d8d3282b2c, which is byte-for-byte the sha256 of this fixture -- so these are provably the exact bytes a real database executed, not a reconstruction. The window was traversed and happened not to be interrupted; same-day readback shows the lane in the intended end state. The replay drives the real violations_for() over those verbatim bytes (captured via `git cat-file` from 211e81e5c, the commit that landed the file, and byte-identical to the current tree since it has never been rewritten) and requires a RULE B rejection. Its accept control in the same module is migration 0033's verbatim blob from 3f10ee5e4, independently sha256-pinned: 0033 is the remedy for the identical shape one node over, and its own header QUOTES the defective DROP POLICY / CREATE POLICY pair in prose, so a byte-blind matcher passes the reject case and fails the fix. Without that control a guard hard-wired to report a violation would replay this incident perfectly while condemning every correct migration.
+  - id: omn19344-destructive-migration-read-as-rollback-neutral
+    guard: scripts/validation/check_migration_class.py
+    incident: OMN-19344
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn19344/087_drop_stale_delegation_events_decoy.a1ca993ca.sql.captured
+      sha256: f1c5da54c354dd249df058d0aac0432d6099bf46e3ce479a951aafb0b68c8015
+    capture:
+      method: git-object
+      source: "git-object:OmniNode-ai/omnibase_infra@a1ca993cabe62e4b01fbb137a5ca8b00541430cd:docker/migrations/forward/087_drop_stale_delegation_events_decoy.sql"
+      captured_at: "2026-09-24T01:40:00Z"
+      captured_by: OMN-19344 wr-recovery lane
+    test: tests/ci/test_incident_replay_omn19344.py::test_omn19344_replay_rejects_087_declared_expand_only
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is that every gate in the tree passed migration 087 as rollback-neutral: no migration declared a machine-readable class, check_migrations_applied in lab_pass_receipt.py accepts a lane AHEAD of the delivered tree by design (OMN-18388), and no down-script exists for 087. So a rollback selector reading PASS lab-pass receipts would have treated any composition older than 087 as eligible, over a schema from which 087 had dropped public.delegation_events with CASCADE (the unified verification plan's review round 3, finding 1, which is what added rule RB). NOT A RECONSTRUCTION -- the .201 dev lane's omnibase_infra.public.schema_migrations records docker/087_drop_stale_delegation_events_decoy.sql applied 2026-07-31 06:44:26.707462+00 (read read-only 2026-09-24), after a1ca993ca, the last commit to touch the file (2026-06-21); the fixture is that commit's blob via git cat-file and hashes identically to the current tree. The replay drives the real violations_for() over those bytes declared expand-only and requires a rejection naming the DROP. THE DISCRIMINATOR is load-bearing: the same module accepts the same bytes declared forward-only and accepts migration 020, a real additive file, declared expand-only, so a guard hard-wired to refuse cannot pass it.
   - id: omn17374-topology-declared-grant-that-no-migration-issues
     guard: scripts/validation/check_topology_grant_delivery.py
     incident: OMN-17374
@@ -1251,3 +1310,20 @@ cases:
     test: tests/ci/test_incident_replay_omn17422.py::test_replay_rejects_the_real_0027_bytes
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is that a policy predicated on the app.tenant_id session GUC was attached to a relation whose declared writer can never set that GUC, and every existing gate passed it: check_migration_rls_policy_atomicity.py asks only whether an admitting policy exists and whether it exists without a committed window, and says in its own header that whether the predicate admits the writer is deliberately out of scope; check_topology_grant_delivery.py asks only whether a declared grant was issued. Neither reads the relation's DOMAIN. Exactly one code path issues set_config('app.tenant_id', ...) -- tenant_transaction, reached only from TenantProjectionTableOperation -- and the Internal and Catalog operations state in their own docstrings that they never open a tenant transaction, so an omninode_internal declaration and a GUC-predicated policy cannot both be right. OMN-18774 found generation_events and node_service_registry in exactly that state, writing only because the connection owned the table and FORCE was off, and failing closed the moment the runtime uses the non-bypassing login lab security parity requires. NOT A RECONSTRUCTION -- onex-dev's own public.node_schema_migrations, read read-only 2026-09-22, records node:node_projection_delegation:0027_generation_events_tenant_rls.sql applied 2026-07-28T21:15:06Z with checksum 00284bf64e3b2a8935bf1737d78dea64c6801966d61edf2b0e6ff19c19d85962, which is byte-for-byte the sha256 of this fixture, so these are provably the bytes a real database executed. The artifact is captured with git cat-file from 6194dc4d9, the commit that landed the file, NOT from the current tree, which hashes 9f5ffade664f1e1aaf86ea990c7b66edd99e076f099f00791ecddacaef6ebd7f because the file was amended after it ran; pinning the tree copy would have replayed bytes nothing executed. THE DISCRIMINATOR IS LOAD-BEARING: a guard hard-wired to report a violation would replay this incident perfectly and condemn its own remedy, so the same module drives 0043 -- the migration OMN-18774 landed, sha256 b119079fd139d1a271a0ad50001b1c120f115db98c8cbc401ff4f0251a0ff05b, byte-identical to what that lane applied on 2026-09-19T02:19:48Z -- after 0027 in the same lineage and requires a clean verdict. That case is also the append-only property under test: 0027's CREATE POLICY is still in the corpus verbatim and always will be, so a gate matching text rather than net end state reports a fixed defect as live. A third case drives 0043 alone, because its header quotes the shape it removes and a byte-blind matcher would trip on the remedy's own prose.
+  - id: omn19412-the-prose-probe-window-list-left-c11-unblacked
+    guard: scripts/ci/check_lab_probe_windows.py
+    incident: OMN-19412
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn19412.py::test_the_same_guard_accepts_the_same_bytes_with_the_committed_entry
+    artifact:
+      fixture: tests/fixtures/omn19412/chain-canary-c11-negative-paths.yml.captured
+      sha256: adb37c7c26e5c96f02ee4054f3a0d04ba1c3941865a0cd56e9d376445f98c12a
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@186be1a4dc64294a662495cff26b936d6d9dc387:.github/workflows/chain-canary-c11-negative-paths.yml
+      captured_at: '2026-09-24T17:19:32Z'
+      captured_by: lane lab-sync-t03-19412 (OMN-19412)
+    test: tests/ci/test_incident_replay_omn19412.py::test_the_real_guard_refuses_the_row_list_on_the_captured_c11
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A PROBE WINDOW LIST THAT OMITTED A PROBE. Until config/lab_probe_windows.yaml the only list of lab probe windows was one ledger row, omni_home docs/tracking/ROLLING_WORK_LEDGER.md at 2026-09-23T20:23:28Z (lane merge-drain-7f), which named C16 and C15 and derived four runtime-merge blackouts from them (20:45Z-21:45Z, 22:55Z-23:45Z, 00:55Z-01:45Z, 02:45Z-03:45Z). It did not name C11, whose job reads the same dev lane at 02:17Z, 08:17Z, 14:17Z and 20:17Z, none of them inside any of those blackouts, so a runtime merge at 02:00Z was within the row's rules and would have redeployed the lane under C11's run. Nothing could have noticed, because a prose list has no reader that compares it with the workflows. The case does not claim such a merge happened; the gap in the list is the defect. NOT A RECONSTRUCTION -- the artifact is the C11 workflow read with git show out of the object store at the dev commit the lane branched from, re-fetchable at the recorded locator and unmodified. The test drives the real check with the row's own list (the committed C15 and C16 entries) over those bytes and requires the unlisted-probe refusal naming the C11 workflow and its cron; a second assertion shows, from the same bytes, that every C11 start falls outside all four of the row's blackouts, so the refusal is not vacuous. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every workflow would replay this perfectly and block every pull request, so the same function is driven over the same bytes with the committed C11 entry and required to return no error.

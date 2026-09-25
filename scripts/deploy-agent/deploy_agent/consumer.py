@@ -69,6 +69,7 @@ from kafka.structs import OffsetAndMetadata
 
 from deploy_agent.auth import verify_command
 from deploy_agent.coalesce import (
+    SHA_RE,
     AncestryResolver,
     ModelCoalescePlan,
     ModelQueuedCommand,
@@ -80,6 +81,7 @@ from deploy_agent.events import (
     TOPIC_REBUILD_REQUESTED,
     EnumRejectionReason,
     EnumRuntimeLane,
+    ModelLineageDecision,
     ModelRebuildRequested,
     ModelRejectionNotice,
     Scope,
@@ -90,9 +92,32 @@ from deploy_agent.lane_policy import (
     LaneNotAllowedError,
     assert_lane_allowed,
 )
+from deploy_agent.lineage_fence import (
+    ModelRunningBuild,
+    RefResolver,
+    RunningBuildReader,
+    decide_lineage,
+    is_workspace_rebuild,
+)
 from deploy_agent.queue_depth import LagSampler, ModelControlTopicLag
+from deploy_agent.routing import ROUTED_LANES, DeployRouter
 
 logger = logging.getLogger(__name__)
+
+
+def _broker_timestamp(msg: Any) -> datetime | None:
+    """The record's broker timestamp, the lineage fence's fallback publish time.
+
+    OMN-19270. On this topic it is set by the hop that FORWARDS the command,
+    just before this agent reads it, so it is never earlier than the running
+    build's start: a command that carries no ``requested_at`` is therefore never
+    superseded on time, which is the direction that builds.
+    """
+    raw = getattr(msg, "timestamp", None)
+    if not isinstance(raw, int) or raw < 0:
+        return None
+    return datetime.fromtimestamp(raw / 1000, tz=UTC)
+
 
 # OMN-16442. Invoked at the PRE_ACCEPT job boundary with a callback that rewinds
 # this consumer's committed offset to the command being examined. The hook is
@@ -186,6 +211,17 @@ def deserialize_command_value(raw: bytes) -> Any:
     return decoded
 
 
+#: The group the single dev agent has always used. A consumer with no router
+#: keeps it; the routing table declares it for dev-201 so that instance's
+#: committed offsets carry over.
+LEGACY_CONSUMER_GROUP = "onex-deploy-agent"
+
+
+def consumer_group_for(router: DeployRouter | None) -> str:
+    """The Kafka consumer group this process subscribes with (OMN-19506 AC3)."""
+    return router.consumer_group if router is not None else LEGACY_CONSUMER_GROUP
+
+
 class DeployConsumer:
     #: OMN-18144. The queue observer, optional and absent by default because
     #: this consumer is also built by tests and by paths that are not serving
@@ -206,6 +242,15 @@ class DeployConsumer:
     #: AttributeError from the middle of a refusal, which would turn a handled
     #: rejection into an unhandled exception on the poll loop.
     on_rejected: RejectedHook | None = None
+    #: OMN-19270, on the same terms again: a consumer built without a reader
+    #: runs no lineage fence, which is the pre-change behaviour.
+    running_build: RunningBuildReader | None = None
+    ref_resolver: RefResolver | None = None
+    tracking_ref: str | None = None
+    #: OMN-19506, on the same terms: a consumer built without a router routes
+    #: nothing and accepts every command its lane fence admits, which is the
+    #: single-instance behaviour.
+    router: DeployRouter | None = None
 
     def __init__(
         self,
@@ -218,11 +263,21 @@ class DeployConsumer:
         ancestry_resolver: AncestryResolver | None = None,
         on_superseded: SupersededHook | None = None,
         on_rejected: RejectedHook | None = None,
+        running_build: RunningBuildReader | None = None,
+        ref_resolver: RefResolver | None = None,
+        tracking_ref: str | None = None,
+        router: DeployRouter | None = None,
     ) -> None:
+        # OMN-19506 AC3. Each deploy-agent instance reads EVERY record, so each
+        # subscribes with its own declared group: in one shared group Kafka
+        # would hand a record to ONE instance, and a command routed to the
+        # other would be skipped by the only reader it reached (the
+        # MC_shared_group counterexample on the ticket).
+        self.router = router
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
             **kafka_config.consumer_kwargs(),
-            group_id="onex-deploy-agent",
+            group_id=consumer_group_for(router),
             auto_offset_reset="latest",
             enable_auto_commit=False,
             value_deserializer=deserialize_command_value,
@@ -248,6 +303,13 @@ class DeployConsumer:
         self.ancestry_resolver = ancestry_resolver
         self.on_superseded = on_superseded
         self.on_rejected = on_rejected
+        # OMN-19270. The lineage fence reads the running build through this
+        # reader and compares infra refs through ``ancestry_resolver``; it runs
+        # only when both are present. Without a ref resolver a symbolic ref
+        # builds as requested.
+        self.running_build = running_build
+        self.ref_resolver = ref_resolver
+        self.tracking_ref = tracking_ref
         logger.info(
             "Deploy agent lane fence: %s",
             ",".join(sorted(lane.value for lane in self.allowed_lanes)),
@@ -267,6 +329,8 @@ class DeployConsumer:
         4. Check the lane fence -> reject "lane_not_allowed"
         5. Check busy (has_active_job) -> reject "busy"
         6. Check dedup (is_duplicate) -> reject "duplicate"
+        6a. Lineage fence (OMN-19270) -> reject "superseded_by_running_build"
+            or "divergent_ref"
         7. Self-update boundary (OMN-16442) -- may not return
         8. Persist job state (accepted)
         9. Commit Kafka offset
@@ -288,20 +352,22 @@ class DeployConsumer:
             return None, None
 
         # OMN-18143. The batch this poll ALREADY fetched is the look-ahead, and
-        # nothing beyond it is polled for.
+        # nothing beyond it is polled for. A queue deeper than one fetch simply
+        # coalesces across successive polls instead of in one, which is slower
+        # and equally correct.
         #
-        # That is a deliberate bound, not a shortcut. The fetch position is
-        # already past every record in this batch -- ``_commit_through``'s own
-        # docstring records what that costs -- so scanning records the client
-        # has in hand adds no exposure at all, while polling AGAIN to see
-        # further would advance the position over records this scan then
-        # declines to fold, widening exactly the window OMN-18613 measured a
-        # lost command in. A queue deeper than one fetch simply coalesces
-        # across successive polls instead of in one, which is slower and
-        # equally correct.
+        # OMN-19259. kafka-python has already moved the fetch position past
+        # EVERY record this poll returned, and it keeps no copy of the ones this
+        # call does not process: the next poll starts at the position, not at
+        # the first record nobody looked at. So every record behind the one
+        # processed here is moved back onto the fetch path explicitly -- on the
+        # processed partition by ``_commit_through``, on any other partition
+        # below, before processing, so that no exit from the accept protocol
+        # can leave a fetched record behind the position.
         ordered, lookahead_usable = self._order_batch(records)
         if not ordered:
             return None, None
+        self._return_other_partitions_to_fetch(records, ordered[0])
         return self._process_message(
             ordered[0], lookahead=ordered[1:] if lookahead_usable else []
         )
@@ -331,6 +397,29 @@ class DeployConsumer:
             )
             return ordered[:1], False
         return ordered, True
+
+    def _return_other_partitions_to_fetch(
+        self, records: dict[Any, list[Any]], head: Any
+    ) -> None:
+        """Seek every partition but the head's back to its first returned record.
+
+        A poll that returned records on more than one partition processes one
+        record of one partition, and the fetch position of every other
+        partition is already past everything it returned. Without this seek
+        those records are never fetched again by this process, and the next
+        commit on their partition skips them for good (OMN-19259). The control
+        topic has a single partition today; this refuses to depend on that
+        staying true, as ``_order_batch`` does.
+        """
+        for topic_partition, messages in records.items():
+            if not messages:
+                continue
+            if (topic_partition.topic, topic_partition.partition) == (
+                head.topic,
+                head.partition,
+            ):
+                continue
+            self.consumer.seek(topic_partition, min(m.offset for m in messages))
 
     def _reject(
         self,
@@ -456,6 +545,26 @@ class DeployConsumer:
             self._commit_through(msg)
             return None, self._reject(EnumRejectionReason.LANE_NOT_ALLOWED, cmd=cmd)
 
+        # Step 4a: Instance routing (OMN-19506). A command the routing table,
+        # read at the command's own ref, gives to another deploy-agent instance
+        # is skipped: offset committed, NOTHING published. A rejection here
+        # would race the other instance's acceptance at the redeploy effect,
+        # and a busy or duplicate rejection from this instance would too, which
+        # is why this runs before both.
+        if self.router is not None and cmd.runtime_lane in ROUTED_LANES:
+            mine, decision = self.router.is_mine(cmd)
+            if not mine:
+                logger.info(
+                    "Skipping command %s: routed to instance %s by the %s; this "
+                    "is instance %s. Nothing is published.",
+                    cmd.correlation_id,
+                    decision.instance,
+                    decision.basis,
+                    self.router.instance.name,
+                )
+                self._commit_through(msg)
+                return None, None
+
         # Step 5: Check busy
         if self.job_store.has_active_job():
             logger.info("Rejecting command %s: agent busy", cmd.correlation_id)
@@ -467,6 +576,41 @@ class DeployConsumer:
             logger.info("Rejecting command %s: duplicate", cmd.correlation_id)
             self._commit_through(msg)
             return None, self._reject(EnumRejectionReason.DUPLICATE, cmd=cmd)
+
+        # Step 6a: Lineage fence (OMN-19270). Compared with the build the lane
+        # already runs, by ancestry against its provenance. On 2026-09-23 a
+        # command at an infra commit from 10:32Z was accepted at 14:32Z and
+        # rebuilt a lane already on a newer commit, and four more full
+        # rebuilds re-delivered omnimarket merges the lane already vendored.
+        # A CI command whose every ref is already running is recorded
+        # superseded and acknowledged, so it neither runs nor blocks the
+        # commands behind it. Any other command at or behind the running
+        # build builds at the running ref, never behind it. A diverged ref off
+        # the tracking branch is refused. A signed rollback declaration is the
+        # one way backwards. Every comparison the host cannot make lets the
+        # command build as requested.
+        lineage = self._lineage_decision(cmd, msg)
+        if lineage is not None and lineage.verdict.refuses:
+            logger.warning(
+                "Rejecting command %s: %s", cmd.correlation_id, lineage.journal_line()
+            )
+            self._commit_through(msg)
+            return None, self._reject(EnumRejectionReason.DIVERGENT_REF, cmd=cmd)
+        if lineage is not None and lineage.verdict.supersedes:
+            logger.info(
+                "Superseding command %s: %s", cmd.correlation_id, lineage.journal_line()
+            )
+            self.job_store.record_superseded_by_running_build(
+                cmd.correlation_id,
+                command=self._command_payload(msg),
+                lineage=lineage,
+            )
+            self._commit_through(msg)
+            return None, self._reject(
+                EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD, cmd=cmd
+            )
+        if lineage is not None and not lineage.verdict.permits_coalescing:
+            lookahead = []
 
         # Step 6b: Coalesce (OMN-18143). The newest foldable command in the
         # batch runs; every one it replaces gets a durable terminal record and
@@ -500,12 +644,24 @@ class DeployConsumer:
                 e,
             )
 
-        # Step 8: Persist job state
+        # Step 8: Persist job state. The lineage decision is the head's, so it
+        # is recorded, and its build ref applied, only when the head is what
+        # runs. A folded runner descends from a head the fence found at or
+        # ahead of the running build, so it builds its own ref.
+        runner_lineage = lineage if runner_cmd is cmd else None
         self.job_store.accept(
             correlation_id=runner_cmd.correlation_id,
             command=self._command_payload(runner_msg),
             superseded_correlation_ids=superseded_ids,
+            lineage=runner_lineage,
         )
+        if (
+            runner_lineage is not None
+            and runner_lineage.build_ref != runner_cmd.git_ref
+        ):
+            runner_cmd = runner_cmd.model_copy(
+                update={"git_ref": runner_lineage.build_ref}
+            )
 
         # Step 9: Commit offset. The runner's offset is at or past every
         # superseded record's, so one commit covers the whole group.
@@ -519,6 +675,68 @@ class DeployConsumer:
             len(superseded_ids),
         )
         return runner_cmd, None
+
+    def _lineage_decision(
+        self, cmd: ModelRebuildRequested, msg: Any
+    ) -> ModelLineageDecision | None:
+        """The lineage fence's verdict for ``cmd``, or ``None`` when it is off.
+
+        Off means this consumer was built without a running-build reader or
+        without an ancestry resolver, which is every test that does not ask
+        for the fence. The verdict is journalled on every path, so an accepted
+        command still records which comparison let it through.
+        """
+        if self.running_build is None or self.ancestry_resolver is None:
+            return None
+        reader = self.running_build
+        decision = decide_lineage(
+            cmd,
+            read_running_build=lambda: self._with_producing_job(
+                reader(cmd.runtime_lane)
+            ),
+            contains=self.ancestry_resolver,
+            resolve_ref=self.ref_resolver,
+            tracking_ref=self.tracking_ref,
+            published_at=cmd.requested_at or _broker_timestamp(msg),
+        )
+        if not (decision.verdict.refuses or decision.verdict.supersedes):
+            logger.info("%s %s", cmd.correlation_id, decision.journal_line())
+        return decision
+
+    def _with_producing_job(
+        self, running: ModelRunningBuild | None
+    ) -> ModelRunningBuild | None:
+        """Attach the job that produced the running image, when it can be named.
+
+        OMN-19270. The job is the one whose accept-to-complete window contains
+        the image's ``build_time``. Its ``accepted_at`` is at or before the
+        moment the build staged its siblings, so it is the conservative start
+        to compare a command's publish time with. A job whose pinned ref names
+        a different commit than the image is not trusted as its producer.
+        """
+        if running is None or running.build_time is None:
+            return running
+        job = self.job_store.job_covering(running.build_time)
+        if job is None:
+            return running
+        pinned = str(job.command.get("git_ref", ""))
+        built = job.lineage.build_ref if job.lineage is not None else pinned
+        if SHA_RE.match(built) and built != running.infra_ref:
+            logger.info(
+                "lineage: job %s covers the running image's build time but built "
+                "%s, not %s; its start is not used",
+                job.correlation_id,
+                built,
+                running.infra_ref,
+            )
+            return running
+        return running.model_copy(
+            update={
+                "started_at": job.accepted_at,
+                "workspace_sourced": is_workspace_rebuild(job.command),
+                "producing_job": str(job.correlation_id),
+            }
+        )
 
     @staticmethod
     def _command_payload(msg: Any) -> dict[str, Any]:
@@ -649,15 +867,22 @@ class DeployConsumer:
             assert_lane_allowed(cmd.runtime_lane, self.allowed_lanes)
         except LaneNotAllowedError:
             return None
+        # OMN-19506: another instance's command is never folded into this
+        # instance's runner, which would record it superseded here while the
+        # other instance runs it.
+        if self.router is not None and cmd.runtime_lane in ROUTED_LANES:
+            mine, _decision = self.router.is_mine(cmd)
+            if not mine:
+                return None
         return cmd
 
     def _sample_lag(self) -> None:
         """Record how many control-topic records this agent has not dealt with.
 
-        Measured against the COMMITTED offset, not the fetch position. After a
-        poll that returned a batch the position is already past records
-        ``poll_and_accept`` left buffered and has never looked at, so a
-        position-based lag reports zero while commands wait -- the same
+        Measured against the COMMITTED offset, not the fetch position. Between
+        a poll that returned a batch and the processing of its first record,
+        the position is past records ``poll_and_accept`` has never looked at,
+        so a position-based lag reports zero while commands wait -- the same
         off-by-a-batch OMN-18613 found in ``_commit_through``, from the other
         side. Where this process has not committed anything yet the position is
         used and the basis says so, because a first-poll under-report by one
@@ -723,21 +948,33 @@ class DeployConsumer:
             )
 
     def _commit_through(self, msg: Any) -> None:
-        """Commit past THIS record and no further.
+        """Commit past THIS record and no further, and fetch from just after it.
 
         A bare ``self.consumer.commit()`` commits the consumer's POSITION for
         every assigned partition. After a ``poll()`` that returned a batch the
         position is past every record FETCHED, not past the one record
         ``_process_message`` was handed -- ``poll_and_accept`` deliberately
-        processes the first record and returns, leaving the rest buffered. So a
-        bare commit silently marks records the agent has never looked at as
-        done, and they are gone the moment the client buffer is discarded, which
-        the ``post_terminal`` self-update re-exec does routinely.
+        processes the first record and returns. So a bare commit silently marks
+        records the agent has never looked at as done.
 
         Measured 2026-09-17 (OMN-18613): accepting offset 262 committed 264,
-        past a buffered 263 carrying the rebuild command for omnimarket#2622.
+        past an unprocessed 263 carrying the rebuild command for omnimarket#2622.
         That command was never delivered again -- no job record, no acceptance
         line, no rejection line and no quarantine record.
+
+        THE COMMIT ALONE IS HALF THE FIX (OMN-19259). Bounding the commit
+        leaves 263 uncommitted, but kafka-python's fetch position is still past
+        it: the next ``poll()`` in this process starts at 264, and nothing holds
+        263 in memory for it. Only a group rejoin or a re-exec read from the
+        committed offset again, and the next record this process processes
+        commits past 263 for good. Measured in a replay against a real broker
+        with the pinned kafka-python 2.3.2: a dev command fetched behind a
+        refused head was never delivered, the committed offset stayed at the
+        refused record plus one, and a later accepted command made the loss
+        permanent. So the position is moved back to the same place the commit
+        names, and the records behind this one are fetched again by the next
+        poll. That costs a re-fetch of at most one poll batch per record
+        processed, on a topic whose records are a few hundred bytes each.
 
         Advancing past a record the agent REFUSES stays deliberate: step 4's own
         comment notes that re-reading a refused command forever "would stall
@@ -752,6 +989,7 @@ class DeployConsumer:
                 )
             }
         )
+        self.consumer.seek(topic_partition, msg.offset + 1)
         # OMN-18144: what the next lag sample measures against.
         if self.lag_sampler is not None:
             self.lag_sampler.note_commit(topic_partition, msg.offset + 1)

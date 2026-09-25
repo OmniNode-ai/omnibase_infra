@@ -145,6 +145,21 @@ NEW_VERIFY_JOBS = (
         "c12-provider-catalogue",
         "C12 provider catalogue (dev lane)",
     ),
+    # OMN-16987: the provider-rung liveness canary. Born on the label, and it
+    # clears the OMN-18602 bar the same way C12 does: one `docker exec`, as the
+    # runtime's own user, runs a Python process that reads the deployed
+    # delegation contract and resolves each key in memory. It writes no file,
+    # restarts nothing and publishes nothing on the lane. Its only outbound
+    # effect is one minimal chat completion per distinct cloud rung, and one
+    # wrong-key request per endpoint, to the providers themselves.
+    #
+    # It needs the HOST label for the identical reason: on another lab host's
+    # daemon there is no `omninode-runtime-effects` container to exec into.
+    (
+        "provider-rung-canary.yml",
+        "provider-rung-canary",
+        "Provider-rung liveness canary (dev lane)",
+    ),
     # OMN-19181: the C16 receipt-identity producer. Born on the label, for the
     # identical reason as C11 above: the lane's onex-api is reachable only
     # through THIS host's gateway alias, and a verify-class runner on another
@@ -157,6 +172,26 @@ NEW_VERIFY_JOBS = (
         "chain-canary-c16-receipt-identity.yml",
         "c16-receipt-identity",
         "C16 receipt identity (dev lane)",
+    ),
+    # OMN-19445: the R1/MD-14 front-door probe. Born on the label, and it
+    # clears the OMN-18602 bar the same way the read-only canaries above do:
+    # it never mutates the lane, only runs `onex delegate` against it and
+    # grades the exit code. It needs the lab host's docker socket-adjacent
+    # network route to reach the dev-lane broker directly -- the same reason
+    # provider-rung-canary.yml and the C12 producer pin this label -- and it
+    # deliberately runs the CLI on the runner host itself, not inside
+    # omninode-runtime-effects, because it measures the FRONT DOOR (the
+    # command a lane operator runs on their own machine), not whether the
+    # runtime can reach itself.
+    #
+    # It needs the HOST label for the identical reason every entry above
+    # does: a verify-class runner on another lab host has no route to this
+    # lane's broker, so an unpinned run would fail closed as a false lane
+    # outage rather than a routing mistake.
+    (
+        "r1-front-door-probe.yml",
+        "r1-front-door-probe",
+        "R1 front-door probe (dev lane, outside the runtime container)",
     ),
 )
 

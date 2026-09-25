@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -13,6 +14,7 @@ from omnibase_infra.cli.model_qualified_phrases import ModelQualifiedPhrases
 from omnibase_infra.cli.model_short_prompt_selection import (
     ModelShortPromptSelection,
 )
+from omnibase_infra.cli.request_instruction import is_negated
 
 __all__ = ["ModelSelectableTaskClass"]
 
@@ -44,6 +46,7 @@ class ModelSelectableTaskClass(BaseModel):
     max_words: int | None = None
     qualified_phrases: ModelQualifiedPhrases | None = None
     short_prompt: ModelShortPromptSelection | None = None
+    vetoed_by: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _validate_short_prompt(self) -> ModelSelectableTaskClass:
@@ -115,6 +118,30 @@ class ModelSelectableTaskClass(BaseModel):
         ordinary use veto the later technical one would be frequency deciding
         the answer, which the contract forbids.
         """
+        for phrase, _start in self._claiming_occurrences(lowered_prompt):
+            return phrase
+        return None
+
+    def opening_words(self) -> frozenset[str]:
+        """Return the first word of every phrase this class declares (OMN-19523).
+
+        A request that opens with one of these words ("write", "review",
+        "summarize", "fix") opens with the verb of a declared request, so its
+        opening sentence is where the work is named. Gated phrases count: the
+        word opens a request whether or not its object qualifies it.
+        """
+        gated = self.qualified_phrases
+        phrases = list(self.phrases) + (list(gated.phrases) if gated else [])
+        return frozenset(
+            phrase.lower().split()[0] for phrase in phrases if phrase.split()
+        )
+
+    def _claiming_occurrences(self, lowered_prompt: str) -> Iterator[tuple[str, int]]:
+        """Yield ``(phrase, start)`` for every occurrence that claims the prompt.
+
+        Phrases in the order :meth:`matching_phrase` reports them (longest
+        first, then alphabetically), occurrences left to right within each.
+        """
         gated = self.qualified_phrases
         gated_set = (
             frozenset(phrase.lower() for phrase in gated.phrases)
@@ -129,9 +156,34 @@ class ModelSelectableTaskClass(BaseModel):
             if not normalized:
                 continue
             for occurrence in _phrase_pattern(normalized).finditer(lowered_prompt):
+                # OMN-19523: "no summary of the change" and "not a review" say
+                # what the caller does NOT want; a negated occurrence claims
+                # nothing, and a later plain one still can.
+                if is_negated(lowered_prompt, occurrence.start()):
+                    continue
                 if normalized not in gated_set or self._qualifier_near(
                     lowered_prompt, occurrence.span()
                 ):
+                    yield phrase, occurrence.start()
+
+    def vetoing_phrase(self, lowered_prompt: str) -> str | None:
+        """Return the declared veto phrase this prompt names, if any (OMN-18831).
+
+        A veto names a requested PROSE artifact or a no-code instruction ("a
+        pull request description", "in prose"). The contract declares it on the
+        classes graded by deterministic acceptance, where a prompt that only
+        DESCRIBES code work ("the unit tests passed") would otherwise be graded
+        on compilation. Presence on word boundaries, like every other phrase;
+        longest first, so the reason names the most specific veto.
+        """
+        for phrase in sorted(self.vetoed_by, key=lambda item: (-len(item), item)):
+            normalized = phrase.lower()
+            if not normalized:
+                continue
+            for occurrence in _phrase_pattern(normalized).finditer(lowered_prompt):
+                # OMN-19523: "do not write a PR description" names no prose
+                # output; only a plain occurrence vetoes.
+                if not is_negated(lowered_prompt, occurrence.start()):
                     return phrase
         return None
 

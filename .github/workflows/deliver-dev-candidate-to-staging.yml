@@ -111,6 +111,22 @@ on:
         required: false
         default: "dev"
         type: string
+      # OMN-19311 AC5 -- the planted-red drill. Both empty by default, which
+      # is byte-identical to today's behaviour: the D11 step below only adds
+      # the drill flags to its command line when drill_ticket is non-empty.
+      # Self-expiring (lab_pass_receipt.py DRILL_MAX_WINDOW_HOURS bounds how
+      # far in the future drill_red_until may be) and one-directional (there
+      # is no input that can force a PASS -- only red).
+      drill_red_until:
+        description: "OMN-19311 AC5 planted-red drill: UTC timestamp (YYYY-MM-DDTHH:MM:SSZ) to force the D11 verdict red until. Requires drill_ticket. Leave empty for an ordinary dispatch."
+        required: false
+        default: ""
+        type: string
+      drill_ticket:
+        description: "OMN-19311 AC5 planted-red drill: the OMN-<n> ticket authorizing it. Requires drill_red_until."
+        required: false
+        default: ""
+        type: string
   # OMN-17057: a SIBLING repository's merge, announcing its own revision.
   #
   # Until this existed, an omnimarket (or omnibase_core, or omnibase_compat)
@@ -1023,11 +1039,35 @@ jobs:
       # nothing but a repository read token.
       contents: read
       actions: read
+      # OMN-19233 (OMN-19318): the proof-subject walk reads each walked commit's
+      # merged pull request labels (a `runtime_change` label makes a commit its
+      # own subject). Read-only.
+      pull-requests: read
     steps:
+      # Full history: the own-sha step resolves the delivered sha's proof subject
+      # by walking first-parent commits (plan PS-1). A shallow clone would show
+      # its boundary commit as adding every file, which reads runtime-affecting
+      # and stops the walk early -- fail closed, but wrong about the subject.
       - name: Checkout omnibase_infra
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      # The canonical deploy-path classifier the rebuild trigger and the release
+      # train read (runtime_change_classifier.py loads it by path). omniclaude is
+      # public, so no credential is needed. A failed fetch fails the job: the
+      # resolver would otherwise fall back to the exact sha, which refuses.
+      - name: Fetch the canonical deploy-path classifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omniclaude
+          ref: main
+          path: .deploy-gate-source
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/deploy-gate/validate_pr_deploy_required.py
+          sparse-checkout-cone-mode: false
 
       # Same missing dependency as the emit half above, and latent rather than
       # observed: this job has been skipped on every run so far because the
@@ -1037,16 +1077,134 @@ jobs:
       - name: Install uv (the receipt reader's runtime)
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
+      # OMN-19311 -- D11, the omnimarket delegation regression corpus run
+      # against the stability-test lane (delegation-regression-nightly.yml),
+      # blocks staging delivery. Operator ruling 2026-09-23T17:12:15Z: the check
+      # is bound NOW, while it is red, and delivery stops until it is fixed.
+      #
+      # WHY DELIVERY AND NOT MERGES. D11 needs a deployed lane; it cannot run
+      # against a PR head (the pre-PR verify slots have no entrypoint). A merge
+      # gate keyed on it would refuse the very PR that fixes it. The fix merges,
+      # the stability-test lane redeploys through its own pre-authorized
+      # procedure, the nightly runs (schedule, or a dispatch -- a new
+      # measurement, not an override), and delivery resumes on its green.
+      #
+      # WHY EVERY PATH. The push path builds the runtime with omnimarket
+      # vendored at its dev HEAD (sibling_ref: dev), so gating only omnimarket's
+      # own deliveries would let any push here carry the same omnimarket code to
+      # onex-dev. So this step has no `if:`. It runs FIRST in the job so its
+      # verdict is always read and printed, whatever the receipts say.
+      #
+      # STATE-KEYED through the one workflow-verdict reader (OMN-18866): the
+      # newest completed run on omnimarket dev, fresh within 26 hours (a nightly
+      # plus slack). Scheduled runs and dispatches are both measurements, but a
+      # dispatch counts only when its run title carries `lane=stability-test`
+      # (the nightly renders its lane into its run-name), so a green dispatch
+      # aimed at the dev lane cannot stand in for the governed measurement. No
+      # force, skip or allow-list; tests/ci/test_workflow_verdict_omn_d11.py
+      # asserts the wiring. The receiver (omninode_infra lab_pass_gate.py)
+      # reads the same verdict independently.
+      #
+      # The token is an App installation token with `actions: read` on
+      # omnimarket alone -- the same App the sibling read below uses -- because
+      # this repository's GITHUB_TOKEN is scoped to this repository. Absent App
+      # credentials fail the job; they do not skip the read.
+      - name: Obtain a read-only Actions token for omnimarket (D11, OMN-19311)
+        id: d11-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omnimarket
+          permission-actions: read
+
+      - name: Require a fresh green D11 delegation regression verdict (OMN-19311)
+        env:
+          GH_TOKEN: ${{ steps.d11-token.outputs.token }}
+          DRILL_RED_UNTIL: ${{ github.event.inputs.drill_red_until }}
+          DRILL_TICKET: ${{ github.event.inputs.drill_ticket }}
+        run: |
+          set -euo pipefail
+          # OMN-19311 AC5: the planted-red drill. Both empty on every path
+          # except an explicit workflow_dispatch that set drill_ticket, so
+          # this is a no-op append on the push and repository_dispatch paths.
+          DRILL_ARGS=()
+          if [ -n "${DRILL_TICKET:-}" ]; then
+            DRILL_ARGS+=(--drill-red-until "${DRILL_RED_UNTIL:-}" --drill-ticket "${DRILL_TICKET}")
+          fi
+          uv run --no-project --with pydantic \
+            python3 scripts/ci/lab_pass_receipt.py workflow-verdict \
+            --repo OmniNode-ai/omnimarket \
+            --workflow delegation-regression-nightly.yml \
+            --branch dev \
+            --max-age-hours 26 \
+            --event schedule \
+            --event workflow_dispatch \
+            --dispatch-title-contains "lane=stability-test" \
+            "${DRILL_ARGS[@]}" \
+            | tee /tmp/lab-pass-gate-d11.txt
+
+      # OMN-19233, operator ruling 2026-09-23 (decision S of the unified
+      # verification plan): delivery requires the compose-dev PRIMARY receipt of
+      # the delivered sha's proof subject (PS-1: the sha itself when it is
+      # runtime-affecting, else its nearest runtime-affecting first-parent
+      # ancestor, where a merged PR's runtime_change label counts). Another
+      # lane's PASS never substitutes (PS-2). Measured before this: all ten
+      # successful deliveries 2026-09-22T19:27Z..2026-09-23T06:20Z passed on the
+      # kind-cluster onex-lab receipt alone.
+      #
+      # The bounded wait is PS-5, not a wait in this 10-minute job: no receipt
+      # refuses PENDING (rebuild in flight) or ABSENT; the compose-dev emitter
+      # (runtime-rebuild-trigger.yml, job rerun-refused-deliveries) re-runs this
+      # job once it uploads a PASS for the subject; and a read more than
+      # 14,400 s after this run's first gate read refuses TIMED_OUT, never a
+      # pass. The verdict JSON is uploaded below for that re-run selector.
+      #
+      # The any-of rule 24(b) premise on the exact sha is unchanged. No `if:`,
+      # no force, skip or override (tests/scripts/ci/test_lab_pass_gate_no_force_skip.py).
       - name: Read the lab-pass receipt for the delivered sha
+        id: own-sha-gate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          uv run --no-project --with pydantic \
+          uv run --no-project --with pydantic --with pyyaml \
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${GITHUB_SHA}" \
             --repo "${GITHUB_REPOSITORY}" \
+            --require-lane compose-dev \
+            --resolve-runtime-ancestor \
+            --clone . \
+            --runtime-path-validator .deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py \
+            --detect-pending \
+            --overall-bound-seconds 14400 \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --gate-job-name "Require a passing lab-pass receipt for this sha" \
+            --verdict-out /tmp/lab-pass-gate-verdict/verdict.json \
             | tee /tmp/lab-pass-gate.txt
+
+      # The verdict the re-run selector reads, one artifact per attempt. Only when
+      # the gate step ran: a step that never ran wrote no verdict, and the
+      # selector then re-runs nothing for this run, which is the safe side.
+      # OMN-18247: `if-no-files-found: error` cannot see a zero-byte file.
+      - name: Assert the lab-pass gate verdict is present and non-empty
+        if: always() && steps.own-sha-gate.outcome != 'skipped'
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact lab-pass-gate-verdict \
+            --require /tmp/lab-pass-gate-verdict/verdict.json
+
+      - name: Upload the lab-pass gate verdict (OMN-19233)
+        if: always() && steps.own-sha-gate.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lab-pass-gate-verdict-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/lab-pass-gate-verdict
+          retention-days: 7
+          if-no-files-found: error
 
       # OMN-17057. The gate above asks about THIS repository's sha. On a
       # sibling-triggered delivery the revision under test is the sibling's,
@@ -1089,12 +1247,62 @@ jobs:
           # is the one that IS proven to vendor the sibling revision, by
           # check_lane_sibling_revision.py, immediately before the receipt is
           # written.
+          #
+          # OMN-19508: an omnimarket revision may instead be proven on the
+          # second deployed dev lane on .202, whose receipt lane is
+          # compose-dev-202 (operator ruling 2026-09-25T00:56:45Z, omnimarket
+          # only). The list is ANY-OF, so a PASS on either admits it and a
+          # revision with neither is refused. Every other sibling stays on
+          # compose-dev alone, and the own-sha read above is unchanged.
+          SIBLING_LANES=(--lane compose-dev)
+          if [ "${PINNED_REPO}" = "omnimarket" ]; then
+            SIBLING_LANES+=(--lane compose-dev-202)
+          fi
           uv run --no-project --with pydantic \
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${PINNED_REVISION}" \
             --repo "OmniNode-ai/${PINNED_REPO}" \
-            --lane compose-dev \
+            "${SIBLING_LANES[@]}" \
             | tee /tmp/lab-pass-gate-sibling.txt
+
+      # OMN-18866, operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending
+      # the 16:10:08Z every-check-blocks ruling): C15, this repository's chain
+      # canary, is bound to staging delivery NOW, red or green. It runs on EVERY
+      # delivery -- push, sibling-triggered and manual -- because the canary
+      # exercises the chain that this repository and the vendored omnimarket
+      # compose, and a delivery on any path carries both.
+      #
+      # WHY DELIVERY AND NOT MERGES: the canary probes the DEPLOYED .201 dev
+      # lane over host.docker.internal. A PR head cannot be deployed there
+      # before it merges, so a merge block would stop the fix itself. Merges
+      # stay open; the fix merges, the dev lane rebuilds, the next scheduled
+      # canary (or a re-run of one, which is a fresh measurement) goes green,
+      # and delivery resumes.
+      #
+      # WHY NOT A CHECK ON THE compose-dev RECEIPT: that is the OMN-18872 revert
+      # shape (PROBES_NOT_YET_WIRED in lab_pass_receipt.py), it would also stop
+      # release-cut, and on the push path it would not block at all because the
+      # own-sha gate above is any-of across lanes.
+      #
+      # STATE-KEYED: the newest completed SCHEDULED run on dev must be success
+      # and at most 3 hours old (a 2-hour cadence plus runner slack). A red,
+      # cancelled, timed-out, absent, stale or unreadable newest run refuses,
+      # naming the run. `--event schedule` admits re-runs of scheduled runs
+      # (same event, default inputs) and not manual dispatches, whose inputs
+      # can point the probe somewhere other than the lane. No `if:`, no force.
+      - name: Require a fresh green chain canary (C15, OMN-18866)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic \
+            python3 scripts/ci/lab_pass_receipt.py workflow-verdict \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow chain-canary.yml \
+            --branch dev \
+            --max-age-hours 3 \
+            --event schedule \
+            | tee /tmp/lab-pass-gate-chain-canary.txt
 
       - name: Summarise
         if: always()
@@ -1114,6 +1322,20 @@ jobs:
                 || echo "(the sibling gate produced no output)"
               echo '```'
             fi
+            echo ""
+            echo "### D11 delegation regression verdict (OMN-19311)"
+            echo ""
+            echo '```'
+            cat /tmp/lab-pass-gate-d11.txt 2>/dev/null \
+              || echo "(the D11 verdict produced no output)"
+            echo '```'
+            echo ""
+            echo "### Chain canary verdict (C15, OMN-18866)"
+            echo ""
+            echo '```'
+            cat /tmp/lab-pass-gate-chain-canary.txt 2>/dev/null \
+              || echo "(the chain canary verdict produced no output)"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
   dispatch-to-staging:

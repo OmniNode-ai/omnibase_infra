@@ -215,7 +215,19 @@ class _FakeApplier:
             raise RuntimeError(_FakeApplier.raise_with)
         return Path(f"/state/lab-overlay/{sha}.json")
 
-    def apply(self, *, sha: str, stamp: str, correlation_id: str) -> Path:
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
+        # OMN-19501: the compose-lane half, taken under the lane lock. Opaque
+        # to the agent, which only hands it back to ``apply``.
+        return {"sha": sha, "stamp": stamp}
+
+    def apply(
+        self,
+        *,
+        sha: str,
+        stamp: str,
+        correlation_id: str,
+        capture: object = None,
+    ) -> Path:
         return self._record("apply", sha, correlation_id)
 
     def build_repair_migrate_image(

@@ -147,7 +147,6 @@ def open_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = _goal_clone(tmp_path, datetime.now(UTC).date() - timedelta(days=2))
     monkeypatch.delenv(ll.GOAL_PATH_ENV, raising=False)
     monkeypatch.setenv(ll.KB_INTERNAL_ROOT_ENV, str(root))
-    monkeypatch.setenv("LEDGER_LOCK_ROOT", str(tmp_path / "locks"))
     return root
 
 
@@ -439,7 +438,6 @@ class TestNotWindowScoped:
         be off on exactly the days its neighbour is off."""
         monkeypatch.delenv(ll.GOAL_PATH_ENV, raising=False)
         monkeypatch.setenv(ll.KB_INTERNAL_ROOT_ENV, str(tmp_path / "no-such-clone"))
-        monkeypatch.setenv("LEDGER_LOCK_ROOT", str(tmp_path / "locks"))
         assert _append(ledger, pipe_claim_row(attribution=None)) == 65
 
     def test_the_refusal_holds_when_the_window_has_not_opened(
@@ -452,7 +450,6 @@ class TestNotWindowScoped:
         root = _goal_clone(tmp_path, datetime.now(UTC).date() + timedelta(days=10))
         monkeypatch.delenv(ll.GOAL_PATH_ENV, raising=False)
         monkeypatch.setenv(ll.KB_INTERNAL_ROOT_ENV, str(root))
-        monkeypatch.setenv("LEDGER_LOCK_ROOT", str(tmp_path / "locks"))
 
         lane = "omn18766-pending-window"
         unpriced_attributed = " | ".join(

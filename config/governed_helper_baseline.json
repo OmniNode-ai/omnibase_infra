@@ -176,7 +176,7 @@
       "pair": "lock-without-holder-record",
       "path": "scripts/deploy-runtime.sh",
       "line_sha256_12": "4d7fe16da4c1",
-      "occurrences": 3,
+      "occurrences": 1,
       "ticket": "OMN-18630",
       "note": "if mkdir \"${LOCK_DIR}\" 2>/dev/null; then"
     },

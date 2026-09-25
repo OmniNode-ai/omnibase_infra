@@ -1,0 +1,36 @@
+# Laptop profile model overlay TEMPLATE (OMN-19496). Not mounted as-is.
+#
+# `make local-env` copies this file to ~/.omnibase/local.bifrost.yaml and
+# points ONEX_LOCAL_BIFROST_OVERLAY at the copy. Then set the ONE line below
+# marked `model_endpoint` to the OpenAI-compatible chat-completions URL of the
+# model you want your runtime to delegate to, and run `make up-local`.
+#
+# Rules the renderer enforces (src/omnibase_infra/runtime/
+# render_bifrost_delegation_contract.py):
+# - the URL is complete and ends in /v1/chat/completions;
+# - served_model_id must equal the model_name omnimarket's routing contract
+#   (omnimarket/configs/bifrost_delegation.yaml) declares for each backend,
+#   today Qwen3.8-27B for both rungs, so the server must serve that model id;
+# - a `lab` locale lane binds every local rung the contract routes to, which is
+#   why both rungs below exist and share the one endpoint.
+# The endpoint is read from this typed file, never from an environment
+# variable. From inside a container, a model served on your own machine is at
+# host.docker.internal (Docker Desktop), not localhost.
+schema_version: "bifrost_lane_overlay.v3"
+lane: local
+locale: lab
+backends:
+  - backend_id: local-coder
+    endpoint_url: &model_endpoint "http://host.docker.internal:8000/v1/chat/completions"
+    served_model_id: "Qwen3.8-27B"
+    parameter_count: "27B"
+    context_window: 32768
+    max_tokens: 16384
+    timeout_ms: 300000
+  - backend_id: local-heavy-reasoning
+    endpoint_url: *model_endpoint
+    served_model_id: "Qwen3.8-27B"
+    parameter_count: "27B"
+    context_window: 32768
+    max_tokens: 16384
+    timeout_ms: 300000

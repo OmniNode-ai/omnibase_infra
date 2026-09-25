@@ -117,6 +117,22 @@
 #   return a non-empty answer and the pool's zero is measured rather than an
 #   errored-and-empty read. No lane was mutated: every command in this attestation
 #   is a read.
+# verified: 2026-09-23 via read-only ssh to each host, `hostname`, `docker info --format '{{.Name}}'`
+#   and `docker ps -a` grouped by com.docker.compose.project (OMN-19088), the attestation for
+#   the `hosts:` registry and every lane's `hosts:` list this PR adds. STATE AT THIS LINE:
+#   .201 hostname `omninode-pc`, daemon `omninode-pc`, projects omnibase-infra 33,
+#   omnibase-infra-stability-test 16, omnibase-infra-judge 7, omnibase-infra-lakshman 7,
+#   omninode-ci-bus 1 and no omnibase-infra-dogfood; .101 hostname `Stickybeatz.local`,
+#   .105 hostname `omnibook` and .200 hostname `Stickybeatz-Studio.local`, all three with
+#   daemon name `docker-desktop` and each carrying only omnibase-infra-dogfood (10, 12 and 10
+#   containers). No lane was mutated: every command was a read.
+# verified: 2026-09-25T01:28:58Z via read-only ssh to 192.168.86.202 (hostname `omnipc2`),
+#   `ss -ltnH` and `docker ps -a` / `docker network ls` filtered on omnibase-infra-dev-202
+#   (OMN-19505): the declared dev-202 port block 61002-61644 has no listener (0 matches for
+#   :61xxx); the host's listeners were 22, 53, 631, 3389, 8000, 8002 and sim-202's 62002,
+#   62085, 62086, 62092, 62379, 62436 and 62644; ip_local_port_range 32768-60999; zero
+#   dev-202 containers and networks. The dev-202 lane is DECLARED, not built: no lane was
+#   mutated.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -166,8 +182,45 @@
 schema_version: "1.0.0"
 # Default image-tag pattern applied to a lane that does not override it.
 default_image_tag_pattern: '.+'
+# hosts — WHERE each lane runs (OMN-19088).
+#
+# Until this block existed every lane was implicitly "the host the census runs
+# on", which was true while every lane lived on one host. The interim pre-PR proof
+# protocol put dogfood-shaped surfaces on three other hosts, and a census run there
+# filed every service of every lane on the lab host as absent: 25 criticals on the
+# .101 host on 2026-09-21, against one lane that was actually there and clean.
+#
+# Each lane names its host ids in `hosts:`. The census resolves the host it runs on
+# (LANE_CENSUS_HOST, default `hostname`; the refresh workflow passes the docker
+# daemon name) through `aliases` below, compared as the lowercase first DNS label,
+# so `Stickybeatz.local` and `stickybeatz` are one name. It evaluates only the
+# lanes declared for that host, reports the rest `lanes_not_applicable`, and files
+# `lane_on_undeclared_host` for a lane found RUNNING on a host its list does not
+# name. A host with no entry here is REFUSED (exit 5), never evaluated as every
+# host and never as none.
+#
+# An alias may be claimed by one host only, and `docker-desktop` may never be one:
+# every Docker Desktop daemon reports that name (the .101, .105 and .200 hosts all
+# did on 2026-09-23), so it identifies none of them.
+#
+# A new surface host is declared HERE, with its lanes, before a census runs there.
+hosts:
+  lab-201:
+    aliases: [omninode-pc]
+  lab-101:
+    aliases: [stickybeatz]
+  lab-105:
+    aliases: [omnibook]
+  lab-200:
+    aliases: [stickybeatz-studio]
+  # OMN-19339: the .202 host (omnipc2). `hostname` there reads `omnipc2` (read
+  # 2026-09-24T01:18Z over ssh, read-only). It carries sim-202 and, since
+  # OMN-19505, the second deployed dev lane dev-202.
+  lab-202:
+    aliases: [omnipc2]
 lanes:
   stability-test:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.stability-test.yml
     compose_project: omnibase-infra-stability-test
     network: omnibase-infra-stability-test-network
@@ -288,6 +341,7 @@ lanes:
       - name: omninode-stability-test-contract-resolver
         kind: profile_gated
   judge:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.judge.yml
     compose_project: omnibase-infra-judge
     network: omnibase-infra-judge-network
@@ -327,6 +381,7 @@ lanes:
   # IS up, the listed services must be running. This avoids a noisy false-positive
   # ticket every time a developer stops their local stack.
   dev:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.generated.yml
     compose_project: omnibase-infra
     network: omnibase-infra_default
@@ -491,6 +546,7 @@ lanes:
   # a worker replica count for contract completeness; that is a contract-shape
   # requirement, not a declaration that a worker container exists here.
   lakshman:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.lakshman.yml
     compose_project: omnibase-infra-lakshman
     network: omnibase-infra-lakshman-network
@@ -527,6 +583,7 @@ lanes:
   # Prospective OMN-18693 dogfood boundary: owner Codex; optional lane only.
   # No production or runtime evidence is asserted here; it is not deployed.
   dogfood:
+    hosts: [lab-105, lab-101, lab-200]
     compose_file: docker/docker-compose.dogfood.yml
     compose_project: omnibase-infra-dogfood
     network: omnibase-infra-dogfood-network
@@ -557,6 +614,194 @@ lanes:
         kind: service
         replicas: 1
       - name: omnimarket-dogfood-projection-api
+        kind: service
+        replicas: 1
+  # ---------------------------------------------------------------------------
+  # sim-202 — the isolated fault-injection stack on the .202 host (OMN-19339,
+  # unified verification plan row S2, track SIM)
+  # ---------------------------------------------------------------------------
+  # Its own Postgres, Redpanda and Valkey, never the .201 shared broker; no
+  # Keycloak, no Infisical, no runtime-worker. The compose file is an overlay on
+  # docker/docker-compose.dogfood.yml that renames every container, the network,
+  # every volume and the project, and republishes every port on the loopback
+  # address only. Its header carries the render command and the reasons.
+  #
+  # A PREMISE FOR NOTHING. It promotes nothing, sources no `stability-proven`
+  # digest, and is deliberately NOT in GOVERNED_LANES or GRANT_INTERLOCK_LANES
+  # (scripts/preflight_lane_deploy_attribution.py), for the reason the dev,
+  # collaborator and pre-PR lanes are not; tests/ci/test_sim_202_lane_boundary_omn19339.py
+  # pins that. Receipts it produces are simulation or pre-PR evidence only.
+  #
+  # `optional: true`: the stack is torn down between SIM runs and absent is a
+  # valid state. The moment any declared service runs it is reconciled normally.
+  #
+  # `hosts: [lab-202]` only. A census on .202 evaluates this lane and reports
+  # every .201 lane not-applicable (OMN-19088); a sim-202 container found on any
+  # other host is a `lane_on_undeclared_host` finding.
+  #
+  # PORT BLOCK, all bound to 127.0.0.1: runtime main 62085, effects 62086,
+  # projection API 62002, Postgres 62436, Valkey 62379, Redpanda Kafka 62092,
+  # Redpanda admin 62644; 62090 (gateway API) reserved and unbound. Read free on
+  # .202 at 2026-09-24T01:18Z (`ss -ltn`: listeners 22, 53, 631, 3389, 8000 and
+  # 8002 only).
+  sim-202:
+    hosts: [lab-202]
+    compose_file: docker/docker-compose.sim-202.yml
+    compose_project: omnibase-infra-sim-202
+    network: omnibase-infra-sim-202-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omnibase-infra-sim-202-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-sim-202-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-sim-202-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-sim-202-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-sim-202-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-sim-202-migration-gate
+        kind: keepalive
+      - name: omnibase-infra-sim-202-intelligence-migration
+        kind: oneshot
+      - name: omninode-sim-202-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-sim-202-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omnimarket-sim-202-projection-api
+        kind: service
+        replicas: 1
+  # ---------------------------------------------------------------------------
+  # dev-202 — the second deployed dev lane, on the .202 host (OMN-19505, task B2
+  # of the second-deploy-slot plan, epic OMN-19500)
+  # ---------------------------------------------------------------------------
+  # A dev-shaped lane that tracks `dev` like the .201 dev lane, so a second
+  # deploy-agent instance can run a second runtime deploy slot in parallel
+  # (operator RULING 2026-09-25T00:56:45Z: omnimarket changes may be proven here
+  # under the receipt lane `compose-dev-202`; omnibase_infra stays .201-only).
+  # Its compose file is an overlay on the dev composition (infra.yml plus
+  # dev-lane.yml) that renames every container, the network, every volume and
+  # the project, and republishes every port on the loopback address in the
+  # 61xxx block; runtime main, effects and the projection API are also published
+  # on the docker bridge gateway, where a fleet verify runner container reaches
+  # them as host.docker.internal (OMN-19507 AC3), and nothing binds the LAN.
+  # Its header carries the render command and the reasons.
+  #
+  # Its own Postgres, Redpanda and Valkey, never the .201 shared broker. It is
+  # NOT in GOVERNED_LANES or GRANT_INTERLOCK_LANES
+  # (scripts/preflight_lane_deploy_attribution.py) and sources no
+  # `stability-proven` digest; tests/ci/test_dev_202_lane_boundary_omn19505.py
+  # pins that.
+  #
+  # Every service the .201 dev lane declares is declared here under a dev-202
+  # name. onex-api and its two cloud-migration one-shots are `profile_gated`:
+  # their image is the omninode_infra cloud build that only the .201 lab-overlay
+  # pin delivers. Keycloak and Infisical (the roles plan's non-roles on .202)
+  # are disabled and declared nowhere. The lane also declares the services the
+  # .201 dev composition runs but its manifest entry leaves loose (the consumers,
+  # projection-api, runtime-worker, phoenix, autoheal and the broker one-shots),
+  # because this entry is parity-checked against its compose file.
+  #
+  # `optional: true`: declared before it is built. Bring-up waits on decision 19
+  # of the unified verification plan (no clone and no `.git` on .202 while the
+  # C13, C14 and C29 producers run bare there).
+  dev-202:
+    hosts: [lab-202]
+    compose_file: docker/docker-compose.dev-202.yml
+    compose_project: omnibase-infra-dev-202
+    network: omnibase-infra-dev-202-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omnibase-infra-dev-202-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dev-202-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dev-202-redpanda-scram-user
+        kind: oneshot
+      - name: omnibase-infra-dev-202-redpanda-sasl-enable
+        kind: oneshot
+      - name: omnibase-infra-dev-202-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-dev-202-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dev-202-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-dev-202-migration-gate
+        kind: keepalive
+      - name: omnibase-infra-dev-202-intelligence-migration
+        kind: oneshot
+      - name: omnibase-infra-dev-202-cloud-migration-files
+        kind: profile_gated
+      - name: omnibase-infra-dev-202-cloud-migration
+        kind: profile_gated
+      - name: onex-api-dev-202
+        kind: profile_gated
+      - name: omnibase-infra-dev-202-autoheal
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dev-202-phoenix
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-runtime-worker
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-tenant-projection-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-api
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-agent-actions-consumer
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-skill-lifecycle-consumer
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-context-audit-consumer
+        kind: service
+        replicas: 1
+      - name: omnibase-dev-202-intelligence-api
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-contract-resolver
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-infra-routing-decisions-consumer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-tenant-registry-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-registration-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-savings-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-tenant-credentials-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-live-events-writer
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------
@@ -643,6 +888,7 @@ lanes:
   # a plain yaml.safe_load and the census must be able to name a container
   # literally.
   prepr-1:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.prepr.yml
     compose_project: omnibase-infra-prepr-1
     network: omnibase-infra-network
@@ -697,6 +943,7 @@ lanes:
         kind: service
         replicas: 1
   prepr-2:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.prepr.yml
     compose_project: omnibase-infra-prepr-2
     network: omnibase-infra-network
@@ -809,6 +1056,7 @@ lanes:
   # So: the project exists, its network exists, both ports it claims are now held by
   # it, and the credential works from where it will actually be used.
   ci-bus:
+    hosts: [lab-201]
     compose_file: docker/docker-compose.ci-bus.yml
     compose_project: omninode-ci-bus
     network: omninode-ci-bus-network

@@ -25,11 +25,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from weakref import WeakKeyDictionary
+
+from aiokafka.errors import KafkaError
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -72,6 +74,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 HANDLER_ID_DLQ_REPLAY: str = "dlq-replay-handler"
+
+
+class ProtocolDlqBacklogProbe(Protocol):
+    """Reads the replay group's undrained count per topic without joining it.
+
+    ``DlqGroupBacklogProbe`` in ``engine_dlq_replay`` is the runtime
+    implementation (OMN-19085).
+    """
+
+    async def undrained(self, topics: Sequence[str]) -> Mapping[str, int]: ...
 
 
 class DlqConsumerDrainState:
@@ -190,6 +202,12 @@ class HandlerDlqReplay:
         producer: Replays eligible messages to the original topic.
         quarantine_producer: Publishes non-replayable messages to quarantine.
         tracking: Optional ``ServiceDlqTracking`` for dlq_replay_history.
+        backlog_probe: Optional reader of the replay group's undrained count
+            per topic (OMN-19085). When it reports a topic fully committed, the
+            run skips that topic's consumer start -- a group join that costs
+            the broker's initial rebalance delay -- because there is nothing
+            on it to drain. Absent, or when a read fails, every topic is
+            drained exactly as before.
     """
 
     def __init__(
@@ -199,6 +217,7 @@ class HandlerDlqReplay:
         producer: DLQProducer,
         quarantine_producer: DLQQuarantineProducer,
         tracking: ServiceDlqTracking | None = None,
+        backlog_probe: ProtocolDlqBacklogProbe | None = None,
     ) -> None:
         if not consumers:
             raise ValueError(
@@ -209,6 +228,7 @@ class HandlerDlqReplay:
         self._producer = producer
         self._quarantine_producer = quarantine_producer
         self._tracking = tracking
+        self._backlog_probe = backlog_probe
         # Bounds, filters and the quarantine topic are identical across the
         # per-topic configs -- only ``dlq_topic`` differs, and every use of it
         # takes the DRAINED consumer's own config rather than this one.
@@ -341,7 +361,23 @@ class HandlerDlqReplay:
         order = topics[start:] + topics[:start]
 
         deadline = time.monotonic() + self._config.max_run_duration_seconds
+        backlog = await self._read_backlog(order, deadline)
         for topic in order:
+            # OMN-19085: a topic the replay group has fully committed has
+            # nothing to drain, so its consumer is not started. Starting it is
+            # a join of the shared onex-dlq-replay group, which waits the
+            # broker's initial rebalance delay (3 s on redpanda) every time,
+            # and the trigger that asked for this run is itself a record on a
+            # declared topic -- so a zero read now proves that record was
+            # already handled. Only an explicit 0 skips; a missing answer
+            # drains.
+            if backlog is not None and backlog.get(topic) == 0:
+                logger.debug(
+                    "DLQ replay group has no undrained record on %s; skipping "
+                    "its consumer start for this run (OMN-19085).",
+                    topic,
+                )
+                continue
             if time.monotonic() >= deadline:
                 logger.debug(
                     "DLQ replay run exhausted its wall-clock budget before "
@@ -384,6 +420,54 @@ class HandlerDlqReplay:
                 lock.release()
 
         return self._summarize(results, tuple(order), self._halted_partitions())
+
+    async def _read_backlog(
+        self, topics: Sequence[str], deadline: float
+    ) -> Mapping[str, int] | None:
+        """The replay group's undrained count per topic, or None if unknown.
+
+        OMN-19085. Bounded by ``backlog_probe_timeout_seconds`` AND by what is
+        left of the run's shared wall clock, so the read can shorten a run but
+        never lengthen it past ``max_run_duration_seconds`` (OMN-17137). Every
+        failure answers None, which makes the run drain every topic exactly as
+        it did before the probe existed: an unreadable backlog must cost time,
+        never a record.
+        """
+        if self._backlog_probe is None:
+            return None
+        budget = min(
+            self._config.backlog_probe_timeout_seconds,
+            deadline - time.monotonic(),
+        )
+        if budget <= 0.0:
+            return None
+        try:
+            return await asyncio.wait_for(
+                self._backlog_probe.undrained(topics), timeout=budget
+            )
+        except (TimeoutError, KafkaError, OSError) as exc:
+            logger.warning(
+                "DLQ replay could not read the replay group's backlog within "
+                "%.2fs (%s: %s); draining every declared topic this run "
+                "(OMN-19085).",
+                budget,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+        except Exception:
+            # Deliberately broad, and deliberately NOT a quarantine or a verdict
+            # path: the only consequence of catching here is the pre-OMN-19085
+            # behaviour (drain every topic). Letting an unexpected probe error
+            # escape would fail the whole dispatch, and the boundary answers a
+            # failed dispatch on this node by dead-lettering its trigger onto
+            # the topic it drains -- the OMN-18084 amplifier. Logged with the
+            # traceback on every trigger, so a defect here is loud, not silent.
+            logger.exception(
+                "DLQ replay backlog probe raised unexpectedly; draining every "
+                "declared topic this run (OMN-19085)."
+            )
+            return None
 
     async def _run_locked(
         self, consumer: DLQConsumer, deadline: float

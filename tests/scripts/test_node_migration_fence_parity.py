@@ -960,7 +960,7 @@ def test_fence_is_checked_before_the_ledger_probe_and_the_apply() -> None:
     fence_call = node_loop.index('if is_fenced_node_migration "${migration_id}"')
     declaration = node_loop.index('resolve_application_migration "$artifact_path"')
     probe = node_loop.index("if migration_is_applied")
-    apply_sql = node_loop.index('-v ON_ERROR_STOP=1 -f "$migration_file"')
+    apply_sql = node_loop.index('-v ON_ERROR_STOP=1 -f "$apply_file"')
     assert fence_call < declaration < probe < apply_sql, (
         "the fenced-id check must precede declaration resolution and the "
         "canonical already-applied probe, which must precede the apply "
@@ -1035,7 +1035,7 @@ def test_unclassified_force_rls_guard_runs_after_the_already_applied_probe() -> 
     node_loop = text[text.index("Auto-discover and apply node-owned migrations") :]
     probe = node_loop.index("if migration_is_applied")
     guard_call = node_loop.index('if ! is_fenced_node_migration "${migration_id}" \\')
-    apply_sql = node_loop.index('-v ON_ERROR_STOP=1 -f "$migration_file"')
+    apply_sql = node_loop.index('-v ON_ERROR_STOP=1 -f "$apply_file"')
     assert probe < guard_call < apply_sql, (
         "the unclassified-FORCE-RLS guard must run strictly between the "
         "already-applied probe and the apply "

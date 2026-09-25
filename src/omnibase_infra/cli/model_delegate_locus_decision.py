@@ -83,3 +83,15 @@ class ModelDelegateLocusDecision(BaseModel):
             "no deployed orchestrator to decide."
         ),
     )
+    consumer_bind_wait_seconds: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Seconds the dispatch gate waited for a consumer group to bind to "
+            "command_topic before it found one (OMN-18843, the "
+            "delegate-consumer-rebind-window class). 0.0 when a group was "
+            "bound on the first probe, and always 0.0 for an in-process run. "
+            "Recorded so a run that rode out a lane rebuild says so rather "
+            "than reading as an ordinary slow run."
+        ),
+    )

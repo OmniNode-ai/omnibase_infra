@@ -143,6 +143,26 @@ class TestTheShortRequest:
         assert _resolve(long_prompt, production) == "summarization"
 
 
+class TestTheShortRequestIsCountedOnTheRequestOnly:
+    """OMN-19140 composed with OMN-19523: the floor counts the request's words.
+
+    Pasted material (a fenced block) is not part of the request, so a short
+    request carrying long material is still a short request, admitted by its
+    opening verb, and the reason line says so.
+    """
+
+    def test_fenced_material_does_not_lift_a_short_request_over_the_floor(
+        self, production: tuple[ModelSelectableTaskClass, ...]
+    ) -> None:
+        material = "\n".join(f"line {index} of the pasted log" for index in range(60))
+        prompt = f"{_CAPTURED_SHORT}\n\n```\n{material}\n```"
+        assert len(prompt.split()) >= 120
+        resolution = resolve_task_type(prompt, explicit=None, classes=production)
+        assert resolution.task_type == "summarization", resolution.reason
+        assert resolution.resolution is EnumTaskTypeResolution.CONTRACT
+        assert "at the start of a 9-word prompt" in resolution.reason
+
+
 class TestTheThinPromptStaysOut:
     """AC4: the negative controls. A prompt with nothing to summarise."""
 

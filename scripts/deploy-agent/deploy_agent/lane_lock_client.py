@@ -50,6 +50,28 @@ against its own parent. This module reads and writes the same token, in the same
 shape, so the two directions interoperate -- an agent holding the lock is
 visible to a script it launches, and a script holding it is visible here.
 
+RE-ENTRANCY INSIDE THIS PROCESS IS PER THREAD (OMN-19501)
+----------------------------------------------------------
+
+The token is in ``os.environ``, which one process shares across all its
+threads. While the agent did all of its lane work on one thread, "this process
+holds the project" and "my caller holds it" were the same fact. OMN-19501 adds a
+second thread: the settle worker re-acquires the dev lane lock for the onex-api
+pin recreate while the job thread may be running the next compose job. Read as
+a process-wide flag, the token made that re-acquire a silent no-op, and the pin
+recreated a container in the middle of another job's compose run. The extended
+TLA+ model on OMN-19501 reports exactly that (``MC_a1_env_token_reentrancy``).
+
+So a project this PROCESS acquired is tracked in ``_OWNERS`` against the thread
+holding it. The same thread asking again is re-entrant; another thread takes
+the flock like any other writer and waits for it (``flock`` on a second open
+file description conflicts inside one process). The token keeps its meaning
+for CHILD processes, and a token this process did not write (inherited from a
+parent) still means "an ancestor holds it". The token is edited by adding and
+removing this project, never by restoring a saved value: with two threads
+interleaving, a restore puts a project released by the other thread back into
+the token, and every later acquire of it becomes a no-op.
+
 WHAT THIS DOES NOT DO
 ---------------------
 
@@ -68,6 +90,7 @@ import fcntl
 import importlib.util
 import logging
 import os
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -137,6 +160,48 @@ def _held_projects() -> list[str]:
     return os.environ.get(ENV_LOCK_HELD, "").split()
 
 
+#: OMN-19501. Projects THIS process holds the flock for, mapped to the thread
+#: that holds it. Guarded by ``_OWNERS_GUARD``, which also serialises every edit
+#: of the ``ONEX_LANE_LOCK_HELD`` token.
+_OWNERS: dict[str, int] = {}
+_OWNERS_GUARD = threading.Lock()
+
+
+def _reentrant_hold(compose_project: str) -> str | None:
+    """Why acquiring ``compose_project`` here would be a no-op, or ``None``.
+
+    Re-entrant when THIS thread already holds it, or when an ancestor process
+    does (the project is in the inherited token and this process never took
+    it). Another thread of this process holding it is NOT re-entrancy: that
+    caller must take the flock and wait.
+    """
+    with _OWNERS_GUARD:
+        owner = _OWNERS.get(compose_project)
+        if owner is not None:
+            return "this thread" if owner == threading.get_ident() else None
+        if compose_project in _held_projects():
+            return "an outer process in this ancestry"
+    return None
+
+
+def _record_hold(compose_project: str) -> None:
+    with _OWNERS_GUARD:
+        _OWNERS[compose_project] = threading.get_ident()
+        held = _held_projects()
+        if compose_project not in held:
+            os.environ[ENV_LOCK_HELD] = " ".join([*held, compose_project])
+
+
+def _clear_hold(compose_project: str) -> None:
+    with _OWNERS_GUARD:
+        _OWNERS.pop(compose_project, None)
+        remaining = [p for p in _held_projects() if p != compose_project]
+        if remaining:
+            os.environ[ENV_LOCK_HELD] = " ".join(remaining)
+        else:
+            os.environ.pop(ENV_LOCK_HELD, None)
+
+
 @contextmanager
 def lane_lock(
     compose_project: str,
@@ -150,17 +215,19 @@ def lane_lock(
     A no-op when an OUTER process in this ancestry already holds the project,
     which is the same re-entrancy rule ``lane_lock.sh`` applies -- and is what
     keeps a deploy that shells out to a locking script from deadlocking against
-    itself.
+    itself. Also a no-op when THIS thread already holds it. Another thread of
+    this process holding it is contention, not re-entrancy (OMN-19501).
 
     Raises :class:`LaneLockContendedError` when the bounded wait expires. The
     holder is named from the sidecar the helper maintains, so contention says
     WHO rather than hanging anonymously.
     """
-    if compose_project in _held_projects():
+    holder = _reentrant_hold(compose_project)
+    if holder is not None:
         logger.info(
-            "lane lock for %s already held by an outer process in this "
-            "ancestry; not re-acquiring",
+            "lane lock for %s already held by %s; not re-acquiring",
             compose_project,
+            holder,
         )
         yield
         return
@@ -171,7 +238,6 @@ def lane_lock(
 
     handle = path.open("a+")
     acquired = False
-    previous_token = os.environ.get(ENV_LOCK_HELD)
     try:
         deadline = time.monotonic() + timeout
         while True:
@@ -192,17 +258,14 @@ def lane_lock(
                 time.sleep(_POLL_INTERVAL_SECONDS)
 
         module.write_holder(compose_project, lane, ref, "deploy-agent")
-        os.environ[ENV_LOCK_HELD] = " ".join([*_held_projects(), compose_project])
+        _record_hold(compose_project)
         logger.info(
             "lane lock acquired for %s (lane=%s ref=%s)", compose_project, lane, ref
         )
         yield
     finally:
         if acquired:
-            if previous_token is None:
-                os.environ.pop(ENV_LOCK_HELD, None)
-            else:
-                os.environ[ENV_LOCK_HELD] = previous_token
+            _clear_hold(compose_project)
             try:
                 module.holder_path(compose_project).unlink()
             except OSError:

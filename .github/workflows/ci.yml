@@ -865,6 +865,29 @@ jobs:
           echo "================================================================"
           uv run python scripts/batch_validate_node_contracts.py --verbose
 
+      # OMN-17423 AC4. The runtime CredentialRedactionFilter installed by
+      # service_kernel.configure_logging() is defense in depth; this gate is
+      # the enforcement layer, refusing the source pattern before a handler
+      # ever sees it. It scans the SHARED path AC2 covers, so a new log site
+      # in any runtime service is caught here rather than in a pod log.
+      # SYNC with the .pre-commit-config.yaml hook `check-no-credential-in-log`.
+      - name: Credential-in-log gate (OMN-17423)
+        run: |
+          echo "================================================================"
+          echo "Credential-in-log gate (OMN-17423)"
+          echo "================================================================"
+          uv run python scripts/ci/check_no_credential_in_log.py \
+            --root src/omnibase_infra
+
+      # Non-vacuity. Without this a gate whose matcher silently stopped
+      # matching would report "zero violations" and read exactly like success.
+      - name: Credential-in-log gate self-test (OMN-17423)
+        run: |
+          uv run python scripts/ci/check_no_credential_in_log.py \
+            --mode=self-test \
+            --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py \
+            --expected 9
+
   infra-node-handler-ownership:
     needs: occ-preflight
     name: Infra Node Handler Ownership
@@ -1432,6 +1455,89 @@ jobs:
           # below any plausible legitimate lockfile size, not a live count
           # that needs updating on every dependency bump.
           uv run python scripts/ci/check_lockfile_registry_allowlist.py uv.lock --min-packages 20
+
+  # Lab probe windows (OMN-19412, lab release-sync plan T0.3, seam L0.3).
+  # config/lab_probe_windows.yaml is the list of scheduled lab probes the
+  # reconcile dispatcher (OMN-19420) and runtime-train (OMN-19424) read to keep
+  # a lane mutation out of the gap before a probe. This job re-derives every
+  # cron, lane and maximum duration from the workflow files and refuses any
+  # disagreement, and refuses a scheduled probe with no entry. omnibase_infra is
+  # read at THIS checkout (so a PR adding a probe cron is judged on its own
+  # head); omninode_infra and omnimarket at their default branch, `dev`.
+  # Registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS, which is what
+  # makes it block through the required CI Summary context. No `if:` and no
+  # continue-on-error: a token mint or checkout that fails fails the job, since
+  # a check that could not read a repository has proven nothing about it.
+  lab-probe-windows:
+    needs: occ-preflight
+    name: Lab Probe Windows (OMN-19412)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Same lightweight-gate baseline as lockfile-registry-allowlist above; the
+    # check itself parses about 290 small YAML files.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      # omninode_infra is private; the default token is scoped to this repo.
+      - name: Mint a read-only omninode_infra token
+        id: infra-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omninode_infra
+          permission-contents: read
+
+      - name: Checkout omninode_infra workflows at dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omninode_infra
+          ref: dev
+          path: .probe-roots/omninode_infra
+          token: ${{ steps.infra-token.outputs.token }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout omnimarket workflows at dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .probe-roots/omnimarket
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+
+      - name: Every probe cron, lane and duration agrees with its workflow, and every probe is listed
+        run: |
+          set -euo pipefail
+          echo "omninode_infra@dev = $(git -C .probe-roots/omninode_infra rev-parse HEAD)"
+          echo "omnimarket@dev = $(git -C .probe-roots/omnimarket rev-parse HEAD)"
+          uv run python scripts/ci/check_lab_probe_windows.py \
+            --root omnibase_infra=. \
+            --root omninode_infra=.probe-roots/omninode_infra \
+            --root omnimarket=.probe-roots/omnimarket
 
   # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
   # git-pinned rev must build the SAME src/ tree as the released tag its
@@ -3143,6 +3249,85 @@ jobs:
     with:
       mode: compose
 
+  # ============================================================================
+  # Laptop profile boot (OMN-19498)
+  # ----------------------------------------------------------------------------
+  # Boots the catalog bundle `local` (OMN-19496) exactly as its documentation
+  # tells a new engineer to -- `make local-env`, `make up-local` -- through
+  # reusable-runtime-boot.yml mode `catalog-local`, and fails unless the
+  # migration gate is healthy, both runtime kernels report /health "healthy"
+  # with is_running true, and the delegate-skill command topic has a consumer.
+  #
+  # Unlike runtime-boot-smoke above it EXECUTES on pull requests: on every
+  # pull request that touches the surfaces the laptop boot is made of (the
+  # catalog, the runtime image, the migrations, the boot-critical kernel and
+  # wiring code, this workflow), on every push to `dev` that does, and on every
+  # workflow_dispatch and merge_group. Unrelated pull requests skip it, which
+  # the CI Summary sweep accepts; a failure when it does run fails CI Summary.
+  # Widening the path set is a one-line change once it has a green record.
+  # ============================================================================
+  laptop-profile-paths:
+    name: Laptop profile paths changed (OMN-19498)
+    # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.paths.outputs.changed }}
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Diff against the base
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)
+              git fetch --no-tags origin "$PR_BASE_REF"
+              range="origin/${PR_BASE_REF}...HEAD"
+              ;;
+            push)
+              if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+              fi
+              range="${PUSH_BEFORE}..HEAD"
+              ;;
+            *)
+              echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+              ;;
+          esac
+          changed_files="$(git diff --name-only "$range")"
+          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
+          matched="$(printf '%s\n' "$changed_files" | grep -E "$pattern" || true)"
+          if [ -n "$matched" ]; then
+            echo "Laptop profile surfaces changed:"
+            printf '%s\n' "$matched"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No laptop profile surface changed in ${range}."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  runtime-boot-laptop-profile:
+    name: Runtime Boot Laptop Profile (catalog local)
+    needs: [laptop-profile-paths]
+    if: needs.laptop-profile-paths.outputs.changed == 'true'
+    uses: ./.github/workflows/reusable-runtime-boot.yml
+    with:
+      mode: catalog-local
+
   # ===========================================================================
   # OMN-15108 fan-out of OMN-14877 (omnibase_core#1478 pattern) / OMN-14430
   # ---------------------------------------------------------------------------
@@ -4569,6 +4754,19 @@ jobs:
       # missing half: an artifact already declared at the base ref may not be
       # modified, deleted, or renamed except via an explicit new-ordinal
       # supersession that lands its successor in the same change.
+      # OMN-19344 (plan row R7, rule RB): every forward migration -- flat,
+      # node stream and intelligence -- declares expand-only, forward-only or
+      # contract in config/migration_classes.yaml, and a destructive statement
+      # declared expand-only is refused. Rule RB makes a rollback candidate
+      # eligible only when every migration applied after it is expand-only or
+      # has a recorded lab execution of its down-migration; an undeclared or
+      # misclassified migration would let the one-command rollback redeploy
+      # old code over a schema it cannot read. The recorded down executions in
+      # config/migration_down_executions.yaml are checked against the current
+      # bytes of both scripts in the same step.
+      - name: Check migration class declarations
+        run: uv run python scripts/validation/check_migration_class.py
+
       - name: Check node migration append-only immutability
         env:
           APPEND_ONLY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}

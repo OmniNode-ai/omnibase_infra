@@ -109,10 +109,17 @@ _SERVING = [pair for pair in _LAB_BINDINGS if pair[1].serving]
 _DARK = [pair for pair in _LAB_BINDINGS if not pair[1].serving]
 
 
-def test_the_lab_overlays_bind_a_serving_and_a_dark_backend() -> None:
-    """Positive control: an empty parametrization would pass every test below."""
+def test_the_lab_overlays_bind_a_serving_backend() -> None:
+    """Positive control: an empty parametrization would pass every test below.
+
+    OMN-19251 removed the last ``serving: false`` lab binding (the dead
+    ``local-ds-v4-flash`` rung on the retired .200:8101 host), so there is no
+    longer a live dark-binding class to control for here. The parametrized
+    ``test_non_serving_bindings_have_a_failed_probe_on_record`` below still
+    covers one correctly, as an empty parametrization, the moment one exists
+    again.
+    """
     assert _SERVING, "no serving lab binding found under docker/lane-overlays"
-    assert _DARK, "no serving: false lab binding found under docker/lane-overlays"
 
 
 @pytest.mark.parametrize("pair", _LAB_BINDINGS, ids=_pair_id)

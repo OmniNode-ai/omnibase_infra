@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 571
+    max_skips: 584
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -67,6 +67,37 @@ suites:
             One lab-alarm id, test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv. OMN-19091 makes the alarm import yaml and aiokafka in-process (a documented exception to its stdlib-only rule, ruled 2026-09-21 because a secret on argv does not satisfy the OMN-18867 consent), so the test proves both imports resolve from the literal brew interpreter the launchd agent names, with no virtualenv. That half needs /opt/homebrew/bin/python3.13 or /usr/local/bin/python3.13 on the host, which no Linux CI runner has, so it skips here with a named reason instead of passing without looking. The installer-text half (both brew paths named, no pydantic, the yaml import declared) runs before the skip on every host, CI included, and the import half runs on the Mac the alarm is installed on. Same class as the OMN-18867 live-ledger readback already in this list: host state CI cannot see.
           node_ids:
             - tests.ci.test_lab_alarm_omn18867::test_the_alarm_runs_on_the_brew_interpreter_with_no_virtualenv
+        - measured_at: '2026-09-23'
+          measured_by: OMN-19251
+          delta: 1
+          reason: >-
+            One `[NOTSET]` id, from an empty pytest.mark.parametrize. OMN-19251 deleted the last `serving: false` (dark) lab binding -- the dead local-ds-v4-flash rung on the retired .200:8101 host -- from every .201 lane overlay. tests/unit/runtime/test_bifrost_served_model_probe_fixture.py parametrizes test_non_serving_bindings_have_a_failed_probe_on_record over the dark-binding set collected from those overlays; with that set now empty, pytest auto-skips the parametrization with reason "got empty parameter set for (pair)" and reports the single `[NOTSET]` id below instead of silently vanishing. It is not a broken proof: the positive control beside it (test_the_lab_overlays_bind_a_serving_backend) still asserts a serving binding exists, and the parametrized test itself resumes running the moment a lane overlay declares a dark binding again -- an empty parametrization, not a deleted test.
+          node_ids:
+            - tests.unit.runtime.test_bifrost_served_model_probe_fixture::test_non_serving_bindings_have_a_failed_probe_on_record[NOTSET]
+        - measured_at: '2026-09-24'
+          measured_by: OMN-19411
+          delta: 11
+          reason: >-
+            Eleven parametrizations of test_lab_sync_fixture_produces_its_named_kind in tests/unit/scripts/test_lane_census_plan.py, one per lab-sync finding kind (T0.2, OMN-19411). The test is a strict xfail (reason="lab-sync kinds are declared, not evaluated: T1.2 OMN-19414, T1.3 OMN-19416"): OMN-19411 declares the eleven finding-kind specs and their fixtures but deliberately wires no evaluation path yet, so asserting a fixture produces its named finding must fail today. pytest's JUnit writer reports a strict xfail as <skipped type="pytest.xfail">, which is why the ratchet counts it rather than a <failure> -- confirmed locally: `pytest -k test_lab_sync_fixture_produces_its_named_kind --junitxml=...` emits exactly these 11 ids as skipped, 11 xfailed in the run summary. Strict means the marker fails the build the moment the test starts passing, so T1.2 (evaluation, OMN-19414) or T1.3 (OMN-19416) deleting the xfail marker is the same commit that removes these 11 ids from this baseline -- they are not left to grow silently, they are pinned to two named, already-open tickets.
+          node_ids:
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[broker_config_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[config_hash_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[container_restart_loop]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[container_unhealthy]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[desired_state_unreadable]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[package_version_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[revision_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_count_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_offline]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_workdir_mismatch]
+            - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[undeclared_container]
+        - measured_at: '2026-09-25'
+          measured_by: OMN-19507
+          delta: 1
+          reason: >-
+            One positive control across a seam that has not landed, test_the_dev_202_route_labels_have_a_runner_to_land_on in tests/ci/test_omnipc2_verify_runner_omn19507.py. It asserts that the verify labels the deploy-lane routing table declares for the dev-202 instance are satisfiable by the new .202 verify runner. That table (config/deploy_lane_routing.yaml) is added by OMN-19506, and even with it the dev-202 instance declares no verify block until the dev-202 bring-up task adds one, so on this base the test skips with a named reason instead of passing without looking. The three other tests in the module assert the runner's compose labels, that it is the only runner labelled host-202, and its mounts, all from committed state, and run in every job. The skip ends in the same change that gives dev-202 a verify block: the test then runs, and that change removes this id from this baseline.
+          node_ids:
+            - tests.ci.test_omnipc2_verify_runner_omn19507::test_the_dev_202_route_labels_have_a_runner_to_land_on
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -99,6 +130,7 @@ suites:
       - tests.ci.test_lane_projection_writer_coverage_omn17562::test_registry_matches_the_runtime_predicate
       - tests.ci.test_lane_runtime_profile_carriage_omn18114::test_carrier_profile_contracts_match_the_omnimarket_manifest
       - tests.ci.test_omnimarket_contract_pin::test_an_upstream_contract_addition_cannot_red_an_unrelated_infra_pr
+      - tests.ci.test_omnipc2_verify_runner_omn19507::test_the_dev_202_route_labels_have_a_runner_to_land_on
       - tests.ci.test_receipt_gate_install_guard.TestReceiptGateInstallSafeguards::test_importable_step_prints_install_path_on_failure
       - tests.ci.test_push_side_derivation_omn18863.TestItPassesOnATreeThatIsInSync::test_the_current_tree_passes_against_its_own_contracts
       - tests.integration.cli.test_execution_budget_shipped_contract_omn18924::test_every_exposed_class_resolves_a_budget_on_the_installed_contract
@@ -619,6 +651,7 @@ suites:
       - tests.unit.nodes.reducers.test_registration_reducer.TestPropertyBasedStateInvariants::test_state_node_id_consistency
       - tests.unit.nodes.test_registry_api_effect_handler_stubs::test_handler_raises_not_implemented[NOTSET]
       - tests.unit.runtime.test_bifrost_parameter_count_matches_served_id::test_parameter_count_agrees_with_the_served_model_id[local-ds-v4-flash]
+      - tests.unit.runtime.test_bifrost_served_model_probe_fixture::test_non_serving_bindings_have_a_failed_probe_on_record[NOTSET]
       - tests.unit.runtime.test_dispatch_result_applier_topic_routing.TestDelegationTopicRegistryNoDrift::test_applier_resolved_topics_match_owning_contract
       - tests.unit.runtime.test_event_bus_subscriber_container_resolution::test_delegation_plugin_falls_back_to_config_event_bus_when_container_absent
       - tests.unit.runtime.test_event_bus_subscriber_container_resolution::test_delegation_plugin_resolves_subscriber_bus_from_container
@@ -627,6 +660,17 @@ suites:
       - tests.unit.runtime.test_message_dispatch_engine.TestMetrics::test_metrics_updated_on_category_mismatch
       - tests.unit.scripts.test_ci_bus_overlay_live_binding.TestLiveOverlayBinding::test_live_omnimarket_overlay_validates
       - tests.unit.scripts.test_ci_bus_overlay_live_binding.TestLiveOverlayBinding::test_live_overlay_declares_the_lane_the_publisher_uses
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[broker_config_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[config_hash_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[container_restart_loop]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[container_unhealthy]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[desired_state_unreadable]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[package_version_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[revision_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_count_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_offline]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_workdir_mismatch]
+      - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[undeclared_container]
       - tests.unit.scripts.test_ledger_cost_sentence_omn18554::test_live_goal_source_declares_a_resolvable_stamp
       - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheFlagIsNotAGeneralWaiver::test_a_future_window_is_refused_as_a_blanket_waiver
       - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheFlagIsNotAGeneralWaiver::test_a_payload_with_no_timestamp_is_refused

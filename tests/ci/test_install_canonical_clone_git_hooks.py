@@ -23,6 +23,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = REPO_ROOT / "scripts" / "install-canonical-clone-git-hooks.sh"
 
@@ -49,6 +53,7 @@ def _clean_env(registry: Path) -> dict[str, str]:
     env["OMNI_HOME"] = str(registry)
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_SYSTEM"] = os.devnull
+    env.pop("ONEX_REGISTRY_ROOTS", None)
     for leaked in (
         "GIT_DIR",
         "GIT_WORK_TREE",
@@ -69,7 +74,7 @@ def registry(tmp_path: Path) -> Path:
     subprocess.run(
         ["git", "init", "-q", "-b", "dev", "."],
         cwd=repo,
-        env=env,
+        env=scrub_git_location_env(env),
         check=True,
         capture_output=True,
     )
@@ -96,7 +101,7 @@ def test_readback_reports_an_uninstalled_clone_and_changes_nothing(
     assert not (registry / "scripts" / "git-hooks").exists()
     current = subprocess.run(
         ["git", "-C", str(registry / "some_repo"), "config", "--get", "core.hooksPath"],
-        env=env,
+        env=scrub_git_location_env(env),
         capture_output=True,
         text=True,
         check=False,
@@ -199,13 +204,16 @@ def test_a_linked_worktree_is_skipped_not_installed_into(
         ["-c", "user.email=t@e.invalid", "-c", "user.name=T", "commit", "-qm", "seed"],
     ):
         subprocess.run(
-            ["git", "-C", str(repo), *args], env=env, check=True, capture_output=True
+            ["git", "-C", str(repo), *args],
+            env=scrub_git_location_env(env),
+            check=True,
+            capture_output=True,
         )
     worktree = registry / "omni_worktrees" / "OMN-16497" / "some_repo"
     worktree.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "-C", str(repo), "worktree", "add", "-q", str(worktree), "-b", "wt"],
-        env=env,
+        env=scrub_git_location_env(env),
         check=True,
         capture_output=True,
     )
