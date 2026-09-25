@@ -1,0 +1,55 @@
+# omnirunners.slice -- OMN-19077: one cgroup for the whole .201 general runner pool.
+#
+# Every omninode-runner-N container is created with
+# `cgroup_parent: omnirunners.slice` (x-runner-base in
+# docker/docker-compose.runners.yml), so the limits below apply to the fleet
+# IN AGGREGATE. Per-runner mem_limit/cpus stay as they are; they bound one job,
+# this bounds all of them together.
+#
+# WHY. The fleet shares the host with the dev, stability-test, judge and
+# collaborator lanes. Measured 2026-09-24: every runner created 2026-09-16 shows
+# memory.peak at its full 6 GiB limit and a swap peak of 2.7 to 5.3 GiB, and on
+# 2026-09-22 58 concurrent jobs drove IO pressure to 52.8 and the lanes' brokers
+# into swap on the same NVMe. The runner cgroups had no aggregate bound at all:
+# they sat beside the lane containers in system.slice, so runner pressure was
+# reclaimed from whoever happened to be there, lanes included.
+#
+# WHAT EACH LINE DOES.
+#   MemoryHigh     soft aggregate ceiling. Above it the kernel throttles and
+#                  reclaims inside THIS slice (runner page cache first), so a CI
+#                  burst pays for its own memory instead of paging a lane out.
+#   MemoryMax      hard aggregate ceiling. Reaching it is an OOM kill inside a
+#                  runner job, never outside the slice.
+#   MemorySwapMax  aggregate swap the runners may hold, so a burst cannot fill
+#                  the shared swapfile on the docker-data disk.
+#   CPUWeight      default is 100 for system.slice (where the lanes and dockerd
+#                  live). 25 means CI yields CPU to a lab build under contention
+#                  and still uses every idle core when there is none.
+#
+# NOT HERE: IOWeight. On this host both NVMe devices run the `none` scheduler
+# and io.cost is not configured, so an IOWeight line would be accepted and do
+# nothing. It is left out rather than declared and ignored.
+#
+# Installed by scripts/deploy-runners.sh (install_runner_slice) before any
+# runner is created or recreated, and read back there; the deploy fails closed
+# if the live values differ from this file.
+#
+# COUNT. The pool is 60 runners (config/runner_fleet.yaml expected_count),
+# not the 40 an earlier draft of OMN-19077 proposed. Operator ruling
+# 2026-09-24 (ROLLING_WORK_LEDGER.md:3794): 60 is the correct steady-state
+# count, and containment -- not a headcount cut -- is the fix for the
+# 2026-09-22 incident. The limits below are unchanged by that ruling: they
+# bound the pool IN AGGREGATE regardless of how many containers are in it, so
+# the same four values hold the host to the same ceiling at 60 runners as
+# they would at 40 -- a full pool just contends harder for the same budget.
+[Unit]
+Description=OmniNode general CI runner pool (OMN-19077)
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=32G
+MemoryMax=40G
+MemorySwapMax=16G
+CPUAccounting=yes
+CPUWeight=25
