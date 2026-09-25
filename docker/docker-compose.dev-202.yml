@@ -27,7 +27,10 @@
 # ISOLATION. Its own Postgres, Redpanda and Valkey, never the .201 shared
 # broker. The ONLY tie to .201 is the deploy agent's read of the dev control
 # topic, and that is the agent's connection, not this stack's. So:
-#   * every port binds the loopback address;
+#   * every port binds the loopback address, and the three ports a fleet
+#     verify job reads (runtime main 61085, effects 61086, projection API
+#     61002) also bind the docker bridge gateway 172.17.0.1 -- never all
+#     interfaces, never the LAN address (see VERIFY-RUNNER REACH below);
 #   * runtime-effects leaves the external omnimemory-network, which does not
 #     exist on .202;
 #   * the four runtime-kernel services mount this lane's own Bifrost overlay
@@ -58,6 +61,21 @@
 # a deploy agent that builds in workspace mode waits until that ruling is
 # discharged for .202 (C29's move into a disposable container is
 # omninode_infra#1663).
+#
+# VERIFY-RUNNER REACH (OMN-19507 AC3, operator RULING 2026-09-25T06:57:54Z).
+# A per-merge verify job runs in a runner CONTAINER, where localhost is the
+# container itself, and reads a lane at host.docker.internal, the runner's
+# `host.docker.internal:host-gateway` alias. That alias resolves to the default
+# bridge network's gateway, 172.17.0.1 on .202 (read 2026-09-25: `docker network
+# inspect bridge`, and daemon.json sets no host-gateway-ip). A loopback-only
+# publish refuses it. So 61085, 61086 and 61002 are published twice: on
+# loopback, where the deploy agent's own localhost health probe reads them, and
+# on the gateway, which no other host routes to. Measured on .202 the same day
+# with throwaway containers on those two binds: a container on a user network
+# with the alias reached the gateway bind, got connection refused from a
+# loopback-only one, and the LAN address refused both. The broker, databases
+# and consumers stay loopback-only: a verify job reads those through the docker
+# socket, not over TCP.
 #
 # PORT BLOCK (read free on .202 by `ss -ltn`, recorded in the lane manifest's
 # verified: line). 61000-61999 sits above .202's ephemeral range (32768-60999)
@@ -170,6 +188,7 @@ services:
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
     ports: !override
       - "127.0.0.1:61085:8085"
+      - "172.17.0.1:61085:8085"
     volumes: !override
       - runtime_logs:/app/logs
       - runtime_data:/app/data
@@ -183,6 +202,7 @@ services:
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
     ports: !override
       - "127.0.0.1:61086:8085"
+      - "172.17.0.1:61086:8085"
     networks: !override
       - omnibase-infra-network
     volumes: !override
@@ -217,6 +237,7 @@ services:
     container_name: omnimarket-dev-202-projection-api
     ports: !override
       - "127.0.0.1:61002:3002"
+      - "172.17.0.1:61002:3002"
   agent-actions-consumer:
     container_name: omninode-dev-202-agent-actions-consumer
     ports: !override
