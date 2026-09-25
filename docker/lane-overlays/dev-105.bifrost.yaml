@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19544: Typed Bifrost delegation overlay for the dev-105 lane, the time-shared
+# deployed dev lane on the .105 host (lab deploy lanes plan, epic OMN-19500).
+#
+# ZERO LOCAL BACKENDS, BY DESIGN. The lane's isolation property is that its only
+# tie to .201 is the deploy agent's read of the dev control topic. The dev lane
+# this stack is layered on binds its local rungs to the .201 model server, so
+# mounting that lane's overlay here would give the stack a route to .201 the
+# moment anything delegated through it.
+#
+# There is no model server on .105 (prove-105 census, ledger STATUS
+# 2026-09-25T08:57:41Z), so there is no local rung to bind either.
+#
+# `locale: cloud` is the schema's way of stating "no lab backend is reachable
+# from this lane" (OMN-17502). The renderer then disables every local backend
+# and refuses a render that still binds one, so the absence is enforced, not
+# assumed. No cloud credential is supplied to this lane, so a delegation
+# attempted through it fails rather than reaching any model.
+schema_version: "bifrost_lane_overlay.v3"
+lane: dev-105
+locale: cloud
+backends: []
