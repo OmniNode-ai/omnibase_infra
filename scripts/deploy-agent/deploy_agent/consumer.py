@@ -100,6 +100,7 @@ from deploy_agent.lineage_fence import (
     is_workspace_rebuild,
 )
 from deploy_agent.queue_depth import LagSampler, ModelControlTopicLag
+from deploy_agent.routing import ROUTED_LANES, DeployRouter
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +211,17 @@ def deserialize_command_value(raw: bytes) -> Any:
     return decoded
 
 
+#: The group the single dev agent has always used. A consumer with no router
+#: keeps it; the routing table declares it for dev-201 so that instance's
+#: committed offsets carry over.
+LEGACY_CONSUMER_GROUP = "onex-deploy-agent"
+
+
+def consumer_group_for(router: DeployRouter | None) -> str:
+    """The Kafka consumer group this process subscribes with (OMN-19506 AC3)."""
+    return router.consumer_group if router is not None else LEGACY_CONSUMER_GROUP
+
+
 class DeployConsumer:
     #: OMN-18144. The queue observer, optional and absent by default because
     #: this consumer is also built by tests and by paths that are not serving
@@ -235,6 +247,10 @@ class DeployConsumer:
     running_build: RunningBuildReader | None = None
     ref_resolver: RefResolver | None = None
     tracking_ref: str | None = None
+    #: OMN-19506, on the same terms: a consumer built without a router routes
+    #: nothing and accepts every command its lane fence admits, which is the
+    #: single-instance behaviour.
+    router: DeployRouter | None = None
 
     def __init__(
         self,
@@ -250,11 +266,18 @@ class DeployConsumer:
         running_build: RunningBuildReader | None = None,
         ref_resolver: RefResolver | None = None,
         tracking_ref: str | None = None,
+        router: DeployRouter | None = None,
     ) -> None:
+        # OMN-19506 AC3. Each deploy-agent instance reads EVERY record, so each
+        # subscribes with its own declared group: in one shared group Kafka
+        # would hand a record to ONE instance, and a command routed to the
+        # other would be skipped by the only reader it reached (the
+        # MC_shared_group counterexample on the ticket).
+        self.router = router
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
             **kafka_config.consumer_kwargs(),
-            group_id="onex-deploy-agent",
+            group_id=consumer_group_for(router),
             auto_offset_reset="latest",
             enable_auto_commit=False,
             value_deserializer=deserialize_command_value,
@@ -521,6 +544,26 @@ class DeployConsumer:
             )
             self._commit_through(msg)
             return None, self._reject(EnumRejectionReason.LANE_NOT_ALLOWED, cmd=cmd)
+
+        # Step 4a: Instance routing (OMN-19506). A command the routing table,
+        # read at the command's own ref, gives to another deploy-agent instance
+        # is skipped: offset committed, NOTHING published. A rejection here
+        # would race the other instance's acceptance at the redeploy effect,
+        # and a busy or duplicate rejection from this instance would too, which
+        # is why this runs before both.
+        if self.router is not None and cmd.runtime_lane in ROUTED_LANES:
+            mine, decision = self.router.is_mine(cmd)
+            if not mine:
+                logger.info(
+                    "Skipping command %s: routed to instance %s by the %s; this "
+                    "is instance %s. Nothing is published.",
+                    cmd.correlation_id,
+                    decision.instance,
+                    decision.basis,
+                    self.router.instance.name,
+                )
+                self._commit_through(msg)
+                return None, None
 
         # Step 5: Check busy
         if self.job_store.has_active_job():
@@ -824,6 +867,13 @@ class DeployConsumer:
             assert_lane_allowed(cmd.runtime_lane, self.allowed_lanes)
         except LaneNotAllowedError:
             return None
+        # OMN-19506: another instance's command is never folded into this
+        # instance's runner, which would record it superseded here while the
+        # other instance runs it.
+        if self.router is not None and cmd.runtime_lane in ROUTED_LANES:
+            mine, _decision = self.router.is_mine(cmd)
+            if not mine:
+                return None
         return cmd
 
     def _sample_lag(self) -> None:
