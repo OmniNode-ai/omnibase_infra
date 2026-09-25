@@ -64,6 +64,7 @@ from deploy_agent.gateway_budget import (
     derive_gateway_deploy_budget,
 )
 from deploy_agent.host_conditions import probe_host_conditions
+from deploy_agent.instance_lanes import ModelInstanceLane, load_instance_lanes
 from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     lane_lock,
@@ -81,6 +82,7 @@ from deploy_agent.ref_fence import (
     ModelRefLineageFacts,
     assert_ref_not_stale_branch,
 )
+from deploy_agent.routing import AGENT_CLONE_ROOT, RoutingTableError
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
     load_tracking_remote_ref_from_env,
@@ -567,53 +569,82 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
 }
 
 
-# OMN-19522: the dev-202 lane's own overlay (OMN-19505), layered on the .201 dev
-# lane's pair. It replaces everything that identifies a lane on a host: the
-# project, every container name, the network, the volumes and the ports.
-_DEV_202_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-202.yml"
-
-#: The dev lane's instances (OMN-19506 routing table, OMN-19522 composition).
-#: The wire lane of a command either instance runs is ``dev``; which
-#: composition runs it is a property of the process, selected once at agent
-#: start from the instance the routing table resolved (``select_dev_instance``).
-#: ``tests/unit/test_dev_202_executor_lane_omn19522.py`` pins that the keys are
-#: exactly the routing table's instances.
-DEV_INSTANCE_LANE_CONFIGS: dict[str, ModelLaneConfig] = {
-    "dev-201": _LANE_CONFIGS[EnumRuntimeLane.DEV],
-    "dev-202": ModelLaneConfig(
-        lane=EnumRuntimeLane.DEV,
-        compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY, _DEV_202_OVERLAY),
-        compose_project="omnibase-infra-dev-202",
-        build_project="omnibase-infra-dev-202",
-        postgres_container="omnibase-infra-dev-202-postgres",
-        # SERVICE names, as on the .201 dev lane: the verify recreate
-        # (VERIFY_RECREATE_LANES) looks them up by compose label. The ports are
-        # the host ports docker-compose.dev-202.yml publishes them on.
-        runtime_health_targets=(
-            ("omninode-runtime", 61085),
-            ("runtime-effects", 61086),
-        ),
-        runtime_container="omninode-dev-202-runtime",
-        disabled_phases=frozenset(EnumInstancePhase),
-        # The overlay's profile-disabled services a dev deploy is otherwise
-        # responsible for, plus the gateway project's, which has no lane here.
-        disabled_services=frozenset(
-            {
-                "onex-api",
-                "cloud-migration-files",
-                "cloud-migration",
-                "keycloak",
-                "infisical",
-                *DEV_LANE_GATEWAY_SERVICES,
-            }
-        ),
-    ),
-}
-
 #: The instance whose composition ``lane_config_for(DEV)`` returns. ``dev-201``
 #: until the agent selects otherwise, so a process with no router (fenced away
-#: from dev) and every caller that predates instances see the .201 lane.
+#: from dev) and every caller that predates instances see the .201 lane. It is
+#: also the routing table's pinned default, the one instance that declares no
+#: ``lane:`` block and keeps ``_LANE_CONFIGS[DEV]``.
 DEFAULT_DEV_INSTANCE = "dev-201"
+
+
+def dev_instance_lane_config(
+    spec: ModelInstanceLane, *, repo_dir: str = REPO_DIR
+) -> ModelLaneConfig:
+    """An instance's dev-lane composition, from its routing-table ``lane:`` block.
+
+    OMN-19543: this replaces the per-instance literal OMN-19522 wrote for
+    dev-202. The instance's overlay is layered on the .201 dev lane's pair and
+    replaces everything that identifies a lane on a host (project, container
+    names, network, volumes, ports); the table names the rest. The health
+    targets keep the SERVICE names, as on the .201 dev lane: the verify
+    recreate (VERIFY_RECREATE_LANES) looks them up by compose label, and the
+    ports are the host ports the overlay publishes them on. Disabling the
+    gateway phase also disables the gateway project's services, which have no
+    lane on a host without that phase.
+    """
+    try:
+        phases = frozenset(EnumInstancePhase(p) for p in spec.disabled_phases)
+    except ValueError as exc:
+        raise RoutingTableError(
+            f"unknown disabled phase in {spec.disabled_phases!r} (known: "
+            f"{', '.join(p.value for p in EnumInstancePhase)})"
+        ) from exc
+    services = set(spec.disabled_services)
+    if EnumInstancePhase.GATEWAY_DEPLOY in phases:
+        services.update(DEV_LANE_GATEWAY_SERVICES)
+    return ModelLaneConfig(
+        lane=EnumRuntimeLane.DEV,
+        compose_files=(
+            COMPOSE_FILE,
+            _DEV_LANE_OVERLAY,
+            f"{repo_dir}/{spec.compose_overlay}",
+        ),
+        compose_project=spec.compose_project,
+        build_project=spec.compose_project,
+        postgres_container=spec.postgres_container,
+        runtime_health_targets=(
+            ("omninode-runtime", spec.health_ports.main),
+            ("runtime-effects", spec.health_ports.effects),
+        ),
+        runtime_container=spec.runtime_container,
+        disabled_phases=phases,
+        disabled_services=frozenset(services),
+    )
+
+
+def build_dev_instance_lane_configs(
+    specs: Mapping[str, ModelInstanceLane], *, repo_dir: str = REPO_DIR
+) -> dict[str, ModelLaneConfig]:
+    """Every dev instance's composition: the default's historical one, plus one
+    per ``lane:`` block."""
+    return {
+        DEFAULT_DEV_INSTANCE: _LANE_CONFIGS[EnumRuntimeLane.DEV],
+        **{
+            name: dev_instance_lane_config(spec, repo_dir=repo_dir)
+            for name, spec in specs.items()
+        },
+    }
+
+
+#: The dev lane's instances (OMN-19506 routing table, OMN-19522 composition,
+#: OMN-19543 composition as data). The wire lane of a command any instance runs
+#: is ``dev``; which composition runs it is a property of the process, selected
+#: once at agent start from the instance the routing table resolved
+#: (``select_dev_instance``). Built from the table shipped with this code, the
+#: same copy the router reads identity from, so the two cannot disagree.
+DEV_INSTANCE_LANE_CONFIGS: dict[str, ModelLaneConfig] = build_dev_instance_lane_configs(
+    load_instance_lanes(AGENT_CLONE_ROOT)
+)
 
 
 class _DevInstanceSelection:

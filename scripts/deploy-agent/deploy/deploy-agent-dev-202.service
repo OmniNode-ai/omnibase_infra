@@ -29,7 +29,7 @@
 #   bound by no container of the lane.
 # * Its own state dir (jobs-dev-202) and its own env file (dev-202.env). The
 #   names that file must carry, and nothing else, are in
-#   dev-202.env.template beside this unit; no value is ever committed.
+#   dev-instance.env.template beside this unit; no value is ever committed.
 #
 # WHAT IS THE SAME, ON PURPOSE
 #

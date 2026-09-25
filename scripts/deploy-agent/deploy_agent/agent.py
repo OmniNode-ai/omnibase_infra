@@ -102,6 +102,12 @@ STATE_DIR = Path(
     os.environ.get("DEPLOY_AGENT_STATE_DIR", "/data/omninode/deploy-agent/state/jobs")
 )
 HEALTH_PORT = int(os.environ.get("DEPLOY_AGENT_PORT", "8099"))
+#: OMN-19543: the address the health endpoint binds. Every interface by default,
+#: which is what the .201 and .202 units have always had. The launchd instances
+#: on the macOS lab hosts set 127.0.0.1, so the endpoint does not face the LAN
+#: (finding (a) of the dev-202 bring-up, omni_home ledger TERMINAL
+#: 2026-09-25T09:22:26Z).
+HEALTH_BIND_HOST = os.environ.get("DEPLOY_AGENT_BIND_HOST", "0.0.0.0")  # noqa: S104
 PUBLISH_RETRY_INTERVAL = 30
 
 #: OMN-18636 AC4. The accept-backlog watchdog's declared bound and cadence.
@@ -511,13 +517,15 @@ class DeployAgent:
         await runner.setup()
         site = web.TCPSite(
             runner,
-            "0.0.0.0",  # noqa: S104
+            HEALTH_BIND_HOST,
             HEALTH_PORT,
             reuse_address=True,
             reuse_port=True,
         )
         await site.start()
-        logger.info("Health endpoint listening on port %d", HEALTH_PORT)
+        logger.info(
+            "Health endpoint listening on %s port %d", HEALTH_BIND_HOST, HEALTH_PORT
+        )
 
         # AFTER the bind, because before it there is no listening socket to
         # sample and the probe would read "no such socket" as indeterminate for

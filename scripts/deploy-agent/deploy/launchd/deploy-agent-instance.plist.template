@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+  SPDX-License-Identifier: MIT
+
+  OMN-19543: the launchd LaunchAgent for a deploy-agent instance on a macOS lab
+  host (.200 today; .105 and .101 when their lanes are built). It is the
+  macOS form of deploy-agent-dev-202.service and carries the same environment,
+  name for name. Rendered, never edited by hand:
+
+    scripts/deploy-agent/deploy/launchd/render-deploy-agent-plist.sh \
+      <instance> <health-port> <lane-root> > ~/Library/LaunchAgents/<label>.plist
+
+  Every @TOKEN@ below is filled by that script; tests/unit/
+  test_deploy_agent_instances_as_data_omn19543.py renders it and checks the
+  result. The reasons for each name are in deploy-agent-dev.service and
+  deploy-agent-dev-202.service and are not repeated; what differs here:
+
+  * No ExecStartPre: launchd has none, so deploy-agent-launchd.sh runs the
+    port preflight (lsof on macOS) and then execs deploy-agent-launch.sh.
+  * KeepAlive on unsuccessful exit plus a 30 s ThrottleInterval stands in for
+    Restart=on-failure and the start-limit burst: a refusal loop retries twice
+    a minute, not five times in five seconds.
+  * PATH is declared, because launchd starts an agent with a bare one and the
+    agent shells out to docker (Docker Desktop's /usr/local/bin), git and uv.
+  * The health endpoint binds 127.0.0.1 (DEPLOY_AGENT_BIND_HOST), so it does not
+    face the LAN.
+  * The interpreter is the instance's own venv built on the brew python3.13
+    (omni_home Operating Rule 11: launchd daemons need the brew binary's LAN
+    grant), inside the instance's own omnibase_infra clone, never the omni_home
+    canonical tree.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.omninode.deploy-agent-@INSTANCE@</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@LANE_ROOT@/omnibase_infra/scripts/deploy-agent/deploy/launchd/deploy-agent-launchd.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@LANE_ROOT@/omnibase_infra/scripts/deploy-agent</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:@HOME@/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>OMNI_HOME</key>
+    <string>@LANE_ROOT@/omni_home</string>
+    <key>DEPLOY_AGENT_REPO_DIR</key>
+    <string>@LANE_ROOT@/omni_home/omnibase_infra</string>
+    <key>DEPLOY_AGENT_ENV_FILE</key>
+    <string>@HOME@/.omnibase/@INSTANCE@.env</string>
+    <key>DEPLOY_AGENT_PYTHON</key>
+    <string>@LANE_ROOT@/omnibase_infra/scripts/deploy-agent/.venv/bin/python</string>
+    <key>DEPLOY_AGENT_ENV_PROTECTED</key>
+    <string>HOME PATH OMNI_HOME DEPLOY_AGENT_REPO_DIR DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_INSTANCE DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_BIND_HOST DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX</string>
+    <key>DEPLOY_AGENT_DIR</key>
+    <string>@LANE_ROOT@/omnibase_infra/scripts/deploy-agent</string>
+    <key>DEPLOY_AGENT_INSTANCE</key>
+    <string>@INSTANCE@</string>
+    <key>DEPLOY_AGENT_STATE_DIR</key>
+    <string>@LANE_ROOT@/state/jobs-@INSTANCE@</string>
+    <key>DEPLOY_AGENT_PORT</key>
+    <string>@PORT@</string>
+    <key>DEPLOY_AGENT_BIND_HOST</key>
+    <string>127.0.0.1</string>
+    <key>DEPLOY_AGENT_TRACKING_REF</key>
+    <string>dev</string>
+    <key>DEPLOY_AGENT_ALLOWED_LANES</key>
+    <string>dev</string>
+    <key>KAFKA_BOOTSTRAP_SERVERS</key>
+    <string>192.168.86.201:19092</string>
+    <key>KAFKA_ENVIRONMENT</key>
+    <string>dev</string>
+    <key>KAFKA_SECURITY_PROTOCOL</key>
+    <string>SASL_PLAINTEXT</string>
+    <key>KAFKA_SASL_MECHANISM</key>
+    <string>SCRAM-SHA-256</string>
+    <key>KAFKA_SASL_ENV_PREFIX</key>
+    <string>DEV_</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>@LANE_ROOT@/logs/deploy-agent-@INSTANCE@.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LANE_ROOT@/logs/deploy-agent-@INSTANCE@.err.log</string>
+</dict>
+</plist>
