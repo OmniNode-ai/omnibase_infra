@@ -1143,10 +1143,11 @@ repos:
       # is caught at the keyboard, not in a pod log.
       - id: check-no-credential-in-log
         name: Credential-in-log gate (OMN-17423)
-        entry: uv run --frozen python scripts/ci/check_no_credential_in_log.py --root src/omnibase_infra
+        entry: uv run --frozen python scripts/ci/check_no_credential_in_log.py
         language: system
         types: [python]
-        pass_filenames: false
+        pass_filenames: true
+        files: ^src/omnibase_infra/.*\.py$
         stages: [pre-commit]
       - id: check-no-credential-in-log-self-test
         name: Credential-in-log gate self-test (OMN-17423)
@@ -1186,11 +1187,11 @@ repos:
         stages: [pre-commit]
       - id: handler-any-signature
         name: Block Any in handler signatures (OMN-10820)
-        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_any_signature --max-violations 0
         language: system
         types: [python]
         files: ^src/omnibase_infra/.*\.py$
-        pass_filenames: false
+        pass_filenames: true
         stages: [pre-commit]
       # OMN-14135: a contract-declared handler exposing NEITHER handle() nor
       # handle_async() is bound by auto-wiring to _missing_handle and raises on EVERY
@@ -1261,10 +1262,10 @@ repos:
       # 'Check envelope tenant dimension gate (OMN-16831)'.
       - id: envelope-tenant-dimension
         name: Every event producer declares its tenant dimension (OMN-16831)
-        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.envelope_tenant_dimension src/omnibase_infra
+        entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.envelope_tenant_dimension
         language: system
         files: ^src/omnibase_infra/.*\.py$
-        pass_filenames: false
+        pass_filenames: true
         stages: [pre-commit]
       - id: no-baseline-refreeze
         name: A burned gate baseline may not come back (OMN-18013)
@@ -1472,16 +1473,17 @@ repos:
         name: Reject hardcoded Kafka broker address fallbacks
         entry: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
         language: system
-        pass_filenames: false
-        types: [python]
+        pass_filenames: true
+        types_or: [python, shell, yaml]
         stages: [pre-commit]
       # OMN-7077: Prevent new direct imports of EventBusInmemory from infra path
       - id: no-infra-inmemory-import
         name: Block infra-path EventBusInmemory imports (OMN-7077)
         entry: bash scripts/validation/check_no_infra_inmemory_import.sh
         language: system
-        pass_filenames: false
+        pass_filenames: true
         types: [python]
+        files: ^src/omnibase_infra/.*\.py$
         stages: [pre-commit]
       # OMN-3530: Ensure writer_postgres.py / handler_*_postgres.py changes include a migration
       - id: onex-check-migration-required
@@ -1506,7 +1508,7 @@ repos:
       # OMN-3617: Block planning docs (belong in omni_home/docs/plans/)
       - id: no-planning-docs
         name: Block planning docs (belong in omni_home/docs/plans/)
-        entry: 'bash -c ''PLAN_FILES=$(git diff --cached --name-only --diff-filter=ACMR -- "docs/plans/"); if [ -n "$PLAN_FILES" ]; then echo "ERROR: Planning docs must live in omni_home/docs/plans/, not in this repo:"; echo "$PLAN_FILES"; echo ""; echo "Move your file to /Volumes/PRO-G40/Code/omni_home/docs/plans/"; exit 1; fi'''
+        entry: 'bash -c ''PLAN_FILES=$(git diff --cached --name-only --diff-filter=ACMR -- "docs/plans/"); if [ -n "$PLAN_FILES" ]; then echo "ERROR: Planning docs must live in omni_home/docs/plans/, not in this repo:"; echo "$PLAN_FILES"; echo ""; echo "Move your file to $OMNI_HOME/docs/plans/"; exit 1; fi'''
         language: system
         pass_filenames: false
         always_run: true

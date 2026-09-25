@@ -331,11 +331,22 @@ def _collect_py_files(root: Path) -> list[Path]:
     )
 
 
-def run_normal(root: Path) -> int:
-    if not root.is_dir():
-        print(f"ERROR: scan root not found: {root}")
+def _collect_paths(paths: list[Path]) -> list[Path]:
+    files: set[Path] = set()
+    for path in paths:
+        if path.is_file() and path.suffix == ".py":
+            files.add(path)
+        elif path.is_dir():
+            files.update(_collect_py_files(path))
+    return sorted(files)
+
+
+def run_normal_paths(paths: list[Path]) -> int:
+    missing = [path for path in paths if not path.exists()]
+    if missing:
+        print(f"ERROR: scan path not found: {missing[0]}")
         return 1
-    files = _collect_py_files(root)
+    files = _collect_paths(paths)
     total = 0
     for path in files:
         for finding in _check_file(path):
@@ -346,14 +357,21 @@ def run_normal(root: Path) -> int:
             total += 1
     if total:
         print(
-            f"\n{total} credential-in-log violation(s) in {root}. Log an "
-            "identifier (``api_key_id``), a fingerprint, or a length -- never "
-            "the value. If this is a false positive, annotate the line with "
+            f"\n{total} credential-in-log violation(s). Log an identifier "
+            "(``api_key_id``), a fingerprint, or a length -- never the value. "
+            "If this is a false positive, annotate the line with "
             "`# credential-log-allow: <reason>`."
         )
         return 1
-    print(f"OK: scanned {len(files)} file(s) under {root}, zero violations.")
+    print(f"OK: scanned {len(files)} file(s), zero violations.")
     return 0
+
+
+def run_normal(root: Path) -> int:
+    if not root.is_dir():
+        print(f"ERROR: scan root not found: {root}")
+        return 1
+    return run_normal_paths([root])
 
 
 def run_self_test(fixture: Path, expected: int) -> int:
@@ -384,11 +402,12 @@ def main() -> None:
         default=Path("scripts/ci/tests/fixtures/credential_in_log_fixture.py"),
     )
     parser.add_argument("--expected", type=int, default=9)
+    parser.add_argument("files", nargs="*", type=Path)
     args = parser.parse_args()
 
     if args.mode == "self-test":
         sys.exit(run_self_test(args.fixture, args.expected))
-    sys.exit(run_normal(args.root))
+    sys.exit(run_normal_paths(args.files) if args.files else run_normal(args.root))
 
 
 if __name__ == "__main__":
