@@ -57,8 +57,16 @@
 #   this file copied under $RUNNER_DIR, the fleet image loaded as
 #   omninode-runner:latest, then
 #   OMNIPC2_VERIFY_RUNNER_TOKEN=<org registration token> \
-#     docker compose -f $RUNNER_DIR/docker/docker-compose.runners-omnipc2-verify-runner.yml \
+#     docker compose -p omnipc2-verify-runner \
+#     -f $RUNNER_DIR/docker/docker-compose.runners-omnipc2-verify-runner.yml \
 #     up -d --no-deps omnipc2-verify-runner-1
+#
+# The explicit project name matters: without -p compose names the project after
+# the directory (`docker`), a name any other file in that directory would share.
+# Stood up this way on 2026-09-25 (omni_home ledger, lane dev-202-bringup): the
+# runner registered online with labels self-hosted, omnibase-verify, host-202,
+# arch-amd64; inside it host.docker.internal resolved to 172.17.0.1 and the
+# `runner` user read the host daemon through the socket.
 services:
   omnipc2-verify-runner-1:
     image: omninode-runner:latest
