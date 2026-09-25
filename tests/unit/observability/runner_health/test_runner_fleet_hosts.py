@@ -47,6 +47,7 @@ EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
     ("omninode-pc.tail75df5e.ts.net", "amd64", 60),
     ("stickybeatz-2.tail75df5e.ts.net", "arm64", 1),
     ("omnibook.tail75df5e.ts.net", "arm64", 1),
+    ("192.168.86.202", "amd64", 1),
 )
 
 

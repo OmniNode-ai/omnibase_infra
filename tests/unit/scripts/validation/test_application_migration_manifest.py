@@ -813,7 +813,13 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # vendored here FIRST per the node-migration vendor-parity ordering. It moves
     # savings_estimates rows stored under the house slug to the house tenant's
     # UUID and makes the UUID the column default, after the writer fix is live.
-    assert len(result.declarations) == 214
+    # 214 -> 216 for OMN-19514: node_projection_delegation/0047 adds the
+    # nullable delegation_events.ticket_id column, and
+    # node_projection_dod_verdict/0002 adds the nullable
+    # dod_verify_runs.delegation_correlation_id column, so a delegation run
+    # joins to its ticket and to the DoD verdict that judged it. Both additive
+    # (expand-only), vendored FIRST per the vendor-parity ordering.
+    assert len(result.declarations) == 216
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

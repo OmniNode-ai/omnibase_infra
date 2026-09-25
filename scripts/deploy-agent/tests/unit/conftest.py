@@ -16,9 +16,13 @@ of truth), and ``test_executor_promotion_lineage.py`` re-stubs
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from concurrent.futures import Executor, Future
 from pathlib import Path
+from typing import Any
 
 import pytest
+from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
 
 
@@ -534,3 +538,35 @@ def declare_loaded_code_sha(monkeypatch: pytest.MonkeyPatch):
         return loaded_code.record_loaded_code_sha("<declared by test>")
 
     return _declare
+
+
+class _InlineSettlePool(Executor):
+    """Runs each settle on the calling thread, at submission (OMN-19501).
+
+    The settle worker is a real thread in production. Most tests here are about
+    WHAT a job and its settle do, and assert on it right after ``_run_deploy``
+    returns; running the settle inline keeps them deterministic without each one
+    learning to drain a pool. The code path is the production one -- only the
+    thread differs. Tests about the concurrency itself opt out with the
+    ``real_settle_pool`` marker and drive the real worker.
+    """
+
+    def submit(  # type: ignore[override]
+        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
+    ) -> Future[Any]:
+        future: Future[Any] = Future()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except BaseException as exc:  # noqa: BLE001 - carried on the future
+            future.set_exception(exc)
+        return future
+
+
+@pytest.fixture(autouse=True)
+def _inline_settle_pool(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run the settle inline unless the test drives the real worker (OMN-19501)."""
+    if request.node.get_closest_marker("real_settle_pool") is not None:
+        return
+    monkeypatch.setattr(agent_mod, "_new_settle_pool", _InlineSettlePool)

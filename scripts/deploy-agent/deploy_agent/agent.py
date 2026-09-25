@@ -10,12 +10,15 @@ import json
 import logging
 import os
 import signal
+import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from aiohttp import web
 
@@ -63,6 +66,7 @@ from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lab_overlay import (
     DEFAULT_APPLY_BUDGET_SECONDS,
     LabOverlayApplier,
+    ModelLabOverlayCapture,
 )
 from deploy_agent.lag_refresher import (
     DEFAULT_REFRESH_INTERVAL_SECONDS,
@@ -132,8 +136,9 @@ SELF_UPDATE_IDLE_INTERVAL_SECONDS = int(
 #: Default ON deliberately, per rule 5 ("enforcement, not detection"): an opt-in
 #: lab re-apply is one nobody turns on, which is exactly how the lane reached
 #: three days of staleness under a green trigger. ``off`` is an incident kill
-#: switch for the case where a wedged apply is holding this agent's single-flight
-#: lock, and a disabled run says so in the journal rather than being silent.
+#: switch for the case where a wedged apply is holding this agent's settle worker
+#: (OMN-19501; before it, the single-flight lock and the dev lane), and a
+#: disabled run says so in the journal rather than being silent.
 LAB_OVERLAY_ENABLED = os.environ.get("DEPLOY_AGENT_LAB_OVERLAY", "on").lower() != "off"
 LAB_OVERLAY_BUDGET_SECONDS = int(
     os.environ.get("DEPLOY_AGENT_LAB_OVERLAY_BUDGET", str(DEFAULT_APPLY_BUDGET_SECONDS))
@@ -186,6 +191,72 @@ JOB_POOL_MAX_WORKERS = 1
 #: than larger than it, so nothing here can make two deploys possible.
 LAG_POOL_MAX_WORKERS = 1
 
+#: OMN-19501. Workers on the settle pool: the k3s lab-overlay apply, the onex-api
+#: pin delivery and the terminal publish that follow a PASSING dev compose job.
+#:
+#: Until OMN-19501 that tail ran on the job pool above, inside the job's dev lane
+#: lock, and held the lane for a median 6.0 min of every slot (29 settle stages
+#: on 2026-09-24, 5.3 to 13.0 min) although the overlay mutates a different
+#: surface. It now runs HERE, after the compose job has released the lane lock
+#: and the job thread, so the next command's compose job can start.
+#:
+#: ONE worker, for the same reason the job pool has one: settles run in the
+#: order their jobs passed, two overlay applies never overlap in this process,
+#: and each pin delivery lands in merge order. This does NOT make two compose
+#: deploys possible -- the job pool is still one worker and still the only
+#: thing that runs a compose job. The design, and the three conditions it rests
+#: on (per-thread lane-lock re-entrancy, overlay inputs captured under the lane
+#: lock, a pin that re-acquires the lane lock), was model-checked before it was
+#: built: OMN-19421's ``LabReconcile.tla`` extended on OMN-19501.
+SETTLE_POOL_MAX_WORKERS = 1
+
+#: OMN-19501. The lock the k3s overlay apply holds instead of the compose lane's.
+#: Same helper, same lock directory, its own file: a writer that applies the
+#: onex-lab overlay by another path excludes this one only by taking it.
+LAB_OVERLAY_SURFACE_LOCK = "onex-lab-k3s"
+
+#: OMN-19501. How long the onex-api pin delivery waits for the dev lane lock.
+#:
+#: The pin recreate is a mutation of the dev compose project, so it re-acquires
+#: that lane's lock -- and the holder it usually waits behind is the NEXT compose
+#: job, which holds the lock for its whole run (median 15.7 min, longest 25.6 on
+#: 2026-09-24). The helper's 900 s default would expire behind an ordinary job
+#: and turn most deliveries into refusals, so the wait is the longest measured
+#: job with margin. It is still bounded: a wait that expires is recorded as a
+#: named non-delivery, never a hang.
+PIN_LANE_LOCK_TIMEOUT_SECONDS = 2700.0
+
+
+def _new_settle_pool() -> Executor:
+    """The settle worker (OMN-19501). A function so tests can run it inline."""
+    return ThreadPoolExecutor(
+        max_workers=SETTLE_POOL_MAX_WORKERS,
+        thread_name_prefix="deploy-agent-settle",
+    )
+
+
+@dataclass(frozen=True)
+class _TerminalFacts:
+    """What the terminal event reports about the compose job, frozen at its end.
+
+    OMN-19501. The event is now published by the settle worker, possibly while
+    the NEXT job is running on the job thread -- and the executor's per-job
+    observations and ``_current_git_sha`` are reset by that next job. Reading
+    them at publish time would attach the next job's facts to this job's
+    event, so they are copied here, on the job thread, before it is released.
+    """
+
+    git_sha: str
+    health_checks: list[Any]
+    services_restarted: list[str]
+    container_residue: list[Any]
+    recreate_supervision: list[Any]
+    deps_convergence: list[Any]
+    compose_invocations: list[Any]
+    verify_recreate: list[Any]
+    sibling_refs: dict[str, str]
+
+
 #: Milliseconds a rejection publish may spend resolving broker metadata
 #: (OMN-18143). See the call site in ``_publish_rejection_event`` for the
 #: measurement this replaces and for why the cause is recorded rather than
@@ -200,10 +271,6 @@ class DeployAgent:
         self._state = "idle"
         self._shutdown = False
         self._current_git_sha = ""
-        #: OMN-18572: this job's onex-api pin delivery verdict, read by the
-        #: terminal payload. ``None`` means the delivery was never reached,
-        #: which is a different fact from one that ran and refused.
-        self._onex_api_delivery: ModelOnexApiDelivery | None = None
         self._skip_self_update = skip_self_update
         self._publish_cb = PublishCircuitBreaker()
         # Stamped at the top of the poll loop so the first idle check happens
@@ -270,6 +337,12 @@ class DeployAgent:
             max_workers=LAG_POOL_MAX_WORKERS,
             thread_name_prefix="deploy-agent-lag",
         )
+        # OMN-19501. See SETTLE_POOL_MAX_WORKERS. ``_settle_future`` is the most
+        # recently submitted settle; the pool is FIFO with one worker, so that
+        # one finishing means every earlier one has.
+        self._settle_pool = _new_settle_pool()
+        self._settle_future: Future[None] | None = None
+        self._settle_guard = threading.Lock()
         # OMN-18636 AC4. Started once the socket is bound (see ``run``), stopped
         # in the same ``finally`` that tears the site down. It holds no handle on
         # the pool above and cannot curtail anything: it samples the listen
@@ -284,7 +357,57 @@ class DeployAgent:
         )
 
     def _get_state(self) -> str:
+        # OMN-19501: with no compose job running, a settle in flight is still
+        # this agent's work on the host, and "idle" would say otherwise.
+        if self._state == "idle" and self._settle_in_flight():
+            return "settling"
         return self._state
+
+    # -- the settle worker (OMN-19501) -----------------------------------------
+    def _settle_in_flight(self) -> bool:
+        with self._settle_guard:
+            future = self._settle_future
+        return future is not None and not future.done()
+
+    def _hand_to_settle(self, settle: Callable[[], None]) -> None:
+        with self._settle_guard:
+            self._settle_future = self._settle_pool.submit(settle)
+
+    def drain_settle(self, timeout: float | None = None) -> bool:
+        """Wait for every settle submitted so far. True when none is in flight.
+
+        One FIFO worker, so the newest submission finishing means all have. A
+        settle's own exceptions are swallowed inside it, so a ``Future`` that
+        raised is a defect, logged here rather than re-raised into a boundary
+        that is about to re-exec.
+        """
+        with self._settle_guard:
+            future = self._settle_future
+        if future is None:
+            return True
+        try:
+            future.result(timeout=timeout)
+        except TimeoutError:
+            return False
+        except Exception:
+            logger.exception("a settle raised past its own handler")
+        return True
+
+    def _await_settle_before_reexec(self) -> None:
+        """``on_before_reexec`` for every self-update boundary (OMN-19501).
+
+        ``self_update`` calls this immediately before it replaces the process
+        image, and only then. A re-exec kills every thread, so without the wait
+        an update would land in the middle of ``k3s ctr images import`` or of
+        the pin recreate, and the sha's onex-lab-k3s record would never be
+        written. The wait is paid only when a re-exec is actually about to
+        happen, which is what keeps it from re-serializing every slot.
+        """
+        if self._settle_in_flight():
+            logger.info(
+                "self_update: waiting for the settle in flight before re-execing"
+            )
+        self.drain_settle(timeout=None)
 
     async def _offload(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run one blocking call on the job thread, not on the event loop.
@@ -496,6 +619,10 @@ class DeployAgent:
             # an indeterminate one, erasing the evidence a reader came for.
             self._accept_backlog.stop()
             await runner.cleanup()
+            # OMN-19501: a settle in flight owes the bus a terminal event and
+            # the lab lane a record. Waited on like the job pool below, and
+            # first, because nothing on the job pool waits for it.
+            self._settle_pool.shutdown(wait=True)
             # Last, and waiting. The loop above only exits once its own awaited
             # offload has returned, so nothing of this agent's own work is in
             # flight here; the wait is for the publish-retry task, whose
@@ -598,10 +725,17 @@ class DeployAgent:
         re-points the committed offset at that command so the replacement
         process re-reads it (OMN-16442).
         """
+
+        def _before_reexec() -> None:
+            # Wait first, then rewind: the rewind must be the last thing before
+            # the process image is replaced (OMN-16442).
+            self._await_settle_before_reexec()
+            rewind_offset()
+
         self.executor.self_update(
             boundary=EnumSelfUpdateBoundary.PRE_ACCEPT,
             skip=self._skip_self_update,
-            on_before_reexec=rewind_offset,
+            on_before_reexec=_before_reexec,
         )
 
     def _self_update_post_terminal(self) -> None:
@@ -616,6 +750,7 @@ class DeployAgent:
             self.executor.self_update(
                 boundary=EnumSelfUpdateBoundary.POST_TERMINAL,
                 skip=self._skip_self_update,
+                on_before_reexec=self._await_settle_before_reexec,
             )
         except Exception as e:  # noqa: BLE001
             logger.error(  # noqa: TRY400
@@ -680,6 +815,7 @@ class DeployAgent:
             self.executor.self_update(
                 boundary=EnumSelfUpdateBoundary.IDLE_HEARTBEAT,
                 skip=self._skip_self_update,
+                on_before_reexec=self._await_settle_before_reexec,
             )
         except Exception as e:  # noqa: BLE001
             logger.error(  # noqa: TRY400
@@ -710,8 +846,10 @@ class DeployAgent:
             self._publish_rejected(cmd, reason=EnumRejectionReason.IN_PROGRESS)
             return
 
-        # OMN-16442 job boundary: the job has a terminal status, its result has
-        # been published, and the single-flight lock is released. Deliberately
+        # OMN-16442 job boundary: the job has a terminal status, and the
+        # single-flight lock is released. Its result is published, or -- on a
+        # passing dev job since OMN-19501 -- owed by the settle worker, which
+        # this boundary waits for before any re-exec. Deliberately
         # outside the `with` block above — a re-exec must not happen while this
         # process holds the deploy lock.
         self._self_update_post_terminal()
@@ -734,10 +872,9 @@ class DeployAgent:
         # PREVIOUS job's commit, which this job never deployed. An unresolved sha
         # must read as unresolved.
         self._current_git_sha = ""
-        # OMN-18572: cleared per job for the same reason the sha is -- a
-        # verdict carried from the previous job would attach the previous
-        # merge's delivery to this merge's terminal event.
-        self._onex_api_delivery = None
+        # OMN-19501: the settle this job hands off, built only on the passing
+        # path, inside the lane lock, from facts frozen before the lock drops.
+        settle: Callable[[], None] | None = None
 
         def on_phase_update(phase: Phase, status: PhaseStatus) -> None:
             self.job_store.update_phase(cid, phase, status)
@@ -768,6 +905,10 @@ class DeployAgent:
             # publish is a bus write, not a lane mutation, and holding a lane
             # lock across a retrying publish would serialize the next merge
             # behind a broker problem that has nothing to do with the lane.
+            #
+            # OMN-19501: nor, any more, the k3s lab-overlay apply and the
+            # onex-api pin delivery. The lock is released at the compose
+            # verdict; see the settle hand-off below.
             with lane_lock(
                 lane_config_for(cmd.runtime_lane).compose_project,
                 lane=cmd.runtime_lane.value,
@@ -863,54 +1004,76 @@ class DeployAgent:
                 #
                 # The verdict below is final and is deliberately not affected by
                 # anything that follows it. What follows it is nevertheless this
-                # job's work, on this job's thread: the lab-overlay apply, the
-                # onex-api pin delivery, the terminal publish. On 2026-09-17 that
-                # tail ran for 3m38s after a record that read `success`, and
-                # nothing the agent served could tell the two apart.
+                # job's work: the lab-overlay apply, the onex-api pin delivery,
+                # the terminal publish. On 2026-09-17 that tail ran for 3m38s
+                # after a record that read `success`, and nothing the agent
+                # served could tell the two apart.
                 #
                 # The stage travels IN this write. A `complete` followed by a
                 # separate `set_settling` would reopen the window by exactly the
                 # gap between two file writes.
+                #
+                # OMN-18200 AC5 -- the k3s onex-lab overlay's half of rule 24(a)
+                # -- runs AFTER the compose lane is verified and the job is
+                # marked complete, and is deliberately NOT part of its verdict.
+                # The compose lane converged on its own merits by this point; a
+                # lab-overlay failure must not report a lane that IS running the
+                # merged sha as broken. The lab verdict travels in its own
+                # sha-keyed record and receipt. Only the dev lane: the fence
+                # below refuses every other lane.
+                lab_sha = self._resolve_lab_overlay_sha(
+                    cmd, action="re-apply", sha=self._current_git_sha
+                )
                 self.job_store.complete(
                     cid,
                     status="success",
-                    settling_stage=EnumJobSettlingStage.LAB_OVERLAY,
+                    settling_stage=(
+                        EnumJobSettlingStage.LAB_OVERLAY
+                        if lab_sha is not None
+                        else EnumJobSettlingStage.PUBLISH
+                    ),
                     verify_recreate=self.executor.verify_recreate,
                 )
-                logger.info(
-                    "Job %s completed successfully; settling (lab overlay)", cid
-                )
 
-                # OMN-18200 AC5 -- the k3s onex-lab overlay's half of rule 24(a).
-                #
-                # AFTER the compose lane is verified and the job is marked complete,
-                # and deliberately NOT part of its verdict. The compose lane
-                # converged on its own merits by this point; a lab-overlay failure
-                # must not report a lane that IS running the merged sha as broken.
-                # The lab verdict travels in its own sha-keyed receipt, on its own
-                # lane value, emitted by the workflow job that reads the record this
-                # writes.
-                #
-                # Only the dev lane. A merge to `main` targets stability-test, which
-                # is a governed lane this agent's fence already refuses, and the lab
-                # overlay is not a stability surface.
-                # OMN-18572: the apply is also where the DELIVERABLE LINEAGE
-                # comes from. The four lab image tags carry the overlay's own
-                # omninode_infra commit, never the merged omnibase_infra sha
-                # this job is keyed by, so the delivery below needs what the
-                # apply resolved rather than what the job is named after.
-                manifest_sha = self._apply_lab_overlay(cmd)
-
-                self.job_store.set_settling(cid, EnumJobSettlingStage.ONEX_API_PIN)
-
-                # OMN-18572. The applier above BUILT a fresh onex-api image;
-                # this is what DELIVERS it. Inside the lock, because it
-                # recreates a container on this lane, and inside the `try`
-                # rather than after it, because a delivery attempted on a job
-                # that has already failed would pin an image the lane was never
-                # proven able to run -- the same argument OMN-18545 made for the
-                # repair build taking a narrower path than the apply.
-                self._deliver_onex_api_pin(cmd, manifest_sha=manifest_sha)
+                if lab_sha is not None:
+                    # OMN-19501. THE LANE IS RELEASED HERE, NOT AFTER THE SETTLE.
+                    #
+                    # Until now the overlay apply and the onex-api pin delivery
+                    # ran on this thread inside this lock: a median 6.0 min of
+                    # every slot on 2026-09-24, for work that mutates the k3s
+                    # lab surface and not this compose project. They now run on
+                    # the settle worker once this block exits. Two things must
+                    # happen first, while the lock is still held:
+                    #
+                    # * CAPTURE. The apply reads three things off this lane --
+                    #   the runtime image, the deploy-source clone for the infra
+                    #   migrate build, and the compose lane's omnimarket version.
+                    #   After the release the next job may be rebuilding,
+                    #   resetting and recreating all three, so they are taken
+                    #   now, by unique tag and by value.
+                    # * FREEZE. The terminal event's facts live on the executor
+                    #   and on this agent, and the next job resets both.
+                    #
+                    # The pin recreate DOES mutate this compose project, so the
+                    # settle re-acquires this same lock for it.
+                    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+                    capture = self._capture_lab_overlay_inputs(sha=lab_sha, stamp=stamp)
+                    facts = self._terminal_facts(health_checks, services_restarted)
+                    settle = functools.partial(
+                        self._settle_success,
+                        cmd,
+                        sha=lab_sha,
+                        stamp=stamp,
+                        capture=capture,
+                        facts=facts,
+                    )
+                    logger.info(
+                        "Job %s completed successfully; lane released, settling "
+                        "(lab overlay) on the settle worker",
+                        cid,
+                    )
+                else:
+                    logger.info("Job %s completed successfully", cid)
 
         except LaneLockContendedError as e:
             # Named separately from a build failure because the two lead to
@@ -992,6 +1155,95 @@ class DeployAgent:
                 self.job_store.set_settling(cid, EnumJobSettlingStage.REPAIR_BUILD)
                 self._build_lab_repair_image(cmd)
 
+        if settle is not None:
+            # OMN-19501. The lane lock is already released; handing off releases
+            # the job thread, so the next command's compose job can start while
+            # this one's overlay applies. The terminal event is published by the
+            # settle, after the pin, exactly as OMN-18572 shaped it.
+            self._hand_to_settle(settle)
+            self._state = "idle"
+            return
+
+        self._publish_terminal(
+            cid,
+            facts=self._terminal_facts(health_checks, services_restarted),
+            onex_api_delivery=None,
+        )
+        self._state = "idle"
+
+    def _terminal_facts(
+        self, health_checks: list[Any], services_restarted: list[str]
+    ) -> _TerminalFacts:
+        """Freeze what the terminal event reports, before the next job resets it."""
+        return _TerminalFacts(
+            git_sha=self._current_git_sha,
+            # OMN-18640 AC8: the local is the target of the assignment that
+            # raises when verification refuses, so it is empty on precisely the
+            # job whose probe readings matter. The executor records them before
+            # it raises.
+            health_checks=list(health_checks or self.executor.health_checks),
+            services_restarted=list(services_restarted),
+            container_residue=list(self.executor.container_residue),
+            # OMN-18692: what the deps-phase ceiling did -- the deferral it took
+            # before touching the lane, or the wait it held rather than
+            # cancelling a live recreate.
+            recreate_supervision=list(self.executor.recreate_supervision),
+            deps_convergence=list(self.executor.deps_convergence),
+            compose_invocations=list(self.executor.compose_invocations),
+            # OMN-18640 AC7: the runtime containers verification found dead and
+            # recreated, and whether that repaired them.
+            verify_recreate=list(self.executor.verify_recreate),
+            # OMN-17135: which sibling commits this build actually vendored. The
+            # command's git_ref pins omnibase_infra alone.
+            sibling_refs=dict(self.executor.sibling_source_refs),
+        )
+
+    def _settle_success(
+        self,
+        cmd: ModelRebuildRequested,
+        *,
+        sha: str,
+        stamp: str,
+        capture: ModelLabOverlayCapture,
+        facts: _TerminalFacts,
+    ) -> None:
+        """The passing dev job's tail, on the settle worker (OMN-19501).
+
+        Overlay apply under its own surface lock, then the onex-api pin under a
+        RE-ACQUIRED dev lane lock, then the terminal publish. Every argument is
+        this job's own: nothing here reads a field the next job resets.
+
+        Swallows, because the publish at the bottom is the one step that must
+        always run: a job whose verdict is durable but never published has no
+        ``result_publish_pending`` either, so nothing would ever replay it.
+        """
+        cid = cmd.correlation_id
+        delivery: ModelOnexApiDelivery | None = None
+        try:
+            manifest_sha = self._apply_lab_overlay(
+                cmd, sha=sha, stamp=stamp, capture=capture
+            )
+            self.job_store.set_settling(cid, EnumJobSettlingStage.ONEX_API_PIN)
+            delivery = self._deliver_onex_api_pin(
+                cmd, sha=sha, manifest_sha=manifest_sha
+            )
+        except Exception:
+            logger.exception(
+                "settle for %s raised past its own handlers; publishing the "
+                "terminal event regardless",
+                cid,
+            )
+        self._publish_terminal(cid, facts=facts, onex_api_delivery=delivery)
+
+    def _publish_terminal(
+        self,
+        cid: UUID,
+        *,
+        facts: _TerminalFacts,
+        onex_api_delivery: ModelOnexApiDelivery | None,
+    ) -> None:
+        """Publish the job's terminal event, and stop reporting it as settling."""
+
         # Publish result (don't use on_phase_update — job is already completed,
         # and update_phase would revert status to in_progress)
         self.job_store.set_settling(cid, EnumJobSettlingStage.PUBLISH)
@@ -1002,32 +1254,21 @@ class DeployAgent:
             self.job_store._save(job)
             payload = build_completion_payload(
                 job,
-                self._current_git_sha,
-                # OMN-18640 AC8: the local above is the target of the
-                # assignment that raises when verification refuses, so it is
-                # empty on precisely the job whose probe readings matter. The
-                # executor records them before it raises.
-                health_checks or self.executor.health_checks,
-                services_restarted=services_restarted,
-                container_residue=self.executor.container_residue,
-                # OMN-18692: what the deps-phase ceiling did -- the deferral it
-                # took before touching the lane, or the wait it held rather
-                # than cancelling a live recreate.
-                recreate_supervision=self.executor.recreate_supervision,
-                deps_convergence=self.executor.deps_convergence,
-                compose_invocations=self.executor.compose_invocations,
-                # OMN-18640 AC7: the runtime containers verification found dead
-                # and recreated, and whether that repaired them.
-                verify_recreate=self.executor.verify_recreate,
-                # OMN-17135: which sibling commits this build actually vendored.
-                # The command's git_ref pins omnibase_infra alone.
-                sibling_refs=self.executor.sibling_source_refs,
+                facts.git_sha,
+                facts.health_checks,
+                services_restarted=facts.services_restarted,
+                container_residue=facts.container_residue,
+                recreate_supervision=facts.recreate_supervision,
+                deps_convergence=facts.deps_convergence,
+                compose_invocations=facts.compose_invocations,
+                verify_recreate=facts.verify_recreate,
+                sibling_refs=facts.sibling_refs,
                 # OMN-18572: what the onex-api pin delivery did on this job's
                 # tail. It never affects `status` -- the compose verdict is
                 # already settled above -- but until it rode this event a
                 # reader had no way to tell a lane running the merged image
                 # from one running a two-day-old pin.
-                onex_api_delivery=self._onex_api_delivery,
+                onex_api_delivery=onex_api_delivery,
             )
             if publish_result(payload, self._kafka_config):
                 job.phase_results[Phase.PUBLISH] = PhaseStatus.SUCCESS
@@ -1045,13 +1286,49 @@ class DeployAgent:
         # This is cleared whether the publish succeeded or not: a publish still
         # owed to the bus is durable in `result_publish_pending` and is replayed
         # by the retry loop, which is a different fact from "this job's own work
-        # is still executing on the job thread".
+        # is still executing".
         self.job_store.clear_settling(cid)
 
-        self._state = "idle"
+    def _capture_lab_overlay_inputs(
+        self, *, sha: str, stamp: str
+    ) -> ModelLabOverlayCapture:
+        """The overlay's compose-lane inputs, taken under the lane lock (OMN-19501).
 
-    def _apply_lab_overlay(self, cmd: ModelRebuildRequested) -> str | None:
+        The applier's capture never raises by contract. If it does anyway, the
+        failure is carried as a capture that pins nothing, so the record fails
+        ``images_pinned`` by name rather than the apply reading the lane late.
+        """
+        try:
+            return self._lab_overlay_applier().capture_compose_inputs(
+                sha=sha, stamp=stamp
+            )
+        except Exception as exc:
+            logger.exception("capturing the lab overlay's inputs for %s raised", sha)
+            reason = f"capture raised {type(exc).__name__}: {exc}"
+            return ModelLabOverlayCapture(
+                sha=sha,
+                stamp=stamp,
+                runtime_image="",
+                infra_migrate_image="",
+                pin_error=reason,
+                compose_omnimarket_version=None,
+                compose_version_error=reason,
+            )
+
+    def _apply_lab_overlay(
+        self,
+        cmd: ModelRebuildRequested,
+        *,
+        sha: str,
+        stamp: str,
+        capture: ModelLabOverlayCapture,
+    ) -> str | None:
         """Re-apply the k3s onex-lab overlay for this merge (OMN-18200 AC5).
+
+        OMN-19501: runs on the settle worker, AFTER the dev lane lock is
+        released, under the k3s surface lock instead. ``sha`` is the fence's
+        answer taken on the job thread and ``capture`` the compose-lane inputs
+        taken under the lane lock; nothing here reads the lane again.
 
         Called on the SUCCESS path only. The failing path takes the narrower
         ``_build_lab_repair_image`` instead (OMN-18545), because the apply
@@ -1065,24 +1342,30 @@ class DeployAgent:
         contract is that it writes a record on both outcomes -- so an escape is a
         defect in the applier, reported as one, not a reason to lose the deploy.
 
-        Swallowing also protects the TERMINAL PUBLISH. This runs inside the
-        deploy job's ``try``/``except`` and the publish block sits after it, so
-        an exception escaping here would skip the publish entirely: the job would
-        be durably ``failed`` on disk with nothing on the bus and
-        ``result_publish_pending`` never set, so the retry loop would not replay
-        it either.
+        Swallowing also protects the TERMINAL PUBLISH, which the settle runs
+        after this: an exception escaping here would skip it, and a job whose
+        verdict is durable but never published has no ``result_publish_pending``
+        either, so the retry loop would not replay it.
+
+        A contended surface lock is logged and swallowed the same way. No record
+        is written, so the onex-lab-k3s reader waits out its window and emits a
+        FAIL for the missing record -- the fail-closed path, unchanged.
         """
-        sha = self._resolve_lab_overlay_sha(cmd, action="re-apply")
-        if sha is None:
-            return None
         applier: LabOverlayApplier | None = None
         try:
-            applier = self._lab_overlay_applier()
-            path = applier.apply(
-                sha=sha,
-                stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
-                correlation_id=str(cmd.correlation_id),
-            )
+            with lane_lock(
+                LAB_OVERLAY_SURFACE_LOCK,
+                lane="onex-lab",
+                ref=sha,
+                timeout=float(LAB_OVERLAY_BUDGET_SECONDS),
+            ):
+                applier = self._lab_overlay_applier()
+                path = applier.apply(
+                    sha=sha,
+                    stamp=stamp,
+                    correlation_id=str(cmd.correlation_id),
+                    capture=capture,
+                )
             logger.info("lab overlay re-apply recorded at %s", path)
         except Exception:
             logger.exception(
@@ -1116,7 +1399,7 @@ class DeployAgent:
             return None
 
     def _deliver_onex_api_pin(
-        self, cmd: ModelRebuildRequested, *, manifest_sha: str | None
+        self, cmd: ModelRebuildRequested, *, sha: str, manifest_sha: str | None
     ) -> ModelOnexApiDelivery | None:
         """Advance ``ONEX_API_IMAGE`` to the image the apply just built (OMN-18572).
 
@@ -1153,6 +1436,12 @@ class DeployAgent:
         outcome is now a typed record on the job and on the terminal event, and
         a failing one is logged at ``ERROR``: the refusal above was emitted at
         ``INFO`` thirty times and read exactly like a successful no-op.
+
+        OMN-19501: runs on the settle worker, and RE-ACQUIRES the dev lane lock
+        for the recreate, because the recreate is a mutation of the compose
+        project and the next compose job may hold it. ``sha`` is the fence's
+        answer from the job thread; it is not re-derived here, because the
+        agent's per-job sha now belongs to whichever job runs next.
         """
         if not lane_runs_phase(cmd.runtime_lane, EnumInstancePhase.ONEX_API_PIN):
             # OMN-19522: no onex-api runs on this instance (its overlay
@@ -1162,9 +1451,9 @@ class DeployAgent:
                 active_dev_instance(),
             )
             return None
-        fence_sha = self._resolve_lab_overlay_sha(cmd, action="onex-api delivery")
-        if fence_sha is None:
-            return None
+        # OMN-19501: the fence already ran on the job thread; ``sha`` is its
+        # answer, carried here by the settle.
+        fence_sha = sha
 
         if manifest_sha is None:
             return self._record_onex_api_delivery(
@@ -1185,10 +1474,36 @@ class DeployAgent:
             )
 
         try:
-            record = self.executor.deliver_onex_api_pin(
-                sha=manifest_sha,
-                omninode_clone=LAB_OVERLAY_SOURCE_DIR,
-                lane=cmd.runtime_lane,
+            with lane_lock(
+                lane_config_for(cmd.runtime_lane).compose_project,
+                lane=cmd.runtime_lane.value,
+                ref=fence_sha,
+                timeout=PIN_LANE_LOCK_TIMEOUT_SECONDS,
+            ):
+                record = self.executor.deliver_onex_api_pin(
+                    sha=manifest_sha,
+                    omninode_clone=LAB_OVERLAY_SOURCE_DIR,
+                    lane=cmd.runtime_lane,
+                )
+        except LaneLockContendedError as exc:
+            logger.error(  # noqa: TRY400
+                "onex-api delivery for omninode_infra %s not attempted: %s "
+                "friction_type=lane_lock_contended",
+                manifest_sha,
+                exc,
+            )
+            return self._record_onex_api_delivery(
+                cmd,
+                ModelOnexApiDelivery(
+                    result=EnumOnexApiDeliveryResult.NOT_ATTEMPTED,
+                    raw_result=EnumOnexApiDeliveryResult.NOT_ATTEMPTED.value,
+                    reason=(
+                        "the dev lane lock was not free within "
+                        f"{PIN_LANE_LOCK_TIMEOUT_SECONDS:g}s, so the onex-api "
+                        f"recreate was not attempted: {exc}"
+                    ),
+                    requested_sha=manifest_sha,
+                ),
             )
         except Exception as exc:
             logger.exception(
@@ -1217,15 +1532,16 @@ class DeployAgent:
     ) -> ModelOnexApiDelivery:
         """Log the verdict at a level that matches it, and make it durable.
 
-        Held on the agent as well as written to the job record because the
-        terminal payload is built after this runs and reads it from here; the
-        job record is what an operator reads on the host afterwards.
+        Returned to the settle, which puts it on the terminal event, and written
+        to the job record, which is what an operator reads on the host
+        afterwards. Never held on the agent (OMN-19501): the settle runs while
+        the next job may be running, and an agent-wide field would attach one
+        job's delivery to another job's event.
 
         The log level is the point. A delivery that did not deliver is an
         ``ERROR`` even though it does not fail the job, because the whole defect
         this closes was legible only as thirty identical ``INFO`` lines.
         """
-        self._onex_api_delivery = delivery
         log = logger.error if delivery.is_failure else logger.info
         log(
             "onex-api delivery for omninode_infra %s: result=%s "
@@ -1254,7 +1570,9 @@ class DeployAgent:
         ``except`` block, so an escape would skip the terminal publish of a job
         that has ALREADY been recorded as failed.
         """
-        sha = self._resolve_lab_overlay_sha(cmd, action="repair build")
+        sha = self._resolve_lab_overlay_sha(
+            cmd, action="repair build", sha=self._current_git_sha
+        )
         if sha is None:
             return
         try:
@@ -1273,7 +1591,7 @@ class DeployAgent:
             )
 
     def _resolve_lab_overlay_sha(
-        self, cmd: ModelRebuildRequested, *, action: str
+        self, cmd: ModelRebuildRequested, *, action: str, sha: str
     ) -> str | None:
         """The fence both lab-overlay paths pass through, or ``None`` to skip.
 
@@ -1284,7 +1602,9 @@ class DeployAgent:
         The sha is per-job -- cleared at the top of ``_run_deploy`` -- and that
         clearing is load-bearing now that the failing path reaches here at all: a
         job that died before ``git_pull`` would otherwise build images for the
-        PREVIOUS job's commit and stamp a record naming it.
+        PREVIOUS job's commit and stamp a record naming it. It is passed in
+        rather than read here (OMN-19501): only the job thread may read the
+        agent's per-job sha, and the settle carries the answer it was given.
         """
         if cmd.runtime_lane != EnumRuntimeLane.DEV:
             return None
@@ -1301,10 +1621,9 @@ class DeployAgent:
                 "lab overlay %s DISABLED by DEPLOY_AGENT_LAB_OVERLAY=off; "
                 "no onex-lab-k3s record will exist for %s",
                 action,
-                self._current_git_sha,
+                sha,
             )
             return None
-        sha = self._current_git_sha
         if not sha or len(sha) != 40:
             logger.warning(
                 "lab overlay %s skipped: the resolved deploy sha is %r, and a "
