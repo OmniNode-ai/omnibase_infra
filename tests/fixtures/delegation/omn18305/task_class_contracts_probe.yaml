@@ -43,6 +43,21 @@ task_classes:
     selection:
       priority: 95
       phrases: []
+  # OMN-13966: a class the contract declares but cannot route yet. The CLI
+  # admits every declared class by explicit name EXCEPT one carrying a
+  # routing_availability block, and refuses that one with the block's own
+  # words. Shaped like the production agent_delegation declaration.
+  cannot_route_yet:
+    gateway_exposure: internal
+    selection:
+      priority: 0
+      phrases: []
+    routing_availability:
+      status: pending_capability
+      missing_capability: probe_capability
+      tracking: "PROBE-1 WS-0"
+      reason: >-
+        No probe tier can serve this class.
 
 # OMN-18305 residual: the fallback is a CONTRACT decision, not a CLI constant.
 # `fallback_class` is the probe's shape-free class, so an unclaimed prompt in

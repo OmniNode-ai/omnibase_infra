@@ -28,11 +28,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from omnibase_infra.cli.task_class_selection import (
     EnumTaskTypeResolution,
     TaskClassContractError,
     load_selectable_task_classes,
+    load_task_class_admission,
     resolve_task_type,
 )
 
@@ -198,6 +200,153 @@ class TestResolutionIsAnnounced:
             classes=classes,
         )
         assert resolution.task_type != "no_prompt_selects_this"
+
+
+class TestExplicitAdmissionCoversEveryDeclaredClass:
+    """OMN-13966: an explicit class is checked against the WHOLE contract.
+
+    Auto-selection still reads only the public projection (OMN-18305). An
+    explicit ``--task-type`` is a caller naming a class, and every class the
+    contract declares is a real Market class (OMN-15651), so the only explicit
+    refusals are a name the contract does not declare and a class the contract
+    itself declares unroutable.
+    """
+
+    @pytest.fixture(name="admission")
+    def _admission(self) -> object:
+        return load_task_class_admission(_PROBE_CONTRACT)
+
+    def test_admission_partitions_every_declared_class(self, admission) -> None:
+        declared = set(
+            yaml.safe_load(_PROBE_CONTRACT.read_text(encoding="utf-8"))["task_classes"]
+        )
+        unavailable = {entry.name for entry in admission.unavailable}
+        assert admission.admitted.isdisjoint(unavailable)
+        assert admission.admitted | unavailable == declared
+        assert unavailable == {"cannot_route_yet"}
+
+    def test_admission_accepts_an_internal_class_by_explicit_name(
+        self, classes: tuple, admission
+    ) -> None:
+        resolution = resolve_task_type(
+            "anything at all",
+            explicit="never_from_a_prompt",
+            classes=classes,
+            admission=admission,
+        )
+        assert resolution.task_type == "never_from_a_prompt"
+        assert resolution.resolution is EnumTaskTypeResolution.EXPLICIT
+        assert "internal" in resolution.reason
+
+    def test_admission_never_auto_selects_an_internal_class(
+        self, classes: tuple, admission
+    ) -> None:
+        """The internal probe class claims 'summarise' at priority 99; it still never wins."""
+        resolution = resolve_task_type(
+            "summarise the window over many many many words here now",
+            explicit=None,
+            classes=classes,
+            admission=admission,
+        )
+        assert resolution.task_type == "long_prose"
+
+    def test_admission_admits_a_newly_declared_class_without_a_code_change(
+        self, tmp_path: Path
+    ) -> None:
+        """No list in this package can fall behind the contract: it is read, not mirrored."""
+        contract = tmp_path / "grown.yaml"
+        contract.write_text(
+            _PROBE_CONTRACT.read_text(encoding="utf-8").replace(
+                "task_classes:\n",
+                "task_classes:\n"
+                "  brand_new_class:\n"
+                "    gateway_exposure: internal\n"
+                "    selection:\n"
+                "      priority: 0\n"
+                "      phrases: []\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        resolution = resolve_task_type(
+            "anything",
+            explicit="brand_new_class",
+            classes=load_selectable_task_classes(contract),
+            admission=load_task_class_admission(contract),
+        )
+        assert resolution.task_type == "brand_new_class"
+
+    def test_unavailable_class_refusal_quotes_the_contract(
+        self, classes: tuple, admission
+    ) -> None:
+        with pytest.raises(TaskClassContractError) as refused:
+            resolve_task_type(
+                "anything",
+                explicit="cannot_route_yet",
+                classes=classes,
+                admission=admission,
+            )
+        message = str(refused.value)
+        assert "unknown" not in message
+        for fragment in (
+            "cannot_route_yet",
+            "pending_capability",
+            "probe_capability",
+            "PROBE-1 WS-0",
+            "No probe tier can serve this class.",
+        ):
+            assert fragment in message
+
+    def test_unavailable_declaration_missing_a_field_fails_closed(
+        self, tmp_path: Path
+    ) -> None:
+        contract = tmp_path / "half_declared.yaml"
+        contract.write_text(
+            "task_classes:\n"
+            "  half:\n"
+            "    gateway_exposure: internal\n"
+            "    selection: {priority: 0, phrases: []}\n"
+            "    routing_availability:\n"
+            "      status: pending_capability\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(TaskClassContractError, match="half"):
+            load_task_class_admission(contract)
+
+    def test_unavailable_declaration_with_an_unknown_status_fails_closed(
+        self, tmp_path: Path
+    ) -> None:
+        """A status the CLI was never taught must not be guessed at either way."""
+        contract = tmp_path / "new_status.yaml"
+        contract.write_text(
+            "task_classes:\n"
+            "  odd:\n"
+            "    gateway_exposure: internal\n"
+            "    selection: {priority: 0, phrases: []}\n"
+            "    routing_availability:\n"
+            "      status: some_future_status\n"
+            "      missing_capability: x\n"
+            "      tracking: y\n"
+            "      reason: z\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(TaskClassContractError, match="odd"):
+            load_task_class_admission(contract)
+
+    def test_admission_still_refuses_an_undeclared_class_as_unknown(
+        self, classes: tuple, admission
+    ) -> None:
+        with pytest.raises(TaskClassContractError) as refused:
+            resolve_task_type(
+                "anything",
+                explicit="not_a_class",
+                classes=classes,
+                admission=admission,
+            )
+        message = str(refused.value)
+        assert "unknown task type 'not_a_class'" in message
+        assert "never_from_a_prompt" in message
+        assert "cannot_route_yet" in message
 
 
 class TestDeterminism:
