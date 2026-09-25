@@ -1074,6 +1074,11 @@ route:
         - Integration Test Removal Gate
         - Kafka Schema Handshake (OMN-3411)
         - kb-doc-gate / kb-doc-gate
+        # OMN-19412: the lab-release-sync probe-window drift check, registered
+        # STRICT in ci.yml's STRICT_GATE_JOBS and enforced by the CI Summary
+        # poller; absent from branch protection, which is exactly the shape
+        # this list records.
+        - Lab Probe Windows (OMN-19412)
         - Lint
         - Lockfile CVE Scan (OMN-16228)
         - Lockfile Registry Allowlist (OMN-16516)

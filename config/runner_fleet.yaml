@@ -15,8 +15,20 @@ runner_name_prefix: omninode-runner
 # burst drove one-minute load to 100.9 on the 32-core host -- the registered
 # runner count is the worst-case concurrent-job ceiling on a fixed-core box,
 # and idle runners cost nothing, so 88 registered runners is what let a burst
-# reach that load. 60 always-on steady-state runners. All 60 are steady (no
-# burst profiles), so burst_count == expected_count (no separate burst tier).
+# reach that load. OMN-19077 (operator consent ROLLING_WORK_LEDGER.md:3220)
+# proposed capping 60 -> 40 after 2026-09-22's 58 concurrent jobs drove IO
+# pressure (full avg10) to 52.8 and load to 397 and crashed dockerd, and every
+# runner created 2026-09-16 had reached its full 6 GiB memory limit with
+# 2.7-5.3 GiB swapped, on the same NVMe as the docker data root and the lab
+# lanes' brokers. OPERATOR RULING 2026-09-24 (ROLLING_WORK_LEDGER.md:3794):
+# 60 is the correct steady-state count; the fix for the 2026-09-22 incident is
+# containment, not headcount. The pool runs inside one aggregate cgroup
+# (omnirunners.slice, docker/runners/systemd/) whose MemoryHigh/MemoryMax/
+# MemorySwapMax/CPUWeight bound the WHOLE pool regardless of how many
+# containers are in it, so CI yields memory and CPU to the lab lanes instead
+# of competing as equals, at 60 runners exactly as it would at 40.
+# 60 always-on steady-state runners. All 60 are steady (no burst profiles),
+# so burst_count == expected_count (no separate burst tier).
 expected_count: 60
 burst_count: 60
 # OMN-17477 — DECLARED HOST INVENTORY.
