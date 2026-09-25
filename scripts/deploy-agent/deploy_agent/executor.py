@@ -16,6 +16,7 @@ import tempfile
 import time
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
+from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -35,6 +36,7 @@ from deploy_agent.compose_budget import (
     derive_runtime_phase_budget,
 )
 from deploy_agent.events import (
+    DEV_LANE_GATEWAY_SERVICES,
     DEV_LANE_ONLY_BUILDABLE_SERVICES,
     DEV_LANE_ONLY_MIGRATION_SERVICES,
     GATEWAY_COMPOSE_PROJECT,
@@ -443,12 +445,44 @@ class ProdStabilityDigestMissingError(RuntimeError):
     """
 
 
+class EnumInstancePhase(StrEnum):
+    """The deploy phases that exist on the .201 dev lane's host only (OMN-19522).
+
+    Each one reaches something .202 does not have: the ``omninode-gateway``
+    compose project and its systemd forwarder, the k3s onex-lab overlay (and its
+    failing-path repair build), the omninode_infra cloud image that the onex-api
+    pin delivers, and the Infisical container that the seed writes to (which the
+    dev-202 overlay disables, as the roles plan rules for that host).
+    """
+
+    GATEWAY_DEPLOY = "gateway-deploy"
+    LAB_OVERLAY = "lab-overlay"
+    ONEX_API_PIN = "onex-api-pin"
+    INFISICAL_SEED = "infisical-seed"
+
+
 class ModelLaneConfig(BaseModel):
     """Per-lane compose file(s), compose project, and health targets.
 
     The base ``docker-compose.infra.yml`` is always the first compose file;
     non-dev lanes layer their overlay (``docker-compose.<lane>.yml``) on top so
     the overlay's container names, project, and host port bindings win.
+
+    OMN-19522 adds four fields, each defaulting to what every lane did before,
+    so only a config that sets them behaves differently:
+
+    * ``build_project`` -- the project ``docker compose build`` runs under.
+      Compose names a built image ``<project>-<service>``, so a lane that brings
+      its runtime up under its own project must build under it too, or the up
+      finds no image and builds a second one without the build args.
+    * ``main_runtime_container`` override -- the container whose image records
+      the running build (the lineage fence reads it). On the .201 dev lane the
+      first health target's service name is also its container name; on a lane
+      that renames containers it is not.
+    * ``disabled_phases`` -- the .201-only phases this lane never runs.
+    * ``disabled_services`` -- services the lane's overlay disables by profile.
+      Naming one in a compose argv would auto-activate its profile and start
+      it, so they are never compose arguments on this lane.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -458,6 +492,15 @@ class ModelLaneConfig(BaseModel):
     compose_project: str
     postgres_container: str
     runtime_health_targets: tuple[tuple[str, int], ...]
+    build_project: str = COMPOSE_PROJECT
+    runtime_container: str = ""
+    disabled_phases: frozenset[EnumInstancePhase] = frozenset()
+    disabled_services: frozenset[str] = frozenset()
+
+    @property
+    def main_runtime_container(self) -> str:
+        """The lane's main runtime container name."""
+        return self.runtime_container or self.runtime_health_targets[0][0]
 
 
 _STABILITY_OVERLAY = f"{REPO_DIR}/docker/docker-compose.stability-test.yml"
@@ -524,9 +567,102 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
 }
 
 
+# OMN-19522: the dev-202 lane's own overlay (OMN-19505), layered on the .201 dev
+# lane's pair. It replaces everything that identifies a lane on a host: the
+# project, every container name, the network, the volumes and the ports.
+_DEV_202_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-202.yml"
+
+#: The dev lane's instances (OMN-19506 routing table, OMN-19522 composition).
+#: The wire lane of a command either instance runs is ``dev``; which
+#: composition runs it is a property of the process, selected once at agent
+#: start from the instance the routing table resolved (``select_dev_instance``).
+#: ``tests/unit/test_dev_202_executor_lane_omn19522.py`` pins that the keys are
+#: exactly the routing table's instances.
+DEV_INSTANCE_LANE_CONFIGS: dict[str, ModelLaneConfig] = {
+    "dev-201": _LANE_CONFIGS[EnumRuntimeLane.DEV],
+    "dev-202": ModelLaneConfig(
+        lane=EnumRuntimeLane.DEV,
+        compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY, _DEV_202_OVERLAY),
+        compose_project="omnibase-infra-dev-202",
+        build_project="omnibase-infra-dev-202",
+        postgres_container="omnibase-infra-dev-202-postgres",
+        # SERVICE names, as on the .201 dev lane: the verify recreate
+        # (VERIFY_RECREATE_LANES) looks them up by compose label. The ports are
+        # the host ports docker-compose.dev-202.yml publishes them on.
+        runtime_health_targets=(
+            ("omninode-runtime", 61085),
+            ("runtime-effects", 61086),
+        ),
+        runtime_container="omninode-dev-202-runtime",
+        disabled_phases=frozenset(EnumInstancePhase),
+        # The overlay's profile-disabled services a dev deploy is otherwise
+        # responsible for, plus the gateway project's, which has no lane here.
+        disabled_services=frozenset(
+            {
+                "onex-api",
+                "cloud-migration-files",
+                "cloud-migration",
+                "keycloak",
+                "infisical",
+                *DEV_LANE_GATEWAY_SERVICES,
+            }
+        ),
+    ),
+}
+
+#: The instance whose composition ``lane_config_for(DEV)`` returns. ``dev-201``
+#: until the agent selects otherwise, so a process with no router (fenced away
+#: from dev) and every caller that predates instances see the .201 lane.
+DEFAULT_DEV_INSTANCE = "dev-201"
+
+
+class _DevInstanceSelection:
+    """The process's selected dev instance; one attribute, set once at start."""
+
+    name: str = DEFAULT_DEV_INSTANCE
+
+
+def select_dev_instance(name: str) -> None:
+    """Make ``name``'s composition the dev lane's for this process.
+
+    Called once at agent start with the instance the routing table resolved.
+    Refuses an unknown name rather than falling back to .201's composition: on
+    .202 that fallback would bring up an ``omnibase-infra`` project on a host it
+    is not declared for.
+    """
+    if name not in DEV_INSTANCE_LANE_CONFIGS:
+        raise ValueError(
+            f"deploy-agent instance {name!r} has no dev-lane composition "
+            f"(declared: {', '.join(sorted(DEV_INSTANCE_LANE_CONFIGS))})"
+        )
+    _DevInstanceSelection.name = name
+
+
+def active_dev_instance() -> str:
+    """The instance whose composition this process deploys the dev lane with."""
+    return _DevInstanceSelection.name
+
+
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
+    if lane is EnumRuntimeLane.DEV:
+        return DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
     return _LANE_CONFIGS[lane]
+
+
+def lane_runs_phase(lane: EnumRuntimeLane, phase: EnumInstancePhase) -> bool:
+    """Whether this process runs a .201-only ``phase`` for ``lane`` (OMN-19522)."""
+    return phase not in lane_config_for(lane).disabled_phases
+
+
+def _without_disabled_services(
+    services: list[str], lane: EnumRuntimeLane | None
+) -> list[str]:
+    """``services`` minus what ``lane``'s overlay disables (OMN-19522)."""
+    if lane is None:
+        return services
+    disabled = lane_config_for(lane).disabled_services
+    return [s for s in services if s not in disabled]
 
 
 # OMN-15181 round 4 (Finding 11): single shared source mapping a canonical
@@ -644,9 +780,11 @@ def _requested_services_for_up(
     is a no-op on every non-DEV lane, since no other lane's scope carries them.
     """
     if services:
-        return without_gateway_services(services)
+        return _without_disabled_services(without_gateway_services(services), lane)
     if scope == Scope.RUNTIME:
-        return without_gateway_services(services_for_scope(scope, lane=lane))
+        return _without_disabled_services(
+            without_gateway_services(services_for_scope(scope, lane=lane)), lane
+        )
     return []
 
 
@@ -2698,14 +2836,30 @@ class DeployExecutor:
 
         on_phase_update(Phase.COMPOSE_GEN, PhaseStatus.SUCCESS)
 
-    def seed_infisical(self, on_phase_update: PhaseCallback) -> None:
+    def seed_infisical(
+        self,
+        on_phase_update: PhaseCallback,
+        *,
+        lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+    ) -> None:
         """Seed Infisical with required secrets before runtime containers start.
 
         Non-fatal: if Infisical is unreachable or seed fails, logs a warning and
         continues — the runtime containers will fall back to env-var resolution.
         This prevents a broken Infisical from blocking deploys entirely.
+
+        OMN-19522: SKIPPED, and recorded as skipped, on a lane that declares no
+        Infisical (dev-202 disables the container by profile).
         """
         from deploy_agent.events import Phase, PhaseStatus
+
+        if not lane_runs_phase(lane, EnumInstancePhase.INFISICAL_SEED):
+            logger.info(
+                "Infisical seed skipped: instance %s declares no Infisical",
+                active_dev_instance(),
+            )
+            on_phase_update(Phase.SEED, PhaseStatus.SKIPPED)
+            return
 
         on_phase_update(Phase.SEED, PhaseStatus.IN_PROGRESS)
         timeout = 120  # 2 minutes max for seed
@@ -2900,7 +3054,9 @@ class DeployExecutor:
                 targets=gateway_targets,
                 git_ref=git_ref,
             )
-            return services_for_scope(Scope.FULL, lane=lane)
+            return _without_disabled_services(
+                services_for_scope(Scope.FULL, lane=lane), lane
+            )
 
         self._compose_build(
             scope,
@@ -2929,7 +3085,9 @@ class DeployExecutor:
             targets=gateway_targets,
             git_ref=git_ref,
         )
-        return services if services else services_for_scope(scope, lane=lane)
+        return _without_disabled_services(
+            services if services else services_for_scope(scope, lane=lane), lane
+        )
 
     def _gateway_child_env(
         self, build_source: BuildSource | str, *, git_ref: str
@@ -3049,6 +3207,15 @@ class DeployExecutor:
         and not a second place to remember.
         """
         if lane != EnumRuntimeLane.DEV or not targets:
+            return
+        if not lane_runs_phase(lane, EnumInstancePhase.GATEWAY_DEPLOY):
+            # OMN-19522: there is no gateway lane on this instance's host.
+            logger.info(
+                "_deploy_gateway_lane: instance %s has no gateway lane; %s not "
+                "deployed",
+                active_dev_instance(),
+                ", ".join(targets),
+            )
             return
 
         script = deploy_gateway_script()
@@ -3703,7 +3870,9 @@ class DeployExecutor:
             "compose",
             *compose_file_args,
             "-p",
-            COMPOSE_PROJECT,
+            # OMN-19522: the lane's build project, which is COMPOSE_PROJECT on
+            # every lane but one that brings its runtime up under its own.
+            lane_config_for(runtime_lane).build_project,
             "--profile",
             profile,
             "build",
@@ -4453,7 +4622,12 @@ class DeployExecutor:
         # here: compose considers an already-exited one-shot converged, so
         # without it a new migrate image tag never reaches the database.
         if lane == EnumRuntimeLane.DEV:
-            for service in DEV_LANE_ONLY_MIGRATION_SERVICES:
+            # OMN-19522: a lane whose overlay disables them (dev-202, which has
+            # no delivery path for the cloud-migrate image) never names them;
+            # naming one would auto-activate its disabled profile.
+            for service in _without_disabled_services(
+                list(DEV_LANE_ONLY_MIGRATION_SERVICES), lane
+            ):
                 cmd = [*base_cmd, service]
                 result = _run(cmd, timeout=timeout, env=_compose_env())
                 if result.returncode != 0:

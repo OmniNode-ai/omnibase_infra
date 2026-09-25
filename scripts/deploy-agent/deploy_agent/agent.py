@@ -49,9 +49,13 @@ from deploy_agent.executor import (
     SCOPE_BUNDLES,
     DeployExecutor,
     DevLaneMigrationPreflightError,
+    EnumInstancePhase,
+    active_dev_instance,
     assert_prod_request_has_stability_digest,
     lane_config_for,
+    lane_runs_phase,
     resolve_prod_target_service,
+    select_dev_instance,
 )
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import EnumJobSettlingStage, JobState, JobStore
@@ -87,8 +91,7 @@ logger = logging.getLogger(__name__)
 
 def _runtime_container_for_lane(lane: EnumRuntimeLane) -> str:
     """The lane's main runtime container, whose image records its build (OMN-19270)."""
-    container_name, _ = lane_config_for(lane).runtime_health_targets[0]
-    return container_name
+    return lane_config_for(lane).main_runtime_container
 
 
 STATE_DIR = Path(
@@ -232,6 +235,10 @@ class DeployAgent:
             else None
         )
         if self._router is not None:
+            # OMN-19522: the instance picks the dev lane's composition too.
+            # Selected here, once, before anything reads a lane config; an
+            # instance with no composition refuses start (ValueError).
+            select_dev_instance(self._router.instance.name)
             logger.info(
                 "Deploy agent routing instance: %s, consumer group %s, %d route(s), "
                 "default %s",
@@ -812,8 +819,11 @@ class DeployAgent:
                     lane=cmd.runtime_lane,
                 )
 
-                # Seed Infisical before containers start (non-fatal)
-                self.executor.seed_infisical(on_phase_update=on_phase_update)
+                # Seed Infisical before containers start (non-fatal). OMN-19522:
+                # the executor records it SKIPPED on an instance with none.
+                self.executor.seed_infisical(
+                    on_phase_update=on_phase_update, lane=cmd.runtime_lane
+                )
 
                 # Runtime/full deploys must not start with stale endpoint env values.
                 if cmd.scope in (Scope.RUNTIME, Scope.FULL):
@@ -1144,6 +1154,14 @@ class DeployAgent:
         a failing one is logged at ``ERROR``: the refusal above was emitted at
         ``INFO`` thirty times and read exactly like a successful no-op.
         """
+        if not lane_runs_phase(cmd.runtime_lane, EnumInstancePhase.ONEX_API_PIN):
+            # OMN-19522: no onex-api runs on this instance (its overlay
+            # disables the service), so there is no pin to deliver.
+            logger.info(
+                "onex-api delivery skipped: instance %s runs no onex-api",
+                active_dev_instance(),
+            )
+            return None
         fence_sha = self._resolve_lab_overlay_sha(cmd, action="onex-api delivery")
         if fence_sha is None:
             return None
@@ -1269,6 +1287,14 @@ class DeployAgent:
         PREVIOUS job's commit and stamp a record naming it.
         """
         if cmd.runtime_lane != EnumRuntimeLane.DEV:
+            return None
+        if not lane_runs_phase(cmd.runtime_lane, EnumInstancePhase.LAB_OVERLAY):
+            # OMN-19522: the k3s onex-lab overlay lives on the .201 host only.
+            logger.info(
+                "lab overlay %s skipped: instance %s has no k3s onex-lab overlay",
+                action,
+                active_dev_instance(),
+            )
             return None
         if not LAB_OVERLAY_ENABLED:
             logger.info(
