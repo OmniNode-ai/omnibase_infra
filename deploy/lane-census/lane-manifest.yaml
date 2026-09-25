@@ -126,6 +126,13 @@
 #   .105 hostname `omnibook` and .200 hostname `Stickybeatz-Studio.local`, all three with
 #   daemon name `docker-desktop` and each carrying only omnibase-infra-dogfood (10, 12 and 10
 #   containers). No lane was mutated: every command was a read.
+# verified: 2026-09-25T01:28:58Z via read-only ssh to 192.168.86.202 (hostname `omnipc2`),
+#   `ss -ltnH` and `docker ps -a` / `docker network ls` filtered on omnibase-infra-dev-202
+#   (OMN-19505): the declared dev-202 port block 61002-61644 has no listener (0 matches for
+#   :61xxx); the host's listeners were 22, 53, 631, 3389, 8000, 8002 and sim-202's 62002,
+#   62085, 62086, 62092, 62379, 62436 and 62644; ip_local_port_range 32768-60999; zero
+#   dev-202 containers and networks. The dev-202 lane is DECLARED, not built: no lane was
+#   mutated.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -206,8 +213,9 @@ hosts:
     aliases: [omnibook]
   lab-200:
     aliases: [stickybeatz-studio]
-  # OMN-19339: the .202 host (omnipc2), carrying only the sim-202 lane. `hostname`
-  # there reads `omnipc2` (read 2026-09-24T01:18Z over ssh, read-only).
+  # OMN-19339: the .202 host (omnipc2). `hostname` there reads `omnipc2` (read
+  # 2026-09-24T01:18Z over ssh, read-only). It carries sim-202 and, since
+  # OMN-19505, the second deployed dev lane dev-202.
   lab-202:
     aliases: [omnipc2]
 lanes:
@@ -668,6 +676,129 @@ lanes:
         kind: service
         replicas: 1
       - name: omnimarket-sim-202-projection-api
+        kind: service
+        replicas: 1
+  # ---------------------------------------------------------------------------
+  # dev-202 — the second deployed dev lane, on the .202 host (OMN-19505, task B2
+  # of the second-deploy-slot plan, epic OMN-19500)
+  # ---------------------------------------------------------------------------
+  # A dev-shaped lane that tracks `dev` like the .201 dev lane, so a second
+  # deploy-agent instance can run a second runtime deploy slot in parallel
+  # (operator RULING 2026-09-25T00:56:45Z: omnimarket changes may be proven here
+  # under the receipt lane `compose-dev-202`; omnibase_infra stays .201-only).
+  # Its compose file is an overlay on the dev composition (infra.yml plus
+  # dev-lane.yml) that renames every container, the network, every volume and
+  # the project, and republishes every port on the loopback address in the
+  # 61xxx block. Its header carries the render command and the reasons.
+  #
+  # Its own Postgres, Redpanda and Valkey, never the .201 shared broker. It is
+  # NOT in GOVERNED_LANES or GRANT_INTERLOCK_LANES
+  # (scripts/preflight_lane_deploy_attribution.py) and sources no
+  # `stability-proven` digest; tests/ci/test_dev_202_lane_boundary_omn19505.py
+  # pins that.
+  #
+  # Every service the .201 dev lane declares is declared here under a dev-202
+  # name. onex-api and its two cloud-migration one-shots are `profile_gated`:
+  # their image is the omninode_infra cloud build that only the .201 lab-overlay
+  # pin delivers. Keycloak and Infisical (the roles plan's non-roles on .202)
+  # are disabled and declared nowhere. The lane also declares the services the
+  # .201 dev composition runs but its manifest entry leaves loose (the consumers,
+  # projection-api, runtime-worker, phoenix, autoheal and the broker one-shots),
+  # because this entry is parity-checked against its compose file.
+  #
+  # `optional: true`: declared before it is built. Bring-up waits on decision 19
+  # of the unified verification plan (no clone and no `.git` on .202 while the
+  # C13, C14 and C29 producers run bare there).
+  dev-202:
+    hosts: [lab-202]
+    compose_file: docker/docker-compose.dev-202.yml
+    compose_project: omnibase-infra-dev-202
+    network: omnibase-infra-dev-202-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omnibase-infra-dev-202-postgres
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dev-202-redpanda
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dev-202-redpanda-scram-user
+        kind: oneshot
+      - name: omnibase-infra-dev-202-redpanda-sasl-enable
+        kind: oneshot
+      - name: omnibase-infra-dev-202-redpanda-partition-cap
+        kind: oneshot
+      - name: omnibase-infra-dev-202-valkey
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dev-202-forward-migration
+        kind: oneshot
+      - name: omnibase-infra-dev-202-migration-gate
+        kind: keepalive
+      - name: omnibase-infra-dev-202-intelligence-migration
+        kind: oneshot
+      - name: omnibase-infra-dev-202-cloud-migration-files
+        kind: profile_gated
+      - name: omnibase-infra-dev-202-cloud-migration
+        kind: profile_gated
+      - name: onex-api-dev-202
+        kind: profile_gated
+      - name: omnibase-infra-dev-202-autoheal
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dev-202-phoenix
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-runtime-effects
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-runtime-worker
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-tenant-projection-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-api
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-agent-actions-consumer
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-skill-lifecycle-consumer
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-context-audit-consumer
+        kind: service
+        replicas: 1
+      - name: omnibase-dev-202-intelligence-api
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-contract-resolver
+        kind: service
+        replicas: 1
+      - name: omninode-dev-202-infra-routing-decisions-consumer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-tenant-registry-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-registration-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-savings-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-tenant-credentials-writer
+        kind: service
+        replicas: 1
+      - name: omnimarket-dev-202-projection-live-events-writer
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------

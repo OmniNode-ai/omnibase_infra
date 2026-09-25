@@ -134,6 +134,10 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # Postgres 62436, Valkey 62379, Redpanda 62092/62644, gateway API 62090
     # reserved) are declared in the lane manifest's comment.
     "sim-202": {"main": "62085", "effects": "62086"},
+    # OMN-19505 — the second deployed dev lane on the .202 host. Read free there
+    # by `ss -ltn` on 2026-09-25T01:28:58Z; bound to the loopback address only.
+    # The rest of its 61xxx block is declared in the lane manifest's comment.
+    "dev-202": {"main": "61085", "effects": "61086"},
 }
 
 _LANE_BOUNDARY: dict[str, str] = {
@@ -178,6 +182,14 @@ _LANE_BOUNDARY: dict[str, str] = {
         ".202 fault-injection stack — own Postgres, Redpanda and Valkey, loopback "
         "only; simulation evidence only, never a proof lane, and never sourced "
         "for stability/prod grants"
+    ),
+    # OMN-19505, second-deploy-slot plan task B2. The operator ruled (ledger
+    # RULING 2026-09-25T00:56:45Z) that its compose-dev-202 receipt proves
+    # omnimarket changes only; omnibase_infra stays proven on .201.
+    "dev-202": (
+        ".202 second deployed dev lane — own Postgres, Redpanda and Valkey, "
+        "loopback only; its compose-dev-202 receipt proves omnimarket changes "
+        "only, and it is never sourced for stability/prod grants"
     ),
 }
 
