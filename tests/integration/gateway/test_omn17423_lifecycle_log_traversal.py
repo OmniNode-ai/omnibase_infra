@@ -131,14 +131,32 @@ def _claims() -> dict[str, object]:
     }
 
 
+def _all_handlers() -> list[logging.Handler]:
+    """Every handler `install_credential_redaction_filter` can reach."""
+    loggers: list[logging.Logger] = [logging.getLogger()]
+    loggers += [
+        obj
+        for obj in logging.getLogger().manager.loggerDict.values()
+        if isinstance(obj, logging.Logger)
+    ]
+    return [handler for logger in loggers for handler in logger.handlers]
+
+
 @pytest.fixture
 def gateway_log_stream() -> Any:
     """A real stream handler on the root logger, filtered exactly as production.
 
     ``install_credential_redaction_filter()`` is AC2's mechanism and is what
-    ``service_kernel.configure_logging()`` calls in the runtime bootstrap. The
-    handler is removed again on teardown so the filter cannot leak into another
-    test's handlers.
+    ``service_kernel.configure_logging()`` calls in the runtime bootstrap, so
+    the fixture calls it rather than attaching a filter by hand -- the point of
+    this test is that the shipped mechanism and the new lifecycle lines compose.
+
+    Teardown has to undo ALL of it, not just this handler. The installer walks
+    every reachable logger and filters every handler it finds, pytest's own
+    capture handlers included; removing only the handler added here would leave
+    a redaction filter attached to the session's shared handlers and silently
+    rewrite later tests' log assertions. So the exact filter objects this call
+    adds are recorded per handler and removed again.
     """
     buffer = io.StringIO()
     handler = logging.StreamHandler(buffer)
@@ -149,11 +167,21 @@ def gateway_log_stream() -> Any:
     previous_level = root.level
     root.addHandler(handler)
     root.setLevel(logging.INFO)
+
+    before = {id(h): list(h.filters) for h in _all_handlers()}
     installed = install_credential_redaction_filter()
     assert installed >= 1, "AC2's redaction filter did not attach to any handler"
+    added = [
+        (h, f)
+        for h in _all_handlers()
+        for f in h.filters
+        if f not in before.get(id(h), [])
+    ]
     try:
         yield buffer
     finally:
+        for target, added_filter in added:
+            target.removeFilter(added_filter)
         root.removeHandler(handler)
         root.setLevel(previous_level)
 
