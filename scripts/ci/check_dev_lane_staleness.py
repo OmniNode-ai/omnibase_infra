@@ -177,6 +177,12 @@ _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.ci.deploy_lane_verify_route import (
+    load_table,
+    targets_for_receipt_lane,
+    write_lane_env,
+    write_route_outputs,
+)
 from scripts.ci.lab_pass_receipt import (
     ModelLaneGeneration,
     read_agent_loaded_code_sha,
@@ -193,6 +199,39 @@ DEFAULT_BRANCH = "dev"
 # if a container were renamed onto the same daemon.
 DEV_LANE_CONTAINER = "omninode-runtime"
 DEV_LANE_COMPOSE_PROJECT = "omnibase-infra"
+
+
+def resolve_lane_target(
+    lane: str, container: str | None, compose_project: str | None
+) -> tuple[str, str]:
+    """The (container, compose project) this guard reads, for a lab-pass lane.
+
+    OMN-19507 AC2. With no lane, the .201 dev lane above, or whatever the caller
+    names explicitly -- exactly as before. With a lane, the runtime container
+    and compose project of the one deploy-agent instance that emits that
+    receipt lane (``config/deploy_lane_routing.yaml``, ``verify:``), so the
+    dev-202 lane is read as ``compose-dev-202`` and never through the .201
+    names. An explicit value that contradicts the lane refuses rather than
+    silently winning: a guard reading one lane and receipting another is the
+    OMN-18420 shape.
+    """
+    if not lane:
+        return (
+            container or DEV_LANE_CONTAINER,
+            compose_project or DEV_LANE_COMPOSE_PROJECT,
+        )
+    targets = targets_for_receipt_lane(load_table(), lane)
+    for given, declared, flag in (
+        (container, targets.runtime_container, "--container"),
+        (compose_project, targets.compose_project, "--compose-project"),
+    ):
+        if given is not None and given != declared:
+            raise ValueError(
+                f"{flag}={given!r} contradicts lane {lane!r}, whose declared "
+                f"value is {declared!r}"
+            )
+    return targets.runtime_container, targets.compose_project
+
 
 REVISION_LABEL = "org.opencontainers.image.revision"
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
@@ -1829,8 +1868,36 @@ def main(argv: list[str] | None = None) -> int:
         "--repo", default=os.environ.get("GITHUB_REPOSITORY", DEFAULT_REPO)
     )
     parser.add_argument("--branch", default=DEFAULT_BRANCH)
-    parser.add_argument("--container", default=DEV_LANE_CONTAINER)
-    parser.add_argument("--compose-project", default=DEV_LANE_COMPOSE_PROJECT)
+    parser.add_argument(
+        "--lane",
+        default="",
+        help=(
+            "OMN-19507: the lab-pass lane whose lane this guard reads (for "
+            "example compose-dev-202). Sets --container and --compose-project "
+            "from the routing table; empty keeps the .201 dev lane."
+        ),
+    )
+    parser.add_argument("--container", default=None)
+    parser.add_argument("--compose-project", default=None)
+    # OMN-19507 AC2. Before this guard reads a lane, the workflow asks it WHICH
+    # lane: the trigger job routes the command it published
+    # (--write-route-outputs), and the verify job loads the routed lane's
+    # targets into its environment (--write-lane-env with --lane). Both read
+    # config/deploy_lane_routing.yaml through
+    # scripts/ci/deploy_lane_verify_route.py and write nothing on a refusal.
+    route_mode = parser.add_mutually_exclusive_group()
+    route_mode.add_argument(
+        "--write-route-outputs",
+        action="store_true",
+        help="route --runtime-lane/--requested-by and write the job outputs",
+    )
+    route_mode.add_argument(
+        "--write-lane-env",
+        action="store_true",
+        help="write --lane's verify targets to the job environment",
+    )
+    parser.add_argument("--runtime-lane", default="dev")
+    parser.add_argument("--requested-by", default="")
     parser.add_argument(
         "--max-commits-behind",
         type=int,
@@ -1912,7 +1979,23 @@ def main(argv: list[str] | None = None) -> int:
         print("::error::--positive-control requires --deployed-revision")
         return 1
 
+    if args.write_route_outputs:
+        if not args.requested_by:
+            print("::error::--write-route-outputs requires --requested-by")
+            return 1
+        return write_route_outputs(
+            runtime_lane=args.runtime_lane, requested_by=args.requested_by
+        )
+    if args.write_lane_env:
+        if not args.lane:
+            print("::error::--write-lane-env requires --lane")
+            return 1
+        return write_lane_env(receipt_lane=args.lane)
+
     try:
+        args.container, args.compose_project = resolve_lane_target(
+            args.lane, args.container, args.compose_project
+        )
         if args.expect_revision:
             return _run_convergence_mode(args)
         return _run_staleness_mode(args)

@@ -79,7 +79,10 @@ _LANES_201 = {
 # second deployed dev lane dev-202. From a dogfood surface host both are as
 # not-applicable as any .201 lane.
 _LANES_202 = {"sim-202", "dev-202"}
-_LANES_OFF_DOGFOOD_HOSTS = _LANES_201 | _LANES_202
+# OMN-19543: the .200 host also carries the third deployed dev lane dev-200, so
+# from the .101 and .105 dogfood hosts it is not-applicable too.
+_LANES_200_ONLY = {"dev-200"}
+_LANES_OFF_DOGFOOD_HOSTS = _LANES_201 | _LANES_202 | _LANES_200_ONLY
 
 # OMN-19544: the .105 host also carries the time-shared deployed dev lane
 # dev-105, which is not applicable on the other dogfood hosts.
