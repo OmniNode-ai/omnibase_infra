@@ -3893,7 +3893,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: b0ce124838108bdce47f0e02245906ec5be4fde2
+          ref: 8b8d5d3b5dda51bdcc99168d4c358a6df0f19380
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -4840,6 +4840,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # OMN-17886 AC4: an EMPTY server for the live-ACL gate. The corpus has to
+      # build into the real database names (sixteen migrations run
+      # `\connect omnidash_analytics`), and the service above already holds a
+      # migrated omnibase_infra, so the gate gets a server of its own.
+      acl_gate_postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -5022,6 +5037,23 @@ jobs:
         run: |
           uv run pytest \
             tests/integration/migrations/test_omn15683_mixed_representation_conversion.py \
+            -v --tb=short -p no:randomly
+
+      # OMN-17886 AC4: build omnidash_analytics from EMPTY with the real forward
+      # runner, then diff its omninode_internal ACLs against the topology. A
+      # migration that confers an undeclared grant, or omits a declared one,
+      # fails here. The findings the corpus still produces are listed one by one
+      # in config/omninode_internal_live_acl_allowlist.yaml, which is
+      # shrink-only: an entry that stops reproducing fails the gate too.
+      - name: omninode_internal live-ACL gate (OMN-17886)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMN17886_GATE_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.acl_gate_postgres.ports['5432'] }}/postgres
+          # With a Postgres in hand a SKIP is a vacuous green.
+          OMN17886_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py \
             -v --tb=short -p no:randomly
 
       - name: Assert manifest tables exist
