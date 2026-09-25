@@ -35,6 +35,7 @@ Related:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -119,6 +120,16 @@ class ModelDomainPluginConfig:
     # Keys are defined per-feature (e.g. DLQ_ENABLED, DLQ_DB_URL for the DLQ plugin).
     # None when the kernel has not loaded an overlay (legacy env-var mode).
     overlay_config: dict[str, str] | None = None
+
+    # Credential resolver: maps a secret's VARIABLE NAME to its value, or None
+    # when it does not resolve (OMN-19129). The kernel owns this because the
+    # kernel owns secret resolution; a plugin that needs a credential asks for
+    # it by name through this callable rather than reading the process
+    # environment, which is the same discipline `overlay_config` establishes
+    # for feature flags. The resolved value is deliberately NOT a field on this
+    # config: a callable keeps credential values out of the dataclass, out of
+    # its repr, and out of anything that logs it.
+    secret_resolver: Callable[[str], str | None] | None = None
 
 
 __all__ = ["ModelDomainPluginConfig"]

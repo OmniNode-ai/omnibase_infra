@@ -1,0 +1,134 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# config/lab_probe_windows.yaml -- OMN-19412 (lab release-sync plan, task T0.3,
+# seam L0.3: probe workflows <-> this file <-> reconcile dispatcher and
+# runtime-train).
+#
+# WHAT THIS IS
+#   Every scheduled probe that reads a lab lane: the workflow, its repository,
+#   its cron (UTC), the lane it reads and the longest one run can take. The
+#   reconcile dispatcher (OMN-19420) and the runtime-train skill (OMN-19424)
+#   read it so that a lane mutation does not land in the gap before a probe.
+#   Until this file those windows were prose in one ledger row
+#   (2026-09-23T20:23:28Z, lane merge-drain-7f).
+#
+# NOTHING HERE IS TAKEN ON TRUST
+#   scripts/ci/check_lab_probe_windows.py re-derives every field from the
+#   workflow file and refuses any disagreement, and refuses a scheduled probe
+#   that has no entry. It runs as the "Lab Probe Windows (OMN-19412)" job in
+#   ci.yml, a STRICT gate of the required CI Summary context, over this
+#   repository's pull request head and the default branch of omninode_infra and
+#   omnimarket. Move a cron in a workflow and this file must move with it.
+#
+# FIELDS
+#   cron                  the workflow's on.schedule crons, exactly as written.
+#   lane                  what the probe reads, as the workflow itself names it:
+#                           job_name  a job named "... (<lane> lane)"
+#                           run_name  the run title's lane= token (its scheduled default)
+#                           runs_on   the runner label every job is pinned to
+#                                     (omnipc2-customer is the no-checkout customer machine, .202)
+#                           none      the workflow names no lane; `reads` says what it reads
+#   max_duration_minutes  the longest `needs` chain of job timeout-minutes
+#                         (GitHub's default of 360 for a job that sets none).
+#
+#   How long before a window a mutation must end, and how long after, is the
+#   dispatcher's and runtime-train's policy, not this file's.
+#
+# PROVIDER-RUNG (the eleventh entry) is not in the plan's section 4 E table.
+# The checker found it: it is scheduled and its job names the dev lane, so it is
+# a probe of that lane like C11 and C12.
+schema_version: 1
+probes:
+  - id: C15
+    name: chain canary
+    repo: omnibase_infra
+    workflow: .github/workflows/chain-canary.yml
+    cron: ['41 1,3,5,7,9,11,13,15,17,19,21,23 * * *']
+    lane: dev
+    lane_source: job_name
+    max_duration_minutes: 25
+  - id: C16
+    name: receipt identity
+    repo: omnibase_infra
+    workflow: .github/workflows/chain-canary-c16-receipt-identity.yml
+    cron: ['29 3,9,15,21 * * *']
+    lane: dev
+    lane_source: job_name
+    max_duration_minutes: 15
+  - id: C11
+    name: negative paths
+    repo: omnibase_infra
+    workflow: .github/workflows/chain-canary-c11-negative-paths.yml
+    cron: ['17 2,8,14,20 * * *']
+    lane: dev
+    lane_source: job_name
+    max_duration_minutes: 10
+  - id: C12
+    name: provider catalogue
+    repo: omnibase_infra
+    workflow: .github/workflows/chain-canary-c12-provider-catalogue.yml
+    cron: ['27 2,8,14,20 * * *']
+    lane: dev
+    lane_source: job_name
+    max_duration_minutes: 10
+  - id: provider-rung
+    name: provider-rung liveness canary
+    repo: omnibase_infra
+    workflow: .github/workflows/provider-rung-canary.yml
+    cron: ['47 2,8,14,20 * * *']
+    lane: dev
+    lane_source: job_name
+    max_duration_minutes: 10
+  - id: C13
+    name: customer-local delegation
+    repo: omninode_infra
+    workflow: .github/workflows/c13-customer-local-delegation.yml
+    cron: ['29 4,16 * * *']
+    lane: omnipc2-customer
+    lane_source: runs_on
+    max_duration_minutes: 45
+  - id: C14
+    name: customer-local routing
+    repo: omninode_infra
+    workflow: .github/workflows/c14-customer-local-routing.yml
+    cron: ['41 5,17 * * *']
+    lane: omnipc2-customer
+    lane_source: runs_on
+    max_duration_minutes: 30
+  - id: C29
+    name: customer own-key delegation
+    repo: omninode_infra
+    workflow: .github/workflows/c29-customer-byo-key-delegation.yml
+    cron: ['53 4,16 * * *']
+    lane: omnipc2-customer
+    lane_source: runs_on
+    max_duration_minutes: 30
+  - id: C17
+    name: customer-surface verdict
+    repo: omninode_infra
+    workflow: .github/workflows/m4-c17-customer-surface-verdict.yml
+    cron: ['29 1,7,13,19 * * *']
+    lane: none
+    lane_source: none
+    reads: >-
+      the published packages and customer guides, installed into a fresh container on the trusted CI fleet; no lab lane
+    max_duration_minutes: 30
+  - id: D11
+    name: delegation regression
+    repo: omnimarket
+    workflow: .github/workflows/delegation-regression-nightly.yml
+    cron: ['30 7 * * *']
+    lane: stability-test
+    lane_source: run_name
+    max_duration_minutes: 70
+  - id: release-train
+    name: release train
+    repo: omnibase_infra
+    workflow: .github/workflows/release-train-nightly.yml
+    cron: ['11 7 * * *']
+    lane: none
+    lane_source: none
+    reads: >-
+      the lab-pass receipts config/release_train_policy.yaml names as each repository's cut premise (compose-dev for omnibase_infra and omnimarket); it touches no lane itself
+    max_duration_minutes: 50

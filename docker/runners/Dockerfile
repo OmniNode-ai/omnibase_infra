@@ -129,6 +129,42 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
+# Playwright chromium system libraries (OMN-19206): a private repository's
+# Playwright smoke tests run on this fleet, and without these every one dies at
+# browserType.launch with "libnspr4.so: cannot open shared object file". A job
+# cannot install them itself: `playwright install --with-deps` needs apt as
+# root, and the sudoers rule below grants one confined `rm -rf` and nothing
+# else. The list is the library half of `playwright install-deps --dry-run
+# chromium` on 22.04. Its xvfb and font packages are left out: the fleet runs
+# Chromium headless, and libpango/libcairo pull fontconfig and a default font
+# in on their own. runner-image-build-smoke resolves every soname inside the
+# built image, and tests/ci/test_runner_image_playwright_chromium_libs_omn19206.py
+# pins the package list.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libwayland-client0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    && rm -rf /var/lib/apt/lists/*
+
 # OMN-15134: scoped NOPASSWD sudo rule -- `runner` may run exactly
 # `rm -rf -- <path under RUNNER_HOME>/_work/...>` as root, nothing else. This
 # is the fallback path runner-job-started.sh uses ONLY after a plain `rm -rf`

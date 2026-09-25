@@ -58,7 +58,7 @@ db_io:
   db_tables:
     - name: delegation_events
       database_ref: application
-      schema: tenant
+      schema: public
       migration: nodes/node_projection_delegation/0001.sql
       access: read_write
       role: events
@@ -71,7 +71,7 @@ db_io:
     assert contract.db_io is not None
     assert isinstance(contract.db_io.db_tables[0], ModelDbTableDeclaration)
     assert contract.db_io.db_tables[0].database_ref == "application"
-    assert contract.db_io.db_tables[0].schema == "tenant"
+    assert contract.db_io.db_tables[0].schema == "public"
 
 
 @pytest.mark.parametrize(
@@ -79,7 +79,7 @@ db_io:
     [
         """\
     - name: delegation_events
-      schema: tenant
+      schema: public
       migration: 0001.sql
       role: events
 """,
@@ -93,7 +93,7 @@ db_io:
     - name: delegation_events
       database: omnidash_analytics
       database_ref: application
-      schema: tenant
+      schema: public
       migration: 0001.sql
       role: events
 """,
@@ -122,7 +122,7 @@ def test_projection_target_exposes_typed_database_schema_and_domain() -> None:
     table = ModelDbTableDeclaration(
         name="delegation_events",
         database_ref="application",
-        schema="tenant",
+        schema="public",
         migration="nodes/node_projection_delegation/0001.sql",
         access="read_write",
         role="events",
@@ -132,10 +132,11 @@ def test_projection_target_exposes_typed_database_schema_and_domain() -> None:
 
     assert target.database_refs == ("application",)
     assert target.physical_database == "omnidash_analytics"
-    # OMN-16239: the declaration stays logical while the resolved placement is
-    # physical. delegation_events is still under the OMN-15359 bridge, so these
-    # two deliberately differ; asserting both keeps the seam visible.
-    assert target.table_targets[0].table.schema == "tenant"
+    # OMN-17887: `public` IS the TENANT domain (the `tenant` schema is retired),
+    # so a tenant-domain relation is declared `public` and resolves to physical
+    # `public` with no bridge. Asserting declaration, placement and domain
+    # together keeps the seam visible.
+    assert target.table_targets[0].table.schema == "public"
     assert target.physical_schemas == ("public",)
     assert target.domains == (EnumDatabaseSchemaDomain.TENANT,)
     assert target.dsn_envs == ("OMNIDASH_ANALYTICS_DB_URL",)
@@ -162,7 +163,7 @@ def test_projection_target_preserves_multiple_schemas_in_one_database() -> None:
         ModelDbTableDeclaration(
             name="delegation_events",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration="0001.sql",
             role="events",
         ),
@@ -178,9 +179,9 @@ def test_projection_target_preserves_multiple_schemas_in_one_database() -> None:
     target = _resolve_projection_database_target(tables, topology)
 
     assert target.physical_database == "omnidash_analytics"
-    # One bridged relation and one not: delegation_events is still physically in
-    # public, future_internal_projection is not enumerated so it resolves to its
-    # declared schema (OMN-16239).
+    # delegation_events is declared `public` (the TENANT domain, OMN-17887);
+    # future_internal_projection is not enumerated in the OMN-15359 internal
+    # bridge so it resolves to its declared schema (OMN-16239).
     assert target.physical_schemas == ("omninode_internal", "public")
     assert target.domains == (
         EnumDatabaseSchemaDomain.OMNINODE_INTERNAL,
@@ -218,7 +219,7 @@ def test_projection_adapter_selection_receives_resolved_domain_target() -> None:
     table = ModelDbTableDeclaration(
         name="delegation_events",
         database_ref="application",
-        schema="tenant",
+        schema="public",
         migration="0001.sql",
         role="events",
     )

@@ -141,7 +141,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import yaml
 
@@ -187,6 +187,34 @@ lab_pass_receipt = _load_sibling("lab_pass_receipt")
 #: click and pydantic at module scope.
 _CLASSIFIER_PATH = _REPO_ROOT / "scripts" / "runtime_change_classifier.py"
 
+#: The ONE ``sys.modules`` name the classifier is registered under, shared with
+#: ``trigger_rebuild_on_merge.py`` (OMN-19318). A second name would load a
+#: second module object, and so a second copy of the runtime-affecting
+#: predicate the two callers must never disagree about.
+_CLASSIFIER_MODULE_NAME = "_omnibase_infra_runtime_change_classifier"
+
+
+def _load_runtime_change_classifier() -> Any:
+    """The shared classifier module, under its one canonical name."""
+    existing = sys.modules.get(_CLASSIFIER_MODULE_NAME)
+    if existing is not None:
+        return existing
+    spec = importlib.util.spec_from_file_location(
+        _CLASSIFIER_MODULE_NAME, _CLASSIFIER_PATH
+    )
+    if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
+        msg = f"cannot load the runtime-change classifier at {_CLASSIFIER_PATH}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[_CLASSIFIER_MODULE_NAME] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(_CLASSIFIER_MODULE_NAME, None)
+        raise
+    return module
+
+
 #: How far back the ancestor walk goes before refusing. A bound rather than an
 #: unbounded walk because an unbounded one on a repo that has never emitted a
 #: receipt reads every commit in its history to reach the same refusal. 200
@@ -221,9 +249,28 @@ class EnumLabEvidence(StrEnum):
     #: to. True of omnibase_infra and omnimarket, the only two repos that carry
     #: a rebuild trigger.
     COMPOSE_DEV = "compose-dev"
+    #: A PASS under ``compose-dev`` OR ``compose-dev-202`` (OMN-19508). The second
+    #: deployed dev lane on the .202 host proves omnimarket changes only, by the
+    #: operator ruling of 2026-09-25T00:56:45Z, so the loader refuses this value
+    #: for any other repo; omnibase_infra stays on ``compose-dev``.
+    COMPOSE_DEV_OR_DEV_202 = "compose-dev-or-compose-dev-202"
     #: The repo has no lab lane of its own. A declaration, with its reason, not
     #: a way around the bar -- the reason is printed on every decision it makes.
     NONE = "none"
+
+
+#: The repos the operator ruled may be proven on the .202 dev lane (OMN-19508).
+COMPOSE_DEV_202_PROVEN_REPOS: Final = frozenset({"omnimarket"})
+
+
+def lab_evidence_lanes(evidence: EnumLabEvidence) -> tuple[Any, ...]:
+    """The receipt lanes, in reading order, whose PASS satisfies ``evidence``."""
+    lanes = lab_pass_receipt.EnumLabLane
+    if evidence is EnumLabEvidence.COMPOSE_DEV_OR_DEV_202:
+        return (lanes.COMPOSE_DEV, lanes.COMPOSE_DEV_202)
+    if evidence is EnumLabEvidence.COMPOSE_DEV:
+        return (lanes.COMPOSE_DEV,)
+    return ()
 
 
 class EnumTrainMode(StrEnum):
@@ -464,6 +511,19 @@ def _parse_entry(repo: str, entry: Any, path: Path) -> ModelRepoReleasePolicy:
     except ValueError as exc:
         msg = f"{path}: repo {repo} declares an unknown value: {exc}"
         raise ReleaseTrainConfigError(msg) from exc
+
+    if (
+        lab_evidence is EnumLabEvidence.COMPOSE_DEV_OR_DEV_202
+        and repo not in COMPOSE_DEV_202_PROVEN_REPOS
+    ):
+        msg = (
+            f"{path}: repo {repo} declares lab_evidence "
+            f"'{EnumLabEvidence.COMPOSE_DEV_OR_DEV_202.value}'. Only "
+            f"{sorted(COMPOSE_DEV_202_PROVEN_REPOS)} may be proven on the .202 "
+            "dev lane (operator ruling 2026-09-25T00:56:45Z); omnibase_infra "
+            "stays proven on .201."
+        )
+        raise ReleaseTrainConfigError(msg)
 
     lab_note = str(entry.get("lab_evidence_note", "") or "").strip()
     if lab_evidence is EnumLabEvidence.NONE and not lab_note:
@@ -751,27 +811,85 @@ def resolve_lab_candidate(
     )
 
 
-def load_runtime_affecting(clone: Path, validator_path: Path) -> Callable[[str], bool]:
+def load_runtime_affecting(
+    clone: Path,
+    validator_path: Path,
+    *,
+    labels_for: Callable[[str], Sequence[str]],
+) -> Callable[[str], bool]:
     """Build the "is this commit runtime-affecting" predicate for one clone.
 
-    The predicate is the TRIGGER'S, reached through the module the trigger reads
-    its own patterns from, so the two cannot disagree about which merges produce
-    a receipt. Nothing about the union is restated here.
+    The predicate is the TRIGGER'S: ``is_runtime_affecting`` in the shared
+    classifier module, the same function object the trigger's ``should_trigger``
+    is (OMN-19318). It unions the path rule with the ``runtime_change`` label of
+    the merged pull request that produced the commit, read by ``labels_for``
+    (normally :func:`default_merged_pr_labels`). Nothing about the union is
+    restated here.
 
     Raises rather than returning a permissive default when the classifier module
     or the canonical deploy-gate validator cannot be loaded. A predicate that
     answered "not runtime-affecting" because it could not read the canonical
     list would inherit a receipt across a source change, which is the one
-    outcome this premise exists to prevent.
+    outcome this premise exists to prevent. For the same reason a label read
+    that fails raises ``LabelReadError`` out of the predicate, and
+    ``resolve_lab_candidate`` then resolves nothing and its caller falls back to
+    the exact head.
     """
-    classifier_module = _load_module_at(_CLASSIFIER_PATH, "runtime_change_classifier")
+    classifier_module = _load_runtime_change_classifier()
     canonical = classifier_module.load_runtime_path_classifier(validator_path)
 
     def _runtime_affecting(sha: str) -> bool:
         changed = default_changed_files(clone, sha)
-        return bool(classifier_module.classify_runtime_paths(changed, canonical))
+        # OMN-19375: the trigger reads the same two manifests at the same pair
+        # of commits, so a version-only bump it declines is walked past here.
+        runtime_paths = classifier_module.classify_runtime_paths(
+            changed,
+            canonical,
+            manifest_reader=classifier_module.git_manifest_reader(clone, sha),
+        )
+        return bool(
+            classifier_module.is_runtime_affecting(
+                runtime_paths, lambda: labels_for(sha)
+            )
+        )
 
     return _runtime_affecting
+
+
+def default_merged_pr_labels(repo: str, sha: str) -> list[str]:
+    """Labels of the merged pull request(s) that introduced ``sha``, read live.
+
+    ``repo`` is ``owner/name``. The commit-to-pulls endpoint returns, for a
+    commit on the default branch, the merged pull request that introduced it;
+    labels of every MERGED pull request it returns are unioned, which errs
+    toward runtime-affecting. A label added after the merge counts too, for the
+    same reason. A commit no pull request produced (a bot push) has no labels.
+
+    Raises on any read failure, and on a response that is not a list, so the
+    predicate raises ``LabelReadError`` instead of reading "no label".
+    """
+    raw = subprocess.run(
+        ["gh", "api", f"repos/{repo}/commits/{sha}/pulls"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    pulls = json.loads(raw)
+    if not isinstance(pulls, list):
+        msg = f"commits/{sha[:12]}/pulls for {repo} is not a list: {raw[:200]!r}"
+        raise ValueError(msg)
+    labels: list[str] = []
+    for pull in pulls:
+        if not isinstance(pull, dict) or not pull.get("merged_at"):
+            continue
+        for label in pull.get("labels") or []:
+            name = label.get("name") if isinstance(label, dict) else None
+            if not isinstance(name, str):
+                msg = f"pull request label without a name for {sha[:12]}: {label!r}"
+                raise ValueError(msg)
+            if name not in labels:
+                labels.append(name)
+    return labels
 
 
 def default_branch_commits(clone: Path, head_ref: str) -> list[str]:
@@ -1077,6 +1195,7 @@ def classify_lab_receipt(
     list_artifacts: Callable[[str, str], list[dict[str, Any]]],
     download_receipt: Callable[[str, int], Any],
     rebuild_pending: Callable[[str, str], bool] | None = None,
+    lanes: Sequence[Any] | None = None,
 ) -> tuple[EnumTrainReason | None, str]:
     """Resolve the compose-dev receipt for one sha into a reason, or None on PASS.
 
@@ -1110,9 +1229,51 @@ def classify_lab_receipt(
 
     The name is exact rather than a paginated listing, because a listing returns
     a false zero and a failed rebuild is precisely when a receipt should exist.
+
+    WHICH LANES (OMN-19508)
+    -----------------------
+    ``lanes`` defaults to ``compose-dev`` alone. A repo whose policy names
+    ``compose-dev-or-compose-dev-202`` is read on ``compose-dev`` first, then
+    ``compose-dev-202``, and a PASS on either satisfies the premise. When none
+    passes, the refusal is the FIRST lane's, with the others' outcomes appended.
     """
-    lane = lab_pass_receipt.EnumLabLane.COMPOSE_DEV
+    read = tuple(lanes) if lanes else (lab_pass_receipt.EnumLabLane.COMPOSE_DEV,)
+    outcomes: list[tuple[EnumTrainReason | None, str]] = []
+    for lane in read:
+        reason, detail = _classify_lab_receipt_on_lane(
+            repo,
+            sha,
+            lane,
+            list_artifacts=list_artifacts,
+            download_receipt=download_receipt,
+            rebuild_pending=rebuild_pending,
+        )
+        if reason is None:
+            return reason, detail
+        outcomes.append((reason, detail))
+    first_reason, first_detail = outcomes[0]
+    if len(outcomes) > 1:
+        others = "; ".join(detail for _reason, detail in outcomes[1:])
+        first_detail = f"{first_detail}. Also read: {others}"
+    return first_reason, first_detail
+
+
+def _classify_lab_receipt_on_lane(
+    repo: str,
+    sha: str,
+    lane: Any,
+    *,
+    list_artifacts: Callable[[str, str], list[dict[str, Any]]],
+    download_receipt: Callable[[str, int], Any],
+    rebuild_pending: Callable[[str, str], bool] | None = None,
+) -> tuple[EnumTrainReason | None, str]:
+    """One lane's receipt for ``sha``, resolved into a reason, or None on PASS."""
     full_repo = f"OmniNode-ai/{repo}"
+    label = (
+        "compose dev lane"
+        if lane is lab_pass_receipt.EnumLabLane.COMPOSE_DEV
+        else f"{lane.value} lane"
+    )
     name = lab_pass_receipt.artifact_name(lane, sha)
 
     try:
@@ -1141,7 +1302,7 @@ def classify_lab_receipt(
         return (
             EnumTrainReason.LAB_RECEIPT_ABSENT,
             f"no artifact named {name} exists in {full_repo}; {sha[:12]} has not "
-            "been exercised on the compose dev lane, or its rebuild never emitted",
+            f"been exercised on the {label}, or its rebuild never emitted",
         )
 
     # Newest first: a re-run of the emitting job supersedes an earlier attempt,
@@ -1190,7 +1351,7 @@ def classify_lab_receipt(
         if unestablished and not failed:
             return (
                 EnumTrainReason.LAB_RECEIPT_INDETERMINATE,
-                "the compose dev lane was asked about this sha and could not "
+                f"the {label} was asked about this sha and could not "
                 f"establish an answer; checks not established: "
                 f"{', '.join(unestablished)}. This is a statement about the "
                 "RUN, not about the lane: no check FAILED. The premise is "
@@ -1200,10 +1361,10 @@ def classify_lab_receipt(
         not_passing = ", ".join(failed + unestablished)
         return (
             EnumTrainReason.LAB_RECEIPT_FAIL,
-            f"the compose dev lane recorded {receipt.result.value} for this sha; "
+            f"the {label} recorded {receipt.result.value} for this sha; "
             f"checks not passing: {not_passing or '(none named)'}",
         )
-    return None, f"{name} records PASS on the compose dev lane"
+    return None, f"{name} records PASS on the {label}"
 
 
 # --------------------------------------------------------------------------- #
@@ -1354,6 +1515,7 @@ def decide(
         list_artifacts=list_artifacts,
         download_receipt=download_receipt,
         rebuild_pending=rebuild_pending,
+        lanes=lab_evidence_lanes(policy.lab_evidence),
     )
     if reason is not None:
         if not candidate.sha and candidate.unresolved_reason:
@@ -1422,6 +1584,44 @@ def render_report_human(decisions: Sequence[ModelTrainDecision]) -> str:
     return "\n".join(lines)
 
 
+# A Linear ticket reference as a conventional-commit scope: "feat(OMN-1234): ..."
+# or "fix(OMN-1234,ci): ...". Matches the scope's own OMN-<digits> token plus the
+# parens, so removing it collapses to "feat: ...".
+_SCOPE_TICKET_REF: Final[re.Pattern[str]] = re.compile(
+    r"\((?:[^()]*,)?(?<![A-Za-z0-9_])OMN-\d+\)(?=:)"
+)
+
+# A Linear ticket reference cited parenthetically elsewhere on the subject line,
+# e.g. "... thing (OMN-1234) (#1745)" -> "... thing (#1745)". Includes the space
+# that precedes the parenthetical so removal does not leave a double space.
+_INLINE_TICKET_REF: Final[re.Pattern[str]] = re.compile(
+    r"\s*\((?<![A-Za-z0-9_])OMN-\d+\)"
+)
+
+# Any remaining bare mention with no surrounding parens (rare, but the doc-content
+# scan's own TICKET_REFERENCE class matches this shape too, so it must fall here).
+_BARE_TICKET_REF: Final[re.Pattern[str]] = re.compile(r"(?<![A-Za-z0-9_])OMN-\d+\b")
+
+
+def _strip_ticket_references(subject: str) -> str:
+    """Drop bare ``OMN-<digits>`` ticket citations from a commit subject.
+
+    The published CHANGELOG is a public-facing doc, and a Linear ticket id is
+    internal tracking state, not reader-facing content -- exactly the class the
+    omnibase_core doc-content scan's TICKET_REFERENCE rule exists to keep out of
+    every doc file that is not under ``onex_change_control/`` or ``contracts/``
+    (``omnibase_core.validation.doc_content_scan.handler``). Every hand-cut
+    CHANGELOG entry already cites only the PR number for traceability (e.g.
+    ``(#1736)``); this mirrors that precedent mechanically instead of adding a
+    per-line ``doc-content-ok`` suppression marker, which would silence the scan
+    for the ticket ids too rather than just omitting them.
+    """
+    subject = _SCOPE_TICKET_REF.sub("", subject)
+    subject = _INLINE_TICKET_REF.sub("", subject)
+    subject = _BARE_TICKET_REF.sub("", subject)
+    return re.sub(r" {2,}", " ", subject).strip()
+
+
 def render_changelog_entry(
     *, package: str, version: str, previous_tag: str, subjects: Sequence[str]
 ) -> str:
@@ -1429,7 +1629,11 @@ def render_changelog_entry(
 
     Mirrors the shape the hand-cut releases use, because the release PR is read
     by people and a generated one that looks different reads as a different kind
-    of change.
+    of change. Every commit subject has its bare ``OMN-<digits>`` ticket
+    reference(s) stripped first (``_strip_ticket_references``) so the generated
+    CHANGELOG never trips the doc-content scan's TICKET_REFERENCE rule -- the
+    prior manual releases already omitted ticket ids from this section, citing
+    only the PR number.
     """
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     since = previous_tag or "the first commit"
@@ -1444,7 +1648,7 @@ def render_changelog_entry(
         "",
         f"### Included Since {since}",
     ]
-    lines.extend(f"- {subject}" for subject in subjects)
+    lines.extend(f"- {_strip_ticket_references(subject)}" for subject in subjects)
     lines.append("")
     return "\n".join(lines)
 
@@ -1586,7 +1790,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.runtime_path_validator is not None:
             try:
                 runtime_affecting = load_runtime_affecting(
-                    clone, args.runtime_path_validator
+                    clone,
+                    args.runtime_path_validator,
+                    labels_for=functools.partial(
+                        default_merged_pr_labels, f"OmniNode-ai/{name}"
+                    ),
                 )
                 head_ref = f"origin/{policy.default_branch}"
                 branch_commits = functools.partial(

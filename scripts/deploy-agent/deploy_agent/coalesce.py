@@ -36,6 +36,12 @@ bare "not coalesced":
     Commands for different lanes are never coalesced. They mutate different
     compose projects; folding them would drop a deploy of one lane entirely.
 
+``ROLLBACK_DECLARED``
+    A command carrying a signed rollback declaration (OMN-19270) is never
+    folded, in either direction. A rollback exists to move the lane off the
+    build a newer command would put back, so a newer command running in its
+    place would undo the one deploy that was deliberate.
+
 ``NOT_FULL_SCOPE``
     Only ``scope=full`` folds into ``scope=full``. The scope decides WHICH
     services are recreated, so folding a ``core`` command into a ``full`` one
@@ -71,6 +77,15 @@ bare "not coalesced":
     failure, a timeout -- is ``ANCESTRY_UNPROVEN`` and ends the group, so every
     failure of this module falls back to the behaviour it replaces: run every
     command, in order, exactly as before.
+
+``DUPLICATE_COMMAND``
+    A look-ahead record whose correlation id is already in the group is a
+    redelivered copy, not newer work (OMN-19521). Folding it made the copy the
+    runner and recorded the first copy as superseded by its own id, which the
+    supersession model refuses; on 2026-09-25 that raise, landing before the
+    offset commit, crash-looped the .201 dev agent on every restart. The copy
+    ends the group and stays queued, where the head path's duplicate and busy
+    checks already own it.
 
 WHY THERE IS NO KILL SWITCH
 ----------------------------
@@ -145,6 +160,7 @@ class EnumCoalesceRefusal(StrEnum):
     """
 
     DIFFERENT_LANE = "different_lane"
+    ROLLBACK_DECLARED = "rollback_declared"
     NOT_FULL_SCOPE = "not_full_scope"
     SERVICES_DIFFER = "services_differ"
     BUILD_SOURCE_DIFFERS = "build_source_differs"
@@ -152,6 +168,7 @@ class EnumCoalesceRefusal(StrEnum):
     REF_NOT_A_SHA = "ref_not_a_sha"
     ANCESTRY_UNPROVEN = "ancestry_unproven"
     NOT_A_DESCENDANT = "not_a_descendant"
+    DUPLICATE_COMMAND = "duplicate_command"
 
 
 class ModelQueuedCommand(BaseModel):
@@ -268,6 +285,8 @@ def _refusal_for(
     """
     if candidate.runtime_lane != head.runtime_lane:
         return EnumCoalesceRefusal.DIFFERENT_LANE
+    if head.rollback is not None or candidate.rollback is not None:
+        return EnumCoalesceRefusal.ROLLBACK_DECLARED
     if head.scope is not Scope.FULL or candidate.scope is not Scope.FULL:
         return EnumCoalesceRefusal.NOT_FULL_SCOPE
     if list(candidate.services) != list(head.services):
@@ -312,6 +331,17 @@ def plan_coalesce(
 
     for candidate in queued[1:]:
         examined += 1
+        # OMN-19521. A redelivered copy of a command already in the group is
+        # not newer work and must never become the runner: the earlier copy
+        # would then be recorded as superseded by its own correlation id,
+        # which ModelSupersession refuses, and the raise lands before the
+        # offset commit, so every restart re-reads the pair and dies again.
+        # Checked first, because a copy needs no clone to recognise.
+        if candidate.command.correlation_id in {
+            member.command.correlation_id for member in group
+        }:
+            stop_reason = EnumCoalesceRefusal.DUPLICATE_COMMAND
+            break
         refusal = _refusal_for(head.command, candidate.command)
         if refusal is not None:
             stop_reason = refusal

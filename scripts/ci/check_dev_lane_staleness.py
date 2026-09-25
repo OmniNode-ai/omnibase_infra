@@ -177,7 +177,14 @@ _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.ci.deploy_lane_verify_route import (
+    load_table,
+    targets_for_receipt_lane,
+    write_lane_env,
+    write_route_outputs,
+)
 from scripts.ci.lab_pass_receipt import (
+    ModelLaneGeneration,
     read_agent_loaded_code_sha,
     read_lane_generation,
     resolve_lane_binding,
@@ -192,6 +199,39 @@ DEFAULT_BRANCH = "dev"
 # if a container were renamed onto the same daemon.
 DEV_LANE_CONTAINER = "omninode-runtime"
 DEV_LANE_COMPOSE_PROJECT = "omnibase-infra"
+
+
+def resolve_lane_target(
+    lane: str, container: str | None, compose_project: str | None
+) -> tuple[str, str]:
+    """The (container, compose project) this guard reads, for a lab-pass lane.
+
+    OMN-19507 AC2. With no lane, the .201 dev lane above, or whatever the caller
+    names explicitly -- exactly as before. With a lane, the runtime container
+    and compose project of the one deploy-agent instance that emits that
+    receipt lane (``config/deploy_lane_routing.yaml``, ``verify:``), so the
+    dev-202 lane is read as ``compose-dev-202`` and never through the .201
+    names. An explicit value that contradicts the lane refuses rather than
+    silently winning: a guard reading one lane and receipting another is the
+    OMN-18420 shape.
+    """
+    if not lane:
+        return (
+            container or DEV_LANE_CONTAINER,
+            compose_project or DEV_LANE_COMPOSE_PROJECT,
+        )
+    targets = targets_for_receipt_lane(load_table(), lane)
+    for given, declared, flag in (
+        (container, targets.runtime_container, "--container"),
+        (compose_project, targets.compose_project, "--compose-project"),
+    ):
+        if given is not None and given != declared:
+            raise ValueError(
+                f"{flag}={given!r} contradicts lane {lane!r}, whose declared "
+                f"value is {declared!r}"
+            )
+    return targets.runtime_container, targets.compose_project
+
 
 REVISION_LABEL = "org.opencontainers.image.revision"
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
@@ -1828,8 +1868,36 @@ def main(argv: list[str] | None = None) -> int:
         "--repo", default=os.environ.get("GITHUB_REPOSITORY", DEFAULT_REPO)
     )
     parser.add_argument("--branch", default=DEFAULT_BRANCH)
-    parser.add_argument("--container", default=DEV_LANE_CONTAINER)
-    parser.add_argument("--compose-project", default=DEV_LANE_COMPOSE_PROJECT)
+    parser.add_argument(
+        "--lane",
+        default="",
+        help=(
+            "OMN-19507: the lab-pass lane whose lane this guard reads (for "
+            "example compose-dev-202). Sets --container and --compose-project "
+            "from the routing table; empty keeps the .201 dev lane."
+        ),
+    )
+    parser.add_argument("--container", default=None)
+    parser.add_argument("--compose-project", default=None)
+    # OMN-19507 AC2. Before this guard reads a lane, the workflow asks it WHICH
+    # lane: the trigger job routes the command it published
+    # (--write-route-outputs), and the verify job loads the routed lane's
+    # targets into its environment (--write-lane-env with --lane). Both read
+    # config/deploy_lane_routing.yaml through
+    # scripts/ci/deploy_lane_verify_route.py and write nothing on a refusal.
+    route_mode = parser.add_mutually_exclusive_group()
+    route_mode.add_argument(
+        "--write-route-outputs",
+        action="store_true",
+        help="route --runtime-lane/--requested-by and write the job outputs",
+    )
+    route_mode.add_argument(
+        "--write-lane-env",
+        action="store_true",
+        help="write --lane's verify targets to the job environment",
+    )
+    parser.add_argument("--runtime-lane", default="dev")
+    parser.add_argument("--requested-by", default="")
     parser.add_argument(
         "--max-commits-behind",
         type=int,
@@ -1911,7 +1979,23 @@ def main(argv: list[str] | None = None) -> int:
         print("::error::--positive-control requires --deployed-revision")
         return 1
 
+    if args.write_route_outputs:
+        if not args.requested_by:
+            print("::error::--write-route-outputs requires --requested-by")
+            return 1
+        return write_route_outputs(
+            runtime_lane=args.runtime_lane, requested_by=args.requested_by
+        )
+    if args.write_lane_env:
+        if not args.lane:
+            print("::error::--write-lane-env requires --lane")
+            return 1
+        return write_lane_env(receipt_lane=args.lane)
+
     try:
+        args.container, args.compose_project = resolve_lane_target(
+            args.lane, args.container, args.compose_project
+        )
         if args.expect_revision:
             return _run_convergence_mode(args)
         return _run_staleness_mode(args)
@@ -2135,7 +2219,23 @@ def read_agent_supersession(
     )
 
 
-def supersession_check_outcome(probe: ModelSupersessionProbe) -> str:
+def _is_same_ref_fold(probe: ModelSupersessionProbe, sha: str) -> bool:
+    """Whether the agent folded this command into THIS SAME commit (OMN-19499).
+
+    The OMN-19270 lineage fence records a command as superseded by the running
+    build when that build already carries the ref, and names the running sha.
+    When the running sha IS the receipt sha, the lane runs exactly this
+    commit's tree, which is the claim the check exists to protect. Exact
+    full-sha equality only: rule 24(b) gates on the exact sha, so an
+    abbreviation is not a match.
+    """
+    if probe.superseded_by_sha is None:
+        return False
+    receipt = sha.strip().lower()
+    return bool(_EXACT_SHA_RE.match(receipt)) and probe.superseded_by_sha == receipt
+
+
+def supersession_check_outcome(probe: ModelSupersessionProbe, sha: str) -> str:
     """The receipt verdict for the ``superseded_by_newer_rebuild`` check.
 
     Three values, and which one a superseded sha gets is the decision this
@@ -2155,8 +2255,11 @@ def supersession_check_outcome(probe: ModelSupersessionProbe) -> str:
 
     ``ok`` when the record exists and names no superseding command, or when
     there is no record at all -- a command the agent never dequeued cannot
-    have been folded.
+    have been folded. Also ``ok`` when the command was folded into ``sha``
+    itself (OMN-19499): a same-ref coalesce built this exact tree.
     """
+    if _is_same_ref_fold(probe, sha):
+        return "ok"
     if probe.superseded:
         return "fail"
     if probe.readable:
@@ -2177,6 +2280,13 @@ def supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
 
 
 def _supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
+    if _is_same_ref_fold(probe, sha):
+        runner = probe.superseded_by_correlation_id or "an unnamed correlation"
+        return (
+            f"the deploy agent folded this rebuild command into the same commit "
+            f"{sha}, run under {runner}, so the lane runs this sha's own tree "
+            "(a same-ref coalesce, not a newer rebuild)"
+        )
     if probe.superseded:
         runner = probe.superseded_by_correlation_id or "an unnamed correlation"
         return (
@@ -2241,6 +2351,224 @@ def reemission_window(
             continue
         window.append(sha)
     return tuple(window)
+
+
+#: The job statuses after which the agent performs no further compose mutation
+#: of the runtime containers. ``superseded`` is terminal for THIS record; the
+#: command that ran in its place is followed instead.
+_TERMINAL_JOB_STATUSES: Final = frozenset({"success", "failed", "superseded"})
+
+#: How often the guard re-reads the job record while waiting for it to end.
+#: Shorter than the convergence poll: the lane has converged, and every second
+#: spent here after the job ends is a second the probe step no longer has.
+JOB_END_POLL_SECONDS: Final = 15
+
+#: A supersession chain longer than this is not followed. The agent folds a
+#: whole backlog into ONE newer command, so a real chain is one hop.
+JOB_END_MAX_SUPERSESSION_HOPS: Final = 3
+
+
+@dataclass(frozen=True)
+class ModelJobEnd:
+    """Whether the deploy agent had finished the job before the generation read.
+
+    OMN-19374. Convergence is satisfied by the running container's revision
+    LABEL, which is set at create time -- minutes before the agent's own
+    post-deploy verification, and before the single force-recreate that
+    verification may perform on the dev lane. A generation read at convergence
+    is therefore the PRE-recreate container whenever that recreate happens,
+    and the probe step's ``probe_generation_bound`` then fails on two reads of
+    one image and one revision in two containers. Read after the job has ended,
+    the generation is the container the job left running, whatever the job did
+    to get there.
+
+    ``verify_recreate`` is the job's own record of that recreate, served by the
+    agent on ``/job/{correlation_id}`` from the same terminal write, so the
+    receipt can say that the generation moved inside this job. A generation
+    that still moves between this read and the probe was moved by something
+    else -- a different command displacing the lane (OMN-18990) -- and the
+    evidence line is how a reader tells the two apart without the host journal.
+    """
+
+    ended: bool
+    correlation_id: str
+    status: str = ""
+    completed_at: str = ""
+    verify_recreate: tuple[dict[str, Any], ...] = ()
+    reason: str = ""
+
+    def evidence_clause(self) -> str:
+        job = f"deploy-agent job {self.correlation_id[:8] or '?'}"
+        if not self.ended:
+            return (
+                f"generation read before {job} ended ({self.reason}); a recreate "
+                "by that job after this read would move the generation"
+            )
+        line = (
+            f"generation read after {job} ended {self.status} at "
+            f"{self.completed_at or 'an unrecorded time'}"
+        )
+        if not self.verify_recreate:
+            return (
+                f"{line}; that job recreated no runtime container during verification"
+            )
+        recreates = ", ".join(
+            f"{record.get('service', '?')} {record.get('outcome', '?')}"
+            f" after {float(record.get('readiness_wait_seconds') or 0):.0f}s"
+            for record in self.verify_recreate
+        )
+        return (
+            f"{line}; that job's own verification recreated {recreates}, so the "
+            "generation is the post-recreate container (in-job recreate, OMN-19374)"
+        )
+
+
+def wait_for_agent_job_end(
+    *,
+    agent_url: str,
+    correlation_id: str,
+    deadline: datetime,
+    clock: Callable[[], datetime],
+    sleep: Callable[[float], None],
+    request_timeout_seconds: float = 10.0,
+    opener: Callable[[str, float], tuple[int, str]] | None = None,
+) -> ModelJobEnd:
+    """Poll ``/job/{correlation_id}`` until the job is terminal or ``deadline``.
+
+    A ``superseded`` record is followed to the command that ran in its place,
+    because that is the job whose verification touched the lane. Never raises:
+    an agent that cannot be read, or a job still running at the deadline, is a
+    ``ModelJobEnd`` with ``ended=False`` and a reason, and the caller reads the
+    generation anyway -- exactly as it did before this wait existed.
+    """
+    cid = correlation_id.strip()
+    if not cid or not _CORRELATION_ID_RE.match(cid):
+        return ModelJobEnd(
+            ended=False,
+            correlation_id=cid,
+            reason="no usable correlation id to locate the job",
+        )
+    if not agent_url.strip():
+        return ModelJobEnd(
+            ended=False,
+            correlation_id=cid,
+            reason="no deploy-agent URL was supplied to this guard",
+        )
+    fetch = opener or _http_get_json
+    hops = 0
+    reason = ""
+    while True:
+        url = f"{agent_url.rstrip('/')}/job/{cid}"
+        payload: dict[str, Any] | None = None
+        try:
+            status, body = fetch(url, request_timeout_seconds)
+        except Exception as exc:  # noqa: BLE001 - an unreachable agent is unreadable
+            reason = f"{url} could not be read: {type(exc).__name__}: {exc}"
+        else:
+            if status != 200:
+                reason = f"{url} answered HTTP {status}"
+            else:
+                try:
+                    decoded = json.loads(body)
+                except json.JSONDecodeError as exc:
+                    reason = f"{url} returned an unreadable body ({exc})"
+                else:
+                    if isinstance(decoded, dict):
+                        payload = decoded
+                    else:
+                        reason = f"{url} returned a non-object body"
+        if payload is not None:
+            job_status = str(payload.get("status", ""))
+            runner = payload.get("superseded_by_correlation_id")
+            if (
+                job_status == "superseded"
+                and runner
+                and hops < JOB_END_MAX_SUPERSESSION_HOPS
+            ):
+                cid = str(runner)
+                hops += 1
+                continue
+            if job_status in _TERMINAL_JOB_STATUSES:
+                raw_recreates = payload.get("verify_recreate") or []
+                return ModelJobEnd(
+                    ended=True,
+                    correlation_id=cid,
+                    status=job_status,
+                    completed_at=str(payload.get("completed_at") or ""),
+                    verify_recreate=tuple(
+                        record for record in raw_recreates if isinstance(record, dict)
+                    )
+                    if isinstance(raw_recreates, list)
+                    else (),
+                )
+            reason = f"job {cid[:8]} still {job_status or 'unreported'}"
+        now = clock()
+        if now >= deadline:
+            return ModelJobEnd(
+                ended=False,
+                correlation_id=cid,
+                reason=f"{reason} when this guard's wall clock ran out",
+            )
+        sleep(min(float(JOB_END_POLL_SECONDS), (deadline - now).total_seconds()))
+
+
+def bind_generation_to_job_end(
+    converged: ModelLaneGeneration | None,
+    after_job: ModelLaneGeneration | None,
+    job_end: ModelJobEnd | None,
+) -> tuple[ModelLaneGeneration | None, str]:
+    """Choose the generation the probe is bound to, and say why (OMN-19374).
+
+    The generation convergence read stays the binding UNLESS every one of these
+    holds, in which case the container the job left running replaces it:
+
+    * the job ended ``success``;
+    * the job's OWN record names a ``recovered`` verification recreate of the
+      service this container is (on the dev lane the container and the compose
+      service share the name);
+    * the container the job left running has the same image AND the same
+      revision label as the one convergence verified.
+
+    So an in-job recreate of the verified build rebinds, and nothing else does.
+    A container that moved with no in-job recreate on record was moved by
+    something else (OMN-18990 displacement), and a recreate that left a
+    different image or revision running is not the build convergence verified:
+    both keep the converged binding, and ``probe_generation_bound`` fails on
+    them exactly as before.
+    """
+    if converged is None or after_job is None or job_end is None or not job_end.ended:
+        return converged, ""
+    if after_job.container_id == converged.container_id:
+        return converged, ""
+    recreated_here = job_end.status == "success" and any(
+        record.get("service") == converged.container
+        and record.get("outcome") == "recovered"
+        for record in job_end.verify_recreate
+    )
+    if not recreated_here:
+        return converged, (
+            f"the container moved from {converged.short} to {after_job.short} with "
+            "no recovered in-job recreate on the job record, so the binding stays "
+            "on the converged container"
+        )
+    if after_job.image != converged.image or after_job.revision != converged.revision:
+        return converged, (
+            f"the job's recreate left {after_job.short} running, which is not the "
+            f"build convergence verified ({converged.short}), so the binding stays "
+            "on the converged container"
+        )
+    return after_job, (
+        f"rebound from {converged.short} to the job's own post-recreate container "
+        f"{after_job.short} (same image and revision)"
+    )
+
+
+def _read_generation_or_warn(container: str) -> ModelLaneGeneration | None:
+    try:
+        return read_lane_generation(container)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"::warning::lane generation unreadable: {exc}")
+        return None
 
 
 def _write_output(name: str, value: str) -> None:
@@ -2320,6 +2648,35 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         margin_seconds=int(args.poll_interval.total_seconds()),
     )
 
+    # OMN-19374. On a convergence, let the deploy agent FINISH the job before
+    # the generation below is read, inside what is left of this step's own wall
+    # clock. See ModelJobEnd for why a generation read at convergence is the
+    # pre-recreate container whenever the agent's verification recreates one.
+    converged_generation = (
+        None if args.deployed_revision else _read_generation_or_warn(args.container)
+    )
+    generation = converged_generation
+    binding_note = ""
+    job_end: ModelJobEnd | None = None
+    if result.outcome is EnumConvergenceOutcome.OK and not args.deployed_revision:
+        job_end = wait_for_agent_job_end(
+            agent_url=args.agent_url,
+            correlation_id=args.correlation_id,
+            # The same wall-clock deadline the convergence wait was given.
+            deadline=result.finished_at
+            - result.waited
+            + timedelta(seconds=args.wall_clock_seconds),
+            clock=lambda: datetime.now(UTC),
+            sleep=time.sleep,
+            request_timeout_seconds=args.agent_timeout_seconds,
+        )
+        if job_end.ended:
+            generation, binding_note = bind_generation_to_job_end(
+                converged_generation,
+                _read_generation_or_warn(args.container),
+                job_end,
+            )
+
     evidence = convergence_evidence(
         lane=lane,
         expected_revision=expected,
@@ -2335,6 +2692,11 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         ),
         queue_clause=queue_clause,
     )
+    if job_end is not None:
+        clauses = [evidence, job_end.evidence_clause(), binding_note]
+        evidence = " ".join(
+            "; ".join(c for c in clauses if c).translate(_EVIDENCE_UNSAFE).split()
+        )
     # OMN-18388 AC2: the receipt's deployed_revision check carries this, so the
     # artifact names the revision the lane was actually observed at and how it
     # relates to the sha the receipt is keyed by.
@@ -2455,7 +2817,8 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         agent_url=args.agent_url, correlation_id=args.correlation_id
     )
     _write_output("superseded_by", supersession.superseded_by_sha or "")
-    _write_output("superseded_outcome", supersession_check_outcome(supersession))
+    outcome = supersession_check_outcome(supersession, expected)
+    _write_output("superseded_outcome", outcome)
     _write_output("superseded_evidence", supersession_evidence(supersession, expected))
 
     # OMN-18436: publish the identity of the container this guard actually read,
@@ -2471,13 +2834,11 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
     # whether or not convergence succeeded. It is omitted only when the identity
     # itself could not be read, and the probe treats an absent record as a
     # failure rather than as permission to skip the check.
-    if not args.deployed_revision:
-        try:
-            generation = read_lane_generation(args.container)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"::warning::lane generation unreadable: {exc}")
-        else:
-            _write_output("generation", generation.to_json())
+    #
+    # OMN-19374: read at convergence, and REBOUND to the container the agent's
+    # job left running only when bind_generation_to_job_end allows it.
+    if generation is not None:
+        _write_output("generation", generation.to_json())
 
     budget = result.budget
     _summary(
@@ -2496,6 +2857,7 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
             f"job could watch for {budget.wall_clock_seconds}s",
             f"- watched: {_format_age(result.waited)}",
             f"- queue at start: {queue_clause}",
+            *([f"- agent job end: {job_end.evidence_clause()}"] if job_end else []),
             *([f"- reason: {result.reason}"] if result.reason else []),
             "",
             "Convergence is CONTAINMENT: a lane running a descendant of the merge "

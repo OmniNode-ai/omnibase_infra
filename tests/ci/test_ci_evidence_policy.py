@@ -70,6 +70,8 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     # OMN-19181: the C16 receipt-identity record.
     "c16-receipt-identity",
     "lab-load",
+    # OMN-19233: the staging delivery gate's verdict, read by the re-run selector.
+    "lab-pass-gate-verdict",
     "lab-pass-receipt-compose-dev",
     # OMN-18572: the same lane, keyed by the OMNINODE_INFRA commit that changed
     # its onex-api image. A third claim about a third repository's commits; the
@@ -84,6 +86,10 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     # OMN-19258: the zombie detector's receipt; its `scanned` map is the only
     # record that tells a clean detector run from a blind one.
     "pr-ci-zombie-detector-report",
+    # OMN-16987: the provider-rung liveness canary's per-rung record.
+    "provider-rung-canary",
+    # OMN-19445: the daily R1/MD-14 front-door probe record.
+    "r1-front-door-probe",
     "saturation-record",
 )
 

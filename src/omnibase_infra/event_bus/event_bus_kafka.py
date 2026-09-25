@@ -194,8 +194,11 @@ import logging
 import os
 import random
 import socket
+import threading
+import time
 from collections import OrderedDict, defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, cast
@@ -221,6 +224,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import (
+    DispatchDeadlineExceededError,
     EventPayloadTooLargeError,
     EventTopicAuthorizationError,
     InfraConnectionError,
@@ -283,6 +287,9 @@ from omnibase_infra.models.health.model_consumer_group_rejoin_event import (
 )
 from omnibase_infra.models.health.model_consumer_sync_status import (
     ModelConsumerSyncStatus,
+)
+from omnibase_infra.models.health.model_dispatch_deadline_status import (
+    ModelDispatchDeadlineStatus,
 )
 from omnibase_infra.observability.wiring_health import (
     MixinEmissionCounter,
@@ -351,6 +358,67 @@ def _record_coordinate(msg: object) -> tuple[int, int] | None:
     if not isinstance(partition, int) or not isinstance(offset, int):
         return None
     return (partition, offset)
+
+
+@dataclass(frozen=True)
+class OrphanedDispatch:
+    """What an abandoned dispatch was doing when its deadline expired (OMN-19355)."""
+
+    topic: str
+    group_id: str
+    subscription_id: str
+    correlation_id: UUID
+    record_coordinate: tuple[int, int] | None
+    started_at: float
+
+    def describe(self, now: float) -> str:
+        partition, offset = self.record_coordinate or (None, None)
+        return (
+            f"{self.topic} partition={partition} offset={offset} "
+            f"subscription={self.subscription_id} age={now - self.started_at:.0f}s"
+        )
+
+
+class SerialBatchWithhold:
+    """Pins a serial batch's fetch positions while one dispatch is slow (OMN-19355).
+
+    After ``getmany`` the consumer's fetch position is past the whole batch,
+    and under ``enable_auto_commit`` that position is what the client commits
+    on its own cadence. Seeking is the only action that withholds it
+    (OMN-15232). ``engage`` seeks the in-flight record's partition back to that
+    record and every partition of the batch not yet started back to its first
+    record, so the next auto-commit covers nothing that has not finished. The
+    serial loop then refetches from those positions instead of continuing the
+    batch it already holds.
+    """
+
+    __slots__ = ("_consumer", "_positions", "engaged")
+
+    def __init__(
+        self,
+        consumer: AIOKafkaConsumer,
+        positions: list[tuple[TopicPartition, int]],
+    ) -> None:
+        self._consumer = consumer
+        self._positions = positions
+        self.engaged = False
+
+    def engage(self) -> None:
+        if self.engaged:
+            return
+        self.engaged = True
+        for partition, offset in self._positions:
+            try:
+                self._consumer.seek(partition, offset)
+            except Exception:
+                logger.exception(
+                    "slow_dispatch_withhold_failed topic=%s partition=%s offset=%s "
+                    "-- could not pin the fetch position at an unfinished record; "
+                    "auto-commit may commit past it (OMN-19355)",
+                    partition.topic,
+                    partition.partition,
+                    offset,
+                )
 
 
 class EventBusKafka(
@@ -530,6 +598,15 @@ class EventBusKafka(
         # the ``subscribe`` that starts the loop; read once when the loop
         # starts.
         self._consume_concurrency: dict[tuple[str, str], int] = {}
+
+        # OMN-19355: dispatches abandoned at their deadline that have not
+        # returned yet, oldest first, with what they were dispatching. A Python
+        # thread cannot be killed, so these are counted rather than stopped:
+        # each one still holds whatever its handler held.
+        self._orphaned_dispatches: OrderedDict[
+            asyncio.Future[None], OrphanedDispatch
+        ] = OrderedDict()
+        self._dispatch_deadline_expiries = 0
 
         # Subscriber registry: topic -> list of (group_id, subscription_id, callback) tuples
         self._subscribers: dict[
@@ -743,6 +820,17 @@ class EventBusKafka(
             Environment string (e.g., "local", "dev", "prod")
         """
         return self._environment
+
+    @property
+    def bootstrap_servers(self) -> str:
+        """Return the configured broker endpoint as public transport identity.
+
+        Together with ``environment`` this is the runtime identity the bounded
+        delegation route gate matches against a lane declaration (OMN-18933).
+        Credentials (a ``user:pass@`` prefix) are stripped, as everywhere else
+        this class exposes the value, because callers log it.
+        """
+        return self._sanitize_bootstrap_servers(self._bootstrap_servers)
 
     @property
     def health_emitter(self) -> ConsumerHealthEmitter | None:
@@ -1064,6 +1152,13 @@ class EventBusKafka(
         # Clear subscribers
         async with self._lock:
             self._subscribers.clear()
+
+        # OMN-19355: an abandoned dispatch is still a pending task. Cancel it so
+        # it does not outlive the bus; a worker thread under it, if any, runs
+        # on until its handler returns, which is the limit stated where it was
+        # abandoned.
+        for dispatch in list(self._orphaned_dispatches):
+            dispatch.cancel()
 
         logger.info(
             "EventBusKafka closed",
@@ -2631,6 +2726,183 @@ class EventBusKafka(
         """
         self._projection_withholds.pop(key, None)
 
+    async def _await_dispatch_within_deadline(
+        self,
+        callback: Callable[[ModelEventMessage], Awaitable[None]],
+        event_message: ModelEventMessage,
+        *,
+        topic: str,
+        group_id: str,
+        subscription_id: str,
+        correlation_id: UUID,
+        record_coordinate: tuple[int, int] | None,
+        on_slow_dispatch: Callable[[], None] | None,
+    ) -> None:
+        """Await one subscriber callback, abandoning it at its deadline (OMN-19355).
+
+        The callback's own exception, if it raises in time, propagates
+        unchanged into the caller's existing arms. If it has not returned by
+        ``effective_dispatch_deadline_seconds`` it is ABANDONED, not cancelled,
+        and :class:`DispatchDeadlineExceededError` is raised in its place.
+
+        Why not cancel. Projection handlers run their blocking work through
+        ``asyncio.to_thread``. Cancelling the awaiting task frees the task and
+        leaves the thread running, and it also releases the projection gate
+        slot the thread still occupies, so the process would lose count of
+        exactly the resource that is leaking. Leaving the task running keeps
+        it observable: it is counted in ``dispatch_deadline_status`` until the
+        handler really returns.
+
+        ``on_slow_dispatch`` is called once, if the dispatch is still running
+        after ``consumer_dispatch_withhold_after_seconds``. The serial loop
+        uses it to pin the fetch position (``SerialBatchWithhold``).
+        """
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        deadline = self._config.effective_dispatch_deadline_seconds
+        dispatch = asyncio.ensure_future(callback(event_message))
+        try:
+            if on_slow_dispatch is None:
+                done, _ = await asyncio.wait({dispatch}, timeout=deadline)
+            else:
+                withhold_after = min(
+                    self._config.consumer_dispatch_withhold_after_seconds, deadline
+                )
+                done, _ = await asyncio.wait({dispatch}, timeout=withhold_after)
+                if not done:
+                    on_slow_dispatch()
+                    done, _ = await asyncio.wait(
+                        {dispatch}, timeout=deadline - withhold_after
+                    )
+        except asyncio.CancelledError:
+            # The consume loop itself is being cancelled (shutdown). The
+            # dispatch goes with it, exactly as it did when it was awaited
+            # inline.
+            dispatch.cancel()
+            raise
+
+        if done:
+            dispatch.result()
+            return
+
+        self._adopt_orphaned_dispatch(
+            dispatch,
+            OrphanedDispatch(
+                topic=topic,
+                group_id=group_id,
+                subscription_id=subscription_id,
+                correlation_id=correlation_id,
+                record_coordinate=record_coordinate,
+                started_at=started_at,
+            ),
+        )
+        partition, offset = record_coordinate or (None, None)
+        raise DispatchDeadlineExceededError(
+            f"subscriber {subscription_id} did not return within "
+            f"{deadline:.1f}s for {topic} partition {partition} offset {offset}; "
+            "the dispatch was abandoned, not cancelled, and the record was "
+            "quarantined so the consumer can keep polling (OMN-19355)",
+            topic=topic,
+            partition=partition,
+            offset=offset,
+            subscription_id=subscription_id,
+            deadline_seconds=deadline,
+        )
+
+    def _adopt_orphaned_dispatch(
+        self, dispatch: asyncio.Future[None], orphan: OrphanedDispatch
+    ) -> None:
+        """Count an abandoned dispatch until it returns on its own (OMN-19355)."""
+        self._orphaned_dispatches[dispatch] = orphan
+        self._dispatch_deadline_expiries += 1
+        dispatch.add_done_callback(self._on_orphaned_dispatch_settled)
+
+        now = asyncio.get_running_loop().time()
+        suspended_at = "unknown"
+        if isinstance(dispatch, asyncio.Task):
+            frames = dispatch.get_stack()
+            if frames:
+                innermost = frames[-1]
+                suspended_at = (
+                    f"{innermost.f_code.co_filename}:{innermost.f_lineno} "
+                    f"in {innermost.f_code.co_name}"
+                )
+        orphaned = len(self._orphaned_dispatches)
+        limit = self._config.consumer_dispatch_orphan_limit
+        logger.error(
+            "dispatch_deadline_exceeded %s deadline=%.1fs suspended_at=%s "
+            "orphaned=%s limit=%s live_threads=%s correlation_id=%s -- the "
+            "handler did not return and was ABANDONED: a Python thread cannot "
+            "be killed, so if it is parked in a to_thread worker that worker "
+            "stays parked until the handler returns or the process exits. The "
+            "record is quarantined and the consume loop keeps polling. At %s "
+            "abandoned dispatches the bus reports UNHEALTHY (OMN-19355)",
+            orphan.describe(now),
+            self._config.effective_dispatch_deadline_seconds,
+            suspended_at,
+            orphaned,
+            limit,
+            threading.active_count(),
+            str(orphan.correlation_id),
+            limit,
+            extra={
+                "topic": orphan.topic,
+                "group_id": orphan.group_id,
+                "subscription_id": orphan.subscription_id,
+                "correlation_id": str(orphan.correlation_id),
+                "orphaned_dispatches": orphaned,
+                "orphan_limit": limit,
+                "suspended_at": suspended_at,
+            },
+        )
+
+    def _on_orphaned_dispatch_settled(self, dispatch: asyncio.Future[None]) -> None:
+        """An abandoned dispatch finally returned; stop counting it."""
+        orphan = self._orphaned_dispatches.pop(dispatch, None)
+        outcome = "cancelled"
+        if not dispatch.cancelled():
+            error = dispatch.exception()
+            outcome = "returned" if error is None else f"raised {type(error).__name__}"
+        if orphan is None:
+            return
+        now = asyncio.get_running_loop().time()
+        logger.warning(
+            "orphaned_dispatch_settled %s outcome=%s orphaned=%s -- an abandoned "
+            "dispatch finished after its record was quarantined; its result is "
+            "discarded (OMN-19355)",
+            orphan.describe(now),
+            outcome,
+            len(self._orphaned_dispatches),
+            extra={
+                "topic": orphan.topic,
+                "group_id": orphan.group_id,
+                "subscription_id": orphan.subscription_id,
+                "correlation_id": str(orphan.correlation_id),
+                "orphaned_dispatches": len(self._orphaned_dispatches),
+            },
+        )
+
+    def dispatch_deadline_status(self) -> ModelDispatchDeadlineStatus:
+        """Abandoned dispatches this bus still holds (OMN-19355).
+
+        Implements ``ProtocolDispatchDeadlineSource``. Performs no I/O.
+        """
+        try:
+            now = asyncio.get_running_loop().time()
+        except RuntimeError:
+            now = time.monotonic()
+        orphans = list(self._orphaned_dispatches.values())
+        return ModelDispatchDeadlineStatus(
+            deadline_seconds=self._config.effective_dispatch_deadline_seconds,
+            orphan_limit=self._config.consumer_dispatch_orphan_limit,
+            orphaned_dispatches=len(orphans),
+            deadline_expiries_total=self._dispatch_deadline_expiries,
+            oldest_orphan_age_seconds=(
+                max(0.0, now - orphans[0].started_at) if orphans else 0.0
+            ),
+            orphans=tuple(orphan.describe(now) for orphan in orphans),
+        )
+
     async def _dispatch_to_subscriber(
         self,
         callback: Callable[[ModelEventMessage], Awaitable[None]],
@@ -2641,6 +2913,7 @@ class EventBusKafka(
         correlation_id: UUID,
         *,
         record_coordinate: tuple[int, int] | None = None,
+        on_slow_dispatch: Callable[[], None] | None = None,
     ) -> bool:
         """Invoke a single subscriber callback, routing to DLQ on exhausted retries.
 
@@ -2653,6 +2926,12 @@ class EventBusKafka(
         could not resolve a coordinate, and the bound is then not applied at
         all -- the withhold stays unbounded, which is the pre-OMN-17379-bound
         behaviour and the safe direction when the record cannot be identified.
+
+        The callback is awaited under the OMN-19355 per-dispatch deadline (see
+        ``_await_dispatch_within_deadline``). A callback that outlives it is
+        abandoned and its record quarantined with failure class
+        ``dispatch_deadline_exceeded``. ``on_slow_dispatch`` is passed through
+        to that method by the serial loop.
 
         Returns:
             ``True`` when it is safe for the partition offset to advance past
@@ -2667,7 +2946,16 @@ class EventBusKafka(
             unconditionally and independently of the retry budget (OMN-17379).
         """
         try:
-            await callback(event_message)
+            await self._await_dispatch_within_deadline(
+                callback,
+                event_message,
+                topic=topic,
+                group_id=group_id,
+                subscription_id=subscription_id,
+                correlation_id=correlation_id,
+                record_coordinate=record_coordinate,
+                on_slow_dispatch=on_slow_dispatch,
+            )
             # A record that projected has no withhold history worth keeping: a
             # repaired write path must restore the full budget, or an outage's
             # leftover count would release a later record early.
@@ -2675,6 +2963,24 @@ class EventBusKafka(
                 self._clear_projection_withhold(
                     (topic, record_coordinate[0], record_coordinate[1], subscription_id)
                 )
+        except DispatchDeadlineExceededError as deadline_error:
+            # OMN-19355: the handler is still running, abandoned, and will not
+            # un-hang on redelivery -- a redelivery only abandons a second
+            # copy. So this does not consult the retry budget: the record is
+            # quarantined on its first expiry. The offset may advance only on a
+            # CONFIRMED quarantine; an unconfirmed one returns False and the
+            # caller rewinds, per OMN-15232, because a record that exists
+            # nowhere durable is worse than a second abandoned dispatch.
+            dlq_result = await self._publish_to_dlq(
+                original_topic=topic,
+                failed_message=event_message,
+                error=deadline_error,
+                correlation_id=correlation_id,
+                consumer_group=group_id,
+                failure_class=EnumDlqFailureClass.DISPATCH_DEADLINE_EXCEEDED,
+                validation_detail=str(deadline_error),
+            )
+            return dlq_result is not False
         except ProjectionNotMaterializedError as projection_error:
             # OMN-17379: a projection consumed a well-formed event and wrote no
             # row because its WRITE PATH failed. Every other arm below decides
@@ -3225,6 +3531,7 @@ class EventBusKafka(
         consumer: AIOKafkaConsumer,
         *,
         rewind_sink: dict[int, int] | None = None,
+        on_slow_dispatch: Callable[[], None] | None = None,
     ) -> bool:
         """Dispatch one fetched record to its subscribers.
 
@@ -3247,6 +3554,9 @@ class EventBusKafka(
                 a seek from inside a task races the other tasks and is undone
                 by whichever of them finishes next. The driver drains and then
                 seeks once, to the lowest offset in the sink.
+            on_slow_dispatch: OMN-19355. Serial path only: called once if a
+                dispatch of this record outlives the withhold threshold, so the
+                loop can pin the fetch position before auto-commit passes it.
 
         Returns:
             True when this record's partition must not advance -- because the
@@ -3345,6 +3655,7 @@ class EventBusKafka(
                 group_id,
                 correlation_id,
                 record_coordinate=_record_coordinate(msg),
+                on_slow_dispatch=on_slow_dispatch,
             )
             # OMN-15232: same gate on the dispatch path. Every subscriber
             # still gets the message (one failing subscriber must not
@@ -3437,27 +3748,13 @@ class EventBusKafka(
             while not self._shutdown:
                 batch = await supervisor.next_batch(consumer)
                 consumer = cast("AIOKafkaConsumer", batch.consumer)
-
-                for records in batch.records.values():
-                    if self._shutdown:
-                        break
-                    for msg in records:
-                        if self._shutdown:
-                            logger.debug(
-                                f"Consumer loop shutdown signal received for topic {topic}",
-                                extra={
-                                    "topic": topic,
-                                    "correlation_id": str(correlation_id),
-                                },
-                            )
-                            break
-                        rewound = await self._process_consumed_record(
-                            msg, topic, group_id, correlation_id, consumer
-                        )
-                        if rewound:
-                            # Fetch position moved back; the remainder of this
-                            # partition's batch is stale.
-                            break
+                await self._process_serial_batch(
+                    batch.records,
+                    topic=topic,
+                    group_id=group_id,
+                    correlation_id=correlation_id,
+                    consumer=consumer,
+                )
 
         except asyncio.CancelledError:
             # Graceful cancellation - this is expected during shutdown
@@ -3493,6 +3790,124 @@ class EventBusKafka(
                     "correlation_id": str(correlation_id),
                 },
             )
+
+    async def _process_serial_batch(
+        self,
+        records: Mapping[TopicPartition, Sequence[object]],
+        *,
+        topic: str,
+        group_id: str,
+        correlation_id: UUID,
+        consumer: AIOKafkaConsumer,
+    ) -> None:
+        """Dispatch one fetched batch inline, one record at a time.
+
+        OMN-19355 adds two exits to what was a plain nested loop, and both end
+        the batch early with every unfinished record's partition seeked back,
+        so the next poll refetches it and nothing is skipped:
+
+        * **A slow dispatch.** Once a dispatch outlives
+          ``consumer_dispatch_withhold_after_seconds`` the fetch positions are
+          pinned at the unfinished records (``SerialBatchWithhold``), so
+          auto-commit cannot commit past a record that may never finish. When
+          the dispatch settles -- returned, or abandoned at its deadline and
+          quarantined -- the position moves just past it and the loop polls
+          again.
+        * **The poll budget.** A record is not started unless its full
+          deadline still fits inside ``serial_batch_poll_budget_seconds`` of
+          this poll. Without it a batch could run fast records for most of the
+          poll interval and then give the last one a whole deadline, and the
+          member would be evicted anyway.
+
+        A fast batch meets neither and is processed exactly as before: no seek,
+        no refetch.
+        """
+        loop = asyncio.get_running_loop()
+        polled_at = loop.time()
+        deadline = self._config.effective_dispatch_deadline_seconds
+        budget = self._config.serial_batch_poll_budget_seconds
+        partitions = [
+            (partition, list(partition_records))
+            for partition, partition_records in records.items()
+            if partition_records
+        ]
+
+        for index, (partition, partition_records) in enumerate(partitions):
+            for position, msg in enumerate(partition_records):
+                if self._shutdown:
+                    logger.debug(
+                        f"Consumer loop shutdown signal received for topic {topic}",
+                        extra={
+                            "topic": topic,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                    return
+
+                coordinate = _record_coordinate(msg)
+                if coordinate is None:
+                    # No offset to pin or resume from: dispatched as before,
+                    # under the deadline alone.
+                    rewound = await self._process_consumed_record(
+                        msg, topic, group_id, correlation_id, consumer
+                    )
+                    if rewound:
+                        break
+                    continue
+
+                unfinished = [(partition, coordinate[1])]
+                for later_partition, later_records in partitions[index + 1 :]:
+                    later = _record_coordinate(later_records[0])
+                    if later is not None:
+                        unfinished.append((later_partition, later[1]))
+
+                started = index > 0 or position > 0
+                if started and loop.time() - polled_at + deadline > budget:
+                    SerialBatchWithhold(consumer, unfinished).engage()
+                    logger.info(
+                        "serial_batch_cut_at_poll_budget topic=%s partition=%s "
+                        "offset=%s elapsed=%.1fs deadline=%.1fs budget=%.1fs -- "
+                        "the next record's deadline no longer fits before the "
+                        "poll interval expires; the rest of the batch is "
+                        "refetched (OMN-19355)",
+                        topic,
+                        coordinate[0],
+                        coordinate[1],
+                        loop.time() - polled_at,
+                        deadline,
+                        budget,
+                    )
+                    return
+
+                withhold = SerialBatchWithhold(consumer, unfinished)
+                rewound = await self._process_consumed_record(
+                    msg,
+                    topic,
+                    group_id,
+                    correlation_id,
+                    consumer,
+                    on_slow_dispatch=withhold.engage,
+                )
+                if withhold.engaged:
+                    if not rewound:
+                        # Settled: returned, or quarantined with a confirmed
+                        # durable copy. Resume just past it.
+                        try:
+                            consumer.seek(partition, coordinate[1] + 1)
+                        except Exception:
+                            logger.exception(
+                                "slow_dispatch_resume_seek_failed topic=%s "
+                                "partition=%s offset=%s -- the record will be "
+                                "redelivered once (OMN-19355)",
+                                topic,
+                                coordinate[0],
+                                coordinate[1],
+                            )
+                    return
+                if rewound:
+                    # Fetch position moved back; the remainder of this
+                    # partition's batch is stale.
+                    break
 
     async def _consume_loop_concurrent(
         self,
@@ -3847,6 +4262,10 @@ class EventBusKafka(
                 - subscriber_count: Total number of active subscriptions
                 - topic_count: Number of topics with subscribers
                 - consumer_count: Number of active consumers
+                - degraded: OMN-19355, True while any abandoned dispatch is
+                  still running and the orphan limit is not reached
+                - dispatch_deadline: OMN-19355 ``ModelDispatchDeadlineStatus``
+                  dump; at the orphan limit ``healthy`` is False
         """
         async with self._lock:
             subscriber_count = sum(len(subs) for subs in self._subscribers.values())
@@ -3868,8 +4287,12 @@ class EventBusKafka(
                 except Exception:  # noqa: BLE001 — boundary: returns degraded response
                     producer_healthy = False
 
+        dispatch_deadline = self.dispatch_deadline_status()
         return {
-            "healthy": started and producer_healthy,
+            "healthy": started
+            and producer_healthy
+            and dispatch_deadline.status != "unhealthy",
+            "degraded": dispatch_deadline.status == "degraded",
             "started": started,
             "environment": self._environment,
             "bootstrap_servers": self._sanitize_bootstrap_servers(
@@ -3879,6 +4302,7 @@ class EventBusKafka(
             "subscriber_count": subscriber_count,
             "topic_count": topic_count,
             "consumer_count": consumer_count,
+            "dispatch_deadline": dispatch_deadline.model_dump(mode="json"),
         }
 
     def get_consumer_groups(self) -> dict[tuple[str, str], str]:

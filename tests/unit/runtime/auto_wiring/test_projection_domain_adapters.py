@@ -135,7 +135,7 @@ def test_verified_authority_cannot_authorize_a_different_dispatch_event() -> Non
         payload={"value": "different"},
         correlation_id=authority.trace_id,
     )
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
 
     with patch("psycopg2.connect") as connect:
         adapter = _adapter(
@@ -240,7 +240,7 @@ def test_red_control_untrusted_tenant_selection() -> None:
             security_labels={"tenant_id": str(tenant_id)},
         ),
     )
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -286,7 +286,7 @@ def test_capability_constructor_is_sealed() -> None:
 
 def test_red_control_nonlocal_tenant_guc() -> None:
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -301,9 +301,10 @@ def test_red_control_nonlocal_tenant_guc() -> None:
         "SELECT set_config(%s, %s, true)",
         ("app.tenant_id", str(tenant_id)),
     )
-    # OMN-16239: qualified with the PHYSICAL schema. delegation_events is still
-    # under the OMN-15359 bridge and lives in public; the pre-fix assertion here
-    # named "tenant", a schema the analytics database does not even have.
+    # OMN-16239/OMN-17887: qualified with the PHYSICAL schema. delegation_events
+    # is a TENANT-domain relation declared `public` (the TENANT domain's schema
+    # for good); the retired `tenant` schema never existed on the analytics
+    # database, and must never be emitted.
     assert 'INSERT INTO "public"."delegation_events"' in calls[2].args[0]
     assert calls[2].args[1]["tenant_id"] == tenant_id
     assert isinstance(calls[2].args[1]["tenant_id"], UUID)
@@ -313,7 +314,7 @@ def test_red_control_nonlocal_tenant_guc() -> None:
 
 def test_red_control_leaked_tenant_guc() -> None:
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
     cursor.execute.side_effect = (None, None, RuntimeError("write failed"))
 
@@ -331,7 +332,7 @@ def test_red_control_leaked_tenant_guc() -> None:
 
 def test_equal_canonical_row_string_is_assertion_not_authority() -> None:
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -350,7 +351,7 @@ def test_equal_canonical_row_string_is_assertion_not_authority() -> None:
 @pytest.mark.parametrize("supplied", [uuid4(), "not-a-uuid", "", 7])
 def test_wrong_or_malformed_row_tenant_fails_before_connect(supplied: object) -> None:
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
 
     with patch("psycopg2.connect") as connect:
         adapter = _verified_adapter(target, tenant_id)
@@ -382,7 +383,7 @@ def test_mixed_target_uses_distinct_domain_bindings_and_connections() -> None:
         ModelDbTableDeclaration(
             name="delegation_events",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration="proof/tenant.sql",
             access="read_write",
             role="delegation_events",
@@ -460,7 +461,7 @@ def test_red_control_internal_resolver_call() -> None:
 
 @pytest.mark.parametrize(
     ("schema", "table"),
-    [("tenant", "delegation_events"), ("omninode_internal", "generation_events")],
+    [("public", "delegation_events"), ("omninode_internal", "generation_events")],
 )
 def test_write_only_declaration_rejects_query_for_every_domain(
     schema: str, table: str
@@ -662,7 +663,7 @@ def test_unbound_authority_writes_the_events_own_tenant_unmodified() -> None:
     The event carries a real verified slug. Nothing invents, defaults, or
     overwrites it: what the producer recorded is what lands.
     """
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -693,7 +694,7 @@ def test_unbound_authority_scopes_the_write_to_the_recorded_tenant() -> None:
     The scope value is the row's own ``tenant_id``, so this is a confinement,
     not a grant: the statement cannot write outside the identity it declares.
     """
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -747,7 +748,7 @@ def _tenant_relations_with_guc_policies() -> list[str]:
 def test_every_tenant_guc_relation_uses_the_recorded_write_scope(table: str) -> None:
     """AC4: contract-derived tenant targets all use the shared GUC write seam."""
     recorded_tenant = "beta-outside-every-compiled-map"
-    target = projection_database_target(table, schema="tenant", access="write")
+    target = projection_database_target(table, schema="public", access="write")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -775,7 +776,7 @@ def test_unbound_write_opens_no_scope_for_a_tenantless_row() -> None:
     re-imported into this seam as a Python raise. An unset GUC compares
     against NULL, so a tenant-less row cannot pass ``WITH CHECK``.
     """
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -791,7 +792,7 @@ def test_unbound_write_opens_no_scope_for_a_tenantless_row() -> None:
 @pytest.mark.parametrize("blank", ["", "   ", None])
 def test_unbound_write_opens_no_scope_for_a_blank_tenant(blank: object) -> None:
     """A blank or null tenant is not a tenant; it opens no scope either."""
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -817,7 +818,7 @@ def test_unbound_read_is_scoped_only_when_the_caller_named_a_tenant() -> None:
     stays blind.
     """
     target = projection_database_target(
-        "delegation_events", schema="tenant", access="read_write"
+        "delegation_events", schema="public", access="read_write"
     )
     conn, cursor = _connection("tenant_projection_writer")
 
@@ -844,7 +845,7 @@ def test_unbound_read_is_scoped_only_when_the_caller_named_a_tenant() -> None:
 
 def test_unbound_scope_is_rolled_back_and_never_leaks_on_failure() -> None:
     """The unbound scope obeys the same leak control as the bound one."""
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
     cursor.execute.side_effect = (None, None, RuntimeError("write failed"))
 
@@ -889,7 +890,7 @@ def test_unbound_authority_never_invents_a_tenant() -> None:
     row is allowed to reach here tenant-less is the PRODUCER's obligation
     (ruling item 4); this seam's obligation is only that it invents nothing.
     """
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -907,7 +908,7 @@ def test_unbound_authority_query_is_not_refused_and_is_not_narrowed() -> None:
     upsert, so a refusal here alone was enough to DLQ the whole event.
     """
     target = projection_database_target(
-        "delegation_events", schema="tenant", access="read_write"
+        "delegation_events", schema="public", access="read_write"
     )
     conn, cursor = _connection("tenant_projection_writer")
 
@@ -927,7 +928,7 @@ def test_bound_authority_still_overrides_nothing_but_verifies_everything() -> No
     tenant, but it gets there by verification rather than by substitution.
     """
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -944,7 +945,7 @@ def test_bound_authority_still_overrides_nothing_but_verifies_everything() -> No
 
 def test_bound_authority_still_fails_closed_on_a_mismatched_tenant() -> None:
     """Regression guard: decoupling must not weaken the bound-authority path."""
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
 
     with patch("psycopg2.connect") as connect:
         adapter = _verified_adapter(target, uuid4())
@@ -960,7 +961,7 @@ def test_bound_authority_still_fails_closed_on_a_mismatched_tenant() -> None:
 
 def test_unbound_tenant_operation_still_honours_the_closed_adapter_guard() -> None:
     """Dropping the authority precondition must not drop the lifecycle one."""
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, _ = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):

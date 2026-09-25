@@ -26,6 +26,7 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.handlers import (
     HandlerForwardOutbound,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
+    ModelGatewayEgressMetadataScrub,
     ModelGatewayEgressRedaction,
     ModelGatewayEnvelope,
     ModelGatewayForwarderConfig,
@@ -460,6 +461,22 @@ def egress_admits(
     return False
 
 
+def egress_scrubbed(
+    scrub: ModelGatewayEgressMetadataScrub | None,
+    envelope: ModelEventEnvelope[dict[str, object]],
+    canonical_topic: str,
+) -> ModelEventEnvelope[dict[str, object]]:
+    """OMN-19439: reduce a scrubbed topic's payload to its metadata allowlist.
+
+    Applied BEFORE the content-addressed ``event_id`` is computed, so the id
+    names what crosses and the unscrubbed form is never hashed at the boundary.
+    An ungoverned topic is returned untouched.
+    """
+    if scrub is None or not scrub.governs(canonical_topic):
+        return envelope
+    return envelope.model_copy(update={"payload": scrub.scrub(envelope.payload)})
+
+
 class ServiceGatewayForwarder:
     """Validate, transform, and republish explicitly polled gateway envelopes."""
 
@@ -499,6 +516,9 @@ class ServiceGatewayForwarder:
             return
         if not egress_admits(self._config.egress_redaction, envelope, source_topic):
             return
+        envelope = egress_scrubbed(
+            self._config.egress_metadata_scrub, envelope, source_topic
+        )
         transformed, wire_topic = self._prepare_outbound(
             envelope_with_event_id(envelope, source_topic), source_topic
         )
@@ -529,6 +549,15 @@ class ServiceGatewayForwarder:
         for message in messages:
             source_topic = self._message_topic(message)
             envelope = self.decode_outbound_message(message)
+            # OMN-19439: the batch (HTTPS) path applies the same boundary
+            # decisions as the single-record path. It previously skipped the
+            # redaction admission, so a governed capture record crossed the
+            # HTTPS leg unadmitted whenever a poll returned more than one.
+            if not egress_admits(self._config.egress_redaction, envelope, source_topic):
+                continue
+            envelope = egress_scrubbed(
+                self._config.egress_metadata_scrub, envelope, source_topic
+            )
             transformed, wire_topic = self._prepare_outbound(
                 envelope_with_event_id(envelope, source_topic), source_topic
             )
@@ -540,7 +569,8 @@ class ServiceGatewayForwarder:
                     getattr(message, "headers", None),
                 )
             )
-        await publish_batch(records)
+        if records:
+            await publish_batch(records)
 
     def validate_outbound_message(self, message: object) -> None:
         """Validate an outbound trust-boundary message without publishing it."""
@@ -666,11 +696,25 @@ class ServiceGatewayForwarder:
             # for that one.
             tenant_id=identity.tenant_slug,
         )
+        # OMN-18691: named explicitly rather than left to StopIteration. The
+        # runtime config already refuses a cloud deployment with no heartbeat
+        # topic, and a mirror-only forwarder never reaches this method at all,
+        # so arriving here with nothing to send means one of those two
+        # invariants broke -- which is worth a message that says so.
         canonical_topic = next(
-            topic
-            for topic in self._config.mirror_topics.outbound
-            if topic.endswith(".gateway-heartbeat.v1")
+            (
+                topic
+                for topic in self._config.declared_outbound_topics
+                if topic.endswith(".gateway-heartbeat.v1")
+            ),
+            None,
         )
+        if canonical_topic is None:
+            raise GatewayRecordRefusedError(
+                "the gateway heartbeat requires an outbound heartbeat topic, but "
+                "this forwarder declares no outbound mirror set; a mirror-only "
+                "forwarder has no cloud leg to heartbeat over"
+            )
         return envelope, canonical_topic
 
     async def publish_heartbeat(self) -> None:
@@ -811,7 +855,7 @@ class ServiceGatewayForwarder:
         """
         identity = self._config.tenant_identity
         canonical_topic = strip_topic_prefix(identity.tenant_slug, wire_topic)
-        if canonical_topic not in self._config.mirror_topics.inbound:
+        if canonical_topic not in self._config.declared_inbound_topics:
             raise GatewayRecordRefusedError(
                 "canonical_topic is not declared for inbound mirroring"
             )
@@ -870,7 +914,7 @@ class ServiceGatewayForwarder:
         COMPUTE handler (OMN-15740).
         """
         identity = self._config.tenant_identity
-        if canonical_topic not in self._config.mirror_topics.outbound:
+        if canonical_topic not in self._config.declared_outbound_topics:
             raise GatewayRecordRefusedError(
                 "canonical_topic is not declared for outbound mirroring"
             )

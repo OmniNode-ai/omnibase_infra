@@ -69,3 +69,23 @@ lanes:
       - seconds: 668
         sha: 732fd291a98afeac849a4904670b210096649529
         note: runtime-rebuild-trigger run 34825117758, "lane ready after 668s of an 837s settle budget"
+  compose-dev-202:
+    # OMN-19507 AC2: the dev-202 lane on .202 (docker-compose.dev-202.yml, an
+    # overlay on the same infra + dev-lane composition). The same 900s as
+    # compose-dev, so the verify job's derived 45-minute ceiling holds for
+    # whichever instance a merge is routed to. Bounded above by the same 1800s
+    # start_period, which the overlay does not change.
+    settle_budget_seconds: 900
+    compose_file: docker/docker-compose.infra.yml
+    readiness_services:
+      - omninode-runtime
+      - runtime-effects
+      - projection-api
+    # Not yet an emitted receipt: no dev-202 lane has run (decision 19 of the
+    # unified verification plan). The one measurement is task B1's, the same
+    # runtime on .202 in a throwaway project. Replace it with the first real
+    # compose-dev-202 "lane ready after Ns" line when one exists.
+    observed_boot_seconds:
+      - seconds: 137
+        sha: 1e405f7c035f8bbae174645398966b3da9f594d7
+        note: OMN-19504 B1 on .202, omninode-runtime start to /health 200 in 137.0s

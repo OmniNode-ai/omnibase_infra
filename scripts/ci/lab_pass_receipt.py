@@ -103,6 +103,22 @@ Subcommands
     unreadable, malformed or ``FAIL`` receipt is a FAILURE naming the sha, never
     a skip.
 
+    ``--lane`` is ANY-OF: one PASS among them satisfies it. ``--require-lane``
+    (OMN-19312) is ALL-OF: every named lane must carry its own PASS, and no
+    other lane's PASS substitutes. The distinction is load-bearing: the push
+    path's unqualified call is satisfied by the onex-lab boot receipt the same
+    workflow emits, so a verdict can only bind delivery as a required lane.
+    ``--wait-seconds`` polls, bounded, for a required receipt that has not
+    landed yet, and expiry refuses. ``--resolve-runtime-ancestor`` asks required
+    lanes about the nearest runtime-affecting ancestor, by the release train's
+    OMN-18664 rule (loaded from ``release_train.py``, never restated).
+
+``workflow-verdict``
+    OMN-18866. For a check that has no sha-keyed receipt of its own (or whose
+    lane may not name itself in one, a governed lane), reads the newest
+    completed run of one workflow on one branch and exits non-zero unless it
+    concluded ``success`` within a freshness bound.
+
 STDLIB ONLY, and that is a requirement rather than a preference
 ------------------------------------------------------------
 Both call sites run on a bare runner with no project environment. The boot gate
@@ -127,6 +143,7 @@ could not be proven to.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import io
 import json
 import os
@@ -313,14 +330,55 @@ class EnumLabLane(StrEnum):
     host's own secret store bound and the lane's tenant minted. A receipt that
     conflated them would answer a question nobody asked.
 
+    ``COMPOSE_DEV_CHAIN`` and ``COMPOSE_DEV_CORPUS`` (OMN-19312) are VERDICT
+    lanes on the same ``.201`` compose dev lane, each with exactly one emitter:
+    the chain canary (``chain-canary.yml``, check C15) and the per-candidate
+    delegation corpus (check D11's dev-lane leg). They are separate values for
+    the ``ONEX_LAB_K3S`` reasons above -- one emitter per name, and a different
+    claim -- and for a third: the ``compose-dev`` receipt is also the release
+    train's premise, so folding either verdict into it would stop release cuts,
+    a surface the 2026-09-23T17:12:15Z operator ruling did not name (the shape
+    OMN-18872 was reverted for). A verdict lane binds delivery only when a
+    caller REQUIRES it with ``gate --require-lane``; it is not in
+    ``ANY_OF_DEFAULT_LANES``, so its PASS never satisfies the any-of lab-pass
+    premise on its own.
+
+    ``COMPOSE_DEV_202`` (OMN-19507) is the SECOND deployed dev lane, ``dev-202``
+    on the ``.202`` host (compose project ``omnibase-infra-dev-202``, ports
+    61085/61086), run by a second deploy-agent instance (OMN-19506). It is a
+    separate value for the ``ONEX_LAB_K3S`` reasons: one emitter per name, and a
+    different host proving a different lane. The operator ruled on
+    2026-09-25T00:56:45Z that its PASS proves omnimarket changes only, and
+    omnibase_infra stays proven on ``.201``. So it is NOT in
+    ``ANY_OF_DEFAULT_LANES``: an unqualified gate never reads it, and only the
+    reads OMN-19508 names (omnimarket's sibling read and its release-cut premise)
+    may admit it.
+
     No other value is admissible, and in particular no governed lane
     (``prod``, ``stability-test``, ``judge``, or a collaborator lane) can name
-    itself in a receipt. A lab pass is a statement about a lab.
+    itself in a receipt. A lab pass is a statement about a lab. A governed
+    lane's verdict is read state-keyed instead, with ``workflow-verdict``.
     """
 
     COMPOSE_DEV = "compose-dev"
     ONEX_LAB = "onex-lab"
     ONEX_LAB_K3S = "onex-lab-k3s"
+    COMPOSE_DEV_CHAIN = "compose-dev-chain"
+    COMPOSE_DEV_CORPUS = "compose-dev-corpus"
+    COMPOSE_DEV_202 = "compose-dev-202"
+
+
+#: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the three lab
+#: surfaces rule 24(b) means by "a passing lab receipt". The OMN-19312 verdict
+#: lanes are deliberately absent -- a chain canary PASS is not evidence that the
+#: candidate booted, and must never be able to stand in for that premise.
+#: ``COMPOSE_DEV_202`` is absent too (OMN-19507): it proves omnimarket changes
+#: only, so no unqualified read may take it for the any-of premise.
+ANY_OF_DEFAULT_LANES: Final[tuple[EnumLabLane, ...]] = (
+    EnumLabLane.COMPOSE_DEV,
+    EnumLabLane.ONEX_LAB,
+    EnumLabLane.ONEX_LAB_K3S,
+)
 
 
 class EnumLabPassResult(StrEnum):
@@ -3034,6 +3092,16 @@ def _gh_api(path: str) -> bytes:
     return completed.stdout
 
 
+def _gh_api_post(path: str) -> None:
+    """One POST against the GitHub REST API. A non-zero exit RAISES (rule 16)."""
+    argv = ["gh", "api", "-X", "POST", path]
+    completed = subprocess.run(argv, capture_output=True, check=False)
+    if completed.returncode != 0:
+        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+        msg = f"`gh api -X POST {path}` exited {completed.returncode}: {stderr}"
+        raise ReceiptLookupError(msg)
+
+
 def list_artifacts(repo: str, name: str) -> list[dict[str, Any]]:
     """Exact-name artifact query. A transport failure raises; it never returns []."""
     raw = _gh_api(f"repos/{repo}/actions/artifacts?name={name}&per_page=100")
@@ -3175,78 +3243,404 @@ def verify_emitted(path: Path, sha: str, lane: EnumLabLane, out: Any) -> int:
     return 0
 
 
-def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -> int:
-    """Fail closed unless a PASS receipt exists for the EXACT sha.
+#: How long ``gate --wait-seconds`` may poll at most. Six hours is the ceiling
+#: GitHub places on a hosted job; a larger request could only ever be cut off
+#: by the runner, which would read as a cancellation rather than as this gate's
+#: own refusal.
+MAX_WAIT_SECONDS: Final[int] = 6 * 60 * 60
+
+#: Default spacing of ``--wait-seconds`` polls. Each poll is one exact-name
+#: listing per lane, so this is gentle on the API while still being short next
+#: to the rebuild durations a waiting gate is waiting out.
+DEFAULT_POLL_SECONDS: Final[float] = 30.0
+
+
+class EnumGateToken(StrEnum):
+    """Why the gate refused, one token per outcome a reader acts on (OMN-19233).
+
+    Plan PS-5 (decision S, 2026-09-23) separates the refusals that a later
+    compose-dev PASS can change from the ones it cannot:
+
+    * ``PENDING``: no receipt for the subject, and its rebuild is in flight;
+    * ``ABSENT``: no receipt for the subject, and nothing is in flight (the
+      PS-3 R1 path: a queued attempt 1 wrote none, a re-run attempt may);
+    * ``INDETERMINATE``: a receipt whose only non-passing checks are
+      INDETERMINATE (PS-3 R2), which asserts nothing about the lane;
+    * ``FAIL``: a receipt carrying at least one FAIL check. It stands until the
+      subject changes; no re-run is triggered for it;
+    * ``UNREADABLE``: the surface or the artifact could not be read, or its name
+      and payload disagree;
+    * ``ANY_OF_UNMET``: the rule 24(b) any-of premise failed on the exact sha;
+    * ``TIMED_OUT``: the read is past the overall bound from the delivery run's
+      first gate read. Never a pass, even when a PASS has since arrived.
+    """
+
+    PASS = "PASS"
+    PENDING = "PENDING"
+    ABSENT = "ABSENT"
+    INDETERMINATE = "INDETERMINATE"
+    FAIL = "FAIL"
+    UNREADABLE = "UNREADABLE"
+    ANY_OF_UNMET = "ANY_OF_UNMET"
+    TIMED_OUT = "TIMED_OUT"
+
+
+#: Most severe first. The run's overall token is the most severe of its lanes'.
+_TOKEN_SEVERITY: Final[tuple[EnumGateToken, ...]] = (
+    EnumGateToken.TIMED_OUT,
+    EnumGateToken.FAIL,
+    EnumGateToken.UNREADABLE,
+    EnumGateToken.ANY_OF_UNMET,
+    EnumGateToken.INDETERMINATE,
+    EnumGateToken.ABSENT,
+    EnumGateToken.PENDING,
+)
+
+#: The refusals a later compose-dev PASS for the same subject can turn into a
+#: pass, and so the only ones the emitter re-runs a delivery for (PS-5 item 2).
+RERUN_ELIGIBLE_TOKENS: Final[frozenset[EnumGateToken]] = frozenset(
+    {EnumGateToken.PENDING, EnumGateToken.ABSENT, EnumGateToken.INDETERMINATE}
+)
+
+#: PS-5 item 3, the overall bound, measured from the delivery run's first gate
+#: read. Basis: the larger measured compose-dev queue bound (10,963 s,
+#: 3e4aaded's first attempt at queue position 5) plus one verify-lane-converged
+#: run at its 45-minute ceiling (2,700 s) = 13,663 s, rounded up to four hours.
+#: Changing it is a ruling, not a tuning.
+DELIVERY_OVERALL_BOUND_SECONDS: Final[int] = 14_400
+
+VERDICT_SCHEMA: Final[str] = "lab_pass_gate_verdict.v1"
+
+
+def verdict_artifact_name(run_id: int, run_attempt: int) -> str:
+    """The artifact a delivery run's gate verdict is uploaded under, per attempt."""
+    return f"lab-pass-gate-verdict-{run_id}-{run_attempt}"
+
+
+def _utc_stamp(value: datetime) -> str:
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def classify_receipt_token(receipt: ModelLabPassReceipt) -> EnumGateToken:
+    """The token a present receipt earns: PASS, FAIL or INDETERMINATE-only."""
+    if receipt.result is EnumLabPassResult.PASS:
+        return EnumGateToken.PASS
+    if any(c.outcome is EnumLabPassCheckOutcome.FAIL for c in receipt.checks):
+        return EnumGateToken.FAIL
+    return EnumGateToken.INDETERMINATE
+
+
+def _most_severe(tokens: Sequence[EnumGateToken]) -> EnumGateToken:
+    for token in _TOKEN_SEVERITY:
+        if token in tokens:
+            return token
+    return EnumGateToken.PASS
+
+
+@dataclass(frozen=True)
+class ModelLaneRead:
+    """What one read of one lane, for one subject sha, established.
+
+    ``kind`` separates the four outcomes a reader acts on differently:
+    ``receipt`` (a validated receipt was read; its verdict may still be FAIL),
+    ``absent`` (the surface was read and holds no artifact by that name),
+    ``unreadable`` (the surface or the artifact could not be read or parsed) and
+    ``mismatch`` (an artifact exists but its payload disagrees with its name).
+    Only ``absent`` and ``unreadable`` can change by waiting.
+    """
+
+    lane: EnumLabLane
+    subject_sha: str
+    kind: str
+    receipt: ModelLabPassReceipt | None = None
+    problem: str = ""
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.receipt is not None and self.receipt.result is EnumLabPassResult.PASS
+        )
+
+    @property
+    def may_still_arrive(self) -> bool:
+        return self.kind in {"absent", "unreadable"}
+
+
+def read_lane(repo: str, lane: EnumLabLane, sha: str) -> ModelLaneRead:
+    """Read the newest receipt for one lane and one EXACT sha. Never raises."""
+    name = artifact_name(lane, sha)
+    try:
+        artifacts = list_artifacts(repo, name)
+    except Exception as exc:  # noqa: BLE001
+        # Deliberately broad. Rule 16: a verification sweep that errors and is
+        # not caught reads as an absence of findings; here it would read as a
+        # traceback with no sha in it. Any failure to READ the surface is
+        # reported as "unreadable" against the named lane and fails the gate,
+        # which is the same verdict as a missing receipt.
+        return ModelLaneRead(lane, sha, "unreadable", problem=f"{lane.value}: {exc}")
+    if not artifacts:
+        return ModelLaneRead(
+            lane,
+            sha,
+            "absent",
+            problem=f"{lane.value}: no receipt artifact named {name}",
+        )
+    # Newest first: a re-run of the emitting job supersedes an earlier attempt
+    # for the same sha and lane, in both directions.
+    artifacts.sort(key=lambda a: str(a.get("created_at", "")), reverse=True)
+    try:
+        receipt = download_receipt(repo, int(artifacts[0]["id"]))
+    except Exception as exc:  # noqa: BLE001 - same reasoning as above
+        return ModelLaneRead(lane, sha, "unreadable", problem=f"{lane.value}: {exc}")
+    if receipt.sha != sha:
+        return ModelLaneRead(
+            lane,
+            sha,
+            "mismatch",
+            problem=(
+                f"{lane.value}: artifact {name} carries sha {receipt.sha}; "
+                "the name and the payload disagree"
+            ),
+        )
+    if receipt.lane != lane:
+        return ModelLaneRead(
+            lane,
+            sha,
+            "mismatch",
+            problem=(
+                f"{lane.value}: artifact {name} carries lane {receipt.lane.value}; "
+                "the name and the payload disagree"
+            ),
+        )
+    return ModelLaneRead(lane, sha, "receipt", receipt=receipt)
+
+
+def _read_all(
+    repo: str,
+    sha: str,
+    lanes: Sequence[EnumLabLane],
+    required: Sequence[EnumLabLane],
+    required_sha: str,
+) -> tuple[list[ModelLaneRead], list[ModelLaneRead]]:
+    any_of = [read_lane(repo, lane, sha) for lane in lanes]
+    cache = {(r.lane, r.subject_sha): r for r in any_of}
+    all_of: list[ModelLaneRead] = []
+    for lane in required:
+        key = (lane, required_sha)
+        if key not in cache:
+            cache[key] = read_lane(repo, lane, required_sha)
+        all_of.append(cache[key])
+    return any_of, all_of
+
+
+def _verdict(any_of: Sequence[ModelLaneRead], all_of: Sequence[ModelLaneRead]) -> bool:
+    any_of_ok = not any_of or any(r.passed for r in any_of)
+    return any_of_ok and all(r.passed for r in all_of)
+
+
+def evaluate_gate(
+    repo: str,
+    sha: str,
+    lanes: Sequence[EnumLabLane],
+    out: Any,
+    *,
+    required: Sequence[EnumLabLane] = (),
+    required_sha: str | None = None,
+    required_note: str = "",
+    wait_seconds: float = 0.0,
+    poll_seconds: float = DEFAULT_POLL_SECONDS,
+    rebuild_pending: Callable[[str], bool] | None = None,
+    first_read_at: datetime | None = None,
+    overall_bound_seconds: float | None = None,
+    now: Callable[[], datetime] | None = None,
+    verdict_out: Path | None = None,
+    run_id: int | None = None,
+    run_attempt: int | None = None,
+) -> int:
+    """Fail closed unless the lab-pass premise holds for the EXACT sha.
+
+    Two requirements, both of which must hold:
+
+    * ``lanes`` is ANY-OF (the rule 24(b) premise, unchanged since OMN-17530):
+      at least one of them carries a PASS receipt for ``sha``. An empty
+      ``lanes`` places no any-of requirement.
+    * ``required`` is ALL-OF (OMN-19312): EVERY one of them carries a PASS
+      receipt for ``required_sha`` (``sha`` unless a caller resolved an
+      ancestor with ``resolve_required_subject``). A PASS on any other lane,
+      in either set, never substitutes for a required lane's verdict -- that
+      substitution is the defect this requirement exists to remove: before it,
+      the onex-lab boot receipt alone satisfied every push delivery.
+
+    ``wait_seconds`` bounds a poll for REQUIRED lanes whose receipt is absent or
+    unreadable; the gate re-reads until the verdict passes, until no required
+    lane can still change by waiting, or until the bound expires. Expiry is a
+    refusal, never a pass. There is no force, skip or override of any kind.
+
+    OMN-19233 (plan PS-5, decision S): every refusal carries one token
+    (:class:`EnumGateToken`). A required compose-dev read with no receipt is
+    PENDING when ``rebuild_pending(subject)`` says the subject's rebuild is in
+    flight and ABSENT otherwise. With ``overall_bound_seconds``, a read more
+    than that many seconds after ``first_read_at`` (the delivery run's first
+    gate read; this read when ``None``) refuses TIMED_OUT whatever the receipts
+    say. ``verdict_out`` receives the verdict as JSON, which the compose-dev
+    emitter's re-run selector reads.
 
     Every terminal branch prints the sha. "The gate failed" with no commit named
     is unactionable at 3am, and the whole point of a sha-keyed receipt is that
     the answer is about one commit.
     """
-    if not _SHA_RE.match(sha):
+    subject = sha if required_sha is None else required_sha
+    clock = now if now is not None else (lambda: datetime.now(UTC))
+
+    def _record(token: EnumGateToken, lane_tokens: Mapping[str, str]) -> None:
+        if verdict_out is None:
+            return
+        read_at = clock()
+        first = first_read_at if first_read_at is not None else read_at
+        body = {
+            "schema": VERDICT_SCHEMA,
+            "repo": repo,
+            "sha": sha,
+            "subject": subject,
+            "required_lanes": [lane.value for lane in required],
+            "lanes": dict(lane_tokens),
+            "token": token.value,
+            "first_read_at": _utc_stamp(first),
+            "read_at": _utc_stamp(read_at),
+            "elapsed_seconds": int((read_at - first).total_seconds()),
+            "bound_seconds": overall_bound_seconds,
+            "run_id": run_id,
+            "run_attempt": run_attempt,
+        }
+        verdict_out.parent.mkdir(parents=True, exist_ok=True)
+        verdict_out.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+
+    for label, value in (("commit", sha), ("required subject", subject)):
+        if not _SHA_RE.match(value):
+            print(
+                f"::error::lab-pass gate: {label} {value!r} is not a 40-character "
+                "lowercase commit sha. Refusing to resolve an abbreviated ref. "
+                "token=UNREADABLE",
+                file=out,
+            )
+            _record(EnumGateToken.UNREADABLE, {})
+            return 1
+    if not lanes and not required:
         print(
-            f"::error::lab-pass gate: {sha!r} is not a 40-character lowercase "
-            "commit sha. Refusing to resolve an abbreviated ref.",
+            f"::error::lab-pass gate FAILED for {sha}: no lane was named to read, "
+            "so nothing could establish a pass. Refusing rather than passing a "
+            "gate that checked nothing. token=UNREADABLE",
             file=out,
         )
+        _record(EnumGateToken.UNREADABLE, {})
+        return 1
+    if wait_seconds < 0 or wait_seconds > MAX_WAIT_SECONDS:
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: --wait-seconds "
+            f"{wait_seconds:g} is outside 0..{MAX_WAIT_SECONDS}. token=UNREADABLE",
+            file=out,
+        )
+        _record(EnumGateToken.UNREADABLE, {})
         return 1
 
-    found: list[ModelLabPassReceipt] = []
-    problems: list[str] = []
+    deadline = time.monotonic() + wait_seconds
+    polls = 0
+    while True:
+        polls += 1
+        any_of, all_of = _read_all(repo, sha, lanes, required, subject)
+        if _verdict(any_of, all_of):
+            break
+        waiting_on = [r for r in all_of if r.may_still_arrive]
+        remaining = deadline - time.monotonic()
+        if not waiting_on or remaining <= 0:
+            break
+        pending = ", ".join(f"{r.lane.value}@{r.subject_sha[:12]}" for r in waiting_on)
+        print(
+            f"lab-pass gate: waiting for required lane(s) {pending} "
+            f"(poll {polls}, {int(remaining)} s of {wait_seconds:g} s left)",
+            file=out,
+        )
+        time.sleep(max(0.0, min(poll_seconds, remaining)))
 
-    for lane in lanes:
-        name = artifact_name(lane, sha)
-        try:
-            artifacts = list_artifacts(repo, name)
-        except Exception as exc:  # noqa: BLE001
-            # Deliberately broad. Rule 16: a verification sweep that errors and
-            # is not caught reads as an absence of findings; here it would read
-            # as a traceback with no sha in it. Any failure to READ the surface
-            # is reported as "unreadable" against the named lane and fails the
-            # gate, which is the same verdict as a missing receipt.
-            problems.append(f"{lane.value}: {exc}")
-            continue
-        if not artifacts:
-            problems.append(f"{lane.value}: no receipt artifact named {name}")
-            continue
-        # Newest first: a re-run of the emitting job supersedes an earlier
-        # attempt for the same sha and lane.
-        artifacts.sort(key=lambda a: str(a.get("created_at", "")), reverse=True)
-        try:
-            receipt = download_receipt(repo, int(artifacts[0]["id"]))
-        except Exception as exc:  # noqa: BLE001 - same reasoning as above
-            problems.append(f"{lane.value}: {exc}")
-            continue
-        if receipt.sha != sha:
-            problems.append(
-                f"{lane.value}: artifact {name} carries sha {receipt.sha}; "
-                "the name and the payload disagree"
-            )
-            continue
-        if receipt.lane != lane:
-            problems.append(
-                f"{lane.value}: artifact {name} carries lane {receipt.lane.value}; "
-                "the name and the payload disagree"
-            )
-            continue
-        found.append(receipt)
+    # OMN-19233: one token per required lane, and the overall bound.
+    lane_tokens: dict[str, EnumGateToken] = {}
+    lane_notes: dict[str, str] = {}
+    for read in all_of:
+        if read.passed:
+            lane_tokens[read.lane.value] = EnumGateToken.PASS
+        elif read.receipt is not None:
+            lane_tokens[read.lane.value] = classify_receipt_token(read.receipt)
+        elif read.kind == "absent":
+            token = EnumGateToken.ABSENT
+            if read.lane is EnumLabLane.COMPOSE_DEV and rebuild_pending is not None:
+                try:
+                    if rebuild_pending(read.subject_sha):
+                        token = EnumGateToken.PENDING
+                        lane_notes[read.lane.value] = (
+                            "a rebuild run for this subject is in flight"
+                        )
+                    else:
+                        lane_notes[read.lane.value] = (
+                            "no rebuild run for this subject is in flight"
+                        )
+                except Exception as exc:  # noqa: BLE001 - named, and still refuses
+                    lane_notes[read.lane.value] = (
+                        f"whether a rebuild is in flight could not be read ({exc}), "
+                        "so this is ABSENT, not PENDING"
+                    )
+            lane_tokens[read.lane.value] = token
+        else:
+            lane_tokens[read.lane.value] = EnumGateToken.UNREADABLE
+    read_at = clock()
+    first = first_read_at if first_read_at is not None else read_at
+    elapsed = (read_at - first).total_seconds()
+    timed_out = overall_bound_seconds is not None and elapsed > overall_bound_seconds
 
     print(f"lab-pass gate (rule 24(b), OMN-17530) for sha {sha}", file=out)
     print(f"  repository : {repo}", file=out)
-    print(f"  lanes read : {', '.join(lane.value for lane in lanes)}", file=out)
-    for receipt in found:
-        print("", file=out)
-        print(render_receipt(receipt), file=out)
-    for problem in problems:
-        print(f"  unreadable : {problem}", file=out)
+    if overall_bound_seconds is not None:
+        print(
+            f"  bound      : first gate read {_utc_stamp(first)}, this read "
+            f"{_utc_stamp(read_at)}, {int(elapsed)} s of {overall_bound_seconds:g} s "
+            "(OMN-19233, PS-5)",
+            file=out,
+        )
+    print(
+        f"  any-of     : {', '.join(lane.value for lane in lanes) or '(none)'}",
+        file=out,
+    )
+    if required:
+        print(
+            f"  all-of     : {', '.join(lane.value for lane in required)} "
+            f"(OMN-19312) for subject {subject}",
+            file=out,
+        )
+        if required_note:
+            print(f"  subject    : {required_note}", file=out)
+    if wait_seconds:
+        print(f"  waited     : up to {wait_seconds:g} s, {polls} read(s)", file=out)
+    rendered: set[tuple[EnumLabLane, str]] = set()
+    for read in [*any_of, *all_of]:
+        key = (read.lane, read.subject_sha)
+        if key in rendered:
+            continue
+        rendered.add(key)
+        if read.receipt is not None:
+            print("", file=out)
+            print(render_receipt(read.receipt), file=out)
+        else:
+            print(f"  unreadable : {read.problem}", file=out)
 
-    passing = [r for r in found if r.result == EnumLabPassResult.PASS]
-    if passing:
-        lanes_passing = ", ".join(r.lane.value for r in passing)
+    if _verdict(any_of, all_of) and not timed_out:
+        lanes_passing = ", ".join(
+            dict.fromkeys(r.lane.value for r in [*any_of, *all_of] if r.passed)
+        )
         print("", file=out)
         print(
             f"lab-pass gate PASSED for {sha} on lane(s): {lanes_passing}.",
             file=out,
         )
+        _record(EnumGateToken.PASS, {k: v.value for k, v in lane_tokens.items()})
         return 0
 
     # OMN-18573. An INDETERMINATE check is named on its own line, with the sha
@@ -3255,33 +3649,804 @@ def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -
     # question for the lane, an INDETERMINATE is a question for the hop that
     # was supposed to establish the fact. Collapsing them into one sentence is
     # what made the 2026-09-16/17 receipts read as lane failures.
-    unestablished = [
-        (receipt, check)
-        for receipt in found
-        for check in receipt.checks
-        if check.outcome is EnumLabPassCheckOutcome.INDETERMINATE
-    ]
     print("", file=out)
-    for receipt, check in unestablished:
+    seen: set[tuple[EnumLabLane, str, str]] = set()
+    for read in [*any_of, *all_of]:
+        if read.receipt is None:
+            continue
+        for check in read.receipt.checks:
+            check_key = (read.lane, read.subject_sha, check.name)
+            if (
+                check.outcome is not EnumLabPassCheckOutcome.INDETERMINATE
+                or check_key in seen
+            ):
+                continue
+            seen.add(check_key)
+            print(
+                f"::error::lab-pass gate: for sha {read.subject_sha} on lane "
+                f"{read.lane.value}, check {check.name!r} is INDETERMINATE and "
+                f"asserts nothing about the lab lane: {check.evidence}. The sha is "
+                "refused because an unestablished check is not a pass, NOT because "
+                "the lane was shown to misbehave.",
+                file=out,
+            )
+
+    for read in all_of:
+        if read.passed:
+            continue
+        if read.receipt is not None:
+            why = f"its newest receipt is {read.receipt.result.value}"
+        elif read.kind == "absent":
+            why = (
+                f"no receipt exists after waiting {wait_seconds:g} s"
+                if wait_seconds
+                else "no receipt exists"
+            )
+        else:
+            why = read.problem
+        note = lane_notes.get(read.lane.value)
+        if note:
+            why = f"{why} ({note})"
         print(
-            f"::error::lab-pass gate: for sha {sha} on lane "
-            f"{receipt.lane.value}, check {check.name!r} is INDETERMINATE and "
-            f"asserts nothing about the lab lane: {check.evidence}. The sha is "
-            "refused because an unestablished check is not a pass, NOT because "
-            "the lane was shown to misbehave.",
+            f"::error::lab-pass gate: REQUIRED lane {read.lane.value} does not pass "
+            f"for sha {read.subject_sha}: {why}. "
+            f"token={lane_tokens[read.lane.value].value}. A required lane is all-of "
+            "(OMN-19312): a PASS on any other lane does not substitute for it.",
             file=out,
         )
+
+    any_of_ok = not any_of or any(r.passed for r in any_of)
+    refusals = [t for t in lane_tokens.values() if t is not EnumGateToken.PASS]
+    if not any_of_ok:
+        refusals.append(EnumGateToken.ANY_OF_UNMET)
+    if timed_out:
+        refusals.append(EnumGateToken.TIMED_OUT)
+        print(
+            f"::error::lab-pass gate: the read at {_utc_stamp(read_at)} is "
+            f"{int(elapsed)} s after this delivery run's first gate read at "
+            f"{_utc_stamp(first)}, past the {overall_bound_seconds:g} s bound "
+            "(OMN-19233, PS-5). token=TIMED_OUT. A PASS that has arrived since "
+            "does not pass a read past the bound; a new delivery run reads afresh.",
+            file=out,
+        )
+    overall = _most_severe(refusals)
     print(
-        f"::error::lab-pass gate FAILED for {sha}: no PASS lab-pass receipt "
-        f"exists for this exact sha on any of {', '.join(lane.value for lane in lanes)}. "
-        "Rule 24(b) — the lab is the first place a change runs; staging is "
-        "promotion — so this candidate is not deliverable. This is not a skip: a "
-        "missing, unreadable, malformed, INDETERMINATE or FAIL receipt all fail "
-        "here, and there is no override flag. Exercise the sha on a lab lane and "
-        "let its emitter publish the receipt.",
+        f"::error::lab-pass gate REFUSED for {sha}: token={overall.value} "
+        f"subject={subject} lanes="
+        + (", ".join(f"{k}:{v.value}" for k, v in lane_tokens.items()) or "(none)"),
         file=out,
     )
+    _record(overall, {k: v.value for k, v in lane_tokens.items()})
+    if not any_of_ok:
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: no PASS lab-pass receipt "
+            f"exists for this exact sha on any of "
+            f"{', '.join(lane.value for lane in lanes)}. "
+            "Rule 24(b) — the lab is the first place a change runs; staging is "
+            "promotion — so this candidate is not deliverable. This is not a skip: a "
+            "missing, unreadable, malformed, INDETERMINATE or FAIL receipt all fail "
+            "here, and there is no override flag. Exercise the sha on a lab lane and "
+            "let its emitter publish the receipt.",
+            file=out,
+        )
+    elif overall is EnumGateToken.TIMED_OUT and not any(
+        t is not EnumGateToken.PASS for t in lane_tokens.values()
+    ):
+        # Every lane reads PASS now; the refusal is the bound alone, and the
+        # TIMED_OUT line above says so. "A required lane does not carry a PASS"
+        # would be false here.
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: the read is past the overall "
+            "bound. This is not a skip, and there is no override flag.",
+            file=out,
+        )
+    else:
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: a required lane does not "
+            "carry a PASS receipt. This is not a skip: a missing, unreadable, "
+            "malformed, INDETERMINATE or FAIL receipt on a required lane all fail "
+            "here, and there is no override flag. Fix what the lane measures and "
+            "let its emitter publish a PASS for this commit.",
+            file=out,
+        )
     return 1
+
+
+# ---------------------------------------------------------------------------
+# Which commit a REQUIRED lane's receipt is about (OMN-19312, reusing OMN-18664)
+# ---------------------------------------------------------------------------
+def _load_release_train() -> Any:
+    """``release_train.py``, loaded by path from beside this module.
+
+    Loaded lazily and only by ``--resolve-runtime-ancestor``: that module needs
+    PyYAML, and every other path through this file must stay stdlib-only
+    (``test_the_module_imports_nothing_outside_the_stdlib``). The rule is
+    REUSED, not restated -- a second copy of the nearest-runtime-affecting-
+    ancestor walk could disagree with the release train about which receipt
+    describes a commit.
+    """
+    name = "_lab_pass_release_train"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = Path(__file__).resolve().parent / "release_train.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        msg = f"cannot load the release train's ancestor rule from {path}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def resolve_required_subject(
+    sha: str,
+    *,
+    branch_commits: Callable[[], Sequence[str]],
+    runtime_affecting: Callable[[str], bool],
+) -> tuple[str, str]:
+    """The commit a required lane's receipt is asked for, and why.
+
+    Required verdict lanes emit only for RUNTIME-AFFECTING merges (their
+    emitters run after the dev lane rebuild, which fires only for those), while
+    delivery also fires for commits the classifier calls non-runtime. Asking
+    such a commit for its own receipt would block it forever. So the subject is
+    the nearest runtime-affecting commit at or below ``sha`` on first parent,
+    by the OMN-18664 rule ``release_train.resolve_lab_candidate`` owns: a
+    runtime-affecting ``sha`` resolves to itself, and inheritance crosses only
+    non-runtime-affecting commits -- the walk stops at the FIRST runtime-
+    affecting commit, so one between the subject and ``sha`` is impossible by
+    construction.
+
+    Every failure resolves to ``sha`` itself, which asks for the exact-commit
+    receipt and refuses rather than inherits. The note says which happened.
+    """
+    try:
+        train = _load_release_train()
+        candidate = train.resolve_lab_candidate(
+            sha, branch_commits=branch_commits, runtime_affecting=runtime_affecting
+        )
+    except Exception as exc:  # noqa: BLE001 - fail to the exact commit, named
+        return sha, f"{sha} itself: the ancestor rule could not run ({exc})"
+    if not candidate.sha:
+        return sha, f"{sha} itself: {candidate.unresolved_reason}"
+    if not candidate.skipped:
+        return candidate.sha, f"{sha} itself (runtime-affecting)"
+    skipped = ", ".join(s[:12] for s in candidate.skipped)
+    return candidate.sha, (
+        f"{candidate.sha}, the nearest runtime-affecting ancestor of {sha}, "
+        f"inherited across {len(candidate.skipped)} non-runtime-affecting "
+        f"commit(s): {skipped}"
+    )
+
+
+def resolve_required_subject_from_clone(
+    sha: str, clone: Path, runtime_path_validator: Path, repo: str
+) -> tuple[str, str]:
+    """``resolve_required_subject`` over a local clone, with the TRIGGER's predicate.
+
+    The predicate is the one the rebuild trigger and the release train read:
+    ``is_runtime_affecting`` in ``scripts/runtime_change_classifier.py``, the
+    path rule over omniclaude's deploy-gate validator unioned with the merged
+    pull request's ``runtime_change`` label, read from ``repo`` (OMN-19318). A
+    classifier that cannot be loaded, and a label that cannot be read, resolve
+    to the exact commit.
+    """
+    try:
+        train = _load_release_train()
+        predicate = train.load_runtime_affecting(
+            clone,
+            runtime_path_validator,
+            labels_for=lambda commit: train.default_merged_pr_labels(repo, commit),
+        )
+    except Exception as exc:  # noqa: BLE001 - fail to the exact commit, named
+        return (
+            sha,
+            f"{sha} itself: the runtime-change classifier could not load ({exc})",
+        )
+    return resolve_required_subject(
+        sha,
+        branch_commits=lambda: train.default_branch_commits(clone, sha),
+        runtime_affecting=predicate,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Receipt timing on staging delivery (OMN-19233, plan PS-5, decision S)
+# ---------------------------------------------------------------------------
+def _parse_utc(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
+
+
+def _gh_json(path: str) -> Any:
+    try:
+        raw = _gh_api(path)
+    except ReceiptLookupError:
+        raise
+    except Exception as exc:
+        raise ReceiptLookupError(str(exc)) from exc
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        msg = f"`gh api {path}` did not return JSON: {exc}"
+        raise ReceiptLookupError(msg) from exc
+
+
+def resolve_first_gate_read(
+    repo: str,
+    run_id: int,
+    run_attempt: int,
+    job_name: str,
+    *,
+    now: Callable[[], datetime],
+) -> datetime:
+    """When the delivery run's gate first read, across all of its attempts.
+
+    The PS-5 bound is measured from the delivery run's FIRST gate read, so a
+    re-run (the emitter's, or a person's) must not restart it. Attempt 1 is its
+    own first read. A later attempt takes the earliest ``started_at`` of the gate
+    job in any earlier attempt, read from the run's own jobs listing, which a
+    caller cannot supply. A prior attempt whose gate job never started (skipped
+    because an earlier job failed) did not read, and does not count.
+
+    The job's start precedes the receipt read by the job's setup steps, so the
+    bound this measures is slightly EARLIER than the literal read: the
+    conservative direction. A listing that cannot be read raises
+    ``ReceiptLookupError``, and the caller refuses UNREADABLE.
+    """
+    if run_attempt <= 1:
+        return now()
+    starts: list[datetime] = []
+    for attempt in range(1, run_attempt):
+        payload = _gh_json(
+            f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"
+        )
+        jobs = payload.get("jobs") if isinstance(payload, dict) else None
+        if not isinstance(jobs, list):
+            msg = f"run {run_id} attempt {attempt}: the jobs listing carries no list"
+            raise ReceiptLookupError(msg)
+        for job in jobs:
+            if not isinstance(job, dict) or job.get("name") != job_name:
+                continue
+            if job.get("conclusion") == "skipped":
+                continue
+            started = _parse_utc(job.get("started_at"))
+            if started is not None:
+                starts.append(started)
+    return min(starts) if starts else now()
+
+
+@dataclass(frozen=True)
+class ModelDeliveryRun:
+    """One staging delivery run, as the re-run selector reads it."""
+
+    run_id: int
+    created_at: datetime
+    status: str
+    conclusion: str | None
+    run_attempt: int
+    #: The gate verdict uploaded by this run's LATEST attempt, or None.
+    verdict: Mapping[str, Any] | None
+
+
+def _ineligible(
+    run: ModelDeliveryRun,
+    subject: str,
+    *,
+    newest: ModelDeliveryRun,
+    now: datetime,
+    bound_seconds: float,
+) -> str:
+    if run is not newest:
+        return (
+            f"a newer delivery run {newest.run_id} exists; re-running this one "
+            "would deliver older code over it"
+        )
+    if run.status != "completed":
+        return f"still {run.status}; it will read afresh"
+    if run.conclusion != "failure":
+        return f"concluded {run.conclusion}, not a refusal"
+    verdict = run.verdict
+    if verdict is None:
+        return (
+            f"attempt {run.run_attempt} uploaded no gate verdict (the gate step "
+            "did not run), so nothing says it refused on compose-dev timing"
+        )
+    if (
+        verdict.get("run_id") != run.run_id
+        or verdict.get("run_attempt") != run.run_attempt
+    ):
+        return (
+            f"its verdict names run {verdict.get('run_id')} attempt "
+            f"{verdict.get('run_attempt')}, not attempt {run.run_attempt}"
+        )
+    if verdict.get("subject") != subject:
+        return f"it refused for subject {verdict.get('subject')}, not {subject}"
+    token = str(verdict.get("token"))
+    if token not in {t.value for t in RERUN_ELIGIBLE_TOKENS}:
+        if token == EnumGateToken.FAIL.value:
+            return "it refused on a FAIL check, which stands until the subject changes"
+        return f"it refused {token}, which a compose-dev PASS does not change"
+    first = _parse_utc(verdict.get("first_read_at"))
+    if first is None:
+        return "its verdict carries no readable first_read_at"
+    elapsed = (now - first).total_seconds()
+    if elapsed > bound_seconds:
+        return (
+            f"its first gate read was {int(elapsed)} s ago, past the "
+            f"{bound_seconds:g} s bound; a re-run would refuse TIMED_OUT"
+        )
+    return ""
+
+
+def select_refused_deliveries(
+    subject: str,
+    runs: Sequence[ModelDeliveryRun],
+    *,
+    now: datetime,
+    bound_seconds: float,
+) -> tuple[list[ModelDeliveryRun], list[str]]:
+    """The delivery runs a compose-dev PASS for ``subject`` should re-run.
+
+    PS-5 item 2: a run is re-run when its latest attempt's gate refused
+    PENDING, ABSENT or INDETERMINATE for this exact subject, inside the bound.
+    A FAIL refusal is never re-run. One rule beyond the plan: only the NEWEST
+    delivery run is ever eligible, because re-running an older one would
+    deliver older code over newer code on staging (and would cancel the newer
+    run in their shared concurrency group). Every run gets a reason line.
+    """
+    ordered = sorted(runs, key=lambda r: r.created_at, reverse=True)
+    selected: list[ModelDeliveryRun] = []
+    reasons: list[str] = []
+    for run in ordered:
+        why = _ineligible(
+            run, subject, newest=ordered[0], now=now, bound_seconds=bound_seconds
+        )
+        if why:
+            reasons.append(f"delivery run {run.run_id}: not re-run: {why}")
+            continue
+        selected.append(run)
+        reasons.append(
+            f"delivery run {run.run_id}: RE-RUN: attempt {run.run_attempt} refused "
+            f"{run.verdict.get('token') if run.verdict else ''} for subject "
+            f"{subject}, which now carries a compose-dev PASS"
+        )
+    return selected, reasons
+
+
+def read_gate_verdict(
+    repo: str, run_id: int, run_attempt: int
+) -> Mapping[str, Any] | None:
+    """The gate verdict one delivery attempt uploaded, or None when it has none."""
+    artifacts = list_artifacts(repo, verdict_artifact_name(run_id, run_attempt))
+    if not artifacts:
+        return None
+    artifacts.sort(key=lambda a: str(a.get("created_at", "")), reverse=True)
+    artifact_id = int(artifacts[0]["id"])
+    blob = _gh_api(f"repos/{repo}/actions/artifacts/{artifact_id}/zip")
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            members = [n for n in archive.namelist() if n.endswith("verdict.json")]
+            if len(members) != 1:
+                msg = (
+                    f"verdict artifact {artifact_id} carries {len(members)} "
+                    "verdict.json entries; exactly one is required."
+                )
+                raise ReceiptLookupError(msg)
+            body = json.loads(archive.read(members[0]).decode("utf-8"))
+    except (zipfile.BadZipFile, json.JSONDecodeError) as exc:
+        msg = f"verdict artifact {artifact_id} is unreadable: {exc}"
+        raise ReceiptLookupError(msg) from exc
+    if not isinstance(body, dict) or body.get("schema") != VERDICT_SCHEMA:
+        msg = f"verdict artifact {artifact_id} is not a {VERDICT_SCHEMA} document"
+        raise ReceiptLookupError(msg)
+    return body
+
+
+def read_delivery_runs(
+    repo: str, workflow: str, branch: str, *, limit: int = 20
+) -> list[ModelDeliveryRun]:
+    """Recent delivery runs, newest first. Only the newest can be re-run, so
+    only its verdict is fetched. A surface that cannot be read raises."""
+    payload = _gh_json(
+        f"repos/{repo}/actions/workflows/{workflow}/runs?branch={branch}"
+        f"&per_page={limit}"
+    )
+    raw_runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
+    if not isinstance(raw_runs, list):
+        msg = f"the {workflow} run listing carries no workflow_runs list"
+        raise ReceiptLookupError(msg)
+    runs: list[ModelDeliveryRun] = []
+    for raw in raw_runs:
+        created = _parse_utc(raw.get("created_at")) if isinstance(raw, dict) else None
+        if created is None:
+            msg = f"a {workflow} run carries no readable created_at: {raw!r}"
+            raise ReceiptLookupError(msg)
+        runs.append(
+            ModelDeliveryRun(
+                run_id=int(raw["id"]),
+                created_at=created,
+                status=str(raw.get("status")),
+                conclusion=raw.get("conclusion"),
+                run_attempt=int(raw.get("run_attempt") or 1),
+                verdict=None,
+            )
+        )
+    runs.sort(key=lambda r: r.created_at, reverse=True)
+    if runs and runs[0].status == "completed" and runs[0].conclusion == "failure":
+        newest = runs[0]
+        runs[0] = ModelDeliveryRun(
+            run_id=newest.run_id,
+            created_at=newest.created_at,
+            status=newest.status,
+            conclusion=newest.conclusion,
+            run_attempt=newest.run_attempt,
+            verdict=read_gate_verdict(repo, newest.run_id, newest.run_attempt),
+        )
+    return runs
+
+
+def rerun_refused_deliveries(
+    repo: str,
+    subjects: Sequence[str],
+    *,
+    workflow: str,
+    branch: str,
+    bound_seconds: float,
+    out: Any,
+    now: Callable[[], datetime],
+) -> int:
+    """The compose-dev emitter's half of PS-5: re-run what a PASS unblocks.
+
+    For each subject that now carries a compose-dev PASS (read back through the
+    same reader the gate uses, never assumed from the emitting job), re-run the
+    failed jobs of the delivery runs :func:`select_refused_deliveries` picks. A
+    subject whose receipt is not PASS re-runs nothing. An unreadable surface or
+    a refused re-run request fails the step, loudly: a delivery nobody re-reads
+    stays refused, and that must be visible.
+    """
+    failures = 0
+    runs: list[ModelDeliveryRun] | None = None
+    for subject in dict.fromkeys(subjects):
+        if not _SHA_RE.match(subject):
+            print(
+                f"::error::rerun-refused-deliveries: subject {subject!r} is not a "
+                "40-character lowercase commit sha",
+                file=out,
+            )
+            failures += 1
+            continue
+        read = read_lane(repo, EnumLabLane.COMPOSE_DEV, subject)
+        if not read.passed:
+            state = read.receipt.result.value if read.receipt is not None else read.kind
+            line = (
+                f"subject {subject}: compose-dev receipt is {state}, not PASS; "
+                "no delivery is re-run for it"
+            )
+            if read.kind in {"unreadable", "mismatch"}:
+                print(
+                    f"::error::rerun-refused-deliveries: {line}: {read.problem}",
+                    file=out,
+                )
+                failures += 1
+            else:
+                print(line, file=out)
+            continue
+        if runs is None:
+            try:
+                runs = read_delivery_runs(repo, workflow, branch)
+            except Exception as exc:  # noqa: BLE001 - reported, and fails the step
+                print(
+                    f"::error::rerun-refused-deliveries: the {workflow} runs could "
+                    f"not be read: {exc}",
+                    file=out,
+                )
+                return 1
+        selected, reasons = select_refused_deliveries(
+            subject, runs, now=now(), bound_seconds=bound_seconds
+        )
+        print(
+            f"subject {subject}: compose-dev receipt is PASS; required lane "
+            "compose-dev (OMN-19233)",
+            file=out,
+        )
+        for reason in reasons:
+            print(f"  {reason}", file=out)
+        for run in selected:
+            path = f"repos/{repo}/actions/runs/{run.run_id}/rerun-failed-jobs"
+            try:
+                _gh_api_post(path)
+            except Exception as exc:  # noqa: BLE001 - reported, and fails the step
+                print(
+                    f"::error::rerun-refused-deliveries: re-running delivery run "
+                    f"{run.run_id} failed: {exc}",
+                    file=out,
+                )
+                failures += 1
+                continue
+            print(f"  re-ran the failed jobs of delivery run {run.run_id}", file=out)
+    return 1 if failures else 0
+
+
+# ---------------------------------------------------------------------------
+# workflow-verdict (OMN-18866, ruling 2026-09-23T17:12:15Z)
+# ---------------------------------------------------------------------------
+#: The widest freshness window a caller may ask for. The reader exists to bind
+#: a RECURRING measurement to a delivery; a window wide enough to span several
+#: of its cadences would turn "the newest measurement" into "some measurement",
+#: and a wider window is exactly how a stale green would be laundered past a
+#: fresh red. 72 hours covers a nightly with two missed nights and nothing more.
+WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS: Final[float] = 72.0
+
+#: How many completed runs are read. The newest attempt wins, and an attempt's
+#: start moves forward on a re-run, so the newest attempt is not necessarily the
+#: newest-CREATED run; reading a page rather than one row is what lets a re-run
+#: of an older run supersede a newer-created one, in both directions.
+WORKFLOW_VERDICT_PAGE: Final[int] = 50
+
+#: OMN-19311 AC5 -- the planted-red drill's blast-radius ceiling. `until` may
+#: not be set more than this many hours in the future, so a mistyped date
+#: cannot leave staging delivery closed for days with nobody watching. The
+#: drill exists to PROVE a refusal happens, not to hold one open.
+DRILL_MAX_WINDOW_HOURS: Final[float] = 2.0
+
+_TICKET_RE = re.compile(r"^OMN-\d+$")
+
+
+def _run_started(run: Mapping[str, Any]) -> datetime | None:
+    """The start of a run's LATEST attempt, which is when it last measured."""
+    raw = run.get("run_started_at") or run.get("created_at")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return _parse_ts(raw)
+    except ValueError:
+        return None
+
+
+def evaluate_workflow_verdict(
+    repo: str,
+    workflow: str,
+    branch: str,
+    max_age_hours: float,
+    events: Sequence[str],
+    out: Any,
+    *,
+    now: datetime | None = None,
+    dispatch_title_contains: str = "",
+    drill_red_until: str = "",
+    drill_ticket: str = "",
+) -> int:
+    """Fail closed unless the NEWEST completed measurement of a workflow is green.
+
+    ``drill_red_until`` / ``drill_ticket`` (OMN-19311 AC5) are the
+    planted-red drill: a self-expiring switch that makes THIS reader return a
+    red, so staging delivery's refusal path can be proven live without
+    depending on a real defect existing at proof time (the real D11 red this
+    binding was written against, 2026-09-23, is not guaranteed to stay red --
+    it turned green at 2026-09-24T05:33:57Z). Both must be set together or
+    neither is (a lone flag is a misconfiguration, refused); ``drill_ticket``
+    must be an ``OMN-<n>`` id and ``drill_red_until`` a parseable UTC
+    timestamp no more than :data:`DRILL_MAX_WINDOW_HOURS` in the future. Past
+    its own expiry the drill has NO effect at all -- nobody has to turn it
+    off. There is deliberately no symmetric flag that forces a PASS: the drill
+    can only make delivery more conservative, never less. When active it does
+    not call the GitHub API at all -- it is a synthetic, clearly-labelled red,
+    not a spoofed real one.
+
+    Operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending the
+    16:10:08Z every-check-blocks ruling) binds four chronically red checks to a
+    blocking surface NOW, not once they go green. Two of them -- C15, this
+    repository's ``chain-canary.yml``, and D11, omnimarket's delegation
+    regression nightly -- measure a DEPLOYED lab lane on a schedule, so no PR
+    head can run them and a merge block would stop the fix itself. Their
+    surface is staging delivery, and until each emits a sha-keyed receipt of its
+    own (the design ``PROBES_NOT_YET_WIRED`` records), the only verdict that
+    exists is the workflow's own conclusion. This reads it.
+
+    STATE-KEYED, NOT SHA-KEYED, and said so in the output: the verdict is about
+    the lane the workflow measured, at the time it measured it, not about the
+    delivered commit. It is the same fact a board reads from a run conclusion.
+
+    NEWEST WINS, IN BOTH DIRECTIONS. The newest completed attempt among the
+    admitted events decides. A re-run is a fresh measurement: a red re-run
+    supersedes an earlier green and a green one an earlier red. There is no
+    "any green in the window" reading, because that is how a check that fails
+    three runs in four would pass.
+
+    FAIL-CLOSED EVERYWHERE, each refusal naming the run: an unreadable surface,
+    no admitted completed run, a newest conclusion other than ``success``
+    (``failure``, ``cancelled``, ``timed_out``, ``startup_failure``,
+    ``skipped``, ``neutral``, ``action_required``, ``stale`` -- a cancelled or
+    runner-starved run is an instrument fault, and it BLOCKS like any red), a
+    newest measurement older than ``max_age_hours``, or an unparseable start.
+    There is no override, and a manual dispatch with non-default inputs is not
+    admitted unless the caller admits its event.
+
+    ``dispatch_title_contains`` (OMN-19311, D11) narrows an admitted
+    ``workflow_dispatch`` further: such a run is a measurement only when its run
+    title carries the token. D11's nightly takes a ``lane`` input and renders it
+    into its ``run-name``; admitting its dispatches (the fast path to a fresh
+    measurement after a fix) without this would let a green dispatch aimed at
+    the dev lane stand in for the governed stability-test verdict, dropping the
+    red by changing what is measured. Runs of every other admitted event are
+    unaffected: a scheduled run takes no inputs and measures the default lane.
+    """
+    moment = now or datetime.now(tz=UTC)
+    admitted = tuple(dict.fromkeys(e.strip() for e in events if e.strip()))
+    label = f"{repo} {workflow} on {branch}"
+
+    def refuse(reason: str) -> int:
+        print(
+            f"::error::workflow verdict FAILED for {label}: {reason} "
+            "This is a blocking gate (operator ruling 2026-09-23T17:12:15Z): "
+            "delivery stops until the workflow's newest measurement is green "
+            "and fresh. There is no override flag; fix the defect it measures, "
+            "or the instrument, and let the next run (or a re-run, which is a "
+            "fresh measurement) decide.",
+            file=out,
+        )
+        return 1
+
+    # OMN-19311 AC5 -- the planted-red drill. Checked before anything else,
+    # including the GitHub API read: an active drill never depends on network
+    # access, so it is a reliable, fast, unambiguously-synthetic red.
+    if drill_red_until or drill_ticket:
+        if not drill_red_until or not drill_ticket:
+            return refuse(
+                "DRILL misconfigured (OMN-19311 AC5): drill_red_until and "
+                "drill_ticket must both be set together, or neither is set "
+                f"(drill_red_until={drill_red_until!r}, "
+                f"drill_ticket={drill_ticket!r})."
+            )
+        if not _TICKET_RE.match(drill_ticket):
+            return refuse(
+                f"DRILL misconfigured (OMN-19311 AC5): drill_ticket "
+                f"{drill_ticket!r} is not an OMN-<n> id."
+            )
+        try:
+            drill_until = _parse_ts(drill_red_until)
+        except ValueError:
+            return refuse(
+                f"DRILL misconfigured (OMN-19311 AC5): drill_red_until "
+                f"{drill_red_until!r} is not a parseable UTC timestamp."
+            )
+        window_hours = (drill_until - moment).total_seconds() / 3600.0
+        if window_hours > DRILL_MAX_WINDOW_HOURS:
+            return refuse(
+                "DRILL misconfigured (OMN-19311 AC5): drill_red_until is "
+                f"{window_hours:.2f}h in the future, past the "
+                f"{DRILL_MAX_WINDOW_HOURS:g}h ceiling ({drill_ticket})."
+            )
+        if window_hours > 0:
+            print(
+                f"::warning::workflow verdict DRILL (OMN-19311 AC5) active for "
+                f"{label}: a self-expiring switch forcing this reader to return "
+                f"red until {drill_red_until} ({window_hours:.2f}h "
+                f"remaining), ticket {drill_ticket}. This proves staging "
+                "delivery's refusal path live; it is not a real defect and no "
+                "GitHub API call was made to produce it.",
+                file=out,
+            )
+            return refuse(
+                f"DRILL (OMN-19311 AC5, ticket {drill_ticket}) forcing red "
+                f"until {drill_red_until}; this is a synthetic "
+                "measurement, not a real one."
+            )
+        print(
+            f"workflow verdict DRILL (OMN-19311 AC5) for {label}: window "
+            f"expired at {drill_red_until} ({drill_ticket}); resuming "
+            "ordinary evaluation with no further action needed.",
+            file=out,
+        )
+
+    print(f"workflow verdict (OMN-18866) for {label}", file=out)
+    if not (0 < max_age_hours <= WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS):
+        return refuse(
+            f"--max-age-hours {max_age_hours} is outside (0, "
+            f"{WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS:g}]; a window that wide "
+            "is not a freshness bound."
+        )
+    if not admitted:
+        return refuse("no event is admitted, so no run can decide the verdict.")
+
+    path = (
+        f"repos/{repo}/actions/workflows/{workflow}/runs"
+        f"?branch={branch}&status=completed&per_page={WORKFLOW_VERDICT_PAGE}"
+    )
+    try:
+        payload = json.loads(_gh_api(path).decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - rule 16: an unread surface is a refusal
+        return refuse(f"the run surface is unreadable: {exc}.")
+    runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
+    if not isinstance(runs, list):
+        return refuse("the run listing carries no 'workflow_runs' list.")
+
+    candidates = [
+        r
+        for r in runs
+        if isinstance(r, dict)
+        and r.get("status") == "completed"
+        and r.get("head_branch") == branch
+        and r.get("event") in admitted
+        and (
+            not dispatch_title_contains
+            or r.get("event") != "workflow_dispatch"
+            or dispatch_title_contains in str(r.get("display_title", ""))
+        )
+    ]
+    ignored = len(runs) - len(candidates)
+    print(
+        f"  events read : {', '.join(admitted)} "
+        f"({len(candidates)} completed run(s) admitted, {ignored} other(s) ignored)",
+        file=out,
+    )
+    if dispatch_title_contains:
+        print(
+            f"  dispatches  : admitted only when the run title carries "
+            f"{dispatch_title_contains!r}",
+            file=out,
+        )
+    if not candidates:
+        return refuse(
+            f"no completed {'/'.join(admitted)} run exists on {branch}; an absent "
+            "measurement is not a pass."
+        )
+
+    dated: list[tuple[datetime, Mapping[str, Any]]] = []
+    for run in candidates:
+        run_start = _run_started(run)
+        if run_start is None:
+            return refuse(f"completed run {run.get('id')} has no parseable start time.")
+        dated.append((run_start, run))
+    started, newest = max(dated, key=lambda pair: pair[0])
+    age_hours = (moment - started).total_seconds() / 3600.0
+    run_id = newest.get("id")
+    conclusion = str(newest.get("conclusion"))
+    head = str(newest.get("head_sha", "?"))
+    print(
+        f"  newest run  : {run_id} ({newest.get('event')}, attempt "
+        f"{newest.get('run_attempt', '?')}) conclusion={conclusion}",
+        file=out,
+    )
+    print(
+        f"  measured at : {started.isoformat()} (age {age_hours:.2f}h, bound "
+        f"{max_age_hours:g}h)",
+        file=out,
+    )
+    print(f"  run head    : {head} (the workflow file's sha, not the lane's)", file=out)
+    print(f"  run title   : {newest.get('display_title', '?')}", file=out)
+    print(f"  url         : {newest.get('html_url', '?')}", file=out)
+
+    if conclusion != "success":
+        return refuse(
+            f"its newest measurement, run {run_id} at {head}, concluded {conclusion!r}."
+        )
+    if age_hours > max_age_hours:
+        return refuse(
+            f"its newest measurement, run {run_id}, is {age_hours:.2f}h old, past "
+            f"the {max_age_hours:g}h bound; a stale green is not a current one."
+        )
+    if age_hours < -0.25:
+        return refuse(
+            f"run {run_id} starts {-age_hours:.2f}h in the future; the clock "
+            "reading cannot be trusted."
+        )
+    print(
+        f"workflow verdict PASSED for {label}: run {run_id} concluded success "
+        f"{age_hours:.2f}h ago.",
+        file=out,
+    )
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -3657,7 +4822,135 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         choices=[e.value for e in EnumLabLane],
-        help="repeatable; defaults to every lab lane",
+        help=(
+            "repeatable, ANY-OF: one PASS among these satisfies the rule 24(b) "
+            "premise. Defaults to compose-dev, onex-lab and onex-lab-k3s"
+        ),
+    )
+    gate.add_argument(
+        "--require-lane",
+        action="append",
+        default=[],
+        choices=[e.value for e in EnumLabLane],
+        help=(
+            "repeatable, ALL-OF (OMN-19312): every named lane must carry its own "
+            "PASS receipt; no other lane's PASS substitutes"
+        ),
+    )
+    gate.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "poll up to this long for a REQUIRED lane's receipt that is absent "
+            f"or unreadable (0..{MAX_WAIT_SECONDS}); expiry refuses"
+        ),
+    )
+    gate.add_argument(
+        "--poll-seconds",
+        type=float,
+        default=DEFAULT_POLL_SECONDS,
+        help="spacing of the --wait-seconds polls",
+    )
+    gate.add_argument(
+        "--resolve-runtime-ancestor",
+        action="store_true",
+        help=(
+            "ask REQUIRED lanes for the nearest runtime-affecting first-parent "
+            "ancestor's receipt (the OMN-18664 release-train rule); needs "
+            "--clone and --runtime-path-validator"
+        ),
+    )
+    gate.add_argument("--clone", type=Path, default=None)
+    gate.add_argument("--runtime-path-validator", type=Path, default=None)
+    gate.add_argument(
+        "--detect-pending",
+        action="store_true",
+        help=(
+            "OMN-19233: a required compose-dev receipt that is absent refuses "
+            "PENDING while the subject's rebuild run is in flight, ABSENT otherwise"
+        ),
+    )
+    gate.add_argument(
+        "--overall-bound-seconds",
+        type=float,
+        default=None,
+        help=(
+            "OMN-19233 (PS-5): refuse TIMED_OUT when this read is more than this "
+            "many seconds after the delivery run's first gate read"
+        ),
+    )
+    gate.add_argument("--run-id", type=int, default=None)
+    gate.add_argument("--run-attempt", type=int, default=None)
+    gate.add_argument(
+        "--gate-job-name",
+        default="",
+        help="the gate job's name, whose earliest start is the first gate read",
+    )
+    gate.add_argument(
+        "--verdict-out",
+        type=Path,
+        default=None,
+        help="write the gate verdict as JSON (the re-run selector reads it)",
+    )
+
+    rerun = sub.add_parser(
+        "rerun-refused-deliveries",
+        help=(
+            "OMN-19233 (PS-5 item 2): after a compose-dev PASS, re-run the staging "
+            "delivery that refused PENDING, ABSENT or INDETERMINATE for it"
+        ),
+    )
+    rerun.add_argument("--repo", default=DEFAULT_REPO)
+    rerun.add_argument("--subject", action="append", required=True)
+    rerun.add_argument("--workflow", required=True)
+    rerun.add_argument("--branch", default="dev")
+    rerun.add_argument("--overall-bound-seconds", type=float, required=True)
+
+    verdict = sub.add_parser(
+        "workflow-verdict",
+        help=(
+            "fail closed unless the newest completed run of a workflow on a "
+            "branch concluded success within a freshness bound (OMN-18866)"
+        ),
+    )
+    verdict.add_argument("--repo", required=True)
+    verdict.add_argument("--workflow", required=True, help="the workflow file name")
+    verdict.add_argument("--branch", required=True)
+    verdict.add_argument("--max-age-hours", required=True, type=float)
+    verdict.add_argument(
+        "--event",
+        action="append",
+        required=True,
+        help=(
+            "repeatable; the run events admitted as a measurement. A run of any "
+            "other event is ignored, never counted as a pass."
+        ),
+    )
+    verdict.add_argument(
+        "--dispatch-title-contains",
+        default="",
+        help=(
+            "OMN-19311: an admitted workflow_dispatch run is a measurement only "
+            "when its run title carries this token (the lane it measured)"
+        ),
+    )
+    verdict.add_argument(
+        "--drill-red-until",
+        default="",
+        help=(
+            "OMN-19311 AC5: the planted-red drill. A UTC timestamp "
+            "(YYYY-MM-DDTHH:MM:SSZ), no more than DRILL_MAX_WINDOW_HOURS in "
+            "the future, past which this flag has no effect at all. Requires "
+            "--drill-ticket. Forces this reader to return red until then, "
+            "proving staging delivery's refusal path live without depending "
+            "on a real red existing."
+        ),
+    )
+    verdict.add_argument(
+        "--drill-ticket",
+        default="",
+        help="OMN-19311 AC5: the OMN-<n> ticket authorizing the drill. Required with --drill-red-until.",
     )
 
     verify = sub.add_parser(
@@ -3927,9 +5220,109 @@ def main(argv: Sequence[str] | None = None) -> int:
         lanes = (
             [EnumLabLane(value) for value in args.lane]
             if args.lane
-            else list(EnumLabLane)
+            else list(ANY_OF_DEFAULT_LANES)
         )
-        return evaluate_gate(args.repo, args.sha, lanes, sys.stdout)
+        required = list(dict.fromkeys(EnumLabLane(v) for v in args.require_lane))
+        required_sha: str | None = None
+        required_note = ""
+        if args.resolve_runtime_ancestor:
+            if args.clone is None or args.runtime_path_validator is None:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: "
+                    "--resolve-runtime-ancestor needs --clone and "
+                    "--runtime-path-validator; refusing rather than guessing.",
+                    file=sys.stdout,
+                )
+                return 1
+            required_sha, required_note = resolve_required_subject_from_clone(
+                args.sha, args.clone, args.runtime_path_validator, args.repo
+            )
+        first_read_at: datetime | None = None
+        if args.run_attempt is not None and args.run_attempt > 1:
+            if args.run_id is None or not args.gate_job_name:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: --run-attempt "
+                    f"{args.run_attempt} needs --run-id and --gate-job-name to find "
+                    "the first gate read. token=UNREADABLE",
+                    file=sys.stdout,
+                )
+                return 1
+            try:
+                first_read_at = resolve_first_gate_read(
+                    args.repo,
+                    args.run_id,
+                    args.run_attempt,
+                    args.gate_job_name,
+                    now=lambda: datetime.now(UTC),
+                )
+            except ReceiptLookupError as exc:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: this delivery "
+                    f"run's first gate read could not be read ({exc}), so the "
+                    "overall bound cannot be applied. token=UNREADABLE",
+                    file=sys.stdout,
+                )
+                if args.verdict_out is not None:
+                    # No lane named: evaluate_gate's own refusal branch records
+                    # the verdict as UNREADABLE, in the one verdict shape.
+                    evaluate_gate(
+                        args.repo,
+                        args.sha,
+                        [],
+                        io.StringIO(),
+                        required_sha=required_sha,
+                        verdict_out=args.verdict_out,
+                        run_id=args.run_id,
+                        run_attempt=args.run_attempt,
+                    )
+                return 1
+        rebuild_pending: Callable[[str], bool] | None = None
+        if args.detect_pending:
+            repo_name = args.repo.split("/")[-1]
+
+            def rebuild_pending(subject: str) -> bool:
+                train = _load_release_train()
+                return bool(train.default_rebuild_pending(repo_name, subject))
+
+        return evaluate_gate(
+            args.repo,
+            args.sha,
+            lanes,
+            sys.stdout,
+            required=required,
+            required_sha=required_sha,
+            required_note=required_note,
+            wait_seconds=args.wait_seconds,
+            poll_seconds=args.poll_seconds,
+            rebuild_pending=rebuild_pending,
+            first_read_at=first_read_at,
+            overall_bound_seconds=args.overall_bound_seconds,
+            verdict_out=args.verdict_out,
+            run_id=args.run_id,
+            run_attempt=args.run_attempt,
+        )
+    if args.command == "rerun-refused-deliveries":
+        return rerun_refused_deliveries(
+            args.repo,
+            args.subject,
+            workflow=args.workflow,
+            branch=args.branch,
+            bound_seconds=args.overall_bound_seconds,
+            out=sys.stdout,
+            now=lambda: datetime.now(UTC),
+        )
+    if args.command == "workflow-verdict":
+        return evaluate_workflow_verdict(
+            args.repo,
+            args.workflow,
+            args.branch,
+            args.max_age_hours,
+            args.event,
+            sys.stdout,
+            dispatch_title_contains=args.dispatch_title_contains,
+            drill_red_until=args.drill_red_until,
+            drill_ticket=args.drill_ticket,
+        )
 
     raise AssertionError(f"unreachable subcommand {args.command!r}")  # pragma: no cover
 

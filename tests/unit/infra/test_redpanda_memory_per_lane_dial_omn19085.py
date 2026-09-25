@@ -14,6 +14,11 @@ test has to hold, because reading ``infra.yml`` alone does not reveal it.
 The dev lane now reads ``DEV_REDPANDA_MEMORY``. These tests pin both halves:
 the dev lane is separated, and the separation did not disturb the lanes it was
 supposed to leave alone (OMN-19077 AC-1).
+
+OMN-19077 then gave the stability-test lane its own dial the same way,
+``STABILITY_TEST_REDPANDA_MEMORY`` defaulting to 12G (operator consent
+ROLLING_WORK_LEDGER.md:3220), so ``REDPANDA_MEMORY`` is now read by the judge
+lane alone and no two lanes share a dial.
 """
 
 from pathlib import Path
@@ -74,7 +79,7 @@ def test_dev_lane_reads_its_own_memory_dial() -> None:
 @pytest.mark.parametrize(
     ("compose_file", "expected"),
     [
-        ("docker-compose.stability-test.yml", "${REDPANDA_MEMORY:-8G}"),
+        ("docker-compose.stability-test.yml", "${STABILITY_TEST_REDPANDA_MEMORY:-12G}"),
         ("docker-compose.judge.yml", "${REDPANDA_MEMORY:-8G}"),
         ("docker-compose.lakshman.yml", "${LAKSHMAN_REDPANDA_MEMORY:-2G}"),
         ("docker-compose.dogfood.yml", "${DOGFOOD_REDPANDA_MEMORY:-2G}"),
@@ -110,16 +115,10 @@ def test_no_two_lanes_share_a_memory_dial() -> None:
         variable = value.split(":-", 1)[0].lstrip("${")
         seen.setdefault(variable, []).append(name)
 
-    # stability-test and judge deliberately still share REDPANDA_MEMORY: they
-    # were out of scope for OMN-19085, which changed the dev lane only. Pin
-    # that as the ONE known sharing so a new one cannot slip in unnoticed.
+    # OMN-19085 left stability-test and judge sharing REDPANDA_MEMORY; OMN-19077
+    # gave stability-test its own dial, so there is no known sharing left.
     shared = {var: files for var, files in seen.items() if len(files) > 1}
-    assert shared == {
-        "REDPANDA_MEMORY": [
-            "docker-compose.stability-test.yml",
-            "docker-compose.judge.yml",
-        ]
-    }
+    assert shared == {}
 
 
 @pytest.mark.unit
@@ -156,7 +155,7 @@ def test_stability_test_fully_overrides_the_base_command() -> None:
         "would merge rather than replace and the base file's value could leak in"
     )
     assert _memory_arg(_DOCKER_DIR / "docker-compose.stability-test.yml") == (
-        "${REDPANDA_MEMORY:-8G}"
+        "${STABILITY_TEST_REDPANDA_MEMORY:-12G}"
     )
 
 
@@ -177,4 +176,29 @@ def test_dev_dial_needs_no_operator_env_edit() -> None:
     )
     assert not value.startswith("${DEV_REDPANDA_MEMORY:?"), (
         "the dev dial is declared required; it must carry a default instead"
+    )
+
+
+@pytest.mark.unit
+def test_stability_test_dial_is_12g_by_default_and_needs_no_env_edit() -> None:
+    """OMN-19077: the stability-test broker drops from the operator env's 24G to 12G.
+
+    The live 24G came from ``REDPANDA_MEMORY`` in the host-global operator env
+    file. If this lane still read that variable, or read a new one with no
+    default or a ``:?`` guard, the next governed recreate would either keep 24G
+    or need an untracked host edit. Assert the lane's own variable, its default,
+    and that the default is the dev lane's level.
+    """
+    value = _memory_arg(_DOCKER_DIR / "docker-compose.stability-test.yml")
+
+    assert value == "${STABILITY_TEST_REDPANDA_MEMORY:-12G}"
+    assert not value.startswith("${REDPANDA_MEMORY"), (
+        "stability-test reads the shared variable again; the operator env's 24G "
+        "would come back at the next recreate"
+    )
+    dev_default = _memory_arg(_DOCKER_DIR / "docker-compose.infra.yml").split(":-", 1)[
+        1
+    ]
+    assert value.split(":-", 1)[1] == dev_default, (
+        "the stability-test default no longer matches the dev lane's level"
     )

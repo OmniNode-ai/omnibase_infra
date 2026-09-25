@@ -166,6 +166,38 @@ jobs:
           '
           echo "node24 capability PASSED: the baked runner can execute node24 actions."
 
+      # OMN-19206: a job on this fleet cannot apt-install Chromium's libraries
+      # itself, so they must be in the image. Resolve each soname in the NEW
+      # image's linker cache rather than grepping the Dockerfile: a grep passes
+      # on an image whose layer did not produce the library. The package list is
+      # pinned in tests/ci/test_runner_image_playwright_chromium_libs_omn19206.py.
+      - name: Assert baked Playwright chromium libraries resolve
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint bash "${SMOKE_TAG}" -lc '
+            set -euo pipefail
+            # Read the cache once: `ldconfig -p | grep -q` under pipefail can
+            # fail on SIGPIPE when grep exits early, reporting a present library
+            # as missing.
+            cache="$(ldconfig -p)"
+            missing=0
+            for soname in libasound.so.2 libatk-bridge-2.0.so.0 libatk-1.0.so.0 \
+                libatspi.so.0 libcairo.so.2 libcups.so.2 libdbus-1.so.3 libdrm.so.2 \
+                libgbm.so.1 libglib-2.0.so.0 libnspr4.so libnss3.so libpango-1.0.so.0 \
+                libwayland-client.so.0 libX11.so.6 libxcb.so.1 libXcomposite.so.1 \
+                libXdamage.so.1 libXext.so.6 libXfixes.so.3 libxkbcommon.so.0 \
+                libXrandr.so.2; do
+              if grep -qE "^[[:space:]]+${soname//./\\.} " <<<"${cache}"; then
+                echo "resolved: ${soname}"
+              else
+                echo "::error::baked runner image has no ${soname} in its linker cache; Playwright chromium cannot launch on the fleet (OMN-19206)"
+                missing=1
+              fi
+            done
+            exit "${missing}"
+          '
+          echo "Playwright chromium libraries PASSED: every soname resolves in the baked image."
+
       - name: Cleanup throwaway image
         if: always()
         run: |

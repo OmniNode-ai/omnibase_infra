@@ -9,6 +9,7 @@ parsed workflow, never by matching prose.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -157,9 +158,12 @@ def test_the_receipt_is_keyed_by_the_sibling_sha() -> None:
         for s in steps
         if str(s.get("uses", "")).startswith("actions/upload-artifact@")
     )
-    assert (
-        upload["with"]["name"]
-        == "lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.sibling_sha }}"
+    # OMN-19507 AC2: the lane half of the name is the routed instance's
+    # receipt lane (compose-dev for dev-201, which the committed table routes
+    # every merge to), and the sha half is still the sibling's.
+    assert upload["with"]["name"] == (
+        "lab-pass-receipt-${{ needs.trigger-rebuild.outputs.receipt_lane }}"
+        "-${{ needs.trigger-rebuild.outputs.sibling_sha }}"
     )
 
 
@@ -199,7 +203,18 @@ def test_the_convergence_job_runs_on_the_lane_host_fleet() -> None:
     hosts that cannot see this lane.
     """
     workflow = _load()
-    assert workflow["jobs"]["verify-sibling-converged"]["runs-on"] == [
+    # OMN-19507 AC2: the runner is the routed instance's. Under the committed
+    # routing table every merge routes to dev-201, whose runner is exactly the
+    # host-201 verify runner this test has always required.
+    from scripts.ci.deploy_lane_verify_route import job_outputs, load_table, resolve
+
+    assert workflow["jobs"]["verify-sibling-converged"]["runs-on"] == (
+        "${{ fromJSON(needs.trigger-rebuild.outputs.verify_runs_on) }}"
+    )
+    routed = job_outputs(
+        resolve(load_table(), runtime_lane="dev", requested_by="gha/omnimarket/pr-1")
+    )
+    assert json.loads(routed["verify_runs_on"]) == [
         "self-hosted",
         "omnibase-verify",
         "host-201",

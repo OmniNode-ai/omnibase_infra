@@ -78,6 +78,21 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 0
 fi
 
+# OMN-19274 -- preserve the image this build is about to overwrite, under a
+# tag disk-gc.sh's keep-list.yaml already protects (keep_image_tags:
+# [latest, stable, rollback]), so a runner recreated against the PREVIOUS
+# generation stays possible after this build retags "latest" out from under
+# it. Discovered when the previous omninode-runner image was found already
+# garbage-collected mid-roll: it had never been tagged as anything but
+# "latest", so once that tag moved it was untagged (dangling) and eligible.
+# `docker tag` is metadata-only (no rebuild, no extra disk beyond the tag
+# itself while the previous image's layers are still referenced).
+if docker image inspect "${IMAGE_TAG}" >/dev/null 2>&1; then
+  ROLLBACK_TAG="${IMAGE_TAG%%:*}:rollback"
+  echo "[build-runner-image] preserving the current ${IMAGE_TAG} as ${ROLLBACK_TAG} before overwriting it"
+  docker tag "${IMAGE_TAG}" "${ROLLBACK_TAG}"
+fi
+
 docker build -t "${IMAGE_TAG}" \
   --build-arg "UV_VERSION=${UV_VERSION}" \
   --build-arg "OMNI_RUNNER_IMAGE_VERSION=${IMAGE_VERSION}" \

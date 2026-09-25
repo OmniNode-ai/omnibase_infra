@@ -55,6 +55,12 @@ source "${SCRIPT_DIR_FOR_ENV}/runtime_build/compose_wait_timeout.sh"
 # shellcheck source=./runtime_build/lane_lock.sh
 source "${SCRIPT_DIR_FOR_ENV}/runtime_build/lane_lock.sh"
 
+# OMN-18349: the verify loop below waits past its fixed floor only while the
+# runtime container itself still reports `starting`, within the health budget
+# that container declares. Same helper-load block as the two files above.
+# shellcheck source=./runtime_build/runtime_health_wait.sh
+source "${SCRIPT_DIR_FOR_ENV}/runtime_build/runtime_health_wait.sh"
+
 OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
 OPERATOR_HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-}"
 OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
@@ -497,6 +503,7 @@ readonly HEALTH_CHECK_INTERVAL=4
 # =============================================================================
 
 MODE="dry-run"           # dry-run | execute
+EFFECTS_PLAN=""          # typed immutable-image plan; separate mutation boundary
 FORCE=false
 RESTART=false
 # OMN-15218: the raw argv this invocation was called with, captured before
@@ -628,6 +635,14 @@ USAGE
 OPTIONS
     (none)              Dry-run mode (default). Preview what would be deployed.
     --execute           Actually deploy: rsync, write registry, build images.
+    --effects-plan FILE Image-only dev runtime-effects rollout using a typed JSON
+                        plan and the ACTIVE compose configuration. Read-only
+                        preview by default; --execute performs the scoped swap.
+                        No build, dependency preparation, migrations, shared
+                        registry update or retention cleanup. Candidate source,
+                        dependency/configuration parity and rollback are gated.
+                        Cannot combine with --restart/--cold/--force/--prod,
+                        --profile, --print-compose-cmd or build/source overrides.
     --force             Required to overwrite an existing version directory.
     --restart           Restart runtime containers after build (requires --execute).
                         WARM path: recreates only the RUNTIME_SERVICES subset
@@ -748,6 +763,14 @@ parse_args() {
     # Parse command-line arguments and set global mode/flag variables.
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --effects-plan)
+                if [[ -n "${EFFECTS_PLAN}" || -z "${2:-}" || "${2:0:1}" == "-" ]]; then
+                    log_error "--effects-plan requires exactly one plan file"
+                    exit 64
+                fi
+                EFFECTS_PLAN="$2"
+                shift 2
+                ;;
             --execute)
                 MODE="execute"
                 shift
@@ -814,6 +837,26 @@ parse_args() {
         esac
     done
 
+    if [[ -n "${EFFECTS_PLAN}" ]]; then
+        local argument
+        for argument in "${DEPLOY_INVOCATION_ARGS[@]}"; do
+            case "${argument}" in
+                --restart|--cold|--force|--prod|--profile|--print-compose-cmd)
+                    log_error "${argument} conflicts with the effects-only plan"
+                    exit 64
+                    ;;
+            esac
+        done
+        if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" || -n "${DEPLOY_REF:-}" ||
+              -n "${BUILD_SOURCE:-}" || -n "${EXPECTED_BUILD_SOURCE:-}" ||
+              "${DEPLOY_HOTPATCH:-0}" != "0" || "${ALLOW_SIBLING_PIN_DRIFT:-0}" != "0" ||
+              "${ALLOW_UNPINNED_DEPLOY_SOURCE:-0}" != "0" || -n "${HOTPATCH_PREFLIGHT_BYPASS:-}" ]]; then
+            log_error "Effects-only plan conflicts with build/source override environment"
+            exit 64
+        fi
+        return 0
+    fi
+
     # Validate flag combinations
     if [[ "${RESTART}" == true && "${MODE}" != "execute" ]]; then
         log_error "--restart requires --execute"
@@ -872,6 +915,49 @@ guard_dogfood_deploy_root() {
     if [[ "${OMNIBASE_INFRA_DEPLOY_ROOT}" != /* ]]; then
         log_error "OMNIBASE_INFRA_DEPLOY_ROOT must be absolute for dogfood: ${OMNIBASE_INFRA_DEPLOY_ROOT}"
         exit 64
+    fi
+}
+
+guard_password_contract() {
+    # Password format contract (OMN-19087). Runs before anything is built,
+    # synced or started, and in dry-run too, so a malformed credential is named
+    # up front instead of surfacing minutes later in the forward migration,
+    # after Postgres, Redpanda and Valkey already came up on it. The operator
+    # env was sourced with `set -a` at the top of this file, so the check reads
+    # exactly the values compose will interpolate.
+    #
+    # The contract itself (which of the five passwords is hex, which is
+    # url-safe, and why) lives in ONE place: scripts/preflight_password_contract.py.
+    # This function only runs it. Values are never printed.
+    local repo_root="$1"
+    local compose_project="$2"
+
+    local lane
+    lane="$(resolve_lane_name "${compose_project}")"
+
+    log_step "Password Format Contract (OMN-19087)"
+
+    local checker="${repo_root}/scripts/preflight_password_contract.py"
+    if [[ ! -f "${checker}" ]]; then
+        log_error "Password contract preflight not found: ${checker}"
+        log_error "Refusing to deploy lane '${lane}' without checking its credentials' format."
+        exit 1
+    fi
+
+    local python_bin=""
+    if [[ -x "${repo_root}/.venv/bin/python" ]]; then
+        python_bin="${repo_root}/.venv/bin/python"
+    elif command -v python3 &>/dev/null; then
+        python_bin="python3"
+    else
+        log_error "No Python interpreter available to run the password contract preflight."
+        exit 1
+    fi
+
+    if ! "${python_bin}" "${checker}" --lane "${lane}"; then
+        log_error "Password contract preflight REFUSED this deploy (lane: ${lane}, ${compose_project})."
+        log_error "  Fix only the variables it names in ${OMNIBASE_OPERATOR_ENV_FILE}."
+        exit 1
     fi
 }
 
@@ -1636,90 +1722,19 @@ acquire_lock() {
         # the lock owner and refuse to proceed).
         echo $$ > "${pid_file}"
     else
-        # Lock directory exists -- check for stale lock by verifying the
-        # owning PID is still alive.
+        # Never reclaim a lock during deployment. A missing/empty PID can be
+        # the mkdir-to-publication window of a concurrent scoped deployment;
+        # even a dead PID does not make check-then-remove atomic. Recovery is
+        # an explicit operator action after verifying the recorded owner.
         if [[ -f "${pid_file}" ]]; then
             local lock_pid
             lock_pid="$(cat "${pid_file}" 2>/dev/null || true)"
-            # Validate PID is numeric before using it in kill -0.
-            # A corrupted or empty PID file is treated as a stale lock.
-            if [[ -n "${lock_pid}" ]] && ! [[ "${lock_pid}" =~ ^[0-9]+$ ]]; then
-                log_warn "Stale lock detected (PID file contains non-numeric value: '${lock_pid}')."
-                log_warn "Treating as corrupted lock and cleaning up..."
-                lock_pid=""
-            fi
-            if [[ -z "${lock_pid}" ]] || ! kill -0 "${lock_pid}" 2>/dev/null; then
-                if [[ -n "${lock_pid}" ]]; then
-                    log_warn "Stale lock detected (PID ${lock_pid} is no longer running)."
-                fi
-                log_warn "Cleaning up stale lock and re-acquiring..."
-                # Re-read the PID file before removing the lock directory.
-                # Between the initial stale check and this point, another
-                # process may have legitimately acquired the lock. If the
-                # PID file now contains a live process, abort cleanup.
-                local recheck_pid
-                recheck_pid="$(cat "${pid_file}" 2>/dev/null || true)"
-                if [[ -n "${recheck_pid}" ]] && [[ "${recheck_pid}" =~ ^[0-9]+$ ]] \
-                        && kill -0 "${recheck_pid}" 2>/dev/null; then
-                    log_error "Lock was re-acquired by PID ${recheck_pid} during stale cleanup."
-                    log_error "A concurrent deployment is legitimately running. Exiting."
-                    exit 2
-                fi
-                rm -rf "${LOCK_DIR}"
-                # Retry mkdir in a short loop to handle the race between rm
-                # and mkdir where another process could acquire the lock.
-                local lock_acquired=false
-                local retry
-                for retry in 1 2 3; do
-                    if mkdir "${LOCK_DIR}" 2>/dev/null; then
-                        # Write PID immediately after acquiring the lock to
-                        # eliminate the window where the lock exists without
-                        # a PID file.
-                        echo $$ > "${pid_file}"
-                        lock_acquired=true
-                        break
-                    fi
-                    # Another process grabbed the lock between our rm and mkdir.
-                    # Brief sleep before retrying to avoid tight spin.
-                    log_warn "Lock contention on retry ${retry}/3, waiting..."
-                    sleep 1
-                done
-                if [[ "${lock_acquired}" != true ]]; then
-                    log_error "Another process acquired the lock during stale cleanup."
-                    log_error "A concurrent deployment is legitimately running. Exiting."
-                    exit 2
-                fi
-                # Fall through to set up traps and continue
-            else
-                log_error "Another deployment is in progress (locked by PID ${lock_pid})."
-                log_error "If the previous deployment crashed, remove the lock manually:"
-                log_error "  rm -rf ${LOCK_DIR}"
-                exit 2
-            fi
+            log_error "Deployment lock already exists (recorded PID: ${lock_pid:-unpublished})."
         else
-            # Lock directory exists but has no PID file. This happens when the
-            # script was killed (e.g., SIGKILL) between mkdir and PID write.
-            # Treat as a stale lock and attempt recovery, same as a dead PID.
-            log_warn "Lock directory exists but has no PID file (likely interrupted deployment)."
-            log_warn "Treating as stale lock and cleaning up..."
-            rm -rf "${LOCK_DIR}"
-            local lock_acquired=false
-            local retry
-            for retry in 1 2 3; do
-                if mkdir "${LOCK_DIR}" 2>/dev/null; then
-                    echo $$ > "${pid_file}"
-                    lock_acquired=true
-                    break
-                fi
-                log_warn "Lock contention on retry ${retry}/3, waiting..."
-                sleep 1
-            done
-            if [[ "${lock_acquired}" != true ]]; then
-                log_error "Another process acquired the lock during stale cleanup."
-                log_error "A concurrent deployment is legitimately running. Exiting."
-                exit 2
-            fi
+            log_error "Deployment lock exists with no published PID; ownership is unknown."
         fi
+        log_error "Refusing automatic lock removal. Verify ownership before operator recovery: ${LOCK_DIR}"
+        exit 2
     fi
 
     # Ensure lock is released on exit (normal, error, or signal).
@@ -3512,17 +3527,45 @@ verify_deployment() {
     runtime_container_name="$(resolve_lane_runtime_container_name "${compose_project}")"
 
     # 1. Health endpoint
+    #
+    # OMN-18349: HEALTH_CHECK_RETRIES x HEALTH_CHECK_INTERVAL (about 60 s) is a
+    # FLOOR, not the whole wait. On 2026-09-23 the stability-test runtime took
+    # about 73 s to boot 0.38.57; this loop gave up at 60 s, the deploy re-tagged
+    # every image to its pre-build id and the refresh wrote no receipt, while
+    # the new containers came up healthy. Past the floor the loop keeps polling
+    # only while docker reports the runtime container still `starting` (or
+    # already `healthy`), and only within the budget that container declares
+    # (start_period + retries x (interval + timeout)). Unhealthy, not running,
+    # restarted since the wait began, or absent stops it at once, so a
+    # crashing or crash-looping runtime still fails fast.
     log_info "Checking health endpoint (${HEALTH_CHECK_URL})..."
     local attempt=0
     local healthy=false
+    local health_budget_seconds
+    health_budget_seconds="$(runtime_health_budget_seconds "${runtime_container_name}")"
+    local health_wait_started=${SECONDS}
+    local runtime_started_baseline
+    runtime_started_baseline="$(runtime_started_at "${runtime_container_name}")"
+    local runtime_state=""
 
-    while (( attempt < HEALTH_CHECK_RETRIES )); do
+    while true; do
         attempt=$((attempt + 1))
         if curl -sf --connect-timeout 2 --max-time 5 "${HEALTH_CHECK_URL}" >/dev/null 2>&1; then
             healthy=true
             break
         fi
-        log_info "  Attempt ${attempt}/${HEALTH_CHECK_RETRIES} -- waiting ${HEALTH_CHECK_INTERVAL}s..."
+        if (( attempt >= HEALTH_CHECK_RETRIES )); then
+            runtime_state="$(runtime_health_state "${runtime_container_name}" "${runtime_started_baseline}")"
+            if ! runtime_health_keep_waiting \
+                "$(( SECONDS - health_wait_started ))" \
+                "${health_budget_seconds}" \
+                "${runtime_state}"; then
+                break
+            fi
+            log_info "  Attempt ${attempt} -- ${runtime_container_name} reports '${runtime_state}', within its declared ${health_budget_seconds}s health budget -- waiting ${HEALTH_CHECK_INTERVAL}s..."
+        else
+            log_info "  Attempt ${attempt}/${HEALTH_CHECK_RETRIES} -- waiting ${HEALTH_CHECK_INTERVAL}s..."
+        fi
         sleep "${HEALTH_CHECK_INTERVAL}"
     done
 
@@ -3534,7 +3577,7 @@ verify_deployment() {
         # tag rollback (see restore_latest_image_tags()).
         HEALTH_PROBES_PASSED=true
     else
-        log_error "Health check FAILED after ${HEALTH_CHECK_RETRIES} attempts."
+        log_error "Health check FAILED after ${attempt} attempts ($(( SECONDS - health_wait_started ))s; ${runtime_container_name} reports '${runtime_state:-unread}', declared health budget ${health_budget_seconds}s)."
         log_error "Service is not responding at ${HEALTH_CHECK_URL}"
         log_error "Check container logs: docker logs ${runtime_container_name}"
         exit 1
@@ -4130,6 +4173,36 @@ show_summary() {
 # Main
 # =============================================================================
 
+run_scoped_effects_deploy() {
+    # Deliberately never enter generic main's sync/build/registry/cleanup path.
+    # Attribution stays shared; only the scoped executor
+    # may acquire/release the deployment lock for this mode.
+    local repo_root compose_project
+    repo_root="$(resolve_repo_root)"
+    compose_project="$(resolve_compose_project)"
+    if [[ "${compose_project}" != "omnibase-infra" || "${ONEX_DEPLOY_LANE:-dev}" != "dev" ]]; then
+        log_error "Effects-only plans are restricted to the compose-dev lane"
+        return 64
+    fi
+    check_command uv "scoped effects executor"
+    check_command docker "container runtime"
+    # This is admission, not yet a deployment: even --execute evaluates the
+    # attribution guard in check-only mode. The scoped receipt records the real
+    # mutation and outcome after validation rather than a write-ahead claim.
+    local requested_mode="${MODE}"
+    MODE="dry-run"
+    guard_lane_deploy_attribution "${repo_root}" "${compose_project}"
+    # The scoped executor runs the existing hot-patch validator with CANDIDATE
+    # refs for every repo. Host HEADs here do not attest an immutable image.
+    MODE="${requested_mode}"
+    local -a command=(uv run --frozen --project "${repo_root}" python
+        "${repo_root}/scripts/runtime_build/scoped_effects_deploy.py" --plan "${EFFECTS_PLAN}")
+    if [[ "${MODE}" == "execute" ]]; then
+        command+=(--execute)
+    fi
+    "${command[@]}"
+}
+
 main() {
     # Orchestrate the full deployment workflow from validation through verification.
     # OMN-15218: capture raw argv before parse_args consumes it so the attribution
@@ -4137,6 +4210,11 @@ main() {
     DEPLOY_INVOCATION_ARGS=("$@")
     DEPLOY_STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     parse_args "$@"
+
+    if [[ -n "${EFFECTS_PLAN:-}" ]]; then
+        run_scoped_effects_deploy
+        return
+    fi
 
     # Phase 1: Validate prerequisites
     validate_prerequisites
@@ -4192,6 +4270,10 @@ main() {
     local compose_project
     compose_project="$(resolve_compose_project)"
     guard_dogfood_deploy_root "${compose_project}"
+    # OMN-19087: the five compose passwords are checked against their stated
+    # format here, before attribution records a deploy and before anything is
+    # built or started.
+    guard_password_contract "${repo_root}" "${compose_project}"
     # OMN-15352: mirror into the global cleanup_on_exit() (a no-argument EXIT
     # trap handler) reads to resolve :latest image names on a failed deploy.
     DEPLOY_COMPOSE_PROJECT="${compose_project}"
