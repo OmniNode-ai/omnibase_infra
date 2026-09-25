@@ -51,6 +51,7 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 DIRECT = WORKFLOWS / "runtime-rebuild-trigger.yml"
 REUSABLE = WORKFLOWS / "runtime-rebuild-trigger-reusable.yml"
 DEV_202_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-202.yml"
+DEV_200_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-200.yml"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "deploy-agent"))
 from deploy_agent.events import EnumRuntimeLane
@@ -219,9 +220,15 @@ class TestEveryInstanceDeclaresHowItIsVerified:
             assert f"host-{name.split('-')[-1]}" in labels, name
             assert "omnipc2-customer" not in labels, name
 
-    def test_dev_202_targets_agree_with_its_overlay(self) -> None:
-        targets = targets_for_receipt_lane(load_table(), "compose-dev-202")
-        overlay_text = DEV_202_OVERLAY.read_text(encoding="utf-8")
+    @pytest.mark.parametrize(
+        ("lane", "overlay_path"),
+        [("compose-dev-202", DEV_202_OVERLAY), ("compose-dev-200", DEV_200_OVERLAY)],
+    )
+    def test_instance_targets_agree_with_its_overlay(
+        self, lane: str, overlay_path: Path
+    ) -> None:
+        targets = targets_for_receipt_lane(load_table(), lane)
+        overlay_text = overlay_path.read_text(encoding="utf-8")
         overlay = yaml.load(overlay_text, Loader=_OverrideLoader)  # noqa: S506
         services = overlay["services"]
         assert overlay["name"] == targets.compose_project

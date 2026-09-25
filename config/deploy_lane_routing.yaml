@@ -71,6 +71,13 @@
 # so those three reach the alias. The deploy agent's 61098 is not a compose
 # port and is not among those binds: it must be reachable at the alias before
 # a route to dev-202 is added.
+#
+# dev-200's values come from the port block and container names
+# docker/docker-compose.dev-200.yml declares (42085 main, 42086 effects, 42002
+# projection, 42098 the agent's health port). Docker Desktop forwards
+# host.docker.internal to the macOS host's loopback, where that overlay
+# publishes (its header records the measurement). A route to dev-200 also
+# waits on a verify runner labelled host-200, which no runner carries yet.
 default_instance: dev-201
 instances:
   dev-201:
@@ -130,4 +137,16 @@ instances:
       disabled_services: [onex-api, cloud-migration-files, cloud-migration, keycloak, infisical]
       receipt_lane: compose-dev-200
       proves: [omnimarket]
+    verify:
+      receipt_lane: compose-dev-200
+      runner_labels: [self-hosted, omnibase-verify, host-200]
+      deploy_agent_url: http://host.docker.internal:42098
+      main_url: http://host.docker.internal:42085
+      effects_url: http://host.docker.internal:42086
+      projection_url: http://host.docker.internal:42002
+      compose_project: omnibase-infra-dev-200
+      runtime_container: omninode-dev-200-runtime
+      effects_container: omninode-dev-200-runtime-effects
+      postgres_container: omnibase-infra-dev-200-postgres
+      broker_container: omnibase-infra-dev-200-redpanda
 routes: []
