@@ -312,7 +312,19 @@ class _FakeApplier:
     def __init__(self, **kwargs: Any) -> None:
         self.manifest_sha: str | None = "c" * 40
 
-    def apply(self, *, sha: str, stamp: str, correlation_id: str) -> Path:
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
+        # OMN-19501: the compose-lane half, taken under the lane lock; opaque
+        # to the agent, which hands it back to ``apply``.
+        return {"sha": sha, "stamp": stamp}
+
+    def apply(
+        self,
+        *,
+        sha: str,
+        stamp: str,
+        correlation_id: str,
+        capture: object = None,
+    ) -> Path:
         _FakeApplier.calls.append("apply")
         return Path("/state/lab-overlay/x.json")
 
@@ -372,16 +384,14 @@ class TestDev202PhasesOff:
     def test_dev_202_phases_off_on_a_successful_job(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        agent, fake, store, cmd = _run_dev_job(
-            tmp_path, monkeypatch, instance="dev-202"
-        )
+        _, fake, store, cmd = _run_dev_job(tmp_path, monkeypatch, instance="dev-202")
 
         job = store.load(cmd.correlation_id)
         assert job is not None and job.status == "success"
         assert "seed_infisical lane=dev" in fake.calls
         assert "deliver_onex_api_pin" not in fake.calls
         assert _FakeApplier.calls == []
-        assert agent._onex_api_delivery is None
+        assert job.onex_api_delivery is None
 
     @pytest.mark.usefixtures("_fake_applier")
     def test_dev_202_phases_off_on_a_failed_migration_preflight(
