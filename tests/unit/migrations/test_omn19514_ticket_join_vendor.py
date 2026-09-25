@@ -159,7 +159,13 @@ def test_the_linter_is_live_positive_control(
         lint_application_database_sql,
     )
 
+    # The broken copy retargets the ALTER at a schema no topology declares.
+    # ``public`` is not a reliable negative: since OMN-17887 it is the TENANT
+    # domain's schema, so a ``public.<name>`` target lints clean.
     sql = _sql(node, filename)
-    broken = sql.replace(table, "ALTER TABLE public.pg_class")
+    broken = sql.replace(table, "ALTER TABLE undeclared_topology_schema.pg_class")
     assert broken != sql
-    assert lint_application_database_sql(broken, load_topology_profile("local")) != ()
+    violations = lint_application_database_sql(broken, load_topology_profile("local"))
+    assert any("unknown topology schema" in violation for violation in violations), (
+        violations
+    )
