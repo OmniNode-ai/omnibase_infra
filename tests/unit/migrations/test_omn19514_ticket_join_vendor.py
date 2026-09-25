@@ -34,12 +34,13 @@ _CLASSES = _ROOT / "config" / "migration_classes.yaml"
 # test started failing on `assert () != ()`. That failure is the control doing
 # its job -- the alternative was a gate whose every zero meant nothing.
 #
-# The live rule, measured against the shipped linter on all four profiles, is
-# relation IDENTITY rather than schema: a relation the topology registry knows
-# is accepted qualified, unqualified, or under the wrong schema, and a relation
-# it does not know is refused. So the falsifier is an UNREGISTERED relation, and
-# it stays one for as long as that is the rule.
-_UNREGISTERED_RELATION = "omn19514_unregistered_relation"
+# The falsifier is an UNDECLARED SCHEMA, and the control asserts which rule
+# fired rather than merely that something did. An earlier pass here used an
+# unregistered bare relation, which trips the schema-qualification rule instead;
+# both are refused today, but naming the rule means a future narrowing of either
+# one cannot leave this control quietly passing on the other.
+_UNDECLARED_SCHEMA_TARGET = "undeclared_topology_schema.pg_class"
+_UNDECLARED_SCHEMA_RULE = "unknown topology schema"
 
 #: (node, file, domain, sha256, the one column it adds, its type, the table
 #: statement a broken copy retargets for the linter's positive control)
@@ -179,15 +180,15 @@ def test_the_linter_is_live_positive_control(
     )
 
     sql = _sql(node, filename)
-    broken = sql.replace(table, f"ALTER TABLE {_UNREGISTERED_RELATION}")
+    broken = sql.replace(table, f"ALTER TABLE {_UNDECLARED_SCHEMA_TARGET}")
     assert broken != sql, f"the {table!r} anchor is no longer present in {filename}"
     for profile in ("local", "onex-dev", "onex-prod", "stability-test"):
         violations = lint_application_database_sql(
             broken, load_topology_profile(profile)
         )
-        assert violations != (), (
-            f"{profile}: the linter returned clean on a migration retargeted at "
-            f"{_UNREGISTERED_RELATION!r}, so its zero on the real file proves "
-            "nothing. The control is dead -- find a falsifier the current rule "
-            "set still refuses before trusting this gate."
+        assert any(_UNDECLARED_SCHEMA_RULE in violation for violation in violations), (
+            f"{profile}: retargeting at {_UNDECLARED_SCHEMA_TARGET!r} did not raise "
+            f"{_UNDECLARED_SCHEMA_RULE!r}; got {violations}. The control is dead, so "
+            "the clean result asserted above proves nothing. Find a falsifier the "
+            "current rule set still refuses before trusting this gate."
         )
