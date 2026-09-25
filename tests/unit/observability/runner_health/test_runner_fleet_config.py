@@ -27,8 +27,12 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     assert config.runner_name_prefix == "omninode-runner"
     # OMN-18411: capped 88 -> 60 after a CI burst drove one-minute load to
     # 100.9 on the 32-core host -- the registered runner count is the
-    # worst-case concurrent-job ceiling. All 60 are always-on steady-state
-    # (no burst tier), so burst_count == expected_count.
+    # worst-case concurrent-job ceiling. OMN-19077 proposed capping 60 -> 40
+    # after 58 concurrent jobs drove IO pressure to 52.8 and crashed dockerd;
+    # operator ruling 2026-09-24 (ROLLING_WORK_LEDGER.md:3794) kept the fleet
+    # at 60 and fixed the incident with the aggregate omnirunners.slice
+    # cgroup instead. All 60 are always-on steady-state (no burst tier), so
+    # burst_count == expected_count.
     assert config.expected_count == 60
     assert config.burst_count == 60
 
@@ -467,10 +471,15 @@ def test_runner_compose_healthcheck_uses_egress_script() -> None:
 
 
 def test_runner_compose_reconciled_to_capacity_capped_60_fleet() -> None:
-    """OMN-18411: the repo compose must match the .201 fleet of 60
-    always-on steady-state runners, so `deploy-runners.sh` cannot orphan-remove
-    or resurrect runners beyond 60. All 60 runners are steady (no burst
-    profiles) and each mounts the OMN-12433 egress healthcheck script.
+    """OMN-18411, reaffirmed by OMN-19077's operator ruling 2026-09-24
+    (ROLLING_WORK_LEDGER.md:3794): the repo compose must match the .201 fleet
+    of 60 always-on steady-state runners, so `deploy-runners.sh` cannot
+    orphan-remove or resurrect runners beyond 60. All 60 runners are steady
+    (no burst profiles) and each mounts the OMN-12433 egress healthcheck
+    script. OMN-19077 also proposed cutting the count to 40; the operator
+    ruled the count stays at 60 and the 2026-09-22 incident is fixed by the
+    aggregate omnirunners.slice cgroup (see the test below), not a headcount
+    cut.
 
     Capped down from 88 (OMN-15978) after a CI burst drove one-minute load to
     100.9 on the 32-core `.201` host: idle runners cost nothing, so the
@@ -507,6 +516,33 @@ def test_runner_compose_reconciled_to_capacity_capped_60_fleet() -> None:
         name for name in compose["volumes"] if re.fullmatch(r"runner-\d+-creds", name)
     }
     assert len(volume_names) == 60
+
+
+def test_every_general_pool_runner_runs_in_the_aggregate_slice() -> None:
+    """OMN-19077: the general pool shares ONE cgroup whose aggregate limits
+    live in docker/runners/systemd/omnirunners.slice. A runner outside it is a
+    sibling of the lab lanes in system.slice again, and a CI burst is
+    reclaimed from the lanes. The non-pool runners (deploy, verify,
+    customer-plane, prod-deploy) are deliberately not in it.
+    """
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    slice_unit = REPO_ROOT / "docker" / "runners" / "systemd" / "omnirunners.slice"
+    assert slice_unit.is_file()
+    pool = {
+        name: definition
+        for name, definition in compose["services"].items()
+        if re.fullmatch(r"omninode-runner-\d+", name)
+    }
+    assert pool
+    for name, definition in pool.items():
+        assert definition.get("cgroup_parent") == slice_unit.name, name
+    for name, definition in compose["services"].items():
+        if name not in pool:
+            assert "cgroup_parent" not in definition, name
 
 
 def test_deploy_ships_healthcheck_script_to_host() -> None:

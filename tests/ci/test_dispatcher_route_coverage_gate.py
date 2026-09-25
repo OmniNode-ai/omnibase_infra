@@ -31,12 +31,23 @@ These tests prove the gate would have caught:
 
 from __future__ import annotations
 
+import json
 import sys
 import textwrap
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 import yaml
+
+from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.runtime.bounded_delegation_routes import (
+    resolve_bounded_delegation_route,
+)
+from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
+from omnibase_infra.runtime.service_delegation_dispatch_port import (
+    RuntimeDelegationDispatchPort,
+)
 
 # ---------------------------------------------------------------------------
 # Locate the gate script so tests can import its public check_route_coverage()
@@ -472,3 +483,307 @@ def test_live_infra_contracts_pass(tmp_path: Path) -> None:
         "Live omnibase_infra contracts have unrouted command topics:\n"
         + "\n".join(f"  {f.topic} ({f.contract_name})" for f in report.failures)
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-18933 (K6): bounded dev and isolated-lab route-to-terminal declarations.
+#
+# A command topic that has a dispatcher route (above) is necessary, not
+# sufficient: on a bounded lane the route must also match the lane's declared
+# row -- lane, broker, consumer, terminal route and repository owner -- and a
+# mismatch must refuse BEFORE the broker exists, so nothing is published and no
+# terminal or projection row can exist for the correlation.
+#
+# The two rows are spelled here exactly as omnimarket declares them in
+# config/ci_bus_lanes.yaml; omnimarket's
+# tests/ci/test_dispatcher_route_coverage_fixtures.py pins the same values on
+# the declaring side, because the infra unit suite runs without omnimarket
+# installed. Drift on either side turns one of the two red.
+# ---------------------------------------------------------------------------
+
+_K6_FIXTURE = (
+    Path(__file__).resolve().parent.parent
+    / "fixtures"
+    / "delegation"
+    / "omn18933"
+    / "offset489_dev_route.json"
+)
+_K6_DEV_BROKER = "omninode-pc.tail75df5e.ts.net:19092"  # onex-allow-internal-ip OMN-18933 reason="the dev lane broker exactly as omnimarket config/ci_bus_lanes.yaml declares it; config-not-secret"
+_K6_DOGFOOD_BROKER = "192.168.86.105:47092"  # onex-allow-internal-ip OMN-18933 reason="the dogfood lane broker exactly as omnimarket config/ci_bus_lanes.yaml declares it; config-not-secret"
+_K6_INTERNAL = "redpanda:9092"
+_K6_ROW: dict[str, object] = {
+    "consumer": "omnimarket.nodes.node_delegation_orchestrator",
+    "terminal_route": "terminal_events",
+    "repository_owner": "omnimarket",
+}
+
+
+class _K6Bus:
+    """A runtime bus identity; any publish or subscribe is a test failure."""
+
+    def __init__(self, environment: str, bootstrap_servers: str) -> None:
+        self.environment = environment
+        self.bootstrap_servers = bootstrap_servers
+
+    async def publish(self, *args: object, **kwargs: object) -> None:
+        raise AssertionError("a refused route must not publish")
+
+    async def subscribe(self, *args: object, **kwargs: object) -> object:
+        raise AssertionError("a refused route must not subscribe")
+
+
+def _k6_lanes() -> dict[str, object]:
+    return {
+        "dev": {
+            "broker": _K6_DEV_BROKER,
+            "security_protocol": "SASL_PLAINTEXT",
+            "sasl_mechanism": "SCRAM-SHA-256",
+            "broker_topology": {
+                "external_bootstrap_servers": _K6_DEV_BROKER,
+                "internal_bootstrap_servers": _K6_INTERNAL,
+                "runtime_environment": "local",
+            },
+            "delegation_routes": [dict(_K6_ROW)],
+        },
+        "dogfood": {
+            "broker": _K6_DOGFOOD_BROKER,
+            "security_protocol": "PLAINTEXT",
+            "broker_topology": {
+                "external_bootstrap_servers": _K6_DOGFOOD_BROKER,
+                "internal_bootstrap_servers": _K6_INTERNAL,
+                "runtime_environment": "dogfood",
+            },
+            "delegation_routes": [dict(_K6_ROW)],
+        },
+        "ci-bus": {
+            "broker": "omninode-pc.tail75df5e.ts.net:21092",  # onex-allow-internal-ip OMN-18933 reason="ci-bus broker as omnimarket declares it; transport-only lane with no route"
+            "security_protocol": "SASL_PLAINTEXT",
+            "sasl_mechanism": "SCRAM-SHA-256",
+        },
+        "prod": {"broker": "inmemory"},
+    }
+
+
+def _k6_write(tmp_path: Path, lanes: dict[str, object]) -> Path:
+    path = tmp_path / "ci_bus_lanes.yaml"
+    path.write_text(
+        yaml.safe_dump({"default": "inmemory", "lanes": lanes}, sort_keys=False),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _k6_route() -> ModelRuntimeLocalIngressRoute:
+    selected = json.loads(_K6_FIXTURE.read_text(encoding="utf-8"))["selected_route"]
+    return ModelRuntimeLocalIngressRoute(
+        node_name=selected["contract_name"],
+        contract_name=selected["contract_name"],
+        command_topic=selected["command_topic"],
+        event_type="omnimarket.delegation-request",
+        terminal_event=selected["terminal_events"][0],
+        terminal_events=tuple(selected["terminal_events"]),
+        contract_path="/contracts/node_delegation_orchestrator/contract.yaml",
+        package_name=selected["package_name"],
+    )
+
+
+async def _k6_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    lanes: dict[str, object],
+    bus: _K6Bus,
+) -> None:
+    """Dispatch through the real port with the fixture overlay in place."""
+
+    def _no_broker(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the broker must not be constructed after a refusal")
+
+    overlay = _k6_write(tmp_path, lanes)
+
+    def _resolve(**kwargs: object) -> object:
+        return resolve_bounded_delegation_route(
+            **kwargs,  # type: ignore[arg-type]
+            overlay_path_for_test=overlay,
+        )
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
+        _no_broker,
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port."
+        "resolve_bounded_delegation_route",
+        _resolve,
+    )
+    port = RuntimeDelegationDispatchPort(
+        event_bus=bus,  # type: ignore[arg-type]
+        routes={
+            "omnimarket.node_delegation_orchestrator.delegation.orchestrate": _k6_route()
+        },
+    )
+    await port.dispatch(
+        prompt="k6 bounded route probe",
+        task_type="document",
+        correlation_id=UUID("ab36c9c7-3246-48e2-8a9c-4081d8caf53d"),
+        max_tokens=64,
+        source_file_path=None,
+        source_session_id=None,
+        wait=True,
+    )
+
+
+@pytest.mark.unit
+def test_k6_offset489_dev_route_resolves_to_its_declaration_row(
+    tmp_path: Path,
+) -> None:
+    """Positive control: the .201 partition-0 offset-489 route is the dev row.
+
+    That run's caller said ``lane=dev``; the runtime that served it reports
+    ``local`` on ``redpanda:9092``. The caller label is not the identity -- the
+    declared (runtime_environment, internal listener) pair is.
+    """
+    fixture = json.loads(_K6_FIXTURE.read_text(encoding="utf-8"))
+    identity = fixture["runtime_identity"]
+    assert fixture["evidence"]["partition"] == 0
+    assert fixture["evidence"]["topic_offset"] == 489
+
+    resolved = resolve_bounded_delegation_route(
+        transport=_K6Bus(
+            identity["bus_environment"], identity["kafka_bootstrap_servers"]
+        ),
+        selected_route=_k6_route(),
+        overlay_path_for_test=_k6_write(tmp_path, _k6_lanes()),
+    )
+
+    assert resolved is not None
+    expected = fixture["expected_row"]
+    assert resolved.lane == expected["lane"] == fixture["caller_lane_label"]
+    assert resolved.broker == _K6_DEV_BROKER
+    assert resolved.consumer == expected["consumer"]
+    assert resolved.terminal_route == expected["terminal_route"]
+    assert resolved.repository_owner == expected["repository_owner"]
+    assert resolved.command_topic == fixture["selected_route"]["command_topic"]
+
+
+@pytest.mark.unit
+def test_k6_isolated_lab_route_resolves_to_its_declaration_row(tmp_path: Path) -> None:
+    resolved = resolve_bounded_delegation_route(
+        transport=_K6Bus("dogfood", _K6_INTERNAL),
+        selected_route=_k6_route(),
+        overlay_path_for_test=_k6_write(tmp_path, _k6_lanes()),
+    )
+
+    assert resolved is not None
+    assert resolved.lane == "dogfood"
+    assert resolved.broker == _K6_DOGFOOD_BROKER
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("environment", "broker"),
+    [
+        ("stability-test", _K6_INTERNAL),
+        ("judge", _K6_INTERNAL),
+        ("local", "localhost:19092"),
+    ],
+)
+def test_k6_unbounded_runtime_is_outside_the_gate(
+    tmp_path: Path, environment: str, broker: str
+) -> None:
+    assert (
+        resolve_bounded_delegation_route(
+            transport=_K6Bus(environment, broker),
+            selected_route=_k6_route(),
+            overlay_path_for_test=_k6_write(tmp_path, _k6_lanes()),
+        )
+        is None
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_k6_missing_row_refuses_before_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lanes = _k6_lanes()
+    del lanes["dev"]["delegation_routes"]  # type: ignore[attr-defined]
+
+    with pytest.raises(InfraUnavailableError, match="exactly one delegation route"):
+        await _k6_dispatch(
+            tmp_path, monkeypatch, lanes=lanes, bus=_K6Bus("local", _K6_INTERNAL)
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_k6_broker_mismatch_refuses_before_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(InfraUnavailableError, match="broker mismatch"):
+        await _k6_dispatch(
+            tmp_path,
+            monkeypatch,
+            lanes=_k6_lanes(),
+            bus=_K6Bus("dogfood", "198.51.100.9:47092"),
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_k6_consumer_mismatch_refuses_before_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lanes = _k6_lanes()
+    lanes["dev"]["delegation_routes"][0]["consumer"] = "omnimarket.nodes.other"  # type: ignore[index]
+
+    with pytest.raises(InfraUnavailableError, match="consumer mismatch"):
+        await _k6_dispatch(
+            tmp_path, monkeypatch, lanes=lanes, bus=_K6Bus("local", _K6_INTERNAL)
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("lane", ["ci-bus", "prod"])
+def test_k6_transport_only_and_prod_lanes_carry_no_route(
+    tmp_path: Path, lane: str
+) -> None:
+    lanes = _k6_lanes()
+    lanes[lane]["delegation_routes"] = [dict(_K6_ROW)]  # type: ignore[index]
+
+    with pytest.raises(InfraUnavailableError, match="ci-bus is transport-only"):
+        resolve_bounded_delegation_route(
+            transport=_K6Bus("local", _K6_INTERNAL),
+            selected_route=_k6_route(),
+            overlay_path_for_test=_k6_write(tmp_path, lanes),
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("service", ["omninode-runtime", "runtime-effects"])
+def test_k6_dev_lane_catalog_still_reports_the_declared_pair(service: str) -> None:
+    """The dev row claims the .201 dev lane by (local, redpanda:9092) only.
+
+    A runtime reporting ``local`` on any other broker is a customer's or a
+    developer's own runtime and stays outside the gate, so the pair is the whole
+    claim. If the dev lane's catalog stopped reporting that pair, the dev lane
+    would silently leave the gate instead of being refused. This pins the lane
+    side; omnimarket's route-coverage fixtures pin the declaration side.
+    """
+    catalog = (
+        Path(__file__).resolve().parents[2]
+        / "docker"
+        / "catalog"
+        / "services"
+        / f"{service}.yaml"
+    )
+    doc = yaml.safe_load(catalog.read_text(encoding="utf-8"))
+    env = {
+        **(doc.get("hardcoded_env") or {}),
+        **(doc.get("operational_defaults") or {}),
+    }
+    topology = _k6_lanes()["dev"]["broker_topology"]  # type: ignore[index]
+    assert env["ONEX_ENVIRONMENT"] == topology["runtime_environment"]
+    assert env["KAFKA_BOOTSTRAP_SERVERS"] == topology["internal_bootstrap_servers"]
+    assert "KAFKA_ENVIRONMENT" not in env
+    assert "KAFKA_ENVIRONMENT" not in (doc.get("required_env") or [])

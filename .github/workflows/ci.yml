@@ -1456,6 +1456,89 @@ jobs:
           # that needs updating on every dependency bump.
           uv run python scripts/ci/check_lockfile_registry_allowlist.py uv.lock --min-packages 20
 
+  # Lab probe windows (OMN-19412, lab release-sync plan T0.3, seam L0.3).
+  # config/lab_probe_windows.yaml is the list of scheduled lab probes the
+  # reconcile dispatcher (OMN-19420) and runtime-train (OMN-19424) read to keep
+  # a lane mutation out of the gap before a probe. This job re-derives every
+  # cron, lane and maximum duration from the workflow files and refuses any
+  # disagreement, and refuses a scheduled probe with no entry. omnibase_infra is
+  # read at THIS checkout (so a PR adding a probe cron is judged on its own
+  # head); omninode_infra and omnimarket at their default branch, `dev`.
+  # Registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS, which is what
+  # makes it block through the required CI Summary context. No `if:` and no
+  # continue-on-error: a token mint or checkout that fails fails the job, since
+  # a check that could not read a repository has proven nothing about it.
+  lab-probe-windows:
+    needs: occ-preflight
+    name: Lab Probe Windows (OMN-19412)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Same lightweight-gate baseline as lockfile-registry-allowlist above; the
+    # check itself parses about 290 small YAML files.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      # omninode_infra is private; the default token is scoped to this repo.
+      - name: Mint a read-only omninode_infra token
+        id: infra-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omninode_infra
+          permission-contents: read
+
+      - name: Checkout omninode_infra workflows at dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omninode_infra
+          ref: dev
+          path: .probe-roots/omninode_infra
+          token: ${{ steps.infra-token.outputs.token }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout omnimarket workflows at dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .probe-roots/omnimarket
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+
+      - name: Every probe cron, lane and duration agrees with its workflow, and every probe is listed
+        run: |
+          set -euo pipefail
+          echo "omninode_infra@dev = $(git -C .probe-roots/omninode_infra rev-parse HEAD)"
+          echo "omnimarket@dev = $(git -C .probe-roots/omnimarket rev-parse HEAD)"
+          uv run python scripts/ci/check_lab_probe_windows.py \
+            --root omnibase_infra=. \
+            --root omninode_infra=.probe-roots/omninode_infra \
+            --root omnimarket=.probe-roots/omnimarket
+
   # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
   # git-pinned rev must build the SAME src/ tree as the released tag its
   # PyPI version string declares, even when the line carries a

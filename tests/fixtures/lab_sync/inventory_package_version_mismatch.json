@@ -1,0 +1,449 @@
+{
+  "capture": "live",
+  "captured_at": "2026-09-24T17:10:39Z",
+  "desired": {
+    "containers": {
+      "omninode-stability-test-runtime": {
+        "packages": {
+          "omnibase-core": "0.47.20",
+          "omnibase-infra": "0.38.56"
+        }
+      }
+    },
+    "surface": "stability-test",
+    "target_ref": "v0.38.56"
+  },
+  "envelope": {
+    "containers": [
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 10.0,
+        "Image": "postgres:16-alpine",
+        "Labels": {
+          "com.docker.compose.config-hash": "946fe34efea7f092392c16438748fdb153438e19b8ea5e16c2303853bb1e7b37",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "postgres",
+          "com.omninode.layer": "infrastructure"
+        },
+        "Names": "omnibase-infra-stability-test-postgres",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 19 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "redpandadata/redpanda:v24.2.7",
+        "Labels": {
+          "com.docker.compose.config-hash": "cd76faa0cd7d398acd39c3a9676bfb99b92674503c87fe2a8ff24673a99cb617",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "redpanda",
+          "com.omninode.layer": "infrastructure"
+        },
+        "Names": "omnibase-infra-stability-test-redpanda",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 19 hours (healthy)"
+      },
+      {
+        "Health": null,
+        "HealthcheckIntervalSeconds": null,
+        "Image": "redpandadata/redpanda:v24.2.7",
+        "Labels": {
+          "com.docker.compose.config-hash": "5e192269ab7e1efcef24ab0b120907229a8de3253ee5d9323723acb5ab27733f",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "redpanda-partition-cap",
+          "com.omninode.layer": "infrastructure"
+        },
+        "Names": "omnibase-infra-stability-test-redpanda-partition-cap",
+        "RestartCount": 0,
+        "State": "exited",
+        "Status": "Exited (0) 12 hours ago"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "valkey/valkey:8.0-alpine",
+        "Labels": {
+          "com.docker.compose.config-hash": "38ac0b0140c652ab1a454710aa64ec04cea5d039645827f02a2e5438bfe1e1d4",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "valkey",
+          "com.omninode.layer": "infrastructure"
+        },
+        "Names": "omnibase-infra-stability-test-valkey",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 19 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 15.0,
+        "Image": "quay.io/keycloak/keycloak:26.3.3",
+        "Labels": {
+          "com.docker.compose.config-hash": "3bf8ad2d5e47db54c8910e3d62942b556138139afcbb921e1452290943adfd6f",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.13/docker",
+          "com.docker.compose.service": "keycloak",
+          "com.omninode.layer": "infrastructure",
+          "org.opencontainers.image.revision": "5ab77dc323cbef958a4789dd007443f7757f72fc",
+          "org.opencontainers.image.version": "26.3.3"
+        },
+        "Names": "omnibase-infra-stability-test-keycloak",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 634 hours (healthy)"
+      },
+      {
+        "Health": null,
+        "HealthcheckIntervalSeconds": null,
+        "Image": "postgres:16-alpine",
+        "Labels": {
+          "com.docker.compose.config-hash": "135eb27e840ec1e57297e4ddbda5a83176f705b36ff91f79d5ff137ac80ebe7d",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "forward-migration",
+          "com.omninode.layer": "infrastructure"
+        },
+        "Names": "omnibase-infra-stability-test-forward-migration",
+        "RestartCount": 0,
+        "State": "exited",
+        "Status": "Exited (0) 11 hours ago"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 10.0,
+        "Image": "postgres:16-alpine",
+        "Labels": {
+          "com.docker.compose.config-hash": "26b02a9053d0a2d6696d0e82dea1c6829c2559cdf6c370ffd6d21c29aab2d45e",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "migration-gate",
+          "com.omninode.layer": "infrastructure"
+        },
+        "Names": "omnibase-infra-stability-test-migration-gate",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": null,
+        "HealthcheckIntervalSeconds": null,
+        "Image": "postgres:16-alpine",
+        "Labels": {
+          "com.docker.compose.config-hash": "de3426962e543edb01ed418a337ea01675ad9fc8fd3b9005331d4545eb2d50fc",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "intelligence-migration",
+          "com.omninode.layer": "infrastructure"
+        },
+        "Names": "omnibase-infra-stability-test-intelligence-migration",
+        "RestartCount": 0,
+        "State": "exited",
+        "Status": "Exited (0) 11 hours ago"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-omninode-runtime",
+        "Labels": {
+          "com.docker.compose.config-hash": "4e289fbf21314b163785c8a814393f903a98f5c3770035abced1c0ebab741a9e",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "omninode-runtime",
+          "com.omninode.lane": "stability-test",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omninode-stability-test-runtime",
+        "Packages": {
+          "omnibase-core": "0.47.23",
+          "omnibase-infra": "0.38.57",
+          "omnimarket": "0.4.213"
+        },
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-runtime-effects",
+        "Labels": {
+          "com.docker.compose.config-hash": "bbc108f1db13d973bb1284c35901e3207c96bc955ca71dfac0d223cae1358702",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "runtime-effects",
+          "com.omninode.lane": "stability-test",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omninode-stability-test-runtime-effects",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-projection-api",
+        "Labels": {
+          "com.docker.compose.config-hash": "0c529922dd67a8315642108c6395a167145e8585ae2ab0acd0db0c0fac319b59",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "projection-api",
+          "com.omninode.lane": "stability-test",
+          "com.omninode.layer": "runtime",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omnimarket-stability-test-projection-api",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-runtime-worker",
+        "Labels": {
+          "com.docker.compose.config-hash": "15534c6923e7a7b2670beefa353ad6c418c7a96eb8013c831eb284ab394c6151",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "runtime-worker",
+          "com.omninode.lane": "stability-test",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omninode-stability-test-runtime-worker",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-projection-tenant-registry-writer",
+        "Labels": {
+          "com.docker.compose.config-hash": "bd76da343420a5ee7323261c8fc225f42e7e16f8f47cea63cd23c99f25c815ae",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "projection-tenant-registry-writer",
+          "com.omninode.lane": "stability-test",
+          "com.omninode.layer": "runtime",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omnimarket-stability-test-projection-tenant-registry-writer",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-projection-delegation-writer",
+        "Labels": {
+          "com.docker.compose.config-hash": "5277be2e2e050572a5ff71e812e0c14d2d62c1fa37b62a11325b01fc88a9313a",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "projection-delegation-writer",
+          "com.omninode.lane": "stability-test",
+          "com.omninode.layer": "runtime",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omnimarket-stability-test-projection-delegation-writer",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-projection-registration-writer",
+        "Labels": {
+          "com.docker.compose.config-hash": "f2d82db400b615deb8454c7aa9e861d71d475548b5746a47664fcfdf01f3ed15",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "projection-registration-writer",
+          "com.omninode.lane": "stability-test",
+          "com.omninode.layer": "runtime",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omnimarket-stability-test-projection-registration-writer",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-projection-savings-writer",
+        "Labels": {
+          "com.docker.compose.config-hash": "57c649d0feab025bb571a84c742372aef9c3690d20cd4d2c4acc1975c628e514",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "projection-savings-writer",
+          "com.omninode.lane": "stability-test",
+          "com.omninode.layer": "runtime",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omnimarket-stability-test-projection-savings-writer",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-projection-tenant-credentials-writer",
+        "Labels": {
+          "com.docker.compose.config-hash": "fcdcff9aa2776194dbbf68fceffe64ff064189ca683be7e319a08c1f99f5e4be",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "projection-tenant-credentials-writer",
+          "com.omninode.lane": "stability-test",
+          "com.omninode.layer": "runtime",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omnimarket-stability-test-projection-tenant-credentials-writer",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-projection-live-events-writer",
+        "Labels": {
+          "com.docker.compose.config-hash": "cce2f66b5aa0032b2193e0d06b0847ba8572013085036d0e7e544df257e9b581",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "projection-live-events-writer",
+          "com.omninode.lane": "stability-test",
+          "com.omninode.layer": "runtime",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omnimarket-stability-test-projection-live-events-writer",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      },
+      {
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "Image": "omnibase-infra-stability-test-tenant-projection-writer",
+        "Labels": {
+          "com.docker.compose.config-hash": "a822b69dd7e2accf04b2456fddbfc8665377174804d2a9adf9fd1a0be94f2945",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "omnibase-infra-stability-test",
+          "com.docker.compose.project.working_dir": "$HOME/.omnibase/infra/deployed/0.38.57/docker",
+          "com.docker.compose.service": "tenant-projection-writer",
+          "com.omninode.lane": "stability-test",
+          "com.omninode.layer": "runtime",
+          "org.opencontainers.image.revision": "0e62809004e5",
+          "org.opencontainers.image.version": "0.38.57"
+        },
+        "Names": "omnimarket-stability-test-tenant-projection-writer",
+        "RestartCount": 0,
+        "State": "running",
+        "Status": "Up 11 hours (healthy)"
+      }
+    ],
+    "host": "omninode-pc",
+    "lane": "stability-test",
+    "networks": [
+      "omnibase-infra-stability-test-network",
+      "omnibase-infra_default",
+      "omnibase-infra-network"
+    ],
+    "runtime_tag": null
+  },
+  "expected_findings": [
+    {
+      "container": "omninode-stability-test-runtime",
+      "kind": "package_version_mismatch",
+      "lane": "stability-test"
+    }
+  ],
+  "expected_kind": "package_version_mismatch",
+  "fixture_schema": "lab-sync-inventory-fixture.v1",
+  "provenance": "importlib.metadata read inside omninode-stability-test-runtime on .201 (docker exec, read-only): omnibase-infra 0.38.57, omnibase-core 0.47.23. v0.38.56's uv.lock pins omnibase-core 0.47.20 and the release itself is omnibase-infra 0.38.56. Runtime health normalized to healthy.",
+  "source": "knowledge-base-internal beta/plans/2026-09-24-lab-release-sync-plan.md section 1",
+  "source_row": "E9",
+  "ticket": "OMN-19411"
+}

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,6 +17,9 @@ from omnibase_core.models.dispatch.model_dispatch_bus_command import (
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
+)
+from omnibase_infra.runtime.bounded_delegation_routes import (
+    resolve_bounded_delegation_route,
 )
 from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
@@ -31,6 +35,8 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     parse_active_runtime_packages,
 )
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
+
+logger = logging.getLogger(__name__)
 
 _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
@@ -299,6 +305,22 @@ class RuntimeDelegationDispatchPort:
             raise ValueError("terminal_delivery_margin_seconds must be positive")
         routes = self._resolved_routes()
         selected = _select_delegation_route(routes)
+        # OMN-18933 (K6): on a bounded lane the declared row, the runtime's broker
+        # identity and the selected consumer contract must agree BEFORE the
+        # broker exists. A refusal raises here, so no command is published and no
+        # terminal or projection row can exist for this correlation.
+        bounded_route = resolve_bounded_delegation_route(
+            transport=self._event_bus,
+            selected_route=selected.route,
+        )
+        if bounded_route is not None:
+            logger.info(
+                "bounded delegation route accepted before dispatch",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    **bounded_route.model_dump(mode="json"),
+                },
+            )
         request_payload: dict[str, object] = {
             "prompt": prompt,
             "task_type": task_type,

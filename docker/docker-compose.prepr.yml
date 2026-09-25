@@ -175,11 +175,11 @@ services:
   # Docker daemon, not within a project. A second copy on a slot would race the
   # dev lane's own autoheal over the dev lane's containers.
   autoheal: *prepr_fenced
-  # The migration gate and the intelligence one-shots gate the DEV databases.
-  # A slot's databases are migrated by the forward-migration one-shot below,
-  # under its own profile, against the suffixed names.
+  # The migration gate and the intelligence API gate the DEV databases. A
+  # slot's databases are migrated by the forward-migration and
+  # intelligence-migration one-shots below, under their own profile, against
+  # the suffixed names.
   migration-gate: *prepr_fenced
-  intelligence-migration: *prepr_fenced
   intelligence-api: *prepr_fenced
   cloud-migration: *prepr_fenced
   cloud-migration-files: *prepr_fenced
@@ -222,6 +222,19 @@ services:
       # it runs the migrations, and the slot's own roles deliberately cannot.
       # That is inherited unchanged from docker-compose.infra.yml, which is
       # the other half of why this block merges nothing else.
+      !!merge <<: [*prepr_slot_marker_env]
+  # The slot's intelligence migration (OMN-19404). Same shape as the forward
+  # migration above and for the same reasons: its own `prepr-migrate` profile,
+  # the superuser connection inherited unchanged, and only the slot marker
+  # merged. ONEX_DB_SLOT makes scripts/run-intelligence-migrations.sh target
+  # omniintelligence_<slot> and refuse to create it. It used to be fenced,
+  # and then nothing created public.db_metadata in the slot's intelligence
+  # database, so the fourth slot boot (2026-09-24) failed stamping there.
+  intelligence-migration:
+    profiles: !override ["prepr-migrate"]
+    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-intelligence-migration"
+    depends_on: !override []
+    environment:
       !!merge <<: [*prepr_slot_marker_env]
   # =========================================================================
   # THE SLOT'S TWELVE. Names, ports, volumes and namespace only -- every other

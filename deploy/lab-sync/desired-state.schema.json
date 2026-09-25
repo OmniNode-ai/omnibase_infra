@@ -1,0 +1,504 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omninode.ai/schemas/lab-desired-state.v1.json",
+  "title": "lab-desired-state.v1",
+  "description": "The desired state of one lab surface, derived from a release or a merge and never hand-kept (OMN-19410, lab release-sync plan section 3, seam L0.1: release or merge -> generator -> detector). One document per surface; its key is (surface.id, target_ref.repo, target_ref.commit). desired_state_sha256 is the sha256 of the canonical body: the whole document minus desired_state_sha256, serialised as JSON with sorted keys, separators (',', ':') and UTF-8. No timestamp may appear in the body, so the same target produces a byte-identical document. The validator is scripts/lab_sync/desired_state.py (stdlib only); it enforces every keyword used here and refuses a schema that uses one it does not implement. x-sorted-by and x-sorted are validator keywords: an array of objects is sorted by, and unique on, the named field; an array of strings is sorted and unique. Both exist so two generators cannot emit the same state in two orders and two hashes.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "surface",
+    "target_ref",
+    "containers",
+    "broker",
+    "runners",
+    "allowed_undeclared",
+    "desired_state_sha256"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "lab-desired-state.v1"
+    },
+    "surface": {
+      "$ref": "#/$defs/surface"
+    },
+    "target_ref": {
+      "$ref": "#/$defs/target_ref"
+    },
+    "containers": {
+      "description": "Every container the surface declares, with what it must be running. Empty only for a host surface.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/container"
+      },
+      "x-sorted-by": "name"
+    },
+    "broker": {
+      "description": "The lane's broker profile. An object for a compose_lane surface, null otherwise.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "$ref": "#/$defs/broker"
+    },
+    "runners": {
+      "description": "The runner fleet on the surface's host. An object for a runner_fleet surface, null otherwise.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "$ref": "#/$defs/runners"
+    },
+    "allowed_undeclared": {
+      "description": "Container classes on the host that no lane declares and that are allowed anyway, each with an owner and a reason. Non-empty only on a host surface; a container matching none of them is an undeclared_container finding.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/allowed_undeclared"
+      },
+      "x-sorted-by": "name"
+    },
+    "desired_state_sha256": {
+      "$ref": "#/$defs/sha256_hex"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "surface"
+        ],
+        "properties": {
+          "surface": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "compose_lane"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "surface": {
+            "properties": {
+              "compose_project": {
+                "type": "string"
+              }
+            }
+          },
+          "containers": {
+            "minItems": 1
+          },
+          "broker": {
+            "type": "object"
+          },
+          "runners": {
+            "type": "null"
+          },
+          "allowed_undeclared": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "surface"
+        ],
+        "properties": {
+          "surface": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "runner_fleet"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "surface": {
+            "properties": {
+              "compose_project": {
+                "type": "string"
+              }
+            }
+          },
+          "containers": {
+            "maxItems": 0
+          },
+          "broker": {
+            "type": "null"
+          },
+          "runners": {
+            "type": "object"
+          },
+          "allowed_undeclared": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "surface"
+        ],
+        "properties": {
+          "surface": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "host"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "surface": {
+            "properties": {
+              "compose_project": {
+                "type": "null"
+              }
+            }
+          },
+          "containers": {
+            "maxItems": 0
+          },
+          "broker": {
+            "type": "null"
+          },
+          "runners": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "git_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "surface": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "host",
+        "compose_project",
+        "mode"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "<host>/<compose project, 'runners' or 'host'>, e.g. lab-201/omnibase-infra-stability-test.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*$"
+        },
+        "kind": {
+          "enum": [
+            "compose_lane",
+            "runner_fleet",
+            "host"
+          ]
+        },
+        "host": {
+          "description": "A host id from the lane manifest's hosts registry (deploy/lane-census/lane-manifest.yaml).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "compose_project": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        },
+        "mode": {
+          "description": "reconcile: the release brings the surface back to this state. detect_only: drift is reported and alerted but nothing reconciles it (the judge and collaborator lanes, plan section 3).",
+          "enum": [
+            "reconcile",
+            "detect_only"
+          ]
+        }
+      }
+    },
+    "ref": {
+      "type": "object",
+      "required": [
+        "repo",
+        "ref",
+        "commit"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$"
+        },
+        "ref": {
+          "description": "The tag or branch the commit was resolved from.",
+          "$ref": "#/$defs/text"
+        },
+        "commit": {
+          "$ref": "#/$defs/git_sha"
+        }
+      }
+    },
+    "target_ref": {
+      "description": "What the surface must be running (plan decision D2): the newest release tag for the stability-test lane, the accepted dev merge for the dev lane, the dev head of the runner files for the fleet. composition lists the other repos built into it (omnimarket for a lane), sorted by repo.",
+      "type": "object",
+      "required": [
+        "kind",
+        "repo",
+        "ref",
+        "commit",
+        "composition"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "release",
+            "merge"
+          ]
+        },
+        "repo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$"
+        },
+        "ref": {
+          "$ref": "#/$defs/text"
+        },
+        "commit": {
+          "$ref": "#/$defs/git_sha"
+        },
+        "composition": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref"
+          },
+          "x-sorted-by": "repo"
+        }
+      }
+    },
+    "container": {
+      "type": "object",
+      "required": [
+        "name",
+        "revision",
+        "config_hash",
+        "packages",
+        "health_required"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/slug"
+        },
+        "revision": {
+          "description": "Expected org.opencontainers.image.revision label. null only for an image not built from a target repo (a third-party image, pinned through config_hash, which covers the image reference).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "config_hash": {
+          "description": "Expected com.docker.compose.config-hash label, equal to docker compose config --hash at the target ref. It covers image, env and mounts in one value.",
+          "$ref": "#/$defs/sha256_hex"
+        },
+        "packages": {
+          "description": "Installed distribution name to version, from the target ref's uv.lock. Empty for a third-party image.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/text"
+          }
+        },
+        "health_required": {
+          "description": "True when the service declares a Docker healthcheck that must read healthy (plan section 4 D).",
+          "type": "boolean"
+        }
+      }
+    },
+    "broker": {
+      "description": "Object half of the top-level broker field. It carries no type of its own, because the top-level field is object or null and the kind conditional decides which.",
+      "required": [
+        "service",
+        "memory",
+        "cluster_config"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "service": {
+          "$ref": "#/$defs/slug"
+        },
+        "memory": {
+          "description": "The broker's declared memory, as the compose render states it (e.g. 2G).",
+          "type": "string",
+          "pattern": "^[0-9]+[KMG]$"
+        },
+        "cluster_config": {
+          "description": "rpk cluster config key to expected value, as rpk cluster config get prints it (e.g. segment_fallocation_step, log_segment_ms, retention_bytes).",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/text"
+          }
+        }
+      }
+    },
+    "runners": {
+      "description": "Object half of the top-level runners field. It carries no type of its own, because the top-level field is object or null and the kind conditional decides which.",
+      "required": [
+        "pools",
+        "containers"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pools": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/runner_pool"
+          },
+          "x-sorted-by": "name"
+        },
+        "containers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/runner_container"
+          },
+          "x-sorted-by": "name"
+        }
+      }
+    },
+    "runner_pool": {
+      "type": "object",
+      "required": [
+        "name",
+        "expected_count",
+        "labels",
+        "workdir"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/slug"
+        },
+        "expected_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "labels": {
+          "description": "The GitHub registration labels every runner in the pool carries.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/text"
+          },
+          "x-sorted": true
+        },
+        "workdir": {
+          "description": "The compose working_dir label every runner container in the pool must carry (the fleet path).",
+          "type": "string",
+          "pattern": "^/"
+        }
+      }
+    },
+    "runner_container": {
+      "type": "object",
+      "required": [
+        "name",
+        "pool",
+        "config_hash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/slug"
+        },
+        "pool": {
+          "$ref": "#/$defs/slug"
+        },
+        "config_hash": {
+          "$ref": "#/$defs/sha256_hex"
+        }
+      }
+    },
+    "allowed_undeclared": {
+      "type": "object",
+      "required": [
+        "name",
+        "match",
+        "owner",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/slug"
+        },
+        "match": {
+          "description": "Every given selector must match. At least one is required.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "name_pattern": {
+              "$ref": "#/$defs/text"
+            },
+            "compose_project": {
+              "$ref": "#/$defs/text"
+            },
+            "label": {
+              "description": "key=value that the container must carry.",
+              "type": "string",
+              "pattern": "^[^=]+=.*$"
+            },
+            "max_age_seconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "owner": {
+          "$ref": "#/$defs/text"
+        },
+        "reason": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    }
+  }
+}

@@ -93,6 +93,13 @@ ALLOWED_EMPTY_DEFAULTS = {
     # loudly at the effect boundary; neither substitutes a default.
     "SLACK_BOT_TOKEN",
     "SLACK_CHANNEL_ID",
+    # OMN-17398: the free OpenRouter rung's key. Present in the lane host's
+    # `.env` on .201 (copied from the secret store's /lab-provider-keys) and
+    # absent on lanes that do not route to OpenRouter, so a `:?` form would
+    # wedge their compose render. Empty is NOT a silent disable: the routing
+    # report shows `llm.openrouter.api_key` as unresolved and the inference
+    # effect's resolver raises on it; nothing substitutes a default.
+    "OPENROUTER_API_KEY",
 }
 
 
