@@ -931,6 +931,9 @@ lanes:
         kind: service
         replicas: 1
       - name: omnimarket-dev-200-projection-live-events-writer
+        kind: service
+        replicas: 1
+  # ---------------------------------------------------------------------------
   # dev-105 — a time-shared deployed dev lane on the .105 host (OMN-19544, the
   # .105 row of the lab deploy lanes plan, epic OMN-19500)
   # ---------------------------------------------------------------------------

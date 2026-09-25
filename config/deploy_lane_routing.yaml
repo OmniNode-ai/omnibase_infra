@@ -54,6 +54,24 @@
 #       requester_repository: omnimarket
 #       instance: dev-202
 #
+# verify: (OMN-19507 AC2) is how the per-merge verify job reads the instance a
+# merge was routed to: the lab-pass lane its receipt is emitted under, the
+# runner that can see that host's docker daemon, the deploy agent's HTTP
+# surface, the lane's readiness URLs and the containers the guards inspect.
+# scripts/ci/deploy_lane_verify_route.py reads it; the deploy agent ignores it.
+# dev-201's values are, literally, what runtime-rebuild-trigger.yml and its
+# reusable hard-coded before (pinned by tests/ci/test_deploy_lane_verify_route_omn19507.py).
+#
+# dev-202's URLs follow the fleet convention every verify job uses, the runner
+# container's host-gateway alias host.docker.internal
+# (tests/ci/test_lab_pass_receipt_gate_omn17530.py: inside a runner container,
+# localhost and 127.0.0.1 are the container itself). docker-compose.dev-202.yml
+# publishes main 61085, effects 61086 and projection 61002 on the docker bridge
+# gateway as well as loopback (OMN-19507 AC3, its VERIFY-RUNNER REACH section),
+# so those three reach the alias. The deploy agent's 61098 is not a compose
+# port and is not among those binds: it must be reachable at the alias before
+# a route to dev-202 is added.
+#
 # LOAD GATE (OMN-19507). An instance may declare `load_gate:`; its agent then
 # does not accept a command, or start an idle converge, while its host's model
 # servers need the machine (deploy_agent/load_gate.py). A deferral commits
@@ -78,6 +96,18 @@ instances:
   dev-201:
     hostnames: [omninode-pc]
     consumer_group: onex-deploy-agent
+    verify:
+      receipt_lane: compose-dev
+      runner_labels: [self-hosted, omnibase-verify, host-201]
+      deploy_agent_url: http://host.docker.internal:8098
+      main_url: http://host.docker.internal:8085
+      effects_url: http://host.docker.internal:8086
+      projection_url: http://host.docker.internal:3002
+      compose_project: omnibase-infra
+      runtime_container: omninode-runtime
+      effects_container: omninode-runtime-effects
+      postgres_container: omnibase-infra-postgres
+      broker_container: omnibase-infra-redpanda
   dev-202:
     hostnames: [omnipc2]
     consumer_group: onex-deploy-agent-dev-202
@@ -91,6 +121,18 @@ instances:
       disabled_services: [onex-api, cloud-migration-files, cloud-migration, keycloak, infisical]
       receipt_lane: compose-dev-202
       proves: [omnimarket]
+    verify:
+      receipt_lane: compose-dev-202
+      runner_labels: [self-hosted, omnibase-verify, host-202]
+      deploy_agent_url: http://host.docker.internal:61098
+      main_url: http://host.docker.internal:61085
+      effects_url: http://host.docker.internal:61086
+      projection_url: http://host.docker.internal:61002
+      compose_project: omnibase-infra-dev-202
+      runtime_container: omninode-dev-202-runtime
+      effects_container: omninode-dev-202-runtime-effects
+      postgres_container: omnibase-infra-dev-202-postgres
+      broker_container: omnibase-infra-dev-202-redpanda
   # OMN-19543: the .200 host (hostname Stickybeatz-Studio.local; the router
   # compares the lowercased first label). macOS on Docker Desktop, so its port
   # block is 42xxx, below the macOS ephemeral range, and its agent runs as a
@@ -108,6 +150,26 @@ instances:
       disabled_services: [onex-api, cloud-migration-files, cloud-migration, keycloak, infisical]
       receipt_lane: compose-dev-200
       proves: [omnimarket]
+    # verify: (OMN-19507). NO RUNNER CARRIES host-200 YET: the org runners
+    # API lists no runner on .200 (read 2026-09-25T14:58Z, 71 runners, none
+    # labelled host-200), and registering one waits on the operator's answer to
+    # question (1) of the lab deploy lanes plan (omni_home ledger
+    # 2026-09-25T10:29:02Z). So no route may name dev-200 until one does: a
+    # verify job for a merge routed here would queue with nowhere to run. The
+    # agent's 42098 binds 127.0.0.1 (DEPLOY_AGENT_BIND_HOST); on Docker Desktop
+    # host.docker.internal reaches the host's loopback, as on dev-105.
+    verify:
+      receipt_lane: compose-dev-200
+      runner_labels: [self-hosted, omnibase-verify, host-200]
+      deploy_agent_url: http://host.docker.internal:42098
+      main_url: http://host.docker.internal:42085
+      effects_url: http://host.docker.internal:42086
+      projection_url: http://host.docker.internal:42002
+      compose_project: omnibase-infra-dev-200
+      runtime_container: omninode-dev-200-runtime
+      effects_container: omninode-dev-200-runtime-effects
+      postgres_container: omnibase-infra-dev-200-postgres
+      broker_container: omnibase-infra-dev-200-redpanda
     # OMN-19507. .200 also runs the orchestration sessions and the gpt-oss-120b
     # llama-server on :8130 (Metal, all layers on the GPU, so its weights live
     # in unified memory). Every number below is a measured baseline, stated in
