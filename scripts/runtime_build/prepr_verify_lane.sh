@@ -926,4 +926,5 @@ mkdir -p "$(dirname "${DESCRIPTOR_OUT}")"
 } > "${DESCRIPTOR_OUT}"
 
 log "slot ${SLOT} is READY. Descriptor: ${DESCRIPTOR_OUT}"
+log "when the proof is done, destroy it: scripts/runtime_build/prepr_teardown_slot.sh --slot ${SLOT} --reason <text>"
 cat "${DESCRIPTOR_OUT}"
