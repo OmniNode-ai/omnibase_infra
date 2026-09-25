@@ -432,6 +432,15 @@ x-runtime-env: &runtime-env
   # maps that ref to GEMINI_API_KEY, so runtime containers must receive the key.
   GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY is required for Gemini routing}
   GOOGLE_API_KEY: ${GOOGLE_API_KEY:?GOOGLE_API_KEY is required for Gemini/Google ADK routing}
+  # OMN-17398: the free OpenRouter rung (cheap_frontier, a `:free` model at zero
+  # cost) declares the OpenRouter secret_ref, which the runtime policy's
+  # resolver config maps to this variable. The value lives in the secret store at
+  # /lab-provider-keys and in the lane host's .env; without this line it never
+  # reached the container and the rung was dead on the lab. Optional on purpose
+  # (allowlisted in tests/unit/infra/test_compose_no_silent_fallbacks.py): an
+  # empty value leaves the ref unresolved, which the routing report shows and
+  # the effect boundary raises on. It is never a required env var.
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   # Vertex bearer path (OMN-12971): ADDITIVE next to the Gemini API-key path. The
   # routing authority declares secret_ref=llm.vertex.access_token for
   # cloud-vertex-gemini; the secret resolver maps it to the mounted token FILE
