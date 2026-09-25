@@ -1917,8 +1917,15 @@ class DeployExecutor:
 
         env_files: list[Path] = []
         explicit_env_file = os.environ.get("OMNIBASE_ENV_FILE")
+        # OMN-19507: the store this agent was launched against, when the unit
+        # declares one, is the file its lane's compose reads. On .201 that is
+        # ~/.omnibase/.env itself; on another lab host (dev-200 on .200) the
+        # unit names the lane's own store, and ~/.omnibase/.env there is a
+        # workstation file the lane never reads, whose drift must not refuse
+        # the lane's deploy.
+        operator_store = _operator_env_file() or Path.home() / ".omnibase" / ".env"
         fallback_candidates = [
-            Path.home() / ".omnibase" / ".env",
+            operator_store,
             Path(REPO_DIR) / ".env",
         ]
         candidates = (
