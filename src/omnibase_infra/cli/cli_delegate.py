@@ -867,7 +867,7 @@ def _write_transport_refusal_run_files(
 ) -> None:
     """Persist the three files for a delegation that never reached the broker.
 
-    OMN-18925 / C16. This is the same writer shape as the attributed and
+    OMN-19557 / C16. This is the same writer shape as the attributed and
     unattributed paths above -- same directory, same three filenames, same
     atomic write -- deliberately, rather than a second artifact format for a
     third kind of outcome. A caller that already knows how to read a failed
@@ -1073,7 +1073,7 @@ def _write_local_run_files(
     if not isinstance(envelope, dict):
         raise ValueError("delegate receipt did not serialize to an object")
 
-    # OMN-18925 / C16: a transport-class failure is written, not raised.
+    # OMN-19557 / C16: a transport-class failure is written, not raised.
     #
     # This sits BEFORE _delegation_result deliberately. A run whose broker
     # was never reached has no terminal to resolve, so the resolver below
@@ -1480,7 +1480,7 @@ _QUALITY_GATE_MODULE = (
 def load_criteria_adequacy_authority() -> Callable[[tuple[str, ...]], bool] | None:
     """Return the gate's own answer to "can a bar of only these criteria accept?".
 
-    OMN-18925. Under ``--criteria-mode replace-task-class`` the caller's
+    OMN-19557. Under ``--criteria-mode replace-task-class`` the caller's
     criteria ARE the bar. The quality gate then refuses any bar whose rules are
     all reject-only (OMN-13370: a structural, length, refusal or marker check
     may reject an answer but never promote one), and that verdict depends only
@@ -2010,7 +2010,7 @@ def _timeout_receipt(
         "not apply to your task. It also drops the class's adequacy authority, "
         "so a replaced bar made only of reject-only checks (concise, "
         "task_completed, plain_text_only, ...) can accept nothing and is "
-        "refused before a run is created (OMN-18925)."
+        "refused before a run is created (OMN-19557)."
     ),
 )
 @click.option(
@@ -2556,7 +2556,7 @@ def run_delegate(
                 shared_bus_value=BUS_KAFKA,
             )
         except DelegateLocusRefusedError as exc:
-            # OMN-18925 / C16: the SECOND transport exit, and the one a
+            # OMN-19557 / C16: the SECOND transport exit, and the one a
             # genuinely unreachable broker takes. The probe refuses here
             # before anything is published, which is correct and stays --
             # what was wrong is that it left no artifact, so the negative
@@ -2704,7 +2704,7 @@ def run_delegate(
                         # request value, so the receipt can never say the
                         # pin held while the exit code says it did not.
                         requested_backend_id=backend_id,
-                        # OMN-18925: the two facts a transport refusal needs
+                        # OMN-19557: the two facts a transport refusal needs
                         # that addressing does not carry separately. Taken
                         # from the decision that was PROVEN viable, so a
                         # refusal names the broker the run actually addressed

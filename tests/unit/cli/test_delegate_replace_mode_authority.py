@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""A replace-mode bar that no answer can meet is refused at the flag (OMN-18925).
+"""A replace-mode bar that no answer can meet is refused at the flag (OMN-19557).
 
 MEASURED 2026-09-25. A Codex lane drafted a PR body with
 

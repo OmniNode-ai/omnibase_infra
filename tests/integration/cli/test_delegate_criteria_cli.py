@@ -197,7 +197,7 @@ class TestTheFallbackIsAnnouncedInHelp:
 
 
 class TestAReplaceModeBarThatCannotAcceptIsRefusedAtTheFlag:
-    """OMN-18925: run 7d83a5df climbed six rungs on a bar that could accept nothing."""
+    """OMN-19557: run 7d83a5df climbed six rungs on a bar that could accept nothing."""
 
     def test_the_measured_command_is_refused_before_dispatch(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
