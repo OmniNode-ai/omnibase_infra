@@ -25,13 +25,29 @@
 # committed offsets carry over on its self-update; a new group would start at
 # `latest` and drop whatever was queued at that moment.
 #
-# NO ROUTE TO dev-202 YET. The omnimarket row below is the plan's target
+# EACH INSTANCE'S COMPOSITION IS DATA (OMN-19543). Every instance except the
+# default carries a `lane:` block: its compose overlay (relative to the deploy
+# source clone, layered on the dev lane's infra plus dev-lane pair), compose
+# project, renamed Postgres and runtime containers, the host ports its overlay
+# publishes runtime main and effects on, the .201-only phases it never runs
+# (gateway-deploy, lab-overlay, onex-api-pin, infisical-seed; disabling
+# gateway-deploy also disables the gateway project's services), the services
+# its overlay disables by profile, its lab-pass receipt lane, and the
+# repositories that receipt may prove. The deploy agent builds its dev
+# composition from the block (deploy_agent/instance_lanes.py), so a new
+# instance is a row here plus its overlay, never a Python edit. The default
+# (dev-201) declares no block: it keeps the dev lane's historical composition.
+# `proves` follows the operator's rulings: omnimarket only on every instance
+# but .201 (ruling 2026-09-25T00:56:45Z for dev-202, ruling
+# 2026-09-25T10:22:22Z for one slot per lab host); omnibase_infra stays .201.
+#
+# NO ROUTE TO dev-202 OR dev-200 YET. The omnimarket row below is the plan's target
 # ((dev, omnimarket) -> dev-202). It is added in the same change that brings the
 # dev-202 instance up (task B8), because a route to an instance that is not
 # running would stop every omnimarket rebuild: .201 would skip them and nothing
-# would accept them. Bring-up waits on decision 19 of the unified verification
-# plan (no clone and no .git on .202 while the C13, C14 and C29 producers run
-# bare there).
+# would accept them. dev-200 (the .200 host, OMN-19543) is declared on the
+# same terms: its instance reads every record in its own group and skips each
+# one, until a route names it.
 #
 #   routes:
 #     - runtime_lane: dev
@@ -55,6 +71,26 @@
 # so those three reach the alias. The deploy agent's 61098 is not a compose
 # port and is not among those binds: it must be reachable at the alias before
 # a route to dev-202 is added.
+#
+# LOAD GATE (OMN-19507). An instance may declare `load_gate:`; its agent then
+# does not accept a command, or start an idle converge, while its host's model
+# servers need the machine (deploy_agent/load_gate.py). A deferral commits
+# nothing and publishes nothing: the command waits on the topic. An instance
+# without a block has no gate. Operator RULING, omni_home ledger
+# 2026-09-25T12:40:36Z (ledger:3893), item (b): "a deploy lane on .200 with a
+# load gate".
+#
+# EXCLUDED HOSTS (OMN-19507). No instance may name one and no agent may run as
+# one, even with DEPLOY_AGENT_INSTANCE set (routing.resolve_instance). The key
+# is the lowercased first hostname label, the same one the router compares.
+excluded_hosts:
+  # .101 (192.168.86.101, hostname Stickybeatz.local; the .200 host is
+  # Stickybeatz-Studio, a different first label). Operator RULING, omni_home
+  # ledger 2026-09-25T12:40:36Z (ledger:3893), item (c): leave .101 out of the
+  # deploy pool and leave its dogfood copy as is. Measured before the ruling:
+  # host swap 96.8% used and 37% memory free at 10:29:49Z (OMN-19545 TERMINAL,
+  # ledger 2026-09-25T10:30:17Z).
+  stickybeatz: ".101 is out of the deploy pool by operator RULING ledger:3893 (omni_home ROLLING_WORK_LEDGER 2026-09-25T12:40:36Z, item c); its dogfood copy stays as is"
 default_instance: dev-201
 instances:
   dev-201:
@@ -75,6 +111,16 @@ instances:
   dev-202:
     hostnames: [omnipc2]
     consumer_group: onex-deploy-agent-dev-202
+    lane:
+      compose_overlay: docker/docker-compose.dev-202.yml
+      compose_project: omnibase-infra-dev-202
+      postgres_container: omnibase-infra-dev-202-postgres
+      runtime_container: omninode-dev-202-runtime
+      health_ports: {main: 61085, effects: 61086}
+      disabled_phases: [gateway-deploy, lab-overlay, onex-api-pin, infisical-seed]
+      disabled_services: [onex-api, cloud-migration-files, cloud-migration, keycloak, infisical]
+      receipt_lane: compose-dev-202
+      proves: [omnimarket]
     verify:
       receipt_lane: compose-dev-202
       runner_labels: [self-hosted, omnibase-verify, host-202]
@@ -87,4 +133,66 @@ instances:
       effects_container: omninode-dev-202-runtime-effects
       postgres_container: omnibase-infra-dev-202-postgres
       broker_container: omnibase-infra-dev-202-redpanda
+  # OMN-19543: the .200 host (hostname Stickybeatz-Studio.local; the router
+  # compares the lowercased first label). macOS on Docker Desktop, so its port
+  # block is 42xxx, below the macOS ephemeral range, and its agent runs as a
+  # launchd LaunchAgent (scripts/deploy-agent/deploy/launchd/).
+  dev-200:
+    hostnames: [stickybeatz-studio]
+    consumer_group: onex-deploy-agent-dev-200
+    lane:
+      compose_overlay: docker/docker-compose.dev-200.yml
+      compose_project: omnibase-infra-dev-200
+      postgres_container: omnibase-infra-dev-200-postgres
+      runtime_container: omninode-dev-200-runtime
+      health_ports: {main: 42085, effects: 42086}
+      disabled_phases: [gateway-deploy, lab-overlay, onex-api-pin, infisical-seed]
+      disabled_services: [onex-api, cloud-migration-files, cloud-migration, keycloak, infisical]
+      receipt_lane: compose-dev-200
+      proves: [omnimarket]
+    # verify: (OMN-19507). NO RUNNER CARRIES host-200 YET: the org runners
+    # API lists no runner on .200 (read 2026-09-25T14:58Z, 71 runners, none
+    # labelled host-200), and registering one waits on the operator's answer to
+    # question (1) of the lab deploy lanes plan (omni_home ledger
+    # 2026-09-25T10:29:02Z). So no route may name dev-200 until one does: a
+    # verify job for a merge routed here would queue with nowhere to run. The
+    # agent's 42098 binds 127.0.0.1 (DEPLOY_AGENT_BIND_HOST); on Docker Desktop
+    # host.docker.internal reaches the host's loopback, as on dev-105.
+    verify:
+      receipt_lane: compose-dev-200
+      runner_labels: [self-hosted, omnibase-verify, host-200]
+      deploy_agent_url: http://host.docker.internal:42098
+      main_url: http://host.docker.internal:42085
+      effects_url: http://host.docker.internal:42086
+      projection_url: http://host.docker.internal:42002
+      compose_project: omnibase-infra-dev-200
+      runtime_container: omninode-dev-200-runtime
+      effects_container: omninode-dev-200-runtime-effects
+      postgres_container: omnibase-infra-dev-200-postgres
+      broker_container: omnibase-infra-dev-200-redpanda
+    # OMN-19507. .200 also runs the orchestration sessions and the gpt-oss-120b
+    # llama-server on :8130 (Metal, all layers on the GPU, so its weights live
+    # in unified memory). Every number below is a measured baseline, stated in
+    # the PR that set it:
+    #   build_reserve_gib 24: the Docker VM is capped at 31 GiB (`docker info`
+    #     MemTotal 33333612544) and the running dev-200 lane holds about 7.3 GiB
+    #     of it (`docker stats`, ledger 2026-09-25T11:23:31Z), so a rebuild can
+    #     grow the VM by about 24 GiB.
+    #   model_reserve_gib 70: the IOAccelerator "In use system memory" while
+    #     llama-server was serving peaked at 73418407936 bytes (68.4 GiB,
+    #     `ioreg -c IOAccelerator` 2026-09-25T12:49:08Z), against 3.5 GiB paged
+    #     out at 12:45:00Z.
+    #   min_headroom_gib 16: what a build may leave the host after both reserves.
+    #   max_load1_per_cpu 3.0: a backstop, not the primary rule. The model runs
+    #     every layer on the GPU and its decode rate held at 66 tok/s single
+    #     stream at load1 47-49 on 24 cpu (llama-server /metrics 12:57Z) against
+    #     68.6 tok/s at 12:42Z; the sessions-and-provers baseline peaked at
+    #     load1 54.31 (2.26 per cpu, uptime 13:04Z). 3.0 per cpu is that peak
+    #     plus most of a Docker VM build's 24 vCPUs.
+    load_gate:
+      max_load1_per_cpu: 3.0
+      build_reserve_gib: 24
+      model_reserve_gib: 70
+      min_headroom_gib: 16
+      recheck_seconds: 60
 routes: []
