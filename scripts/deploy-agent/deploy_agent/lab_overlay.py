@@ -291,8 +291,9 @@ PROBES_NOT_YET_WIRED: tuple[str, ...] = (
 #: Whole-apply ceiling. ``apply_lab_lane.sh`` carries its own internal waits
 #: (300s for Postgres, 900s per migrate bundle, 900s per Deployment rollout,
 #: 600s for the tenant mint) and this bound is the outer one: it is what keeps a
-#: wedged lab apply from holding this agent's single-flight lock indefinitely
-#: and serialising the next merge's rebuild behind it. A budget that expires is
+#: wedged lab apply from holding this agent's settle worker indefinitely and
+#: serialising the next merge's lab apply and pin behind it (OMN-19501; before
+#: it, the single-flight lock and the next rebuild). A budget that expires is
 #: recorded as a failing check, never as a silent truncation.
 DEFAULT_APPLY_BUDGET_SECONDS = 1500
 
@@ -396,6 +397,38 @@ class ModelLabOverlayPins:
             f"cloud-migrate={self.cloud_migrate_image} "
             f"overlay=omninode_infra@{self.manifest_sha}"
         )
+
+
+@dataclass(frozen=True)
+class ModelLabOverlayCapture:
+    """The compose-lane inputs of one apply, taken while the job holds the lane.
+
+    OMN-19501. The apply now runs AFTER the dev lane lock is released, so the
+    next compose job may by then be rebuilding
+    ``omnibase-infra-omninode-runtime:latest``, resetting the deploy-source
+    clone and recreating ``omninode-runtime``. Everything the apply used to read
+    off that lane is read once here instead, under the lock, by
+    ``LabOverlayApplier.capture_compose_inputs``:
+
+    * ``runtime_image`` -- the unique pin tag already pointing at THIS job's
+      build (``docker tag`` of ``:latest`` at the verdict);
+    * ``infra_migrate_image`` -- built from the deploy-source clone while it
+      is still at this job's sha, not yet imported into k3s;
+    * ``compose_omnimarket_version`` -- what the compose lane ran for this sha,
+      the value the ``runtime_omnimarket_version`` readback compares against.
+
+    A capture never raises. ``pin_error`` and ``compose_version_error`` carry a
+    failure to the record as a failing check, so the ``onex-lab-k3s`` receipt
+    reads FAIL rather than "missing".
+    """
+
+    sha: str
+    stamp: str
+    runtime_image: str
+    infra_migrate_image: str
+    pin_error: str | None
+    compose_omnimarket_version: str | None
+    compose_version_error: str | None
 
 
 @dataclass(frozen=True)
@@ -671,7 +704,7 @@ class LabOverlayApplier:
         self._popen = popen or subprocess.Popen
         #: The k3s CONTENT digest of the runtime image actually promoted this
         #: run -- not the Docker image id, which a pod's ``imageID`` never
-        #: equals for an imported image (see ``promote_and_import``). Set by
+        #: equals for an imported image (see ``import_captured``). Set by
         #: ``_derive_pins`` and read by the readback. Empty until then, and the
         #: readback refuses an empty value rather than passing vacuously.
         self._runtime_digest: str = ""
@@ -825,10 +858,74 @@ class LabOverlayApplier:
         )
         return frozenset(line.strip() for line in out.splitlines() if line.strip())
 
-    def promote_and_import(self, *, source: str, target: str) -> str:
-        """Tag ``source`` as ``target``, import it, and return its CONTENT digest.
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> ModelLabOverlayCapture:
+        """Take every compose-lane input of the apply, under the lane lock (OMN-19501).
 
-        The returned value is the k3s content store's digest for ``target``, and
+        The caller holds the dev lane lock; this is the only part of the overlay
+        that must, and it is short: one ``docker tag``, one ``alpine`` plus
+        ``COPY`` build, one ``docker exec``. Nothing is imported into k3s here,
+        nothing reads the overlay source, and nothing touches the cluster -- that
+        is the minutes-long part, and it runs after the lane is released.
+
+        The runtime image is TAGGED to this run's unique pin name rather than
+        read later from ``:latest``, because after the release ``:latest`` names
+        whatever the next job builds. The extended TLA+ model on OMN-19501 shows
+        the cost of reading it late (``OverlayPromotesOwnBuild`` violated): the
+        overlay promotes the next job's build under this job's sha.
+
+        Never raises; failures are carried on the capture (see its docstring).
+        """
+        tag = f"{stamp}-{sha[:8]}"
+        runtime_image = f"{RUNTIME_IMAGE_NAME}:{tag}"
+        infra_migrate_image = f"{INFRA_MIGRATE_IMAGE_NAME}:{tag}"
+        pin_error: str | None = None
+        try:
+            self._run(
+                [
+                    "docker",
+                    "tag",
+                    self.env.get("LAB_RUNTIME_SOURCE_IMAGE")
+                    or "omnibase-infra-omninode-runtime:latest",
+                    runtime_image,
+                ],
+                timeout=SHORT_TIMEOUT_SECONDS,
+            )
+            # omnibase_infra's own tree, still at the merged sha while the lock
+            # is held. Imported into k3s later, from this tag.
+            self.build_and_import(
+                tree=self.repo_dir,
+                dockerfile=MIGRATE_DOCKERFILE,
+                context=MIGRATE_CONTEXT,
+                target=infra_migrate_image,
+                timeout=MIGRATE_BUILD_TIMEOUT_SECONDS,
+                import_into_containerd=False,
+            )
+        except (LabOverlayRefusalError, OSError, subprocess.SubprocessError) as exc:
+            pin_error = f"{type(exc).__name__}: {_truncate(str(exc))}"
+
+        compose_version: str | None = None
+        compose_version_error: str | None = None
+        try:
+            compose_version = self.compose_lane_omnimarket_version(
+                self.env.get("LAB_COMPOSE_RUNTIME_CONTAINER") or "omninode-runtime"
+            )
+        except (LabOverlayRefusalError, OSError, subprocess.SubprocessError) as exc:
+            compose_version_error = f"{type(exc).__name__}: {_truncate(str(exc))}"
+
+        return ModelLabOverlayCapture(
+            sha=sha,
+            stamp=stamp,
+            runtime_image=runtime_image,
+            infra_migrate_image=infra_migrate_image,
+            pin_error=pin_error,
+            compose_omnimarket_version=compose_version,
+            compose_version_error=compose_version_error,
+        )
+
+    def import_captured(self, ref: str) -> str:
+        """Import one captured image into k3s and return its CONTENT digest.
+
+        The returned value is the k3s content store's digest for ``ref``, and
         that choice is measured rather than assumed. A pod's
         ``status.containerStatuses[].imageID`` for an imported image is the OCI
         index digest that containerd holds -- read live on 2026-09-12,
@@ -837,14 +934,9 @@ class LabOverlayApplier:
         Docker image id (``docker inspect {{.Id}}``, a config digest), so a
         readback comparing those two values can never match and would report a
         correctly-applied lane as stale on every run.
-
-        Comparing content and not the tag is the point of AC6: a tag can be moved,
-        and the 2026-09-11 state -- fifteen Deployments on a three-day-old stamp
-        under a green trigger -- was visible only because somebody read a pod.
         """
-        self._run(["docker", "tag", source, target], timeout=SHORT_TIMEOUT_SECONDS)
-        self._import_into_containerd(target)
-        return self.containerd_digest(target)
+        self._import_into_containerd(ref)
+        return self.containerd_digest(ref)
 
     def containerd_digest(self, ref: str) -> str:
         """The k3s content store's digest for one ref, or a refusal.
@@ -1122,8 +1214,21 @@ class LabOverlayApplier:
         """
         return self._manifest_sha
 
-    def apply(self, *, sha: str, stamp: str, correlation_id: str | None) -> Path:
+    def apply(
+        self,
+        *,
+        sha: str,
+        stamp: str,
+        correlation_id: str | None,
+        capture: ModelLabOverlayCapture | None = None,
+    ) -> Path:
         """Apply the overlay for one merged sha and write the record.
+
+        ``capture`` is the compose-lane half taken under the lane lock by
+        ``capture_compose_inputs`` (OMN-19501). The deploy agent always passes
+        one, because it runs this after releasing the lane. A caller that holds
+        no lane and runs nothing concurrently may omit it, and the capture is
+        then taken here, at the point the pins are derived.
 
         Returns the record's path. Raises only on a failure to WRITE the record,
         because an unwritten record is the one outcome worse than a failing one:
@@ -1179,11 +1284,14 @@ class LabOverlayApplier:
             )
 
         try:
+            if capture is None:
+                capture = self.capture_compose_inputs(sha=sha, stamp=stamp)
             pins = self._derive_pins(
                 sha=sha,
                 stamp=stamp,
                 overlay_tree=overlay_tree,
                 manifest_sha=manifest_sha,
+                capture=capture,
             )
             checks.append(
                 ModelLabOverlayCheck(
@@ -1262,6 +1370,7 @@ class LabOverlayApplier:
                 pins=pins,
                 runtime_digest=runtime_digest,
                 render_path=work / "apply" / "onex-lab-render.yaml",
+                capture=capture,
             )
         )
         shred(kubeconfig)
@@ -1286,7 +1395,7 @@ class LabOverlayApplier:
         would let the preflight pass. This is the narrow path out of that loop.
 
         WHY THIS IS NOT JUST ``apply`` ON THE FAILING PATH. ``apply`` PROMOTES
-        the runtime pin (``_derive_pins``: ``promote_and_import`` of
+        the runtime pin (``_derive_pins``: the captured tag of
         ``omnibase-infra-omninode-runtime:latest``) on the premise that "this
         agent just built it for the compose lane from the merged sha". On a
         FAILED job that premise can be false -- a job that dies before or during
@@ -1422,8 +1531,15 @@ class LabOverlayApplier:
         stamp: str,
         overlay_tree: Path,
         manifest_sha: str,
+        capture: ModelLabOverlayCapture,
     ) -> ModelLabOverlayPins:
         """Build, import and pin all four images, then verify every one is resident.
+
+        OMN-19501: the runtime and infra-migrate pins come from ``capture``,
+        taken under the dev lane lock; this method only imports them. A capture
+        that failed, or that belongs to another sha, is refused here by name, so
+        the record fails ``images_pinned`` rather than pinning something this
+        job did not build.
 
         ALL FOUR ARE BUILT OR PROMOTED FROM THE MERGED SHA ON EVERY RUN, AND NONE
         IS EVER CARRIED FORWARD. That is a measured requirement, not a
@@ -1450,31 +1566,31 @@ class LabOverlayApplier:
         ``ImagePullBackOff`` -- the succeeds-then-fails-later shape
         ``preflight_lab_cluster.sh`` exists to remove for the node address.
         """
-        tag = f"{stamp}-{sha[:8]}"
+        if capture.sha != sha:
+            msg = (
+                f"the captured compose-lane inputs belong to {capture.sha[:12]}, "
+                f"not to {sha[:12]}; refusing to pin another job's images"
+            )
+            raise LabOverlayRefusalError(msg)
+        if capture.pin_error is not None:
+            msg = (
+                "the runtime and infra-migrate pins were not captured under the "
+                f"dev lane lock: {capture.pin_error}"
+            )
+            raise LabOverlayRefusalError(msg)
         overlay_tag = f"{manifest_sha[:8]}-{stamp}"
-        runtime_image = f"{RUNTIME_IMAGE_NAME}:{tag}"
-        infra_migrate_image = f"{INFRA_MIGRATE_IMAGE_NAME}:{tag}"
+        runtime_image = capture.runtime_image
+        infra_migrate_image = capture.infra_migrate_image
         cloud_migrate_image = f"{CLOUD_MIGRATE_IMAGE_NAME}:{overlay_tag}"
         api_image = f"{API_IMAGE_NAME}:{overlay_tag}"
 
         # The runtime image is PROMOTED rather than rebuilt -- this agent just
         # built it for the compose lane from the merged sha, and a second build
-        # of the same source would be a different digest for no reason. It is
-        # still imported every run, for the same GC reason as the rest.
-        self._runtime_digest = self.promote_and_import(
-            source=self.env.get("LAB_RUNTIME_SOURCE_IMAGE")
-            or "omnibase-infra-omninode-runtime:latest",
-            target=runtime_image,
-        )
-        # omnibase_infra's own tree, already checked out at the merged sha.
-        self.build_and_import(
-            tree=self.repo_dir,
-            dockerfile=MIGRATE_DOCKERFILE,
-            context=MIGRATE_CONTEXT,
-            target=infra_migrate_image,
-            timeout=MIGRATE_BUILD_TIMEOUT_SECONDS,
-            import_into_containerd=True,
-        )
+        # of the same source would be a different digest for no reason. The
+        # capture tagged it; it is still imported every run, for the same GC
+        # reason as the rest.
+        self._runtime_digest = self.import_captured(runtime_image)
+        self._import_into_containerd(infra_migrate_image)
         # The overlay's tree, so these two carry the overlay's lineage.
         self.build_and_import(
             tree=overlay_tree,
@@ -1561,6 +1677,7 @@ class LabOverlayApplier:
         pins: ModelLabOverlayPins,
         runtime_digest: str,
         render_path: Path,
+        capture: ModelLabOverlayCapture,
     ) -> list[ModelLabOverlayCheck]:
         """AC6, as two checks the lane cannot pass while it is stale.
 
@@ -1658,9 +1775,15 @@ class LabOverlayApplier:
                 raise LabOverlayRefusalError(msg)
             pod = sorted(running)[0]
             lab_version = self.pod_omnimarket_version(kubeconfig, pod)
-            compose_version = self.compose_lane_omnimarket_version(
-                self.env.get("LAB_COMPOSE_RUNTIME_CONTAINER") or "omninode-runtime"
-            )
+            # OMN-19501: the compose side was read at the verdict, under the
+            # lane lock. Read now it would be whatever the next job is running.
+            if capture.compose_version_error is not None:
+                msg = (
+                    "the compose dev lane's omnimarket version was not read at "
+                    f"the verdict: {capture.compose_version_error}"
+                )
+                raise LabOverlayRefusalError(msg)
+            compose_version = capture.compose_omnimarket_version or ""
             checks.append(
                 ModelLabOverlayCheck(
                     name="runtime_omnimarket_version",
@@ -1668,7 +1791,7 @@ class LabOverlayApplier:
                     evidence=(
                         f"omnimarket in {pod} on the k3s lab lane = "
                         f"{lab_version or '(unreadable)'}; in the compose dev lane's "
-                        f"running container = {compose_version or '(unreadable)'}"
+                        f"running container at this job's verdict = {compose_version or '(unreadable)'}"
                     ),
                 )
             )
