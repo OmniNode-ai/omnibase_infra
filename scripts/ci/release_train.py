@@ -249,9 +249,28 @@ class EnumLabEvidence(StrEnum):
     #: to. True of omnibase_infra and omnimarket, the only two repos that carry
     #: a rebuild trigger.
     COMPOSE_DEV = "compose-dev"
+    #: A PASS under ``compose-dev`` OR ``compose-dev-202`` (OMN-19508). The second
+    #: deployed dev lane on the .202 host proves omnimarket changes only, by the
+    #: operator ruling of 2026-09-25T00:56:45Z, so the loader refuses this value
+    #: for any other repo; omnibase_infra stays on ``compose-dev``.
+    COMPOSE_DEV_OR_DEV_202 = "compose-dev-or-compose-dev-202"
     #: The repo has no lab lane of its own. A declaration, with its reason, not
     #: a way around the bar -- the reason is printed on every decision it makes.
     NONE = "none"
+
+
+#: The repos the operator ruled may be proven on the .202 dev lane (OMN-19508).
+COMPOSE_DEV_202_PROVEN_REPOS: Final = frozenset({"omnimarket"})
+
+
+def lab_evidence_lanes(evidence: EnumLabEvidence) -> tuple[Any, ...]:
+    """The receipt lanes, in reading order, whose PASS satisfies ``evidence``."""
+    lanes = lab_pass_receipt.EnumLabLane
+    if evidence is EnumLabEvidence.COMPOSE_DEV_OR_DEV_202:
+        return (lanes.COMPOSE_DEV, lanes.COMPOSE_DEV_202)
+    if evidence is EnumLabEvidence.COMPOSE_DEV:
+        return (lanes.COMPOSE_DEV,)
+    return ()
 
 
 class EnumTrainMode(StrEnum):
@@ -492,6 +511,19 @@ def _parse_entry(repo: str, entry: Any, path: Path) -> ModelRepoReleasePolicy:
     except ValueError as exc:
         msg = f"{path}: repo {repo} declares an unknown value: {exc}"
         raise ReleaseTrainConfigError(msg) from exc
+
+    if (
+        lab_evidence is EnumLabEvidence.COMPOSE_DEV_OR_DEV_202
+        and repo not in COMPOSE_DEV_202_PROVEN_REPOS
+    ):
+        msg = (
+            f"{path}: repo {repo} declares lab_evidence "
+            f"'{EnumLabEvidence.COMPOSE_DEV_OR_DEV_202.value}'. Only "
+            f"{sorted(COMPOSE_DEV_202_PROVEN_REPOS)} may be proven on the .202 "
+            "dev lane (operator ruling 2026-09-25T00:56:45Z); omnibase_infra "
+            "stays proven on .201."
+        )
+        raise ReleaseTrainConfigError(msg)
 
     lab_note = str(entry.get("lab_evidence_note", "") or "").strip()
     if lab_evidence is EnumLabEvidence.NONE and not lab_note:
@@ -1163,6 +1195,7 @@ def classify_lab_receipt(
     list_artifacts: Callable[[str, str], list[dict[str, Any]]],
     download_receipt: Callable[[str, int], Any],
     rebuild_pending: Callable[[str, str], bool] | None = None,
+    lanes: Sequence[Any] | None = None,
 ) -> tuple[EnumTrainReason | None, str]:
     """Resolve the compose-dev receipt for one sha into a reason, or None on PASS.
 
@@ -1196,9 +1229,51 @@ def classify_lab_receipt(
 
     The name is exact rather than a paginated listing, because a listing returns
     a false zero and a failed rebuild is precisely when a receipt should exist.
+
+    WHICH LANES (OMN-19508)
+    -----------------------
+    ``lanes`` defaults to ``compose-dev`` alone. A repo whose policy names
+    ``compose-dev-or-compose-dev-202`` is read on ``compose-dev`` first, then
+    ``compose-dev-202``, and a PASS on either satisfies the premise. When none
+    passes, the refusal is the FIRST lane's, with the others' outcomes appended.
     """
-    lane = lab_pass_receipt.EnumLabLane.COMPOSE_DEV
+    read = tuple(lanes) if lanes else (lab_pass_receipt.EnumLabLane.COMPOSE_DEV,)
+    outcomes: list[tuple[EnumTrainReason | None, str]] = []
+    for lane in read:
+        reason, detail = _classify_lab_receipt_on_lane(
+            repo,
+            sha,
+            lane,
+            list_artifacts=list_artifacts,
+            download_receipt=download_receipt,
+            rebuild_pending=rebuild_pending,
+        )
+        if reason is None:
+            return reason, detail
+        outcomes.append((reason, detail))
+    first_reason, first_detail = outcomes[0]
+    if len(outcomes) > 1:
+        others = "; ".join(detail for _reason, detail in outcomes[1:])
+        first_detail = f"{first_detail}. Also read: {others}"
+    return first_reason, first_detail
+
+
+def _classify_lab_receipt_on_lane(
+    repo: str,
+    sha: str,
+    lane: Any,
+    *,
+    list_artifacts: Callable[[str, str], list[dict[str, Any]]],
+    download_receipt: Callable[[str, int], Any],
+    rebuild_pending: Callable[[str, str], bool] | None = None,
+) -> tuple[EnumTrainReason | None, str]:
+    """One lane's receipt for ``sha``, resolved into a reason, or None on PASS."""
     full_repo = f"OmniNode-ai/{repo}"
+    label = (
+        "compose dev lane"
+        if lane is lab_pass_receipt.EnumLabLane.COMPOSE_DEV
+        else f"{lane.value} lane"
+    )
     name = lab_pass_receipt.artifact_name(lane, sha)
 
     try:
@@ -1227,7 +1302,7 @@ def classify_lab_receipt(
         return (
             EnumTrainReason.LAB_RECEIPT_ABSENT,
             f"no artifact named {name} exists in {full_repo}; {sha[:12]} has not "
-            "been exercised on the compose dev lane, or its rebuild never emitted",
+            f"been exercised on the {label}, or its rebuild never emitted",
         )
 
     # Newest first: a re-run of the emitting job supersedes an earlier attempt,
@@ -1276,7 +1351,7 @@ def classify_lab_receipt(
         if unestablished and not failed:
             return (
                 EnumTrainReason.LAB_RECEIPT_INDETERMINATE,
-                "the compose dev lane was asked about this sha and could not "
+                f"the {label} was asked about this sha and could not "
                 f"establish an answer; checks not established: "
                 f"{', '.join(unestablished)}. This is a statement about the "
                 "RUN, not about the lane: no check FAILED. The premise is "
@@ -1286,10 +1361,10 @@ def classify_lab_receipt(
         not_passing = ", ".join(failed + unestablished)
         return (
             EnumTrainReason.LAB_RECEIPT_FAIL,
-            f"the compose dev lane recorded {receipt.result.value} for this sha; "
+            f"the {label} recorded {receipt.result.value} for this sha; "
             f"checks not passing: {not_passing or '(none named)'}",
         )
-    return None, f"{name} records PASS on the compose dev lane"
+    return None, f"{name} records PASS on the {label}"
 
 
 # --------------------------------------------------------------------------- #
@@ -1440,6 +1515,7 @@ def decide(
         list_artifacts=list_artifacts,
         download_receipt=download_receipt,
         rebuild_pending=rebuild_pending,
+        lanes=lab_evidence_lanes(policy.lab_evidence),
     )
     if reason is not None:
         if not candidate.sha and candidate.unresolved_reason:
