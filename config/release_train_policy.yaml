@@ -47,9 +47,9 @@ repos:
     package: omnimarket
     default_branch: dev
     release_relevant_paths: [src, pyproject.toml]
-    lab_evidence: compose-dev
+    lab_evidence: compose-dev-or-compose-dev-202
     lab_evidence_note: >-
-      the compose dev lane; this repo carries its own runtime-rebuild-trigger.yml and its receipts are published here, in the repo the sha belongs to. As in omnibase_infra, a receipt exists only for a RUNTIME-AFFECTING merge, so the premise asks for the nearest runtime-affecting ancestor of the head and accepts it only when nothing between that ancestor and the head is runtime-affecting (OMN-18664).
+      the compose dev lane on .201, or the second deployed dev lane dev-202 on .202 (receipt lane compose-dev-202, OMN-19508): the operator ruled on 2026-09-25T00:56:45Z that omnimarket changes may be proven on either, and only omnimarket (the loader refuses this value for any other repo). compose-dev is read first, then compose-dev-202, and a PASS on either satisfies the premise. This repo carries its own runtime-rebuild-trigger.yml and its receipts are published here, in the repo the sha belongs to. As in omnibase_infra, a receipt exists only for a RUNTIME-AFFECTING merge, so the premise asks for the nearest runtime-affecting ancestor of the head and accepts it only when nothing between that ancestor and the head is runtime-affecting (OMN-18664).
     mode: report_only
     mode_note: >-
       release-on-merge.yml already releases this repo on every source-touching merge to dev (OMN-18010), proven by the automated post-release bump PRs from 0.4.85 onward. A second cutter would race it. The train reports this repo instead, so a run that finds unreleased work here is the signal that release-on-merge has stopped firing.

@@ -88,6 +88,8 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "pr-ci-zombie-detector-report",
     # OMN-16987: the provider-rung liveness canary's per-rung record.
     "provider-rung-canary",
+    # OMN-19445: the daily R1/MD-14 front-door probe record.
+    "r1-front-door-probe",
     "saturation-record",
 )
 

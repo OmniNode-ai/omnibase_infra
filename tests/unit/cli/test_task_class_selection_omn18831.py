@@ -77,7 +77,7 @@ _MIRROR = (
 #: is the fix. A digest matching on both sides is what makes the falsifier
 #: table below a statement about production rather than about a fixture.
 PRODUCTION_SELECTION_DIGEST = (
-    "1140172be1e69c09663e40a9e9c7635c3827b9b84c72fc4dd380afaace717843"
+    "405fa60a930a7c86b076f7ed6dc0d1e5afd55e31829da206261f2069feb3e530"
 )
 
 #: The opening sentence is quoted verbatim from the run's own stderr. The
