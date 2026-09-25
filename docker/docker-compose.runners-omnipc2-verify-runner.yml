@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19507 AC3 -- the .202 host's verify runner, for the dev-202 lane.
+#
+# WHAT IT IS FOR. The per-merge verify job for a merge the deploy agent routed
+# to dev-202 (config/deploy_lane_routing.yaml, instance dev-202, runner_labels
+# [self-hosted, omnibase-verify, host-202]) reads that lane's docker daemon and
+# its ports. Those live on .202, so the job must run on .202: a runner on any
+# other host observes nothing and reports the lane unreachable. That is why the
+# `host-202` label is load-bearing, the same reason `host-201` is on
+# omninode-verify-runner-1.
+#
+# NOT THE CUSTOMER RUNNER. .202 also carries `omnipc2-customer`, the rootless
+# podman runner (user ghrunner) that runs the C13, C14 and C29 clean-machine
+# producers. This runner shares no label with it, runs under a different user's
+# docker daemon, and has none of its paths. A job for one can never land on the
+# other.
+#
+# WHY A SEPARATE FILE. Same reason as the .101 and .105 files: compose
+# interpolates the whole file before selecting services, so each host keeps its
+# own fail-closed variable contract.
+#
+# WHAT IS DELIBERATELY ABSENT, relative to omninode-verify-runner-1, each line
+# load-bearing:
+#   - no operator env file and no lab credentials directory. The dev-202 verify
+#     job reads the lane through the docker socket and the host gateway, and its
+#     bus credentials arrive as Actions secrets. Nothing on .202 needs to be
+#     copied into this container.
+#   - no OMNI_HOME or clone bind, no DEPLOY_RUNNER_TOKEN release-train wiring,
+#     no write surface into a compose lane. The docker socket is a read use here
+#     (revision labels, `docker exec` health and psql reads), the same use the
+#     .201 verify runner makes of its socket.
+#   - not `omnibase-ci`: an action-class job must never be placed on the host
+#     that serves the 4090 model and the dev-202 lane.
+#
+# WHAT IS DELIBERATELY PRESENT:
+#   - the host-gateway alias. The dev-202 overlay publishes runtime main,
+#     effects and the projection API on the docker bridge gateway
+#     (docker-compose.dev-202.yml, VERIFY-RUNNER REACH), which is where
+#     host.docker.internal resolves.
+#   - group_add 984: the docker group's GID on .202 (read 2026-09-25 with
+#     `getent group docker`), the same value as the primary host's. The image's
+#     entrypoint also repairs the socket GID in its root phase.
+#   - CPU and memory caps as tight as omninode-verify-runner-1's. This host
+#     serves the model on its GPU and runs sim-202 and dev-202; one verify job
+#     at a time is all this runner is for.
+#
+# STANDING IT UP (from a machine with ssh to .202 and org-admin gh). The
+# service name matches the host's `<prefix>-<N>` pattern, which the inventory
+# contract requires, so `deploy-runners.sh --add` refuses it as a general-pool
+# name; it is stood up by name on the host, the way the .101 and .105 runners
+# were:
+#
+#   RUNNER_DIR=$HOME/.omnibase/runners   (on .202)
+#   docker/runners/{entrypoint.sh,runner-job-started.sh,healthcheck.sh} and
+#   this file copied under $RUNNER_DIR, the fleet image loaded as
+#   omninode-runner:latest, then
+#   OMNIPC2_VERIFY_RUNNER_TOKEN=<org registration token> \
+#     docker compose -f $RUNNER_DIR/docker/docker-compose.runners-omnipc2-verify-runner.yml \
+#     up -d --no-deps omnipc2-verify-runner-1
+services:
+  omnipc2-verify-runner-1:
+    image: omninode-runner:latest
+    container_name: omnipc2-verify-runner-1
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    environment:
+      RUNNER_LABELS: self-hosted,omnibase-verify,host-202,linux,x64,arch-amd64
+      RUNNER_NAME: omnipc2-verify-runner-1
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${OMNIPC2_VERIFY_RUNNER_TOKEN:-}
+      RUNNER_GROUP: omnibase-deploy
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      # Inside this container `localhost` is the container itself, not .202.
+      LANE_PROBE_HOST: host.docker.internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      # OMN-19070: the disk-admission self-pause marker directory every runner
+      # running the job-started hook mounts.
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - omnipc2-verify-runner-1-creds:/home/runner/.runner-creds
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    group_add:
+      - "984" # .202's docker group GID (getent group docker, 2026-09-25)
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  omnipc2-verify-runner-1-creds:

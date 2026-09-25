@@ -93,6 +93,19 @@ hosts:
     runner_name_prefix: omninode-air-runner
     expected_count: 1
     classes: [verify]
+  # .202 -- omnipc2, RTX 4090, 32 cores, 60 GiB (OMN-19507 AC3). One verify
+  # runner, labelled host-202, for the dev-202 lane's per-merge verify job, which
+  # reads that lane's docker daemon and so must run on this host. Addressed by
+  # its LAN address because it is not on the tailnet (no tailscale on the host,
+  # read 2026-09-25). amd64, but verify class only: this host serves the model
+  # and the dev-202 and sim-202 lanes, so it takes no action-class job. It is
+  # not the `omnipc2-customer` runner, which is a separate rootless podman
+  # runner under another user and outside this inventory.
+  - host: 192.168.86.202
+    arch: amd64
+    runner_name_prefix: omnipc2-verify-runner
+    expected_count: 1
+    classes: [verify]
 # Docker subnet-pool alerting (OMN-12566). The runner host's default address
 # pool can subnet a bounded number of networks before `docker network create`
 # fails with "all predefined address pools have been fully subnetted". Alert at
