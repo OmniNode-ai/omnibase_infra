@@ -314,6 +314,11 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # authenticate to an auth-required listener; the sharded test matrix
     # excludes it by marker (`-m "not kafka"`).
     "Customer Path Boundary (OMN-18012)",  # customer-path-boundary
+    # OMN-19412: the lab probe-window file's drift check. THIS LINE IS THE
+    # MECHANISM, the same as the lockfile entries above: the job has no `if:`,
+    # so it always completes, and registering it here is what makes a skip or
+    # an absence fail CI Summary rather than read green.
+    "Lab Probe Windows (OMN-19412)",  # lab-probe-windows
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries

@@ -9,6 +9,7 @@
 # Usage:
 #   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft] [--rolling [--limit=N] [--only=NAME]]
 #   ./scripts/deploy-runners.sh --add=<service>[,<service>...] [--dry-run] [--skip-build]
+#   ./scripts/deploy-runners.sh --retire-surplus [--dry-run]
 #
 # What it does (in order):
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
@@ -88,6 +89,26 @@
 #   toolcache seeding and the two-signal busy check this mode has neither of);
 #   a service the compose file does not declare (fail closed on a typo BEFORE
 #   the rsync touches the host); and --add combined with --soft or --rolling.
+#
+# --retire-surplus mode (OMN-19077, scale-DOWN of the general pool):
+#   1. Rsync runner artifacts to host, so the host's fleet config and compose
+#      already declare the smaller count BEFORE any container goes away (the
+#      monitor's auto-bounce iterates 1..expected_count from the host copy and
+#      would recreate a removed runner it still believes should exist)
+#   2. Install and read back the runner slice (install_runner_slice)
+#   3. For each ${RUNNER_NAME_PREFIX}-N container on the host with N greater
+#      than expected_count, one at a time: two-signal idle check (the same
+#      runner_is_idle the rolling mode uses; a STOPPED container runs no job
+#      and counts as idle), re-checked immediately before stop, then
+#      `docker stop` + `docker rm` of that ONE container. Never `rm -v`: the
+#      runner's named creds volume is left in place (volumes are data).
+#   4. Once GitHub reports that runner offline, delete ITS registration by id.
+#      Only a runner this invocation just removed is deregistered, which is why
+#      this is not the blanket auto-delete the stale report below refuses.
+#   Skips: image build, token fetch, every cron install, --remove-orphans.
+#   Refuses: running when the compose file and config disagree (fleet_services
+#   fails closed), and combining with --soft, --rolling or --add.
+#   A runner busy through every retry pass is reported and left running; rerun.
 #
 # Requirements:
 #   - gh CLI authenticated with org admin scope
@@ -273,6 +294,9 @@ SYNC_PATHS=(
     "docker/runners/healthcheck.sh"
     "docker/runners/model-review-healthcheck.sh"
     "docker/runners/model-review-observation.json"
+    # OMN-19077: the aggregate cgroup the general pool runs in. install_runner_slice
+    # copies it into /etc/systemd/system on the host and reads it back.
+    "docker/runners/systemd/omnirunners.slice"
     # OMN-15142: docker/runners/Dockerfile does `COPY omni-curl
     # /usr/local/bin/omni-curl` -- both the built binary shim and its source
     # script must be synced or a rebuild against a fresh/empty deployment dir
@@ -303,6 +327,9 @@ DRY_RUN=false
 SKIP_BUILD=false
 SOFT_DEPLOY=false
 ROLLING_DEPLOY=false
+# OMN-19077: scale the general pool DOWN to expected_count, one idle runner at
+# a time. See the --retire-surplus block in the header.
+RETIRE_SURPLUS=false
 # 0 means the whole fleet; --limit=N stops after N successful recreates.
 ROLL_LIMIT=0
 # Empty means the whole fleet; --only=<service> converges exactly one runner.
@@ -327,6 +354,7 @@ for arg in "$@"; do
         --skip-build) SKIP_BUILD=true ;;
         --soft)       SOFT_DEPLOY=true ;;
         --rolling)    ROLLING_DEPLOY=true ;;
+        --retire-surplus) RETIRE_SURPLUS=true ;;
         --limit=*)    ROLL_LIMIT="${arg#*=}" ;;
         --only=*)     ROLL_ONLY="${arg#*=}" ;;
         --token-file=*) TOKEN_FILE="${arg#*=}" ;;
@@ -359,6 +387,11 @@ for arg in "$@"; do
             echo "                and a wait scoped to those runners. Refuses a"
             echo "                ${RUNNER_NAME_PREFIX}-N service (use --rolling), an"
             echo "                undeclared service, and --soft/--rolling."
+            echo "  --retire-surplus  Scale the general pool DOWN to expected_count:"
+            echo "                each ${RUNNER_NAME_PREFIX}-N container with N above it is"
+            echo "                idle-checked, stopped and removed one at a time (its"
+            echo "                creds volume is kept), then its GitHub registration"
+            echo "                is deleted once it reads offline."
             echo "  --host=NAME   Target one declared host from config/runner_fleet.yaml's"
             echo "                hosts: inventory. Default: the primary host, which is"
             echo "                what every invocation meant before the fleet had more"
@@ -538,7 +571,7 @@ rsync_artifacts() {
     log "Rsyncing runner artifacts to ${RUNNER_HOST}:${RUNNER_HOST_DIR}/ ..."
 
     # Ensure remote directory structure exists
-    run_ssh "mkdir -p ${RUNNER_HOST_DIR}/config ${RUNNER_HOST_DIR}/docker/runners ${RUNNER_HOST_DIR}/docker ${RUNNER_HOST_DIR}/scripts/ci ${RUNNER_HOST_DIR}/.github/actions/setup-python-uv"
+    run_ssh "mkdir -p ${RUNNER_HOST_DIR}/config ${RUNNER_HOST_DIR}/docker/runners ${RUNNER_HOST_DIR}/docker/runners/systemd ${RUNNER_HOST_DIR}/docker ${RUNNER_HOST_DIR}/scripts/ci ${RUNNER_HOST_DIR}/.github/actions/setup-python-uv"
 
     if "${DRY_RUN}"; then
         log "[DRY RUN] rsync ${SYNC_PATHS[*]} -> ${RUNNER_HOST}:${RUNNER_HOST_DIR}/"
@@ -574,6 +607,10 @@ rsync_artifacts() {
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/"
 
     rsync -av --checksum \
+        "${REPO_ROOT}/docker/runners/systemd/omnirunners.slice" \
+        "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/systemd/"
+
+    rsync -av --checksum \
         "${REPO_ROOT}/scripts/runner_fleet_event.py" \
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/scripts/"
 
@@ -592,6 +629,69 @@ rsync_artifacts() {
         "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/"
 
     log "Rsync complete."
+}
+
+# ---------------------------------------------------------------------------
+# Step 3b: Install the general pool's aggregate cgroup (OMN-19077)
+# ---------------------------------------------------------------------------
+# x-runner-base names `cgroup_parent: omnirunners.slice`. With the systemd
+# cgroup driver, systemd CREATES a slice that has no unit file on demand, with
+# no limits at all -- so a runner recreated before this install would land in
+# an unbounded slice and look correct. That is why this runs before every path
+# that creates a runner, and why it reads the live values back and fails
+# closed on any difference instead of trusting the copy.
+#
+# Primary (Linux, systemd) host only. The arm64 hosts are Docker Desktop, have
+# their own compose files and never merge x-runner-base.
+readonly RUNNER_SLICE_NAME="omnirunners.slice"
+readonly RUNNER_SLICE_SOURCE="${REPO_ROOT}/docker/runners/systemd/${RUNNER_SLICE_NAME}"
+
+runner_slice_expected() {
+    # Echo "Key=Value" lines for every limit the unit file declares, in the
+    # form `systemctl show` prints them (sizes as bytes).
+    awk -F= '/^(MemoryHigh|MemoryMax|MemorySwapMax|CPUWeight)=/ {print $1"="$2}' \
+        "${RUNNER_SLICE_SOURCE}" | while IFS='=' read -r key value; do
+        case "${value}" in
+            *G) value=$(( ${value%G} * 1024 * 1024 * 1024 )) ;;
+            *M) value=$(( ${value%M} * 1024 * 1024 )) ;;
+        esac
+        printf '%s=%s\n' "${key}" "${value}"
+    done
+}
+
+install_runner_slice() {
+    if [[ -n "${TARGET_HOST}" && "${TARGET_HOST}" != "$(runner_config_field runner_host)" ]]; then
+        log "Runner slice: ${RUNNER_HOST} is not the primary host; nothing to install."
+        return 0
+    fi
+    [[ -f "${RUNNER_SLICE_SOURCE}" ]] || err "missing ${RUNNER_SLICE_SOURCE}"
+
+    local expected
+    expected=$(runner_slice_expected | sort)
+    [[ -n "${expected}" ]] || err "${RUNNER_SLICE_SOURCE} declares no limits; refusing to install an unbounded slice."
+
+    log "Installing ${RUNNER_SLICE_NAME} on ${RUNNER_HOST} ..."
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] would install ${RUNNER_HOST_DIR}/docker/runners/systemd/${RUNNER_SLICE_NAME} -> /etc/systemd/system/, daemon-reload, start, and read back:"
+        printf '%s\n' "${expected}" | sed 's/^/[DRY RUN]   /'
+        return 0
+    fi
+
+    ssh "${RUNNER_HOST}" "
+        set -euo pipefail
+        sudo -n install -m 0644 ${RUNNER_HOST_DIR}/docker/runners/systemd/${RUNNER_SLICE_NAME} /etc/systemd/system/${RUNNER_SLICE_NAME}
+        sudo -n systemctl daemon-reload
+        sudo -n systemctl start ${RUNNER_SLICE_NAME}
+    " || err "could not install ${RUNNER_SLICE_NAME} on ${RUNNER_HOST} (needs passwordless sudo for install/systemctl)."
+
+    local keys live
+    keys=$(printf '%s\n' "${expected}" | cut -d= -f1 | sed 's/^/-p /' | tr '\n' ' ')
+    live=$(ssh "${RUNNER_HOST}" "systemctl show ${RUNNER_SLICE_NAME} ${keys}" | sort) \
+        || err "could not read ${RUNNER_SLICE_NAME} back from ${RUNNER_HOST}."
+    if [[ "${live}" != "${expected}" ]]; then
+        err "${RUNNER_SLICE_NAME} on ${RUNNER_HOST} does not match ${RUNNER_SLICE_SOURCE}. Expected: $(echo ${expected}) -- live: $(echo ${live})"
+    fi
+    log "Runner slice read back: $(echo ${live})"
 }
 
 # ---------------------------------------------------------------------------
@@ -819,6 +919,7 @@ deploy_with_retry() {
         token_b64=$(encode_token "${token}")
 
         rsync_artifacts
+        install_runner_slice
         deploy_runners "${token_b64}"
         install_prune_cron
         install_monitor_cron
@@ -1405,6 +1506,7 @@ roll_one_runner() {
 rolling_deploy() {
     log "=== Rolling deploy (one runner at a time, busy-checked, fail-closed) ==="
     rsync_artifacts
+    install_runner_slice
 
     local services
     services=$(fleet_services)
@@ -1479,13 +1581,177 @@ rolling_deploy() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Retire surplus runners (OMN-19077): scale the general pool DOWN
+# ---------------------------------------------------------------------------
+# The other three modes can only create or recreate. Scaling down used to mean
+# a default deploy, whose `--remove-orphans` deletes every surplus container in
+# one call with no busy check -- killing whatever jobs they were running. This
+# mode removes them the way --rolling recreates them: one at a time, idle on
+# two signals, re-checked immediately before the stop.
+
+host_surplus_runners() {
+    # Echo the names of ${RUNNER_NAME_PREFIX}-N containers on the host (running
+    # or not) whose N is above ${RUNNER_COUNT}, lowest first. Fail closed if the
+    # host cannot be read: an empty answer from a failed ssh is not "none".
+    local names
+    names=$(ssh "${RUNNER_HOST}" "docker ps -a --format '{{.Names}}'") \
+        || err "could not list containers on ${RUNNER_HOST}; refusing to decide what is surplus."
+    printf '%s\n' "${names}" \
+        | grep -E "^${RUNNER_NAME_PREFIX}-[0-9]+$" \
+        | awk -F- -v max="${RUNNER_COUNT}" '{ if ($NF + 0 > max) print $NF" "$0 }' \
+        | sort -n | cut -d' ' -f2 || true
+}
+
+container_is_running() {
+    # 0 running, 1 not running, 2 unknown (fail closed: callers treat 2 as busy).
+    local state
+    state=$(ssh "${RUNNER_HOST}" "docker inspect -f '{{.State.Running}}' ${1}" 2>/dev/null) || return 2
+    state="${state//[$'\r\n ']/}"
+    case "${state}" in
+        true) return 0 ;;
+        false) return 1 ;;
+        *) return 2 ;;
+    esac
+}
+
+surplus_runner_is_idle() {
+    # A stopped container runs no job. A running one must pass the SAME
+    # two-signal check --rolling uses (runner_is_idle): GitHub online and not
+    # busy, and no Runner.Worker in the container's process list.
+    local rc=0
+    container_is_running "${1}" || rc=$?
+    case "${rc}" in
+        0) runner_is_idle "${1}" ;;
+        1) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+github_runner_id() {
+    gh api --paginate "/orgs/${RUNNER_ORG}/actions/runners?per_page=100" 2>/dev/null |
+        jq -rs --arg name "${1}" '[.[].runners[] | select(.name == $name)][0].id // empty' 2>/dev/null
+}
+
+deregister_retired_runner() {
+    # Delete the GitHub registration of a runner whose container THIS
+    # invocation just removed, and only once GitHub reports it offline -- an
+    # online registration under that name is somebody else's live listener.
+    local name="${1}" elapsed=0 state id
+    while [[ "${elapsed}" -le "${ROLL_ONLINE_MAX_SECONDS}" ]]; do
+        state=$(github_runner_state "${name}")
+        case "${state%% *}" in
+            offline) break ;;
+            unknown)
+                log "  ${name}: no GitHub registration under that name; nothing to deregister."
+                return 0 ;;
+        esac
+        sleep "${ROLL_ONLINE_INTERVAL_SECONDS}"
+        elapsed=$((elapsed + ROLL_ONLINE_INTERVAL_SECONDS))
+    done
+    if [[ "${state%% *}" != "offline" ]]; then
+        warn "  ${name}: GitHub still reports '${state}' ${ROLL_ONLINE_MAX_SECONDS}s after its container was removed; registration LEFT in place. It shows in the stale report below."
+        return 1
+    fi
+    id=$(github_runner_id "${name}")
+    if [[ -z "${id}" ]]; then
+        warn "  ${name}: could not resolve its GitHub runner id; registration left in place."
+        return 1
+    fi
+    gh api -X DELETE "/orgs/${RUNNER_ORG}/actions/runners/${id}" >/dev/null \
+        || { warn "  ${name}: DELETE of GitHub runner ${id} failed; registration left in place."; return 1; }
+    log "  ${name}: GitHub registration ${id} deleted."
+}
+
+retire_one_runner() {
+    local name="${1}"
+    if ! surplus_runner_is_idle "${name}"; then
+        log "  ${name} is busy (or its state is unknown) -- skipped."
+        return 2
+    fi
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] would run on ${RUNNER_HOST}: docker stop ${name} && docker rm ${name} (creds volume kept), then delete its GitHub registration once offline"
+        return 0
+    fi
+    # Re-check immediately before the stop: a job can be assigned between the
+    # selection pass and this call.
+    if ! surplus_runner_is_idle "${name}"; then
+        log "  ${name} became busy -- skipped."
+        return 2
+    fi
+    log "  Retiring ${name} ..."
+    # One container, by name. `docker rm` without -v: the named creds volume
+    # is not an anonymous volume and survives either way; -v is omitted so no
+    # future volume change turns this into a data deletion.
+    ssh "${RUNNER_HOST}" "docker stop -t 60 ${name} >/dev/null && docker rm ${name} >/dev/null" || return 1
+    deregister_retired_runner "${name}" || true
+    return 0
+}
+
+retire_surplus() {
+    log "=== Retire surplus runners (scale down to ${RUNNER_COUNT}, one at a time, busy-checked) ==="
+    # Fail closed on a disagreeing definition BEFORE anything reaches the host.
+    fleet_services >/dev/null
+    rsync_artifacts
+    install_runner_slice
+
+    local surplus
+    surplus=$(host_surplus_runners)
+    if [[ -z "${surplus}" ]]; then
+        log "No ${RUNNER_NAME_PREFIX}-N container above ${RUNNER_COUNT} on ${RUNNER_HOST}; nothing to retire."
+        return 0
+    fi
+    local pending=() name
+    while IFS= read -r name; do
+        [[ -n "${name}" ]] && pending+=("${name}")
+    done <<< "${surplus}"
+    log "Retiring ${#pending[@]} surplus runner(s): ${pending[*]}"
+
+    local pass=0 done_count=0 failed=""
+    while [[ "${#pending[@]}" -gt 0 ]] && [[ "${pass}" -le "${ROLL_SKIP_RETRY_PASSES}" ]]; do
+        if [[ "${pass}" -gt 0 ]]; then
+            log "Retry pass ${pass}: ${#pending[@]} runner(s) were busy; waiting ${ROLL_SKIP_RETRY_SLEEP_SECONDS:-120}s."
+            "${DRY_RUN}" || sleep "${ROLL_SKIP_RETRY_SLEEP_SECONDS:-120}"
+        fi
+        local next=()
+        for name in "${pending[@]}"; do
+            local rc=0
+            retire_one_runner "${name}" || rc=$?
+            case "${rc}" in
+                0) done_count=$((done_count + 1)) ;;
+                2) next+=("${name}") ;;
+                *) failed="${name}"; break ;;
+            esac
+        done
+        [[ -z "${failed}" ]] || break
+        pending=(${next[@]+"${next[@]}"})
+        pass=$((pass + 1))
+    done
+
+    [[ -z "${failed}" ]] || err "HALTED at ${failed}: its stop/remove failed. ${done_count} retired. Investigate that container before resuming."
+    log "Retired ${done_count} runner(s)."
+    if [[ "${#pending[@]}" -gt 0 ]]; then
+        warn "Still busy after ${ROLL_SKIP_RETRY_PASSES} retry pass(es), NOT retired: ${pending[*]}. Re-run --retire-surplus."
+    fi
+}
+
 main() {
-    log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY}, rolling=${ROLLING_DEPLOY}, add=${ADD_SERVICES:-<none>})"
+    log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY}, rolling=${ROLLING_DEPLOY}, retire_surplus=${RETIRE_SURPLUS}, add=${ADD_SERVICES:-<none>})"
     log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP}"
     log "Runner count: ${RUNNER_COUNT} | Compose file: ${COMPOSE_FILE}"
 
     if "${DRY_RUN}"; then
         log "[DRY RUN MODE] No remote commands will be executed."
+    fi
+
+    if "${RETIRE_SURPLUS}"; then
+        if "${SOFT_DEPLOY}" || "${ROLLING_DEPLOY}" || [[ -n "${ADD_SERVICES}" ]]; then
+            err "--retire-surplus is mutually exclusive with --soft, --rolling and --add: it only removes containers above expected_count and never creates one."
+        fi
+        retire_surplus
+        print_stale_runner_report
+        log "=== deploy-runners.sh complete (retire-surplus) ==="
+        return 0
     fi
 
     if "${SOFT_DEPLOY}" && "${ROLLING_DEPLOY}"; then

@@ -43,6 +43,11 @@ Drift kinds (named exactly so the auto-ticket says precisely what is wrong):
                          name, compose project label or lane label, running
                          containers only
 
+Every kind, with its one severity, is declared in ``CENSUS_FINDING_KINDS``; the
+eleven lab-sync kinds that compare the inventory with the generated desired
+state are declared in ``LAB_SYNC_FINDING_KINDS`` (OMN-19411) and are not yet
+evaluated here (OMN-19414, OMN-19416).
+
 Host scoping (OMN-19088): every lane declares the host(s) it runs on
 (`hosts:`, naming entries of the top-level `hosts:` registry). The census
 evaluates only the lanes declared for the host it runs on and reports the rest
@@ -98,7 +103,7 @@ import re
 import socket
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 
@@ -122,9 +127,122 @@ class HostDeclarationError(ValueError):
 
 
 # Drift severities. critical => a required service is down / network gone (the
-# 2026-06-11 class of outage). warning => degraded but not lane-down.
+# 2026-06-11 class of outage), or the lane's proof is about something other than
+# what it was meant to run. warning => degraded but not lane-down. Severity only
+# ranks the alert: every finding of every kind is drift, and drift blocks.
 _SEVERITY_CRITICAL = "critical"
 _SEVERITY_WARNING = "warning"
+
+
+class FindingKindSpec(NamedTuple):
+    """One finding kind the planner may emit, and what grading it needs.
+
+    A ``NamedTuple`` rather than a dataclass: the census scripts are loaded by
+    path, without a ``sys.modules`` entry, which a dataclass cannot survive.
+
+    ``subject`` names what a finding of this kind is about, which is what its
+    ``container`` field holds: a ``container`` name, a ``broker`` container name,
+    a ``runner`` name, or the literal ``desired_state``.
+
+    ``envelope_fields`` is the collector side of the seam (L0.2): the envelope
+    keys, per container row or top level, that must be present for the kind to
+    be graded. A kind whose fields are absent cannot be graded, and T1.2
+    (OMN-19414) reports that as a finding, never as clean.
+    """
+
+    kind: str
+    severity: str
+    subject: str
+    envelope_fields: tuple[str, ...]
+
+
+#: The kinds the planner emits today (OMN-13011, OMN-16803, OMN-19088), with the
+#: severity each has always carried. ``_finding`` resolves severity from this
+#: table, so an undeclared kind raises instead of publishing.
+CENSUS_FINDING_KINDS: tuple[FindingKindSpec, ...] = (
+    FindingKindSpec("container_absent", _SEVERITY_CRITICAL, "container", ()),
+    FindingKindSpec("replicas_zero", _SEVERITY_CRITICAL, "container", ()),
+    FindingKindSpec("network_detached", _SEVERITY_CRITICAL, "network", ()),
+    FindingKindSpec("oneshot_failed", _SEVERITY_CRITICAL, "container", ()),
+    FindingKindSpec("oneshot_stuck", _SEVERITY_WARNING, "container", ()),
+    FindingKindSpec("image_tag_mismatch", _SEVERITY_WARNING, "container", ()),
+    FindingKindSpec("unexpected_container", _SEVERITY_WARNING, "container", ()),
+    FindingKindSpec("profile_gated_present", _SEVERITY_WARNING, "container", ()),
+    FindingKindSpec("lane_on_undeclared_host", _SEVERITY_CRITICAL, "container", ()),
+)
+
+#: OMN-19411 (lab release sync plan, T0.2, section 4 B): the eleven kinds that
+#: compare the inventory with the generated desired state (``lab-desired-state.v1``,
+#: OMN-19410). DECLARED ONLY: nothing in this module evaluates them yet. T1.2
+#: (OMN-19414) and T1.3 (OMN-19416) add the evaluation, against the fixtures in
+#: ``tests/fixtures/lab_sync/``, one per kind.
+#:
+#: Container-row fields beyond ``docker ps``: ``Health`` (``{"Status",
+#: "FailingStreak"}`` from ``State.Health``), ``HealthcheckIntervalSeconds``
+#: (``Config.Healthcheck.Interval``), ``RestartCount`` and ``Packages``
+#: (``{distribution: version}`` installed in the container). Top-level fields:
+#: ``broker_config`` (``{broker container: {key: value}}`` from
+#: ``rpk cluster config get``), ``github_runners`` (``[{"name", "status",
+#: "labels"}]`` from the org runner registration) and ``desired_state`` (the
+#: ``lab-desired-state.v1`` document, or null when it could not be read).
+LAB_SYNC_FINDING_KINDS: tuple[FindingKindSpec, ...] = (
+    # A declared container runs an image built from another commit than the
+    # desired ref (org.opencontainers.image.revision).
+    FindingKindSpec("revision_mismatch", _SEVERITY_CRITICAL, "container", ("Labels",)),
+    # com.docker.compose.config-hash differs from `docker compose config --hash`
+    # at the desired ref: image, env, mounts or command drifted.
+    FindingKindSpec(
+        "config_hash_mismatch", _SEVERITY_CRITICAL, "container", ("Labels",)
+    ),
+    # An installed distribution's version differs from the desired ref's lock.
+    FindingKindSpec(
+        "package_version_mismatch", _SEVERITY_CRITICAL, "container", ("Packages",)
+    ),
+    # Docker-unhealthy for FailingStreak x interval >= the bound (default
+    # 1800 s, plan section 4 D).
+    FindingKindSpec(
+        "container_unhealthy",
+        _SEVERITY_CRITICAL,
+        "container",
+        ("Health", "HealthcheckIntervalSeconds"),
+    ),
+    # RestartCount above the container's restart bound.
+    FindingKindSpec(
+        "container_restart_loop", _SEVERITY_CRITICAL, "container", ("RestartCount",)
+    ),
+    # A container on the host that no lane or surface declares and that is not
+    # listed in the desired state's allowed_undeclared with an owner.
+    FindingKindSpec(
+        "undeclared_container", _SEVERITY_WARNING, "container", ("Labels",)
+    ),
+    # A declared broker key reads another value than the lane's broker profile.
+    FindingKindSpec(
+        "broker_config_mismatch", _SEVERITY_CRITICAL, "broker", ("broker_config",)
+    ),
+    # Fewer or more runner containers of a class on a host than expected_count.
+    FindingKindSpec("runner_count_mismatch", _SEVERITY_WARNING, "runner", ("Labels",)),
+    # A runner's com.docker.compose.project.working_dir is not the fleet path.
+    FindingKindSpec(
+        "runner_workdir_mismatch", _SEVERITY_CRITICAL, "runner", ("Labels",)
+    ),
+    # A declared runner is not registered online with GitHub.
+    FindingKindSpec("runner_offline", _SEVERITY_WARNING, "runner", ("github_runners",)),
+    # The desired state is missing or does not validate. Fails closed: the
+    # census never reads clean without a desired state to compare against.
+    FindingKindSpec(
+        "desired_state_unreadable",
+        _SEVERITY_CRITICAL,
+        "desired_state",
+        ("desired_state",),
+    ),
+)
+
+#: Every kind the census event may carry, with its one severity. The event
+#: validator (``lane_census_event.validate_event``) reads this mapping.
+FINDING_KIND_SEVERITY: dict[str, str] = {
+    spec.kind: spec.severity
+    for spec in (*CENSUS_FINDING_KINDS, *LAB_SYNC_FINDING_KINDS)
+}
 
 _DEFAULT_MANIFEST = (
     Path(__file__).resolve().parent.parent
@@ -254,7 +372,6 @@ def _undeclared_presence(
             f"{', '.join(lane_spec.get('hosts', []))} but is running on "
             f"{host_id!r}: {', '.join(running_here)}. Stop it here, or declare "
             f"{host_id!r} in the lane's 'hosts' in the same change",
-            _SEVERITY_CRITICAL,
         )
     ]
 
@@ -281,15 +398,18 @@ def _tag_of(image: str) -> str:
     return "latest"
 
 
-def _finding(
-    lane: str, kind: str, container: str, detail: str, severity: str
-) -> dict[str, str]:
+def _finding(lane: str, kind: str, container: str, detail: str) -> dict[str, str]:
+    """One finding. Its severity is the kind's, from ``FINDING_KIND_SEVERITY``.
+
+    A kind the table does not declare raises ``KeyError`` here, so a typo or an
+    undeclared kind can never reach the event (OMN-19411).
+    """
     return {
         "lane": lane,
         "kind": kind,
         "container": container,
         "detail": detail,
-        "severity": severity,
+        "severity": FINDING_KIND_SEVERITY[kind],
     }
 
 
@@ -353,7 +473,6 @@ def reconcile_lane(
                 declared_network,
                 f"lane network {declared_network!r} is not present in "
                 f"`docker network ls` — containers cannot reach the broker",
-                _SEVERITY_CRITICAL,
             )
         )
 
@@ -393,7 +512,6 @@ def reconcile_lane(
                     f"disables it via a compose profile override "
                     f"(kind=profile_gated, expected absent) — something started "
                     f"it outside the lane's active profile",
-                    _SEVERITY_WARNING,
                 )
             )
             continue
@@ -416,7 +534,6 @@ def reconcile_lane(
                         name,
                         f"migration/init container {name!r} is still Running "
                         f"(expected run-to-completion): {status}",
-                        _SEVERITY_WARNING,
                     )
                 )
                 continue
@@ -429,7 +546,6 @@ def reconcile_lane(
                         name,
                         f"migration/init container {name!r} Exited non-zero "
                         f"(code {code}): {status}",
-                        _SEVERITY_CRITICAL,
                     )
                 )
             continue
@@ -452,7 +568,6 @@ def reconcile_lane(
                     f"required service container {name!r} is not running "
                     f"(desired replicas={required_replicas}); lane "
                     f"{lane_name!r} is degraded",
-                    _SEVERITY_CRITICAL,
                 )
             )
             continue
@@ -467,7 +582,6 @@ def reconcile_lane(
                     name,
                     f"container {name!r} runs image tag {tag!r} which does not "
                     f"match lane pattern {tag_pattern!r}",
-                    _SEVERITY_WARNING,
                 )
             )
 
@@ -481,7 +595,6 @@ def reconcile_lane(
                     actual_name,
                     f"container {actual_name!r} carries com.omninode.lane="
                     f"{lane_name!r} but is not declared in the lane manifest",
-                    _SEVERITY_WARNING,
                 )
             )
 

@@ -81,10 +81,11 @@ def test_omn16979_capture_topic_is_mirrored_and_governed(topic: str) -> None:
 
 
 def test_contract_outbound_has_exactly_all_seven_capture_topics() -> None:
-    """Six pre-existing topics plus seven governed captures makes thirteen."""
+    """Six pre-existing topics plus seven governed captures makes thirteen;
+    OMN-19439's two metadata-scrubbed delegate-skill terminals make fifteen."""
     contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
     outbound = contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"]
-    assert len(outbound) == 13
+    assert len(outbound) == 15
     for topic in ALL_CAPTURE_TOPICS:
         assert topic in outbound
 

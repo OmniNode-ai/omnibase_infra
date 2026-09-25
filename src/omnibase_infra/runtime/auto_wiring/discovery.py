@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Mapping
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -23,6 +24,9 @@ import yaml
 
 from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
     ModelDbOwnershipSubcontract,
+)
+from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
+    ModelRuntimeLaneScope,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -446,6 +450,7 @@ def _parse_contract(
         handler_routing = _parse_legacy_handler(h_raw)
 
     runtime_profiles = _extract_runtime_profiles(raw)
+    runtime_lanes = _extract_runtime_lanes(raw)
     db_io_raw = raw.get("db_io")
     db_io = (
         ModelDbOwnershipSubcontract.model_validate(db_io_raw)
@@ -470,6 +475,7 @@ def _parse_contract(
         package_name=package_name,
         package_version=package_version,
         runtime_profiles=runtime_profiles,
+        runtime_lanes=runtime_lanes,
         compatibility_publish_topics=raw.get("compatibility_publish_topics"),
         terminal_event=(
             raw.get("terminal_event")
@@ -545,6 +551,22 @@ def _extract_runtime_profiles(raw: dict) -> tuple[str, ...]:
             raise ValueError("runtime_profiles entries cannot be blank")
         profiles.append(profile)
     return tuple(dict.fromkeys(profiles))
+
+
+def _extract_runtime_lanes(raw: Mapping[str, object]) -> ModelRuntimeLaneScope | None:
+    """Extract the contract-declared runtime lane scope (OMN-19408).
+
+    Read from the top-level ``runtime_lanes`` key only. Absent means unscoped.
+    A present value is validated by the core model: an unregistered lane, a
+    blank entry or an empty list raises, which the caller records as a
+    discovery error for this contract -- a malformed scope must never degrade
+    to "unscoped", because that attaches the node on exactly the lanes the
+    author tried to keep it off.
+    """
+    lanes_raw = raw.get("runtime_lanes")
+    if lanes_raw is None:
+        return None
+    return ModelRuntimeLaneScope.model_validate({"lanes": lanes_raw})
 
 
 def _parse_handler_routing(

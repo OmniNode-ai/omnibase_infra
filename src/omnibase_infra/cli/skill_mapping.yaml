@@ -18,6 +18,8 @@
 #                    identity; ticket deliverable 3) — verified against the
 #                    live handler `handle()` return type on origin/dev.
 #   event_bus      – backend override (default inmemory)
+#   publish_terminal_to_lane – lane id; publish the returned result to the
+#                  contract terminal_event there, fail-soft (OMN-19152)
 #   timeout        – dispatch timeout seconds (default 300)
 #   args           – CLI arg -> payload field specs
 #   static_payload – payload fields injected regardless of args
@@ -170,6 +172,10 @@ skills:
   - skill_name: dod_verify
     node_name: node_dod_verify
     result_model: omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState
+    # OMN-19152: the dispatch stays in-memory; the returned verdict is then
+    # published fail-soft to the dev lane, where node_projection_dod_verdict
+    # stores it in omninode_internal.dod_verify_runs.
+    publish_terminal_to_lane: dev
     args:
       - {name: ticket-id, payload_field: ticket_id, arg_type: string, positional: true, required: true}
       - {name: contract-path, payload_field: contract_path, arg_type: string}

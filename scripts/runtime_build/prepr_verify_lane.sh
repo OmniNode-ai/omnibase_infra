@@ -850,6 +850,18 @@ if ! compose --profile prepr-migrate run --rm --no-deps forward-migration; then
   reaches staging. Record it as the slot's verdict."
 fi
 
+# The intelligence corpus lives in its own database and its own one-shot, so
+# the forward migration above never reaches it (OMN-19404). Without this the
+# slot's projection-api and runtime-worker fail stamping on a missing
+# public.db_metadata in omniintelligence_<slot>.
+log "running the intelligence migration against the slot's intelligence database ..."
+if ! compose --profile prepr-migrate run --rm --no-deps intelligence-migration; then
+    fail "${EXIT_PROVISION_FAILED}" \
+        "the intelligence migration failed against the slot's fresh
+  omniintelligence_${DB_SLOT}. As with the forward migration, on a branch under
+  test this is a FINDING. Record it as the slot's verdict."
+fi
+
 log "starting the slot's services ..."
 # --no-build: every image was built in step 8 with the workspace args. A
 # service `up` finds unbuilt is a defect in that list, and building it here
@@ -914,4 +926,5 @@ mkdir -p "$(dirname "${DESCRIPTOR_OUT}")"
 } > "${DESCRIPTOR_OUT}"
 
 log "slot ${SLOT} is READY. Descriptor: ${DESCRIPTOR_OUT}"
+log "when the proof is done, destroy it: scripts/runtime_build/prepr_teardown_slot.sh --slot ${SLOT} --reason <text>"
 cat "${DESCRIPTOR_OUT}"

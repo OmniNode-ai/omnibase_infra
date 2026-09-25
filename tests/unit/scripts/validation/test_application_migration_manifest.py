@@ -803,7 +803,17 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # correction must be a first-class vendored application migration. Its
     # exact source bytes and manifest binding are pinned separately by
     # test_omn19013_terminal_construction_vendor.py.
-    assert len(result.declarations) == 212
+    #
+    # 212 -> 213 for OMN-18930: node_projection_delegation/0046 adds the three
+    # nullable delegation_events cohort-key columns (additive, expand-only).
+    # Vendored FIRST, ahead of the omnimarket source, per the vendor-parity
+    # ordering.
+    # 213 -> 214 for OMN-19438: one node-owned migration,
+    # nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql,
+    # vendored here FIRST per the node-migration vendor-parity ordering. It moves
+    # savings_estimates rows stored under the house slug to the house tenant's
+    # UUID and makes the UUID the column default, after the writer fix is live.
+    assert len(result.declarations) == 214
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

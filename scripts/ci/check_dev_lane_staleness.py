@@ -2136,7 +2136,23 @@ def read_agent_supersession(
     )
 
 
-def supersession_check_outcome(probe: ModelSupersessionProbe) -> str:
+def _is_same_ref_fold(probe: ModelSupersessionProbe, sha: str) -> bool:
+    """Whether the agent folded this command into THIS SAME commit (OMN-19499).
+
+    The OMN-19270 lineage fence records a command as superseded by the running
+    build when that build already carries the ref, and names the running sha.
+    When the running sha IS the receipt sha, the lane runs exactly this
+    commit's tree, which is the claim the check exists to protect. Exact
+    full-sha equality only: rule 24(b) gates on the exact sha, so an
+    abbreviation is not a match.
+    """
+    if probe.superseded_by_sha is None:
+        return False
+    receipt = sha.strip().lower()
+    return bool(_EXACT_SHA_RE.match(receipt)) and probe.superseded_by_sha == receipt
+
+
+def supersession_check_outcome(probe: ModelSupersessionProbe, sha: str) -> str:
     """The receipt verdict for the ``superseded_by_newer_rebuild`` check.
 
     Three values, and which one a superseded sha gets is the decision this
@@ -2156,8 +2172,11 @@ def supersession_check_outcome(probe: ModelSupersessionProbe) -> str:
 
     ``ok`` when the record exists and names no superseding command, or when
     there is no record at all -- a command the agent never dequeued cannot
-    have been folded.
+    have been folded. Also ``ok`` when the command was folded into ``sha``
+    itself (OMN-19499): a same-ref coalesce built this exact tree.
     """
+    if _is_same_ref_fold(probe, sha):
+        return "ok"
     if probe.superseded:
         return "fail"
     if probe.readable:
@@ -2178,6 +2197,13 @@ def supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
 
 
 def _supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
+    if _is_same_ref_fold(probe, sha):
+        runner = probe.superseded_by_correlation_id or "an unnamed correlation"
+        return (
+            f"the deploy agent folded this rebuild command into the same commit "
+            f"{sha}, run under {runner}, so the lane runs this sha's own tree "
+            "(a same-ref coalesce, not a newer rebuild)"
+        )
     if probe.superseded:
         runner = probe.superseded_by_correlation_id or "an unnamed correlation"
         return (
@@ -2708,7 +2734,8 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         agent_url=args.agent_url, correlation_id=args.correlation_id
     )
     _write_output("superseded_by", supersession.superseded_by_sha or "")
-    _write_output("superseded_outcome", supersession_check_outcome(supersession))
+    outcome = supersession_check_outcome(supersession, expected)
+    _write_output("superseded_outcome", outcome)
     _write_output("superseded_evidence", supersession_evidence(supersession, expected))
 
     # OMN-18436: publish the identity of the container this guard actually read,
