@@ -126,3 +126,44 @@ def test_the_bus_publish_is_left_alone() -> None:
     publish = _steps()["Publish the compose-dev lab-pass verdict to the bus"]
     assert publish["if"] == "always()"
     assert publish["continue-on-error"] is True
+
+
+def test_the_queued_path_records_its_outcome() -> None:
+    """AC1: suppression alone would leave a green job that explains nothing.
+
+    A skipped assertion and a skipped upload are invisible in a run summary, so
+    a queued merge would render identically to a lane nobody probed -- and the
+    reader who goes looking for the receipt finds no statement about why it is
+    absent. The recorder is the complement of the suppression condition, so the
+    two cannot drift apart: every run takes exactly one of the two branches.
+    """
+    step = _steps()["Record the queued outcome for a merge whose turn has not come"]
+    condition = str(step.get("if", ""))
+    assert "steps.converge.outputs.emit_receipt == 'false'" in condition, (
+        "the recorder must be the exact complement of the suppression guard, "
+        f"not {condition!r}"
+    )
+    body = str(step.get("run", ""))
+    assert "GITHUB_STEP_SUMMARY" in body, (
+        "the queued outcome must reach the run summary"
+    )
+    assert "QUEUED" in body, "the summary must name the queued token (AC1)"
+    assert "PENDING" in body and "UNREADABLE" in body, (
+        "the summary must say why NOT uploading is the point: absent reads as "
+        "PENDING and stays recoverable, a receiptless artifact reads as "
+        "UNREADABLE and does not"
+    )
+
+
+def test_reemit_job_gating_is_unchanged() -> None:
+    """AC3: the attempt-2 re-emission path is not touched by this change.
+
+    It stays conditioned on the verify job having SUCCEEDED and on a non-empty
+    candidate list. What changes is that the queued path now REACHES that
+    success -- which is the fix -- while the conditions themselves stand.
+    """
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    condition = " ".join(str(workflow["jobs"]["reemit-queued-receipts"]["if"]).split())
+    assert "needs.verify-lane-converged.result == 'success'" in condition
+    assert "reemit_candidates != ''" in condition
+    assert "reemit_candidates != '[]'" in condition

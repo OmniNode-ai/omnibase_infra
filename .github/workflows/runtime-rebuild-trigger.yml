@@ -1008,6 +1008,36 @@ jobs:
             --bus-lane "dev" \
             --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml"
 
+      # OMN-19338 AC1. Suppressing the three steps below leaves a GREEN job that
+      # says nothing about why no receipt exists, which reads exactly like a
+      # lane nobody probed. The queued outcome is a statement about the QUEUE,
+      # not the lane, so it is RECORDED rather than asserted. The condition is
+      # the exact complement of the suppression guard, so every run takes one
+      # branch or the other and the two cannot drift apart.
+      - name: Record the queued outcome for a merge whose turn has not come
+        if: always() && steps.converge.outputs.emit_receipt == 'false'
+        env:
+          MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          RECEIPT_LANE: ${{ needs.trigger-rebuild.outputs.receipt_lane }}
+          QUEUE_EVIDENCE: ${{ steps.converge.outputs.evidence }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### ${RECEIPT_LANE} lab-pass: QUEUED (OMN-18976)"
+            echo ""
+            echo "No receipt was emitted for \`${MERGE_SHA}\`: its turn in the deploy"
+            echo "agent's queue had not come, so nothing here asserts anything about"
+            echo "the lane. NO artifact is uploaded either, and that is the"
+            echo "load-bearing half -- the delivery gate reads an absent receipt as"
+            echo "PENDING, which a later convergence can still turn into a PASS,"
+            echo "while a receipt-named artifact carrying no receipt reads as"
+            echo "UNREADABLE, a token no later PASS can undo."
+            echo ""
+            echo "Queue evidence from the convergence guard:"
+            echo ""
+            echo "    ${QUEUE_EVIDENCE:-(the guard wrote no evidence)}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
       # since the directory matches whether or not the receipt carries bytes.
       #
