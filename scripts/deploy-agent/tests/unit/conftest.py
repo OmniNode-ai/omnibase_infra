@@ -62,6 +62,19 @@ def _declare_lane_fence(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _declare_agent_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-19506: a dev-lane agent must know which routing instance it is.
+
+    On a lab host that comes from the host name; a test host matches none, so
+    tests that construct a ``DeployAgent`` are named the default instance here.
+    The resolution itself, including the refusal when nothing names the
+    instance, is asserted in ``test_deploy_lane_routing_omn19506.py``, which
+    deletes the variable and so is unaffected by this fixture.
+    """
+    monkeypatch.setenv("DEPLOY_AGENT_INSTANCE", "dev-201")
+
+
+@pytest.fixture(autouse=True)
 def _declare_control_bus_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     """OMN-18012: KAFKA_SECURITY_PROTOCOL is required and has no default.
 
