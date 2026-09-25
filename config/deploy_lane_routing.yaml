@@ -121,10 +121,14 @@ instances:
     #     `ioreg -c IOAccelerator` 2026-09-25T12:49:08Z), against 3.5 GiB paged
     #     out at 12:45:00Z.
     #   min_headroom_gib 16: what a build may leave the host after both reserves.
-    #   max_load1_per_cpu: see the PR for the baseline and the build's measured
-    #     effect on the model's decode rate.
+    #   max_load1_per_cpu 3.0: a backstop, not the primary rule. The model runs
+    #     every layer on the GPU and its decode rate held at 66 tok/s single
+    #     stream at load1 47-49 on 24 cpu (llama-server /metrics 12:57Z) against
+    #     68.6 tok/s at 12:42Z; the sessions-and-provers baseline peaked at
+    #     load1 54.31 (2.26 per cpu, uptime 13:04Z). 3.0 per cpu is that peak
+    #     plus most of a Docker VM build's 24 vCPUs.
     load_gate:
-      max_load1_per_cpu: 2.0
+      max_load1_per_cpu: 3.0
       build_reserve_gib: 24
       model_reserve_gib: 70
       min_headroom_gib: 16
