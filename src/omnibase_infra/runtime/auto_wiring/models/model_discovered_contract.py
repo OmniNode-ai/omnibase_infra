@@ -11,6 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
     ModelDbOwnershipSubcontract,
 )
+from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
+    ModelRuntimeLaneScope,
+)
 from omnibase_infra.runtime.auto_wiring.models.model_contract_version import (
     ModelContractVersion,
 )
@@ -66,6 +69,18 @@ class ModelDiscoveredContract(BaseModel):
         description=(
             "Optional runtime profiles allowed to own this contract. "
             "Empty means backward-compatible ownership by every runtime profile."
+        ),
+    )
+    runtime_lanes: ModelRuntimeLaneScope | None = Field(
+        default=None,
+        description=(
+            "Optional runtime lanes this contract may attach on (OMN-19408), "
+            "parsed from the top-level contract.yaml `runtime_lanes` list. "
+            "None means unscoped: the contract attaches on any lane whose "
+            "runtime profile owns it. When set, the ownership filter attaches "
+            "it only on a runtime whose declared ONEX_RUNTIME_LANE is in the "
+            "scope, and fails closed with a discovery error on a runtime that "
+            "declares no registered lane."
         ),
     )
     compatibility_publish_topics: tuple[str, ...] = Field(
