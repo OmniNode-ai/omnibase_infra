@@ -132,10 +132,12 @@ def report_for(
     failing: frozenset[EnumLabProofStepId] = frozenset(),
     stdout: dict[EnumLabProofStepId, str] | None = None,
     patterns: dict[EnumLabProofStepId, dict[str, int]] | None = None,
+    extracted: dict[EnumLabProofStepId, tuple[str, ...]] | None = None,
 ) -> ModelLabProofRunReport:
     """A report as the run effect would write it, every step ok unless listed."""
     stdout = stdout or {}
     patterns = patterns or {}
+    extracted = extracted or {}
     observations: list[ModelLabProofObservation] = []
     aborted: EnumLabProofStepId | None = None
     always = {EnumLabProofStepPhase.TEARDOWN, EnumLabProofStepPhase.RESIDUE}
@@ -166,6 +168,7 @@ def report_for(
                 pattern_counts=patterns.get(
                     step.step_id, dict.fromkeys(step.grep_patterns, 0)
                 ),
+                extracted=extracted.get(step.step_id, ()),
             )
         )
         if (

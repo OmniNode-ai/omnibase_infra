@@ -43,6 +43,12 @@ class ModelLabProofStep(BaseModel):
     expect_stdout_empty: bool = False
     expect_stdout_nonempty: bool = False
     grep_patterns: tuple[str, ...] = ()
+    extract_pattern: str = Field(
+        default="",
+        description="A regex with one group; every distinct capture in the output is "
+        "recorded (sorted), so a verdict can compare WHICH items failed, not only "
+        "how many lines matched.",
+    )
     record_output: bool = Field(
         default=True,
         description="False keeps the output out of the report (it stays in the "

@@ -247,3 +247,61 @@ def test_a_report_of_another_run_is_refused() -> None:
     other = report_for(core_plan(base_control=True))
     with pytest.raises(LabProofVerdictError, match="is not a run of plan"):
         _judge(plan, other)
+
+
+_WIRING_LINE = {
+    "Auto-wiring failed for": 1,
+    "Cannot register duplicate dispatcher ID": 0,
+}
+_MAIN_QUARANTINE = ("capsule_effectiveness_feedback_reducer", "nightly_loop_controller")
+
+
+def _wiring_report(
+    plan: ModelLabProofPlan, main: tuple[str, ...]
+) -> ModelLabProofRunReport:
+    return report_for(
+        plan,
+        patterns={_ID.WIRING_LOGS_RUNTIME_MAIN: _WIRING_LINE},
+        extracted={_ID.WIRING_LOGS_RUNTIME_MAIN: main},
+    )
+
+
+def test_wiring_failures_name_the_contracts_that_failed() -> None:
+    plan = core_plan()
+    result = _judge(plan, _wiring_report(plan, _MAIN_QUARANTINE))
+    wiring = next(c for c in result.checks if c.check is _C.NO_WIRING_FAILURES)
+    assert not wiring.passed
+    assert "main:capsule_effectiveness_feedback_reducer" in wiring.evidence_items
+    assert "main:Auto-wiring failed for" in wiring.evidence_items
+
+
+def test_the_same_wiring_failures_at_the_merge_base_are_not_the_prs() -> None:
+    base_plan = core_plan(base_control=True)
+    base = _judge(base_plan, _wiring_report(base_plan, _MAIN_QUARANTINE))
+    assert base.outcome is _O.FAIL
+    plan = core_plan()
+    head = _judge(plan, _wiring_report(plan, _MAIN_QUARANTINE), base)
+    assert head.outcome is _O.PASS
+    wiring = next(c for c in head.checks if c.check is _C.NO_WIRING_FAILURES)
+    assert wiring.passed and "no item the merge base" in wiring.detail
+    assert any("the PR adds none" in reason for reason in head.reasons)
+
+
+def test_a_contract_the_pr_breaks_is_a_fail_even_beside_known_failures() -> None:
+    base_plan = core_plan(base_control=True)
+    base = _judge(base_plan, _wiring_report(base_plan, _MAIN_QUARANTINE))
+    plan = core_plan()
+    broken = (*_MAIN_QUARANTINE, "node_the_pr_broke")
+    head = _judge(plan, _wiring_report(plan, broken), base)
+    assert head.outcome is _O.FAIL
+    wiring = next(c for c in head.checks if c.check is _C.NO_WIRING_FAILURES)
+    assert "not at the merge base" in wiring.detail
+    assert "main:node_the_pr_broke" in wiring.detail
+
+
+def test_a_negative_control_is_never_excused_by_a_base_result() -> None:
+    base_plan = core_plan(base_control=True)
+    base = _judge(base_plan, _wiring_report(base_plan, _MAIN_QUARANTINE))
+    plan = core_plan(negative_control=True)
+    result = _judge(plan, _wiring_report(plan, _MAIN_QUARANTINE), base)
+    assert result.outcome is _O.FAIL

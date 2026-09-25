@@ -220,3 +220,12 @@ def test_refuses_a_harness_outside_the_lane_or_inside_the_run() -> None:
         core_request(harness_root="/opt/omnibase_infra")
     with pytest.raises(ValueError, match="run directory"):
         core_request(harness_root=f"{LANE}/{RUN}/harness")
+
+
+def test_the_base_build_is_handed_the_runtime_policy_env_before_the_bundle_env() -> (
+    None
+):
+    steps = {step.step_id: step for step in core_plan().steps}
+    argv = list(steps[_ID.BUILD_BASE].argv)
+    env_files = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--env-file"]
+    assert env_files == ["docker/runtime-policy.env", f"{LANE}/{RUN}/local.env"]

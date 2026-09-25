@@ -92,6 +92,13 @@ config:
     infra_repo: "OmniNode-ai/omnibase_infra"
     compose_project: "omnibase-infra-local"
     runtime_image: "omnibase-infra-local-runtime"
+    # The catalog CLI loads this after the bundle env (catalog/cli.py
+    # _load_stack_env). The base image is built with a bare compose build so it
+    # can be re-tagged before `up`, and that build must be handed the same file:
+    # without it the render refuses on ONEX_ACTIVE_RUNTIME_PACKAGES (measured on
+    # .105, 2026-09-25T15:33Z, run core-1766-r1). Listed first so the bundle env
+    # file, listed after it, wins, as it does in the CLI.
+    runtime_policy_env: "docker/runtime-policy.env"
     container_runtime_main: "omnibase-infra-local-omninode-runtime"
     container_runtime_effects: "omnibase-infra-local-runtime-effects"
     container_migration_gate: "omnibase-infra-local-migration-gate"
@@ -105,6 +112,12 @@ config:
     wiring_failure_patterns:
       - "Auto-wiring failed for"
       - "Cannot register duplicate dispatcher ID"
+    # Which contracts failed, not only how many lines said so. The laptop bundle
+    # boots with wiring strictness off, and on dev it quarantines contracts that
+    # need a topology DSN the bundle does not carry (26 on main and 6 on effects,
+    # measured on .105 at 2026-09-25T15:43Z, run core-1766-dev2). A proof passes
+    # this check when the PR adds no failing contract the merge base lacks.
+    wiring_failure_extract: "Auto-wiring contract '([^']+)' failed"
     # Every foundation package and both consumers of them, imported inside the
     # runtime containers after the override.
     consumer_modules:

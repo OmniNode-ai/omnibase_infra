@@ -21,6 +21,12 @@ class ModelLabProofCheckResult(BaseModel):
     check: EnumLabProofCheck
     passed: bool
     detail: str = Field(min_length=1)
+    evidence_items: tuple[str, ...] = Field(
+        default=(),
+        description="The distinct failing items behind a set-valued check (for "
+        "no_wiring_failures, the contracts that failed to wire), so a base control "
+        "can be compared item by item.",
+    )
 
 
 __all__ = ["ModelLabProofCheckResult"]

@@ -25,6 +25,12 @@ class ModelLabProofBundlePolicy(BaseModel):
     infra_repo: str = Field(pattern=r"^OmniNode-ai/[A-Za-z0-9_.-]+$")
     compose_project: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]+$")
     runtime_image: str = Field(min_length=1)
+    runtime_policy_env: str = Field(
+        pattern=r"^[A-Za-z0-9_./-]+$",
+        description="The runtime policy env file, relative to the infra clone. The "
+        "catalog CLI loads it after the bundle env; a bare compose build needs it "
+        "named, or the ${VAR:?} guards it satisfies refuse the render.",
+    )
     container_runtime_main: str = Field(min_length=1)
     container_runtime_effects: str = Field(min_length=1)
     container_migration_gate: str = Field(min_length=1)
@@ -32,6 +38,7 @@ class ModelLabProofBundlePolicy(BaseModel):
     health_interval_seconds: int = Field(ge=1)
     health_deadline_seconds: int = Field(ge=1)
     wiring_failure_patterns: tuple[str, ...] = Field(min_length=1)
+    wiring_failure_extract: str = Field(min_length=1)
     consumer_modules: tuple[str, ...] = Field(min_length=1)
     delegation_prompt: str = Field(min_length=1)
     delegation_timeout_seconds: int = Field(ge=1)

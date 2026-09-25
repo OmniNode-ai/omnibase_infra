@@ -25,6 +25,7 @@ Ticket: OMN-19572
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -44,6 +45,7 @@ from omnibase_infra.lab_proof.model_lab_proof_run_report import (
 from omnibase_infra.lab_proof.model_lab_proof_step import ModelLabProofStep
 
 TAIL_CHARS = 6000
+MAX_EXTRACTED = 500
 ALWAYS_RUN_PHASES = frozenset(
     {EnumLabProofStepPhase.TEARDOWN, EnumLabProofStepPhase.RESIDUE}
 )
@@ -168,6 +170,13 @@ class HandlerLabProofRun:
             self._sleep(step.retry.interval_seconds)
         combined = stdout + "\n" + stderr
         counts = {pattern: combined.count(pattern) for pattern in step.grep_patterns}
+        extracted = (
+            tuple(
+                sorted(set(re.findall(step.extract_pattern, combined)))[:MAX_EXTRACTED]
+            )
+            if step.extract_pattern
+            else ()
+        )
         observation = ModelLabProofObservation(
             step_id=step.step_id,
             phase=step.phase,
@@ -182,6 +191,7 @@ class HandlerLabProofRun:
             expectation_met=met,
             ok=met,
             pattern_counts=counts,
+            extracted=extracted,
             log_path=str(log_path),
         )
         self._write_log(step, observation, stdout, stderr)

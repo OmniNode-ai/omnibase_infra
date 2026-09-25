@@ -262,6 +262,31 @@ def test_patterns_are_counted_and_unrecorded_output_stays_in_the_host_log(
     assert "hunter2" in Path(observation.log_path).read_text(encoding="utf-8")
 
 
+def test_extraction_records_each_distinct_capture_once(tmp_path: Path) -> None:
+    log = (
+        "Auto-wiring contract 'b_reducer' failed: x\n"
+        "Auto-wiring contract 'a_effect' failed: y\n"
+        "Auto-wiring contract 'b_reducer' failed: again\n"
+    )
+    runner = FakeRunner({"logs": [(0, log)]})
+    step = _step(
+        "logs",
+        _ID.WIRING_LOGS_RUNTIME_MAIN,
+        _P.PROVE,
+        tmp_path,
+        must_succeed=False,
+        extract_pattern="Auto-wiring contract '([^']+)' failed",
+        record_output=False,
+    )
+    observation = (
+        _handler(runner)
+        .handle(_plan(tmp_path, [step]))
+        .get(_ID.WIRING_LOGS_RUNTIME_MAIN)
+    )
+    assert observation is not None
+    assert observation.extracted == ("a_effect", "b_reducer")
+
+
 def test_a_timeout_is_recorded_not_raised(tmp_path: Path) -> None:
     def runner(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(argv, 5, output="partial")

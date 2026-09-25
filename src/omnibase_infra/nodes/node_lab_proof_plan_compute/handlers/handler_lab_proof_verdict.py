@@ -137,9 +137,25 @@ class HandlerLabProofVerdict:
             raise LabProofVerdictError(
                 "checks not evaluated from a node run: " + ", ".join(unknown)
             )
-        checks = tuple(self._check(check, report) for check in request.mandatory_checks)
-        failed = tuple(result.check for result in checks if not result.passed)
+        base = request.base_result
+        if base is not None and not base.base_control:
+            raise LabProofVerdictError("base_result is not a base control run")
+        if plan.negative_control:
+            base = None
         reasons: list[str] = []
+        checks = tuple(
+            self._relative_to_base(self._check(check, report), base, reasons)
+            for check in request.mandatory_checks
+        )
+        failed = tuple(result.check for result in checks if not result.passed)
+        # A set-valued check still failing after the item comparison failed on an
+        # item the base lacks, so the check-level dev-inherited rule must not
+        # excuse it (the base failing the same CHECK is not the same failure).
+        item_regressions = {
+            result.check
+            for result in checks
+            if not result.passed and result.evidence_items and base is not None
+        }
         harness_abort = False
         if report.aborted_at is not None:
             aborted = report.get(report.aborted_at)
@@ -167,12 +183,14 @@ class HandlerLabProofVerdict:
         else:
             outcome = EnumLabProofOutcome.FAIL
             reasons.append("failed checks: " + ", ".join(failed))
-            base = request.base_result
-            if base is not None and not plan.negative_control:
-                if not base.base_control:
-                    raise LabProofVerdictError("base_result is not a base control run")
+            if base is not None:
                 if base.outcome is EnumLabProofOutcome.INCONCLUSIVE:
                     reasons.append("base control was inconclusive; FAIL stands")
+                elif item_regressions:
+                    reasons.append(
+                        "the PR adds failing items the merge base does not have: "
+                        + ", ".join(sorted(item_regressions))
+                    )
                 elif set(failed) <= set(base.failed_checks):
                     outcome = EnumLabProofOutcome.DEV_INHERITED
                     reasons.append(
@@ -229,6 +247,43 @@ class HandlerLabProofVerdict:
             failed_checks=failed,
         )
 
+    @staticmethod
+    def _relative_to_base(
+        result: ModelLabProofCheckResult,
+        base: ModelLabProofResult | None,
+        reasons: list[str],
+    ) -> ModelLabProofCheckResult:
+        """A set-valued check passes when the head adds no item the merge base lacks.
+
+        Only checks that carry ``evidence_items`` are compared item by item; a
+        binary check is left for the dev-inherited rule, which compares checks.
+        """
+        if result.passed or base is None or not result.evidence_items:
+            return result
+        at_base = next((c for c in base.checks if c.check is result.check), None)
+        if at_base is None:
+            return result
+        new_items = sorted(set(result.evidence_items) - set(at_base.evidence_items))
+        if new_items:
+            return result.model_copy(
+                update={
+                    "detail": result.detail
+                    + f"; not at the merge base {base.proved_sha[:12]}: "
+                    + ", ".join(new_items)
+                }
+            )
+        reasons.append(
+            f"{result.check}: the same {len(result.evidence_items)} item(s) fail at the "
+            f"merge base {base.proved_sha[:12]} (run {base.run_key}); the PR adds none"
+        )
+        return result.model_copy(
+            update={
+                "passed": True,
+                "detail": f"no item the merge base {base.proved_sha[:12]} lacks; "
+                + result.detail,
+            }
+        )
+
     def _check(
         self, check: EnumLabProofCheck, report: ModelLabProofRunReport
     ) -> ModelLabProofCheckResult:
@@ -266,10 +321,11 @@ class HandlerLabProofVerdict:
             return both(_ID.IMPORT_SMOKE_RUNTIME_MAIN, _ID.IMPORT_SMOKE_RUNTIME_EFFECTS)
         if check is _C.NO_WIRING_FAILURES:
             parts: list[str] = []
+            items: list[str] = []
             passed = True
-            for step_id in (
-                _ID.WIRING_LOGS_RUNTIME_MAIN,
-                _ID.WIRING_LOGS_RUNTIME_EFFECTS,
+            for label, step_id in (
+                ("main", _ID.WIRING_LOGS_RUNTIME_MAIN),
+                ("effects", _ID.WIRING_LOGS_RUNTIME_EFFECTS),
             ):
                 observation = report.get(step_id)
                 if observation is None or not observation.ok:
@@ -277,9 +333,25 @@ class HandlerLabProofVerdict:
                     parts.append(f"{step_id}: {_describe(observation)}")
                     continue
                 hits = {k: v for k, v in observation.pattern_counts.items() if v}
-                passed = passed and not hits
-                parts.append(f"{step_id}: {hits or 'no failure lines'}")
-            return result(passed, "; ".join(parts))
+                found = [f"{label}:{name}" for name in observation.extracted]
+                found += [f"{label}:{pattern}" for pattern in sorted(hits)]
+                items += found
+                passed = passed and not found
+                parts.append(
+                    f"{step_id}: "
+                    + (
+                        f"{len(observation.extracted)} contract(s) failed to wire, "
+                        f"lines {hits}"
+                        if found
+                        else "no failure lines"
+                    )
+                )
+            return ModelLabProofCheckResult(
+                check=check,
+                passed=passed,
+                detail="; ".join(parts),
+                evidence_items=tuple(sorted(items)),
+            )
         # OVERRIDE_INSTALLED_IDENTITY
         expected = _tree_hash(report.get(_ID.SUBJECT_HASH))
         if expected is None or expected[1] == 0:

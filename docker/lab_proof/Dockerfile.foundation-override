@@ -23,7 +23,7 @@ FROM ${UV_IMAGE} AS uv-bin
 FROM ${BASE_IMAGE}
 ARG PACKAGE_NAME
 ARG PROVED_SHA
-ARG LAB_PROOF_RUN_KEY
+ARG LAB_PROOF_RUN
 COPY --from=uv-bin /uv /usr/local/bin/lab-proof-uv
 COPY subject/ /lab-proof/subject/
 RUN set -eu; \
@@ -35,4 +35,4 @@ RUN set -eu; \
     rm -rf /lab-proof /usr/local/bin/lab-proof-uv
 LABEL ai.omninode.lab-proof.package="${PACKAGE_NAME}" \
       ai.omninode.lab-proof.proved-sha="${PROVED_SHA}" \
-      ai.omninode.lab-proof.run-key="${LAB_PROOF_RUN_KEY}"
+      ai.omninode.lab-proof.run="${LAB_PROOF_RUN}"

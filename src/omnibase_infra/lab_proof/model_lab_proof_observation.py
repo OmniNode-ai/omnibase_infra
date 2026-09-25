@@ -36,6 +36,7 @@ class ModelLabProofObservation(BaseModel):
     expectation_met: bool = False
     ok: bool = False
     pattern_counts: dict[str, int] = Field(default_factory=dict)
+    extracted: tuple[str, ...] = ()
     log_path: str = ""
 
 
