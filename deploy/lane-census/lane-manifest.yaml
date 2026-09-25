@@ -689,7 +689,10 @@ lanes:
   # Its compose file is an overlay on the dev composition (infra.yml plus
   # dev-lane.yml) that renames every container, the network, every volume and
   # the project, and republishes every port on the loopback address in the
-  # 61xxx block. Its header carries the render command and the reasons.
+  # 61xxx block; runtime main, effects and the projection API are also published
+  # on the docker bridge gateway, where a fleet verify runner container reaches
+  # them as host.docker.internal (OMN-19507 AC3), and nothing binds the LAN.
+  # Its header carries the render command and the reasons.
   #
   # Its own Postgres, Redpanda and Valkey, never the .201 shared broker. It is
   # NOT in GOVERNED_LANES or GRANT_INTERLOCK_LANES
