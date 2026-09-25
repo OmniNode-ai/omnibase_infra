@@ -50,6 +50,14 @@ NODE_DIR = (
 )
 CREATE_FILE = NODE_DIR / "0000_create_dod_verify_runs.sql"
 GRANT_FILE = NODE_DIR / "0001_grant_omninode_runtime_dod_verify_runs.sql"
+#: Added by OMN-19514 (#4102, merged 2026-09-25): a nullable, additive column
+#: that lets a verdict row join back to the delegation run it judged. Listed
+#: here, beside CREATE_FILE and GRANT_FILE, is what keeps the checksum-ledger
+#: check below in sync with what this node actually vendors -- the same
+#: pattern the OMN-18900 pair used, extended rather than special-cased.
+DELEGATION_CORRELATION_FILE = (
+    NODE_DIR / "0002_dod_verify_runs_delegation_correlation_id.sql"
+)
 LEDGER = (
     REPO_ROOT
     / "docker"
@@ -252,13 +260,19 @@ def test_the_vendored_pair_matches_the_checksum_the_ledger_records() -> None:
     present, which is every ordinary test split, and a collected-but-never-run
     test proves nothing -- the skip-count ratchet said so by name. This one
     executes everywhere.
+
+    The node vendors three files as of OMN-19514 (#4102): the original create
+    and grant pair from OMN-18900, plus the delegation_correlation_id column
+    migration. "The pair" in this test's name is historical; the ledger check
+    below covers everything this node vendors, not a fixed count of two.
     """
+    vendored_files = (CREATE_FILE, GRANT_FILE, DELEGATION_CORRELATION_FILE)
     recorded = _ledger_digests()
-    assert set(recorded) == {CREATE_FILE.name, GRANT_FILE.name}, (
-        "the ledger does not carry exactly the two rows this node vendors; "
+    assert set(recorded) == {path.name for path in vendored_files}, (
+        "the ledger does not carry exactly the rows this node vendors; "
         f"got {sorted(recorded)}"
     )
-    for vendored in (CREATE_FILE, GRANT_FILE):
+    for vendored in vendored_files:
         actual = hashlib.sha256(vendored.read_bytes()).hexdigest()
         assert actual == recorded[vendored.name], (
             f"{vendored.name} does not match the checksum its ledger row "
