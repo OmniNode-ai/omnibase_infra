@@ -343,6 +343,17 @@ class EnumLabLane(StrEnum):
     ``ANY_OF_DEFAULT_LANES``, so its PASS never satisfies the any-of lab-pass
     premise on its own.
 
+    ``COMPOSE_DEV_202`` (OMN-19507) is the SECOND deployed dev lane, ``dev-202``
+    on the ``.202`` host (compose project ``omnibase-infra-dev-202``, ports
+    61085/61086), run by a second deploy-agent instance (OMN-19506). It is a
+    separate value for the ``ONEX_LAB_K3S`` reasons: one emitter per name, and a
+    different host proving a different lane. The operator ruled on
+    2026-09-25T00:56:45Z that its PASS proves omnimarket changes only, and
+    omnibase_infra stays proven on ``.201``. So it is NOT in
+    ``ANY_OF_DEFAULT_LANES``: an unqualified gate never reads it, and only the
+    reads OMN-19508 names (omnimarket's sibling read and its release-cut premise)
+    may admit it.
+
     No other value is admissible, and in particular no governed lane
     (``prod``, ``stability-test``, ``judge``, or a collaborator lane) can name
     itself in a receipt. A lab pass is a statement about a lab. A governed
@@ -354,12 +365,15 @@ class EnumLabLane(StrEnum):
     ONEX_LAB_K3S = "onex-lab-k3s"
     COMPOSE_DEV_CHAIN = "compose-dev-chain"
     COMPOSE_DEV_CORPUS = "compose-dev-corpus"
+    COMPOSE_DEV_202 = "compose-dev-202"
 
 
 #: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the three lab
 #: surfaces rule 24(b) means by "a passing lab receipt". The OMN-19312 verdict
 #: lanes are deliberately absent -- a chain canary PASS is not evidence that the
 #: candidate booted, and must never be able to stand in for that premise.
+#: ``COMPOSE_DEV_202`` is absent too (OMN-19507): it proves omnimarket changes
+#: only, so no unqualified read may take it for the any-of premise.
 ANY_OF_DEFAULT_LANES: Final[tuple[EnumLabLane, ...]] = (
     EnumLabLane.COMPOSE_DEV,
     EnumLabLane.ONEX_LAB,
@@ -4179,6 +4193,14 @@ WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS: Final[float] = 72.0
 #: of an older run supersede a newer-created one, in both directions.
 WORKFLOW_VERDICT_PAGE: Final[int] = 50
 
+#: OMN-19311 AC5 -- the planted-red drill's blast-radius ceiling. `until` may
+#: not be set more than this many hours in the future, so a mistyped date
+#: cannot leave staging delivery closed for days with nobody watching. The
+#: drill exists to PROVE a refusal happens, not to hold one open.
+DRILL_MAX_WINDOW_HOURS: Final[float] = 2.0
+
+_TICKET_RE = re.compile(r"^OMN-\d+$")
+
 
 def _run_started(run: Mapping[str, Any]) -> datetime | None:
     """The start of a run's LATEST attempt, which is when it last measured."""
@@ -4201,8 +4223,25 @@ def evaluate_workflow_verdict(
     *,
     now: datetime | None = None,
     dispatch_title_contains: str = "",
+    drill_red_until: str = "",
+    drill_ticket: str = "",
 ) -> int:
     """Fail closed unless the NEWEST completed measurement of a workflow is green.
+
+    ``drill_red_until`` / ``drill_ticket`` (OMN-19311 AC5) are the
+    planted-red drill: a self-expiring switch that makes THIS reader return a
+    red, so staging delivery's refusal path can be proven live without
+    depending on a real defect existing at proof time (the real D11 red this
+    binding was written against, 2026-09-23, is not guaranteed to stay red --
+    it turned green at 2026-09-24T05:33:57Z). Both must be set together or
+    neither is (a lone flag is a misconfiguration, refused); ``drill_ticket``
+    must be an ``OMN-<n>`` id and ``drill_red_until`` a parseable UTC
+    timestamp no more than :data:`DRILL_MAX_WINDOW_HOURS` in the future. Past
+    its own expiry the drill has NO effect at all -- nobody has to turn it
+    off. There is deliberately no symmetric flag that forces a PASS: the drill
+    can only make delivery more conservative, never less. When active it does
+    not call the GitHub API at all -- it is a synthetic, clearly-labelled red,
+    not a spoofed real one.
 
     Operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending the
     16:10:08Z every-check-blocks ruling) binds four chronically red checks to a
@@ -4257,6 +4296,58 @@ def evaluate_workflow_verdict(
             file=out,
         )
         return 1
+
+    # OMN-19311 AC5 -- the planted-red drill. Checked before anything else,
+    # including the GitHub API read: an active drill never depends on network
+    # access, so it is a reliable, fast, unambiguously-synthetic red.
+    if drill_red_until or drill_ticket:
+        if not drill_red_until or not drill_ticket:
+            return refuse(
+                "DRILL misconfigured (OMN-19311 AC5): drill_red_until and "
+                "drill_ticket must both be set together, or neither is set "
+                f"(drill_red_until={drill_red_until!r}, "
+                f"drill_ticket={drill_ticket!r})."
+            )
+        if not _TICKET_RE.match(drill_ticket):
+            return refuse(
+                f"DRILL misconfigured (OMN-19311 AC5): drill_ticket "
+                f"{drill_ticket!r} is not an OMN-<n> id."
+            )
+        try:
+            drill_until = _parse_ts(drill_red_until)
+        except ValueError:
+            return refuse(
+                f"DRILL misconfigured (OMN-19311 AC5): drill_red_until "
+                f"{drill_red_until!r} is not a parseable UTC timestamp."
+            )
+        window_hours = (drill_until - moment).total_seconds() / 3600.0
+        if window_hours > DRILL_MAX_WINDOW_HOURS:
+            return refuse(
+                "DRILL misconfigured (OMN-19311 AC5): drill_red_until is "
+                f"{window_hours:.2f}h in the future, past the "
+                f"{DRILL_MAX_WINDOW_HOURS:g}h ceiling ({drill_ticket})."
+            )
+        if window_hours > 0:
+            print(
+                f"::warning::workflow verdict DRILL (OMN-19311 AC5) active for "
+                f"{label}: a self-expiring switch forcing this reader to return "
+                f"red until {drill_red_until} ({window_hours:.2f}h "
+                f"remaining), ticket {drill_ticket}. This proves staging "
+                "delivery's refusal path live; it is not a real defect and no "
+                "GitHub API call was made to produce it.",
+                file=out,
+            )
+            return refuse(
+                f"DRILL (OMN-19311 AC5, ticket {drill_ticket}) forcing red "
+                f"until {drill_red_until}; this is a synthetic "
+                "measurement, not a real one."
+            )
+        print(
+            f"workflow verdict DRILL (OMN-19311 AC5) for {label}: window "
+            f"expired at {drill_red_until} ({drill_ticket}); resuming "
+            "ordinary evaluation with no further action needed.",
+            file=out,
+        )
 
     print(f"workflow verdict (OMN-18866) for {label}", file=out)
     if not (0 < max_age_hours <= WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS):
@@ -4844,6 +4935,23 @@ def build_parser() -> argparse.ArgumentParser:
             "when its run title carries this token (the lane it measured)"
         ),
     )
+    verdict.add_argument(
+        "--drill-red-until",
+        default="",
+        help=(
+            "OMN-19311 AC5: the planted-red drill. A UTC timestamp "
+            "(YYYY-MM-DDTHH:MM:SSZ), no more than DRILL_MAX_WINDOW_HOURS in "
+            "the future, past which this flag has no effect at all. Requires "
+            "--drill-ticket. Forces this reader to return red until then, "
+            "proving staging delivery's refusal path live without depending "
+            "on a real red existing."
+        ),
+    )
+    verdict.add_argument(
+        "--drill-ticket",
+        default="",
+        help="OMN-19311 AC5: the OMN-<n> ticket authorizing the drill. Required with --drill-red-until.",
+    )
 
     verify = sub.add_parser(
         "verify",
@@ -5212,6 +5320,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.event,
             sys.stdout,
             dispatch_title_contains=args.dispatch_title_contains,
+            drill_red_until=args.drill_red_until,
+            drill_ticket=args.drill_ticket,
         )
 
     raise AssertionError(f"unreachable subcommand {args.command!r}")  # pragma: no cover

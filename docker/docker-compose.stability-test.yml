@@ -53,6 +53,30 @@ x-omninode-contract-overlay:
 x-stability-test-strict-wiring-env: &stability_test_strict_wiring_env
   ONEX_WIRING_STRICT_MODE: "1"
 # =============================================================================
+# RUNTIME LANE IDENTITY (OMN-19408)
+# =============================================================================
+# The deployment names its own lane, as the dev lane's main runtime does
+# (docker-compose.dev-lane.yml, OMN-19144). Until OMN-19408 this lane declared
+# nothing, so the lab lane-health projection -- a node whose scope holds the
+# three lab lanes only (OMN-18769 AC6) -- attached on this runtime, consumed
+# every health event, keyed none of them and wrote zero rows, and the
+# projection_apply_divergence detector held omninode-stability-test-runtime
+# Docker-unhealthy from about 05:40Z on 2026-09-24. The node's contract now
+# declares `runtime_lanes`, and the auto-wiring ownership filter attaches it
+# only where the declared lane is in scope; a runtime that declares NO lane
+# fails closed with a discovery error.
+#
+# `stability-test` is a registered lane (omnibase_core constants_runtime_lanes)
+# and NOT a lab lane, so declaring it changes nothing about health keying: the
+# health emitter still publishes this runtime's verdict with no lane, which is
+# OMN-18769 AC6 unchanged. It changes only what may attach here.
+#
+# On the main runtime only, the one that owns the lab projection by profile,
+# mirroring the dev lane. Literal, not interpolated: an exported shell value
+# must not be able to rename the lane.
+x-stability-test-lane-identity-env: &stability_test_lane_identity_env
+  ONEX_RUNTIME_LANE: "stability-test"
+# =============================================================================
 # STANDALONE PROJECTION WRITER CONFIG (OMN-17562)
 # =============================================================================
 # YAML anchors do NOT cross compose files, so the writer services at the bottom
@@ -213,7 +237,7 @@ services:
       redpanda-partition-cap:
         condition: service_completed_successfully
     environment:
-      !!merge <<: *stability_test_strict_wiring_env
+      !!merge <<: [*stability_test_strict_wiring_env, *stability_test_lane_identity_env]
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test

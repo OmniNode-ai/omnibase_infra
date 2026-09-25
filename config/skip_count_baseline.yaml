@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 585
+    max_skips: 586
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -92,6 +92,12 @@ suites:
             - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_workdir_mismatch]
             - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[undeclared_container]
         - measured_at: '2026-09-25'
+          measured_by: OMN-19507
+          delta: 1
+          reason: >-
+            One positive control across a seam that has not landed, test_the_dev_202_route_labels_have_a_runner_to_land_on in tests/ci/test_omnipc2_verify_runner_omn19507.py. It asserts that the verify labels the deploy-lane routing table declares for the dev-202 instance are satisfiable by the new .202 verify runner. That table (config/deploy_lane_routing.yaml) is added by OMN-19506, and even with it the dev-202 instance declares no verify block until the dev-202 bring-up task adds one, so on this base the test skips with a named reason instead of passing without looking. The three other tests in the module assert the runner's compose labels, that it is the only runner labelled host-202, and its mounts, all from committed state, and run in every job. The skip ends in the same change that gives dev-202 a verify block: the test then runs, and that change removes this id from this baseline.
+          node_ids:
+            - tests.ci.test_omnipc2_verify_runner_omn19507::test_the_dev_202_route_labels_have_a_runner_to_land_on
           measured_by: OMN-17886
           delta: 2
           reason: >-
@@ -131,6 +137,7 @@ suites:
       - tests.ci.test_lane_projection_writer_coverage_omn17562::test_registry_matches_the_runtime_predicate
       - tests.ci.test_lane_runtime_profile_carriage_omn18114::test_carrier_profile_contracts_match_the_omnimarket_manifest
       - tests.ci.test_omnimarket_contract_pin::test_an_upstream_contract_addition_cannot_red_an_unrelated_infra_pr
+      - tests.ci.test_omnipc2_verify_runner_omn19507::test_the_dev_202_route_labels_have_a_runner_to_land_on
       - tests.ci.test_receipt_gate_install_guard.TestReceiptGateInstallSafeguards::test_importable_step_prints_install_path_on_failure
       - tests.ci.test_push_side_derivation_omn18863.TestItPassesOnATreeThatIsInSync::test_the_current_tree_passes_against_its_own_contracts
       - tests.integration.cli.test_execution_budget_shipped_contract_omn18924::test_every_exposed_class_resolves_a_budget_on_the_installed_contract

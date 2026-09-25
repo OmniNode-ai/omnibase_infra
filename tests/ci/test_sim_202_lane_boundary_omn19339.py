@@ -120,14 +120,19 @@ def test_manifest_declares_sim_202_on_lab_202_only() -> None:
     )
 
 
-def test_lab_202_resolves_from_its_hostname_and_carries_only_sim_202() -> None:
+#: OMN-19505: .202 also carries the second deployed dev lane. No .201 lane is
+#: declared for it.
+LANES_ON_202 = ["dev-202", LANE]
+
+
+def test_lab_202_resolves_from_its_hostname_and_carries_only_its_own_lanes() -> None:
     manifest = _manifest()
     validate_hosts(manifest)
     assert resolve_host(HOSTNAME_ON_HOST, manifest) == HOST_ID
     lanes_on_host = sorted(
         name for name, spec in manifest["lanes"].items() if HOST_ID in spec["hosts"]
     )
-    assert lanes_on_host == [LANE], (
+    assert lanes_on_host == LANES_ON_202, (
         f"no .201 lane may be declared for .202; got {lanes_on_host}"
     )
 
@@ -219,8 +224,10 @@ def test_census_on_202_reads_sim_202_clean_and_every_other_lane_not_applicable()
     plan = _plan_on_202(_healthy_sim_202_rows())
     manifest = _manifest()
     assert plan["host"] == HOST_ID
-    assert plan["lanes_checked"] == [LANE]
-    assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - {LANE}
+    assert sorted(plan["lanes_checked"]) == LANES_ON_202
+    assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - set(
+        LANES_ON_202
+    )
     assert plan["findings"] == []
     assert plan["has_drift"] is False
 
