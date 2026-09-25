@@ -97,6 +97,42 @@ _PHYSICALLY_PUBLIC_APPLICATION_OBJECTS: frozenset[str] = (
         APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
     )
 )
+# OMN-17887: a lint allowance, not a schema mapping. Tenant-domain relations live
+# in `public`, and deployed, append-only migrations name them without a schema
+# (node_projection_delegation/0046's bare `ALTER TABLE delegation_events` is one).
+# Those files cannot be rewritten, so the qualification lint accepts exactly the
+# names it accepted while they were bridged, and nothing more: widening this to
+# every `public` relation would silently retire grandfathered violations in
+# scripts/ci/application_database_sql_baseline.yaml. It maps nothing, and a
+# qualified `public.<name>` target is still held to the ownership check.
+_TENANT_RELATIONS_REFERENCED_UNQUALIFIED: frozenset[str] = frozenset(
+    {
+        "agent_routing_decisions",
+        "capability_scores",
+        "context_roi_scores",
+        "delegation_budget_state",
+        "delegation_events",
+        "delegation_judge_verdict_events",
+        "delegation_routing_tenant_overlay",
+        "delegation_shadow_comparisons",
+        "dep_health_findings",
+        "hook_events",
+        "instruction_eval_aggregate_snapshots",
+        "llm_cost_aggregates",
+        "pattern_learning_artifacts",
+        "projection_cost_savings_overview",
+        "projection_delegation_inference_response_text",
+        "projection_delegation_model_routing",
+        "projection_delegation_quality_gate",
+        "projection_delegation_savings",
+        "projection_delegation_savings_series",
+        "projection_delegation_summary",
+        "projection_delegation_token_usage",
+        "savings_estimates",
+        "skill_execution_snapshots",
+        "tenant_inference_credentials",
+    }
+)
 _RELATION_OBJECT_KINDS = frozenset(
     {
         EnumApplicationInventoryObjectKind.TABLE,
@@ -1208,6 +1244,8 @@ def _record_sql_target(
         ):
             return
         if name in _PHYSICALLY_PUBLIC_APPLICATION_OBJECTS:
+            return
+        if name in _TENANT_RELATIONS_REFERENCED_UNQUALIFIED:
             return
         violations.append(
             f"application relation target {name!r} must be schema-qualified"

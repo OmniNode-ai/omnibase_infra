@@ -1050,6 +1050,71 @@ def test_red_control_unqualified_application_mutation_target() -> None:
     assert "schema-qualified" in "\n".join(violations)
 
 
+def test_deployed_unqualified_tenant_relation_reference_is_accepted() -> None:
+    """OMN-17887: node_projection_delegation/0046 as vendored on dev.
+
+    Tenant-domain relations live in `public`, and this deployed, append-only
+    migration names one without a schema. It was accepted while the relation was
+    bridged and must stay accepted now that the bridge is gone.
+    """
+    assert not lint_application_database_sql(
+        "ALTER TABLE delegation_events\n"
+        "    ADD COLUMN IF NOT EXISTS cohort_key JSONB,\n"
+        "    ADD COLUMN IF NOT EXISTS cohort_key_sha256 TEXT,\n"
+        "    ADD COLUMN IF NOT EXISTS cohort_key_refusal TEXT;",
+        _TOPOLOGY,
+    )
+
+
+def test_unqualified_allowance_does_not_extend_to_other_public_relations() -> None:
+    """The allowance is the 24 formerly-bridged names, not every `public` table."""
+    for statement in (
+        "ALTER TABLE brand_new_tenant_table ADD COLUMN payload jsonb;",
+        # Granted in `public` by the topology, but never bridged: still refused.
+        "ALTER TABLE dispatch_eval_results ADD COLUMN payload jsonb;",
+    ):
+        assert "schema-qualified" in "\n".join(
+            lint_application_database_sql(statement, _TOPOLOGY)
+        ), statement
+
+
+def test_unqualified_tenant_allowance_equals_the_retired_bridge() -> None:
+    """Pinned so the allowance can only shrink, by an explicit edit here."""
+    from omnibase_infra.validation import application_database_domain_enforcement
+
+    assert (
+        frozenset(
+            {
+                "agent_routing_decisions",
+                "capability_scores",
+                "context_roi_scores",
+                "delegation_budget_state",
+                "delegation_events",
+                "delegation_judge_verdict_events",
+                "delegation_routing_tenant_overlay",
+                "delegation_shadow_comparisons",
+                "dep_health_findings",
+                "hook_events",
+                "instruction_eval_aggregate_snapshots",
+                "llm_cost_aggregates",
+                "pattern_learning_artifacts",
+                "projection_cost_savings_overview",
+                "projection_delegation_inference_response_text",
+                "projection_delegation_model_routing",
+                "projection_delegation_quality_gate",
+                "projection_delegation_savings",
+                "projection_delegation_savings_series",
+                "projection_delegation_summary",
+                "projection_delegation_token_usage",
+                "savings_estimates",
+                "skill_execution_snapshots",
+                "tenant_inference_credentials",
+            }
+        )
+        == application_database_domain_enforcement._TENANT_RELATIONS_REFERENCED_UNQUALIFIED
+    )
+
+
 def test_red_control_unknown_topology_schema() -> None:
     violations = lint_application_database_sql(
         "CREATE TABLE mystery.events (id uuid);", _TOPOLOGY
