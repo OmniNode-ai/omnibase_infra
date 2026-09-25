@@ -105,6 +105,16 @@ DEFAULT_GH_TIMEOUT_SECONDS = 120.0
 RUNNER_GROUP = "omnibase-ci"
 DEFAULT_GITHUB_API_URL = "https://api.github.com"  # url-authority-ok: canonical public GitHub REST base; probe_fleet scheme-pins it to https before any request
 
+#: Per-PR outcome detail prefix when ``arm-automerge`` refuses rather than
+#: merging directly (OMN-17427). An operation named *arm* must never merge:
+#: on 2026-09-25 this operation fell back to ``gh pr merge --squash --auto``
+#: actually performing a direct squash merge on a repo whose
+#: ``allow_auto_merge`` is ``false``, because GitHub CLI silently merges
+#: immediately instead of refusing when auto-merge cannot be armed. The fix
+#: reads the repo's live ``allow_auto_merge`` setting first and refuses with
+#: this outcome instead of ever invoking ``gh pr merge`` on such a repo.
+REFUSED_AUTOMERGE_DISABLED = "REFUSED_AUTOMERGE_DISABLED"
+
 # Ordered sources the fleet-status token is resolved from (OMN-18655). The two
 # environment variables come first so CI behaviour is byte-for-byte unchanged.
 # The gh CLI credential is last: a lane session is already authenticated as an
@@ -793,6 +803,38 @@ def gh_queue_depth(owner: str, repo: str) -> int:
         ) from exc
 
 
+def gh_repo_allows_auto_merge(owner: str, repo: str) -> bool:
+    """Live ``allow_auto_merge`` repo setting via the gh CLI (OMN-17427).
+
+    ``arm-automerge`` must never merge a PR directly: it may only arm
+    auto-merge on a repo that supports it. This is the one live check that
+    decides whether it is safe to invoke ``gh pr merge --squash --auto`` at
+    all. A probe failure raises rather than defaulting to ``True`` — an
+    operation named *arm* fails closed on an unreadable repo setting, the
+    same posture ``wait_for_runner_capacity`` and ``gh_queue_depth`` take.
+    """
+    result = _run_gh(
+        [
+            "api",
+            f"repos/{owner}/{repo}",
+            "--jq",
+            ".allow_auto_merge",
+        ]
+    )
+    if result.returncode != 0:
+        raise BulkPrThrottleError(
+            f"gh api repo settings probe failed: {result.stderr.strip()}"
+        )
+    value = result.stdout.strip()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise BulkPrThrottleError(
+        f"gh api repo settings probe returned invalid allow_auto_merge output: {value!r}"
+    )
+
+
 def _gh_auth_token() -> str | None:
     """Return the stored gh CLI credential, or ``None`` if there is not one.
 
@@ -909,6 +951,30 @@ def gh_apply_pr_operation(
             detail=(result.stdout or result.stderr).strip(),
         )
     if operation == "arm-automerge":
+        # OMN-17427: an operation named *arm* must never merge. GitHub CLI's
+        # own ``--auto`` flag silently performs a direct squash merge instead
+        # of refusing when the repo's ``allow_auto_merge`` is disabled, so
+        # this checks the live repo setting itself and never reaches
+        # ``gh pr merge`` at all on such a repo — there is no merge path left
+        # inside this branch for that case.
+        try:
+            auto_merge_allowed = gh_repo_allows_auto_merge(owner, repo)
+        except BulkPrThrottleError as exc:
+            return PrOutcome(
+                pr_number=pr_number,
+                success=False,
+                detail=f"could not verify allow_auto_merge before arming: {exc}",
+            )
+        if not auto_merge_allowed:
+            return PrOutcome(
+                pr_number=pr_number,
+                success=False,
+                detail=(
+                    f"{REFUSED_AUTOMERGE_DISABLED}: repo {owner}/{repo} has "
+                    "allow_auto_merge=false; refusing to arm rather than "
+                    "falling back to a direct merge"
+                ),
+            )
         result = _run_gh(
             [
                 "pr",
