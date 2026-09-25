@@ -267,7 +267,11 @@ def _added_backend_entry(
     # tier and rung names against the ladder it loads. Absent means absent, so
     # an added backend with no placement renders exactly as it did before.
     if binding.placement is not None:
-        entry["placement"] = binding.placement.model_dump(mode="json")
+        # AC4: ``mode`` is written only when it is not the default, so a
+        # fallback placement renders byte-identical to the pre-mode shape.
+        entry["placement"] = binding.placement.model_dump(
+            mode="json", exclude_defaults=True
+        )
     return entry
 
 

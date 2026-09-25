@@ -211,3 +211,33 @@ def test_the_render_refuses_an_oversized_placement_with_a_typed_error(
                 _added_binding(placement={**_PLACEMENT, "max_context_tokens": 65_536}),
             ],
         )
+
+
+# --- AC4: placement mode (RULING ledger:4257) --------------------------------
+
+
+@pytest.mark.unit
+def test_a_spread_placement_passes_its_mode_through(tmp_path: Path) -> None:
+    spread = {**_PLACEMENT, "mode": "spread"}
+    rendered = _render(tmp_path, [_base_binding(), _added_binding(placement=spread)])
+    assert _added(rendered)["placement"] == spread
+
+
+@pytest.mark.unit
+def test_a_fallback_placement_renders_without_a_mode_key(tmp_path: Path) -> None:
+    # The default renders the pre-mode bytes, so a routing authority that does
+    # not know the field still accepts every fallback placement.
+    explicit = {**_PLACEMENT, "mode": "fallback"}
+    rendered = _render(tmp_path, [_base_binding(), _added_binding(placement=explicit)])
+    placement = _added(rendered)["placement"]
+    assert placement == _PLACEMENT
+    assert isinstance(placement, dict)
+    assert "mode" not in placement
+
+
+@pytest.mark.unit
+def test_an_unknown_placement_mode_is_refused() -> None:
+    with pytest.raises(ValidationError, match="mode"):
+        ModelBifrostLaneBackendBinding.model_validate(
+            _added_binding(placement={**_PLACEMENT, "mode": "round_robin"})
+        )
