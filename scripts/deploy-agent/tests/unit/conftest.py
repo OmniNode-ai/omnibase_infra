@@ -76,6 +76,10 @@ def _declare_agent_instance(monkeypatch: pytest.MonkeyPatch) -> None:
     deletes the variable and so is unaffected by this fixture.
     """
     monkeypatch.setenv("DEPLOY_AGENT_INSTANCE", "dev-201")
+    # OMN-19522: agent construction selects the instance's dev-lane
+    # composition process-wide; each test starts on, and is returned to, the
+    # .201 one.
+    monkeypatch.setattr(executor_mod._DevInstanceSelection, "name", "dev-201")
 
 
 @pytest.fixture(autouse=True)
