@@ -352,14 +352,6 @@ class DeployAgent:
             # Selected here, once, before anything reads a lane config; an
             # instance with no composition refuses start (ValueError).
             select_dev_instance(self._router.instance.name)
-            logger.info(
-                "Deploy agent routing instance: %s, consumer group %s, %d route(s), "
-                "default %s",
-                self._router.instance.name,
-                self._router.consumer_group,
-                len(self._router.table.routes),
-                self._router.table.default_instance,
-            )
         # OMN-19509. The idle converge's state and its reads, each a seam a test
         # replaces. See _maybe_idle_converge.
         self._idle_converge_started_at = datetime.now(UTC)
@@ -400,8 +392,6 @@ class DeployAgent:
         )
         self._load_gate = LoadGate(thresholds) if thresholds is not None else None
         self._load_gate_last_verdict: EnumLoadGateVerdict | None = None
-        if thresholds is not None:
-            logger.info("Deploy agent load gate: %s", thresholds.model_dump())
         if self._host_slot is not None:
             logger.info(
                 "Deploy agent host slot: %s as %s, verify window %ds",
@@ -559,6 +549,24 @@ class DeployAgent:
             STATE_DIR,
             self._kafka_config.bootstrap_servers,
             ",".join(sorted(lane.value for lane in self._allowed_lanes)),
+        )
+        # OMN-19507. Stated here, after logging is configured, rather than in
+        # __init__, where both lines were emitted before basicConfig ran and
+        # reached no handler: the dev-200 agent's log had no instance line
+        # (dev-200-lane TERMINAL, omni_home ledger 2026-09-25T11:23:31Z).
+        if self._router is not None:
+            logger.info(
+                "Deploy agent routing instance: %s, consumer group %s, %d route(s), "
+                "default %s",
+                self._router.instance.name,
+                self._router.consumer_group,
+                len(self._router.table.routes),
+                self._router.table.default_instance,
+            )
+        gate = getattr(self, "_load_gate", None)
+        logger.info(
+            "Deploy agent load gate: %s",
+            gate.thresholds.model_dump() if gate is not None else "none declared",
         )
 
         # Step 0: record which code this process actually loaded, before
