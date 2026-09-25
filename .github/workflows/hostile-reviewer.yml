@@ -10,12 +10,16 @@
 # through any omnibase_infra handler -- OMN-15959 corrected this stale
 # doc-comment, which named a since-deleted HandlerLlmCliSubprocess class that
 # omniintelligence.review_pairing.cli_review never actually imported) with
-# three models (OMN-17492): the two local keys (qwen3-review /
-# qwen3-review-b -- both currently resolve to the ONE remaining GPU on
-# .201:8000 since the 4090 RMA, see OMN-16481) plus glm-review, an
-# authenticated cloud reviewer on the z.ai GLM Coding Plan -- an
-# independent quota domain AND independent hardware, so the roster
-# survives a total local-fleet outage. Codex is excluded from the initial
+# three DIFFERENT models (OMN-17492, operator ruling 2026-09-25):
+# qwen3-review (Qwen3.8-27B on .201:8000), gpt-oss-review (gpt-oss-120b on
+# the .200 Mac Studio, :8130) and glm-review, an authenticated cloud
+# reviewer on the z.ai GLM Coding Plan. qwen3-review-b is no longer a
+# voter: it resolves to the same .201:8000 model as qwen3-review, so their
+# "agreement" was one model agreeing with itself (on the OMN-17492 eval the
+# same model on two hosts agreed on a false critical in 2 of 8 runs). The
+# Mac sleeps; when gpt-oss-review is unreachable the reachability probe
+# drops it, the result names it as unreachable, and qwen3-review plus
+# glm-review are still two different models, so the run keeps a verdict. Codex is excluded from the initial
 # pilot -- add --model codex once non-interactive OAuth auth is confirmed
 # on the omnibase-ci runner (OMN-8524).
 #
@@ -194,19 +198,19 @@ jobs:
         env:
           # Resolve the SAME registry the reviewer loads (model_registry_loader)
           # for the SAME models the review step runs
-          # (`--model qwen3-review --model qwen3-review-b --model glm-review`).
+          # (`--model qwen3-review --model gpt-oss-review --model glm-review`).
           # We flip reachable=false ONLY when EVERY requested model is
           # unreachable AND the codex api-fallback is unavailable — the exact
           # condition under which the reviewer itself yields verdict=degraded
           # + exit 0. glm-review (OMN-17492) is an HTTPS cloud endpoint —
           # probed as api.z.ai:443 (scheme-aware port default below).
-          REVIEW_MODEL_KEYS: "qwen3-review qwen3-review-b glm-review"
+          REVIEW_MODEL_KEYS: "qwen3-review gpt-oss-review glm-review"
           REGISTRY_PATH: "src/omniintelligence/review_pairing/model_registry.yaml"
           # Wired from a GitHub Actions secret (mirrors OMN-14176): the LLM HTTP
           # transport HMAC-signs every call with LOCAL_LLM_SHARED_SECRET and
           # fail-closes if it is absent.
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
-          LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint host 192.168.86.201"
+          LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint hosts 192.168.86.201 and .200"
         run: |
           # -e is intentionally OMITTED: this probe must NEVER fail the job. Every
           # uncertain/ambiguous outcome FAILS OPEN to the full install + review.
@@ -355,7 +359,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
-          LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint host 192.168.86.201; transport fail-closes if unset"
+          LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint hosts 192.168.86.201 and .200; transport fail-closes if unset"
           # OMN-17492: glm-review — authenticated cloud reviewer on the z.ai
           # GLM Coding Plan. The Bearer key is a repo Actions secret (same
           # sanctioned pattern as LOCAL_LLM_SHARED_SECRET); the transport
@@ -369,11 +373,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Three models (OMN-17492): qwen3-review + qwen3-review-b (both on
-          # the one remaining .201 GPU — OMN-16481) + glm-review (z.ai GLM
-          # Coding Plan; independent hardware AND quota domain). Running >=2
-          # models keeps cli_review's exit-0 "at least 2 succeeded" path
-          # reachable even when the whole local fleet is down.
+          # Three different models (OMN-17492): qwen3-review (Qwen3.8-27B,
+          # .201) + gpt-oss-review (gpt-oss-120b, .200 Mac Studio) +
+          # glm-review (z.ai GLM Coding Plan; independent hardware AND quota
+          # domain). Any two of them are two models, so losing one -- the Mac
+          # asleep, the GPU busy, the cloud quota spent -- still leaves a
+          # verdict. A reviewer the reachability probe drops is recorded in
+          # the result as failed with an "unreachable" error, and the summary
+          # below names it.
           #
           # OMN-18479: those models are also the quorum. cli_review now
           # resolves cross-model agreement and only a finding at least two
@@ -383,7 +390,7 @@ jobs:
             --pr "$PR_NUMBER" \
             --repo "$REPO" \
             --model qwen3-review \
-            --model qwen3-review-b \
+            --model gpt-oss-review \
             --model glm-review \
             --output "$REVIEW_JSON_PATH" \
             2> >(tee hostile-reviewer-stderr.log >&2) || REVIEW_EXIT=$?
@@ -450,6 +457,14 @@ jobs:
           print(f"warning_count={severity_counts.get('warning', 0)}")
           print(f"total_findings={total_findings}")
           print(f"models_succeeded={','.join(models_succeeded)}")
+          # OMN-17492: name every reviewer that did not answer, with its
+          # reason, so a run that lost one says which and why.
+          failed = [
+              f"{r.get('model')} ({str(r.get('error') or 'failed').splitlines()[0][:160]})"
+              for r in data.get("results", [])
+              if not r.get("success")
+          ]
+          print(f"models_failed={'; '.join(failed)}")
           PYEOF
           )
 
@@ -489,6 +504,7 @@ jobs:
           REVIEW_WARNINGS: ${{ steps.review.outputs.warning_count || '0' }}
           REVIEW_TOTAL: ${{ steps.review.outputs.total_findings || steps.preflight.outputs.total_findings }}
           REVIEW_MODELS: ${{ steps.review.outputs.models_succeeded || steps.preflight.outputs.models_succeeded }}
+          REVIEW_MODELS_FAILED: ${{ steps.review.outputs.models_failed || '' }}
           REVIEW_ERROR: ${{ steps.review.outputs.error || steps.preflight.outputs.error }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -498,6 +514,7 @@ jobs:
             const warnings = parseInt(process.env.REVIEW_WARNINGS || '0');
             const total = parseInt(process.env.REVIEW_TOTAL || '0');
             const models = process.env.REVIEW_MODELS || '';
+            const modelsFailed = process.env.REVIEW_MODELS_FAILED || '';
             const error = process.env.REVIEW_ERROR || '';
 
             const icon = {
@@ -528,7 +545,8 @@ jobs:
               `**Critical findings**: ${errors}  `,
               `**Major findings**: ${warnings}  `,
               `**Total findings**: ${total}  `,
-              `**Models succeeded**: ${models || 'none'}`,
+              `**Models succeeded**: ${models || 'none'}  `,
+              `**Models unavailable**: ${modelsFailed || 'none'}`,
               note,
               '',
               '---',
@@ -541,7 +559,7 @@ jobs:
               '| `Hostile Review Thread Gate` | Deterministic: unresolved hostile-reviewer threads exist | Fails until resolved (not yet a required context) |',
               '| `degraded` verdict | Fewer than 2 models succeeded (infra) | Fails this job with a named reason |',
               '',
-              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review: qwen3-review, qwen3-review-b, glm-review (OMN-8468/OMN-8524/OMN-17492)_',
+              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review: qwen3-review (Qwen3.8-27B), gpt-oss-review (gpt-oss-120b), glm-review (OMN-8468/OMN-8524/OMN-17492)_',
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
