@@ -116,7 +116,7 @@ import signal
 import sys
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -1469,6 +1469,88 @@ def load_supported_criteria() -> frozenset[str] | None:
     return frozenset(str(item) for item in supported)
 
 
+#: omnimarket's quality gate: the module whose verdict ``replace-task-class``
+#: is checked against. Named once so the resolver and its docstring agree.
+_QUALITY_GATE_MODULE = (
+    "omnimarket.nodes.node_delegation_quality_gate_reducer.handlers."
+    "handler_quality_gate"
+)
+
+
+def load_criteria_adequacy_authority() -> Callable[[tuple[str, ...]], bool] | None:
+    """Return the gate's own answer to "can a bar of only these criteria accept?".
+
+    OMN-18925. Under ``--criteria-mode replace-task-class`` the caller's
+    criteria ARE the bar. The quality gate then refuses any bar whose rules are
+    all reject-only (OMN-13370: a structural, length, refusal or marker check
+    may reject an answer but never promote one), and that verdict depends only
+    on the rule set, never on the answer. A bar with no adequacy authority is
+    therefore refused on every rung, metered ones included, and the outcome is
+    known before the first rung runs.
+
+    The predicate is built from the gate module's own rule-set merge and
+    authority check, not from a copy of its reject-only sets, for the reason
+    :func:`load_supported_criteria` gives: one source, not a table that drifts.
+    ``None`` means omnimarket (or either function) is unresolvable, and the
+    criteria pass through to be judged where they always were.
+    """
+    try:
+        gate = importlib.import_module(_QUALITY_GATE_MODULE)
+        merge_rule_sets = gate._merge_rule_sets
+        has_adequacy_authority = gate._has_adequacy_authority
+    except (ImportError, AttributeError):
+        return None
+
+    def _predicate(criteria: tuple[str, ...]) -> bool:
+        deterministic, heuristic = merge_rule_sets(
+            declared_deterministic=(),
+            declared_heuristic=(),
+            caller_criteria=criteria,
+        )
+        return bool(has_adequacy_authority(deterministic, heuristic))
+
+    return _predicate
+
+
+def _validate_criteria_mode(
+    criteria: tuple[str, ...], criteria_mode: str | None
+) -> str | None:
+    """Refuse a replace-mode bar that no answer can meet, naming the flag.
+
+    Measured 2026-09-25 (run ``7d83a5df-8824-4817-a70d-e5997b1a7af3``): a
+    ``document`` request with ``--criteria concise --criteria task_completed
+    --criteria plain_text_only --criteria-mode replace-task-class`` climbed six
+    rungs in 116 s, each scoring 1.0 against a 0.8 bar and each refused for
+    having no adequacy authority. The default extend mode keeps the task
+    class's own authority and is never refused here.
+    """
+    if criteria_mode != "replace-task-class":
+        return criteria_mode
+    has_authority = load_criteria_adequacy_authority()
+    if has_authority is None or has_authority(criteria):
+        return criteria_mode
+    supported = load_supported_criteria() or frozenset()
+    accepting = sorted(item for item in supported if has_authority((item,)))
+    why = (
+        f"{', '.join(criteria)} are all reject-only checks (OMN-13370)"
+        if criteria
+        else "with no criteria the replaced bar falls to the legacy checks, "
+        "which are reject-only (OMN-13370)"
+    )
+    raise ValueError(
+        "--criteria-mode replace-task-class with this bar can never accept an "
+        f"answer: {why}, so the quality gate has no adequacy authority and "
+        "every rung would be refused, metered ones included. Drop "
+        "--criteria-mode to keep the task class's own adequacy authority and "
+        "add your criteria to it"
+        + (
+            f", or add a criterion that can accept: {', '.join(accepting)}."
+            if accepting
+            else "."
+        )
+    )
+
+
 def _validate_backend_pin(backend_id: str | None) -> str | None:
     """Normalise ``--backend-id`` and refuse an empty one (OMN-19124).
 
@@ -1906,7 +1988,9 @@ def _timeout_receipt(
     type=str,
     multiple=True,
     help=(
-        "An acceptance criterion this answer must meet, repeatable. Stating "
+        "An acceptance criterion this answer must meet, repeatable: a DECLARED "
+        "slug such as concise or task_completed, never free text (an unknown "
+        "value is refused and the refusal lists the vocabulary). Stating "
         "your own criteria is how you stop being graded against a rubric you "
         "did not ask for: on 2026-09-15 a drafting prompt was refused on every "
         "rung for missing source citations, because the task class it landed "
@@ -1923,7 +2007,10 @@ def _timeout_receipt(
         "Whether --criteria are added to the task class's own definition of "
         "done (the default) or REPLACE it. Only meaningful with --criteria. "
         "'replace-task-class' is the escape hatch from a shape floor that does "
-        "not apply to your task."
+        "not apply to your task. It also drops the class's adequacy authority, "
+        "so a replaced bar made only of reject-only checks (concise, "
+        "task_completed, plain_text_only, ...) can accept nothing and is "
+        "refused before a run is created (OMN-18925)."
     ),
 )
 @click.option(
@@ -2160,7 +2247,7 @@ def delegate_command(
             task_type=_resolve_task_class_flag(task_type, task_class_alias),
             backend_id=_validate_backend_pin(backend_id),
             acceptance_criteria=_validate_criteria(tuple(criteria)),
-            criteria_mode=criteria_mode,
+            criteria_mode=_validate_criteria_mode(tuple(criteria), criteria_mode),
             response_contract=_load_response_contract(response_contract),
             system_prompt=system_prompt,
             max_tokens=max_tokens,
