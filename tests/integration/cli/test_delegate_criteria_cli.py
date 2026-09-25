@@ -194,3 +194,74 @@ class TestTheFallbackIsAnnouncedInHelp:
         help_text = str(_invoke(["--help"]).output)
         assert DEFAULT_TASK_TYPE in help_text
         assert "the fallback when none" in help_text
+
+
+class TestAReplaceModeBarThatCannotAcceptIsRefusedAtTheFlag:
+    """OMN-18925: run 7d83a5df climbed six rungs on a bar that could accept nothing."""
+
+    def test_the_measured_command_is_refused_before_dispatch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from omnibase_infra.cli import cli_delegate
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "load_supported_criteria",
+            lambda: frozenset(
+                {"concise", "task_completed", "plain_text_only", "final_artifact_only"}
+            ),
+        )
+        monkeypatch.setattr(
+            cli_delegate,
+            "load_criteria_adequacy_authority",
+            lambda: lambda criteria: "final_artifact_only" in criteria,
+        )
+        args = [
+            "draft a PR body",
+            "--task-type",
+            "document",
+            "--criteria",
+            "concise",
+            "--criteria",
+            "task_completed",
+            "--criteria",
+            "plain_text_only",
+            "--criteria-mode",
+            "replace-task-class",
+            "--state-root",
+            str(tmp_path),
+        ]
+        result = _invoke(args)
+        assert result.exit_code == 2, result.output
+        assert "no adequacy authority" in result.output
+        assert "omnimarket is NOT INSTALLED" not in result.output, (
+            "the bar refusal must precede the drift guard"
+        )
+        assert not (tmp_path / "runs").exists(), "no run may be created"
+
+    def test_the_same_criteria_in_extend_mode_are_not_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Positive control: extend mode keeps the class's own authority."""
+        from omnibase_infra.cli import cli_delegate
+
+        monkeypatch.setattr(
+            cli_delegate,
+            "load_supported_criteria",
+            lambda: frozenset({"concise", "task_completed", "plain_text_only"}),
+        )
+        monkeypatch.setattr(
+            cli_delegate,
+            "load_criteria_adequacy_authority",
+            lambda: lambda criteria: False,
+        )
+        result = _invoke(
+            [
+                "draft a PR body",
+                "--criteria",
+                "concise",
+                "--state-root",
+                str(tmp_path),
+            ]
+        )
+        assert "no adequacy authority" not in result.output
