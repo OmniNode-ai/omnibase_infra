@@ -8,9 +8,10 @@
     "Update procedure: bump core, re-run the seam test, and record the new",
     "surface here only after confirming every consumer still type-checks.",
     "OMN-18918: bumped 0.47.18 -> 0.47.20 for the delivery-context chain. The consumed SURFACE is unchanged -- the seam test reported the version line and no symbol or field-type drift -- because 0.47.20 only ADDS ModelMessageDeliveryContext. Recorded only after mypy --strict passed over all 3120 source files, which is the confirmation this fixture's update procedure requires.",
-    "OMN-18595: bumped 0.47.20 -> 0.47.22 by the dependency cascade (omnibase_infra#3997). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged."
+    "OMN-18595: bumped 0.47.20 -> 0.47.22 by the dependency cascade (omnibase_infra#3997). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged.",
+    "OMN-19408: bumped 0.47.22 -> 0.47.23 (omnibase_infra#4077) to pick up ModelRuntimeLaneScope. The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged."
   ],
-  "core_version": "0.47.22",
+  "core_version": "0.47.23",
   "source": "pypi",
   "modules": {
     "omnibase_core.models.delegation.wire": [

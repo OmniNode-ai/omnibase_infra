@@ -1497,6 +1497,47 @@ def _validate_backend_pin(backend_id: str | None) -> str | None:
     return pinned
 
 
+#: The request ``metadata`` key that names the ticket a delegation works
+#: (OMN-19514). omnimarket's delegate-skill handler reads the same key.
+DELEGATE_TICKET_METADATA_KEY = "ticket_id"
+
+#: A Linear issue identifier: a team key, a hyphen, a positive number.
+_TICKET_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9]+-[1-9][0-9]*$")
+
+#: The ticket segment of a per-ticket worktree path,
+#: ``.../omni_worktrees/<TICKET>/<repo>/...`` (Operating Rule 9).
+_WORKTREE_TICKET_PATTERN = re.compile(
+    r"(?:^|/)omni_worktrees/([A-Z][A-Z0-9]+-[1-9][0-9]*)(?:/|$)"
+)
+
+
+def resolve_delegate_ticket(ticket: str | None, *, cwd: Path) -> tuple[str | None, str]:
+    """Resolve the ticket a delegation works, and say how (OMN-19514).
+
+    Order: the explicit ``--ticket`` flag; otherwise the ticket segment of an
+    ``omni_worktrees/<TICKET>/`` working directory; otherwise nothing. The
+    second element names which rule decided, so the stderr line and a reader
+    of the run can tell a stated ticket from a derived one.
+
+    A malformed flag is refused rather than dropped: a ticket the caller
+    believes they named, silently lost, is a run that joins to nothing. A
+    directory that is not a ticket worktree names nothing; no ticket is ever
+    guessed.
+    """
+    if ticket is not None:
+        named = ticket.strip()
+        if not _TICKET_ID_PATTERN.fullmatch(named):
+            raise ValueError(
+                f"--ticket {ticket!r} is not a ticket identifier: expected a "
+                "team key, a hyphen and a positive number, such as OMN-1234."
+            )
+        return named, "explicit"
+    found = _WORKTREE_TICKET_PATTERN.search(cwd.as_posix())
+    if found is not None:
+        return found.group(1), "worktree path"
+    return None, "none"
+
+
 def _validate_criteria(criteria: tuple[str, ...]) -> tuple[str, ...]:
     """Refuse an unknown criterion here, naming the flag and the vocabulary."""
     if not criteria:
@@ -1586,6 +1627,7 @@ def _write_payload(
     system_prompt: str | None = None,
     requested_timeout_seconds: int | None = None,
     backend_id: str | None = None,
+    ticket_id: str | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -1651,6 +1693,12 @@ def _write_payload(
     # existing caller's payload.
     if backend_id is not None:
         payload["backend_id"] = backend_id
+    # OMN-19514: the ticket this delegation works, in the request's metadata
+    # map, which every released request consumer already accepts. A declared
+    # request field would be refused by the deployed consumer until a release
+    # carried it. Omitted entirely when no ticket was named.
+    if ticket_id is not None:
+        payload["metadata"] = {DELEGATE_TICKET_METADATA_KEY: ticket_id}
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -2020,6 +2068,19 @@ def _timeout_receipt(
     ),
 )
 @click.option(
+    "--ticket",
+    "ticket",
+    default=None,
+    help=(
+        "The ticket this delegation works, such as OMN-1234 (OMN-19514). It "
+        "rides in the request metadata onto the delegation's terminal and its "
+        "delegation_events row, so the run joins to its ticket and to the DoD "
+        "verdict that judged it. Omitted, it is read from an "
+        "omni_worktrees/<TICKET>/ working directory; otherwise none is "
+        "recorded. A malformed value is a usage error, never dropped."
+    ),
+)
+@click.option(
     "--omnibase-path",
     "omnibase_path",
     type=click.Path(path_type=Path),
@@ -2069,6 +2130,7 @@ def delegate_command(
     emit_socket: Path | None,
     omnibase_path: Path | None,
     allow_omnimarket_drift: bool,
+    ticket: str | None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print exactly one typed result.
 
@@ -2092,6 +2154,7 @@ def delegate_command(
         onex delegate "document the router" --bus kafka --lane dev --locus in-process
     """
     try:
+        ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
         exit_code = run_delegate(
             prompt=prompt,
             task_type=_resolve_task_class_flag(task_type, task_class_alias),
@@ -2112,6 +2175,8 @@ def delegate_command(
             emit_socket=emit_socket,
             omni_home=omnibase_path,
             allow_drift=allow_omnimarket_drift,
+            ticket_id=ticket_id,
+            ticket_resolution=ticket_resolution,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2139,6 +2204,8 @@ def run_delegate(
     emit_socket: Path | None,
     omni_home: Path | None = None,
     allow_drift: bool = False,
+    ticket_id: str | None = None,
+    ticket_resolution: str = "none",
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -2374,7 +2441,11 @@ def run_delegate(
             state_root=state_root,
             run_id=run_id,
             correlation_id=correlation_id,
+            ticket_id=ticket_id,
         )
+        # OMN-19514: say which ticket the run carries and how it was chosen,
+        # beside the task-class line, so a derived ticket is never silent.
+        click.echo(f"ticket: {ticket_id or 'none'} ({ticket_resolution})", err=True)
         contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
         # OMN-17295 / OMN-17304: decide WHERE the orchestrator runs, and — for a
         # dispatched run — prove a deployed one is actually consuming the command

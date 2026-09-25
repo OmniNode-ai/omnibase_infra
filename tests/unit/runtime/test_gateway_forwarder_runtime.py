@@ -544,9 +544,15 @@ def test_staging_canary_resolves_topics_from_node_contract(tmp_path: Path) -> No
 
     assert len(loaded.forwarder.mirror_topics.inbound) == 3
     # 8 after OMN-16204's OD-9 pair; 13 after OMN-16979's seven governed hook
-    # classes. The governance half is asserted in
-    # tests/unit/nodes/node_bus_forwarder_effect/test_egress_redaction_omn16979.py.
-    assert len(loaded.forwarder.mirror_topics.outbound) == 13
+    # classes; 15 after OMN-19439's two metadata-scrubbed delegate-skill
+    # terminals. The governance half is asserted in
+    # tests/unit/nodes/node_bus_forwarder_effect/test_egress_redaction_omn16979.py
+    # and test_delegate_skill_metadata_scrub_omn19439.py.
+    assert len(loaded.forwarder.mirror_topics.outbound) == 15
+    scrub = loaded.forwarder.egress_metadata_scrub
+    assert scrub is not None
+    assert scrub.governs("onex.evt.omnimarket.delegate-skill-completed.v1")
+    assert scrub.governs("onex.evt.omnimarket.delegate-skill-failed.v1")
     # OMN-16979 admits all seven capture classes ONLY behind the
     # egress_redaction gate, so the resolved deployment is asserted on both
     # halves: present in outbound and governed by the policy.

@@ -82,6 +82,13 @@ config:
         - "onex.evt.omniclaude.skill-started.v1"
         - "onex.evt.omniclaude.skill-completed.v1"
         - "onex.evt.omnimarket.tool-output-captured.v1"
+        # OMN-19439 (MD-42): the two delegate-skill terminals cross ONLY as the
+        # metadata allowlist declared by egress_metadata_scrub below. Their
+        # payload carries the delegated prompt and the model's answer; neither
+        # crosses. The cloud half (FORWARDER_MIRROR_TOPIC_UNION and the
+        # provisioner) lands in omninode_infra in the same change.
+        - "onex.evt.omnimarket.delegate-skill-completed.v1"
+        - "onex.evt.omnimarket.delegate-skill-failed.v1"
     # ------------------------------------------------------------------
     # OMN-16979: fail-closed egress redaction for the widened hook classes.
     # ------------------------------------------------------------------
@@ -137,6 +144,51 @@ config:
         - "onex.evt.omniclaude.skill-started.v1"
         - "onex.evt.omniclaude.skill-completed.v1"
         - "onex.evt.omnimarket.tool-output-captured.v1"
+    # ------------------------------------------------------------------
+    # OMN-19439: metadata-only egress scrub for the delegate-skill terminals.
+    # ------------------------------------------------------------------
+    # The cloud needs delegation OUTCOMES (MD-42), never what was asked or
+    # answered. A delegate-skill terminal carries `prompt_text` and `response`
+    # at the top level and model text again inside `attempts[*]`,
+    # `error_message`, `response_contract_evidence`, `budget_evidence` and
+    # the per-gate diagnostics in `quality_gates_failed` (which can quote the
+    # response). So this is an ALLOWLIST of top-level payload keys, applied
+    # at the boundary before the content-addressed event_id is computed:
+    # every key not named here is dropped, including any key a producer adds
+    # later. The model refuses, structurally, to retain a known text field.
+    # A delegate-skill topic mirrored outbound without this scrub fails
+    # config validation.
+    egress_metadata_scrub:
+      scrubbed_topics:
+        - "onex.evt.omnimarket.delegate-skill-completed.v1"
+        - "onex.evt.omnimarket.delegate-skill-failed.v1"
+      retained_payload_fields:
+        - "status"
+        - "correlation_id"
+        - "task_type"
+        - "tenant_id"
+        - "provider"
+        - "model_name"
+        - "model_cloud_baseline"
+        - "pricing_manifest_version"
+        - "quality_gate_passed"
+        - "quality_score"
+        - "required_quality_bar"
+        - "score_vs_required_bar"
+        - "terminal_failure_cause"
+        # A consume-boundary failure terminal (payload_type
+        # ModelBoundaryFailureTerminal) rides the failed topic; the
+        # cloud closes the workflow with its class and ONEX code. Both are
+        # grammar-checked codes, never text; failure_reason is text and
+        # does not cross.
+        - "failure_class"
+        - "failure_code"
+        - "preamble_chars"
+        - "metrics"
+        - "escalation_count"
+        - "attempts_count"
+        - "queue_wait_ms"
+        - "execution_duration_ms"
     # ------------------------------------------------------------------
     # OMN-17034: the lane-mirror leg.
     # ------------------------------------------------------------------
