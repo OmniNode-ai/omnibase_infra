@@ -12,7 +12,10 @@ subject and the live-lane binding has already been established by the caller.
 
 from __future__ import annotations
 
+import contextlib
+import io
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +26,12 @@ pytestmark = pytest.mark.unit
 QUEUED_SHA = "a" * 40
 LATER_SHA = "b" * 40
 NOW = datetime(2026, 9, 25, 17, 0, tzinfo=UTC)
+WORKFLOW = (
+    Path(__file__).resolve().parents[3]
+    / ".github"
+    / "workflows"
+    / "runtime-rebuild-trigger.yml"
+)
 
 
 def _delivery(
@@ -98,6 +107,40 @@ class TestTimeoutThenDeploy:
         assert recovered.result is receipts.EnumLabPassResult.PASS
         assert recovered.converged_via == f"{LATER_SHA} via container-revision"
 
+    def test_a_later_failed_probe_is_preserved_as_fail_for_the_queued_head(
+        self,
+    ) -> None:
+        assert _eligibility(_delivery()) == "reemit:absent-endpoint-delivery-waiting"
+        source = receipts.build_receipt(
+            sha=LATER_SHA,
+            lane=receipts.EnumLabLane.COMPOSE_DEV,
+            started_at=NOW,
+            finished_at=NOW + timedelta(minutes=5),
+            checks=[
+                receipts.ModelLabPassCheck(
+                    name="deployed_revision",
+                    ok=True,
+                    evidence=f"lane at {LATER_SHA}, containing {QUEUED_SHA}",
+                ),
+                receipts.ModelLabPassCheck(
+                    name="ready_main", ok=False, evidence="GET /ready -> 503"
+                ),
+            ],
+            agent_command_id=None,
+        )
+
+        recovered = receipts.reemit_receipt(
+            source,
+            QUEUED_SHA,
+            converged_via=f"{LATER_SHA} via container-revision",
+        )
+
+        assert recovered.sha == QUEUED_SHA
+        assert recovered.result is receipts.EnumLabPassResult.FAIL
+        assert [check.name for check in recovered.checks if not check.ok] == [
+            "ready_main"
+        ]
+
 
 class TestEndpointRecoveryStaysFailClosed:
     def test_a_delivery_for_another_subject_does_not_open_the_endpoint(self) -> None:
@@ -120,7 +163,9 @@ class TestEndpointRecoveryStaysFailClosed:
         assert _eligibility(old, newer).startswith("skip:")
 
     def test_an_unreadable_delivery_surface_keeps_the_endpoint_closed(self) -> None:
-        def _unreadable(_repo: str, _workflow: str, _branch: str):
+        def _unreadable(
+            _repo: str, _workflow: str, _branch: str
+        ) -> list[receipts.ModelDeliveryRun]:
             raise receipts.ReceiptLookupError("delivery API unavailable")
 
         decision = receipts.endpoint_reemit_eligibility(
@@ -133,3 +178,73 @@ class TestEndpointRecoveryStaysFailClosed:
             read_runs=_unreadable,
         )
         assert decision.startswith("skip:endpoint-delivery-unreadable")
+
+
+def test_the_cli_wires_the_endpoint_subject_and_delivery_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def _decision(
+        subject: str,
+        *,
+        repo: str,
+        workflow: str,
+        branch: str,
+        bound_seconds: float,
+        now: datetime,
+    ) -> str:
+        observed.update(
+            subject=subject,
+            repo=repo,
+            workflow=workflow,
+            branch=branch,
+            bound_seconds=bound_seconds,
+            now=now,
+        )
+        return "reemit:absent-endpoint-delivery-waiting"
+
+    monkeypatch.setattr(receipts, "endpoint_reemit_eligibility", _decision)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = receipts.main(
+            [
+                "reemit-eligible",
+                "--endpoint",
+                "--endpoint-subject",
+                QUEUED_SHA,
+                "--repo",
+                "OmniNode-ai/omnibase_infra",
+                "--delivery-workflow",
+                "deliver-dev-candidate-to-staging.yml",
+                "--delivery-branch",
+                "dev",
+                "--overall-bound-seconds",
+                "14400",
+            ]
+        )
+
+    assert code == 0
+    assert out.getvalue().strip() == "reemit:absent-endpoint-delivery-waiting"
+    assert observed == {
+        "subject": QUEUED_SHA,
+        "repo": "OmniNode-ai/omnibase_infra",
+        "workflow": "deliver-dev-candidate-to-staging.yml",
+        "branch": "dev",
+        "bound_seconds": 14_400,
+        "now": observed["now"],
+    }
+    assert isinstance(observed["now"], datetime)
+
+
+def test_reemission_runs_after_a_completed_failed_verify_that_wrote_a_receipt() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    job = text.split("  reemit-queued-receipts:", 1)[1].split(
+        "\n  rerun-refused-deliveries:", 1
+    )[0]
+    condition = job.split("    runs-on:", 1)[0]
+
+    assert "always()" in condition
+    assert "needs.verify-lane-converged.result != 'skipped'" in condition
+    assert "needs.verify-lane-converged.result != 'cancelled'" in condition
+    assert "needs.verify-lane-converged.result == 'success'" not in condition

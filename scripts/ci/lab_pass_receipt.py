@@ -4095,6 +4095,47 @@ def read_delivery_runs(
     return runs
 
 
+def endpoint_reemit_eligibility(
+    subject: str,
+    *,
+    repo: str,
+    workflow: str,
+    branch: str,
+    bound_seconds: float,
+    now: datetime,
+    read_runs: Callable[[str, str, str], list[ModelDeliveryRun]] = read_delivery_runs,
+) -> str:
+    """Decide whether an absent lower-endpoint receipt may be recovered.
+
+    OMN-19563. A queued verify run emits no receipt. When its command deploys
+    after that run ends, the next convergence observes the queued sha as its
+    exact initial revision -- the bounded lower endpoint -- rather than inside
+    the open re-emission window. The caller has already re-established live
+    containment for that endpoint; this second predicate proves the newest
+    staging delivery is waiting for the same exact subject inside its bound.
+
+    Any unreadable delivery surface stays closed. This function only admits an
+    absent receipt; unreadable or health-failing receipts are rejected by the
+    existing eligibility path before this function is called.
+    """
+    if not _SHA_RE.match(subject):
+        return "skip:endpoint-subject-invalid"
+    try:
+        runs = read_runs(repo, workflow, branch)
+    except Exception as exc:  # noqa: BLE001 - refusal is the fail-closed result
+        detail = " ".join(str(exc).split()) or type(exc).__name__
+        return f"skip:endpoint-delivery-unreadable {detail}"
+    selected, _reasons = select_refused_deliveries(
+        subject,
+        runs,
+        now=now,
+        bound_seconds=bound_seconds,
+    )
+    if selected:
+        return "reemit:absent-endpoint-delivery-waiting"
+    return "skip:endpoint-has-no-waiting-delivery"
+
+
 def rerun_refused_deliveries(
     repo: str,
     subjects: Sequence[str],
@@ -4809,10 +4850,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "this candidate is the window's LOWER endpoint, the revision the "
-            "lane was already on. An endpoint with no receipt is skipped: it "
-            "may not be a merge this lane ever watched."
+            "lane was already on. An endpoint with no receipt is eligible only "
+            "when the newest staging delivery is waiting for its exact sha."
         ),
     )
+    elig.add_argument(
+        "--endpoint-subject",
+        default="",
+        help=(
+            "OMN-19563: exact lower-endpoint sha. When its receipt is absent, "
+            "re-emission is allowed only while the newest staging delivery is "
+            "waiting for this subject."
+        ),
+    )
+    elig.add_argument("--repo", default=DEFAULT_REPO)
+    elig.add_argument(
+        "--delivery-workflow",
+        default="deliver-dev-candidate-to-staging.yml",
+    )
+    elig.add_argument("--delivery-branch", default="dev")
+    elig.add_argument("--overall-bound-seconds", type=float, default=14_400)
 
     gate = sub.add_parser("gate", help="fail closed unless a PASS receipt exists")
     gate.add_argument("--sha", required=True)
@@ -5177,7 +5234,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         existing = args.existing
         if existing is None or not existing.is_file():
             if args.endpoint:
-                print("skip:endpoint-has-no-receipt")
+                if not args.endpoint_subject:
+                    print("skip:endpoint-has-no-receipt")
+                    return 0
+                print(
+                    endpoint_reemit_eligibility(
+                        args.endpoint_subject,
+                        repo=args.repo,
+                        workflow=args.delivery_workflow,
+                        branch=args.delivery_branch,
+                        bound_seconds=args.overall_bound_seconds,
+                        now=datetime.now(UTC),
+                    )
+                )
                 return 0
             print("reemit:absent")
             return 0
