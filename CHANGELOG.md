@@ -1,3 +1,17 @@
+## v0.38.57 (2026-09-24)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.57 by the scheduled release train.
+- 5 release-relevant commit(s) merged since v0.38.56.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.56
+- fix(OMN-19356): observability consumers stay healthy on a quiet topic after handled traffic (#4031)
+- feat(OMN-17423): re-home credential log redaction into the shared runtime path (#4016)
+- fix(OMN-19241): lease the shared DLQ replay producers and bound a record that keeps failing (#4002)
+- chore(OMN-17292): advance omnimarket contract pin to fcc374d5908f (#3994)
+- fix(OMN-16852): the catalog render stops handing the runtime build an empty OMNI_HOME (#3996)
+
 ## v0.38.56 (2026-09-23)
 
 ### Release

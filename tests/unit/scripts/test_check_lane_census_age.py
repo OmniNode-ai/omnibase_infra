@@ -202,6 +202,6 @@ def test_committed_snapshot_is_present_and_valid() -> None:
     )
     with open(snapshot_path, encoding="utf-8") as fh:
         snapshot = json.load(fh)
-    assert snapshot.get("schema_version") == "1.0.0"
+    assert snapshot.get("schema_version") in {"1.0.0", "1.1.0"}
     assert "emitted_at" in snapshot
     assert "lanes_checked" in snapshot

@@ -67,7 +67,7 @@ class HandlerConsumeInbound:
         canonical_topic = strip_topic_prefix(identity.tenant_slug, envelope.wire_topic)
         if canonical_topic != envelope.canonical_topic:
             raise ValueError("wire_topic and canonical_topic do not match")
-        if canonical_topic not in config.mirror_topics.inbound:
+        if canonical_topic not in config.declared_inbound_topics:
             raise ValueError("canonical_topic is not declared for inbound mirroring")
         expected_wire_topic = prefix_topic(identity.tenant_slug, canonical_topic)
         if envelope.wire_topic != expected_wire_topic:

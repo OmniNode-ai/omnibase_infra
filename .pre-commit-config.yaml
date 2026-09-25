@@ -380,6 +380,18 @@ repos:
         files: ^(\.github/workflows/chain-canary-c11-negative-paths\.yml|scripts/ci/c11_negative_paths_probe\.py|tests/ci/test_c11_negative_paths_probe_omn19175\.py|tests/fixtures/omn19175/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19412: the lab probe-window file must agree with every workflow it
+      # lists, and every scheduled lane probe must be listed. Locally this runs
+      # the offline tests, which include the committed file against THIS
+      # repository's workflows; the ci.yml "Lab Probe Windows (OMN-19412)" job
+      # (a STRICT CI Summary gate) also reads omninode_infra and omnimarket.
+      - id: lab-probe-windows
+        name: lab probe-window file agrees with the workflows (OMN-19412)
+        entry: uv run --frozen pytest tests/ci/test_check_lab_probe_windows.py -q
+        language: system
+        files: ^(\.github/workflows/.*\.ya?ml|config/lab_probe_windows\.yaml|scripts/ci/check_lab_probe_windows\.py|tests/ci/test_check_lab_probe_windows\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-19179: the C13 customer-local producer grades four clauses and
       # three controls from observations taken outside the process. Pins that
       # a blind tracer is an unproven zero rather than a pass, that the
