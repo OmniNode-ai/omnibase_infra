@@ -61,6 +61,12 @@ from deploy_agent.executor import (
     select_dev_instance,
 )
 from deploy_agent.health import create_health_app
+from deploy_agent.host_slot import (
+    HostSlotHeldError,
+    host_slot_from_env,
+    job_lease,
+    verify_window_from_env,
+)
 from deploy_agent.idle_converge import (
     CHECK_INTERVAL_SECONDS as IDLE_CONVERGE_CHECK_INTERVAL_SECONDS,
 )
@@ -359,6 +365,25 @@ class DeployAgent:
         self._idle_probe_blocker: Callable[[datetime], str | None] = lambda now: (
             probe_blocking(now, load_probe_windows(AGENT_CLONE_ROOT))
         )
+        # OMN-19544 AC1. On a lab host this instance shares with a prover (the
+        # .105 laptop's VM holds the lane or a proof stack, not both), both
+        # tenants take one lease file on the host. Off unless the instance's
+        # env file names the directory, so the .201 and .202 agents are
+        # unchanged. The lease carries this instance's name.
+        self._host_slot = host_slot_from_env()
+        self._host_slot_owner = (
+            f"deploy-agent-{self._router.instance.name}"
+            if self._router is not None
+            else "deploy-agent"
+        )
+        self._host_slot_verify_window = verify_window_from_env()
+        if self._host_slot is not None:
+            logger.info(
+                "Deploy agent host slot: %s as %s, verify window %ds",
+                self._host_slot.directory,
+                self._host_slot_owner,
+                int(self._host_slot_verify_window.total_seconds()),
+            )
         # OMN-18636. The one thread every blocking call in this process runs on.
         # See JOB_POOL_MAX_WORKERS and _offload for why it is one, and why the
         # event loop thread must be left with nothing to do but serve HTTP.
@@ -610,6 +635,9 @@ class DeployAgent:
             ref_resolver=GitRefResolver(REPO_DIR),
             tracking_ref=load_tracking_remote_ref_from_env(),
             router=self._router,
+            # OMN-19544 AC1: refuse, as busy, while a prover holds the host.
+            host_slot=self._host_slot,
+            host_slot_owner=self._host_slot_owner,
         )
 
         # Step 6b: keep the lag sample current DURING a rebuild (OMN-18990).
@@ -1032,11 +1060,26 @@ class DeployAgent:
             # OMN-19501: nor, any more, the k3s lab-overlay apply and the
             # onex-api pin delivery. The lock is released at the compose
             # verdict; see the settle hand-off below.
-            with lane_lock(
-                lane_config_for(cmd.runtime_lane).compose_project,
-                lane=cmd.runtime_lane.value,
-                ref=cmd.git_ref,
-                timeout=DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+            #
+            # OMN-19544 AC1: THE HOST SLOT, OUTSIDE THE LANE LOCK. On a host
+            # this instance shares with a prover, the job takes the host's
+            # lease before its first phase, or ends without touching anything,
+            # and keeps it for the verify window after its last, so the
+            # post-merge verify job reads the lane this job built. A no-op on
+            # an instance with no host slot.
+            with (
+                job_lease(
+                    self._host_slot,
+                    self._host_slot_owner,
+                    verify_window=self._host_slot_verify_window,
+                    reason=f"deploy job {cid}",
+                ),
+                lane_lock(
+                    lane_config_for(cmd.runtime_lane).compose_project,
+                    lane=cmd.runtime_lane.value,
+                    ref=cmd.git_ref,
+                    timeout=DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+                ),
             ):
                 # OMN-15181: boundary-level guard — a prod request may only
                 # deploy a digest already proven in stability-test. Must run
@@ -1198,6 +1241,16 @@ class DeployAgent:
                 else:
                     logger.info("Job %s completed successfully", cid)
 
+        except HostSlotHeldError as e:
+            # OMN-19544 AC1. A prover took the host between this command's
+            # accept (which read the slot free) and the job's start. Nothing on
+            # the host was touched: the lease is taken before the first phase.
+            logger.error(  # noqa: TRY400
+                "Job %s did not start: %s friction_type=host_slot_held",
+                cid,
+                e,
+            )
+            self.job_store.complete(cid, status="failed", errors=[str(e)])
         except LaneLockContendedError as e:
             # Named separately from a build failure because the two lead to
             # different actions: this one is retried later by whoever holds the
