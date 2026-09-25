@@ -138,6 +138,10 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # by `ss -ltn` on 2026-09-25T01:28:58Z; bound to the loopback address only.
     # The rest of its 61xxx block is declared in the lane manifest's comment.
     "dev-202": {"main": "61085", "effects": "61086"},
+    # OMN-19543 — the third deployed dev lane, on the .200 host. Read free there
+    # by `lsof -iTCP -sTCP:LISTEN` on 2026-09-25T10:33:16Z; loopback only. The
+    # rest of its 42xxx block is declared in the lane manifest's comment.
+    "dev-200": {"main": "42085", "effects": "42086"},
     # OMN-19544 — the time-shared deployed dev lane on the .105 host. Read free
     # there by `lsof -iTCP:43000-43999` on 2026-09-25T10:35:52Z; loopback only.
     # The rest of its 43xxx block is declared in the lane manifest's comment.
@@ -193,6 +197,13 @@ _LANE_BOUNDARY: dict[str, str] = {
     "dev-202": (
         ".202 second deployed dev lane — own Postgres, Redpanda and Valkey, "
         "loopback only; its compose-dev-202 receipt proves omnimarket changes "
+        "only, and it is never sourced for stability/prod grants"
+    ),
+    # OMN-19543, the .200 slot of the one-deploy-slot-per-lab-host ruling (ledger
+    # RULING 2026-09-25T10:22:22Z). Same receipt rule as dev-202.
+    "dev-200": (
+        ".200 third deployed dev lane — own Postgres, Redpanda and Valkey, "
+        "loopback only; its compose-dev-200 receipt proves omnimarket changes "
         "only, and it is never sourced for stability/prod grants"
     ),
     # OMN-19544, lab deploy lanes plan (operator RULING 2026-09-25T10:22:22Z as
