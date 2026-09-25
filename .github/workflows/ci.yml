@@ -891,6 +891,13 @@ jobs:
             --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py \
             --expected 9
 
+      # OMN-19612: validate-spdx-headers runs staged-file-scoped in
+      # .pre-commit-config.yaml (pass_filenames: true); this is its
+      # whole-tree CI counterpart so the header requirement still holds
+      # over the entire tree, not only a developer's staged diff.
+      - name: SPDX header check (OMN-19612)
+        run: uv run --frozen onex spdx validate src tests scripts
+
   infra-node-handler-ownership:
     needs: occ-preflight
     name: Infra Node Handler Ownership
