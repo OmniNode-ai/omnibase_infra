@@ -65,6 +65,18 @@ def _cli(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path)}
     for key in _OPERATOR_KEYS:
         assert key not in env
+
+    python_path = os.pathsep.join(
+        path
+        for path in (
+            str(_REPO / "src"),
+            str(_REPO),
+            os.environ.get("PYTHONPATH", ""),
+        )
+        if path
+    )
+    env["PYTHONPATH"] = python_path
+
     return subprocess.run(
         [sys.executable, "-m", "omnibase_infra.docker.catalog.cli", *args],
         cwd=str(_REPO),
