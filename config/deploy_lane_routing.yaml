@@ -53,6 +53,26 @@
 #     - runtime_lane: dev
 #       requester_repository: omnimarket
 #       instance: dev-202
+#
+# LOAD GATE (OMN-19507). An instance may declare `load_gate:`; its agent then
+# does not accept a command, or start an idle converge, while its host's model
+# servers need the machine (deploy_agent/load_gate.py). A deferral commits
+# nothing and publishes nothing: the command waits on the topic. An instance
+# without a block has no gate. Operator RULING, omni_home ledger
+# 2026-09-25T12:40:36Z (ledger:3893), item (b): "a deploy lane on .200 with a
+# load gate".
+#
+# EXCLUDED HOSTS (OMN-19507). No instance may name one and no agent may run as
+# one, even with DEPLOY_AGENT_INSTANCE set (routing.resolve_instance). The key
+# is the lowercased first hostname label, the same one the router compares.
+excluded_hosts:
+  # .101 (192.168.86.101, hostname Stickybeatz.local; the .200 host is
+  # Stickybeatz-Studio, a different first label). Operator RULING, omni_home
+  # ledger 2026-09-25T12:40:36Z (ledger:3893), item (c): leave .101 out of the
+  # deploy pool and leave its dogfood copy as is. Measured before the ruling:
+  # host swap 96.8% used and 37% memory free at 10:29:49Z (OMN-19545 TERMINAL,
+  # ledger 2026-09-25T10:30:17Z).
+  stickybeatz: ".101 is out of the deploy pool by operator RULING ledger:3893 (omni_home ROLLING_WORK_LEDGER 2026-09-25T12:40:36Z, item c); its dogfood copy stays as is"
 default_instance: dev-201
 instances:
   dev-201:
@@ -88,4 +108,25 @@ instances:
       disabled_services: [onex-api, cloud-migration-files, cloud-migration, keycloak, infisical]
       receipt_lane: compose-dev-200
       proves: [omnimarket]
+    # OMN-19507. .200 also runs the orchestration sessions and the gpt-oss-120b
+    # llama-server on :8130 (Metal, all layers on the GPU, so its weights live
+    # in unified memory). Every number below is a measured baseline, stated in
+    # the PR that set it:
+    #   build_reserve_gib 24: the Docker VM is capped at 31 GiB (`docker info`
+    #     MemTotal 33333612544) and the running dev-200 lane holds about 7.3 GiB
+    #     of it (`docker stats`, ledger 2026-09-25T11:23:31Z), so a rebuild can
+    #     grow the VM by about 24 GiB.
+    #   model_reserve_gib 70: the IOAccelerator "In use system memory" while
+    #     llama-server was serving peaked at 73418407936 bytes (68.4 GiB,
+    #     `ioreg -c IOAccelerator` 2026-09-25T12:49:08Z), against 3.5 GiB paged
+    #     out at 12:45:00Z.
+    #   min_headroom_gib 16: what a build may leave the host after both reserves.
+    #   max_load1_per_cpu: see the PR for the baseline and the build's measured
+    #     effect on the model's decode rate.
+    load_gate:
+      max_load1_per_cpu: 2.0
+      build_reserve_gib: 24
+      model_reserve_gib: 70
+      min_headroom_gib: 16
+      recheck_seconds: 60
 routes: []

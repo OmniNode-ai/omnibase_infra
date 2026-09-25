@@ -98,6 +98,11 @@ from deploy_agent.lane_lock_client import (
 )
 from deploy_agent.lane_policy import load_allowed_lanes_from_env
 from deploy_agent.lineage_fence import DockerProvenanceReader, GitRefResolver
+from deploy_agent.load_gate import (
+    EnumLoadGateVerdict,
+    LoadGate,
+    load_gate_for_instance,
+)
 from deploy_agent.loaded_code import record_loaded_code_sha
 from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
@@ -383,6 +388,20 @@ class DeployAgent:
             else "deploy-agent"
         )
         self._host_slot_verify_window = verify_window_from_env()
+        # OMN-19507. An instance whose table row declares a load_gate: defers
+        # a command, and an idle converge, while its host's model servers need
+        # the machine. Read from the table shipped with this code, like the
+        # instance's identity; an instance without a block has no gate, so the
+        # .201 and .202 agents are unchanged. A malformed block refuses start.
+        thresholds = (
+            load_gate_for_instance(AGENT_CLONE_ROOT, self._router.instance.name)
+            if self._router is not None
+            else None
+        )
+        self._load_gate = LoadGate(thresholds) if thresholds is not None else None
+        self._load_gate_last_verdict: EnumLoadGateVerdict | None = None
+        if thresholds is not None:
+            logger.info("Deploy agent load gate: %s", thresholds.model_dump())
         if self._host_slot is not None:
             logger.info(
                 "Deploy agent host slot: %s as %s, verify window %ds",
@@ -646,6 +665,8 @@ class DeployAgent:
             # OMN-19544 AC1: refuse, as busy, while a prover holds the host.
             host_slot=self._host_slot,
             host_slot_owner=self._host_slot_owner,
+            # OMN-19507: defer, without refusing, while the host is loaded.
+            load_gate=self._load_gate,
         )
 
         # Step 6b: keep the lag sample current DURING a rebuild (OMN-18990).
@@ -692,8 +713,11 @@ class DeployAgent:
                     # OMN-19509: only here, where the poll returned no command,
                     # so a converge never runs beside a routed job and never
                     # ahead of one already waiting (the model's SingleWriter201
-                    # and QueuedFirst).
-                    await self._offload(self._maybe_idle_converge)
+                    # and QueuedFirst). OMN-19507: a command the load gate
+                    # deferred IS one already waiting, so no converge while a
+                    # deferral holds its partition paused.
+                    if getattr(consumer, "load_gate_paused", None) is None:
+                        await self._offload(self._maybe_idle_converge)
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
@@ -973,6 +997,11 @@ class DeployAgent:
             return
         self._idle_converge_last_verdict = decision.verdict
         assert decision.head_ref is not None  # CONVERGE always names the head
+        # OMN-19507: a converge is a deploy like any other, so it waits for the
+        # load gate too. The head is not marked attempted, so it runs once the
+        # gate opens.
+        if not self._idle_converge_gate_open():
+            return
         self._idle_converge_attempted.add(decision.head_ref)
         cmd = converge_command()
         logger.info(
@@ -983,6 +1012,22 @@ class DeployAgent:
         )
         self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
         self._execute_command(cmd)
+
+    def _idle_converge_gate_open(self) -> bool:
+        """Whether the load gate lets an idle converge start now (OMN-19507)."""
+        gate = getattr(self, "_load_gate", None)
+        if gate is None:
+            return True
+        decision = gate.check()
+        if decision.verdict is EnumLoadGateVerdict.DEFER:
+            if self._load_gate_last_verdict is not EnumLoadGateVerdict.DEFER:
+                logger.info(
+                    "idle converge: deferred by load gate %s", decision.describe()
+                )
+            self._load_gate_last_verdict = decision.verdict
+            return False
+        self._load_gate_last_verdict = decision.verdict
+        return True
 
     def _execute_command(self, cmd: ModelRebuildRequested) -> None:
         """Run one accepted command to its terminal state. BLOCKING, by design.
