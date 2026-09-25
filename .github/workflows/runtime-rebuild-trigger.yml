@@ -454,6 +454,7 @@ jobs:
         # reads this step's `verdict` OUTPUT, which carries all three values;
         # `continue-on-error` keeps the run alive to produce the artifact and
         # the verdict is what decides the check.
+        # advisory-ok: OMN-19507 INDETERMINATE exit 3 must not stop the receipt write; the emit step's verdict decides the check
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

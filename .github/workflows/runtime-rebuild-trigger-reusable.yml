@@ -472,6 +472,7 @@ jobs:
         # emitter itself still exits non-zero on any non-PASS receipt -- so
         # `deliver-sibling-candidate`'s `success()` gating is unchanged and a
         # non-converged sibling still cannot announce itself to staging.
+        # advisory-ok: OMN-19507 INDETERMINATE exit 3 must not stop the receipt write; the emit step's verdict decides the check
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
