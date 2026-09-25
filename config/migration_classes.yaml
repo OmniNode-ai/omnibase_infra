@@ -228,6 +228,7 @@ migrations:
   forward/nodes/node_projection_delegation/0044_restore_delegation_shadow_comparisons.sql: forward-only # ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL
   forward/nodes/node_projection_delegation/0045_terminal_construction_outcome_metrics.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation/0046_delegation_events_cohort_key.sql: expand-only
+  forward/nodes/node_projection_delegation/0047_delegation_events_ticket_id.sql: expand-only
   forward/nodes/node_projection_delegation_inference_response/0001_create_projection_delegation_inference_response_text.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PROJECTION_DELEGATION_INFERENCE_RESPONSE_TEXT_PKEY; ALTER TABLE ADD CONSTR
   forward/nodes/node_projection_delegation_inference_response/0002_inference_response_text_tenant_rekey.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; UPDATE
   forward/nodes/node_projection_delegation_inference_response/0003_inference_response_text_rls_tenant_isolation.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
@@ -238,6 +239,7 @@ migrations:
   forward/nodes/node_projection_dep_health/004_grant_tenant_projection_writer_dep_health_findings.sql: expand-only
   forward/nodes/node_projection_dod_verdict/0000_create_dod_verify_runs.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_dod_verdict/0001_grant_omninode_runtime_dod_verify_runs.sql: expand-only
+  forward/nodes/node_projection_dod_verdict/0002_dod_verify_runs_delegation_correlation_id.sql: expand-only
   forward/nodes/node_projection_event_chain/0001_create_event_chain.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PK_EVENT_CHAIN; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_EVENT_CHAIN_SEQUEN
   forward/nodes/node_projection_event_chain/0002_grant_omninode_runtime_event_chain.sql: expand-only
   forward/nodes/node_projection_instruction_eval/0001_create_instruction_eval_aggregate_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT INSTRUCTION_EVAL_AGGREGATE_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_I
@@ -306,6 +308,7 @@ migrations:
   forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql: forward-only # CREATE OR REPLACE; ALTER VIEW
   forward/nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql: expand-only
   forward/nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql: forward-only # CREATE OR REPLACE
+  forward/nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; transaction-scoped CREATE/DROP POLICY inside one DO block
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only
   forward/nodes/node_projection_session_replay/0001_create_session_replay_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_S

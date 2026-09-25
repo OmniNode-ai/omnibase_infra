@@ -106,7 +106,9 @@ def test_the_apply_itself_is_wired_in_the_agent(job: dict[str, Any]) -> None:
         "the applier exists but nothing in the agent's deploy path calls it, "
         "which is the same zero-callers shape AC7 names"
     )
-    assert agent.count("self._apply_lab_overlay(cmd)") == 1
+    # OMN-19501: the call now passes the settle worker's own sha, stamp and
+    # capture as keywords, so count the call site, not one argument spelling.
+    assert agent.count("self._apply_lab_overlay(") == 1
 
 
 def test_the_uploaded_artifact_name_matches_what_the_gate_queries(

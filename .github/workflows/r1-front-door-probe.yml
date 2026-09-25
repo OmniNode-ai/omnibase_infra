@@ -1,0 +1,108 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# r1-front-door-probe.yml — OMN-19445
+#
+# WHAT THIS IS
+#   "PLAN-R1 / MD-14: a good local answer ends the chain, and the decision is
+#   in the log." The probe text carried in knowledge-base-internal's beta
+#   rebaseline and GOAL documents was wrong for months -- `onex delegate ...
+#   --bus kafka --kafka-bootstrap <lab broker literal host:port>`, which the dev-lane
+#   broker refuses (SASL required since OMN-18012 Phase B) -- and NOTHING ran
+#   it on a schedule, so a front-door regression could sit undetected for
+#   days. The corrected form (`--lane dev`, resolved through the checked-in
+#   `config/ci_bus_lanes.yaml`) was proven once by hand on 2026-09-21 and the
+#   next three daily rebaseline snapshots silently reverted to citing the
+#   stale, refused form again. This workflow is what makes the corrected form
+#   a standing regression signal instead of a one-off manual proof.
+#
+#   The job's EXIT CODE is the probe's verdict (scripts/ci/r1_front_door_probe.py
+#   docstring has the full 0/1/2 table). This workflow only schedules it,
+#   asserts the record artifact is present and non-empty, and uploads it.
+#
+# WHY host-201, AND WHY OUTSIDE THE RUNTIME CONTAINER
+#   The lab lane's broker has no route from a GitHub-hosted runner (the same
+#   reason provider-rung-canary.yml and the C12 producer pin this label). This
+#   probe deliberately runs the CLI DIRECTLY on the runner host rather than
+#   `docker exec`-ing into omninode-runtime-effects (provider-rung-canary's
+#   pattern): AC2 measures the FRONT DOOR -- the command a lane operator runs
+#   on their own machine -- not whether the runtime can reach itself.
+#
+# WHY THERE IS NO pull_request TRIGGER
+#   Same reason as provider-rung-canary.yml: a path-scoped pull-request job
+#   sits in neither required_status_checks nor EXPECTED_EXTERNAL_CONTEXTS, and
+#   the advisory-job gate refuses it. workflow_dispatch re-runs it on demand.
+#
+# CRON PLACEMENT
+#   05:19 UTC daily. Clear of the 07:30Z nightly delegation-regression window,
+#   clear of C15 (:41 every other hour; the ledger's HARD RULES ask lanes to
+#   stay clear of :25-:55 of those hours -- 05:19 is neither an odd hour's C15
+#   slot nor inside that window), and distinct from provider-rung-canary's
+#   :47 slots and dev-lane-liveness's :07/:22/:37/:52 slots.
+
+name: R1 front-door probe (daily)
+
+on:
+  schedule:
+    - cron: '19 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: r1-front-door-probe-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  r1-front-door-probe:
+    name: R1 front-door probe (dev lane, outside the runtime container)
+    runs-on: [self-hosted, omnibase-verify, host-201]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Run the R1 front-door probe and grade it
+        id: probe
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: a non-zero probe is the verdict and must still write
+          # its record before the job ends.
+          uv run python scripts/ci/r1_front_door_probe.py \
+            --record r1-front-door-probe.json
+          status=$?
+          echo "probe exit status: ${status}"
+          exit "${status}"
+
+      - name: Assert the probe record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/assert_evidence_artifact.py \
+            --artifact r1-front-door-probe \
+            --require r1-front-door-probe.json
+
+      - name: Upload the probe record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1-front-door-probe
+          path: r1-front-door-probe.json
+          if-no-files-found: error
+          retention-days: 30

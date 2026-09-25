@@ -49,8 +49,12 @@ operational_defaults:
   # Persistent DLQ replay consumer group — kernel reads ONEX_GROUP_ID
   # (service_kernel.py:639). Replaces ephemeral dlq-replay-{pid}.
   ONEX_GROUP_ID: onex-dlq-replay
+# OMN-19497: the external host port moved off a port another service in the
+# same resolved runtime bundle already published (8091: contract-resolver;
+# 8097: llm-cost-aggregation-consumer). docker compose refuses to start the
+# second claimant. The container port is unchanged.
 ports:
-  external: 8097
+  external: 8100
   internal: 8085
 healthcheck:
   # OMN-17883: the SEMANTIC probe, not `curl -sf`. `curl -sf` asserts only

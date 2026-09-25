@@ -152,6 +152,16 @@ scope:
     # suite, not an incident replay.
     - scripts/ci/provider_rung_canary_observe.py
     - scripts/ci/provider_rung_canary_probe.py
+    # OMN-19445: the daily R1/MD-14 front-door probe, a PROBE in the same
+    # class as provider-rung-canary above -- it measures live front-door
+    # state (one `onex delegate` call, graded by exit code), not a past
+    # incident's bytes. Its grading is proven offline over a stubbed
+    # subprocess call in tests/ci/test_r1_front_door_probe_omn19445.py -- a
+    # regression suite with positive controls, not an incident replay. A real
+    # replay case (the OMN-16932 stale --kafka-bootstrap SASL refusal, run
+    # f1a9f38f) would need committed bytes from that run's own log, which this
+    # PR did not fetch; tracked as follow-up debt here rather than fabricated.
+    - scripts/ci/r1_front_door_probe.py
     # OMN-19181: a PROBE, the C16 producer, and the same class as the C11 one
     # above. Its grading IS driven by real bytes -- three observations captured
     # read-only from the .201 dev lane's gateway_workflows rows and their bus terminals
@@ -1300,3 +1310,20 @@ cases:
     test: tests/ci/test_incident_replay_omn17422.py::test_replay_rejects_the_real_0027_bytes
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is that a policy predicated on the app.tenant_id session GUC was attached to a relation whose declared writer can never set that GUC, and every existing gate passed it: check_migration_rls_policy_atomicity.py asks only whether an admitting policy exists and whether it exists without a committed window, and says in its own header that whether the predicate admits the writer is deliberately out of scope; check_topology_grant_delivery.py asks only whether a declared grant was issued. Neither reads the relation's DOMAIN. Exactly one code path issues set_config('app.tenant_id', ...) -- tenant_transaction, reached only from TenantProjectionTableOperation -- and the Internal and Catalog operations state in their own docstrings that they never open a tenant transaction, so an omninode_internal declaration and a GUC-predicated policy cannot both be right. OMN-18774 found generation_events and node_service_registry in exactly that state, writing only because the connection owned the table and FORCE was off, and failing closed the moment the runtime uses the non-bypassing login lab security parity requires. NOT A RECONSTRUCTION -- onex-dev's own public.node_schema_migrations, read read-only 2026-09-22, records node:node_projection_delegation:0027_generation_events_tenant_rls.sql applied 2026-07-28T21:15:06Z with checksum 00284bf64e3b2a8935bf1737d78dea64c6801966d61edf2b0e6ff19c19d85962, which is byte-for-byte the sha256 of this fixture, so these are provably the bytes a real database executed. The artifact is captured with git cat-file from 6194dc4d9, the commit that landed the file, NOT from the current tree, which hashes 9f5ffade664f1e1aaf86ea990c7b66edd99e076f099f00791ecddacaef6ebd7f because the file was amended after it ran; pinning the tree copy would have replayed bytes nothing executed. THE DISCRIMINATOR IS LOAD-BEARING: a guard hard-wired to report a violation would replay this incident perfectly and condemn its own remedy, so the same module drives 0043 -- the migration OMN-18774 landed, sha256 b119079fd139d1a271a0ad50001b1c120f115db98c8cbc401ff4f0251a0ff05b, byte-identical to what that lane applied on 2026-09-19T02:19:48Z -- after 0027 in the same lineage and requires a clean verdict. That case is also the append-only property under test: 0027's CREATE POLICY is still in the corpus verbatim and always will be, so a gate matching text rather than net end state reports a fixed defect as live. A third case drives 0043 alone, because its header quotes the shape it removes and a byte-blind matcher would trip on the remedy's own prose.
+  - id: omn19412-the-prose-probe-window-list-left-c11-unblacked
+    guard: scripts/ci/check_lab_probe_windows.py
+    incident: OMN-19412
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn19412.py::test_the_same_guard_accepts_the_same_bytes_with_the_committed_entry
+    artifact:
+      fixture: tests/fixtures/omn19412/chain-canary-c11-negative-paths.yml.captured
+      sha256: adb37c7c26e5c96f02ee4054f3a0d04ba1c3941865a0cd56e9d376445f98c12a
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@186be1a4dc64294a662495cff26b936d6d9dc387:.github/workflows/chain-canary-c11-negative-paths.yml
+      captured_at: '2026-09-24T17:19:32Z'
+      captured_by: lane lab-sync-t03-19412 (OMN-19412)
+    test: tests/ci/test_incident_replay_omn19412.py::test_the_real_guard_refuses_the_row_list_on_the_captured_c11
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A PROBE WINDOW LIST THAT OMITTED A PROBE. Until config/lab_probe_windows.yaml the only list of lab probe windows was one ledger row, omni_home docs/tracking/ROLLING_WORK_LEDGER.md at 2026-09-23T20:23:28Z (lane merge-drain-7f), which named C16 and C15 and derived four runtime-merge blackouts from them (20:45Z-21:45Z, 22:55Z-23:45Z, 00:55Z-01:45Z, 02:45Z-03:45Z). It did not name C11, whose job reads the same dev lane at 02:17Z, 08:17Z, 14:17Z and 20:17Z, none of them inside any of those blackouts, so a runtime merge at 02:00Z was within the row's rules and would have redeployed the lane under C11's run. Nothing could have noticed, because a prose list has no reader that compares it with the workflows. The case does not claim such a merge happened; the gap in the list is the defect. NOT A RECONSTRUCTION -- the artifact is the C11 workflow read with git show out of the object store at the dev commit the lane branched from, re-fetchable at the recorded locator and unmodified. The test drives the real check with the row's own list (the committed C15 and C16 entries) over those bytes and requires the unlisted-probe refusal naming the C11 workflow and its cron; a second assertion shows, from the same bytes, that every C11 start falls outside all four of the row's blackouts, so the refusal is not vacuous. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every workflow would replay this perfectly and block every pull request, so the same function is driven over the same bytes with the committed C11 entry and required to return no error.

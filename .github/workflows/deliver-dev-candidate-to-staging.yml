@@ -111,6 +111,22 @@ on:
         required: false
         default: "dev"
         type: string
+      # OMN-19311 AC5 -- the planted-red drill. Both empty by default, which
+      # is byte-identical to today's behaviour: the D11 step below only adds
+      # the drill flags to its command line when drill_ticket is non-empty.
+      # Self-expiring (lab_pass_receipt.py DRILL_MAX_WINDOW_HOURS bounds how
+      # far in the future drill_red_until may be) and one-directional (there
+      # is no input that can force a PASS -- only red).
+      drill_red_until:
+        description: "OMN-19311 AC5 planted-red drill: UTC timestamp (YYYY-MM-DDTHH:MM:SSZ) to force the D11 verdict red until. Requires drill_ticket. Leave empty for an ordinary dispatch."
+        required: false
+        default: ""
+        type: string
+      drill_ticket:
+        description: "OMN-19311 AC5 planted-red drill: the OMN-<n> ticket authorizing it. Requires drill_red_until."
+        required: false
+        default: ""
+        type: string
   # OMN-17057: a SIBLING repository's merge, announcing its own revision.
   #
   # Until this existed, an omnimarket (or omnibase_core, or omnibase_compat)
@@ -1106,8 +1122,17 @@ jobs:
       - name: Require a fresh green D11 delegation regression verdict (OMN-19311)
         env:
           GH_TOKEN: ${{ steps.d11-token.outputs.token }}
+          DRILL_RED_UNTIL: ${{ github.event.inputs.drill_red_until }}
+          DRILL_TICKET: ${{ github.event.inputs.drill_ticket }}
         run: |
           set -euo pipefail
+          # OMN-19311 AC5: the planted-red drill. Both empty on every path
+          # except an explicit workflow_dispatch that set drill_ticket, so
+          # this is a no-op append on the push and repository_dispatch paths.
+          DRILL_ARGS=()
+          if [ -n "${DRILL_TICKET:-}" ]; then
+            DRILL_ARGS+=(--drill-red-until "${DRILL_RED_UNTIL:-}" --drill-ticket "${DRILL_TICKET}")
+          fi
           uv run --no-project --with pydantic \
             python3 scripts/ci/lab_pass_receipt.py workflow-verdict \
             --repo OmniNode-ai/omnimarket \
@@ -1117,6 +1142,7 @@ jobs:
             --event schedule \
             --event workflow_dispatch \
             --dispatch-title-contains "lane=stability-test" \
+            "${DRILL_ARGS[@]}" \
             | tee /tmp/lab-pass-gate-d11.txt
 
       # OMN-19233, operator ruling 2026-09-23 (decision S of the unified
@@ -1221,11 +1247,22 @@ jobs:
           # is the one that IS proven to vendor the sibling revision, by
           # check_lane_sibling_revision.py, immediately before the receipt is
           # written.
+          #
+          # OMN-19508: an omnimarket revision may instead be proven on the
+          # second deployed dev lane on .202, whose receipt lane is
+          # compose-dev-202 (operator ruling 2026-09-25T00:56:45Z, omnimarket
+          # only). The list is ANY-OF, so a PASS on either admits it and a
+          # revision with neither is refused. Every other sibling stays on
+          # compose-dev alone, and the own-sha read above is unchanged.
+          SIBLING_LANES=(--lane compose-dev)
+          if [ "${PINNED_REPO}" = "omnimarket" ]; then
+            SIBLING_LANES+=(--lane compose-dev-202)
+          fi
           uv run --no-project --with pydantic \
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${PINNED_REVISION}" \
             --repo "OmniNode-ai/${PINNED_REPO}" \
-            --lane compose-dev \
+            "${SIBLING_LANES[@]}" \
             | tee /tmp/lab-pass-gate-sibling.txt
 
       # OMN-18866, operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending

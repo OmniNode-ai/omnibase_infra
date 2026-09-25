@@ -183,7 +183,19 @@ class _BlockingApplier:
         self.running = running
         self.manifest_sha: str | None = None
 
-    def apply(self, *, sha: str, stamp: str, correlation_id: str) -> str:
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
+        # OMN-19501: the compose-lane half, taken under the lane lock. Opaque
+        # to the agent, which only hands it back to ``apply``.
+        return {"sha": sha, "stamp": stamp}
+
+    def apply(
+        self,
+        *,
+        sha: str,
+        stamp: str,
+        correlation_id: str,
+        capture: object = None,
+    ) -> str:
         # OMN-18572: the real applier resolves this before anything that can
         # block or fail, and the agent reads it after the apply returns.
         self.manifest_sha = "b" * 40

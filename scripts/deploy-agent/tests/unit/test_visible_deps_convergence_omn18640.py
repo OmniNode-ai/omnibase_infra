@@ -500,8 +500,12 @@ class TestBothReachTheTerminalEvent:
         from deploy_agent import agent as agent_mod
 
         source = inspect.getsource(agent_mod)
-        assert "deps_convergence=self.executor.deps_convergence" in source
-        assert "compose_invocations=self.executor.compose_invocations" in source
+        # OMN-19501: both fields are frozen off the executor into
+        # `_TerminalFacts` (wrapped in `list(...)`) before the lane lock
+        # releases, then carried by `facts` to the completion payload --
+        # not read from `self.executor` directly at the publish call site.
+        assert "deps_convergence=list(self.executor.deps_convergence)," in source
+        assert "compose_invocations=list(self.executor.compose_invocations)," in source
 
 
 class TestTheHashComparisonIsCompoundedFromRealInterfaces:

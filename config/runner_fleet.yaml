@@ -15,8 +15,20 @@ runner_name_prefix: omninode-runner
 # burst drove one-minute load to 100.9 on the 32-core host -- the registered
 # runner count is the worst-case concurrent-job ceiling on a fixed-core box,
 # and idle runners cost nothing, so 88 registered runners is what let a burst
-# reach that load. 60 always-on steady-state runners. All 60 are steady (no
-# burst profiles), so burst_count == expected_count (no separate burst tier).
+# reach that load. OMN-19077 (operator consent ROLLING_WORK_LEDGER.md:3220)
+# proposed capping 60 -> 40 after 2026-09-22's 58 concurrent jobs drove IO
+# pressure (full avg10) to 52.8 and load to 397 and crashed dockerd, and every
+# runner created 2026-09-16 had reached its full 6 GiB memory limit with
+# 2.7-5.3 GiB swapped, on the same NVMe as the docker data root and the lab
+# lanes' brokers. OPERATOR RULING 2026-09-24 (ROLLING_WORK_LEDGER.md:3794):
+# 60 is the correct steady-state count; the fix for the 2026-09-22 incident is
+# containment, not headcount. The pool runs inside one aggregate cgroup
+# (omnirunners.slice, docker/runners/systemd/) whose MemoryHigh/MemoryMax/
+# MemorySwapMax/CPUWeight bound the WHOLE pool regardless of how many
+# containers are in it, so CI yields memory and CPU to the lab lanes instead
+# of competing as equals, at 60 runners exactly as it would at 40.
+# 60 always-on steady-state runners. All 60 are steady (no burst profiles),
+# so burst_count == expected_count (no separate burst tier).
 expected_count: 60
 burst_count: 60
 # OMN-17477 — DECLARED HOST INVENTORY.
@@ -79,6 +91,19 @@ hosts:
   - host: omnibook.tail75df5e.ts.net
     arch: arm64
     runner_name_prefix: omninode-air-runner
+    expected_count: 1
+    classes: [verify]
+  # .202 -- omnipc2, RTX 4090, 32 cores, 60 GiB (OMN-19507 AC3). One verify
+  # runner, labelled host-202, for the dev-202 lane's per-merge verify job, which
+  # reads that lane's docker daemon and so must run on this host. Addressed by
+  # its LAN address because it is not on the tailnet (no tailscale on the host,
+  # read 2026-09-25). amd64, but verify class only: this host serves the model
+  # and the dev-202 and sim-202 lanes, so it takes no action-class job. It is
+  # not the `omnipc2-customer` runner, which is a separate rootless podman
+  # runner under another user and outside this inventory.
+  - host: 192.168.86.202
+    arch: amd64
+    runner_name_prefix: omnipc2-verify-runner
     expected_count: 1
     classes: [verify]
 # Docker subnet-pool alerting (OMN-12566). The runner host's default address

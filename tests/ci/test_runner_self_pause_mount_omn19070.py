@@ -115,6 +115,7 @@ def test_the_population_is_not_empty() -> None:
         "docker-compose.runners.yml",
         "docker-compose.runners-omninode-air-runner.yml",
         "docker-compose.runners-omninode-mini-runner.yml",
+        "docker-compose.runners-omnipc2-verify-runner.yml",
     } <= names
     services = {(f, s) for f, s, _ in _hook_services()}
     assert (
@@ -124,6 +125,10 @@ def test_the_population_is_not_empty() -> None:
     assert (
         "docker-compose.runners-omninode-mini-runner.yml",
         "omninode-mini-runner-1",
+    ) in services
+    assert (
+        "docker-compose.runners-omnipc2-verify-runner.yml",
+        "omnipc2-verify-runner-1",
     ) in services
     assert ("docker-compose.runners.yml", "omninode-verify-runner-1") in services
     assert len(services) >= 60
