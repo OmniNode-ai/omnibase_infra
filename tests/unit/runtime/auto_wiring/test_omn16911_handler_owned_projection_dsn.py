@@ -166,7 +166,7 @@ def test_one_owned_pool_cannot_serve_two_workload_identities() -> None:
     target = projection_database_target(
         "consumer_flow_windows", schema="omninode_internal"
     )
-    mixed = projection_database_target("agent_routing_decisions", schema="tenant")
+    mixed = projection_database_target("agent_routing_decisions", schema="public")
     combined = target.__class__(  # type: ignore[attr-defined]
         tables=target.tables + mixed.tables,  # type: ignore[attr-defined]
         table_targets=target.table_targets + mixed.table_targets,  # type: ignore[attr-defined]

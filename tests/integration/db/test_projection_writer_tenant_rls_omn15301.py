@@ -45,18 +45,20 @@ OWNER_ROLE = "postgres"
 TENANT_A = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 TENANT_B = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 
+# OMN-17887 (operator ruling 2026-09-24): the `tenant` schema is RETIRED and the
+# TENANT domain's schema is `public` for good, so the tenant-domain relation is
+# built in `public` -- exactly where the runtime's emitted SQL names it.
 _SCHEMA_SQL = """
-CREATE SCHEMA tenant;
 CREATE SCHEMA omninode_internal;
 CREATE SCHEMA platform_catalog;
-CREATE TABLE tenant.delegation_events (
+CREATE TABLE public.delegation_events (
     correlation_id UUID PRIMARY KEY,
     task_type TEXT NOT NULL,
     tenant_id UUID NOT NULL
 );
-ALTER TABLE tenant.delegation_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tenant.delegation_events FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON tenant.delegation_events
+ALTER TABLE public.delegation_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.delegation_events FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON public.delegation_events
   FOR ALL
   USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
@@ -169,9 +171,9 @@ def domain_dsns(pg_socket_dir: str) -> dict[str, str]:
                 (ROLE_PASSWORD,),
             )
             cursor.execute(f"GRANT CONNECT ON DATABASE {DATABASE} TO {role}")
-        cursor.execute(f"GRANT USAGE ON SCHEMA tenant TO {TENANT_ROLE}")
+        cursor.execute(f"GRANT USAGE ON SCHEMA public TO {TENANT_ROLE}")
         cursor.execute(
-            f"GRANT SELECT, INSERT, UPDATE ON tenant.{TENANT_TABLE} TO {TENANT_ROLE}"
+            f"GRANT SELECT, INSERT, UPDATE ON public.{TENANT_TABLE} TO {TENANT_ROLE}"
         )
         cursor.execute(f"GRANT USAGE ON SCHEMA omninode_internal TO {INTERNAL_ROLE}")
         cursor.execute(
@@ -199,14 +201,14 @@ def _clean_tables(domain_dsns: dict[str, str]) -> Iterator[None]:
     conn = psycopg2.connect(domain_dsns["owner"])
     conn.autocommit = True
     with conn.cursor() as cursor:
-        cursor.execute(f"TRUNCATE tenant.{TENANT_TABLE}")
+        cursor.execute(f"TRUNCATE public.{TENANT_TABLE}")
         cursor.execute(f"TRUNCATE omninode_internal.{INTERNAL_TABLE}")
         cursor.execute(f"TRUNCATE platform_catalog.{CATALOG_TABLE}")
     conn.close()
 
 
 def _tenant_adapter(dsn: str, tenant_id: UUID | None) -> object:
-    target = projection_database_target(TENANT_TABLE, schema="tenant")
+    target = projection_database_target(TENANT_TABLE, schema="public")
     authority = None
     event = None
     if tenant_id is not None:
@@ -248,7 +250,7 @@ def _tenant_rows(owner_dsn: str) -> list[tuple[UUID, UUID]]:
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT correlation_id, tenant_id FROM tenant.delegation_events "
+                "SELECT correlation_id, tenant_id FROM public.delegation_events "
                 "ORDER BY tenant_id"
             )
             return list(cursor.fetchall())
@@ -318,7 +320,7 @@ def test_missing_authority_is_adjudicated_by_rls_not_by_the_runtime(
     Decoupling attribution from authorization does not weaken isolation, and
     this is the proof: with no verified capability there is no
     ``app.tenant_id`` GUC, so the FORCE-RLS ``WITH CHECK`` on
-    ``tenant.delegation_events`` compares against NULL and Postgres rejects
+    ``public.delegation_events`` compares against NULL and Postgres rejects
     the row itself. The guarantee moved from a runtime precondition to the
     database policy that was always its real enforcement point.
     """
@@ -385,7 +387,7 @@ def test_real_rls_with_check_rejects_tenant_b_insert_and_update_under_a(
         with conn.cursor() as cursor:
             with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                 cursor.execute(
-                    "INSERT INTO tenant.delegation_events VALUES (%s, %s, %s)",
+                    "INSERT INTO public.delegation_events VALUES (%s, %s, %s)",
                     (uuid4(), "unset-context", TENANT_A),
                 )
         conn.rollback()
@@ -394,7 +396,7 @@ def test_real_rls_with_check_rejects_tenant_b_insert_and_update_under_a(
             cursor.execute("SET LOCAL app.tenant_id = %s", (str(TENANT_A),))
             with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                 cursor.execute(
-                    "INSERT INTO tenant.delegation_events VALUES (%s, %s, %s)",
+                    "INSERT INTO public.delegation_events VALUES (%s, %s, %s)",
                     (uuid4(), "wrong-insert", TENANT_B),
                 )
         conn.rollback()
@@ -403,7 +405,7 @@ def test_real_rls_with_check_rejects_tenant_b_insert_and_update_under_a(
         with conn.cursor() as cursor:
             cursor.execute("SET LOCAL app.tenant_id = %s", (str(TENANT_A),))
             cursor.execute(
-                "INSERT INTO tenant.delegation_events VALUES (%s, %s, %s)",
+                "INSERT INTO public.delegation_events VALUES (%s, %s, %s)",
                 (correlation_id, "valid-a", TENANT_A),
             )
         conn.commit()
@@ -411,7 +413,7 @@ def test_real_rls_with_check_rejects_tenant_b_insert_and_update_under_a(
             cursor.execute("SET LOCAL app.tenant_id = %s", (str(TENANT_A),))
             with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                 cursor.execute(
-                    "UPDATE tenant.delegation_events SET tenant_id = %s "
+                    "UPDATE public.delegation_events SET tenant_id = %s "
                     "WHERE correlation_id = %s",
                     (TENANT_B, correlation_id),
                 )
@@ -507,7 +509,7 @@ def test_catalog_reader_can_read_and_has_no_writer_operation(
     ("dsn_key", "sql"),
     [
         ("tenant", "SELECT * FROM omninode_internal.generation_events"),
-        ("internal", "SELECT * FROM tenant.delegation_events"),
+        ("internal", "SELECT * FROM public.delegation_events"),
         ("catalog", "INSERT INTO platform_catalog.plan_tiers VALUES ('x', 'X')"),
     ],
 )
@@ -525,7 +527,7 @@ def test_cross_domain_roles_are_denied(
 
 
 def test_miswired_dsn_fails_identity_attestation(domain_dsns: dict[str, str]) -> None:
-    target = projection_database_target(TENANT_TABLE, schema="tenant")
+    target = projection_database_target(TENANT_TABLE, schema="public")
     authority, event = verified_tenant_dispatch(TENANT_A)
     adapter = _build_projection_db_adapter(
         projection_database_urls(target, domain_dsns["internal"]),
