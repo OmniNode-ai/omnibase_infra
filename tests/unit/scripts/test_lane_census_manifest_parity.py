@@ -48,7 +48,18 @@ _MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
 # OMN-19339: `sim-202` joins with its compose file. That file is an overlay on
 # the dogfood file, and it re-declares every container_name and the network name,
 # so the scrape of docker-compose.sim-202.yml alone sees the lane's full set.
-_COMPOSE_LANES = ("stability-test", "judge", "lakshman", "dogfood", "sim-202")
+# OMN-19505: `dev-202` joins with its compose file on the same terms: an overlay
+# on the dev composition that re-declares every container_name it runs and the
+# network name. Keycloak and Infisical carry no container_name there (disabled,
+# never declared), so the scrape sees exactly the lane's set.
+_COMPOSE_LANES = (
+    "stability-test",
+    "judge",
+    "lakshman",
+    "dogfood",
+    "sim-202",
+    "dev-202",
+)
 
 
 def _load_manifest() -> dict:
