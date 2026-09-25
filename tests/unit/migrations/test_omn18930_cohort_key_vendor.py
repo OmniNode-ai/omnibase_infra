@@ -87,16 +87,37 @@ def test_migration_passes_the_application_database_sql_gate() -> None:
 def test_the_linter_is_live_positive_control() -> None:
     """A zero from the linter means something only if it can return non-zero.
 
-    The same file with its target unqualified away into a public-schema write
-    of an unknown relation must not lint clean, or the test above proves
-    nothing.
+    The same file retargeted at the retired ``tenant`` schema must not lint
+    clean, or the test above proves nothing.
+
+    OMN-17887 made ``public`` the TENANT domain's schema, so a ``public.<name>``
+    target is no longer refused by the lint itself: like every other
+    application schema it is held to the SQL gate's exactly-one-ownership
+    check. That half is proven too, by showing the rewritten target becomes an
+    ownership requirement the gate must satisfy.
     """
     from omnibase_infra.topology.application_database import load_topology_profile
     from omnibase_infra.validation.application_database_domain_enforcement import (
+        application_database_sql_target_requirements,
         lint_application_database_sql,
     )
 
+    topology = load_topology_profile("local")
     sql = (_VENDOR / _FILENAME).read_text(encoding="utf-8")
-    broken = sql.replace("ALTER TABLE delegation_events", "ALTER TABLE public.pg_class")
-    assert broken != sql
-    assert lint_application_database_sql(broken, load_topology_profile("local")) != ()
+
+    retired = sql.replace(
+        "ALTER TABLE delegation_events", "ALTER TABLE tenant.delegation_events"
+    )
+    assert retired != sql
+    assert lint_application_database_sql(retired, topology) != ()
+
+    unknown_public = sql.replace(
+        "ALTER TABLE delegation_events", "ALTER TABLE public.pg_class"
+    )
+    assert unknown_public != sql
+    assert ("public", "pg_class") in {
+        (requirement.schema, requirement.name)
+        for requirement in application_database_sql_target_requirements(
+            unknown_public, topology
+        )
+    }

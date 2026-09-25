@@ -23,7 +23,6 @@ from omnibase_core.models.core.model_deployment_topology_database import (
 from omnibase_infra.topology.physical_schema_mapping import (
     APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
-    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
 )
 from omnibase_infra.validation.application_relation_ownership import (
     load_service_ownership_manifest,
@@ -88,15 +87,51 @@ _SYSTEM_READ_SCHEMAS = frozenset({"information_schema", "pg_catalog"})
 # by one, failing an unrelated gate for a reason that has nothing to do with
 # type complexity. `.union()` is semantically identical and invisible to that
 # checker.
+# OMN-17887: tenant-domain relations are declared `schema: public` directly, so
+# only the internal family still needs this pass-through.
 _PHYSICALLY_PUBLIC_APPLICATION_TABLES: frozenset[str] = (
-    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359.union(
-        INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
-    )
+    INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
 )
 _PHYSICALLY_PUBLIC_APPLICATION_OBJECTS: frozenset[str] = (
     _PHYSICALLY_PUBLIC_APPLICATION_TABLES.union(
         APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
     )
+)
+# OMN-17887: a lint allowance, not a schema mapping. Tenant-domain relations live
+# in `public`, and deployed, append-only migrations name them without a schema
+# (node_projection_delegation/0046's bare `ALTER TABLE delegation_events` is one).
+# Those files cannot be rewritten, so the qualification lint accepts exactly the
+# names it accepted while they were bridged, and nothing more: widening this to
+# every `public` relation would silently retire grandfathered violations in
+# scripts/ci/application_database_sql_baseline.yaml. It maps nothing, and a
+# qualified `public.<name>` target is still held to the ownership check.
+_TENANT_RELATIONS_REFERENCED_UNQUALIFIED: frozenset[str] = frozenset(
+    {
+        "agent_routing_decisions",
+        "capability_scores",
+        "context_roi_scores",
+        "delegation_budget_state",
+        "delegation_events",
+        "delegation_judge_verdict_events",
+        "delegation_routing_tenant_overlay",
+        "delegation_shadow_comparisons",
+        "dep_health_findings",
+        "hook_events",
+        "instruction_eval_aggregate_snapshots",
+        "llm_cost_aggregates",
+        "pattern_learning_artifacts",
+        "projection_cost_savings_overview",
+        "projection_delegation_inference_response_text",
+        "projection_delegation_model_routing",
+        "projection_delegation_quality_gate",
+        "projection_delegation_savings",
+        "projection_delegation_savings_series",
+        "projection_delegation_summary",
+        "projection_delegation_token_usage",
+        "savings_estimates",
+        "skill_execution_snapshots",
+        "tenant_inference_credentials",
+    }
 )
 _RELATION_OBJECT_KINDS = frozenset(
     {
@@ -1210,6 +1245,8 @@ def _record_sql_target(
             return
         if name in _PHYSICALLY_PUBLIC_APPLICATION_OBJECTS:
             return
+        if name in _TENANT_RELATIONS_REFERENCED_UNQUALIFIED:
+            return
         violations.append(
             f"application relation target {name!r} must be schema-qualified"
         )
@@ -1218,6 +1255,13 @@ def _record_sql_target(
     target = f"{schema}.{name}"
     if schema == "public":
         if name in _PHYSICALLY_PUBLIC_APPLICATION_OBJECTS:
+            return
+        # OMN-17887: `public` is the TENANT domain's schema wherever the typed
+        # topology declares it. A `public.<name>` target is then an ordinary
+        # application location, held to the same exactly-one-ownership check as
+        # every other schema, so an undeclared public relation is still refused.
+        if "public" in application_schemas:
+            target_locations.append((schema, name))
             return
         violations.append(
             f"application relation target {target!r} is prohibited in public"
@@ -1747,10 +1791,11 @@ def validate_application_database_relation_states(
         label = _relation_label(state)
         if declaration.owner_declaration is None:
             violations.append(f"{label}: relation lacks exactly one owner declaration")
-        if declaration.schema == "public":
-            violations.append(
-                f"{label}: application relations are prohibited in public"
-            )
+        # OMN-17887: no blanket `public` prohibition. `public` is the TENANT
+        # domain's schema; `_schema_owner_for` below refuses a relation whose
+        # schema the topology does not declare for its database, and one whose
+        # domain differs from the declared schema domain -- so a non-TENANT
+        # relation placed in `public` is still a violation.
         schema_owner = _schema_owner_for(state, topology, violations)
         domain = declaration.domain
         if domain is None:
@@ -1981,11 +2026,11 @@ def load_application_database_ownership_identities(
             owner=owner,
             source_path=source_path,
         )
-        # OMN-16993: the bridge is symmetric across BOTH physically-public
-        # families, not just `tenant`.
+        # OMN-16993 / OMN-17887: only the internal family is bridged. The
+        # tenant family is declared `schema: public` directly since OMN-17887
+        # retired the `tenant` schema, so it needs no bridge.
         #
-        # A relation in `TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359` or
-        # `INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359` is declared by
+        # A relation in `INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359` is declared by
         # its logical schema in every manifest and node contract, while its
         # physical table still lives bare in `public` until the governed
         # OMN-15359 cutover moves it. Deployable SQL must therefore target
@@ -2013,7 +2058,6 @@ def load_application_database_ownership_identities(
         # `schema: public` in omninode_infra's k8s manifest, is in neither
         # set and so is untouched by this bridge.
         bridged_schema_for_family = {
-            "tenant": TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
             "omninode_internal": INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
         }.get(schema)
         if (

@@ -360,7 +360,10 @@ class EnumLabLane(StrEnum):
     changes only (operator ruling 2026-09-25T10:22:22Z, one deploy slot per lab
     host), NOT in ``ANY_OF_DEFAULT_LANES``. Which repositories an instance lane
     may prove is read from ``config/deploy_lane_routing.yaml``
-    (``scripts/ci/instance_receipt_lanes.py``), not from this enum.
+    (``scripts/ci/instance_receipt_lanes.py``), not from this enum. It is
+    declared so the routing table's ``verify:`` block for ``dev-200`` names a
+    known lane; no route sends a merge to ``dev-200`` yet, so nothing emits it
+    today.
 
     No other value is admissible, and in particular no governed lane
     (``prod``, ``stability-test``, ``judge``, or a collaborator lane) can name

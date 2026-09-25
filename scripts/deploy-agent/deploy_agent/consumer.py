@@ -86,6 +86,7 @@ from deploy_agent.events import (
     ModelRejectionNotice,
     Scope,
 )
+from deploy_agent.host_slot import HostSlot
 from deploy_agent.job_state import JobStore
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
 from deploy_agent.lane_policy import (
@@ -251,6 +252,11 @@ class DeployConsumer:
     #: nothing and accepts every command its lane fence admits, which is the
     #: single-instance behaviour.
     router: DeployRouter | None = None
+    #: OMN-19544 AC1, on the same terms: a consumer built without a host slot
+    #: shares its host with nobody and accepts as before. ``host_slot_owner`` is
+    #: the name this agent's own lease carries, which never blocks it.
+    host_slot: HostSlot | None = None
+    host_slot_owner: str = "deploy-agent"
 
     def __init__(
         self,
@@ -267,6 +273,8 @@ class DeployConsumer:
         ref_resolver: RefResolver | None = None,
         tracking_ref: str | None = None,
         router: DeployRouter | None = None,
+        host_slot: HostSlot | None = None,
+        host_slot_owner: str = "deploy-agent",
     ) -> None:
         # OMN-19506 AC3. Each deploy-agent instance reads EVERY record, so each
         # subscribes with its own declared group: in one shared group Kafka
@@ -274,6 +282,8 @@ class DeployConsumer:
         # other would be skipped by the only reader it reached (the
         # MC_shared_group counterexample on the ticket).
         self.router = router
+        self.host_slot = host_slot
+        self.host_slot_owner = host_slot_owner
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
             **kafka_config.consumer_kwargs(),
@@ -328,6 +338,8 @@ class DeployConsumer:
         3. Validate payload (schema, scope, services legality)
         4. Check the lane fence -> reject "lane_not_allowed"
         5. Check busy (has_active_job) -> reject "busy"
+        5a. Check the host slot (OMN-19544) -> reject "busy" while another
+            owner, a prover, holds it
         6. Check dedup (is_duplicate) -> reject "duplicate"
         6a. Lineage fence (OMN-19270) -> reject "superseded_by_running_build"
             or "divergent_ref"
@@ -570,6 +582,24 @@ class DeployConsumer:
             logger.info("Rejecting command %s: agent busy", cmd.correlation_id)
             self._commit_through(msg)
             return None, self._reject(EnumRejectionReason.BUSY, cmd=cmd)
+
+        # Step 5a: Host slot (OMN-19544 AC1). On a host this agent shares with
+        # a prover (the .105 laptop, whose VM holds the lane or a proof stack,
+        # not both), a lease another owner holds refuses the command as `busy`,
+        # the reason a running job already gives. Read here, before anything is
+        # accepted or folded; the job takes the lease itself before its first
+        # phase, and a prover that won the slot in between makes that job end
+        # without touching the host.
+        if self.host_slot is not None:
+            holder = self.host_slot.held_by_other(self.host_slot_owner)
+            if holder is not None:
+                logger.info(
+                    "Rejecting command %s: busy, %s",
+                    cmd.correlation_id,
+                    holder.describe(),
+                )
+                self._commit_through(msg)
+                return None, self._reject(EnumRejectionReason.BUSY, cmd=cmd)
 
         # Step 6: Check dedup
         if self.job_store.is_duplicate(cmd.correlation_id):

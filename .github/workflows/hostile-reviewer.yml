@@ -26,7 +26,12 @@
 #   - The DETERMINISTIC merge surface is "Hostile Review Thread Gate": it
 #     fails while unresolved hostile-reviewer threads exist and passes when
 #     they are resolved. No job exits nonzero on a model's opinion.
-#   - degraded — fewer than 2 models succeeded (infra) → informational.
+#   - degraded — fewer than 2 models succeeded (infra) → the reviewer job
+#     FAILS with a named reason (OMN-17492 follow-up, 2026-09-25). It was
+#     informational, and 28 of the 32 PRs merged 2026-09-24T23:18Z..
+#     2026-09-25T11:10Z went green on a DEGRADED run that reviewed nothing:
+#     the job ran hosted, where no local key is reachable, so glm-review
+#     alone succeeded and the two-model quorum (OMN-18479) never formed.
 #   The pre-OMN-17492 "blocked on critical findings → exit 1" path was DEAD
 #   CODE: it parsed merged_findings / total_input_findings, fields
 #   ModelMultiReviewResult never had, so blocking was always 0 and finding
@@ -104,13 +109,24 @@ jobs:
       && github.event.pull_request.user.login != 'dependabot[bot]'
       && github.event.pull_request.user.login != 'onexbot-occ-writer[bot]'
     name: Hostile Reviewer (adversarial gate)
-    # self-hosted runner on .201 required -- qwen3-review(-b) are LAN-only  # onex-allow-internal-ip
+    # RUNNER CARVE-OUT (OMN-17492 follow-up; same shape as omniclaude
+    # OMN-18415). qwen3-review(-b) are LAN-only, so the trusted branch reads a
+    # DEDICATED variable whose fallback is the LAN-attached omnibase-ci fleet,
+    # NOT the shared OMNI_TRUSTED_CI_RUNS_ON_JSON seam: that seam is
+    # ["ubuntu-latest"] at org and repo scope, and while this job read it
+    # every trusted run landed hosted, failed 3 of 3 TCP connects to the lab
+    # endpoint for each local key, and left glm-review as the only model
+    # (run 36111018598, omnibase_infra#4110). OMNI_HOSTILE_REVIEW_RUNS_ON_JSON
+    # is deliberately left UNSET: setting it is an operator kill switch that
+    # must cite a reachability proof, never a side effect of a seam migration.
+    # Nothing here writes an Actions variable (CLAUDE.md rule 14). Fork PRs
+    # keep the public path first and never reach the LAN fleet.
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_HOSTILE_REVIEW_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     timeout-minutes: 35
 
@@ -491,13 +507,14 @@ jobs:
 
             const label = {
               passed: 'REVIEWED',
-              degraded: 'DEGRADED (informational)',
+              degraded: 'DEGRADED (no verdict, job failed)',
             }[verdict] || verdict.toUpperCase();
 
             let note = '';
             if (verdict === 'degraded') {
-              note = '\n\n> **Note**: Fewer than 2 reviewer models succeeded. ' +
-                'Degraded results are informational (OMN-8468/OMN-8524) and do not block merge.';
+              note = '\n\n> **No review verdict**: fewer than 2 reviewer models succeeded, ' +
+                'so no finding could reach quorum. This run FAILS the reviewer job (OMN-17492): ' +
+                'a review that established nothing is not a pass. Re-run once the endpoint is back.';
               if (error) note += ` Error: \`${error}\``;
             } else if (errors + warnings > 0) {
               note = '\n\n> **Action required**: findings were posted as review threads. ' +
@@ -522,7 +539,7 @@ jobs:
               '|---------|---------|---------------|',
               '| Review threads | Per-finding, posted by the reviewer | No (informational) |',
               '| `Hostile Review Thread Gate` | Deterministic: unresolved hostile-reviewer threads exist | Fails until resolved (not yet a required context) |',
-              '| `degraded` verdict | Fewer than 2 models succeeded (infra) | No |',
+              '| `degraded` verdict | Fewer than 2 models succeeded (infra) | Fails this job with a named reason |',
               '',
               '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review: qwen3-review, qwen3-review-b, glm-review (OMN-8468/OMN-8524/OMN-17492)_',
             ].join('\n');
@@ -552,6 +569,25 @@ jobs:
                 body,
               });
             }
+
+      # OMN-17492 follow-up (2026-09-25), same rule as omnimarket OMN-15110:
+      # a run that established no verdict is a NAMED failure, never a green
+      # check. Every producer above (the preflight short-circuit, the missing
+      # result JSON branch, and the quorum parse) still exits 0 so the summary
+      # comment can explain itself; this last step is the single point that
+      # turns anything other than `passed` into a job failure, which the
+      # Hostile Review Gate below then reports.
+      - name: Enforce hostile-review verdict (no verdict is not a pass)
+        if: always()
+        env:
+          REVIEW_VERDICT: ${{ steps.review.outputs.verdict || steps.preflight.outputs.verdict }}
+          REVIEW_ERROR: ${{ steps.review.outputs.error || steps.preflight.outputs.error }}
+        run: |
+          echo "Resolved verdict: ${REVIEW_VERDICT:-unknown}"
+          if [ "${REVIEW_VERDICT:-}" != "passed" ]; then
+            echo "::error::Hostile Reviewer established no review verdict (verdict '${REVIEW_VERDICT:-unknown}'; reason: ${REVIEW_ERROR:-none reported}). Fewer than two reviewer models succeeded, so no finding could reach quorum. This is an infrastructure failure, not a pass: re-run once the review endpoints are reachable (OMN-17492)."
+            exit 1
+          fi
 
   hostile-review-gate:
     name: Hostile Review Gate
@@ -595,7 +631,7 @@ jobs:
             # OMN-17492: hostile-review no longer exits nonzero on findings
             # (finder-never-gate) — a failure here is a pipeline/infra error
             # (install, script, or posting failure), not a model opinion.
-            echo "::error::hostile-review job failed (pipeline error — findings never fail it since OMN-17492)."
+            echo "::error::hostile-review job failed: either no review verdict was established (fewer than two models succeeded) or the pipeline errored. Findings never fail it (OMN-17492); read the job's own error line for which."
             exit 1
           fi
           echo "Hostile Review Gate PASSED"

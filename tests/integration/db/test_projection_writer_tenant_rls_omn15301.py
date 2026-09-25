@@ -25,6 +25,9 @@ from omnibase_infra.errors.error_projection import ProjectionTenantContextError
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _build_projection_db_adapter,
 )
+from omnibase_infra.topology.physical_schema_mapping import (
+    physical_grant_schema_for_table,
+)
 from tests.helpers.application_db_topology import (
     projection_database_target,
     projection_database_urls,
@@ -37,6 +40,16 @@ DATABASE = "omnidash_analytics"
 TENANT_TABLE = "delegation_events"
 INTERNAL_TABLE = "generation_events"
 CATALOG_TABLE = "plan_tiers"
+# OMN-17422 amendment 2 (K3): each relation is built where the runtime's own
+# physical mapping says its SQL lands, never in a hard-coded schema. The suite
+# was stranded twice by hard-coding: once by the tenant bridge, once by the
+# internal bridge (`generation_events` is logically omninode_internal but
+# physically in `public` until OMN-15359 moves it), and nothing noticed because
+# the module is skipped in CI. Deriving the schema makes the next remap move the
+# fixture with it.
+TENANT_SCHEMA = physical_grant_schema_for_table("public", TENANT_TABLE)
+INTERNAL_SCHEMA = physical_grant_schema_for_table("omninode_internal", INTERNAL_TABLE)
+CATALOG_SCHEMA = physical_grant_schema_for_table("platform_catalog", CATALOG_TABLE)
 TENANT_ROLE = "tenant_projection_writer"
 INTERNAL_ROLE = "omninode_runtime"
 CATALOG_READER_ROLE = "app_dashboard"
@@ -45,27 +58,29 @@ OWNER_ROLE = "postgres"
 TENANT_A = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 TENANT_B = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 
-_SCHEMA_SQL = """
-CREATE SCHEMA tenant;
+# OMN-17887 (operator ruling 2026-09-24): the `tenant` schema is RETIRED and the
+# TENANT domain's schema is `public` for good, so the tenant-domain relation is
+# built in `public` -- exactly where the runtime's emitted SQL names it.
+_SCHEMA_SQL = f"""
 CREATE SCHEMA omninode_internal;
 CREATE SCHEMA platform_catalog;
-CREATE TABLE tenant.delegation_events (
+CREATE TABLE {TENANT_SCHEMA}.{TENANT_TABLE} (
     correlation_id UUID PRIMARY KEY,
     task_type TEXT NOT NULL,
     tenant_id UUID NOT NULL
 );
-ALTER TABLE tenant.delegation_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tenant.delegation_events FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON tenant.delegation_events
+ALTER TABLE {TENANT_SCHEMA}.{TENANT_TABLE} ENABLE ROW LEVEL SECURITY;
+ALTER TABLE {TENANT_SCHEMA}.{TENANT_TABLE} FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON {TENANT_SCHEMA}.{TENANT_TABLE}
   FOR ALL
   USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
-CREATE TABLE omninode_internal.generation_events (
+CREATE TABLE {INTERNAL_SCHEMA}.{INTERNAL_TABLE} (
     correlation_id UUID PRIMARY KEY,
     source_tenant_id UUID NULL,
     status TEXT NOT NULL
 );
-CREATE TABLE platform_catalog.plan_tiers (
+CREATE TABLE {CATALOG_SCHEMA}.{CATALOG_TABLE} (
     tier_id TEXT PRIMARY KEY,
     display_name TEXT NOT NULL
 );
@@ -169,20 +184,20 @@ def domain_dsns(pg_socket_dir: str) -> dict[str, str]:
                 (ROLE_PASSWORD,),
             )
             cursor.execute(f"GRANT CONNECT ON DATABASE {DATABASE} TO {role}")
-        cursor.execute(f"GRANT USAGE ON SCHEMA tenant TO {TENANT_ROLE}")
+        cursor.execute(f"GRANT USAGE ON SCHEMA {TENANT_SCHEMA} TO {TENANT_ROLE}")
         cursor.execute(
-            f"GRANT SELECT, INSERT, UPDATE ON tenant.{TENANT_TABLE} TO {TENANT_ROLE}"
+            f"GRANT SELECT, INSERT, UPDATE ON {TENANT_SCHEMA}.{TENANT_TABLE} TO {TENANT_ROLE}"
         )
-        cursor.execute(f"GRANT USAGE ON SCHEMA omninode_internal TO {INTERNAL_ROLE}")
+        cursor.execute(f"GRANT USAGE ON SCHEMA {INTERNAL_SCHEMA} TO {INTERNAL_ROLE}")
         cursor.execute(
             "GRANT SELECT, INSERT, UPDATE ON "
-            f"omninode_internal.{INTERNAL_TABLE} TO {INTERNAL_ROLE}"
+            f"{INTERNAL_SCHEMA}.{INTERNAL_TABLE} TO {INTERNAL_ROLE}"
         )
         cursor.execute(
-            f"GRANT USAGE ON SCHEMA platform_catalog TO {CATALOG_READER_ROLE}"
+            f"GRANT USAGE ON SCHEMA {CATALOG_SCHEMA} TO {CATALOG_READER_ROLE}"
         )
         cursor.execute(
-            f"GRANT SELECT ON platform_catalog.{CATALOG_TABLE} TO {CATALOG_READER_ROLE}"
+            f"GRANT SELECT ON {CATALOG_SCHEMA}.{CATALOG_TABLE} TO {CATALOG_READER_ROLE}"
         )
     conn.close()
     return {
@@ -199,14 +214,14 @@ def _clean_tables(domain_dsns: dict[str, str]) -> Iterator[None]:
     conn = psycopg2.connect(domain_dsns["owner"])
     conn.autocommit = True
     with conn.cursor() as cursor:
-        cursor.execute(f"TRUNCATE tenant.{TENANT_TABLE}")
-        cursor.execute(f"TRUNCATE omninode_internal.{INTERNAL_TABLE}")
-        cursor.execute(f"TRUNCATE platform_catalog.{CATALOG_TABLE}")
+        cursor.execute(f"TRUNCATE {TENANT_SCHEMA}.{TENANT_TABLE}")
+        cursor.execute(f"TRUNCATE {INTERNAL_SCHEMA}.{INTERNAL_TABLE}")
+        cursor.execute(f"TRUNCATE {CATALOG_SCHEMA}.{CATALOG_TABLE}")
     conn.close()
 
 
 def _tenant_adapter(dsn: str, tenant_id: UUID | None) -> object:
-    target = projection_database_target(TENANT_TABLE, schema="tenant")
+    target = projection_database_target(TENANT_TABLE, schema="public")
     authority = None
     event = None
     if tenant_id is not None:
@@ -248,12 +263,52 @@ def _tenant_rows(owner_dsn: str) -> list[tuple[UUID, UUID]]:
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT correlation_id, tenant_id FROM tenant.delegation_events "
+                f"SELECT correlation_id, tenant_id FROM {TENANT_SCHEMA}.{TENANT_TABLE} "  # noqa: S608 - module constant
                 "ORDER BY tenant_id"
             )
             return list(cursor.fetchall())
     finally:
         conn.close()
+
+
+def test_fixture_relations_live_where_the_runtime_writes(
+    domain_dsns: dict[str, str],
+) -> None:
+    """K3: the fixture is built from the runtime's own physical mapping.
+
+    Every relation this suite writes must exist in the schema that
+    ``physical_grant_schema_for_table`` resolves, which is the schema the
+    adapter's SQL names. When a family is remapped, this fails first and names
+    the relation, instead of every write test failing with ``UndefinedTable``.
+    """
+    expected = {
+        (TENANT_TABLE, physical_grant_schema_for_table("public", TENANT_TABLE)),
+        (
+            INTERNAL_TABLE,
+            physical_grant_schema_for_table("omninode_internal", INTERNAL_TABLE),
+        ),
+        (
+            CATALOG_TABLE,
+            physical_grant_schema_for_table("platform_catalog", CATALOG_TABLE),
+        ),
+    }
+    conn = psycopg2.connect(domain_dsns["owner"])
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT c.relname, n.nspname FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE c.relkind = 'r' AND c.relname = ANY(%s)",
+                ([name for name, _ in expected],),
+            )
+            built = set(cursor.fetchall())
+    finally:
+        conn.close()
+    assert built == expected, (
+        f"fixture relations {sorted(built)} are not where the runtime writes "
+        f"{sorted(expected)}"
+    )
 
 
 def test_verified_tenant_write_read_and_uuid_preservation(
@@ -304,38 +359,68 @@ def test_equal_tenant_string_is_replaced_with_uuid(domain_dsns: dict[str, str]) 
         adapter.close()
 
 
-def test_missing_authority_is_adjudicated_by_rls_not_by_the_runtime(
+def test_unbound_write_is_scoped_to_its_recorded_tenant(
     domain_dsns: dict[str, str],
 ) -> None:
-    """With no authority bound, the DATABASE refuses -- the runtime does not.
+    """With no authority bound, the row lands under the tenant it records.
 
-    OMN-16831 (ruling 2026-08-28, option D). This test previously proved the
-    runtime refused before connecting. That refusal was the defect: because
-    ``bind_projection_tenant_authority`` has zero non-test call sites, EVERY
-    real dispatch took this path, so every tenant-classified event was
-    quarantined and its tenant attribution destroyed rather than recorded.
+    OMN-17422, option (a) ruling, shipped in omnibase_infra#3088. This test used
+    to assert the OMN-16831 interim shape, where Postgres refused every unbound
+    write because no ``app.tenant_id`` GUC was set. That refused every tenant
+    row for every tenant, which is the defect OMN-17422 was filed for. Under the
+    ruling, the writer opens a transaction-local scope from the attribution it
+    is about to write, so the FORCE-RLS ``WITH CHECK`` is satisfied by the row's
+    own tenant, and isolation still holds on every other path:
 
-    Decoupling attribution from authorization does not weaken isolation, and
-    this is the proof: with no verified capability there is no
-    ``app.tenant_id`` GUC, so the FORCE-RLS ``WITH CHECK`` on
-    ``tenant.delegation_events`` compares against NULL and Postgres rejects
-    the row itself. The guarantee moved from a runtime precondition to the
-    database policy that was always its real enforcement point.
+    * the row lands, and lands as the tenant it records;
+    * a session scoped to a different tenant cannot read it;
+    * the recording tenant's own scoped session can;
+    * a row that records no tenant opens no scope, and Postgres refuses it
+      (nothing invents or defaults a tenant: OMN-16804 AC3, OMN-16831 AC2).
     """
-    adapter = _tenant_adapter(domain_dsns["tenant"], None)
+    # The no-tenant refusal is asserted on a FRESH connection, where the GUC has
+    # never been set and reads NULL, so the policy refuses with
+    # InsufficientPrivilege. On a connection that already ran a scoped write,
+    # Postgres reads a custom GUC back as '' rather than NULL, and the policy's
+    # ``::uuid`` cast raises InvalidTextRepresentation instead: still a refusal,
+    # but a different error class, so it is not the shape pinned here.
+    no_tenant = _tenant_adapter(domain_dsns["tenant"], None)
     try:
         with pytest.raises(psycopg2.errors.InsufficientPrivilege):
-            adapter.upsert(
+            no_tenant.upsert(
                 TENANT_TABLE,
                 "correlation_id",
-                {
-                    "correlation_id": uuid4(),
-                    "task_type": "proof",
-                    "tenant_id": TENANT_A,
-                },
+                {"correlation_id": uuid4(), "task_type": "no-tenant"},
             )
     finally:
-        adapter.close()
+        no_tenant.close()
+    assert _tenant_rows(domain_dsns["owner"]) == []
+
+    correlation_id = uuid4()
+    unbound = _tenant_adapter(domain_dsns["tenant"], None)
+    try:
+        assert unbound.upsert(
+            TENANT_TABLE,
+            "correlation_id",
+            {
+                "correlation_id": correlation_id,
+                "task_type": "proof",
+                "tenant_id": TENANT_A,
+            },
+        )
+    finally:
+        unbound.close()
+    assert _tenant_rows(domain_dsns["owner"]) == [(correlation_id, TENANT_A)]
+
+    tenant_a = _tenant_adapter(domain_dsns["tenant"], TENANT_A)
+    tenant_b = _tenant_adapter(domain_dsns["tenant"], TENANT_B)
+    try:
+        assert tenant_b.query(TENANT_TABLE, {"correlation_id": correlation_id}) == []
+        found = tenant_a.query(TENANT_TABLE, {"correlation_id": correlation_id})
+        assert [row["correlation_id"] for row in found] == [correlation_id]
+    finally:
+        tenant_a.close()
+        tenant_b.close()
 
 
 def test_tenant_b_cannot_read_tenant_a(domain_dsns: dict[str, str]) -> None:
@@ -385,7 +470,7 @@ def test_real_rls_with_check_rejects_tenant_b_insert_and_update_under_a(
         with conn.cursor() as cursor:
             with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                 cursor.execute(
-                    "INSERT INTO tenant.delegation_events VALUES (%s, %s, %s)",
+                    f"INSERT INTO {TENANT_SCHEMA}.{TENANT_TABLE} VALUES (%s, %s, %s)",  # noqa: S608 - module constant
                     (uuid4(), "unset-context", TENANT_A),
                 )
         conn.rollback()
@@ -394,7 +479,7 @@ def test_real_rls_with_check_rejects_tenant_b_insert_and_update_under_a(
             cursor.execute("SET LOCAL app.tenant_id = %s", (str(TENANT_A),))
             with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                 cursor.execute(
-                    "INSERT INTO tenant.delegation_events VALUES (%s, %s, %s)",
+                    f"INSERT INTO {TENANT_SCHEMA}.{TENANT_TABLE} VALUES (%s, %s, %s)",  # noqa: S608 - module constant
                     (uuid4(), "wrong-insert", TENANT_B),
                 )
         conn.rollback()
@@ -403,7 +488,7 @@ def test_real_rls_with_check_rejects_tenant_b_insert_and_update_under_a(
         with conn.cursor() as cursor:
             cursor.execute("SET LOCAL app.tenant_id = %s", (str(TENANT_A),))
             cursor.execute(
-                "INSERT INTO tenant.delegation_events VALUES (%s, %s, %s)",
+                f"INSERT INTO {TENANT_SCHEMA}.{TENANT_TABLE} VALUES (%s, %s, %s)",  # noqa: S608 - module constant
                 (correlation_id, "valid-a", TENANT_A),
             )
         conn.commit()
@@ -411,7 +496,7 @@ def test_real_rls_with_check_rejects_tenant_b_insert_and_update_under_a(
             cursor.execute("SET LOCAL app.tenant_id = %s", (str(TENANT_A),))
             with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                 cursor.execute(
-                    "UPDATE tenant.delegation_events SET tenant_id = %s "
+                    f"UPDATE {TENANT_SCHEMA}.{TENANT_TABLE} SET tenant_id = %s "  # noqa: S608 - module constant
                     "WHERE correlation_id = %s",
                     (TENANT_B, correlation_id),
                 )
@@ -486,7 +571,7 @@ def test_catalog_reader_can_read_and_has_no_writer_operation(
     owner.autocommit = True
     with owner.cursor() as cursor:
         cursor.execute(
-            "INSERT INTO platform_catalog.plan_tiers VALUES (%s, %s)",
+            f"INSERT INTO {CATALOG_SCHEMA}.{CATALOG_TABLE} VALUES (%s, %s)",  # noqa: S608 - module constant
             ("beta", "Beta"),
         )
     owner.close()
@@ -506,9 +591,9 @@ def test_catalog_reader_can_read_and_has_no_writer_operation(
 @pytest.mark.parametrize(
     ("dsn_key", "sql"),
     [
-        ("tenant", "SELECT * FROM omninode_internal.generation_events"),
-        ("internal", "SELECT * FROM tenant.delegation_events"),
-        ("catalog", "INSERT INTO platform_catalog.plan_tiers VALUES ('x', 'X')"),
+        ("tenant", f"SELECT * FROM {INTERNAL_SCHEMA}.{INTERNAL_TABLE}"),  # noqa: S608 - module constant
+        ("internal", f"SELECT * FROM {TENANT_SCHEMA}.{TENANT_TABLE}"),  # noqa: S608 - module constant
+        ("catalog", f"INSERT INTO {CATALOG_SCHEMA}.{CATALOG_TABLE} VALUES ('x', 'X')"),  # noqa: S608 - module constant
     ],
 )
 def test_cross_domain_roles_are_denied(
@@ -525,7 +610,7 @@ def test_cross_domain_roles_are_denied(
 
 
 def test_miswired_dsn_fails_identity_attestation(domain_dsns: dict[str, str]) -> None:
-    target = projection_database_target(TENANT_TABLE, schema="tenant")
+    target = projection_database_target(TENANT_TABLE, schema="public")
     authority, event = verified_tenant_dispatch(TENANT_A)
     adapter = _build_projection_db_adapter(
         projection_database_urls(target, domain_dsns["internal"]),
@@ -547,23 +632,32 @@ def test_environment_tenant_is_not_authority(
     """``ONEX_TENANT_ID`` never becomes the isolation context (OMN-16831).
 
     A process-wide deployment env var is not a request-scoped entitlement, and
-    the decoupling must not accidentally promote it into one. Even with it set
-    to a real tenant, no GUC is issued on its word and the row is still
-    adjudicated by RLS against a NULL context.
+    the option (a) scope (OMN-17422) must come from the row, never from the
+    environment. The environment and the row therefore name DIFFERENT tenants
+    here: were the environment promoted into the GUC, the row's own
+    ``WITH CHECK`` would refuse it. Instead it lands as the tenant it records,
+    and the environment's tenant cannot read it.
     """
     monkeypatch.setenv("ONEX_TENANT_ID", str(TENANT_A))
     monkeypatch.setenv("ENFORCE_TENANT_ISOLATION", "false")
+    correlation_id = uuid4()
     adapter = _tenant_adapter(domain_dsns["tenant"], None)
     try:
-        with pytest.raises(psycopg2.errors.InsufficientPrivilege):
-            adapter.upsert(
-                TENANT_TABLE,
-                "correlation_id",
-                {
-                    "correlation_id": uuid4(),
-                    "task_type": "proof",
-                    "tenant_id": TENANT_A,
-                },
-            )
+        assert adapter.upsert(
+            TENANT_TABLE,
+            "correlation_id",
+            {
+                "correlation_id": correlation_id,
+                "task_type": "proof",
+                "tenant_id": TENANT_B,
+            },
+        )
     finally:
         adapter.close()
+    assert _tenant_rows(domain_dsns["owner"]) == [(correlation_id, TENANT_B)]
+
+    tenant_a = _tenant_adapter(domain_dsns["tenant"], TENANT_A)
+    try:
+        assert tenant_a.query(TENANT_TABLE, {"correlation_id": correlation_id}) == []
+    finally:
+        tenant_a.close()

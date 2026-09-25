@@ -5,12 +5,12 @@
 # second dev-lane deploy slot on the .202 host (epic OMN-19500, plan
 # knowledge-base-internal beta/plans/2026-09-24-second-deploy-slot-plan.md B3).
 #
-# NOT INSTALLED. This file is in the repo so the instance's shape is reviewed
-# and tested before any host runs it. Installing it waits on decision 19 of the
+# INSTALLED on .202 and enabled, 2026-09-25 (OMN-19522). Decision 19 of the
 # unified verification plan (no clone and no .git on .202 while the clean-
-# machine producers run bare there); omninode_infra#1663 is the last of those
-# producers' moves into a disposable container. The install, when it is ruled,
-# is the documented control path of the .201 dev unit:
+# machine producers ran bare there) no longer applies to .202: C13, C14 and,
+# since omninode_infra#1663, C29 run their customer steps in a disposable
+# rootless container. The install follows the documented control path of the
+# .201 dev unit:
 #   cp deploy-agent-dev-202.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now deploy-agent-dev-202.service

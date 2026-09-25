@@ -157,6 +157,12 @@ jobs:
       # id or from the start command, because a correlation no agent job can be
       # resolved by is worse than an absent one -- a reader would believe it.
       correlation_id: ${{ steps.publish.outputs.correlation_id }}
+      # OMN-19507 AC2. Which deploy-agent instance the command is routed to,
+      # and so where verify-sibling-converged runs and which receipt lane it
+      # emits the sibling sha's receipt under.
+      routed_instance: ${{ steps.route.outputs.routed_instance }}
+      receipt_lane: ${{ steps.route.outputs.receipt_lane }}
+      verify_runs_on: ${{ steps.route.outputs.verify_runs_on }}
 
     steps:
       # Into the workspace ROOT, so `./.github/actions/setup-python-uv` below
@@ -280,6 +286,25 @@ jobs:
             --source-checkout ".source-manifests" \
             --requested-by "gha/${{ inputs.source_repo }}/pr-$PR_NUMBER"
 
+      # OMN-19507 AC2: route the command just published, by the rule the deploy
+      # agent applies (config/deploy_lane_routing.yaml, read from the
+      # omnibase_infra dev checkout above, which is the command's git_ref). Once
+      # the (dev, omnimarket) -> dev-202 row lands (task B8), an omnimarket merge
+      # is verified on .202 under compose-dev-202; until then every merge
+      # resolves to dev-201 and nothing here changes. Fails the job on an
+      # unreadable table rather than leaving the verify job a guessed runner.
+      - name: Resolve the deploy-agent instance the command is routed to
+        id: route
+        env:
+          SOURCE_REPO: ${{ inputs.source_repo }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/check_dev_lane_staleness.py \
+            --write-route-outputs \
+            --runtime-lane dev \
+            --requested-by "gha/${SOURCE_REPO}/pr-${PR_NUMBER}"
+
   # Publication is not application (OMN-17888 AC4), and for a sibling trigger the
   # usual convergence read cannot answer the question at all: the infra revision
   # label does not move when only a sibling changes, so
@@ -316,7 +341,13 @@ jobs:
     #
     # `host-201` is required, never the bare class: the other verify-class
     # runners are on other lab hosts and cannot see this lane.
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    # OMN-19507 AC2: the runner is the ROUTED instance's, declared in
+    # config/deploy_lane_routing.yaml and resolved by the trigger job. For
+    # dev-201 that is exactly [self-hosted, omnibase-verify, host-201], and the
+    # reasons above for the host label hold unchanged; dev-202's is host-202.
+    # An empty output fails fromJSON, so the job cannot start on a guessed
+    # runner.
+    runs-on: ${{ fromJSON(needs.trigger-rebuild.outputs.verify_runs_on) }}
     # 25-minute convergence wait plus a tail for the probe, the emit and the
     # upload. A job killed by timeout uploads NO receipt, which is the one
     # outcome worse than a failing one.
@@ -394,6 +425,24 @@ jobs:
           # because it is DATA the receipt carries, not a verdict it reports.
           echo "LAB_PASS_INVENTORY=${LAB_PASS_WORK}/node-inventory.json" >> "$GITHUB_ENV"
 
+      # OMN-19507 AC2: every lane-specific value below comes from the routed
+      # instance's verify: block in config/deploy_lane_routing.yaml, written to
+      # the job environment once here: RECEIPT_LANE, DEPLOY_AGENT_URL, the three
+      # DEV_LANE_*_URL readiness URLs, DEV_LANE_COMPOSE_PROJECT and the runtime,
+      # effects, postgres and broker containers. The committed table routes every
+      # merge to dev-201, whose block is literally the values this job hard-coded
+      # before (tests/ci/test_deploy_lane_verify_route_omn19507.py). An unknown
+      # lane exits non-zero and writes nothing, so no later step runs against a
+      # guessed lane.
+      - name: Read the routed lane's verify targets
+        env:
+          ROUTED_RECEIPT_LANE: ${{ needs.trigger-rebuild.outputs.receipt_lane }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/check_dev_lane_staleness.py \
+            --write-lane-env \
+            --lane "$ROUTED_RECEIPT_LANE"
+
       # OMN-18685, porting OMN-18573 from the direct caller's guard. The 25
       # minutes below is the LANE's budget and is measured from the moment the
       # deploy agent ACCEPTS the rebuild command, not from when this step
@@ -423,6 +472,7 @@ jobs:
         # emitter itself still exits non-zero on any non-PASS receipt -- so
         # `deliver-sibling-candidate`'s `success()` gating is unchanged and a
         # non-converged sibling still cannot announce itself to staging.
+        # advisory-ok: OMN-19507 INDETERMINATE exit 3 must not stop the receipt write; the emit step's verdict decides the check
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -433,7 +483,7 @@ jobs:
           # The deploy agent's own HTTP surface on this host, the same one the
           # direct caller's converge step reads. Its /job/<correlation_id>
           # endpoint serves the acceptance timestamp.
-          DEPLOY_AGENT_URL: http://host.docker.internal:8098
+          DEPLOY_AGENT_URL: ${{ env.DEPLOY_AGENT_URL }}
           # Must equal this job's own `timeout-minutes`, which is DERIVED from
           # the declared parts and asserted by tests/ci/test_lab_pass_settle_budget.py.
           JOB_TIMEOUT_MINUTES: 45
@@ -448,7 +498,7 @@ jobs:
           # fail-closed: an unresolvable declaration exits non-zero and prints
           # nothing, so a partial capture cannot become a guessed bound.
           CONVERGE_WALL_CLOCK=$(uv run python scripts/ci/lane_settle_budget.py \
-            --lane compose-dev \
+            --lane "$RECEIPT_LANE" \
             --converge-wall-clock \
             --job-ceiling-seconds "$(( JOB_TIMEOUT_MINUTES * 60 ))" \
             --elapsed-seconds "$ELAPSED" \
@@ -459,6 +509,8 @@ jobs:
             --repo "$SOURCE_REPO" \
             --repo-slug "$REPO_SLUG" \
             --expect-revision "$SIBLING_SHA" \
+            --container "$DEV_LANE_EFFECTS_CONTAINER" \
+            --compose-project "$DEV_LANE_COMPOSE_PROJECT" \
             --wait-timeout 25m \
             --poll-interval 60s \
             --agent-url "$DEPLOY_AGENT_URL" \
@@ -484,19 +536,19 @@ jobs:
           # convergence guard verified. Empty CONVERGE_GENERATION means the
           # guard published none, which FAILS the binding check rather than
           # skipping it.
-          DEV_LANE_CONTAINER: omninode-runtime-effects
+          DEV_LANE_CONTAINER: ${{ env.DEV_LANE_EFFECTS_CONTAINER }}
           CONVERGE_GENERATION: ${{ steps.converge.outputs.generation }}
           # host.docker.internal, NOT localhost: this job runs in the
           # omninode-deploy-runner container against the host's docker daemon,
           # not in the host's network namespace (OMN-18200).
-          DEV_LANE_MAIN_URL: http://host.docker.internal:8085
-          DEV_LANE_EFFECTS_URL: http://host.docker.internal:8086
+          DEV_LANE_MAIN_URL: ${{ env.DEV_LANE_MAIN_URL }}
+          DEV_LANE_EFFECTS_URL: ${{ env.DEV_LANE_EFFECTS_URL }}
           # OMN-18387: the omnimarket-projection-api container, published on
           # the same host as main/effects above. Reachability confirmed live
           # 2026-09-15 from inside this same runner image
           # (omninode-deploy-runner): `curl http://host.docker.internal:3002/projections`
           # -> HTTP_200, identically to the :8085/ready probe already in use.
-          DEV_LANE_PROJECTION_URL: http://host.docker.internal:3002
+          DEV_LANE_PROJECTION_URL: ${{ env.DEV_LANE_PROJECTION_URL }}
         run: |
           set -euo pipefail
           mkdir -p "${LAB_PASS_DIR}"
@@ -539,13 +591,13 @@ jobs:
           # cannot be resolved, so a partial capture cannot become a guessed
           # budget.
           SETTLE_BUDGET_JSON=$(uv run python scripts/ci/lane_settle_budget.py \
-            --lane compose-dev \
+            --lane "$RECEIPT_LANE" \
             --job-ceiling-seconds "$(( JOB_TIMEOUT_MINUTES * 60 ))" \
             --elapsed-seconds "$ELAPSED" \
             --reserved-tail-seconds "$RESERVED_TAIL_SECONDS")
           echo "settle budget: ${SETTLE_BUDGET_JSON}"
           uv run python scripts/ci/lab_pass_receipt.py probe-lane \
-            --lane compose-dev \
+            --lane "$RECEIPT_LANE" \
             --main-url "$DEV_LANE_MAIN_URL" \
             --effects-url "$DEV_LANE_EFFECTS_URL" \
             --projection-url "$DEV_LANE_PROJECTION_URL" \
@@ -625,7 +677,7 @@ jobs:
           EVIDENCE="${CONVERGE_EVIDENCE:-check_lane_sibling_revision.py --repo $SOURCE_REPO --expect-revision ${SAFE_SIBLING_SHA} against the omnibase-infra compose project, rebuilt at omnibase_infra $GIT_REF (the guard wrote no evidence)}"
           uv run python scripts/ci/lab_pass_receipt.py emit \
             --sha "$SIBLING_SHA" \
-            --lane compose-dev \
+            --lane "$RECEIPT_LANE" \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --check "sibling_revision:${SIBLING_REVISION_VERDICT}:${EVIDENCE}" \
@@ -657,14 +709,14 @@ jobs:
           uv run python scripts/ci/lab_pass_receipt.py verify \
             --path "${LAB_PASS_DIR}/receipt.json" \
             --sha "$SIBLING_SHA" \
-            --lane compose-dev
+            --lane "$RECEIPT_LANE"
 
       - name: Upload the compose-dev lab-pass receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # Must match scripts/ci/lab_pass_receipt.py artifact_name() exactly.
-          name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.sibling_sha }}
+          name: lab-pass-receipt-${{ needs.trigger-rebuild.outputs.receipt_lane }}-${{ needs.trigger-rebuild.outputs.sibling_sha }}
           path: ${{ env.LAB_PASS_DIR }}
           retention-days: 90
           if-no-files-found: error
