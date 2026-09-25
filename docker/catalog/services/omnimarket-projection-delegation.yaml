@@ -1,6 +1,10 @@
 name: omnimarket-projection-delegation
 description: Kafka-to-DB projection consumer for delegation events (OMN-7610)
-image: omnimarket-projection:latest
+# OMN-19496: built from docker/Dockerfile.runtime, which installs omnimarket, as
+# the dev lane's projection-delegation-writer is (docker-compose.dev-lane.yml).
+# The former omnimarket-projection:latest image was built only in the
+# omnimarket repo, so no catalog render could start this service.
+image: runtime:latest
 layer: runtime
 container_name: omnimarket-projection-delegation
 required_env:
@@ -13,14 +17,24 @@ required_env:
   - ONEX_TENANT_DB_URL
 hardcoded_env:
   KAFKA_BROKERS: redpanda:9092
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   PYTHONUNBUFFERED: "1"
+  # The runner's /ready server; 8099 as on the dev lane.
+  PROJECTION_RUNNER_HEALTH_PORT: "8099"
 operational_defaults:
-  KAFKA_CONSUMER_GROUP: omnimarket-projections-v1
+  KAFKA_CONSUMER_GROUP: local.omnimarket-projections.delegation-writer.consume.v1
   ONEX_LOG_LEVEL: INFO
 ports: null
-healthcheck: null
+healthcheck:
+  test: curl -sf http://localhost:8099/ready
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 60
 volumes: []
 depends_on:
+  - service: migration-gate
+    condition: service_healthy
   - service: redpanda
     condition: service_healthy
   - service: postgres
@@ -28,7 +42,7 @@ depends_on:
 restart: unless-stopped
 resources:
   cpus: "0.5"
-  memory: 256M
+  memory: 1024M
   cpus_reservation: "0.1"
   memory_reservation: 64M
 stop_grace_period: 30s

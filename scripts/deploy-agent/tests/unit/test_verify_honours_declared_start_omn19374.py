@@ -430,6 +430,13 @@ def test_the_agent_hands_the_recreate_to_both_terminal_writes() -> None:
     agent_source = (
         Path(__file__).resolve().parents[2] / "deploy_agent" / "agent.py"
     ).read_text(encoding="utf-8")
-    assert agent_source.count("verify_recreate=self.executor.verify_recreate,") == 3, (
-        "the success write, the failure write and the terminal event"
+    assert agent_source.count("verify_recreate=self.executor.verify_recreate,") == 2, (
+        "the success write and the failure write"
+    )
+    # OMN-19501: the terminal event no longer reads self.executor directly at
+    # the publish site -- the lane lock releases before the settle worker
+    # publishes, so the recreate is frozen into `_TerminalFacts` off the
+    # executor first, then carried by `facts` to the payload.
+    assert "verify_recreate=list(self.executor.verify_recreate)," in agent_source, (
+        "the terminal facts snapshot, frozen off the executor before release"
     )

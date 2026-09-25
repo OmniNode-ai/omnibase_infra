@@ -6,7 +6,20 @@
 # Cost and speed data come from the eval harness (OMN-7840) via live metrics.
 # Models without >=20 eval samples receive lowest routing priority.
 #
-# Tickets: OMN-7270, OMN-7841, OMN-16442
+# Tickets: OMN-7270, OMN-7841, OMN-16442, OMN-19129
+#
+# TWO PATH FIELDS, TWO READERS — do not merge them.
+#   health_path: read by omnimarket's node_model_router
+#     (handler_model_router._check_health). An EMPTY value there means "skip
+#     the health check, treat this model as always available", which is the
+#     right answer for a metered cloud surface the router must not poll.
+#   probe_path: read by omnibase_infra's ServiceLlmEndpointHealth via
+#     ModelLlmEndpointHealthConfig.from_model_registry (OMN-19129). This is the
+#     path that surface ACTUALLY SERVES for a cheap liveness check, and it is
+#     required for every http-transport entry that declares a base_url_env.
+#     Before OMN-19129 the prober synthesized /health and /v1/models for every
+#     backend; on the GLM coding-plan surface both 404 even with a valid
+#     credential, which the prober then misread as a rejected key.
 #
 # OMN-16442 (2026-08-28): reconciled against the canonical lab inventory
 # omni_home/docs/reference/AI_LAB_HARDWARE.md ("Last verified: 2026-08-28") and
@@ -30,6 +43,7 @@ models:
     # aither-kvcache K4/V3 setup.
     # CONCURRENCY: this endpoint admits ONE running generation at a time —
     # callers must queue above the model server rather than fan out to it.
+    probe_path: "/health"
     capabilities:
       - code_generation
       - refactoring
@@ -60,6 +74,7 @@ models:
     # is named for. context_window stays a conservative 65536 budget (matches
     # the topology contract's context_window_budgeted for this slot), not the
     # server's 131072 ceiling.
+    probe_path: "/health"
     capabilities:
       - deep_reasoning
       - code_review
@@ -87,6 +102,7 @@ models:
     provider: local
     transport: http
     base_url_env: LLM_EMBEDDING_URL
+    probe_path: "/health"
     capabilities:
       - embeddings
     context_window: 8192
@@ -120,6 +136,11 @@ models:
     base_url_env: LLM_GLM_URL
     api_key_env: LLM_GLM_API_KEY
     health_path: ""
+    # OMN-19129: measured live from omninode-runtime-effects 2026-09-21.
+    # Authenticated GET .../v4/models -> 200 with the model list; GET
+    # .../v4/health and .../v4/v1/models -> 404. health_path stays "" so the
+    # omnimarket router does not poll a metered surface.
+    probe_path: "/models"
     capabilities:
       - code_generation
       - refactoring
@@ -132,6 +153,7 @@ models:
     transport: http
     base_url_env: LLM_GLM_URL
     api_key_env: LLM_GLM_API_KEY
+    probe_path: "/models"
     capabilities:
       - code_generation
       - deep_reasoning
@@ -144,6 +166,7 @@ models:
     transport: http
     base_url_env: LLM_GLM_URL
     api_key_env: LLM_GLM_API_KEY
+    probe_path: "/models"
     capabilities:
       - code_generation
       - deep_reasoning
@@ -167,6 +190,7 @@ models:
     transport: http
     base_url_env: LLM_OPENROUTER_URL
     api_key_env: OPENROUTER_API_KEY
+    probe_path: "/models"
     capabilities:
       - code_generation
       - reasoning

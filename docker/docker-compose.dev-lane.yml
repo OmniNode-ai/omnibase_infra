@@ -15,6 +15,8 @@
 #      kernel services, with autoheal disarmed in the same block.
 #   6. OMN-16025 — the infra routing-decision projection consumer, which was
 #      declared in docker/catalog and in no compose file, so it ran on no lane.
+#   7. OMN-19415 — the declared connection capacity of this lane's Postgres,
+#      the one server the pre-PR verify slots share.
 #
 # The header used to say "it carries exactly ONE thing". That stopped being
 # true at (2) and is corrected here rather than left to mislead the next reader
@@ -357,6 +359,43 @@ x-dev-lane-identity-env: &dev_lane_identity_env
   ONEX_RUNTIME_LANE: "compose-dev"
 services:
   # ===========================================================================
+  # (7) DECLARED POSTGRES CAPACITY -- OMN-19415
+  # ===========================================================================
+  # This lane's Postgres is the one SERVER the pre-PR verify slots share (epic
+  # OMN-18888): each slot gets its own databases and principals on it, not its
+  # own server. It ran the stock max_connections of 100 (3 superuser-reserved),
+  # declared nowhere. Measured on 2026-09-24 by a read-only 2-second
+  # pg_stat_activity sampler on the lab host:
+  #   * this lane ALONE reached 93 at 16:50:07Z, five minutes after a runtime
+  #     redeploy (omninode-runtime, runtime-worker, runtime-effects and
+  #     tenant-projection-writer at 18/13/13/13 as `postgres`), then idled back
+  #     to about 31;
+  #   * one booting slot held 63 at 16:27:12Z, the server sat at 100/100, and
+  #     this lane's runtime logged 1171 refusals in four minutes;
+  #   * after the next redeploy (17:20:08Z) this lane saturated the server with
+  #     NO slot running: 99 at 17:24:40Z, omninode-runtime climbing to 27 until
+  #     refused, 176 refusals, all in omninode-runtime.
+  # Sized from the budget in scripts/provision_db_slot.sh: dev lane 140 + 2
+  # slots x 118 (every slot principal carries a CONNECTION LIMIT, so a slot
+  # cannot exceed its share) + 3 superuser-reserved = 379. `--apply` refuses to
+  # provision a slot on a server below that figure, and
+  # tests/unit/infra/test_db_slot_connection_budget.py pins this value against
+  # the same arithmetic.
+  #
+  # HERE AND NOT IN THE BASE: stability-test, sim-202 and prod layer their
+  # postgres over the base block and would inherit a base `command:`, recreating
+  # their servers for capacity only this lane's slots need.
+  #
+  # TAKES EFFECT ON RECREATE ONLY. deploy-runtime.sh's ensure_core_infra_ready
+  # runs `up -d --no-deps --wait postgres valkey` on every --restart, so the
+  # first dev-lane restart after this lands recreates this container and drops
+  # every connection on the lane for the length of a Postgres restart.
+  postgres:
+    command:
+      - postgres
+      - -c
+      - max_connections=400
+  # ===========================================================================
   # (6a) BROKER READINESS THAT READS A PARTITION -- OMN-18789
   # ===========================================================================
   # THE SURFACE THIS REPLACES WAS GREEN THROUGH A TOTAL OUTAGE.
@@ -650,6 +689,129 @@ services:
       - "com.omninode.service=redpanda-sasl-enable"
       - "com.omninode.layer=infrastructure"
       - "com.omninode.ticket=OMN-18012"
+  # ===========================================================================
+  # (9) DEV-LANE BROKER DISK DIALS -- OMN-19082 (.201 half of the .105 fix)
+  # ===========================================================================
+  # Redpanda preallocates each active segment in `segment_fallocation_step`
+  # chunks, 32 MiB by default, and rolls an idle segment only after
+  # `log_segment_ms` (14 days by default). This broker carries about 1745
+  # topics, most of them nearly idle, so the preallocation alone held 46.26 GiB
+  # of its 98.96 GiB volume at filing (OMN-19082). The .105 dogfood broker got
+  # these same three values in omnibase_infra#4025
+  # (docker/docker-compose.dogfood.yml, basis in
+  # tests/unit/infra/test_dogfood_redpanda_disk_dials_omn19070.py); this block
+  # gives the dev lane the same values.
+  #
+  # WHY AN OVERRIDE OF `redpanda-partition-cap` AND NOT A NEW ONE-SHOT
+  # ------------------------------------------------------------------
+  # scripts/deploy-runtime.sh warm_broker_topic_provisioning() force-recreates
+  # exactly this service on every dev-lane redeploy, including a restart-only
+  # one, and a cold `up` runs it through depends_on. A separate service would
+  # run on neither path. The service is declared in docker-compose.infra.yml,
+  # the base every lane merges, but every other lane (stability-test, judge,
+  # lakshman, dogfood, prod, sim-202) overrides its `command`, and only the
+  # bare `omnibase-infra` project loads this file, so this reaches the dev
+  # lane and no other. A `command:` override REPLACES the base list, which is
+  # why the two base settings are repeated here;
+  # tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py pins them to the
+  # base values.
+  #
+  # All five properties are dynamic: the admin API's cluster_config/schema on
+  # this lane reads needs_restart=false for each, and `rpk cluster config
+  # status` read NEEDS-RESTART false after they were applied (2026-09-24).
+  # Segments that were already open keep their 32 MiB until they roll or the
+  # broker next restarts, which is what the .105 broker showed.
+  #
+  # THE DLQ TOPICS ARE EXEMPT FROM THE NEW RETENTION BEHAVIOUR, ON PURPOSE
+  # ---------------------------------------------------------------------
+  # Dead-lettered records wait for replay (node_dlq_replay_effect) and must
+  # not be deleted sooner because of this change. Two of the dials would do
+  # that to a DLQ topic that inherits the cluster default:
+  #   * `retention_bytes` 1 GiB would cut a DLQ partition that grows past
+  #     1 GiB. None is that large today (largest 443 MiB, and the two largest,
+  #     events and quarantine, already carry an explicit 50 GiB
+  #     retention.bytes), but a cap that bites only later is still a cap.
+  #   * `log_segment_ms` 1 day rolls the active segment daily, so the 7-day
+  #     `retention.ms` starts acting on DLQ records a day after they arrive
+  #     rather than after the active segment closes.
+  # So before either cluster value is set, every topic whose name contains
+  # `dlq` gets `retention.bytes=-1` and `segment.ms=1209600000` (the 14-day
+  # value it inherits today) as topic-level config, but only where the key
+  # still reads DEFAULT_CONFIG; a deliberately set value is left alone. The
+  # readback fails the one-shot if any DLQ topic is left inheriting either
+  # key.
+  #
+  # RESIDUAL: a DLQ topic created after this one-shot runs (a new declaration
+  # provisioned by the runtime in the same deploy) inherits the cluster
+  # values until the next dev redeploy pins it. It starts empty, so the byte
+  # cap cannot touch it before then; the one-day roll can. Moving the pin into
+  # the DLQ topic spec itself is the complete fix and is not done here.
+  #
+  # CREDENTIALS: the topic calls go through the Kafka listener, which is SASL
+  # on this lane, so the principal is passed as RPK_USER / RPK_PASS in the
+  # container environment and never on a command line. The `enable_sasl` read
+  # keeps the script correct on a cold volume where the flip has not run yet;
+  # the depends_on below orders it after the flip on a normal `up`.
+  redpanda-partition-cap:
+    environment:
+      DEV_KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane's broker dials pin DLQ topic config through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-19082); resolved from the operator env file, never inlined here}
+      DEV_KAFKA_SASL_PASSWORD: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the dev lane's broker dials pin DLQ topic config through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-19082); resolved from the operator env file, never inlined here}
+    command:
+      - |
+        set -eu
+        ADMIN="-X admin.hosts=redpanda:9644"
+        export RPK_BROKERS=redpanda:9092
+        /usr/bin/rpk cluster config set topic_partitions_per_shard 7000 $$ADMIN
+        /usr/bin/rpk cluster config set topic_memory_per_partition 1048576 $$ADMIN
+        /usr/bin/rpk cluster config set segment_fallocation_step 1048576 $$ADMIN
+        if [ "$$(/usr/bin/rpk cluster config get enable_sasl $$ADMIN)" = "true" ]; then
+          export RPK_USER="$$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$$DEV_KAFKA_SASL_PASSWORD" RPK_SASL_MECHANISM=SCRAM-SHA-256
+        fi
+        # OMN-19543: onex.tenant.events is onex-api's control-plane topic. An
+        # instance lane (dev-202, dev-200, ...) disables onex-api, so nothing
+        # else creates it and projection-tenant-registry-writer subscribes to a
+        # missing topic. One partition, as onex-api creates it. The create may
+        # lose a race to onex-api on .201; the read-back is the gate.
+        CP_TOPIC=onex.tenant.events
+        /usr/bin/rpk topic list > /tmp/topics.txt
+        if ! awk -v t="$$CP_TOPIC" 'NR>1 && $$1==t {found=1} END {exit !found}' /tmp/topics.txt; then
+          /usr/bin/rpk topic create "$$CP_TOPIC" -p 1 || echo "OMN-19543: create of $$CP_TOPIC returned non-zero; reading back"
+          /usr/bin/rpk topic list > /tmp/topics.txt
+          if ! awk -v t="$$CP_TOPIC" 'NR>1 && $$1==t {found=1} END {exit !found}' /tmp/topics.txt; then
+            echo "OMN-19543 FAIL: control-plane topic $$CP_TOPIC is absent after create" >&2
+            exit 1
+          fi
+        fi
+        echo "OMN-19543: control-plane topic $$CP_TOPIC present"
+        /usr/bin/rpk topic list > /tmp/topics.txt
+        DLQ=$$(awk 'NR>1 && tolower($$1) ~ /dlq/ {print $$1}' /tmp/topics.txt)
+        echo "OMN-19082: $$(awk 'NR>1' /tmp/topics.txt | wc -l) topics, $$(echo "$$DLQ" | awk 'NF' | wc -l) DLQ topics"
+        PIN_BYTES=""
+        PIN_SEGMENT=""
+        for t in $$DLQ; do
+          /usr/bin/rpk topic describe "$$t" -c > /tmp/cfg.txt
+          if [ "$$(awk '$$1=="retention.bytes"{print $$3}' /tmp/cfg.txt)" = "DEFAULT_CONFIG" ]; then PIN_BYTES="$$PIN_BYTES $$t"; fi
+          if [ "$$(awk '$$1=="segment.ms"{print $$3}' /tmp/cfg.txt)" = "DEFAULT_CONFIG" ]; then PIN_SEGMENT="$$PIN_SEGMENT $$t"; fi
+        done
+        if [ -n "$$PIN_BYTES" ]; then /usr/bin/rpk topic alter-config $$PIN_BYTES --set retention.bytes=-1; fi
+        if [ -n "$$PIN_SEGMENT" ]; then /usr/bin/rpk topic alter-config $$PIN_SEGMENT --set segment.ms=1209600000; fi
+        for t in $$DLQ; do
+          /usr/bin/rpk topic describe "$$t" -c > /tmp/cfg.txt
+          if awk '($$1=="retention.bytes" || $$1=="segment.ms") && $$3=="DEFAULT_CONFIG" {found=1} END {exit !found}' /tmp/cfg.txt; then
+            echo "OMN-19082 FAIL: DLQ topic $$t still inherits retention.bytes or segment.ms" >&2
+            exit 1
+          fi
+        done
+        echo "OMN-19082: every DLQ topic carries its own retention.bytes and segment.ms"
+        /usr/bin/rpk cluster config set log_segment_ms 86400000 $$ADMIN
+        /usr/bin/rpk cluster config set retention_bytes 1073741824 $$ADMIN
+        test "$$(/usr/bin/rpk cluster config get segment_fallocation_step $$ADMIN)" = "1048576"
+        test "$$(/usr/bin/rpk cluster config get log_segment_ms $$ADMIN)" = "86400000"
+        test "$$(/usr/bin/rpk cluster config get retention_bytes $$ADMIN)" = "1073741824"
+        echo "OMN-19082: disk dials read back"
+    depends_on:
+      redpanda-sasl-enable:
+        condition: service_completed_successfully
   forward-migration:
     environment:
       # Consumed by scripts/run-forward-migrations.sh. `dev` is the only value
@@ -1011,6 +1173,10 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      # OMN-19543: the one-shot creates onex.tenant.events, the only topic this
+      # writer reads, on lanes where onex-api (its owner) does not run.
+      redpanda-partition-cap:
+        condition: service_completed_successfully
     # The `if __name__ == "__main__"` entrypoint on the handler module, exactly
     # as the onex-dev Deployment invokes it. Same class, same code path, same
     # image contents -- the only difference between the two lanes is the

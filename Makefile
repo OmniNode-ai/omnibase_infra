@@ -23,6 +23,15 @@
 #     make seed-keycloak   # Reconcile Keycloak clients from desired-clients.json
 #     make seed-infisical  # Seed Infisical from ONEX contracts (writes with --execute)
 #
+# Laptop profile (OMN-19496) -- the stack plus your own runtime, no lab or ops
+# secrets, under its own compose project `omnibase-infra-local`:
+#
+#     make up-local            # write ~/.omnibase/local.env + model overlay if absent, then boot
+#     make status-local        # migration gate, runtime /health bodies, delegate consumer group
+#     make delegate-local PROMPT="..."  # one delegation through your runtime on the local broker
+#     make down-local          # stop the laptop profile (keeps its volumes)
+#     make down-local-volumes  # stop it and delete its volumes (local data)
+#
 # Environment:
 #
 #     OMNIBASE_ENV_FILE   Override env file path (default: ~/.omnibase/.env)
@@ -35,9 +44,13 @@
 # `seed-infisical` delegates to scripts/seed-infisical.py.
 
 .PHONY: help up up-auth up-runtime down down-auth down-runtime down-all status \
-        seed-keycloak seed-infisical _check-docker _check-env-file
+        seed-keycloak seed-infisical _check-docker _check-env-file \
+        local-env up-local status-local delegate-local down-local down-local-volumes
 
 OMNIBASE_ENV_FILE ?= $(HOME)/.omnibase/.env
+LOCAL_ENV_FILE ?= $(HOME)/.omnibase/local.env
+LOCAL_OVERLAY_FILE ?= $(HOME)/.omnibase/local.bifrost.yaml
+LOCAL_PROJECT := omnibase-infra-local
 ONEX_CLI := uv run python -m omnibase_infra.docker.catalog.cli
 
 help: ## Show this help
@@ -93,6 +106,55 @@ seed-infisical: _check-docker _check-env-file ## Seed Infisical from ONEX contra
 	  --contracts-dir src/omnibase_infra/nodes \
 	  --create-missing-keys \
 	  --execute
+
+# ----------------------------------------------------------------------------
+# Laptop profile (OMN-19496): catalog bundle `local`, docker/catalog/bundles.yaml
+# ----------------------------------------------------------------------------
+
+local-env: ## Write the laptop env file and model overlay from their templates (never overwrites)
+	@mkdir -p "$(dir $(LOCAL_ENV_FILE))" "$(dir $(LOCAL_OVERLAY_FILE))"
+	@if [ -e "$(LOCAL_OVERLAY_FILE)" ]; then \
+	  echo "==> Keeping existing model overlay $(LOCAL_OVERLAY_FILE)"; \
+	else \
+	  cp docker/lane-overlays/local.bifrost.example.yaml "$(LOCAL_OVERLAY_FILE)"; \
+	  echo "==> Wrote model overlay $(LOCAL_OVERLAY_FILE)"; \
+	fi
+	@if [ -e "$(LOCAL_ENV_FILE)" ]; then \
+	  echo "==> Keeping existing env file $(LOCAL_ENV_FILE)"; \
+	else \
+	  command -v openssl > /dev/null 2>&1 || { echo "ERROR: openssl is required to generate the local passwords"; exit 1; }; \
+	  umask 077; \
+	  sed -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$(openssl rand -hex 32)|" \
+	      -e "s|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=$$(openssl rand -hex 32)|" \
+	      -e "s|^ONEX_LOCAL_BIFROST_OVERLAY=.*|ONEX_LOCAL_BIFROST_OVERLAY=$(LOCAL_OVERLAY_FILE)|" \
+	      docker/local.env.example > "$(LOCAL_ENV_FILE)"; \
+	  echo "==> Wrote env file $(LOCAL_ENV_FILE) (passwords generated)"; \
+	fi
+	@echo "==> Model endpoint: the line marked model_endpoint in $(LOCAL_OVERLAY_FILE)"
+
+up-local: _check-docker local-env ## Laptop profile: build the runtime image and boot the stack + your runtime
+	@echo "==> Starting the laptop profile (compose project $(LOCAL_PROJECT))..."
+	$(ONEX_CLI) up local --env-file "$(LOCAL_ENV_FILE)" --build
+	@echo "==> Started. A cold runtime takes several minutes to report healthy; run 'make status-local'."
+
+status-local: _check-docker ## Laptop profile: migration gate, runtime /health bodies, delegate consumer group
+	@echo "migration-gate: $$(docker inspect --format '{{.State.Health.Status}}' $(LOCAL_PROJECT)-migration-gate)"
+	@echo "runtime main /health:";    curl -sS --max-time 10 http://localhost:8085/health; echo
+	@echo "runtime effects /health:"; curl -sS --max-time 10 http://localhost:8086/health; echo
+	@echo "delegate-skill command topic consumer groups:"
+	@docker exec $(LOCAL_PROJECT)-redpanda rpk group list \
+	  | awk 'NR==1 || /node_delegate_skill_orchestrator/' || true
+
+delegate-local: _check-docker ## Laptop profile: one delegation through your runtime on the local broker (PROMPT="...")
+	@test -n "$(PROMPT)" || { echo 'usage: make delegate-local PROMPT="Reply with exactly one word: hello"'; exit 2; }
+	docker exec $(LOCAL_PROJECT)-runtime-effects onex delegate "$(PROMPT)" \
+	  --bus kafka --kafka-bootstrap redpanda:9092 --locus deployed-lane
+
+down-local: _check-docker ## Laptop profile: stop it (keeps its volumes)
+	$(ONEX_CLI) down
+
+down-local-volumes: _check-docker ## Laptop profile: stop it and delete its volumes (local data)
+	$(ONEX_CLI) down --volumes
 
 # ----------------------------------------------------------------------------
 # Internal helpers (not part of the public target surface)
