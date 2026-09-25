@@ -231,6 +231,15 @@ class DeployAgent:
             if self._allowed_lanes & ROUTED_LANES
             else None
         )
+        if self._router is not None:
+            logger.info(
+                "Deploy agent routing instance: %s, consumer group %s, %d route(s), "
+                "default %s",
+                self._router.instance.name,
+                self._router.consumer_group,
+                len(self._router.table.routes),
+                self._router.table.default_instance,
+            )
         # OMN-18636. The one thread every blocking call in this process runs on.
         # See JOB_POOL_MAX_WORKERS and _offload for why it is one, and why the
         # event loop thread must be left with nothing to do but serve HTTP.
