@@ -19,6 +19,7 @@ from deploy_agent.events import (
     DEPLOY_PHASE_ORDER,
     ModelLineageDecision,
     ModelOnexApiDelivery,
+    ModelVerifyRecreate,
     Phase,
     PhaseStatus,
 )
@@ -126,6 +127,15 @@ class JobState(BaseModel):
     #: build it was compared with, and the ref it built. ``None`` on a record
     #: written without the fence, or by an older agent.
     lineage: ModelLineageDecision | None = None
+    #: OMN-19374. The runtime containers post-deploy verification recreated
+    #: INSIDE this job, and how each recreate ended. Durable here as well as on
+    #: the terminal event because the post-merge lab guard reads this record
+    #: (``/job/{correlation_id}``), not the bus: a compose-dev receipt whose
+    #: container generation moved during the job can then name the job's own
+    #: recreate as the reason, instead of leaving a lane to re-derive from the
+    #: host journal whether it was that or a different command displacing the
+    #: lane (OMN-18990). Empty on a record written by an older agent.
+    verify_recreate: list[ModelVerifyRecreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _supersession_fields_are_paired(self) -> JobState:
@@ -468,6 +478,7 @@ class JobStore:
         status: Literal["success", "failed"],
         errors: list[str] | None = None,
         settling_stage: EnumJobSettlingStage | None = None,
+        verify_recreate: list[ModelVerifyRecreate] | None = None,
     ) -> JobState:
         """Write the job's terminal verdict, and what it is still doing.
 
@@ -477,6 +488,10 @@ class JobStore:
         exactly as it did on 2026-09-17: terminal, with nothing saying that the
         agent is still executing that job's post-terminal work. A window is what
         the 19:56:03Z reader fell into, so there is not one.
+
+        ``verify_recreate`` rides the same write for the same reason
+        (OMN-19374): a reader that sees the terminal status must also see
+        whether the job recreated a runtime container on its way there.
         """
         job = self.load(correlation_id)
         if job is None:
@@ -485,6 +500,8 @@ class JobStore:
         job.completed_at = datetime.now(UTC)
         job.phase_results = reconcile_terminal_phase_results(job.phase_results)
         job.settling_stage = settling_stage
+        if verify_recreate:
+            job.verify_recreate = list(verify_recreate)
         if errors:
             job.errors.extend(errors)
         self._save(job)

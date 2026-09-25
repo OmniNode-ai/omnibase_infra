@@ -36,7 +36,9 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 _DEFAULT_SNAPSHOT = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
 _DEFAULT_MAX_AGE_DAYS = 7
-_SUPPORTED_SCHEMA_VERSIONS = {"1.0.0"}
+# 1.1.0 (OMN-19411) widens the finding-kind vocabulary only; every key this
+# gate reads is unchanged. Must match lane_census_event.SUPPORTED_EVENT_SCHEMA_VERSIONS.
+_SUPPORTED_SCHEMA_VERSIONS = {"1.0.0", "1.1.0"}
 
 
 def check_census_age(

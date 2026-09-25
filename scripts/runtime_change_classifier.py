@@ -49,7 +49,10 @@ from __future__ import annotations
 
 import fnmatch
 import importlib.util
+import re
+import subprocess
 import sys
+import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
@@ -192,6 +195,45 @@ LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
     # that makes it, not to this one -- stated as a residual rather than taken.
     "pyproject.toml",
     "uv.lock",
+    # OMN-19383: omnimarket's shared events package. Measured on
+    # omnimarket#2813's change to runtime_deployment.py (run 35961924174),
+    # which read "No rebuild trigger" although that module is imported by
+    # all ten canonical redeploy-node handlers -- orchestrator,
+    # deploy-publish-monitor effect, FSM reducer, prod-promotion-gate
+    # compute, grant-resolver effect, health-fact-resolver effect. The gap
+    # is the directory, not that one file: every other module under
+    # src/omnimarket/events/ has the same handler fan-in by construction
+    # (it exists so one node does not import another node's private
+    # package -- see runtime_deployment.py's own module docstring), and a
+    # spot-measured import count against src/omnimarket/nodes/*/handlers/*.py
+    # at omnimarket dev HEAD (2026-09-24) found at least one handler
+    # importer for every file in the directory (__init__.py 252,
+    # topics.py 160, delegation.py 80, verification.py 51, generation.py
+    # 52, github.py 49, ledger.py 31, runtime_deployment.py 10, and 30
+    # more). The canonical deploy-gate classifier is right to miss it for
+    # its own question (deploy EVIDENCE, not lane state), which is why
+    # this goes in the supplement rather than widening that list -- same
+    # reasoning as the pyproject.toml/uv.lock entries above (OMN-18671).
+    "src/omnimarket/events/**",
+    # OMN-19378: the rest of the packaged source trees the lane image installs
+    # WHOLE. The entry above covers events/; the canonical list names a fixed
+    # set of subtrees (``nodes/``, ``runtime/``, ``handlers/``, ``services/``
+    # ...) and so also misses every ``models/``, ``enums/``, ``adapters/``,
+    # ``delegation/`` and ``configs/`` file: 939 of 4393 files under
+    # src/omnimarket and 1162 of 3322 under src/omnibase_infra (``models/``,
+    # ``event_bus/``, ``errors/`` ...), replayed over both dev branches on
+    # 2026-09-24.
+    #
+    # The lane does not select modules. It installs omnimarket from the staged
+    # clone (``omnimarket @ file:///workspace/sibling-repos/omnimarket``, read
+    # back from the running container's ``direct_url.json``) and omnibase_infra
+    # as the image's own project, so every file under either tree is in the
+    # image. Which of them a given process imports is an import-graph question
+    # this trigger cannot answer cheaply, and guessing wrong is the direction
+    # that ships an unrebuilt lane. Replayed over the last 60 merges to dev this
+    # adds 9 omnimarket rebuilds and 1 omnibase_infra rebuild.
+    "src/omnimarket/**",
+    "src/omnibase_infra/**",
 )
 
 #: What a matched path is attributed to when no pattern in this module claims
@@ -330,8 +372,155 @@ def is_runtime_affecting(runtime_paths: Sequence[str], labels: LabelSource) -> b
     return RUNTIME_CHANGE_LABEL in {label.strip() for label in read}
 
 
+#: OMN-19375: packages whose OWN ``[project].version`` is proven not to reach
+#: what the lane runs, so a merge that changes only that string in the root
+#: ``pyproject.toml`` and the package's own ``uv.lock`` entry is not lane state.
+#:
+#: MEASURED: every omnimarket release is followed by a bot merge that changes
+#: exactly those two lines, and each one published a full dev-lane rebuild (jobs
+#: ``0805d076``, ``e4d36317``, ``ff4dc5de`` on 2026-09-24; the last recreated
+#: ``omninode-runtime`` nine minutes before C15 run 35971574919, which failed).
+#: For omnimarket the string is inert: the lane installs it ``--no-deps`` from
+#: the staged source tree (``file:///workspace/sibling-repos/omnimarket`` in the
+#: running container's ``direct_url.json``), ``omnimarket.__version__`` is a
+#: literal ``0.1.0``, and the one runtime reader of the distribution version
+#: (``version_handshake.check_plugin_compat``) has no caller.
+#:
+#: omnibase-infra is deliberately absent: ``service_kernel.KERNEL_VERSION``,
+#: ``overlay_config_resolver`` and ``version_compatibility`` read its version at
+#: runtime. A package joins this set only with that proof made for it.
+VERSION_INERT_PACKAGES: frozenset[str] = frozenset({"omnimarket"})
+
+#: Reads one repository-root file at the merged commit's first parent and at
+#: the merged commit, as ``(before, after)``; ``None`` for a side where the file
+#: is absent. Raises when the commits themselves cannot be read.
+ManifestReader = Callable[[str], tuple[str | None, str | None]]
+
+_MANIFESTS: tuple[str, str] = ("pyproject.toml", "uv.lock")
+
+
+def _normalize_package_name(name: str) -> str:
+    """PEP 503 normalization, the form ``uv.lock`` records names in."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _without_project_version(document: dict[str, object]) -> dict[str, object]:
+    project = document.get("project")
+    if not isinstance(project, dict):
+        raise ValueError("pyproject.toml has no [project] table")
+    return {**document, "project": {**project, "version": None}}
+
+
+def _without_own_lock_version(
+    document: dict[str, object], package: str
+) -> dict[str, object]:
+    """The lock with the root package's own ``version`` blanked, and nothing else.
+
+    The root package is the one entry whose name is ``package`` and whose source
+    is the project directory itself. Exactly one must exist; anything else is a
+    lock this function does not understand, and it raises.
+    """
+    entries = document.get("package")
+    if not isinstance(entries, list):
+        raise ValueError("uv.lock has no [[package]] entries")
+    own = [
+        index
+        for index, entry in enumerate(entries)
+        if isinstance(entry, dict)
+        and _normalize_package_name(str(entry.get("name", ""))) == package
+        and entry.get("source") in ({"editable": "."}, {"virtual": "."})
+    ]
+    if len(own) != 1:
+        raise ValueError(f"uv.lock names {len(own)} root entries for {package}")
+    blanked = list(entries)
+    blanked[own[0]] = {**entries[own[0]], "version": None}
+    return {**document, "package": blanked}
+
+
+def inert_version_bump_paths(
+    changed_files: Sequence[str], manifest_reader: ManifestReader
+) -> list[str]:
+    """The root manifests whose change is only a version-inert package's own version.
+
+    ``pyproject.toml`` qualifies when the parsed document differs only in
+    ``[project].version``; ``uv.lock`` when it differs only in the root
+    package's own ``version``. Either way the package, named by the merged
+    ``pyproject.toml``, must be in :data:`VERSION_INERT_PACKAGES`.
+
+    Fails CLOSED: a reader that raises, a manifest that is absent on either side
+    or does not parse, and a lock this module does not understand all return
+    nothing exempt, so the path stays lane state exactly as before OMN-19375.
+    """
+    candidates = [path for path in _MANIFESTS if path in changed_files]
+    if not candidates:
+        return []
+    try:
+        pyproject_before, pyproject_after = manifest_reader("pyproject.toml")
+        if pyproject_before is None or pyproject_after is None:
+            return []
+        before = tomllib.loads(pyproject_before)
+        after = tomllib.loads(pyproject_after)
+        package = _normalize_package_name(str(after["project"]["name"]))
+        if package not in VERSION_INERT_PACKAGES:
+            return []
+        inert: list[str] = []
+        if "pyproject.toml" in candidates and _without_project_version(
+            before
+        ) == _without_project_version(after):
+            inert.append("pyproject.toml")
+        if "uv.lock" in candidates:
+            lock_before, lock_after = manifest_reader("uv.lock")
+            if lock_before is not None and lock_after is not None:
+                if _without_own_lock_version(
+                    tomllib.loads(lock_before), package
+                ) == _without_own_lock_version(tomllib.loads(lock_after), package):
+                    inert.append("uv.lock")
+        return inert
+    # A reader failure, a TOML parse error (a ValueError), a missing
+    # [project].name or a lock this module does not understand: every one keeps
+    # the manifests lane state.
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+def git_manifest_reader(repo: Path, sha: str) -> ManifestReader:
+    """A :data:`ManifestReader` over a clone holding ``sha`` and its first parent.
+
+    A file absent from a commit reads as ``None``; a commit the clone does not
+    hold raises ``OSError``, which :func:`inert_version_bump_paths` turns into
+    "not exempt".
+    """
+
+    def _show(rev: str, path: str) -> str | None:
+        shown = subprocess.run(
+            ["git", "-C", str(repo), "show", f"{rev}:{path}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if shown.returncode == 0:
+            return shown.stdout
+        resolves = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", f"{rev}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if resolves.returncode != 0:
+            msg = f"{repo} does not hold commit {rev}: {shown.stderr.strip()}"
+            raise OSError(msg)
+        return None
+
+    def _read(path: str) -> tuple[str | None, str | None]:
+        return _show(f"{sha}^1", path), _show(sha, path)
+
+    return _read
+
+
 def classify_runtime_paths(
-    changed_files: list[str], classifier: RuntimePathClassifier
+    changed_files: list[str],
+    classifier: RuntimePathClassifier,
+    manifest_reader: ManifestReader | None = None,
 ) -> list[str]:
     """Run and validate the canonical classifier's output fail-closed.
 
@@ -339,14 +528,23 @@ def classify_runtime_paths(
     supplement above. The validation stays ahead of the union so a broken
     canonical classifier still fails closed rather than being papered over by a
     supplementary hit.
+
+    OMN-19375: with a ``manifest_reader``, a root manifest whose change is only
+    a version-inert package's own version is left out of the supplement's half.
+    The canonical half is never narrowed. Without a reader nothing is exempt.
     """
     runtime_paths = classifier(changed_files)
     if not isinstance(runtime_paths, list) or any(
         not isinstance(path, str) or not path.strip() for path in runtime_paths
     ):
         raise ValueError("runtime path validator returned an invalid path list")
+    inert = (
+        set(inert_version_bump_paths(changed_files, manifest_reader))
+        if manifest_reader is not None
+        else set()
+    )
     combined = list(runtime_paths)
     for path in find_lane_state_paths(changed_files):
-        if path not in combined:
+        if path not in combined and path not in inert:
             combined.append(path)
     return combined

@@ -77,7 +77,7 @@ _MIRROR = (
 #: is the fix. A digest matching on both sides is what makes the falsifier
 #: table below a statement about production rather than about a fixture.
 PRODUCTION_SELECTION_DIGEST = (
-    "6d43ffef9e8aef89eba02b61da356adec3e74ef53e439a6a819cfa14aaa85819"
+    "1140172be1e69c09663e40a9e9c7635c3827b9b84c72fc4dd380afaace717843"
 )
 
 #: The opening sentence is quoted verbatim from the run's own stderr. The
@@ -302,6 +302,11 @@ def _canonical_projection(contract_path: Path) -> str:
                 "phrases": sorted(str(item) for item in qualified["phrases"]),
                 "qualifiers": sorted(str(item) for item in qualified["qualifiers"]),
             },
+            # OMN-18831 residual: the prose-output veto. Part of the projection
+            # because it changes which class a prompt resolves to.
+            "vetoed_by": sorted(
+                str(item) for item in (selection.get("vetoed_by") or ())
+            ),
         }
     return json.dumps(projection, sort_keys=True, separators=(",", ":"))
 

@@ -43,6 +43,11 @@ THE THREE RULES, each a contract field rather than an implementation detail:
   class's declared qualifiers sits within ``within_words`` words of it, so
   "write a parser" is a code request and "write a PR body" is not. The
   vocabulary is the contract's; see ``ModelQualifiedPhrases``.
+* **A named prose output vetoes a compilation-graded class** (OMN-18831, the
+  2026-09-20 residual). A class that declares ``vetoed_by`` does not claim a
+  prompt naming one of those phrases, such as "a pull request description",
+  whatever else matched. A prompt that DESCRIBES code work ("the unit tests
+  passed") is not a request to do it; the requested output says which.
 
 Ties between eligible classes are broken by ``priority`` (higher wins) and then
 by class name, so resolution is total and deterministic.
@@ -197,6 +202,9 @@ def load_selectable_task_classes(
                     min_words=selection.get("min_words"),
                     max_words=selection.get("max_words"),
                     qualified_phrases=selection.get("qualified_phrases"),
+                    vetoed_by=tuple(
+                        str(phrase) for phrase in selection.get("vetoed_by") or ()
+                    ),
                 )
             )
         except ValidationError as exc:
@@ -354,12 +362,25 @@ def resolve_task_type(
     lowered = prompt.lower()
     word_count = len(prompt.split())
     eligible: list[tuple[ModelSelectableTaskClass, str]] = []
+    vetoed: list[str] = []
     for entry in classes:
         if not entry.shape_admits(word_count):
             continue
         phrase = entry.matching_phrase(lowered)
-        if phrase is not None:
-            eligible.append((entry, phrase))
+        if phrase is None:
+            continue
+        # OMN-18831: a class that matched is still refused when the prompt
+        # names a prose artifact the class declares as a veto. Recorded, so the
+        # reason line says which class was refused and on what, instead of the
+        # resolution reading as though nothing had matched.
+        veto = entry.vetoing_phrase(lowered)
+        if veto is not None:
+            vetoed.append(
+                f"{entry.name!r} matched {phrase!r} but the prompt names {veto!r}"
+            )
+            continue
+        eligible.append((entry, phrase))
+    veto_note = f"; vetoed: {', '.join(vetoed)}" if vetoed else ""
 
     if not eligible:
         return ModelTaskTypeResolution(
@@ -370,6 +391,7 @@ def resolve_task_type(
                 f"{word_count}-word prompt; using the declared fallback "
                 f"{fallback!r}, whose quality floors are shape-agnostic. Pass "
                 f"--criteria to state your own acceptance criteria instead"
+                f"{veto_note}"
             ),
         )
 
@@ -382,5 +404,6 @@ def resolve_task_type(
         reason=(
             f"contract predicate for {winner.name!r} (priority {winner.priority}) "
             f"matched the phrase {phrase!r} in a {word_count}-word prompt"
+            f"{veto_note}"
         ),
     )

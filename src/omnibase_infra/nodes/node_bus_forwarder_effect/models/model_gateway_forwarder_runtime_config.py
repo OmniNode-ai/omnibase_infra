@@ -25,8 +25,14 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     forwarder: ModelGatewayForwarderConfig
-    local_bus: ModelKafkaEventBusConfig
-    cloud_bus: ModelKafkaEventBusConfig
+    # OMN-18691: both trust-boundary legs are optional and are required exactly
+    # when the contract declares a `cloud_bus`. A LANE MIRROR ONLY deployment
+    # (the CI bus mirroring its topics onto the dev lane) has no trust boundary
+    # to resolve legs for, and a resolved leg the contract does not declare is a
+    # deployment asserting a capability the contract does not carry -- refused
+    # below on the same terms the lane-mirror legs already are.
+    local_bus: ModelKafkaEventBusConfig | None = None
+    cloud_bus: ModelKafkaEventBusConfig | None = None
     # OMN-17034: resolved broker legs for the contract-declared lane mirror.
     # The contract NAMES lanes; this is where this deployment says which
     # broker each named lane is. Both stay None when the contract declares no
@@ -41,6 +47,19 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
                 "the production gateway process currently requires the "
                 "containerized local transport flavor"
             )
+        self._validate_trust_boundary_presence()
+        self._validate_lane_mirror_legs()
+        if self.forwarder.cloud_bus is None:
+            # Mirror-only: every check below is about the trust boundary, and
+            # this process has none. The lane-mirror leg validated above is the
+            # whole of its configuration.
+            return self
+
+        # Narrowed by _validate_trust_boundary_presence above; restated for the
+        # type checker rather than assumed.
+        assert self.local_bus is not None
+        assert self.cloud_bus is not None
+
         if self.local_bus.bootstrap_servers == self.cloud_bus.bootstrap_servers:
             raise ValueError("gateway local_bus and cloud_bus must be distinct")
         if self.local_bus.enable_auto_commit or self.cloud_bus.enable_auto_commit:
@@ -61,15 +80,14 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
                 "and auto_offset_reset also fires mid-session on "
                 "OffsetOutOfRangeError, not only on first boot (OMN-15781)"
             )
+        mirror_topics = self.forwarder.mirror_topics
+        assert mirror_topics is not None
         if not any(
-            topic.endswith(".gateway-heartbeat.v1")
-            for topic in self.forwarder.mirror_topics.outbound
+            topic.endswith(".gateway-heartbeat.v1") for topic in mirror_topics.outbound
         ):
             raise ValueError(
                 "production gateway forwarder requires an outbound heartbeat topic"
             )
-
-        self._validate_lane_mirror_legs()
 
         https_ingest = self.forwarder.https_ingest
         if https_ingest is not None:
@@ -99,6 +117,39 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
         ):
             raise ValueError("resolved AWS_MSK_IAM cloud bus requires msk_region")
         return self
+
+    def _validate_trust_boundary_presence(self) -> None:
+        """OMN-18691: the resolved legs and the contract must agree, both ways.
+
+        A resolved ``local_bus`` or ``cloud_bus`` on a contract that declares no
+        ``cloud_bus`` is a deployment claiming a trust boundary the node does not
+        have -- the same direction of error ``_validate_lane_mirror_legs``
+        already refuses for a resolved mirror lane the contract never named. A
+        declared ``cloud_bus`` with a leg unresolved is the reverse: a forwarder
+        that would boot believing it can reach a broker it has no address for.
+
+        Both are boot refusals, because both produce a process that reports
+        healthy and moves nothing across the boundary it claims to serve.
+        """
+        resolved = {
+            "local_bus": self.local_bus,
+            "cloud_bus": self.cloud_bus,
+        }
+        present = sorted(name for name, bus in resolved.items() if bus is not None)
+        if self.forwarder.cloud_bus is None:
+            if present:
+                raise ValueError(
+                    f"resolved {present} but the node contract declares no "
+                    "cloud_bus; the contract is the authority for whether this "
+                    "forwarder crosses a trust boundary at all"
+                )
+            return
+        missing = sorted(name for name, bus in resolved.items() if bus is None)
+        if missing:
+            raise ValueError(
+                "the node contract declares a cloud_bus, so both trust-boundary "
+                f"legs must be resolved; unresolved: {missing}"
+            )
 
     def _validate_lane_mirror_legs(self) -> None:
         """Fail closed on a declared lane mirror whose brokers were not resolved.

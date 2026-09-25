@@ -44,6 +44,11 @@
 #   comment block below).
 #   --limit=N stops after N successful recreates: --limit=1 is the canary
 #   step, proven before the rest of the fleet is touched.
+#   A fleet service with no container at all (retired by --retire-surplus, or
+#   never created) is idle by construction and is CREATED on this path, but
+#   only with --token-file: its kept creds volume may hold credentials for a
+#   registration GitHub already deleted (OMN-19397). Without a token file it
+#   is skipped and reported, never created into a crash loop.
 #   --only=NAME converges exactly one fleet service. A runner that is busy
 #   through every retry pass is reported and left alone, which is correct --
 #   but without a way to come back for it later, the residual would have to be
@@ -345,7 +350,9 @@ for arg in "$@"; do
             echo "                current label set has no matching credential cache"
             echo "                would otherwise be SKIPPED -- with this, they are"
             echo "                migrated one at a time (still busy-checked) using this"
-            echo "                token, instead of being left untouched."
+            echo "                token, instead of being left untouched. A fleet"
+            echo "                service with NO container (e.g. one --retire-surplus"
+            echo "                removed) always needs this and is created with it."
             echo "  --add=LIST    Additively stand up the named DECLARED non-general-pool"
             echo "                services: 'up -d --no-deps LIST' with NEITHER"
             echo "                --force-recreate NOR --remove-orphans, no cron installs,"
@@ -1220,6 +1227,30 @@ github_runner_state() {
     echo "${row}"
 }
 
+runner_container_state() {
+    # OMN-19397. Echo exactly one of running | stopped | absent | unknown for
+    # one runner container on the host. "absent" only when docker ANSWERED and
+    # listed no container of that exact name; an ssh or daemon failure is
+    # "unknown", never "absent". Paused, restarting and removing count as
+    # running: none of them is safe to replace.
+    local name="${1}" out cname cstate state=""
+    out=$(ssh "${RUNNER_HOST}" "docker ps -a --filter 'name=^${name}\$' --format '{{.Names}} {{.State}}'" 2>/dev/null) || {
+        echo unknown
+        return 0
+    }
+    # The name filter is a regex; compare exactly so omninode-runner-4 never
+    # reads omninode-runner-41's state.
+    while IFS=' ' read -r cname cstate; do
+        [[ "${cname}" == "${name}" ]] && state="${cstate}"
+    done <<< "${out}"
+    case "${state}" in
+        "") echo absent ;;
+        running|restarting|paused|removing) echo running ;;
+        exited|created|dead) echo stopped ;;
+        *) echo unknown ;;
+    esac
+}
+
 runner_is_idle() {
     # Fail CLOSED: returns 0 (idle, safe to recreate) only when GitHub says
     # online+not-busy AND the container's process list carries no job worker.
@@ -1236,8 +1267,18 @@ runner_is_idle() {
     # token or not. Checked first, ahead of the two-signal busy check, on
     # purpose: a stopped container has no signals to disagree over.
     local running
-    running=$(ssh "${RUNNER_HOST}" "docker inspect --format '{{.State.Running}}' ${name} 2>/dev/null" 2>/dev/null)
+    running=$(ssh "${RUNNER_HOST}" "docker inspect --format '{{.State.Running}}' ${name} 2>/dev/null" 2>/dev/null) || running=""
     [[ "${running}" == "false" ]] && return 0
+
+    # OMN-19397: a container that does not exist runs no job either. This is
+    # the state --retire-surplus leaves (container removed, registration
+    # deleted), and GitHub has no runner to report online, so without this
+    # branch --rolling read a retired runner "unknown" on every pass and could
+    # never bring it back. Asked of docker explicitly: an empty inspect is
+    # also what an unreachable host or daemon looks like, and that is not
+    # absent -- runner_container_state says "unknown" for it and we fall
+    # through to the fail-closed check below.
+    [[ -z "${running}" ]] && [[ "$(runner_container_state "${name}")" == "absent" ]] && return 0
 
     local state status busy
     state=$(github_runner_state "${name}")
@@ -1297,12 +1338,24 @@ roll_one_runner() {
         warn "  ${name}: could not render its compose config to compute a cache key -- skipping rather than guessing."
         return 3
     }
-    if ! _runner_cache_ready "${name}" "${key}"; then
+    # OMN-19397: a runner with NO container is being created, not recreated,
+    # and always needs a registration token, whatever its creds volume holds.
+    # --retire-surplus keeps the volume but deletes the GitHub registration,
+    # so the cache the pre-flight below would call "ready" restores
+    # credentials for a registration that no longer exists, and an empty
+    # token leaves the entrypoint nothing to re-register with.
+    local needs_token_reason=""
+    if [[ "$(runner_container_state "${name}")" == "absent" ]]; then
+        needs_token_reason="no container on ${RUNNER_HOST} (retired or never created), so its cached registration cannot be trusted"
+    elif ! _runner_cache_ready "${name}" "${key}"; then
+        needs_token_reason="no credential-cache entry for its current label set (key=${key:0:12}...)"
+    fi
+    if [[ -n "${needs_token_reason}" ]]; then
         if [[ -z "${TOKEN_FILE}" ]]; then
-            log "  ${name}: no credential-cache entry for its current label set (key=${key:0:12}...) and no --token-file given -- SKIPPING (left on its current container, untouched)."
+            log "  ${name}: ${needs_token_reason}, and no --token-file given -- SKIPPING (left as it is, untouched)."
             return 3
         fi
-        log "  ${name}: no credential-cache entry for its current label set (key=${key:0:12}...) -- migrating with the supplied token."
+        log "  ${name}: ${needs_token_reason} -- registering with the supplied token."
         if "${DRY_RUN}"; then
             log "[DRY RUN] would run (migration): ${compose_cmd} up -d --force-recreate --no-deps ${name} (RUNNER_TOKEN from --token-file)"
             return 0
@@ -1421,7 +1474,7 @@ rolling_deploy() {
         warn "Re-run with --rolling to converge; a runner already rolled is recreated again, which is idempotent."
     fi
     if [[ "${#skip_migration[@]}" -gt 0 ]]; then
-        warn "Skipped (no credential-cache entry for the current label set, no --token-file given): ${skip_migration[*]}"
+        warn "Skipped (no credential-cache entry for the current label set, or no container at all, and no --token-file given): ${skip_migration[*]}"
         warn "Re-run with --rolling --token-file=PATH to migrate exactly these, one at a time, still busy-checked."
     fi
 }
