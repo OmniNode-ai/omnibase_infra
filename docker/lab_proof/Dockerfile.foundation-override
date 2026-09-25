@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Lab proof derived image (OMN-19572): the laptop-bundle runtime image with ONE
+# foundation package (omnibase_core, omnibase_spi or omnibase_compat) replaced
+# by the tree of the commit under test.
+#
+# Built only by node_lab_proof_run_effect, from a plan rendered by
+# node_lab_proof_plan_compute; never pushed, never deployed, deleted by the same
+# run's teardown. The build context is the committed tree of the commit under
+# test (git archive, so nothing uncommitted can enter), unpacked at subject/.
+#
+# The install mirrors the workspace-mode reinstall in docker/Dockerfile.runtime
+# (OMN-13405): run from / so no project pyproject or uv.lock is in scope, target
+# the runtime venv explicitly, ignore [tool.uv.sources], skip the uv cache, and
+# --no-deps so the image's pinned dependency set is otherwise unchanged. What
+# was installed is proved by hashing the installed tree inside the running
+# containers against the tree under test, not by trusting this file.
+ARG BASE_IMAGE
+ARG UV_IMAGE
+FROM ${UV_IMAGE} AS uv-bin
+
+FROM ${BASE_IMAGE}
+ARG PACKAGE_NAME
+ARG PROVED_SHA
+ARG LAB_PROOF_RUN_KEY
+COPY --from=uv-bin /uv /usr/local/bin/lab-proof-uv
+COPY subject/ /lab-proof/subject/
+RUN set -eu; \
+    test -n "${PACKAGE_NAME}"; \
+    ( cd / && VIRTUAL_ENV=/app/.venv /usr/local/bin/lab-proof-uv pip install \
+        --python /app/.venv/bin/python --no-deps --no-sources --no-cache \
+        --reinstall-package "${PACKAGE_NAME}" \
+        "${PACKAGE_NAME} @ file:///lab-proof/subject" ); \
+    rm -rf /lab-proof /usr/local/bin/lab-proof-uv
+LABEL ai.omninode.lab-proof.package="${PACKAGE_NAME}" \
+      ai.omninode.lab-proof.proved-sha="${PROVED_SHA}" \
+      ai.omninode.lab-proof.run-key="${LAB_PROOF_RUN_KEY}"
