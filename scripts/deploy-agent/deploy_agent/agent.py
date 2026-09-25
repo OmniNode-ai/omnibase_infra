@@ -61,6 +61,19 @@ from deploy_agent.executor import (
     select_dev_instance,
 )
 from deploy_agent.health import create_health_app
+from deploy_agent.idle_converge import (
+    CHECK_INTERVAL_SECONDS as IDLE_CONVERGE_CHECK_INTERVAL_SECONDS,
+)
+from deploy_agent.idle_converge import (
+    EnumIdleConvergeVerdict,
+    ModelIdleConvergeInputs,
+    converge_command,
+    load_probe_windows,
+    probe_blocking,
+    read_omnimarket_dev_head,
+    read_running_omnimarket_ref,
+)
+from deploy_agent.idle_converge import decide as decide_idle_converge
 from deploy_agent.job_state import EnumJobSettlingStage, JobState, JobStore
 from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lab_overlay import (
@@ -87,7 +100,11 @@ from deploy_agent.publisher import (
     publish_result,
 )
 from deploy_agent.queue_depth import LagSampler
-from deploy_agent.routing import ROUTED_LANES, build_router_from_env
+from deploy_agent.routing import (
+    AGENT_CLONE_ROOT,
+    ROUTED_LANES,
+    build_router_from_env,
+)
 from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 
 logger = logging.getLogger(__name__)
@@ -96,6 +113,18 @@ logger = logging.getLogger(__name__)
 def _runtime_container_for_lane(lane: EnumRuntimeLane) -> str:
     """The lane's main runtime container, whose image records its build (OMN-19270)."""
     return lane_config_for(lane).main_runtime_container
+
+
+def _read_omnimarket_dev_head() -> str | None:
+    """The omnimarket dev head, read in the clone a workspace build stages from.
+
+    OMN-19509. ``OMNI_HOME`` has no default here, as in the executor's
+    workspace build: unset, the head is unread and the converge refuses.
+    """
+    omni_home = os.environ.get("OMNI_HOME", "").strip()
+    if not omni_home:
+        return None
+    return read_omnimarket_dev_head(Path(omni_home) / "omnimarket")
 
 
 STATE_DIR = Path(
@@ -314,6 +343,22 @@ class DeployAgent:
                 len(self._router.table.routes),
                 self._router.table.default_instance,
             )
+        # OMN-19509. The idle converge's state and its reads, each a seam a test
+        # replaces. See _maybe_idle_converge.
+        self._idle_converge_started_at = datetime.now(UTC)
+        self._idle_converge_last_check: float | None = None
+        self._idle_converge_attempted: set[str] = set()
+        self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
+        self._idle_converge_now: Callable[[], datetime] = lambda: datetime.now(UTC)
+        self._idle_read_running_ref: Callable[[], str | None] = lambda: (
+            read_running_omnimarket_ref(
+                _runtime_container_for_lane(EnumRuntimeLane.DEV)
+            )
+        )
+        self._idle_read_head_ref: Callable[[], str | None] = _read_omnimarket_dev_head
+        self._idle_probe_blocker: Callable[[datetime], str | None] = lambda now: (
+            probe_blocking(now, load_probe_windows(AGENT_CLONE_ROOT))
+        )
         # OMN-18636. The one thread every blocking call in this process runs on.
         # See JOB_POOL_MAX_WORKERS and _offload for why it is one, and why the
         # event loop thread must be left with nothing to do but serve HTTP.
@@ -608,6 +653,11 @@ class DeployAgent:
                     logger.info("Rejected command: %s", reason)
                 else:
                     await self._offload(self._maybe_self_update_idle)
+                    # OMN-19509: only here, where the poll returned no command,
+                    # so a converge never runs beside a routed job and never
+                    # ahead of one already waiting (the model's SingleWriter201
+                    # and QueuedFirst).
+                    await self._offload(self._maybe_idle_converge)
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
@@ -824,6 +874,79 @@ class DeployAgent:
                 "friction_type=self_update_boundary_failed",
                 e,
             )
+
+    def _maybe_idle_converge(self) -> None:
+        """Converge .201 on the omnimarket dev head when idle (OMN-19509).
+
+        See ``deploy_agent.idle_converge`` for the rule and the model behind
+        it. Throttled to one check per interval. Every refusal is logged once
+        per change of verdict, not once per second. A converge runs as an
+        ordinary job through ``_execute_command``, under the same single-flight
+        and lane locks, with its own job record and terminal event named
+        ``agent/idle-converge``.
+        """
+        if self._router is None:
+            return
+        tick = time.monotonic()
+        if (
+            self._idle_converge_last_check is not None
+            and tick - self._idle_converge_last_check
+            < IDLE_CONVERGE_CHECK_INTERVAL_SECONDS
+        ):
+            return
+        self._idle_converge_last_check = tick
+
+        routed_to = self._router.table.route(
+            EnumRuntimeLane.DEV, "gha/omnimarket/idle-converge"
+        )
+        routed_elsewhere = routed_to != self._router.instance.name
+        now = self._idle_converge_now()
+        running_ref = head_ref = probe_blocker = windows_error = None
+        if routed_elsewhere:
+            try:
+                probe_blocker = self._idle_probe_blocker(now)
+            except Exception as exc:  # noqa: BLE001 - an unread schedule refuses
+                windows_error = (
+                    f"probe schedule unreadable: {type(exc).__name__}: {exc}"
+                )
+            running_ref = self._idle_read_running_ref()
+            head_ref = self._idle_read_head_ref()
+        decision = decide_idle_converge(
+            ModelIdleConvergeInputs(
+                now=now,
+                omnimarket_routed_elsewhere=routed_elsewhere,
+                job_active=self.job_store.has_active_job(),
+                last_activity=max(
+                    self.job_store.last_completed_at()
+                    or self._idle_converge_started_at,
+                    self._idle_converge_started_at,
+                ),
+                running_ref=running_ref,
+                head_ref=head_ref,
+                probe_blocker=probe_blocker,
+                windows_error=windows_error,
+                attempted_heads=frozenset(self._idle_converge_attempted),
+            )
+        )
+        if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
+            if decision.verdict is not self._idle_converge_last_verdict:
+                logger.info(
+                    "idle converge: %s (%s)", decision.verdict.value, decision.detail
+                )
+            self._idle_converge_last_verdict = decision.verdict
+            return
+        self._idle_converge_last_verdict = decision.verdict
+        assert decision.head_ref is not None  # CONVERGE always names the head
+        self._idle_converge_attempted.add(decision.head_ref)
+        cmd = converge_command()
+        logger.info(
+            "idle converge: running %s as %s: %s",
+            cmd.correlation_id,
+            cmd.requested_by,
+            decision.detail,
+        )
+        self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+        self._execute_command(cmd)
 
     def _execute_command(self, cmd: ModelRebuildRequested) -> None:
         """Run one accepted command to its terminal state. BLOCKING, by design.
