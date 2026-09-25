@@ -22,11 +22,12 @@ import asyncio
 import base64
 import json
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
+from aiokafka.admin import AIOKafkaAdminClient
 from aiokafka.errors import KafkaConnectionError, KafkaError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -198,6 +199,12 @@ class ModelDlqReplayEngineConfig(BaseModel):
     # CRITICAL line names the coordinate, and every later run result carries it
     # in ``halted_partitions``. The offset is still never committed past it.
     max_record_failure_attempts: int = Field(default=5, gt=0)
+    # OMN-19085: the bound on the read that decides whether a trigger has any
+    # work to do (``DlqGroupBacklogProbe``). It is taken out of the run's
+    # SHARED wall clock, never added to it, so OMN-17137 stays closed; a probe
+    # that does not answer inside it is treated as "unknown" and the run
+    # drains exactly as it did before this field existed.
+    backlog_probe_timeout_seconds: float = Field(default=3.0, gt=0.0)
 
     @field_validator("bootstrap_servers")
     @classmethod
@@ -637,6 +644,131 @@ class DLQConsumer:
             raise
 
 
+async def _stop_group_less_reader(reader: AIOKafkaConsumer) -> None:
+    """Stop a group-less consumer without leaking aiokafka's close race.
+
+    Measured on the .201 dev lane 2026-09-24 (aiokafka 0.13.0): ``stop()``
+    called soon after ``start()`` on a consumer with ``group_id=None`` raises
+    ``CancelledError`` out of the no-group coordinator's ``close()``, which
+    awaits a task it has just cancelled. That is not a cancellation of the
+    caller, so it is absorbed here; a REAL cancellation of the calling task
+    (``cancelling()`` is non-zero, e.g. the handler's probe timeout firing) is
+    re-raised untouched.
+    """
+    try:
+        await reader.stop()
+    except asyncio.CancelledError:
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            raise
+        logger.debug(
+            "group-less reader close raised aiokafka's close-race CancelledError"
+        )
+
+
+class DlqGroupBacklogProbe:
+    """How many records the replay group has NOT committed, per topic (OMN-19085).
+
+    WHY THIS EXISTS. ``node_dlq_replay_effect`` is auto-wired as a PER-RECORD
+    trigger on every DLQ topic it drains, and every trigger ran a full drain:
+    ``DLQConsumer.start()`` for each declared topic in turn, which JOINS the
+    shared ``onex-dlq-replay`` group. A join into an Empty group waits the
+    broker's ``group_initial_rebalance_delay`` (3000 ms on redpanda), so a
+    trigger cost about 10 s even when every topic was already fully drained.
+    Measured on the .201 dev lane 2026-09-24: the replay group's lag was 0 on
+    all three topics while the events-topic TRIGGER group sat 44,178 records
+    behind (the stale triggers of the OMN-19241 replay storm), draining at
+    about six a minute. Its committed offset moved once per fetched batch of
+    about 69 records, i.e. every ~11.5 minutes, so the broker readiness probe
+    (OMN-18789, 300 s window) read ``group_not_synced`` continuously.
+
+    WHAT IT READS, AND WHY IT NEVER JOINS. Committed offsets come from the
+    group coordinator through an admin client (OffsetFetch), and log-start and
+    log-end offsets from a GROUP-LESS consumer (ListOffsets). Neither is a
+    group member, so reading the backlog cannot rebalance the group it
+    measures. ``undrained = end - max(committed, log_start)``; a partition with
+    no commit counts from log start, which is where ``auto_offset_reset=
+    earliest`` would begin.
+
+    The committed offsets are read BEFORE the log-end offsets, so a record
+    appended between the two reads can only make the answer larger, never
+    smaller.
+
+    WHY A ZERO IS SAFE TO ACT ON. The replay group commits only records whose
+    handling COMPLETED (OMN-17896 explicit offset map). A trigger is itself a
+    record on the topic it triggers, appended before it could be delivered, so
+    a read taken while handling that trigger that finds the topic's undrained
+    count at 0 proves the trigger's own record -- and everything before it --
+    was already replayed or quarantined. A read that fails, times out or omits
+    a topic proves nothing, and the caller then drains as before.
+
+    Raises whatever the Kafka clients raise; the handler owns the fallback.
+    """
+
+    def __init__(self, config: ModelDlqReplayEngineConfig) -> None:
+        self.config = config
+
+    async def undrained(self, topics: Sequence[str]) -> dict[str, int]:
+        """Return ``{canonical_topic: undrained_record_count}`` for ``topics``.
+
+        A topic the broker does not report partitions for is omitted rather
+        than reported as 0: an absent answer must never read as "drained".
+        """
+        auth = build_aiokafka_auth_kwargs_from_env()
+        physical_to_canonical = {apply_topic_namespace(t): t for t in topics}
+        admin = AIOKafkaAdminClient(
+            bootstrap_servers=self.config.bootstrap_servers,
+            request_timeout_ms=self.config.request_timeout_ms,
+            **auth,
+        )
+        try:
+            await admin.start()
+            # Partitions come from the admin client's own metadata request. A
+            # freshly started consumer that has subscribed to nothing answers
+            # ``partitions_for_topic`` with None (measured live on the .201 dev
+            # lane), which would make every topic look unknown.
+            described = await admin.describe_topics(list(physical_to_canonical))
+            partitions = [
+                TopicPartition(str(entry["topic"]), int(part["partition"]))
+                for entry in described
+                if entry.get("error_code") == 0
+                and entry.get("topic") in physical_to_canonical
+                for part in entry.get("partitions", [])
+            ]
+            if not partitions:
+                return {}
+            committed = await admin.list_consumer_group_offsets(
+                self.config.consumer_group, partitions=partitions
+            )
+        finally:
+            await admin.close()
+
+        reader = AIOKafkaConsumer(
+            bootstrap_servers=self.config.bootstrap_servers,
+            group_id=None,
+            enable_auto_commit=False,
+            request_timeout_ms=self.config.request_timeout_ms,
+            **auth,
+        )
+        try:
+            await reader.start()
+            end = await reader.end_offsets(partitions)
+            start = await reader.beginning_offsets(partitions)
+        finally:
+            await _stop_group_less_reader(reader)
+
+        undrained: dict[str, int] = {}
+        for tp in partitions:
+            meta = committed.get(tp)
+            done = meta.offset if meta is not None and meta.offset >= 0 else -1
+            position = max(done, start[tp])
+            canonical = physical_to_canonical[tp.topic]
+            undrained[canonical] = undrained.get(canonical, 0) + max(
+                end[tp] - position, 0
+            )
+        return undrained
+
+
 class DLQProducer:
     """Replays messages back to their original topic with replay headers."""
 
@@ -929,6 +1061,7 @@ __all__ = [
     "DLQConsumer",
     "DLQProducer",
     "DLQQuarantineProducer",
+    "DlqGroupBacklogProbe",
     "ModelDlqReplayEngineConfig",
     "generate_replay_correlation_id",
     "parse_datetime_with_timezone",

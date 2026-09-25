@@ -193,6 +193,9 @@ class ModelCiBusLaneBrokerTopology(BaseModel):
 
     external_bootstrap_servers: str
     internal_bootstrap_servers: str
+    # OMN-18933. The environment the lane's runtime bus reports (the .201 dev
+    # lane reports ``local``, not ``dev``). Shape only here, like the rest.
+    runtime_environment: str | None = None
 
 
 class ModelCiBusLaneDelegationRoute(BaseModel):
