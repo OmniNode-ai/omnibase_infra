@@ -48,6 +48,11 @@ THE THREE RULES, each a contract field rather than an implementation detail:
   prompt naming one of those phrases, such as "a pull request description",
   whatever else matched. A prompt that DESCRIBES code work ("the unit tests
   passed") is not a request to do it; the requested output says which.
+* **Only the request is read** (OMN-19523). Fenced code, inline code and
+  quoted strings are the material a prompt carries, and a negated phrase ("no
+  summary of the change") is the caller saying what they do not want. None of
+  them claims a prompt, and the shape gates count the request's words only.
+  See ``request_instruction``.
 
 Ties between eligible classes are broken by ``priority`` (higher wins) and then
 by class name, so resolution is total and deterministic.
@@ -69,6 +74,10 @@ from omnibase_infra.cli.model_task_class_execution_budget import (
     ModelTaskClassExecutionBudget,
 )
 from omnibase_infra.cli.model_task_type_resolution import ModelTaskTypeResolution
+from omnibase_infra.cli.request_instruction import (
+    instruction_text,
+    opening_sentence,
+)
 from omnibase_infra.enums.enum_task_type_resolution import EnumTaskTypeResolution
 
 __all__ = [
@@ -359,27 +368,31 @@ def resolve_task_type(
             reason="explicitly selected with --task-type",
         )
 
-    lowered = prompt.lower()
-    word_count = len(prompt.split())
+    # OMN-19523: phrases and shape are read from the REQUEST only. Fenced code,
+    # inline code and quoted strings are the material the request carries, and
+    # a word inside them (a pasted "pytest" comment, a quoted "needs review"
+    # linter line, a sample prompt opening "Summarize") says nothing about what
+    # the caller asked for. See ``request_instruction``.
+    instruction = instruction_text(prompt)
+    lowered = instruction.lower()
+    word_count = len(lowered.split())
+    # OMN-19523: when the request OPENS with the first word of a declared
+    # phrase ("Write three Pydantic model modules", "Review this pull request
+    # diff"), its opening sentence names the work and is read first. The facts
+    # that follow are material, and a noun among them ("an immutable digest",
+    # "a one-line docstring") no longer outranks the request's own verb. When
+    # the opening sentence selects no class, or opens with no declared word,
+    # the whole request is read, exactly as before.
+    opening = opening_sentence(instruction)
+    opening_word = opening.split()[0] if opening.split() else ""
+    opens_with = any(opening_word in entry.opening_words() for entry in classes)
     eligible: list[tuple[ModelSelectableTaskClass, str]] = []
     vetoed: list[str] = []
-    for entry in classes:
-        if not entry.shape_admits(word_count):
-            continue
-        phrase = entry.matching_phrase(lowered)
-        if phrase is None:
-            continue
-        # OMN-18831: a class that matched is still refused when the prompt
-        # names a prose artifact the class declares as a veto. Recorded, so the
-        # reason line says which class was refused and on what, instead of the
-        # resolution reading as though nothing had matched.
-        veto = entry.vetoing_phrase(lowered)
-        if veto is not None:
-            vetoed.append(
-                f"{entry.name!r} matched {phrase!r} but the prompt names {veto!r}"
-            )
-            continue
-        eligible.append((entry, phrase))
+    if opens_with:
+        eligible, vetoed = _eligible(classes, opening, lowered, word_count)
+    read_opening = bool(eligible)
+    if not read_opening:
+        eligible, vetoed = _eligible(classes, lowered, lowered, word_count)
     veto_note = f"; vetoed: {', '.join(vetoed)}" if vetoed else ""
 
     if not eligible:
@@ -388,7 +401,7 @@ def resolve_task_type(
             resolution=EnumTaskTypeResolution.FALLBACK,
             reason=(
                 f"no declared selection predicate claimed this "
-                f"{word_count}-word prompt; using the declared fallback "
+                f"{word_count}-word request; using the declared fallback "
                 f"{fallback!r}, whose quality floors are shape-agnostic. Pass "
                 f"--criteria to state your own acceptance criteria instead"
                 f"{veto_note}"
@@ -403,7 +416,44 @@ def resolve_task_type(
         resolution=EnumTaskTypeResolution.CONTRACT,
         reason=(
             f"contract predicate for {winner.name!r} (priority {winner.priority}) "
-            f"matched the phrase {phrase!r} in a {word_count}-word prompt"
+            f"matched the phrase {phrase!r} in "
+            f"{'the opening sentence of ' if read_opening else ''}"
+            f"a {word_count}-word request"
             f"{veto_note}"
         ),
     )
+
+
+def _eligible(
+    classes: tuple[ModelSelectableTaskClass, ...],
+    scope: str,
+    instruction: str,
+    word_count: int,
+) -> tuple[list[tuple[ModelSelectableTaskClass, str]], list[str]]:
+    """Return the classes a phrase in ``scope`` claims, and the vetoes recorded.
+
+    A class is eligible when its shape gate admits the request, one of its
+    phrases claims ``scope``, and no veto phrase occurs anywhere in the
+    ``instruction``: a prose output named later in the request still vetoes a
+    class its opening sentence matched.
+    """
+    eligible: list[tuple[ModelSelectableTaskClass, str]] = []
+    vetoed: list[str] = []
+    for entry in classes:
+        if not entry.shape_admits(word_count):
+            continue
+        phrase = entry.matching_phrase(scope)
+        if phrase is None:
+            continue
+        # OMN-18831: a class that matched is still refused when the prompt
+        # names a prose artifact the class declares as a veto. Recorded, so the
+        # reason line says which class was refused and on what, instead of the
+        # resolution reading as though nothing had matched.
+        veto = entry.vetoing_phrase(instruction)
+        if veto is not None:
+            vetoed.append(
+                f"{entry.name!r} matched {phrase!r} but the prompt names {veto!r}"
+            )
+            continue
+        eligible.append((entry, phrase))
+    return eligible, vetoed

@@ -46,16 +46,15 @@
 # dev-201's values are, literally, what runtime-rebuild-trigger.yml and its
 # reusable hard-coded before (pinned by tests/ci/test_deploy_lane_verify_route_omn19507.py).
 #
-# OPEN, AND STATED: dev-202's URLs follow the fleet convention every verify job
-# uses, the runner container's host-gateway alias host.docker.internal
+# dev-202's URLs follow the fleet convention every verify job uses, the runner
+# container's host-gateway alias host.docker.internal
 # (tests/ci/test_lab_pass_receipt_gate_omn17530.py: inside a runner container,
-# localhost and 127.0.0.1 are the container itself). But docker-compose.dev-202.yml
-# binds every port to 127.0.0.1 only (its ISOLATION section), and the host
-# gateway does not reach a loopback bind. Before the .202 verify runner is
-# registered (OMN-19507 AC3, waiting on decision 19 with the rest of the .202
-# bring-up), one of the two has to move: the overlay binds the docker bridge
-# gateway address instead of loopback, or that runner runs on the host network
-# and these URLs become loopback ones.
+# localhost and 127.0.0.1 are the container itself). docker-compose.dev-202.yml
+# publishes main 61085, effects 61086 and projection 61002 on the docker bridge
+# gateway as well as loopback (OMN-19507 AC3, its VERIFY-RUNNER REACH section),
+# so those three reach the alias. The deploy agent's 61098 is not a compose
+# port and is not among those binds: it must be reachable at the alias before
+# a route to dev-202 is added.
 default_instance: dev-201
 instances:
   dev-201:

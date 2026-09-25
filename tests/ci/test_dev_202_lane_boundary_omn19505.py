@@ -16,9 +16,15 @@ directions where a direction exists:
   only host, so the host-aware census evaluates it on .202 and reports every
   .201 lane not-applicable (ticket AC3).
 * **Nothing reachable from another host, nothing reaching .201.** Every port the
-  overlay publishes binds the loopback address and is one of the declared
-  block; the overlay names no .201 address and mounts no .201-bound Bifrost
-  overlay.
+  overlay publishes binds the loopback address or the docker bridge gateway,
+  never all interfaces or a LAN address, and is one of the declared block; the
+  overlay names no .201 address and mounts no .201-bound Bifrost overlay.
+* **Reachable by a fleet verify runner (OMN-19507 AC3).** A verify job runs in a
+  runner CONTAINER and reads the lane at ``host.docker.internal``, the runner's
+  host-gateway alias, which resolves to the docker bridge gateway. The three
+  ports that job reads (runtime main, effects, projection API) are published on
+  that gateway as well as on loopback, which the deploy agent's own
+  ``localhost`` health probe reads. No other port is.
 * **Every service the .201 dev lane declares, under a dev-202 name** (ticket
   AC1), and no Keycloak or Infisical (the roles plan's non-roles on .202).
 """
@@ -86,6 +92,18 @@ GOVERNED_COMPOSE_PROJECTS = (
     "omnibase-infra-judge",
 )
 GOVERNED_LANE_PORT_LITERALS = ("28085", "28086", "18085", "18086")
+
+#: The docker bridge gateway on .202: the default ``bridge`` network's gateway,
+#: which is where a runner container's ``host.docker.internal:host-gateway``
+#: alias resolves when the daemon sets no ``host-gateway-ip`` (read on .202
+#: 2026-09-25 by ``docker network inspect bridge`` and ``/etc/docker/daemon.json``).
+DOCKER_BRIDGE_GATEWAY = "172.17.0.1"
+LOOPBACK = "127.0.0.1"
+
+#: The ports a fleet verify job reads through ``host.docker.internal`` (the
+#: dev-202 instance's main, effects and projection URLs in
+#: ``config/deploy_lane_routing.yaml``).
+GATEWAY_REACHED_PORTS = {"61085", "61086", "61002"}
 
 #: The roles plan's non-roles on .202.
 FORBIDDEN_SERVICE_FRAGMENTS = ("keycloak", "infisical")
@@ -177,20 +195,61 @@ def test_dev_202_lane_boundary_declares_no_forbidden_service() -> None:
         assert "container_name" not in block.group(1)
 
 
-def test_dev_202_lane_boundary_every_published_port_is_loopback_and_in_the_block() -> (
+def _bindings() -> dict[str, set[str]]:
+    """Host port -> the set of host addresses it is published on."""
+    bindings: dict[str, set[str]] = {}
+    for line in _published_port_lines():
+        host_ip, host_port, _container_port = line.split(":")
+        bindings.setdefault(host_port, set()).add(host_ip)
+    return bindings
+
+
+def test_dev_202_lane_boundary_every_port_entry_names_a_host_address() -> None:
+    """A port entry without a host address publishes on every interface."""
+    raw = OVERLAY_PATH.read_text(encoding="utf-8")
+    entries = re.findall(r'^\s+-\s+"([^"]*:\d+)"\s*$', raw, re.MULTILINE)
+    assert entries, "positive control: the overlay publishes ports"
+    assert sorted(entries) == sorted(_published_port_lines()), (
+        "every published entry has the host-address:host-port:container-port form"
+    )
+
+
+def test_dev_202_lane_boundary_every_published_port_binds_loopback_or_the_gateway() -> (
     None
 ):
-    lines = _published_port_lines()
-    assert lines, "positive control: the overlay publishes ports"
-    published: set[str] = set()
-    for line in lines:
-        host_ip, host_port, _container_port = line.split(":")
-        assert host_ip == "127.0.0.1", (
-            f"{line!r} binds {host_ip!r}; every dev-202 port binds the loopback "
-            "address so no other host can reach its broker or databases"
+    bindings = _bindings()
+    assert bindings, "positive control: the overlay publishes ports"
+    for port, addresses in bindings.items():
+        assert addresses <= {LOOPBACK, DOCKER_BRIDGE_GATEWAY}, (
+            f"port {port} binds {sorted(addresses)}; a dev-202 port binds only the "
+            "loopback address or the docker bridge gateway, never all interfaces "
+            "or a LAN address, so no other host can reach its broker or databases"
         )
-        published.add(host_port)
-    assert published == EXPECTED_PUBLISHED_PORTS
+        assert LOOPBACK in addresses, (
+            f"port {port} is not on loopback, where the deploy agent's localhost "
+            "health probe and host-side readers reach it"
+        )
+    assert set(bindings) == EXPECTED_PUBLISHED_PORTS
+
+
+def test_dev_202_lane_boundary_verify_ports_are_reachable_from_a_runner_container() -> (
+    None
+):
+    """OMN-19507 AC3: a runner container reaches the lane at host.docker.internal,
+    the bridge gateway; a loopback-only bind refuses it (measured on .202
+    2026-09-25: loopback-only answered connection refused, the gateway bind
+    answered)."""
+    bindings = _bindings()
+    on_gateway = {
+        port
+        for port, addresses in bindings.items()
+        if DOCKER_BRIDGE_GATEWAY in addresses
+    }
+    assert on_gateway == GATEWAY_REACHED_PORTS, (
+        f"gateway-published ports {sorted(on_gateway)}; exactly the verify job's "
+        f"{sorted(GATEWAY_REACHED_PORTS)} are, and the broker, databases and "
+        "consumers stay loopback-only"
+    )
 
 
 def test_dev_202_lane_boundary_block_is_clear_of_every_other_lane() -> None:

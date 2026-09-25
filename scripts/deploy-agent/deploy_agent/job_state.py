@@ -419,6 +419,20 @@ class JobStore:
                 continue
         return False
 
+    def last_completed_at(self) -> datetime | None:
+        """When the most recent job ended, or ``None`` when none has (OMN-19509)."""
+        latest: datetime | None = None
+        for path in self.state_dir.glob("*.json"):
+            try:
+                job = JobState.model_validate_json(path.read_text())
+            except Exception:  # noqa: BLE001
+                continue
+            if job.completed_at is not None and (
+                latest is None or job.completed_at > latest
+            ):
+                latest = job.completed_at
+        return latest
+
     def load(self, correlation_id: UUID) -> JobState | None:
         path = self._job_path(correlation_id)
         if not path.exists():

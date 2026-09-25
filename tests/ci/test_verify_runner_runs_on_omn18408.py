@@ -174,6 +174,26 @@ NEW_VERIFY_JOBS = (
         "c16-receipt-identity",
         "C16 receipt identity (dev lane)",
     ),
+    # OMN-19445: the R1/MD-14 front-door probe. Born on the label, and it
+    # clears the OMN-18602 bar the same way the read-only canaries above do:
+    # it never mutates the lane, only runs `onex delegate` against it and
+    # grades the exit code. It needs the lab host's docker socket-adjacent
+    # network route to reach the dev-lane broker directly -- the same reason
+    # provider-rung-canary.yml and the C12 producer pin this label -- and it
+    # deliberately runs the CLI on the runner host itself, not inside
+    # omninode-runtime-effects, because it measures the FRONT DOOR (the
+    # command a lane operator runs on their own machine), not whether the
+    # runtime can reach itself.
+    #
+    # It needs the HOST label for the identical reason every entry above
+    # does: a verify-class runner on another lab host has no route to this
+    # lane's broker, so an unpinned run would fail closed as a false lane
+    # outage rather than a routing mistake.
+    (
+        "r1-front-door-probe.yml",
+        "r1-front-door-probe",
+        "R1 front-door probe (dev lane, outside the runtime container)",
+    ),
 )
 
 # Every job legally on the label, however it got there.
