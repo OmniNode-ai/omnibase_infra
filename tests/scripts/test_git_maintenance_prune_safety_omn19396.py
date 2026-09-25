@@ -306,6 +306,31 @@ def test_open_ledger_claim_is_kept_and_a_closed_one_is_not(box: Sandbox) -> None
     assert "[removed] OMN-90002" in out, out
 
 
+def test_lane_terminal_without_claim_id_closes_all_earlier_claims(
+    box: Sandbox,
+) -> None:
+    """Canonical ledger semantics close every earlier CLAIM for the lane."""
+    first = box.add_worktree("OMN-90003")
+    second = box.add_worktree("OMN-90004")
+    box.ledger.write_text(
+        "2026-09-24T10:00:00Z | CLAIM | lane=done-lane | ticket=OMN-90003 | "
+        "scope=first\n"
+        "2026-09-24T10:00:01Z | CLAIM | lane=done-lane | ticket=OMN-90004 | "
+        "scope=second\n"
+        "2026-09-24T11:00:00Z | TERMINAL | lane=done-lane | friction=none | "
+        "done\n",
+        encoding="utf-8",
+    )
+
+    result = box.run("--execute", "--prune-worktrees")
+
+    assert result.returncode == 0, result.stderr
+    assert not first.exists(), result.stdout
+    assert not second.exists(), result.stdout
+    assert "[removed] OMN-90003" in result.stdout, result.stdout
+    assert "[removed] OMN-90004" in result.stdout, result.stdout
+
+
 def test_stash_for_the_branch_is_kept(box: Sandbox) -> None:
     worktree = box.add_worktree("OMN-STASHED")
     (worktree / "root.txt").write_text("edited\n", encoding="utf-8")
@@ -321,6 +346,55 @@ def test_ignored_file_that_git_cannot_restore_is_kept(box: Sandbox) -> None:
     result = box.run("--execute", "--prune-worktrees")
     assert (worktree / ".env").exists(), result.stdout
     assert "holds ignored file" in result.stdout, result.stdout
+
+
+@pytest.mark.parametrize(
+    "secret_name",
+    [
+        ".env",
+        "service-account-prod.json",
+        "terraform.tfstate",
+        ".infisical-admin-token",
+        ".monitor-env",
+    ],
+)
+def test_secret_bearing_file_inside_ignored_dist_is_kept(
+    box: Sandbox, secret_name: str
+) -> None:
+    """Ignored build output must not hide credential-bearing local files."""
+    (box.clone / ".gitignore").write_text(".env\n.venv/\ndist/\n", encoding="utf-8")
+    box.git("commit", "-q", "-am", "ignore dist", cwd=box.clone)
+    box.git("push", "-q", "origin", "main", cwd=box.clone)
+    worktree = box.add_worktree("OMN-DISTSECRET")
+    dist = worktree / "dist"
+    dist.mkdir()
+    (dist / "bundle.js").write_text("built\n", encoding="utf-8")
+    secret = dist / secret_name
+    secret.write_text("credential-shaped local data\n", encoding="utf-8")
+
+    result = box.run("--execute", "--prune-worktrees")
+
+    assert result.returncode == 0, result.stderr
+    assert secret.exists(), result.stdout
+    assert "holds ignored file not recoverable from git" in result.stdout, result.stdout
+
+
+def test_control_ignored_dist_without_secrets_does_not_block_removal(
+    box: Sandbox,
+) -> None:
+    (box.clone / ".gitignore").write_text(".env\n.venv/\ndist/\n", encoding="utf-8")
+    box.git("commit", "-q", "-am", "ignore dist", cwd=box.clone)
+    box.git("push", "-q", "origin", "main", cwd=box.clone)
+    worktree = box.add_worktree("OMN-DISTONLY")
+    dist = worktree / "dist"
+    dist.mkdir()
+    (dist / "bundle.js").write_text("built\n", encoding="utf-8")
+
+    result = box.run("--execute", "--prune-worktrees")
+
+    assert result.returncode == 0, result.stderr
+    assert not worktree.exists(), result.stdout
+    assert "[removed] OMN-DISTONLY" in result.stdout, result.stdout
 
 
 def test_control_regenerable_cache_does_not_block_removal(box: Sandbox) -> None:
