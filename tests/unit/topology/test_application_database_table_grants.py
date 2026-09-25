@@ -47,7 +47,6 @@ from omnibase_infra.topology.table_grant_derivation import (
     DOMAIN_PROJECTION_BINDINGS,
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     READ_PRIVILEGES,
-    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     WRITE_PRIVILEGES,
     ContractTableDeclaration,
     derive_table_grants,
@@ -165,30 +164,62 @@ def test_domain_bindings_match_the_wiring_module() -> None:
 
 
 def test_tenant_declarations_route_to_the_tenant_writer() -> None:
+    """OMN-17887: the TENANT domain's schema is ``public``, so a tenant-domain
+    declaration is ``schema: public`` and routes to the tenant writer there."""
     topology = load_topology_profile("local")
     derived = derive_table_grants(
-        topology, [_declaration("future_tenant_projection", "tenant", "write")]
+        topology, [_declaration("future_tenant_projection", "public", "write")]
     )
     assert set(derived.grants) == {"tenant_projection_writer"}
-    assert derived.grants["tenant_projection_writer"][0].schema == "tenant"
+    assert derived.grants["tenant_projection_writer"][0].schema == "public"
+    assert derived.grants["tenant_projection_writer"][0].objects == (
+        "future_tenant_projection",
+    )
+    assert derived.unmappable == ()
 
 
-def test_omn15359_pending_tenant_tables_grant_against_current_physical_schema() -> None:
-    """Temporary physical-schema bridge: logical tenant tables still live in public."""
+def test_retired_tenant_schema_declaration_is_a_typed_residual() -> None:
+    """OMN-17887: a declaration still naming the retired ``tenant`` schema is
+    not silently granted anywhere -- it surfaces as a residual."""
+    derived = derive_table_grants(
+        load_topology_profile("local"),
+        [_declaration("future_tenant_projection", "tenant", "write")],
+    )
+    assert derived.grants == {}
+    assert len(derived.unmappable) == 1
+    assert "schema 'tenant'" in derived.unmappable[0].reason
+
+
+def test_omn17887_tenant_tables_grant_directly_against_public_with_no_bridge() -> None:
+    """Formerly the OMN-15359 tenant physical-schema bridge. OMN-17887 retired
+    the ``tenant`` schema: tenant-domain tables are declared ``schema: public``
+    and grant there directly, and ``physical_grant_schema_for_table`` no longer
+    rewrites ``tenant`` to ``public`` for anything (identity, like any other
+    unbridged schema)."""
     topology = load_topology_profile("local")
     derived = derive_table_grants(
         topology,
-        [_declaration("delegation_judge_verdict_events", "tenant", "write")],
+        [_declaration("delegation_judge_verdict_events", "public", "write")],
     )
     assert set(derived.grants) == {"tenant_projection_writer"}
     assert derived.grants["tenant_projection_writer"][0].schema == "public"
     assert (
-        physical_grant_schema_for_table("tenant", "delegation_judge_verdict_events")
+        physical_grant_schema_for_table("public", "delegation_judge_verdict_events")
         == "public"
+    )
+    assert (
+        physical_grant_schema_for_table("tenant", "delegation_judge_verdict_events")
+        == "tenant"
     )
     assert physical_grant_schema_for_table("tenant", "future_tenant_projection") == (
         "tenant"
     )
+    retired = derive_table_grants(
+        topology,
+        [_declaration("delegation_judge_verdict_events", "tenant", "write")],
+    )
+    assert retired.grants == {}
+    assert "schema 'tenant'" in retired.unmappable[0].reason
 
 
 def test_omn15359_pending_internal_tables_grant_against_current_physical_schema() -> (
@@ -436,12 +467,12 @@ def test_every_granted_relation_resolves_through_the_real_validator(
                 "read" if set(grant.privileges) == set(READ_PRIVILEGES) else "write"
             )
             for name in grant.objects:
+                # OMN-17887: tenant-domain relations are declared `public`
+                # directly, so only the internal family is mapped back.
+                assert grant.schema != "tenant", (
+                    f"{database_ref} grants on the retired `tenant` schema"
+                )
                 if (
-                    grant.schema == "public"
-                    and name in TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
-                ):
-                    logical_schema = "tenant"
-                elif (
                     grant.schema == "public"
                     and name in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
                 ):
@@ -770,12 +801,30 @@ def test_omn15701_replay_captured_topology_fails_all_eight_reverted_relations() 
 
 
 def test_omn15701_replay_shipped_topology_now_accepts_all_reverted_relations() -> None:
-    """The nine house-tenant relations resolve cleanly on every shipped profile
-    now that the tenant_projection_writer grants are restored."""
+    """The house-tenant relations resolve cleanly on every shipped profile
+    now that the tenant_projection_writer grants are restored.
+
+    OMN-17887 (operator ruling 2026-09-24) retired the ``tenant`` schema: the
+    TENANT domain's schema is ``public``, so the same relations are declared
+    ``schema: public`` today and must resolve there. The captured-topology
+    replays above keep their historical ``schema: tenant`` declarations because
+    the captured bytes still declare that schema; on the shipped topology a
+    ``schema: tenant`` declaration must now be refused, not quietly accepted.
+    """
     for profile in sorted(SUPPORTED_TOPOLOGY_PROFILES):
         topology = load_topology_profile(profile)
         for relation in _REVERTED_GRANT_RELATIONS:
-            _resolve_projection_database_target((relation,), topology)
+            assert relation.schema == "tenant"
+            _resolve_projection_database_target(
+                (
+                    ModelDbTableDeclaration.model_validate(
+                        {**relation.model_dump(), "schema": "public"}
+                    ),
+                ),
+                topology,
+            )
+            with pytest.raises(ValueError, match="Unknown schema 'tenant'"):
+                _resolve_projection_database_target((relation,), topology)
 
 
 def test_omn15701_shipped_grants_restore_nightly_loop_configs_read() -> None:

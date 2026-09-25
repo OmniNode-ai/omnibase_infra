@@ -46,7 +46,6 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 )
 from omnibase_infra.topology.physical_schema_mapping import (
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
-    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     physical_grant_schema_for_table,
 )
 
@@ -60,7 +59,6 @@ __all__ = [
     "DOMAIN_PROJECTION_BINDINGS",
     "STATE_IO_TABLE_DECLARATIONS",
     "LEGACY_MIGRATION_TABLE_DECLARATIONS",
-    "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "physical_grant_schema_for_table",
     "derive_table_grants",
@@ -167,7 +165,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="tenant_inference_credentials",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
                 "0000_create_tenant_inference_credentials.sql"
@@ -198,7 +196,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_model_routing",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
             ),
@@ -214,7 +212,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_quality_gate",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
             ),
@@ -230,7 +228,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_summary",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
             ),
@@ -246,7 +244,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_token_usage",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
             ),
@@ -320,7 +318,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_savings",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_savings/"
                 "089_savings_aggregate_views_per_tenant.sql"
@@ -343,7 +341,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_cost_savings_overview",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_savings/"
                 "089_savings_aggregate_views_per_tenant.sql"

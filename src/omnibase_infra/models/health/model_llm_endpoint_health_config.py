@@ -22,6 +22,13 @@ circuit breaker thresholds consumed by ``ServiceLlmEndpointHealth``.
     classified once and never probed, rather than 401-ing forever at the probe
     interval.  Adds ``auth_failure_threshold`` and
     ``auth_failure_backoff_max_seconds`` for the terminal-auth-failure backoff.
+
+.. versionchanged:: OMN-19129
+    Adds ``endpoint_auth_env`` and ``endpoint_probe_paths``. The first
+    carries each probeable endpoint's credential VARIABLE NAME through to
+    the health service, which OMN-16900 resolved and then dropped; the
+    second replaces the synthesized ``/health`` and ``/v1/models`` guess
+    with the path the backend declares it serves.
 """
 
 from __future__ import annotations
@@ -214,6 +221,56 @@ class ModelLlmEndpointHealthConfig(BaseModel):
         ),
     )
 
+    endpoint_auth_env: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Endpoint name -> the NAME of the variable holding its bearer "
+            "credential (OMN-19129). Never a credential value: the service "
+            "resolves the name through an injected resolver at probe time."
+        ),
+    )
+
+    endpoint_probe_paths: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict,
+        description=(
+            "Endpoint name -> the probe paths its surface actually serves, "
+            "tried in order (OMN-19129). Declared by the backend, never "
+            "synthesized. An endpoint absent from this map falls back to the "
+            "/health then /v1/models synthesis, which is correct only for "
+            "local vLLM-style servers."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_declarations_reference_probeable_endpoints(
+        self,
+    ) -> ModelLlmEndpointHealthConfig:
+        """Reject an auth or probe-path declaration for an endpoint never probed.
+
+        Both maps are keyed by endpoint name and parallel to ``endpoints``.
+        A key that names nothing probeable is a wiring typo whose only symptom
+        would otherwise be the declaration silently not applying — which is the
+        exact failure mode OMN-19129 exists to remove.
+
+        Raises:
+            ValueError: If either map names an endpoint absent from
+                ``endpoints``.
+        """
+        for label, declared in (
+            ("endpoint_auth_env", self.endpoint_auth_env),
+            ("endpoint_probe_paths", self.endpoint_probe_paths),
+        ):
+            unknown = sorted(set(declared) - set(self.endpoints))
+            if unknown:
+                msg = (
+                    f"'{label}' declares endpoint(s) {unknown} that are absent "
+                    "from 'endpoints'. Declarations are keyed by probeable "
+                    "endpoint name; an entry naming a skipped or nonexistent "
+                    "endpoint would never be applied."
+                )
+                raise ValueError(msg)
+        return self
+
     @classmethod
     def from_model_registry(
         cls,
@@ -321,6 +378,8 @@ class ModelLlmEndpointHealthConfig(BaseModel):
 
         endpoints: dict[str, str] = {}
         unauthenticated: dict[str, str] = {}
+        auth_env_by_endpoint: dict[str, str] = {}
+        probe_paths_by_endpoint: dict[str, tuple[str, ...]] = {}
         for entry in models:
             if not isinstance(entry, dict):
                 continue
@@ -356,7 +415,26 @@ class ModelLlmEndpointHealthConfig(BaseModel):
 
             endpoints[str(model_key)] = url
 
-        return cls(endpoints=endpoints, unauthenticated_endpoints=unauthenticated)
+            # OMN-19129: carry the credential's VARIABLE NAME through to the
+            # probe.  OMN-16900 resolved this name only to decide probeability
+            # and then dropped it, so every endpoint that passed the check was
+            # probed anonymously and 401'd forever.
+            if api_key_env:
+                auth_env_by_endpoint[str(model_key)] = str(api_key_env)
+
+            # OMN-19129: the probe path is declared by the backend, not
+            # synthesized.  See the field docstring on ``probe_path`` in
+            # model_registry.yaml for why this is separate from ``health_path``.
+            probe_path = entry.get("probe_path", "")
+            if probe_path:
+                probe_paths_by_endpoint[str(model_key)] = (str(probe_path),)
+
+        return cls(
+            endpoints=endpoints,
+            unauthenticated_endpoints=unauthenticated,
+            endpoint_auth_env=auth_env_by_endpoint,
+            endpoint_probe_paths=probe_paths_by_endpoint,
+        )
 
 
 __all__: list[str] = ["ModelLlmEndpointHealthConfig"]

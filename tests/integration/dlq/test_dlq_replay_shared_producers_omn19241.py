@@ -149,6 +149,13 @@ async def test_kernel_wired_dispatchers_never_stop_a_producer_a_peer_is_using(
     dependencies = _build_runtime_handler_dependencies(None, "localhost:9092")
     assert dependencies is not None
     mapping = dependencies["HandlerDlqReplay"]
+    # OMN-19085: the kernel also wires a backlog probe, which would read the
+    # (fake) broker's committed offsets before each run. This test is about
+    # producer leases across two concurrent drains, so both runs must drain;
+    # the probe has its own tests in
+    # tests/unit/nodes/node_dlq_replay_effect/test_omn19085_*.
+    assert "backlog_probe" in mapping
+    mapping = {key: value for key, value in mapping.items() if key != "backlog_probe"}
     events_run = HandlerDlqReplay(**mapping)
     commands_run = HandlerDlqReplay(**mapping)
     # Dispatchers rotate independently; on the lane the two were draining

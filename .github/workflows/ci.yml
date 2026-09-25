@@ -1456,6 +1456,89 @@ jobs:
           # that needs updating on every dependency bump.
           uv run python scripts/ci/check_lockfile_registry_allowlist.py uv.lock --min-packages 20
 
+  # Lab probe windows (OMN-19412, lab release-sync plan T0.3, seam L0.3).
+  # config/lab_probe_windows.yaml is the list of scheduled lab probes the
+  # reconcile dispatcher (OMN-19420) and runtime-train (OMN-19424) read to keep
+  # a lane mutation out of the gap before a probe. This job re-derives every
+  # cron, lane and maximum duration from the workflow files and refuses any
+  # disagreement, and refuses a scheduled probe with no entry. omnibase_infra is
+  # read at THIS checkout (so a PR adding a probe cron is judged on its own
+  # head); omninode_infra and omnimarket at their default branch, `dev`.
+  # Registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS, which is what
+  # makes it block through the required CI Summary context. No `if:` and no
+  # continue-on-error: a token mint or checkout that fails fails the job, since
+  # a check that could not read a repository has proven nothing about it.
+  lab-probe-windows:
+    needs: occ-preflight
+    name: Lab Probe Windows (OMN-19412)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Same lightweight-gate baseline as lockfile-registry-allowlist above; the
+    # check itself parses about 290 small YAML files.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      # omninode_infra is private; the default token is scoped to this repo.
+      - name: Mint a read-only omninode_infra token
+        id: infra-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omninode_infra
+          permission-contents: read
+
+      - name: Checkout omninode_infra workflows at dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omninode_infra
+          ref: dev
+          path: .probe-roots/omninode_infra
+          token: ${{ steps.infra-token.outputs.token }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout omnimarket workflows at dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .probe-roots/omnimarket
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+
+      - name: Every probe cron, lane and duration agrees with its workflow, and every probe is listed
+        run: |
+          set -euo pipefail
+          echo "omninode_infra@dev = $(git -C .probe-roots/omninode_infra rev-parse HEAD)"
+          echo "omnimarket@dev = $(git -C .probe-roots/omnimarket rev-parse HEAD)"
+          uv run python scripts/ci/check_lab_probe_windows.py \
+            --root omnibase_infra=. \
+            --root omninode_infra=.probe-roots/omninode_infra \
+            --root omnimarket=.probe-roots/omnimarket
+
   # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
   # git-pinned rev must build the SAME src/ tree as the released tag its
   # PyPI version string declares, even when the line carries a
@@ -3166,6 +3249,85 @@ jobs:
     with:
       mode: compose
 
+  # ============================================================================
+  # Laptop profile boot (OMN-19498)
+  # ----------------------------------------------------------------------------
+  # Boots the catalog bundle `local` (OMN-19496) exactly as its documentation
+  # tells a new engineer to -- `make local-env`, `make up-local` -- through
+  # reusable-runtime-boot.yml mode `catalog-local`, and fails unless the
+  # migration gate is healthy, both runtime kernels report /health "healthy"
+  # with is_running true, and the delegate-skill command topic has a consumer.
+  #
+  # Unlike runtime-boot-smoke above it EXECUTES on pull requests: on every
+  # pull request that touches the surfaces the laptop boot is made of (the
+  # catalog, the runtime image, the migrations, the boot-critical kernel and
+  # wiring code, this workflow), on every push to `dev` that does, and on every
+  # workflow_dispatch and merge_group. Unrelated pull requests skip it, which
+  # the CI Summary sweep accepts; a failure when it does run fails CI Summary.
+  # Widening the path set is a one-line change once it has a green record.
+  # ============================================================================
+  laptop-profile-paths:
+    name: Laptop profile paths changed (OMN-19498)
+    # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.paths.outputs.changed }}
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Diff against the base
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)
+              git fetch --no-tags origin "$PR_BASE_REF"
+              range="origin/${PR_BASE_REF}...HEAD"
+              ;;
+            push)
+              if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+              fi
+              range="${PUSH_BEFORE}..HEAD"
+              ;;
+            *)
+              echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+              ;;
+          esac
+          changed_files="$(git diff --name-only "$range")"
+          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
+          matched="$(printf '%s\n' "$changed_files" | grep -E "$pattern" || true)"
+          if [ -n "$matched" ]; then
+            echo "Laptop profile surfaces changed:"
+            printf '%s\n' "$matched"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No laptop profile surface changed in ${range}."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  runtime-boot-laptop-profile:
+    name: Runtime Boot Laptop Profile (catalog local)
+    needs: [laptop-profile-paths]
+    if: needs.laptop-profile-paths.outputs.changed == 'true'
+    uses: ./.github/workflows/reusable-runtime-boot.yml
+    with:
+      mode: catalog-local
+
   # ===========================================================================
   # OMN-15108 fan-out of OMN-14877 (omnibase_core#1478 pattern) / OMN-14430
   # ---------------------------------------------------------------------------
@@ -3731,7 +3893,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: b0ce124838108bdce47f0e02245906ec5be4fde2
+          ref: 8b8d5d3b5dda51bdcc99168d4c358a6df0f19380
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -4678,6 +4840,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # OMN-17886 AC4: an EMPTY server for the live-ACL gate. The corpus has to
+      # build into the real database names (sixteen migrations run
+      # `\connect omnidash_analytics`), and the service above already holds a
+      # migrated omnibase_infra, so the gate gets a server of its own.
+      acl_gate_postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4860,6 +5037,23 @@ jobs:
         run: |
           uv run pytest \
             tests/integration/migrations/test_omn15683_mixed_representation_conversion.py \
+            -v --tb=short -p no:randomly
+
+      # OMN-17886 AC4: build omnidash_analytics from EMPTY with the real forward
+      # runner, then diff its omninode_internal ACLs against the topology. A
+      # migration that confers an undeclared grant, or omits a declared one,
+      # fails here. The findings the corpus still produces are listed one by one
+      # in config/omninode_internal_live_acl_allowlist.yaml, which is
+      # shrink-only: an entry that stops reproducing fails the gate too.
+      - name: omninode_internal live-ACL gate (OMN-17886)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMN17886_GATE_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.acl_gate_postgres.ports['5432'] }}/postgres
+          # With a Postgres in hand a SKIP is a vacuous green.
+          OMN17886_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py \
             -v --tb=short -p no:randomly
 
       - name: Assert manifest tables exist

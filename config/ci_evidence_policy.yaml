@@ -117,6 +117,22 @@ evidence_artifacts:
       - provider-rung-canary.json
     rationale: >-
       One row per declared backend of the deployed delegation contract with its typed verdict (LIVE, AUTH_DEAD, QUOTA_DEAD with the contract's quota class, UNREACHABLE, UNRESOLVED, PROTOCOL_ERROR, HTTP_ERROR, or the skip reason), plus one wrong-key control per endpoint taken in the same run. The controls are what make a green readable: a probe that reads 200 whatever credential it sends produces the same LIVE rows, and only a refused wrong key tells the two apart.
+  # --- r1-front-door-probe.yml: PLAN-R1/MD-14, daily (OMN-19445) -----------
+  #
+  # The probe's EXIT CODE is the verdict. Nothing ran this on a schedule
+  # before OMN-19445, and the corrected `--lane dev` command form, proven once
+  # by hand on 2026-09-21, silently reverted to a stale --kafka-bootstrap
+  # literal in the next three daily rebaseline snapshots -- a probe proven
+  # once and never re-run is not a regression signal.
+  - id: r1-front-door-probe
+    workflow: .github/workflows/r1-front-door-probe.yml
+    job: r1-front-door-probe
+    producer_step: "Run the R1 front-door probe and grade it"
+    artifact_name: r1-front-door-probe
+    required_paths:
+      - r1-front-door-probe.json
+    rationale: >-
+      One record per day: the exact command run, its exit code, and stdout/stderr tails. A green run with no record would claim the front door was exercised with nothing behind it.
   # --- dev-lane-liveness.yml: the lab saturation signal (OMN-18031) ---------
   #
   # This pair is the plan's named regression fixture. The probe was dead from
@@ -186,11 +202,11 @@ evidence_artifacts:
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: verify-lane-converged
     producer_step: "Emit the compose-dev lab-pass receipt"
-    artifact_name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.source_sha }}
+    artifact_name: lab-pass-receipt-${{ needs.trigger-rebuild.outputs.receipt_lane }}-${{ needs.trigger-rebuild.outputs.source_sha }}
     required_paths:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
-      The .201 compose dev lane's lab pass for the merged sha (rule 24(a)).
+      The .201 compose dev lane's lab pass for the merged sha (rule 24(a)). The lane half of the name is the routed deploy-agent instance's receipt lane (OMN-19507 AC2, config/deploy_lane_routing.yaml); omnibase_infra merges route to dev-201, so it reads compose-dev.
   - id: lab-pass-receipt-compose-dev-reemitted
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: reemit-queued-receipts
@@ -204,11 +220,11 @@ evidence_artifacts:
     workflow: .github/workflows/runtime-rebuild-trigger-reusable.yml
     job: verify-sibling-converged
     producer_step: "Emit the compose-dev lab-pass receipt for the sibling sha"
-    artifact_name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.sibling_sha }}
+    artifact_name: lab-pass-receipt-${{ needs.trigger-rebuild.outputs.receipt_lane }}-${{ needs.trigger-rebuild.outputs.sibling_sha }}
     required_paths:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
-      The .201 compose dev lane's lab pass for a SIBLING repository's merged sha (rule 24(a), OMN-18268). Keyed by the sibling sha, not the omnibase_infra one, because that is the revision the lane was proven to vendor; the two never collide on one artifact name.
+      The routed dev lane's lab pass for a SIBLING repository's merged sha (rule 24(a), OMN-18268). The lane half of the name is the routed deploy-agent instance's receipt lane (OMN-19507 AC2): compose-dev for dev-201, compose-dev-202 once an omnimarket route to dev-202 exists. Keyed by the sibling sha, not the omnibase_infra one, because that is the revision the lane was proven to vendor; the two never collide on one artifact name.
   - id: lab-pass-receipt-compose-dev-onex-api
     workflow: .github/workflows/onex-api-lab-delivery-reusable.yml
     job: verify-onex-api-delivered

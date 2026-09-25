@@ -1,0 +1,60 @@
+{
+  "allowed_undeclared": [],
+  "broker": null,
+  "containers": [],
+  "desired_state_sha256": "2fa0b678ee8d0d57c85197e272319afd3b192a8378f2bac9f985b51476e6858b",
+  "runners": {
+    "containers": [
+      {
+        "config_hash": "a28bbc963ccacc17c40758b355446b46080a7f6b124fc7b5b594a7a43c3e1fc2",
+        "name": "omninode-runner-1",
+        "pool": "general"
+      },
+      {
+        "config_hash": "5ead56492f0566069164f723b7313798fa2d3f6d0594c4afbe25b32f6898eb61",
+        "name": "omninode-runner-2",
+        "pool": "general"
+      },
+      {
+        "config_hash": "d2a756c2ea5231b9e25f3dcd8125fed5c0757a14cc7f74c0becf0db16684bead",
+        "name": "omninode-verify-runner-1",
+        "pool": "verify"
+      }
+    ],
+    "pools": [
+      {
+        "expected_count": 2,
+        "labels": [
+          "omnibase-ci",
+          "self-hosted"
+        ],
+        "name": "general",
+        "workdir": "/srv/omninode-runners"
+      },
+      {
+        "expected_count": 1,
+        "labels": [
+          "omninode-verify",
+          "self-hosted"
+        ],
+        "name": "verify",
+        "workdir": "/srv/omninode-runners"
+      }
+    ]
+  },
+  "schema_version": "lab-desired-state.v1",
+  "surface": {
+    "compose_project": "docker",
+    "host": "lab-201",
+    "id": "lab-201/runners",
+    "kind": "runner_fleet",
+    "mode": "reconcile"
+  },
+  "target_ref": {
+    "commit": "892b2a4344943bb632aea4075a5c90bc9941ff36",
+    "composition": [],
+    "kind": "merge",
+    "ref": "dev",
+    "repo": "OmniNode-ai/omnibase_infra"
+  }
+}
