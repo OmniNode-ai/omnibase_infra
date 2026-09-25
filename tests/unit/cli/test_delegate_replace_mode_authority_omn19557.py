@@ -127,33 +127,24 @@ class TestPositiveControls:
 
     def test_one_acceptance_capable_criterion_is_enough(self) -> None:
         criteria = (*_CODEX_C2_CRITERIA, "final_artifact_only")
-        assert (
-            _validate_replace_mode_authority(
-                criteria, "replace-task-class", response_contract=None
-            )
-            is None
-        )
+        _validate_replace_mode_authority(
+            criteria, "replace-task-class", response_contract=None
+        )  # must not raise
 
     def test_a_declared_response_contract_is_its_own_authority(self) -> None:
         """The gate validates against the contract and skips the DoD path entirely."""
-        assert (
-            _validate_replace_mode_authority(
-                _CODEX_C2_CRITERIA,
-                "replace-task-class",
-                response_contract={"type": "object"},
-            )
-            is None
-        )
+        _validate_replace_mode_authority(
+            _CODEX_C2_CRITERIA,
+            "replace-task-class",
+            response_contract={"type": "object"},
+        )  # must not raise
 
     @pytest.mark.parametrize("mode", [None, "extend-task-class"])
     def test_extending_keeps_the_task_class_authority(self, mode: str | None) -> None:
         """The same reject-only set ADDED to the class bar keeps the class's judge."""
-        assert (
-            _validate_replace_mode_authority(
-                _CODEX_C2_CRITERIA, mode, response_contract=None
-            )
-            is None
-        )
+        _validate_replace_mode_authority(
+            _CODEX_C2_CRITERIA, mode, response_contract=None
+        )  # must not raise
 
 
 def test_an_unresolvable_gate_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,12 +154,9 @@ def test_an_unresolvable_gate_passes_through(monkeypatch: pytest.MonkeyPatch) ->
     cannot dispatch anyway, and the next guard reports the real cause.
     """
     monkeypatch.setattr(cli_delegate, "load_acceptance_capable_criteria", lambda: None)
-    assert (
-        _validate_replace_mode_authority(
-            _CODEX_C2_CRITERIA, "replace-task-class", response_contract=None
-        )
-        is None
-    )
+    _validate_replace_mode_authority(
+        _CODEX_C2_CRITERIA, "replace-task-class", response_contract=None
+    )  # must not raise
 
 
 def test_the_help_says_criteria_are_slugs_and_warns_about_replace() -> None:
