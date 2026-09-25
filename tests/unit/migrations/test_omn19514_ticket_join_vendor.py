@@ -42,7 +42,7 @@ _VENDORED = (
         "node_projection_dod_verdict",
         "0002_dod_verify_runs_delegation_correlation_id.sql",
         "omninode_internal",
-        "ee284de16cf8568e858e30408e6470c3dfb5858fcc7ad4e67a70ffc6856d7d7b",
+        "f057edc26ff6498ce7c3156a2d51c9477703f859e19083f934198c7e4edc2e83",
         ("delegation_correlation_id", "UUID"),
         "ALTER TABLE omninode_internal.dod_verify_runs",
     ),
