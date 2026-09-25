@@ -55,7 +55,7 @@ from typing import Any
 
 # Matches check_lane_census_age.py. A snapshot whose schema this does not know
 # is not one this module will reason about.
-_SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0.0"})
+_SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0.0", "1.1.0"})
 
 # Deliberately well inside the gate's 7-day limit (check_lane_census_age.py
 # _DEFAULT_MAX_AGE_DAYS). The margin is the point: a refresh PR opened at day 3
