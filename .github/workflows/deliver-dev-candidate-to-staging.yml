@@ -1247,11 +1247,22 @@ jobs:
           # is the one that IS proven to vendor the sibling revision, by
           # check_lane_sibling_revision.py, immediately before the receipt is
           # written.
+          #
+          # OMN-19508: an omnimarket revision may instead be proven on the
+          # second deployed dev lane on .202, whose receipt lane is
+          # compose-dev-202 (operator ruling 2026-09-25T00:56:45Z, omnimarket
+          # only). The list is ANY-OF, so a PASS on either admits it and a
+          # revision with neither is refused. Every other sibling stays on
+          # compose-dev alone, and the own-sha read above is unchanged.
+          SIBLING_LANES=(--lane compose-dev)
+          if [ "${PINNED_REPO}" = "omnimarket" ]; then
+            SIBLING_LANES+=(--lane compose-dev-202)
+          fi
           uv run --no-project --with pydantic \
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${PINNED_REVISION}" \
             --repo "OmniNode-ai/${PINNED_REPO}" \
-            --lane compose-dev \
+            "${SIBLING_LANES[@]}" \
             | tee /tmp/lab-pass-gate-sibling.txt
 
       # OMN-18866, operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending

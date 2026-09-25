@@ -63,6 +63,17 @@ class ModelSkillMapping(BaseModel):
         default="inmemory",
         description="event_bus backend override for the dispatch.",
     )
+    publish_terminal_to_lane: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "OMN-19152: a declared lane id. After the in-memory dispatch has "
+            "returned, the node's returned result is published to the "
+            "contract's terminal_event topic on this lane's broker. Fail-soft: "
+            "a failed publish never changes the result or the exit code. None "
+            "publishes nothing."
+        ),
+    )
     timeout: int = Field(
         default=300,
         gt=0,

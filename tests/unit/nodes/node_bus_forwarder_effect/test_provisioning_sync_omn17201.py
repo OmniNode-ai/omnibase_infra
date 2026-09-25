@@ -49,7 +49,7 @@ CONTRACT_PATH = (
     / "contract.yaml"
 )
 
-# The fifteen canonical topics that every tenant's wire set must contain.
+# The seventeen canonical topics that every tenant's wire set must contain.
 # Counterpart: omninode_infra docker/onex-api/topic_constants.py
 # ``FORWARDER_MIRROR_TOPIC_UNION`` / ``DEFAULT_TENANT_CANONICAL_TOPICS``.
 PROVISIONED_TENANT_CANONICAL_TOPICS: frozenset[str] = frozenset(
@@ -69,6 +69,9 @@ PROVISIONED_TENANT_CANONICAL_TOPICS: frozenset[str] = frozenset(
         "onex.evt.omniclaude.skill-started.v1",
         "onex.evt.omniclaude.skill-completed.v1",
         "onex.evt.omnimarket.tool-output-captured.v1",
+        # OMN-19439: the delegate-skill terminals, metadata-scrubbed.
+        "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
     }
 )
 
@@ -118,10 +121,11 @@ def test_each_hook_class_is_in_the_provisioned_set(topic: str) -> None:
 
 @pytest.mark.unit
 def test_pin_is_a_falsifiable_count() -> None:
-    """8 pre-existing topics plus all seven governed capture topics = 15.
+    """8 pre-existing topics plus all seven governed capture topics = 15, plus
+    OMN-19439's two metadata-scrubbed delegate-skill terminals = 17.
 
     A count assertion catches the case a set-equality edit would launder: an
     author who "fixes" a failure by editing BOTH sides of the pin at once still
     has to move this number, which is the line a reviewer reads.
     """
-    assert len(PROVISIONED_TENANT_CANONICAL_TOPICS) == 15
+    assert len(PROVISIONED_TENANT_CANONICAL_TOPICS) == 17
