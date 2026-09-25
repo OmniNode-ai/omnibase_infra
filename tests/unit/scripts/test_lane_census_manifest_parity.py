@@ -52,6 +52,7 @@ _MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
 # on the dev composition that re-declares every container_name it runs and the
 # network name. Keycloak and Infisical carry no container_name there (disabled,
 # never declared), so the scrape sees exactly the lane's set.
+# OMN-19544: `dev-105` joins on the same terms as dev-202, whose overlay it copies.
 _COMPOSE_LANES = (
     "stability-test",
     "judge",
@@ -59,6 +60,7 @@ _COMPOSE_LANES = (
     "dogfood",
     "sim-202",
     "dev-202",
+    "dev-105",
 )
 
 
