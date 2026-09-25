@@ -1,0 +1,306 @@
+# OMN-19505 dev-202 lane: the second deployed dev lane, on the .202 host.
+#
+# WHAT THIS IS. Task B2 of the second-deploy-slot plan (knowledge-base-internal
+# beta/plans/2026-09-24-second-deploy-slot-plan.md, epic OMN-19500). A second
+# dev-shaped lane that tracks the `dev` branch like the .201 dev lane does, so a
+# second deploy-agent instance (task B3) can run a second runtime deploy slot in
+# parallel with .201's. The operator ruled .202's second role on 2026-09-22 ("a
+# second deployed lane"), and answered the plan's two questions yes on
+# 2026-09-25 (omni_home ledger RULING 2026-09-25T00:56:45Z).
+#
+# HOW IT IS BUILT. An OVERLAY on the .201 dev composition, rendered only as the
+# triple, the way the deploy agent renders the dev lane plus this file:
+#
+#   docker compose -p omnibase-infra-dev-202 \
+#     --env-file docker/runtime-policy.env --env-file <dev-202 env file> \
+#     -f docker/docker-compose.infra.yml -f docker/docker-compose.dev-lane.yml \
+#     -f docker/docker-compose.dev-202.yml --profile runtime up -d
+#
+# The service graph and the runtime policy are the dev lane's, unchanged. What
+# this overlay replaces is everything that identifies a lane on a host, the same
+# set sim-202 replaces on the dogfood file: the compose project, every
+# container_name, the network name, every volume name, every published port and
+# the com.omninode.lane label. Without those the census on .202 would read these
+# containers as the .201 dev lane on a host it is not declared for
+# (lane_on_undeclared_host).
+#
+# ISOLATION. Its own Postgres, Redpanda and Valkey, never the .201 shared
+# broker. The ONLY tie to .201 is the deploy agent's read of the dev control
+# topic, and that is the agent's connection, not this stack's. So:
+#   * every port binds the loopback address;
+#   * runtime-effects leaves the external omnimemory-network, which does not
+#     exist on .202;
+#   * the four runtime-kernel services mount this lane's own Bifrost overlay
+#     (docker/lane-overlays/dev-202.bifrost.yaml: cloud locale, no local model
+#     rung) and never the dev lane's, which binds the .201 model server.
+#     .202's own model server is not bound either: C13 and C14 read it at proof
+#     time, and routing lane traffic to it is its own decision (plan row S5);
+#   * host credential mounts (Vertex token, Codex and Claude logins) are pinned
+#     to /dev/null; this lane carries no operator login.
+#
+# NOT RUN HERE. The roles plan's non-roles on .202 are Keycloak, anything
+# production and customer traffic, so Keycloak and Infisical are disabled by a
+# profile override and declared nowhere. onex-api and its two cloud-migration
+# one-shots are disabled too: their image is the omninode_infra cloud build that
+# the .201 lab-overlay pin delivers, and there is no path that delivers it to
+# .202. They keep dev-202 names and are declared `profile_gated`, so the lane
+# still states every service the .201 dev lane declares.
+#
+# A PREMISE FOR NOTHING BEYOND ITS RECEIPT. Not in GOVERNED_LANES or
+# GRANT_INTERLOCK_LANES (scripts/preflight_lane_deploy_attribution.py); no
+# `stability-proven` digest is ever sourced from it. What it proves is task B5's
+# `compose-dev-202` receipt, which the operator ruled counts for omnimarket
+# changes only.
+#
+# DECISION 19. No clone and no `.git` on .202 while the C13, C14 and C29
+# clean-machine producers run bare there (unified verification plan, ruled
+# 2026-09-23). This file declares the lane; it does not bring it up. Bring-up by
+# a deploy agent that builds in workspace mode waits until that ruling is
+# discharged for .202 (C29's move into a disposable container is
+# omninode_infra#1663).
+#
+# PORT BLOCK (read free on .202 by `ss -ltn`, recorded in the lane manifest's
+# verified: line). 61000-61999 sits above .202's ephemeral range (32768-60999)
+# and below sim-202's 62xxx and the reserved pre-PR pool's 63xxx/64xxx. No
+# governed lane's port literal (18085, 18086, 28085, 28086) is a substring of
+# any of them, and no governed compose project name is a substring of
+# omnibase-infra-dev-202.
+#
+#   runtime main 61085      runtime effects 61086     projection API 61002
+#   agent actions 61087     contract resolver 61091   skill lifecycle 61092
+#   context audit 61093     intelligence API 61053    phoenix 61006
+#   Postgres 61436          Valkey 61379              Redpanda Kafka 61192
+#   Redpanda proxy 61182    schema registry 61181     Redpanda admin 61644
+#   onex-api 61090 (reserved, unbound: the service is disabled here)
+name: omnibase-infra-dev-202
+x-omninode-contract-overlay:
+  dev-202-redpanda:
+    advertised_kafka_addr: &dev_202_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://127.0.0.1:61192"
+    advertised_pandaproxy_addr: &dev_202_redpanda_advertised_pandaproxy_addr "internal://redpanda:8082,external://127.0.0.1:61182"
+services:
+  postgres:
+    container_name: omnibase-infra-dev-202-postgres
+    ports: !override
+      - "127.0.0.1:61436:5432"
+  redpanda:
+    container_name: omnibase-infra-dev-202-redpanda
+    command: !override
+      - redpanda
+      - start
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - *dev_202_redpanda_advertised_kafka_addr
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr
+      - *dev_202_redpanda_advertised_pandaproxy_addr
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      # Its own dial. .202 has 60 GiB and also serves the 4090's model and the
+      # sim-202 broker (2G), so this lane's broker does not take .201's 12G.
+      - ${DEV_202_REDPANDA_MEMORY:-4G}
+      - --default-log-level=warn
+      - --set
+      - topic_partitions_per_shard=7000
+    ports: !override
+      - "127.0.0.1:61192:19092"
+      - "127.0.0.1:61182:18082"
+      - "127.0.0.1:61181:18081"
+      - "127.0.0.1:61644:9644"
+  redpanda-scram-user:
+    container_name: omnibase-infra-dev-202-redpanda-scram-user
+  redpanda-sasl-enable:
+    container_name: omnibase-infra-dev-202-redpanda-sasl-enable
+  redpanda-partition-cap:
+    container_name: omnibase-infra-dev-202-redpanda-partition-cap
+  valkey:
+    container_name: omnibase-infra-dev-202-valkey
+    ports: !override
+      - "127.0.0.1:61379:6379"
+  # Roles plan non-roles on .202: never started, never declared.
+  keycloak:
+    profiles: !override ["dev-202-disabled"]
+  infisical:
+    profiles: !override ["dev-202-disabled"]
+  forward-migration:
+    container_name: omnibase-infra-dev-202-forward-migration
+    labels:
+      com.omninode.lane: dev-202
+  migration-gate:
+    container_name: omnibase-infra-dev-202-migration-gate
+  intelligence-migration:
+    container_name: omnibase-infra-dev-202-intelligence-migration
+  cloud-migration-files:
+    container_name: omnibase-infra-dev-202-cloud-migration-files
+    profiles: !override ["dev-202-disabled"]
+    labels:
+      com.omninode.lane: dev-202
+  cloud-migration:
+    container_name: omnibase-infra-dev-202-cloud-migration
+    profiles: !override ["dev-202-disabled"]
+    labels:
+      com.omninode.lane: dev-202
+  onex-api:
+    container_name: onex-api-dev-202
+    profiles: !override ["dev-202-disabled"]
+    ports: !override
+      - "127.0.0.1:61090:8000"
+    labels:
+      com.omninode.lane: dev-202
+  autoheal:
+    container_name: omnibase-infra-dev-202-autoheal
+  phoenix:
+    container_name: omnibase-infra-dev-202-phoenix
+    ports: !override
+      - "127.0.0.1:61006:6006"
+  omninode-runtime:
+    container_name: omninode-dev-202-runtime
+    environment:
+      ONEX_RUNTIME_LANE: "compose-dev-202"
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
+    ports: !override
+      - "127.0.0.1:61085:8085"
+    volumes: !override
+      - runtime_logs:/app/logs
+      - runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev-202.bifrost.yaml:/app/config/delegation/dev-202.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - /dev/null:/run/secrets/vertex_access_token:ro
+  runtime-effects:
+    container_name: omninode-dev-202-runtime-effects
+    environment:
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
+    ports: !override
+      - "127.0.0.1:61086:8085"
+    networks: !override
+      - omnibase-infra-network
+    volumes: !override
+      - effects_logs:/app/logs
+      - effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev-202.bifrost.yaml:/app/config/delegation/dev-202.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - /dev/null:/run/secrets/vertex_access_token:ro
+  runtime-worker:
+    container_name: omninode-dev-202-runtime-worker
+    environment:
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
+    volumes: !override
+      - worker_logs:/app/logs
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev-202.bifrost.yaml:/app/config/delegation/dev-202.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+  tenant-projection-writer:
+    container_name: omnimarket-dev-202-tenant-projection-writer
+    environment:
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
+    labels:
+      com.omninode.lane: dev-202
+    volumes: !override
+      - tenant_projection_logs:/app/logs
+      - tenant_projection_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev-202.bifrost.yaml:/app/config/delegation/dev-202.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+  projection-api:
+    container_name: omnimarket-dev-202-projection-api
+    ports: !override
+      - "127.0.0.1:61002:3002"
+  agent-actions-consumer:
+    container_name: omninode-dev-202-agent-actions-consumer
+    ports: !override
+      - "127.0.0.1:61087:8087"
+  skill-lifecycle-consumer:
+    container_name: omninode-dev-202-skill-lifecycle-consumer
+    ports: !override
+      - "127.0.0.1:61092:8092"
+  context-audit-consumer:
+    container_name: omninode-dev-202-context-audit-consumer
+    ports: !override
+      - "127.0.0.1:61093:8093"
+  intelligence-api:
+    container_name: omnibase-dev-202-intelligence-api
+    ports: !override
+      - "127.0.0.1:61053:8053"
+  omninode-contract-resolver:
+    container_name: omninode-dev-202-contract-resolver
+    ports: !override
+      - "127.0.0.1:61091:8091"
+  infra-routing-decisions-consumer:
+    container_name: omninode-dev-202-infra-routing-decisions-consumer
+    labels:
+      com.omninode.lane: dev-202
+  projection-tenant-registry-writer:
+    container_name: omnimarket-dev-202-projection-tenant-registry-writer
+    labels:
+      com.omninode.lane: dev-202
+  projection-delegation-writer:
+    container_name: omnimarket-dev-202-projection-delegation-writer
+    labels:
+      com.omninode.lane: dev-202
+  projection-registration-writer:
+    container_name: omnimarket-dev-202-projection-registration-writer
+    labels:
+      com.omninode.lane: dev-202
+  projection-savings-writer:
+    container_name: omnimarket-dev-202-projection-savings-writer
+    labels:
+      com.omninode.lane: dev-202
+  projection-tenant-credentials-writer:
+    container_name: omnimarket-dev-202-projection-tenant-credentials-writer
+    labels:
+      com.omninode.lane: dev-202
+  projection-live-events-writer:
+    container_name: omnimarket-dev-202-projection-live-events-writer
+    labels:
+      com.omninode.lane: dev-202
+networks:
+  omnibase-infra-network:
+    name: omnibase-infra-dev-202-network
+    driver: bridge
+volumes:
+  postgres_data:
+    name: omnibase-infra-dev-202-postgres-data
+  redpanda_data:
+    name: omnibase-infra-dev-202-redpanda-data
+  valkey_data:
+    name: omnibase-infra-dev-202-valkey-data
+  keycloak_data:
+    name: omnibase-infra-dev-202-keycloak-data
+  phoenix_data:
+    name: omnibase-infra-dev-202-phoenix-data
+  cloud_migrations:
+    name: omnibase-infra-dev-202-cloud-migrations
+  runtime_logs:
+    name: omninode-dev-202-runtime-logs
+  runtime_data:
+    name: omninode-dev-202-runtime-data
+  effects_logs:
+    name: omninode-dev-202-effects-logs
+  effects_data:
+    name: omninode-dev-202-effects-data
+  worker_logs:
+    name: omninode-dev-202-worker-logs
+  agent_actions_logs:
+    name: omninode-dev-202-agent-actions-logs
+  skill_lifecycle_logs:
+    name: omninode-dev-202-skill-lifecycle-logs
+  context_audit_logs:
+    name: omninode-dev-202-context-audit-logs
+  contract_resolver_logs:
+    name: omninode-dev-202-contract-resolver-logs
+  tenant_projection_logs:
+    name: omnimarket-dev-202-tenant-projection-logs
+  tenant_projection_data:
+    name: omnimarket-dev-202-tenant-projection-data

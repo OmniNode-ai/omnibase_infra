@@ -75,9 +75,10 @@ _LANES_201 = {
     "ci-bus",
 }
 
-# OMN-19339: the .202 host carries the sim-202 lane and nothing else. From a
-# dogfood surface host it is as not-applicable as any .201 lane.
-_LANES_202 = {"sim-202"}
+# OMN-19339: the .202 host carries the sim-202 lane, and since OMN-19505 the
+# second deployed dev lane dev-202. From a dogfood surface host both are as
+# not-applicable as any .201 lane.
+_LANES_202 = {"sim-202", "dev-202"}
 _LANES_OFF_DOGFOOD_HOSTS = _LANES_201 | _LANES_202
 
 
