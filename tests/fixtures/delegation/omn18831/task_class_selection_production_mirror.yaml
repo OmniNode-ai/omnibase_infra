@@ -75,6 +75,7 @@ task_classes:
         - create a
         - create an
         - generate
+        - write
         - write a
         - write an
         qualifiers:
@@ -174,9 +175,11 @@ task_classes:
       - review the diff
       - review the patch
       - review the pr
+      - review the pull request
       - review this diff
       - review this patch
       - review this pr
+      - review this pull request
       priority: 72
   complex_reasoning:
     gateway_exposure: public
