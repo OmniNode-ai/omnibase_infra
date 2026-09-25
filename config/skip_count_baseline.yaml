@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 583
+    max_skips: 585
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -91,6 +91,14 @@ suites:
             - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_offline]
             - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_workdir_mismatch]
             - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[undeclared_container]
+        - measured_at: '2026-09-25'
+          measured_by: OMN-17886
+          delta: 2
+          reason: >-
+            Two Postgres proofs for the omninode_internal live-ACL check (OMN-17886). Both need a real server: the gate builds omnibase_infra and omnidash_analytics from empty with scripts/run-forward-migrations.sh, and the CLI test starts a throwaway cluster with initdb. The main splits have neither, so they collect both as skips. The gate is not unexecuted: the migration-integration job runs it against its own empty acl_gate_postgres service with OMN17886_REQUIRE_PG=1, so a missing server fails there instead of skipping. The CLI test is the one that only runs where initdb exists (a developer machine); the CI gate drives the same CLI and catalog queries end to end against a real catalog built from the corpus. Both passed locally on PostgreSQL 16 on 2026-09-25 (11 passed with the unit tests).
+          node_ids:
+            - tests.integration.migrations.test_omninode_internal_live_acl_gate_omn17886::test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist
+            - tests.integration.migrations.test_omninode_internal_live_acl_omn17886::test_live_catalog_green_red_and_default_rule
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -373,6 +381,8 @@ suites:
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_0034_refuses_early_and_names_the_failing_predicate
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_0034_still_refuses_a_non_member_and_names_the_other_predicate
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_usage_and_set_are_independent_predicates
+      - tests.integration.migrations.test_omninode_internal_live_acl_gate_omn17886::test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist
+      - tests.integration.migrations.test_omninode_internal_live_acl_omn17886::test_live_catalog_green_red_and_default_rule
       - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_null_ticket_is_storable
       - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_zero_attempt_ordinal_is_refused
       - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_an_unknown_cause_code_is_refused
