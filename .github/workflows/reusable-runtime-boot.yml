@@ -1076,14 +1076,26 @@ jobs:
           # and the topic it consumes (...node_delegate_skill_orchestrator.
           # consume.<version>.__t.<topic>), so the owner is read from the name
           # and its liveness from describe: a group with no member is not live.
+          #
+          # Each listing is captured whole before anything reads it, and every
+          # read is a here-string: under pipefail a reader that stops early
+          # (awk's `exit`, `head`) sends SIGPIPE to a writer still producing
+          # rows, and the step then dies with exit 141 and no output, even
+          # with the group live (job 107881660050). The regression test
+          # tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py runs
+          # this step's own text against a stub broker.
           for _ in $(seq 1 30); do
-            group="$(docker exec "$broker" rpk group list 2>/dev/null \
-              | awk -v topic="__t.${DELEGATE_COMMAND_TOPIC}" \
-                  '$2 ~ /node_delegate_skill_orchestrator/ && index($2, topic) && $3 == "Stable" {print $2; exit}')"
+            if ! groups="$(docker exec "$broker" rpk group list)"; then
+              echo "rpk group list failed; retrying"
+              groups=""
+            fi
+            group="$(awk -v topic="__t.${DELEGATE_COMMAND_TOPIC}" \
+                '$2 ~ /node_delegate_skill_orchestrator/ && index($2, topic) && $3 == "Stable" {print $2; exit}' \
+                <<< "$groups")"
             if [ -n "$group" ]; then
               describe="$(docker exec "$broker" rpk group describe "$group")"
-              printf '%s\n' "$describe" | head -12
-              members="$(printf '%s\n' "$describe" | awk '$1 == "MEMBERS" {print $2}')"
+              head -12 <<< "$describe"
+              members="$(awk '$1 == "MEMBERS" {print $2}' <<< "$describe")"
               if [ "${members:-0}" -ge 1 ]; then
                 echo "live consumer group ${group} (${members} member) on ${DELEGATE_COMMAND_TOPIC}"
                 exit 0
