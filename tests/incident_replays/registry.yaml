@@ -260,6 +260,23 @@ cases:
     test: tests/ci/test_incident_replay_omn19655.py::test_the_real_guard_calls_the_2026_09_25_state_stranded
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is SILENCE WHILE A CORE RELEASE STRANDS EVERY DOWNSTREAM. omnibase_infra pins omnibase-core exactly; on 2026-09-25 its dev pinned 0.47.23 while the newest published omnibase-infra, 0.38.57, pinned 0.47.22, and nothing in the release chain noticed, so omnimarket's release failed on every dev push for the whole day (and the same way on 2026-09-24 with 0.47.22). THE ARTIFACT IS PyPI's JSON document for omnibase-infra 0.38.57, fetched from the live index and committed unmodified; its Requires-Dist carries the stale exact pin. THE DISCRIMINATOR IS LOAD-BEARING: a guard that called every state stranded would replay this incident and dispatch the release train every hour forever, so the same bytes against the pin the release carries must not be stranded. NO MODIFICATIONS: the file is the exact bytes the index served, 11303 bytes.
+  - id: omn19655-exact-core-pin-published-strands-downstream-floors
+    guard: scripts/ci/check_sibling_compatible_range.py
+    incident: OMN-19655
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/scripts/test_check_sibling_compatible_range.py::test_the_same_guard_accepts_that_manifest_with_the_ruled_range
+    artifact:
+      fixture: tests/fixtures/omn19655/omnibase-infra-v0.38.57-pyproject.toml.captured
+      sha256: fe8963fe3c45d3f671358c27cf159c09f272249837746506c628b0c4eda8c0ed
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@bd51068da4c289a75fcf3c19c2459b7b8b05bbbd:pyproject.toml
+      captured_at: '2026-09-25T20:22:47Z'
+      captured_by: lane infra-core-range-83 (OMN-19655)
+    test: tests/scripts/test_check_sibling_compatible_range.py::test_the_guard_rejects_the_manifest_0_38_57_was_released_from
+    why: >-
+      Newly wired enforcement (a pre-commit hook plus the live-tree test), so default-deny demands a real case. THE ARTIFACT IS the pyproject.toml omnibase-infra 0.38.57 was released from (tag v0.38.57, commit bd51068d), read from the git object and committed unmodified, 45474 bytes. It published omnibase-core==0.47.22 as an exact pin, the shape that left every downstream core floor raise unresolvable until infra re-released (the omnimarket release failed on every dev push on 2026-09-25). Nothing refused that shape then. The operator ruled on 2026-09-25 that infra publishes >=FLOOR,<NEXT_MINOR and keeps the exact pin only in [tool.uv] override-dependencies, and this guard holds that. THE DISCRIMINATOR IS LOAD-BEARING: the same captured bytes with only the published core line moved to the ruled range must pass, so a guard that rejected every manifest cannot satisfy this case.
   - id: omn18942-fleet-failure-findings-delivered-to-nowhere
     guard: scripts/omninode-fleet-failure-probe.py
     incident: OMN-18942

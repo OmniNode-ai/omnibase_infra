@@ -384,7 +384,13 @@ The runtime uses plugin-based handler loading from YAML contracts
 
 **Dependency bump checklist:**
 
-1. Update `pyproject.toml` bounds, then `uv sync`.
+1. Update `pyproject.toml` bounds, then `uv sync`. `omnibase-core` is published as
+   `>=FLOOR,<NEXT_MINOR` in `[project.dependencies]` and pinned exactly only in
+   `[tool.uv] override-dependencies` (OMN-19655); the range must admit the override
+   (`scripts/ci/check_sibling_compatible_range.py`, pre-commit and
+   `tests/scripts/test_check_sibling_compatible_range.py`). A patch bump moves the
+   override; a change that needs a newer core raises FLOOR; a new core minor moves the
+   whole range.
 2. `uv run pytest tests/unit/runtime/test_version_compatibility.py` — `test_matrix_matches_pyproject` catches drift.
 3. The release workflow runs `scripts/update_version_matrix.py --check` as a pre-build gate (run without `--check` to update the fallback in-place).
 

@@ -54,7 +54,29 @@ def test_the_real_guard_calls_the_2026_09_25_state_stranded(tmp_path: Path) -> N
     assert verdict.published_version == "0.38.57"
     assert verdict.stranded is True
     assert [(a.name, a.published, a.dev) for a in verdict.advances] == [
-        ("omnibase-core", "0.47.22", "0.47.23")
+        ("omnibase-core", "==0.47.22", "0.47.23")
+    ]
+
+
+@pytest.mark.unit
+def test_the_guard_still_sees_it_through_the_published_range_shape(
+    tmp_path: Path,
+) -> None:
+    """OMN-19655 part 1: dev publishes a core range and pins exactly only in the
+    override. The same captured bytes must still read stranded: dev resolves
+    0.47.23, which 0.38.57's ==0.47.22 does not admit."""
+    path = tmp_path / "pyproject.toml"
+    path.write_text(
+        '[project]\nname = "omnibase-infra"\nversion = "0.38.58"\n'
+        'dependencies = [\n    "omnibase-core>=0.47.23,<0.48.0",\n'
+        '    "omnibase-spi==0.23.5",\n    "omnibase-compat==0.5.7",\n]\n'
+        '[tool.uv]\noverride-dependencies = [\n    "omnibase-core==0.47.23",\n'
+        '    "omnibase-spi==0.23.5",\n    "omnibase-compat==0.5.7",\n]\n',
+        encoding="utf-8",
+    )
+    verdict = advance.decide(package="omnibase-infra", pyproject=path, fetch=_captured)
+    assert [(a.name, a.published, a.dev) for a in verdict.advances] == [
+        ("omnibase-core", "==0.47.22", "0.47.23")
     ]
 
 
