@@ -28,18 +28,30 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from functools import lru_cache
+
+from omnibase_core.constants.constants_runtime_lanes import (
+    LAB_RUNTIME_LANES,
+    REGISTERED_RUNTIME_LANES,
+)
 
 logger = logging.getLogger(__name__)
 
 #: The environment variable a deployment sets to name its own lane.
 ENV_RUNTIME_LANE = "ONEX_RUNTIME_LANE"
 
-#: The lanes a runtime may claim to be. Deliberately the LAB set and nothing
-#: else: the stability-test, judge and collaborator lanes are read-only
-#: surfaces, and a runtime there has no business publishing a lane-keyed health
-#: fact that a dashboard would then present as actionable.
-KNOWN_LANES: frozenset[str] = frozenset({"compose-dev", "onex-lab", "onex-lab-k3s"})
+#: The lanes a runtime's HEALTH may be keyed on. Deliberately the LAB set and
+#: nothing else (OMN-18769 AC6): the stability-test, judge and collaborator
+#: lanes are read-only surfaces, and a runtime there has no business publishing
+#: a lane-keyed health fact that a dashboard would then present as actionable.
+#:
+#: This is NOT the set of lanes a runtime may declare. Since OMN-19408 every
+#: deployment may name itself from ``REGISTERED_RUNTIME_LANES`` (core) so that
+#: a lane-scoped node contract can refuse to attach there; see
+#: :func:`resolve_declared_runtime_lane`. A stability-test runtime names its
+#: lane for placement and still publishes its health with no lane.
+KNOWN_LANES: frozenset[str] = LAB_RUNTIME_LANES
 
 
 @lru_cache(maxsize=1)
@@ -65,24 +77,89 @@ def _warn_absent_lane() -> None:
     logger.warning(
         "%s is not set — this runtime cannot name its lane, so its health "
         "events carry lane=null and every lane-keyed consumer DROPS them "
-        "silently. Set it to one of %s in the deployment that runs this "
-        "process (OMN-19144).",
+        "silently, and every lane-scoped node contract fails closed. Set it "
+        "to this deployment's lane, one of %s, in the deployment that runs "
+        "this process; only the lab lanes %s key a health row "
+        "(OMN-19144, OMN-19408).",
         ENV_RUNTIME_LANE,
+        sorted(REGISTERED_RUNTIME_LANES),
         sorted(KNOWN_LANES),
     )
 
 
-def resolve_runtime_lane(environ: dict[str, str] | None = None) -> str | None:
+@lru_cache(maxsize=8)
+def _note_non_lab_lane(lane: str) -> None:
+    """Say ONCE per process that a registered non-lab lane keys no health row.
+
+    OMN-19408. A stability-test runtime declares its lane so that lane-scoped
+    node contracts can refuse to attach there. That declaration is the
+    deployment telling the truth, not a typo, so it must not trip the
+    per-emit "not a known lane" warning below -- a warning every check
+    interval for the life of the container is the volume that gets filtered.
+    """
+    logger.info(
+        "%s=%r is a registered runtime lane but not a lab lane %s; this "
+        "runtime's health events carry no lane, by OMN-18769 AC6",
+        ENV_RUNTIME_LANE,
+        lane,
+        sorted(KNOWN_LANES),
+    )
+
+
+def resolve_declared_runtime_lane(
+    environ: Mapping[str, str] | None = None,
+) -> str | None:
+    """Return the lane this runtime's deployment declares, for PLACEMENT.
+
+    OMN-19408. The value a lane-scoped node contract (``runtime_lanes``) is
+    checked against. Any registered lane is accepted -- stability-test
+    included -- because the question here is "which deployment is this", not
+    "which lab lane-health row is this".
+
+    Returns ``None`` when the variable is absent, blank or not a registered
+    lane. ``None`` is not a default: the auto-wiring ownership filter treats
+    it as "cannot name its lane" and fails closed for every lane-scoped
+    contract, recording a discovery error rather than attaching or silently
+    skipping.
+
+    Args:
+        environ: Override for the process environment. Injected by tests; the
+            default reads ``os.environ``.
+    """
+    source: Mapping[str, str] = os.environ if environ is None else environ
+    raw = (source.get(ENV_RUNTIME_LANE) or "").strip().lower()
+    if raw in REGISTERED_RUNTIME_LANES:
+        return raw
+    return None
+
+
+def describe_undeclared_runtime_lane(environ: Mapping[str, str] | None = None) -> str:
+    """Say why :func:`resolve_declared_runtime_lane` returned ``None``.
+
+    For the fail-closed discovery error a lane-scoped contract records on a
+    runtime that cannot name its lane: absent and misspelt are different fixes.
+    """
+    source: Mapping[str, str] = os.environ if environ is None else environ
+    raw = (source.get(ENV_RUNTIME_LANE) or "").strip()
+    if not raw:
+        return f"{ENV_RUNTIME_LANE} is not set"
+    return f"{ENV_RUNTIME_LANE}={raw!r} is not a registered lane"
+
+
+def resolve_runtime_lane(environ: Mapping[str, str] | None = None) -> str | None:
     """Return this runtime's declared lane, or ``None`` when it has none.
 
     Args:
         environ: Override for the process environment. Injected by tests; the
             default reads ``os.environ``.
     """
-    source = os.environ if environ is None else environ
+    source: Mapping[str, str] = os.environ if environ is None else environ
     raw = (source.get(ENV_RUNTIME_LANE) or "").strip().lower()
     if not raw:
         _warn_absent_lane()
+        return None
+    if raw in REGISTERED_RUNTIME_LANES and raw not in KNOWN_LANES:
+        _note_non_lab_lane(raw)
         return None
     if raw not in KNOWN_LANES:
         logger.warning(
@@ -95,4 +172,10 @@ def resolve_runtime_lane(environ: dict[str, str] | None = None) -> str | None:
     return raw
 
 
-__all__: list[str] = ["ENV_RUNTIME_LANE", "KNOWN_LANES", "resolve_runtime_lane"]
+__all__: list[str] = [
+    "ENV_RUNTIME_LANE",
+    "KNOWN_LANES",
+    "describe_undeclared_runtime_lane",
+    "resolve_declared_runtime_lane",
+    "resolve_runtime_lane",
+]
