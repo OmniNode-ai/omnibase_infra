@@ -28,6 +28,10 @@ import pytest
 import yaml
 
 from scripts.ci.deploy_lane_verify_route import load_table, targets_for_receipt_lane
+from scripts.ci.lane_settle_budget import (
+    assert_declaration_within_bounds,
+    load_declaration,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -96,3 +100,13 @@ def test_dev_200_verify_targets_agree_with_its_overlay() -> None:
 def test_no_route_names_dev_200_while_no_runner_carries_host_200() -> None:
     routed = {str(row.get("instance")) for row in load_table().get("routes") or ()}
     assert "dev-200" not in routed
+
+
+def test_compose_dev_200_declares_a_settle_budget_inside_its_bounds() -> None:
+    """The verify job derives its ceiling from the routed lane's declaration.
+
+    Without one, a verify job for a merge routed to dev-200 would refuse at the
+    budget read. The observed boots are the lab proof's (job fec4e429).
+    """
+    declaration = load_declaration("compose-dev-200")
+    assert_declaration_within_bounds(declaration)
