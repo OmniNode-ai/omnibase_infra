@@ -334,7 +334,7 @@ def test_unresolvable_report_emits_an_error_annotation_and_step_summary(
     monkeypatch.setattr(
         pin_gate,
         "verify_pin_resolvability",
-        lambda wheel: (False, _OMN_19655_UV_CONFLICT),
+        lambda _wheel: (False, _OMN_19655_UV_CONFLICT),
     )
 
     assert pin_gate.main([str(tmp_path)]) == 1
@@ -358,7 +358,7 @@ def test_resolvable_report_writes_no_error_annotation(
     (tmp_path / "pkg-1.0-py3-none-any.whl").write_bytes(b"")
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     monkeypatch.setattr(
-        pin_gate, "verify_pin_resolvability", lambda wheel: (True, "installed\n")
+        pin_gate, "verify_pin_resolvability", lambda _wheel: (True, "installed\n")
     )
 
     assert pin_gate.main([str(tmp_path)]) == 0
