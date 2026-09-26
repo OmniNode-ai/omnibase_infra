@@ -116,7 +116,7 @@ def _skip_dormant_cloud_gateway(contract: ModelDiscoveredContract) -> bool:
     return True
 
 
-class _DiscoveryMemo:
+class DiscoveryMemo:
     """One-slot holder for the last completed scan.
 
     A holder rather than three module globals so the memo can be replaced by
@@ -146,7 +146,7 @@ class _DiscoveryMemo:
         self.manifest = manifest
 
 
-_DISCOVERY_MEMO = _DiscoveryMemo()
+_DISCOVERY_MEMO = DiscoveryMemo()
 
 
 def discover_contracts_cache_clear() -> None:
