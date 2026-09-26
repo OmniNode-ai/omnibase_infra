@@ -362,6 +362,54 @@ def test_no_warning_when_nothing_shadows_the_entrypoint(workspace: _Workspace) -
     assert "WARNING" not in result.stderr
 
 
+# OMN-19810: a symlink on PATH whose resolved target IS this wrapper is the
+# sanctioned way to put `onex` on PATH, not a shadow. `command -v onex` returns
+# the link path unresolved, so comparing it raw against $SCRIPT_DIR/onex printed
+# the shadow warning on every dispatch from a correctly set-up host.
+def test_no_warning_when_path_onex_is_a_symlink_to_this_wrapper(
+    workspace: _Workspace,
+) -> None:
+    workspace.install_entrypoint()
+    workspace.path_onex.symlink_to(workspace.wrapper)
+
+    result = workspace.run("node", "x")
+
+    assert result.returncode == _SENTINEL_OK, result.stderr
+    assert "shadows" not in result.stderr
+
+
+def test_no_warning_when_a_relative_symlink_chain_reaches_this_wrapper(
+    workspace: _Workspace,
+) -> None:
+    workspace.install_entrypoint()
+    hop = workspace.root / "hop" / "onex"
+    hop.parent.mkdir()
+    hop.symlink_to(Path("..") / "omnibase_infra" / "scripts" / "onex")
+    workspace.path_onex.symlink_to(Path("..") / "hop" / "onex")
+
+    result = workspace.run("node", "x")
+
+    assert result.returncode == _SENTINEL_OK, result.stderr
+    assert "shadows" not in result.stderr
+
+
+def test_warning_still_fires_for_a_symlink_to_anything_else(
+    workspace: _Workspace,
+) -> None:
+    workspace.install_entrypoint()
+    stray = workspace.root / "stray" / "onex"
+    stray.parent.mkdir()
+    stray.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    stray.chmod(0o755)
+    workspace.path_onex.symlink_to(stray)
+
+    result = workspace.run("node", "x")
+
+    assert result.returncode == _SENTINEL_OK
+    assert "shadows" in result.stderr
+    assert str(workspace.path_onex) in result.stderr
+
+
 # --------------------------------------------------------------------------- #
 # Invocation contract
 # --------------------------------------------------------------------------- #

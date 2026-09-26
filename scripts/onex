@@ -188,12 +188,37 @@ FLOOR_FILE="$OMNI_HOME/.onex-workspace-floor.json"
 # PyPI omnimarket. Naming it on every dispatch is deliberate; a silent shadow
 # is exactly the failure this wrapper was written to end, and the warning stops
 # the moment the stale install is removed.
+#
+# A SYMLINK on PATH whose resolved target is this wrapper (or the entrypoint) is
+# not a shadow: it is the sanctioned way to put `onex` on PATH, and running it
+# lands right here (OMN-19810). `command -v` returns the link path unresolved,
+# so it is resolved before comparing. Only a symlink pays for the resolution;
+# the common no-link case starts no process.
+_resolve_path() {
+  local p="$1" link hops=0 dir
+  while [[ -L "$p" && "$hops" -lt 40 ]]; do
+    link="$(readlink "$p")" || break
+    case "$link" in
+      /*) p="$link" ;;
+      *) p="$(dirname "$p")/$link" ;;
+    esac
+    hops=$((hops + 1))
+  done
+  dir="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || { printf '%s' "$p"; return 0; }
+  printf '%s/%s' "$dir" "${p##*/}"
+}
+
 _warn_on_shadowed_path_onex() {
-  local path_onex
+  local path_onex resolved
   path_onex="$(command -v onex 2>/dev/null || true)"
   [[ -n "$path_onex" ]] || return 0
   [[ "$path_onex" != "$ENTRYPOINT" ]] || return 0
   [[ "$path_onex" != "$SCRIPT_DIR/onex" ]] || return 0
+  if [[ -L "$path_onex" ]]; then
+    resolved="$(_resolve_path "$path_onex")"
+    [[ "$resolved" != "$(_resolve_path "$SCRIPT_DIR/onex")" ]] || return 0
+    [[ "$resolved" != "$(_resolve_path "$ENTRYPOINT")" ]] || return 0
+  fi
   _say "WARNING: a different 'onex' shadows the CLI venv on PATH:"
   _say "  PATH resolves : $path_onex"
   _say "  this wrapper  : $ENTRYPOINT"
