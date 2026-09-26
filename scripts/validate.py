@@ -107,12 +107,13 @@ def run_architecture_layers(verbose: bool = False) -> bool:
     script_path = Path(__file__).parent / "check_architecture.sh"
 
     if not script_path.exists():
-        print(f"Architecture Layers: SKIP (script not found: {script_path})")
-        return True
+        print(f"Architecture Layers: ERROR (script not found: {script_path})")
+        return False
 
     try:
-        # Build command with appropriate flags
-        cmd = ["bash", str(script_path), "--no-color"]
+        # The hook caller controls PATH. Invoke the checker through the same
+        # fixed shell boundary it uses when executed directly.
+        cmd = ["/bin/bash", str(script_path), "--no-color"]
         if verbose:
             cmd.append("--verbose")
 
@@ -134,11 +135,11 @@ def run_architecture_layers(verbose: bool = False) -> bool:
         passed = result.returncode == 0
 
         if not passed and result.returncode == 2:
-            # Exit code 2 means script error (path not found, etc.)
-            # This is not a violation, just skip
-            if verbose:
-                print("Architecture Layers: SKIP (omnibase_core not found)")
-            return True
+            print(
+                "Architecture Layers: ERROR "
+                "(omnibase_core source target invalid or unavailable)"
+            )
+            return False
 
         # Note: The bash script already reports known issues with ticket links
         # when violations are found, so we don't duplicate the reporting here.
@@ -152,8 +153,8 @@ def run_architecture_layers(verbose: bool = False) -> bool:
         print("  Fix: Try running with --verbose to see progress")
         return False
     except FileNotFoundError:
-        print("Architecture Layers: SKIP (bash not available)")
-        return True
+        print("Architecture Layers: ERROR (/bin/bash not available)")
+        return False
     except PermissionError as e:
         print(f"Architecture Layers: ERROR (Permission denied: {e})")
         print("  Fix: Ensure execute permissions on check_architecture.sh")
