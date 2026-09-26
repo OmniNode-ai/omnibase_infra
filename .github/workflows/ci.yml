@@ -1102,6 +1102,18 @@ jobs:
           echo "================================================================"
           uv run python scripts/generate_topic_enums.py --check
 
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  topic-naming-baseline-oneway:
+    name: Topic Naming Baseline One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: scripts/validation/topic_naming_baseline.txt
+      parser: line-set
+
   # Topic naming lint -- CI gate for ONEX topic naming convention (OMN-3188)
   # Validates onex.{kind}.{producer}.{event}.v{n} format in all contract.yaml files
   topic-naming-lint:
@@ -2652,6 +2664,18 @@ jobs:
           path: .onex_state/compliance/report.yaml
           retention-days: 30
 
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  skip-count-baseline-oneway:
+    name: Skip Count Baseline One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: config/skip_count_baseline.yaml
+      parser: yaml-counted-list-map:suites
+
   # ============================================================================
   # OMN-18776 — skip-count baseline ratchet (epic OMN-18775)
   #
@@ -3423,6 +3447,18 @@ jobs:
       - name: Every reconciler resolves its tools explicitly and writes as the owner
         run: python3 scripts/check_reconciler_privilege.py
 
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  validator-requirements-baseline-oneway:
+    name: Validator Requirements Baseline One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: architecture-handshakes/validator-requirements-baseline.yaml
+      parser: yaml-list:gaps
+
   validate-validator-requirements:
     name: Enforce validator-requirements.yaml (OMN-13291)
     # OMNI_RUNNER_SELECTOR_V1 — runners are resolved from centralized selector variables.
@@ -3469,6 +3505,18 @@ jobs:
             --repo-root .. \
             --spec ../architecture-handshakes/validator-requirements.yaml \
             --baseline ../architecture-handshakes/validator-requirements-baseline.yaml
+
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  runtime-profiles-allowlist-oneway:
+    name: Runtime Profiles Allowlist One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: config/validation/runtime_profiles_allowlist.yaml
+      parser: yaml-list:allowlist
 
   # Migrated from validator-runtime-profiles.yml (OMN-15108, OMN-14877
   # pattern). Enforces runtime_profiles on command-consuming contracts
@@ -3525,6 +3573,18 @@ jobs:
               print(f"[{issue.severity.value}] {issue.file_path}:{issue.line_number}: {issue.message}")
           raise SystemExit(0 if result.is_valid else 1)
           PY
+
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  noncanonical-class-allowlist-oneway:
+    name: Noncanonical Class Allowlist One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: .onex_ratchets/noncanonical_class_allowlist.yaml
+      parser: yaml-list:allowlist
 
   no-noncanonical-lifecycle-classes:
     name: no-noncanonical-lifecycle-classes
@@ -4167,9 +4227,8 @@ jobs:
     permissions:
       actions: read
       contents: read
-      # OMN-14909 (CI-01): read the head SHA's cross-workflow check-runs for the
-      # REPORT-ONLY cascade projection step below. Read scope only — no verdict
-      # authority; the poll step above owns pass/fail.
+      # OMN-15496: the poll step reads commits/<head>/check-runs to enforce the
+      # cross-workflow contexts included in the fail-closed verdict.
       checks: read
     # Hard backstop above the internal poll deadline (DEADLINE_MINUTES below).
     # Kept under any run-cancellation window so the required context ALWAYS posts
@@ -4295,20 +4354,38 @@ jobs:
             sleep "${POLL_INTERVAL_SECONDS}"
           done
 
+  ci-cascade-reason-graph:
+    name: CI cascade reason-graph (report-only)
+    needs: [ci-summary]
+    if: always()
+    # advisory-ok: OMN-14909 report-only telemetry after the CI Summary verdict; defines no pass/fail policy
+    continue-on-error: true
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+    steps:
+      - name: Checkout (gate script)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
       # OMN-14909 (CI-01, plan §3.C5) — REPORT-ONLY cascade reason-graph.
-      # Collapses the head SHA's full cross-workflow check-run list into ONE
-      # typed root + BLOCKED_UPSTREAM dependents so a single upstream defect
-      # (e.g. a missing Evidence-Source making occ-preflight red) is presented
-      # as ONE rerunnable root instead of the ~37 independently-rerunnable red
-      # checks that provoke the rerun reflex. This step:
-      #   * runs `if: always()` so it renders even when the poll above FAILED,
-      #   * is `continue-on-error: true` and ends every command with `|| true`,
-      #     so it can NEVER change the CI Summary verdict — the poll step above
-      #     is the sole pass/fail authority (gate not weakened), and
-      #   * writes only to $GITHUB_STEP_SUMMARY.
+      # It now runs as its own job after the CI Summary verdict, so it cannot
+      # touch the required context. It collapses the head SHA's full cross-
+      # workflow check-run list into ONE typed root + BLOCKED_UPSTREAM dependents
+      # so a single upstream defect (e.g. a missing Evidence-Source making
+      # occ-preflight red) is presented as ONE rerunnable root instead of the
+      # ~37 independently-rerunnable red checks that provoke the rerun reflex.
+      # Every command remains non-fatal, and the step writes only to
+      # $GITHUB_STEP_SUMMARY.
       - name: CI cascade reason-graph (report-only, counts roots not checks)
-        if: always()
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

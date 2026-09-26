@@ -2031,6 +2031,36 @@ repos:
           # reject-deploy-gate-skip-token-commit-msg hook (stages:[commit-msg]) silently
           # never installed locally — a false-green. The precommit-fail-loud-meta-gate
           # above now fails closed if this drifts again.
+  # OMN-19677: the same immutable omniclaude commit supplies these shrink-only
+  # hooks and their CI jobs, so local and required-gate verdicts cannot drift.
+  - repo: https://github.com/OmniNode-ai/omniclaude
+    rev: 3faefdcd5750b05f69d2efcb8cf200bc359483c3 # pragma: allowlist secret
+    hooks:
+      - id: anti-growth-baseline
+        alias: anti-growth-noncanonical-class-allowlist
+        name: Noncanonical class allowlist baseline can only shrink (OMN-19677)
+        args: [--baseline, .onex_ratchets/noncanonical_class_allowlist.yaml, --parser, 'yaml-list:allowlist', --base-ref, origin/dev]
+        files: ^\.onex_ratchets/noncanonical_class_allowlist\.yaml$
+      - id: anti-growth-baseline
+        alias: anti-growth-topic-naming-baseline
+        name: Topic naming baseline can only shrink (OMN-19677)
+        args: [--baseline, scripts/validation/topic_naming_baseline.txt, --parser, line-set, --base-ref, origin/dev]
+        files: ^scripts/validation/topic_naming_baseline\.txt$
+      - id: anti-growth-baseline
+        alias: anti-growth-validator-requirements-baseline
+        name: Validator requirements baseline can only shrink (OMN-19677)
+        args: [--baseline, architecture-handshakes/validator-requirements-baseline.yaml, --parser, 'yaml-list:gaps', --base-ref, origin/dev]
+        files: ^architecture-handshakes/validator-requirements-baseline\.yaml$
+      - id: anti-growth-baseline
+        alias: anti-growth-runtime-profiles-allowlist
+        name: Runtime profiles allowlist baseline can only shrink (OMN-19677)
+        args: [--baseline, config/validation/runtime_profiles_allowlist.yaml, --parser, 'yaml-list:allowlist', --base-ref, origin/dev]
+        files: ^config/validation/runtime_profiles_allowlist\.yaml$
+      - id: anti-growth-baseline
+        alias: anti-growth-skip-count-baseline
+        name: Skip count baseline can only shrink (OMN-19677)
+        args: [--baseline, config/skip_count_baseline.yaml, --parser, 'yaml-counted-list-map:suites', --base-ref, origin/dev]
+        files: ^config/skip_count_baseline\.yaml$
   # OMN-19666: VCS-backed additional_dependencies can inherit GIT_INDEX_FILE
   # during a cold-cache commit and overwrite the committing worktree index.
   - repo: local
