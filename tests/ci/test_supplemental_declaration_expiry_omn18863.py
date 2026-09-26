@@ -100,12 +100,15 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # Relations this repo declares by hand during an infra-first window, each with
 # the omnimarket pull request whose merge plus pin advance retires it.
 #
-# EMPTY IS THE GOAL STATE, not a gap. Both entries this ticket added have been
-# retired by the mechanism below. A relation belongs here only while it is
+# EMPTY IS THE GOAL STATE, not a gap. Earlier entries have been retired by the
+# mechanism below. A relation belongs here only while it is
 # declared in the shipped topology instances and derivable from no pinned
 # contract; add it in the same pull request that vendors it, and this module
 # will tell you when to take it out.
-_INTERIM_ENTRIES: dict[str, str] = {}
+_INTERIM_ENTRIES: dict[str, str] = {
+    "claude_agent_spans": "omnimarket#2956",
+    "claude_hook_events": "omnimarket#2956",
+}
 
 _SKIP_REASON = (
     "requires the pinned omnimarket checkout at .proof-dependencies/omnimarket-pin "

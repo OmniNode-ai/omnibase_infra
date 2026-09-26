@@ -86,6 +86,8 @@ databases:
           - object_type: TABLE
             objects:
               - ci_attempt_outcome
+              - claude_agent_spans
+              - claude_hook_events
               - consumer_flow_windows
               - delegate_skill_command_claims
               - dod_verify_runs

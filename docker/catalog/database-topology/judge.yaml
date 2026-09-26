@@ -76,6 +76,8 @@ databases:
           - object_type: TABLE
             objects:
               - ci_attempt_outcome
+              - claude_agent_spans
+              - claude_hook_events
               - consumer_flow_windows
               - delegate_skill_command_claims
               - dod_verify_runs
@@ -358,5 +360,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 438ac358796031551ec954b6c797294012467be9a73b4df9f041836790b3afe3
+  sha256: 8b70ba39f57cd28dc8b4e9b187b46b68bdbc158ab2233abb9f81336a0e3364fe
 topology_instance: local

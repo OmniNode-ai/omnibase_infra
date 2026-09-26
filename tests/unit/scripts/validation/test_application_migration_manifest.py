@@ -823,7 +823,9 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # adds the nullable runtime_error_fingerprints.last_applied_event_id column,
     # so a broker redelivery of one runtime-error event is counted once.
     # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
-    assert len(result.declarations) == 217
+    # 217 -> 219 for OMN-19513: the claude_hook_events and claude_agent_spans
+    # create/grant pair is vendored ahead of omnimarket#2956.
+    assert len(result.declarations) == 219
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
