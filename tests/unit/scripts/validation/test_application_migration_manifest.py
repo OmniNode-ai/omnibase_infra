@@ -819,7 +819,8 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # dod_verify_runs.delegation_correlation_id column, so a delegation run
     # joins to its ticket and to the DoD verdict that judged it. Both additive
     # (expand-only), vendored FIRST per the vendor-parity ordering.
-    assert len(result.declarations) == 216
+    # OMN-19716 adds the topic-activity table and grant migrations.
+    assert len(result.declarations) == 218
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
