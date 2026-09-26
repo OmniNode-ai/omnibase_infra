@@ -1135,6 +1135,7 @@ services:
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_MAIN_CAPABILITIES}
       ONEX_GROUP_ID: ${ONEX_GROUP_ID:-onex-runtime-main}
       KAFKA_INSTANCE_ID: runtime-main
+      ENABLE_RUNTIME_LOG_BRIDGE: "true"
       # OMN-9060: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly
       # from env (matches the override already present on runtime-effects and
       # runtime-worker). Without it the handler throws KeyError during wiring and
@@ -1232,6 +1233,7 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
       ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
       KAFKA_INSTANCE_ID: runtime-effects
+      ENABLE_RUNTIME_LOG_BRIDGE: "true"
       # OMN-13247 (epic OMN-13245): coding-agent runtime env. These are
       # effects-only (the four coding-agent nodes run in runtime_profiles:
       # [effects]) so they live on this service, not the shared x-runtime-env

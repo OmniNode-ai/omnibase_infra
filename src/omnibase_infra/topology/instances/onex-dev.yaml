@@ -102,6 +102,7 @@ databases:
               - savings_correlation_finalizations
               - savings_injection_signals
               - savings_validator_catch_signals
+              - topic_activity
               - topic_produce_windows
               - work_events
             privileges: [INSERT, SELECT, UPDATE]

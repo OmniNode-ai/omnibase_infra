@@ -108,6 +108,7 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 _INTERIM_ENTRIES: dict[str, str] = {
     "claude_agent_spans": "omnimarket#2956",
     "claude_hook_events": "omnimarket#2956",
+    "topic_activity": "omnimarket#2953",
 }
 
 _SKIP_REASON = (
