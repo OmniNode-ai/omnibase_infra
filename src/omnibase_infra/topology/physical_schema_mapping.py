@@ -5,87 +5,9 @@
 
 from __future__ import annotations
 
-TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
-    {
-        "agent_routing_decisions",
-        "capability_scores",
-        "context_roi_scores",
-        "delegation_budget_state",
-        "delegation_events",
-        "delegation_judge_verdict_events",
-        # OMN-15631: node_delegation_routing_reducer's tenant overlay table.
-        # Same bridge as its sibling delegation_events above -- logically
-        # tenant-domain per contract.yaml (ADR-0027), physically created bare
-        # in `public` because no `tenant` Postgres schema exists on any lane
-        # today (live-confirmed 2026-08-19, see delegation_events' own
-        # comment). Enumerated here so
-        # physical_grant_schema_for_table('tenant',
-        # 'delegation_routing_tenant_overlay') resolves to 'public', matching
-        # the migration's actual bare CREATE TABLE.
-        "delegation_routing_tenant_overlay",
-        "delegation_shadow_comparisons",
-        "dep_health_findings",
-        # OMN-16090: hook_events is tenant-domain by contract and RLS policy,
-        # but its node migration physically created the relation bare in
-        # public before the tenant schema cutover. Keep ACL checks aligned with
-        # the live relation until OMN-15359 moves the family.
-        "hook_events",
-        "instruction_eval_aggregate_snapshots",
-        "llm_cost_aggregates",
-        "pattern_learning_artifacts",
-        "projection_delegation_inference_response_text",
-        # OMN-18159: the four delegation aggregate READ VIEWS, re-grouped on
-        # tenant_id by node_projection_delegation/0039. Same bridge as their
-        # own source table delegation_events above, and as the
-        # node_projection_savings read views below -- logically tenant-domain
-        # per contract.yaml, physically created bare in `public` because no
-        # `tenant` Postgres schema exists on any lane today. A view cannot
-        # live in a schema its base table does not, so enumerating them here
-        # is what makes physical_grant_schema_for_table('tenant', <view>)
-        # resolve to 'public' and the derived GRANT match the migration's
-        # actual bare GRANT.
-        "projection_delegation_model_routing",
-        "projection_delegation_quality_gate",
-        "projection_delegation_summary",
-        "projection_delegation_token_usage",
-        # OMN-15533: these node_projection_savings read views were physically
-        # created bare in public by migrations 076/078/079, and the dashboard
-        # projection_api exposures already declare schema: public. Migration
-        # 083 replaces those existing public views without moving authority.
-        "projection_delegation_savings",
-        "projection_delegation_savings_series",
-        # OMN-17426: the THIRD node_projection_savings read view, and the one
-        # this set had always been missing. `projection_cost_savings_overview`
-        # was physically created bare in public by migration 077 exactly like
-        # its two siblings above, and is declared `schema: tenant` in the same
-        # ownership manifest they are -- so it belongs to the same family by
-        # every property the bridge keys on. It stayed absent only because no
-        # migration after the gate landed had touched it: 083 and 087 replace
-        # the two siblings, 088 alters them, and 077 predates the gate and sits
-        # in its frozen shrink-only baseline. Migration 089 is the first new
-        # deployable SQL to name it, and without this entry it resolves to ZERO
-        # ownership declarations with no admissible way to satisfy the gate --
-        # declaring `schema: public` upstream is rejected as a conflicting
-        # declaration against the node contract's own `schema`. Same gap, same
-        # shape and same remedy as OMN-16993's `omninode_internal` half.
-        "projection_cost_savings_overview",
-        "savings_estimates",
-        "skill_execution_snapshots",
-        # OMN-16316: node_projection_tenant_credentials' BYOK inference-
-        # credential ref catalog. Same bridge as delegation_events/
-        # delegation_routing_tenant_overlay above -- logically tenant-domain
-        # (per-tenant credential-ref rows, house-tenant ruling), physically
-        # created bare in `public` because no `tenant` Postgres schema exists
-        # on any lane today. Enumerated here so
-        # physical_grant_schema_for_table('tenant',
-        # 'tenant_inference_credentials') resolves to 'public' and the
-        # application_database_sql_gate accepts the migration's bare
-        # CREATE TABLE, matching its actual physical location. No RLS in v1,
-        # same dev/beta-only posture as its siblings -- promotable later once
-        # the tenant-schema RLS foundation (OMN-14894/OMN-15356) lands.
-        "tenant_inference_credentials",
-    }
-)
+# OMN-17887 (operator ruling 2026-09-24): the TENANT domain's schema is `public`
+# for good and no `tenant` schema will be built, so tenant-domain relations are
+# declared `schema: public` directly and need no logical-to-physical bridge.
 
 # OMN-15359 (P2-P4 build). The `omninode_internal` schema now physically exists
 # (docker/migrations/forward/098_create_omninode_internal_schema.sql), but the
@@ -98,8 +20,7 @@ TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(
 # these relations while they resolve nowhere, producing `relation does not
 # exist` rather than a permission error. Enumerated (not a blanket public->
 # internal rule) so a *new* table declared against `omninode_internal` after
-# this landed resolves to its real target schema, matching the precedent set
-# by TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359 above.
+# this landed resolves to its real target schema.
 #
 # `live_events` is REMOVED from this set as of
 # docker/migrations/forward/099_create_omninode_internal_live_events.sql --
@@ -219,17 +140,12 @@ APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = froz
 def physical_grant_schema_for_table(schema: str, table_name: str) -> str:
     """Return the schema where PostgreSQL ACLs currently apply for a table.
 
-    OMN-15359 owns the physical ``public`` -> ``tenant``/``omninode_internal``
-    moves. Until each relation family is individually transform-copied and
-    proven, these tables remain physically in ``public`` even though their
-    contracts and runtime routing are logically tenant- or
-    omninode_internal-domain.
+    OMN-15359 owns the physical ``public`` -> ``omninode_internal`` moves.
+    Until each relation family is individually transform-copied and proven,
+    these tables remain physically in ``public`` even though their contracts
+    and runtime routing are logically omninode_internal-domain. Tenant-domain
+    relations need no mapping: their declared schema is ``public`` (OMN-17887).
     """
-    if (
-        schema == "tenant"
-        and table_name in TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
-    ):
-        return "public"
     if (
         schema == "omninode_internal"
         and table_name in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359

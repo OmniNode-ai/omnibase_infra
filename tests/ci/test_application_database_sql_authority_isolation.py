@@ -4,11 +4,15 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 from omnibase_infra.topology.application_database import load_topology_profile
 from omnibase_infra.validation.application_database_domain_enforcement import (
     application_database_created_catalog_identities,
@@ -30,6 +34,7 @@ def _git(repository: Path, *arguments: str) -> str:
     result = subprocess.run(
         ["git", *arguments],
         cwd=repository,
+        env=scrub_git_location_env(os.environ),
         capture_output=True,
         text=True,
         check=True,
@@ -64,14 +69,14 @@ def test_ephemeral_proof_seed_is_not_a_deployable_changed_sql_path(
     proof_directory = repository / "docker" / "application-domain-enforcement"
     proof_directory.mkdir(parents=True)
     (proof_directory / "seed.sql").write_text(
-        "CREATE TABLE tenant.proof_only (id uuid);\n",
+        "CREATE TABLE public.proof_only (id uuid);\n",
         encoding="utf-8",
     )
     migration_directory = repository / "migrations"
     migration_directory.mkdir()
     deployed = migration_directory / "deployed.sql"
     deployed.write_text(
-        "CREATE TABLE tenant.deployed (id uuid);\n",
+        "CREATE TABLE public.deployed (id uuid);\n",
         encoding="utf-8",
     )
     head_revision = _commit(repository, "changed SQL")
@@ -103,7 +108,7 @@ def test_fixture_and_control_bootstrap_sql_are_not_deployable_changed_sql(
 
     deployed = repository / "docker/migrations/forward/nodes/node_real/0001.sql"
     deployed.parent.mkdir(parents=True)
-    deployed.write_text("CREATE TABLE tenant.deployed (id uuid);\n", encoding="utf-8")
+    deployed.write_text("CREATE TABLE public.deployed (id uuid);\n", encoding="utf-8")
     head_revision = _commit(repository, "changed SQL")
 
     assert changed_sql_paths(repository, base_revision, head_revision) == (deployed,)
