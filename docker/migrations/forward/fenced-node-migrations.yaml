@@ -103,7 +103,9 @@
 #     releasing it was MEASURED, on the .201 dev lane, to refuse every write
 #     the lane's own async judge-verdict writer issues. Both arguments, with
 #     the verbatim errors, are in the "2026-09-08" block at the end of this
-#     header.
+#     header. 0026 keeps this BASELINE entry but carries a dev-lane release
+#     since 2026-09-26 (OMN-15092): the writer-side release condition that
+#     block states has been met. See "2026-09-26" at the end of this header.
 #   registration 0002 — OMN-15343 (introduced-by) / OMN-14894 (tranche 1).
 #     FORCE ROW LEVEL SECURITY plus a tenant_id column on
 #     node_service_registry. THIS is the id the hold was ever really about,
@@ -549,7 +551,7 @@
 # tenant-registry projection caught up on that database.
 #
 # ---------------------------------------------------------------------------
-# WHY 0026 IS NOT RELEASED — MEASURED ON THE LAB LANE, NOT INHERITED
+# WHY 0026 WAS NOT RELEASED ON 2026-09-08 — MEASURED ON THE LAB LANE
 # ---------------------------------------------------------------------------
 # 0026 puts ENABLE + FORCE ROW LEVEL SECURITY and a TEXT-comparing
 # tenant_isolation policy on delegation_judge_verdict_events. This file's own
@@ -591,6 +593,38 @@
 # writer must pass the row's own resolved tenant to the adapter (the
 # `tenant=` argument the OMN-15919 seam exists for), so the GUC and the column
 # agree by construction. That is an omnimarket change, not a fence edit.
+#
+# 2026-09-26 — THE RELEASE CONDITION IS MET, AND 0026 IS RELEASED ON THE DEV
+# LANE ONLY (OMN-15092, tranche 5 of OMN-14894). The omnimarket change landed
+# as OMN-17627: _project_judge_verdict now issues its INSERT with
+# `tenant=tenant_id`, the row's own resolved tenant, and its attribution probe
+# runs under a bound tenant (OMN-15919). Both were read in the handler the .201
+# dev lane's runtime worker actually imports. The table held 116 rows there,
+# every tenant_id a uuid string for one tenant, last written 2026-09-25.
+#
+# Measured, not argued, on a copy of that lane's delegation_events and
+# delegation_judge_verdict_events in a throwaway database on the dev-lane
+# Postgres (created and dropped by the lane, no product relation touched).
+# 0026 applied exactly as the node loop runs it, `psql -v ON_ERROR_STOP=1 -f`,
+# exit 0. Probed as the non-superuser, non-BYPASSRLS roles, before and after:
+#
+#   probe                                      before 0026   after 0026
+#   tenant_projection_writer, GUC = row tenant  116 visible   116 visible
+#   tenant_projection_writer, GUC unset         116 visible   0 visible
+#   tenant_projection_writer, foreign tenant    116 visible   0 visible
+#   INSERT, GUC = row tenant (the writer path)  inserted      inserted
+#   INSERT, GUC unset                           inserted      refused
+#   INSERT, GUC = house slug (the 09-08 shape)  inserted      refused
+#   app_dashboard, GUC = row tenant / unset     116 / 116     116 / 0
+#
+# Both refusals read "new row violates row-level security policy for table
+# delegation_judge_verdict_events". Every INSERT was rolled back.
+#
+# The BASELINE entry stays for the same mechanical reason 0037 and 0041 keep
+# theirs: 0026 enables FORCE ROW LEVEL SECURITY and is not grandfathered, so a
+# baseline removal is FATAL under the OMN-15336 item-4 guard. Only the dev arm
+# of scripts/run-forward-migrations.sh releases it. onex-dev stays fenced until
+# the k8s migrate Job's own release block names it, in its own repository.
 #
 # ---------------------------------------------------------------------------
 # WHY 0025 IS RELEASED
@@ -692,10 +726,11 @@
 fenced_node_migrations:
   # 0024_drop_unwired_routing_columns.sql and
   # 0025_delegation_judge_verdict_events_tenant_id.sql were RELEASED from this
-  # BASELINE on 2026-09-08 (OMN-15683). 0023 and 0026 stay fully fenced -- 0023
-  # because it is superseded in place and now aborts, 0026 because releasing it
-  # was MEASURED on the .201 dev lane to lock the lane's own judge-verdict
-  # writer out of the table. See the "2026-09-08" block in the header.
+  # BASELINE on 2026-09-08 (OMN-15683). 0023 stays fully fenced because it is
+  # superseded in place and now aborts. 0026 stays in the baseline but is
+  # released on the dev lane since 2026-09-26 (OMN-15092), once its writer-side
+  # release condition was met. See the "2026-09-08" and "2026-09-26" blocks in
+  # the header.
   - id: "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql"
     ticket: "OMN-14974"
   - id: "node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql"

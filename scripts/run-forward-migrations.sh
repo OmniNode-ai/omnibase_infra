@@ -635,13 +635,14 @@ migration_declares_unclassified_force_rls() {
 # baseline entirely in the same change; they declare no FORCE, so nothing here
 # names them.
 #
-# 0026 IS NOT RELEASED, and that is a measurement, not a hold-over. It was
-# released here in the first revision of this change and applied on the .201
-# dev lane; the resulting ENABLE + FORCE RLS on delegation_judge_verdict_events
-# is a WRITE LOCKOUT for the lane's own writer, so it was reverted on the lane
-# and dropped from this arm. See fenced-node-migrations.yaml's 2026-09-08 block
-# for the two measured refusals and the writer-side condition that has to land
-# before it can be released.
+# 0026 WAS NOT RELEASED on 2026-09-08, and that was a measurement, not a
+# hold-over. It was released in the first revision of that change and applied
+# on the .201 dev lane; the resulting ENABLE + FORCE RLS on
+# delegation_judge_verdict_events was a WRITE LOCKOUT for the lane's own
+# writer, so it was reverted on the lane and dropped from this arm.
+# fenced-node-migrations.yaml's 2026-09-08 block records the two measured
+# refusals and the writer-side release condition. That condition has since
+# been met, and 0026 is released on the dev arm below (OMN-15092, 2026-09-26).
 ONEX_MIGRATION_LANE="${ONEX_MIGRATION_LANE:-}"
 case "${ONEX_MIGRATION_LANE}" in
   dev)
@@ -693,8 +694,38 @@ case "${ONEX_MIGRATION_LANE}" in
     # omni_home docs/tracking/ROLLING_WORK_LEDGER.md, which authorizes resuming
     # tenant row-level security on relations the OMN-15354 classification
     # manifest classifies TENANT, lab first and onex-dev second.
+    #
+    # WIDENED 2026-09-26 (OMN-15092, tranche 5 of OMN-14894). The arm also
+    # releases 0026: ENABLE + FORCE ROW LEVEL SECURITY, a tenant_isolation
+    # policy and the app_dashboard SELECT grant on
+    # delegation_judge_verdict_events, the last relation the OMN-15354
+    # manifest classifies TENANT that had no tenant boundary on this lane.
+    # It was measured on 2026-09-08 to refuse every write the async
+    # judge-verdict writer issued, because that writer passed no `tenant=` and
+    # the GUC fell back to the house slug while the row carried a uuid. The
+    # release condition that block wrote down, "the async judge-verdict writer
+    # must pass the row's own resolved tenant to the adapter", is now met in
+    # the image this lane runs: omnimarket handler_delegation
+    # _project_judge_verdict issues its INSERT with `tenant=tenant_id`
+    # (OMN-17627), and its attribution probe runs under a bound tenant
+    # (OMN-15919). The column stays TEXT and holds the uuid string, so GUC and
+    # column agree by construction, the same way 0041's do.
+    #
+    # Measured 2026-09-26 on a copy of this lane's delegation_events and
+    # delegation_judge_verdict_events (116 rows, one tenant) in a throwaway
+    # database on the .201 dev-lane Postgres, applying 0026 exactly as the node
+    # loop does and probing as the non-superuser tenant_projection_writer and
+    # app_dashboard roles. The writer path, with the GUC set to the row's
+    # tenant, inserts. An unset GUC and the 2026-09-08 slug GUC are both
+    # refused with "new row violates row-level security policy". An unset or
+    # foreign GUC sees 0 of 116 rows. Before 0026 every one of those probes
+    # saw or wrote everything. The runtime worker's omnidash_analytics DSNs
+    # on this lane name tenant_projection_writer and role_omnidash, neither a
+    # superuser nor BYPASSRLS, and the table is owned by postgres, so the
+    # policy binds the writer here rather than being bypassed.
     LANE_RELEASED_NODE_MIGRATION_IDS="\
 node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
+node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql
 node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql
 node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
     ;;
