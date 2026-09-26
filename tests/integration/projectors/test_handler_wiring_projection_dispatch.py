@@ -142,7 +142,7 @@ def test_projection_dispatch_bridge_rejects_missing_db_url_at_wiring(
             call_count[0] += 1
             return {}
 
-    db_tables = projection_database_target("delegation_events", schema="tenant")
+    db_tables = projection_database_target("delegation_events", schema="public")
     handler = FakeProjectionHandler()
     monkeypatch.delenv("ONEX_TENANT_DB_URL")
 

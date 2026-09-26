@@ -61,6 +61,25 @@ from deploy_agent.executor import (
     select_dev_instance,
 )
 from deploy_agent.health import create_health_app
+from deploy_agent.host_slot import (
+    HostSlotHeldError,
+    host_slot_from_env,
+    job_lease,
+    verify_window_from_env,
+)
+from deploy_agent.idle_converge import (
+    CHECK_INTERVAL_SECONDS as IDLE_CONVERGE_CHECK_INTERVAL_SECONDS,
+)
+from deploy_agent.idle_converge import (
+    EnumIdleConvergeVerdict,
+    ModelIdleConvergeInputs,
+    converge_command,
+    load_probe_windows,
+    probe_blocking,
+    read_omnimarket_dev_head,
+    read_running_omnimarket_ref,
+)
+from deploy_agent.idle_converge import decide as decide_idle_converge
 from deploy_agent.job_state import EnumJobSettlingStage, JobState, JobStore
 from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lab_overlay import (
@@ -79,6 +98,11 @@ from deploy_agent.lane_lock_client import (
 )
 from deploy_agent.lane_policy import load_allowed_lanes_from_env
 from deploy_agent.lineage_fence import DockerProvenanceReader, GitRefResolver
+from deploy_agent.load_gate import (
+    EnumLoadGateVerdict,
+    LoadGate,
+    load_gate_for_instance,
+)
 from deploy_agent.loaded_code import record_loaded_code_sha
 from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
@@ -87,7 +111,11 @@ from deploy_agent.publisher import (
     publish_result,
 )
 from deploy_agent.queue_depth import LagSampler
-from deploy_agent.routing import ROUTED_LANES, build_router_from_env
+from deploy_agent.routing import (
+    AGENT_CLONE_ROOT,
+    ROUTED_LANES,
+    build_router_from_env,
+)
 from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 
 logger = logging.getLogger(__name__)
@@ -96,6 +124,18 @@ logger = logging.getLogger(__name__)
 def _runtime_container_for_lane(lane: EnumRuntimeLane) -> str:
     """The lane's main runtime container, whose image records its build (OMN-19270)."""
     return lane_config_for(lane).main_runtime_container
+
+
+def _read_omnimarket_dev_head() -> str | None:
+    """The omnimarket dev head, read in the clone a workspace build stages from.
+
+    OMN-19509. ``OMNI_HOME`` has no default here, as in the executor's
+    workspace build: unset, the head is unread and the converge refuses.
+    """
+    omni_home = os.environ.get("OMNI_HOME", "").strip()
+    if not omni_home:
+        return None
+    return read_omnimarket_dev_head(Path(omni_home) / "omnimarket")
 
 
 STATE_DIR = Path(
@@ -312,13 +352,52 @@ class DeployAgent:
             # Selected here, once, before anything reads a lane config; an
             # instance with no composition refuses start (ValueError).
             select_dev_instance(self._router.instance.name)
+        # OMN-19509. The idle converge's state and its reads, each a seam a test
+        # replaces. See _maybe_idle_converge.
+        self._idle_converge_started_at = datetime.now(UTC)
+        self._idle_converge_last_check: float | None = None
+        self._idle_converge_attempted: set[str] = set()
+        self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
+        self._idle_converge_now: Callable[[], datetime] = lambda: datetime.now(UTC)
+        self._idle_read_running_ref: Callable[[], str | None] = lambda: (
+            read_running_omnimarket_ref(
+                _runtime_container_for_lane(EnumRuntimeLane.DEV)
+            )
+        )
+        self._idle_read_head_ref: Callable[[], str | None] = _read_omnimarket_dev_head
+        self._idle_probe_blocker: Callable[[datetime], str | None] = lambda now: (
+            probe_blocking(now, load_probe_windows(AGENT_CLONE_ROOT))
+        )
+        # OMN-19544 AC1. On a lab host this instance shares with a prover (the
+        # .105 laptop's VM holds the lane or a proof stack, not both), both
+        # tenants take one lease file on the host. Off unless the instance's
+        # env file names the directory, so the .201 and .202 agents are
+        # unchanged. The lease carries this instance's name.
+        self._host_slot = host_slot_from_env()
+        self._host_slot_owner = (
+            f"deploy-agent-{self._router.instance.name}"
+            if self._router is not None
+            else "deploy-agent"
+        )
+        self._host_slot_verify_window = verify_window_from_env()
+        # OMN-19507. An instance whose table row declares a load_gate: defers
+        # a command, and an idle converge, while its host's model servers need
+        # the machine. Read from the table shipped with this code, like the
+        # instance's identity; an instance without a block has no gate, so the
+        # .201 and .202 agents are unchanged. A malformed block refuses start.
+        thresholds = (
+            load_gate_for_instance(AGENT_CLONE_ROOT, self._router.instance.name)
+            if self._router is not None
+            else None
+        )
+        self._load_gate = LoadGate(thresholds) if thresholds is not None else None
+        self._load_gate_last_verdict: EnumLoadGateVerdict | None = None
+        if self._host_slot is not None:
             logger.info(
-                "Deploy agent routing instance: %s, consumer group %s, %d route(s), "
-                "default %s",
-                self._router.instance.name,
-                self._router.consumer_group,
-                len(self._router.table.routes),
-                self._router.table.default_instance,
+                "Deploy agent host slot: %s as %s, verify window %ds",
+                self._host_slot.directory,
+                self._host_slot_owner,
+                int(self._host_slot_verify_window.total_seconds()),
             )
         # OMN-18636. The one thread every blocking call in this process runs on.
         # See JOB_POOL_MAX_WORKERS and _offload for why it is one, and why the
@@ -471,6 +550,24 @@ class DeployAgent:
             self._kafka_config.bootstrap_servers,
             ",".join(sorted(lane.value for lane in self._allowed_lanes)),
         )
+        # OMN-19507. Stated here, after logging is configured, rather than in
+        # __init__, where both lines were emitted before basicConfig ran and
+        # reached no handler: the dev-200 agent's log had no instance line
+        # (dev-200-lane TERMINAL, omni_home ledger 2026-09-25T11:23:31Z).
+        if self._router is not None:
+            logger.info(
+                "Deploy agent routing instance: %s, consumer group %s, %d route(s), "
+                "default %s",
+                self._router.instance.name,
+                self._router.consumer_group,
+                len(self._router.table.routes),
+                self._router.table.default_instance,
+            )
+        gate = getattr(self, "_load_gate", None)
+        logger.info(
+            "Deploy agent load gate: %s",
+            gate.thresholds.model_dump() if gate is not None else "none declared",
+        )
 
         # Step 0: record which code this process actually loaded, before
         # anything can move the clone underneath it, and NAME IT IN THE JOURNAL
@@ -573,6 +670,11 @@ class DeployAgent:
             ref_resolver=GitRefResolver(REPO_DIR),
             tracking_ref=load_tracking_remote_ref_from_env(),
             router=self._router,
+            # OMN-19544 AC1: refuse, as busy, while a prover holds the host.
+            host_slot=self._host_slot,
+            host_slot_owner=self._host_slot_owner,
+            # OMN-19507: defer, without refusing, while the host is loaded.
+            load_gate=self._load_gate,
         )
 
         # Step 6b: keep the lag sample current DURING a rebuild (OMN-18990).
@@ -616,6 +718,14 @@ class DeployAgent:
                     logger.info("Rejected command: %s", reason)
                 else:
                     await self._offload(self._maybe_self_update_idle)
+                    # OMN-19509: only here, where the poll returned no command,
+                    # so a converge never runs beside a routed job and never
+                    # ahead of one already waiting (the model's SingleWriter201
+                    # and QueuedFirst). OMN-19507: a command the load gate
+                    # deferred IS one already waiting, so no converge while a
+                    # deferral holds its partition paused.
+                    if getattr(consumer, "load_gate_paused", None) is None:
+                        await self._offload(self._maybe_idle_converge)
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
@@ -833,6 +943,100 @@ class DeployAgent:
                 e,
             )
 
+    def _maybe_idle_converge(self) -> None:
+        """Converge .201 on the omnimarket dev head when idle (OMN-19509).
+
+        See ``deploy_agent.idle_converge`` for the rule and the model behind
+        it. Throttled to one check per interval. Every refusal is logged once
+        per change of verdict, not once per second. A converge runs as an
+        ordinary job through ``_execute_command``, under the same single-flight
+        and lane locks, with its own job record and terminal event named
+        ``agent/idle-converge``.
+        """
+        if self._router is None:
+            return
+        tick = time.monotonic()
+        if (
+            self._idle_converge_last_check is not None
+            and tick - self._idle_converge_last_check
+            < IDLE_CONVERGE_CHECK_INTERVAL_SECONDS
+        ):
+            return
+        self._idle_converge_last_check = tick
+
+        routed_to = self._router.table.route(
+            EnumRuntimeLane.DEV, "gha/omnimarket/idle-converge"
+        )
+        routed_elsewhere = routed_to != self._router.instance.name
+        now = self._idle_converge_now()
+        running_ref = head_ref = probe_blocker = windows_error = None
+        if routed_elsewhere:
+            try:
+                probe_blocker = self._idle_probe_blocker(now)
+            except Exception as exc:  # noqa: BLE001 - an unread schedule refuses
+                windows_error = (
+                    f"probe schedule unreadable: {type(exc).__name__}: {exc}"
+                )
+            running_ref = self._idle_read_running_ref()
+            head_ref = self._idle_read_head_ref()
+        decision = decide_idle_converge(
+            ModelIdleConvergeInputs(
+                now=now,
+                omnimarket_routed_elsewhere=routed_elsewhere,
+                job_active=self.job_store.has_active_job(),
+                last_activity=max(
+                    self.job_store.last_completed_at()
+                    or self._idle_converge_started_at,
+                    self._idle_converge_started_at,
+                ),
+                running_ref=running_ref,
+                head_ref=head_ref,
+                probe_blocker=probe_blocker,
+                windows_error=windows_error,
+                attempted_heads=frozenset(self._idle_converge_attempted),
+            )
+        )
+        if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
+            if decision.verdict is not self._idle_converge_last_verdict:
+                logger.info(
+                    "idle converge: %s (%s)", decision.verdict.value, decision.detail
+                )
+            self._idle_converge_last_verdict = decision.verdict
+            return
+        self._idle_converge_last_verdict = decision.verdict
+        assert decision.head_ref is not None  # CONVERGE always names the head
+        # OMN-19507: a converge is a deploy like any other, so it waits for the
+        # load gate too. The head is not marked attempted, so it runs once the
+        # gate opens.
+        if not self._idle_converge_gate_open():
+            return
+        self._idle_converge_attempted.add(decision.head_ref)
+        cmd = converge_command()
+        logger.info(
+            "idle converge: running %s as %s: %s",
+            cmd.correlation_id,
+            cmd.requested_by,
+            decision.detail,
+        )
+        self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+        self._execute_command(cmd)
+
+    def _idle_converge_gate_open(self) -> bool:
+        """Whether the load gate lets an idle converge start now (OMN-19507)."""
+        gate = getattr(self, "_load_gate", None)
+        if gate is None:
+            return True
+        decision = gate.check()
+        if decision.verdict is EnumLoadGateVerdict.DEFER:
+            if self._load_gate_last_verdict is not EnumLoadGateVerdict.DEFER:
+                logger.info(
+                    "idle converge: deferred by load gate %s", decision.describe()
+                )
+            self._load_gate_last_verdict = decision.verdict
+            return False
+        self._load_gate_last_verdict = decision.verdict
+        return True
+
     def _execute_command(self, cmd: ModelRebuildRequested) -> None:
         """Run one accepted command to its terminal state. BLOCKING, by design.
 
@@ -917,11 +1121,26 @@ class DeployAgent:
             # OMN-19501: nor, any more, the k3s lab-overlay apply and the
             # onex-api pin delivery. The lock is released at the compose
             # verdict; see the settle hand-off below.
-            with lane_lock(
-                lane_config_for(cmd.runtime_lane).compose_project,
-                lane=cmd.runtime_lane.value,
-                ref=cmd.git_ref,
-                timeout=DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+            #
+            # OMN-19544 AC1: THE HOST SLOT, OUTSIDE THE LANE LOCK. On a host
+            # this instance shares with a prover, the job takes the host's
+            # lease before its first phase, or ends without touching anything,
+            # and keeps it for the verify window after its last, so the
+            # post-merge verify job reads the lane this job built. A no-op on
+            # an instance with no host slot.
+            with (
+                job_lease(
+                    self._host_slot,
+                    self._host_slot_owner,
+                    verify_window=self._host_slot_verify_window,
+                    reason=f"deploy job {cid}",
+                ),
+                lane_lock(
+                    lane_config_for(cmd.runtime_lane).compose_project,
+                    lane=cmd.runtime_lane.value,
+                    ref=cmd.git_ref,
+                    timeout=DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+                ),
             ):
                 # OMN-15181: boundary-level guard — a prod request may only
                 # deploy a digest already proven in stability-test. Must run
@@ -1083,6 +1302,16 @@ class DeployAgent:
                 else:
                     logger.info("Job %s completed successfully", cid)
 
+        except HostSlotHeldError as e:
+            # OMN-19544 AC1. A prover took the host between this command's
+            # accept (which read the slot free) and the job's start. Nothing on
+            # the host was touched: the lease is taken before the first phase.
+            logger.error(  # noqa: TRY400
+                "Job %s did not start: %s friction_type=host_slot_held",
+                cid,
+                e,
+            )
+            self.job_store.complete(cid, status="failed", errors=[str(e)])
         except LaneLockContendedError as e:
             # Named separately from a build failure because the two lead to
             # different actions: this one is retried later by whoever holds the

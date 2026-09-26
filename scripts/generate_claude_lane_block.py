@@ -142,6 +142,10 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # by `lsof -iTCP -sTCP:LISTEN` on 2026-09-25T10:33:16Z; loopback only. The
     # rest of its 42xxx block is declared in the lane manifest's comment.
     "dev-200": {"main": "42085", "effects": "42086"},
+    # OMN-19544 — the time-shared deployed dev lane on the .105 host. Read free
+    # there by `lsof -iTCP:43000-43999` on 2026-09-25T10:35:52Z; loopback only.
+    # The rest of its 43xxx block is declared in the lane manifest's comment.
+    "dev-105": {"main": "43085", "effects": "43086"},
 }
 
 _LANE_BOUNDARY: dict[str, str] = {
@@ -201,6 +205,14 @@ _LANE_BOUNDARY: dict[str, str] = {
         ".200 third deployed dev lane — own Postgres, Redpanda and Valkey, "
         "loopback only; its compose-dev-200 receipt proves omnimarket changes "
         "only, and it is never sourced for stability/prod grants"
+    ),
+    # OMN-19544, lab deploy lanes plan (operator RULING 2026-09-25T10:22:22Z as
+    # amended 10:22:36Z). Same receipt rule as dev-202.
+    "dev-105": (
+        ".105 time-shared deployed dev lane — own Postgres, Redpanda and Valkey, "
+        "loopback only; takes turns with the prove-105 proof stack; its "
+        "compose-dev-105 receipt proves omnimarket changes only, and it is never "
+        "sourced for stability/prod grants"
     ),
 }
 

@@ -86,6 +86,7 @@ from deploy_agent.events import (
     ModelRejectionNotice,
     Scope,
 )
+from deploy_agent.host_slot import HostSlot
 from deploy_agent.job_state import JobStore
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
 from deploy_agent.lane_policy import (
@@ -99,6 +100,7 @@ from deploy_agent.lineage_fence import (
     decide_lineage,
     is_workspace_rebuild,
 )
+from deploy_agent.load_gate import EnumLoadGateVerdict, LoadGate
 from deploy_agent.queue_depth import LagSampler, ModelControlTopicLag
 from deploy_agent.routing import ROUTED_LANES, DeployRouter
 
@@ -251,6 +253,16 @@ class DeployConsumer:
     #: nothing and accepts every command its lane fence admits, which is the
     #: single-instance behaviour.
     router: DeployRouter | None = None
+    #: OMN-19544 AC1, on the same terms: a consumer built without a host slot
+    #: shares its host with nobody and accepts as before. ``host_slot_owner`` is
+    #: the name this agent's own lease carries, which never blocks it.
+    host_slot: HostSlot | None = None
+    host_slot_owner: str = "deploy-agent"
+    #: OMN-19507, on the same terms: a consumer built without a load gate
+    #: accepts whatever the steps above admit. ``load_gate_paused`` is the
+    #: partition a deferral paused, until a re-check opens the gate.
+    load_gate: LoadGate | None = None
+    load_gate_paused: TopicPartition | None = None
 
     def __init__(
         self,
@@ -267,6 +279,9 @@ class DeployConsumer:
         ref_resolver: RefResolver | None = None,
         tracking_ref: str | None = None,
         router: DeployRouter | None = None,
+        host_slot: HostSlot | None = None,
+        host_slot_owner: str = "deploy-agent",
+        load_gate: LoadGate | None = None,
     ) -> None:
         # OMN-19506 AC3. Each deploy-agent instance reads EVERY record, so each
         # subscribes with its own declared group: in one shared group Kafka
@@ -274,6 +289,10 @@ class DeployConsumer:
         # other would be skipped by the only reader it reached (the
         # MC_shared_group counterexample on the ticket).
         self.router = router
+        self.host_slot = host_slot
+        self.host_slot_owner = host_slot_owner
+        self.load_gate = load_gate
+        self.load_gate_paused = None
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
             **kafka_config.consumer_kwargs(),
@@ -328,6 +347,11 @@ class DeployConsumer:
         3. Validate payload (schema, scope, services legality)
         4. Check the lane fence -> reject "lane_not_allowed"
         5. Check busy (has_active_job) -> reject "busy"
+        5a. Check the host slot (OMN-19544) -> reject "busy" while another
+            owner, a prover, holds it
+        5b. Load gate (OMN-19507) -> DEFER while the host's model servers need
+            it: nothing committed or published, the partition paused until a
+            re-check at the top of a later poll opens the gate
         6. Check dedup (is_duplicate) -> reject "duplicate"
         6a. Lineage fence (OMN-19270) -> reject "superseded_by_running_build"
             or "divergent_ref"
@@ -336,6 +360,7 @@ class DeployConsumer:
         9. Commit Kafka offset
         10. Return (command, None)
         """
+        self._maybe_resume_after_load_gate()
         try:
             records = self.consumer.poll(timeout_ms=1000)
         except UNDECODABLE_FETCH_ERRORS as exc:
@@ -371,6 +396,26 @@ class DeployConsumer:
         return self._process_message(
             ordered[0], lookahead=ordered[1:] if lookahead_usable else []
         )
+
+    def _maybe_resume_after_load_gate(self) -> None:
+        """Resume a partition a deferral paused, once a re-check opens the gate.
+
+        OMN-19507. Re-read no more often than the gate's ``recheck_seconds``;
+        the poll in between returns nothing for the paused partition. Resuming
+        fetches from the deferred record, which the deferral sought back to.
+        """
+        paused = self.load_gate_paused
+        if paused is None or self.load_gate is None:
+            return
+        if not self.load_gate.recheck_due():
+            return
+        decision = self.load_gate.check()
+        if decision.verdict is EnumLoadGateVerdict.DEFER:
+            logger.info("Load gate still shut: %s", decision.describe())
+            return
+        self.consumer.resume(paused)
+        self.load_gate_paused = None
+        logger.info("Load gate open, resuming %s: %s", paused, decision.describe())
 
     def _order_batch(self, records: dict[Any, list[Any]]) -> tuple[list[Any], bool]:
         """The fetched batch in control-topic order, and whether it may be scanned.
@@ -570,6 +615,46 @@ class DeployConsumer:
             logger.info("Rejecting command %s: agent busy", cmd.correlation_id)
             self._commit_through(msg)
             return None, self._reject(EnumRejectionReason.BUSY, cmd=cmd)
+
+        # Step 5a: Host slot (OMN-19544 AC1). On a host this agent shares with
+        # a prover (the .105 laptop, whose VM holds the lane or a proof stack,
+        # not both), a lease another owner holds refuses the command as `busy`,
+        # the reason a running job already gives. Read here, before anything is
+        # accepted or folded; the job takes the lease itself before its first
+        # phase, and a prover that won the slot in between makes that job end
+        # without touching the host.
+        if self.host_slot is not None:
+            holder = self.host_slot.held_by_other(self.host_slot_owner)
+            if holder is not None:
+                logger.info(
+                    "Rejecting command %s: busy, %s",
+                    cmd.correlation_id,
+                    holder.describe(),
+                )
+                self._commit_through(msg)
+                return None, self._reject(EnumRejectionReason.BUSY, cmd=cmd)
+
+        # Step 5b: Load gate (OMN-19507). After routing, so a command for
+        # another instance is still skipped whatever this host's load, and
+        # after busy and the host slot, whose refusals stand as they were. A
+        # deferral is not a refusal: the record goes back onto the fetch path
+        # uncommitted and the partition is paused, so the next polls return
+        # nothing (the group keeps its membership) until a re-check opens the
+        # gate. Nothing is published, because nothing about the command is
+        # wrong; it is taken, or coalesced past, once the host has room.
+        if self.load_gate is not None:
+            gate = self.load_gate.check()
+            if gate.verdict is EnumLoadGateVerdict.DEFER:
+                topic_partition = TopicPartition(msg.topic, msg.partition)
+                self.consumer.seek(topic_partition, msg.offset)
+                self.consumer.pause(topic_partition)
+                self.load_gate_paused = topic_partition
+                logger.info(
+                    "Deferring command %s: load gate %s",
+                    cmd.correlation_id,
+                    gate.describe(),
+                )
+                return None, None
 
         # Step 6: Check dedup
         if self.job_store.is_duplicate(cmd.correlation_id):
