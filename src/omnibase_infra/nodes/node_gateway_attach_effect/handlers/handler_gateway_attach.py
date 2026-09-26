@@ -38,6 +38,7 @@ rejected credential.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -86,6 +87,8 @@ from omnibase_infra.nodes.node_gateway_attach_effect.services.protocol_gateway_s
 from omnibase_infra.runtime.secret_resolver import SecretResolver
 
 __all__ = ["HandlerGatewayAttach"]
+
+logger = logging.getLogger(__name__)
 
 
 class HandlerGatewayAttach:
@@ -189,6 +192,27 @@ class HandlerGatewayAttach:
             expires_at=expires_at,
         )
         await self._session_store.put(session)
+
+        # OMN-17423 AC3: the gateway lifecycle is the credential-carrying path,
+        # so its logs are the ones a redaction proof has to read. Until now the
+        # success path wrote nothing here, and a grep for a sentinel that
+        # traversed this handler could not tell a clean log from a silent one --
+        # every zero was unfalsifiable. These lines emit the session identifiers
+        # only: ``session_id`` and ``edge_instance_id`` are server-minted,
+        # non-secret correlators, and the access token is a ``SecretStr`` that
+        # never reaches a log record.
+        logger.info(
+            "gateway session attached: session_id=%s",
+            session.session_id,
+            extra={
+                "event": "gateway.session.attached",
+                "session_id": str(session.session_id),
+                "tenant_id": str(session.tenant_id),
+                "tenant_slug": session.tenant_slug,
+                "edge_instance_id": session.edge_instance_id,
+                "expires_at": session.expires_at.isoformat(),
+            },
+        )
 
         event = ModelGatewaySessionEvent(
             event_type=EnumGatewaySessionEventType.ATTACHED,
