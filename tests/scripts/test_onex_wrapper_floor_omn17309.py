@@ -341,6 +341,17 @@ def test_leading_global_options_do_not_hide_the_subcommand(ws: _Workspace) -> No
     assert ws.run("-v", "delegate", "x").returncode == _EXIT_BELOW_FLOOR
 
 
+def test_help_on_an_evidence_subcommand_is_ordinary(ws: _Workspace) -> None:
+    """``onex delegate --help`` prints usage and mints nothing (OMN-19709)."""
+    ws.install_dist("omnibase_compat", "0.5.5")
+    ws.write_floor({"omnibase_compat": "0.5.6"})
+    proc = ws.run("delegate", "--help")
+    assert proc.returncode == _SENTINEL_OK
+    assert "WARNING: this workspace is below the proven floor." in proc.stderr
+    # positive control: the same subcommand without --help is still refused
+    assert ws.run("delegate", "x").returncode == _EXIT_BELOW_FLOOR
+
+
 def test_bare_invocation_with_no_subcommand_is_ordinary(ws: _Workspace) -> None:
     """``onex --help`` must never be refused -- it is how you find out what to run."""
     ws.install_dist("omnibase_compat", "0.5.5")

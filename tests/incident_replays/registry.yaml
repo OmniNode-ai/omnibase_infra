@@ -243,6 +243,40 @@ scope:
     - scripts/validation/validate_test_root_collection.py
     - scripts/verify-merge-queue-no-bypass.sh
 cases:
+  - id: omn19655-core-release-strands-every-downstream-until-infra-cuts
+    guard: scripts/ci/release_dependency_advance.py
+    incident: OMN-19655
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn19655.py::test_the_same_guard_accepts_the_pins_the_release_carries
+    artifact:
+      fixture: tests/fixtures/omn19655/pypi-omnibase-infra-0.38.57.json.captured
+      sha256: 5e29161ece38aa044977c2bcc1cf34cf496ae64b67422e1376c785dbce869d0d
+    capture:
+      method: live-http
+      source: live-http:pypi.org:443/pypi/omnibase-infra/0.38.57/json
+      captured_at: '2026-09-25T18:41:17Z'
+      captured_by: lane pin-gate-83 (OMN-19655)
+    test: tests/ci/test_incident_replay_omn19655.py::test_the_real_guard_calls_the_2026_09_25_state_stranded
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is SILENCE WHILE A CORE RELEASE STRANDS EVERY DOWNSTREAM. omnibase_infra pins omnibase-core exactly; on 2026-09-25 its dev pinned 0.47.23 while the newest published omnibase-infra, 0.38.57, pinned 0.47.22, and nothing in the release chain noticed, so omnimarket's release failed on every dev push for the whole day (and the same way on 2026-09-24 with 0.47.22). THE ARTIFACT IS PyPI's JSON document for omnibase-infra 0.38.57, fetched from the live index and committed unmodified; its Requires-Dist carries the stale exact pin. THE DISCRIMINATOR IS LOAD-BEARING: a guard that called every state stranded would replay this incident and dispatch the release train every hour forever, so the same bytes against the pin the release carries must not be stranded. NO MODIFICATIONS: the file is the exact bytes the index served, 11303 bytes.
+  - id: omn19655-exact-core-pin-published-strands-downstream-floors
+    guard: scripts/ci/check_sibling_compatible_range.py
+    incident: OMN-19655
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/scripts/test_check_sibling_compatible_range.py::test_the_same_guard_accepts_that_manifest_with_the_ruled_range
+    artifact:
+      fixture: tests/fixtures/omn19655/omnibase-infra-v0.38.57-pyproject.toml.captured
+      sha256: fe8963fe3c45d3f671358c27cf159c09f272249837746506c628b0c4eda8c0ed
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@bd51068da4c289a75fcf3c19c2459b7b8b05bbbd:pyproject.toml
+      captured_at: '2026-09-25T20:22:47Z'
+      captured_by: lane infra-core-range-83 (OMN-19655)
+    test: tests/scripts/test_check_sibling_compatible_range.py::test_the_guard_rejects_the_manifest_0_38_57_was_released_from
+    why: >-
+      Newly wired enforcement (a pre-commit hook plus the live-tree test), so default-deny demands a real case. THE ARTIFACT IS the pyproject.toml omnibase-infra 0.38.57 was released from (tag v0.38.57, commit bd51068d), read from the git object and committed unmodified, 45474 bytes. It published omnibase-core==0.47.22 as an exact pin, the shape that left every downstream core floor raise unresolvable until infra re-released (the omnimarket release failed on every dev push on 2026-09-25). Nothing refused that shape then. The operator ruled on 2026-09-25 that infra publishes >=FLOOR,<NEXT_MINOR and keeps the exact pin only in [tool.uv] override-dependencies, and this guard holds that. THE DISCRIMINATOR IS LOAD-BEARING: the same captured bytes with only the published core line moved to the ruled range must pass, so a guard that rejected every manifest cannot satisfy this case.
   - id: omn18942-fleet-failure-findings-delivered-to-nowhere
     guard: scripts/omninode-fleet-failure-probe.py
     incident: OMN-18942
@@ -1327,3 +1361,54 @@ cases:
     test: tests/ci/test_incident_replay_omn19412.py::test_the_real_guard_refuses_the_row_list_on_the_captured_c11
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A PROBE WINDOW LIST THAT OMITTED A PROBE. Until config/lab_probe_windows.yaml the only list of lab probe windows was one ledger row, omni_home docs/tracking/ROLLING_WORK_LEDGER.md at 2026-09-23T20:23:28Z (lane merge-drain-7f), which named C16 and C15 and derived four runtime-merge blackouts from them (20:45Z-21:45Z, 22:55Z-23:45Z, 00:55Z-01:45Z, 02:45Z-03:45Z). It did not name C11, whose job reads the same dev lane at 02:17Z, 08:17Z, 14:17Z and 20:17Z, none of them inside any of those blackouts, so a runtime merge at 02:00Z was within the row's rules and would have redeployed the lane under C11's run. Nothing could have noticed, because a prose list has no reader that compares it with the workflows. The case does not claim such a merge happened; the gap in the list is the defect. NOT A RECONSTRUCTION -- the artifact is the C11 workflow read with git show out of the object store at the dev commit the lane branched from, re-fetchable at the recorded locator and unmodified. The test drives the real check with the row's own list (the committed C15 and C16 entries) over those bytes and requires the unlisted-probe refusal naming the C11 workflow and its cron; a second assertion shows, from the same bytes, that every C11 start falls outside all four of the row's blackouts, so the refusal is not vacuous. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every workflow would replay this perfectly and block every pull request, so the same function is driven over the same bytes with the committed C11 entry and required to return no error.
+  - id: omn19565-lab-evidence-none-left-library-prs-unproved
+    guard: scripts/ci/validate_lab_proof_profiles.py
+    incident: OMN-19565
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn19565.py::test_the_same_guard_accepts_the_committed_registry
+    artifact:
+      fixture: tests/fixtures/omn19565/release_train_policy.yaml.captured
+      sha256: ffa119e3655fb832ecd260043253887ec7f8b924e42cc7e91b2d9b5feaf4280d
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@c7150a15a94d5c4cc929de5f07bab2e7b622b497:config/release_train_policy.yaml
+      captured_at: '2026-09-25T14:57:02Z'
+      captured_by: lane lab-proof-build-1 (OMN-19565)
+    test: tests/ci/test_incident_replay_omn19565.py::test_the_real_guard_refuses_the_registry_the_captured_file_describes
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A PER-REPOSITORY LAB-EVIDENCE DECLARATION THAT ACCEPTED "NONE". Until config/lab_proof_profiles.yaml, config/release_train_policy.yaml was the only file that declared, per repository, what lab evidence stands behind a change, and it declared lab_evidence none for five of its seven repositories (omnibase_core, omnibase_spi, omnimemory, omniintelligence, omniclaude), with its own header saying they cannot produce a receipt for any sha. Every check that read the file was green, and a pull request in any of those repositories merged with no lab proof of any kind. The operator ruled on 2026-09-25T13:07:40Z (omni_home rolling ledger, lane merge-drain-83) that every code PR gets a lab proof before merge through a per-repository profile declared as data. NOT A RECONSTRUCTION -- the artifact is config/release_train_policy.yaml read with git show out of the object store at the omnibase_infra dev commit this lane branched from, re-fetchable at the recorded locator and unmodified. The test builds the proof registry those bytes describe, a row only for the two repositories whose captured lab_evidence is not none, drives the real check over it, and requires a refusal naming every repository the captured file left at none. THE DISCRIMINATOR IS LOAD-BEARING: a check that refused every registry would replay this perfectly and block every pull request, so the same check is driven over the committed registry, which carries a row for every repository, and required to accept.
+  - id: omn14141-a-bundled-runner-must-not-swallow-the-flat-schema-red
+    guard: scripts/ci/run_validators_in_process.py
+    incident: OMN-14141
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn19613.py::test_the_same_runner_passes_the_same_contract_once_fixed
+    artifact:
+      fixture: tests/fixtures/omn19613/node_session_state_effect.contract.yaml.flat.captured
+      sha256: 3a50b4edfadbc69f357a071d2b389a771e03c36dae0da02bc4d928254286cf44
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@b896ca5c42aceff3e8f575563ac0c84600b491e6:src/omnibase_infra/nodes/node_session_state_effect/contract.yaml
+      captured_at: '2026-09-25T15:27:52Z'
+      captured_by: lane ci-infra (OMN-19613)
+    test: tests/ci/test_incident_replay_omn19613.py::test_the_runner_fails_the_step_on_the_real_flat_schema_contract
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. OMN-19613 moves the Lint job's fourteen omnibase_infra validator steps into one interpreter, and the only way that move can go wrong is a false green: one red validator swallowed by the passing validators around it, or its exit code lost in the aggregation, so the step reports success over a real violation. The artifact is the incident that made the first of those fourteen gates exist. The flat handler_class/handler_module routing schema parsed to zero dispatchers and phantom-wired the subscribed topic while the node reported WIRED and committed offsets (OMN-14141, the WI-14 root cause), and node_session_state_effect carried that exact shape until 340c539c. The fixture is its contract.yaml at b896ca5c, the parent of that fix, byte for byte from git cat-file. The replay places the flat-schema gate first in the list, follows it with two gates that pass on this repository's own tree, and requires the step to fail with exactly one error annotation, titled with the flat-schema gate's step name, and with the later gates still run. The discriminator drives the identical list over the same contract as fixed in 340c539c (tests/fixtures/omn19613/node_session_state_effect.contract.yaml.nested.captured, sha256 9d783707ca5a7a2a505c652e3422af63f5920672fa0df1c4f0926cd97246f806) and requires success, so a runner that fails everything cannot satisfy the case.
+  - id: omn10122-the-pr-diff-scope-must-still-hand-plugin-emit-daemon-to-the-guard
+    guard: scripts/ci/precommit_diff_scope.py
+    incident: OMN-10122
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn19613.py::test_the_same_scope_leaves_the_daemon_out_of_an_unrelated_pr
+    artifact:
+      fixture: tests/fixtures/omn19613/plugin_emit_daemon.py.captured
+      sha256: b8eabf6d555889dec8286f0b2c95124d2d9abbe0adc44347b4aca83915e03197
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@8d78fa80d70823a9dab5584d0729cd5231a37a32:src/omnibase_infra/plugins/plugin_emit_daemon.py
+      captured_at: '2026-09-25T15:27:52Z'
+      captured_by: lane ci-infra (OMN-19613)
+    test: tests/ci/test_incident_replay_omn19613.py::test_the_scope_hands_the_real_plugin_emit_daemon_to_the_guard
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. OMN-19613 narrows the no-plugin-daemon-classes pre-commit step to the PR's own files on pull_request, and the only way a narrowing can go wrong is a false green: the scope computes the wrong range, the violating file is not in it, and the guard says OK. PluginEmitDaemon is the incident behind the guard: a Plugin* class that owned a daemon lifecycle, added by OMN-7640, deleted by OMN-10122 once it was replaced by a node entry point, and the reason OMN-10123 built the Plugin* lifecycle guard. The fixture is that file at 8d78fa80, the parent of the deletion, byte for byte from git cat-file, 13866 bytes. The replay adds it in a PR whose merge commit sits on a base that moved after the PR branched, which is the shape of GitHub's pull_request checkout, asks the real scope script for its range, and runs the real omnibase_core guard over the Python files in that range: the daemon must be in the range, the base's own new commit must not be, and the guard must reject. A scope that diffed against the second parent, or included the base branch's own commits, fails one of those three assertions. The discriminator is a PR that touches only an unrelated file with the same daemon already on the base, where the same scope must leave the daemon out and the guard must accept, so a scope that simply returns the whole tree cannot satisfy the case; the whole-tree fallbacks (push, merge_group, dispatch, a hook-config or workflow change, a moved omnibase-core pin, an unresolvable base) are pinned separately in tests/ci/test_lint_validator_runner.py.

@@ -15,6 +15,7 @@ cannot exhibit the failure is the OMN-15547 defect.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -24,9 +25,11 @@ import pytest
 from scripts.validation.check_topology_grant_delivery import (
     _IDENTITY_COLUMN_RE,
     _SERIAL_COLUMN_RE,
+    CORPUS_RELPATH,
     MAX_UNDECLARED,
     MAX_UNDELIVERED,
     MAX_UNDELIVERED_SEQUENCES,
+    TOPOLOGY_RELPATH,
     GrantKey,
     SequenceKey,
     declared_grants,
@@ -841,17 +844,11 @@ OMN_18768_INCIDENT = GrantKey(
 # omnibase_infra and declares NO db_io block at all -- so no contract anywhere
 # declares them, the contract-driven derivation has nothing to derive from, and
 # nothing resolves a projection binding for them. Real drift, different shape.
-OMN_18768_UNDECLARED_RESIDUAL = frozenset(
-    {
-        GrantKey(
-            "omninode_runtime", "omninode_internal", "savings_correlation_finalizations"
-        ),
-        GrantKey("omninode_runtime", "omninode_internal", "savings_injection_signals"),
-        GrantKey(
-            "omninode_runtime", "omninode_internal", "savings_validator_catch_signals"
-        ),
-    }
-)
+#
+# OMN-17886 AC2 step 1 declared those three savings relations as checked-in
+# supplemental entries in table_grant_derivation.py, so the residual is now
+# empty and pinned empty: any delivered-but-undeclared pair is a new one.
+OMN_18768_UNDECLARED_RESIDUAL: frozenset[GrantKey] = frozenset()
 
 
 @pytest.mark.unit
@@ -920,18 +917,32 @@ def test_the_undeclared_residual_is_exactly_the_known_set() -> None:
 
 
 @pytest.mark.unit
-def test_checker_fails_when_the_undeclared_residual_grows() -> None:
-    """RED control for the reverse arm, against the real corpus and topology.
+def test_checker_fails_when_the_undeclared_residual_grows(tmp_path: Path) -> None:
+    """RED control for the reverse arm, against a copy of the real inputs.
 
-    Proves the arm can fail without editing either input -- the OMN-15547
-    requirement that a gate be shown to bite rather than assumed to.
+    Proves the arm can fail -- the OMN-15547 requirement that a gate be shown to
+    bite rather than assumed to. The residual is 0 since OMN-17886 AC2 step 1,
+    so a lowered bound against the real corpus would fail without naming any
+    pair. Instead the real topology instance and forward corpus are copied, one
+    migration granting a relation nothing declares is added, and the checker
+    must fail at the real bound and name that pair.
     """
+    topology = tmp_path / TOPOLOGY_RELPATH
+    topology.parent.mkdir(parents=True)
+    shutil.copyfile(REPO_ROOT / TOPOLOGY_RELPATH, topology)
+    corpus = tmp_path / CORPUS_RELPATH
+    shutil.copytree(REPO_ROOT / CORPUS_RELPATH, corpus)
+    (corpus / "999_omn17886_red_control_undeclared_grant.sql").write_text(
+        "GRANT SELECT ON omninode_internal.omn17886_red_control TO omninode_runtime;\n",
+        encoding="utf-8",
+    )
+
     completed = subprocess.run(
         [
             sys.executable,
             str(REPO_ROOT / "scripts/validation/check_topology_grant_delivery.py"),
-            "--max-undeclared",
-            str(MAX_UNDECLARED - 1),
+            "--repo-root",
+            str(tmp_path),
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -939,8 +950,8 @@ def test_checker_fails_when_the_undeclared_residual_grows() -> None:
         check=False,
     )
     assert completed.returncode == 1
-    assert "UNDECLARED" in completed.stdout
-    assert "grant declaration" in completed.stdout
+    assert "grant declaration: 1 delivered-but-undeclared" in completed.stdout
+    assert "omninode_internal.omn17886_red_control" in completed.stdout
 
 
 @pytest.mark.unit

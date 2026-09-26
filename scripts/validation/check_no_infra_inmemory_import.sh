@@ -102,6 +102,11 @@ fi
 # the import keyword only.
 PATTERN='^[[:space:]]*from omnibase_infra\.event_bus\.event_bus_inmemory import|^[[:space:]]*import[[:space:]]+omnibase_infra\.event_bus\.event_bus_inmemory([[:space:]]+as[[:space:]]+[A-Za-z_][A-Za-z0-9_]*)?([[:space:]]*#.*)?$|^[[:space:]]*from omnibase_infra\.event_bus import[^#]*EventBusInmemory'
 
+SCAN_PATHS=("$@")
+if [[ ${#SCAN_PATHS[@]} -eq 0 ]]; then
+    SCAN_PATHS=("src/")
+fi
+
 while IFS= read -r line; do
     file="${line%%:*}"
     # Normalize any doubled slash from grep's "src/" prefix (src//foo -> src/foo).
@@ -111,7 +116,7 @@ while IFS= read -r line; do
     fi
     echo "  $line"
     VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE "$PATTERN" src/ --include="*.py" 2>/dev/null || true)
+done < <(grep -rnE --include="*.py" "$PATTERN" "${SCAN_PATHS[@]}" 2>/dev/null || true)
 
 if [[ $VIOLATIONS -gt 0 ]]; then
     echo ""

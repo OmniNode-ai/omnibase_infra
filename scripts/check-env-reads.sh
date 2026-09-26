@@ -245,6 +245,7 @@ report_block() {
 check_new_env_reads() {
     local file="$1"
     local added_reads base_names names name blocked=0
+    local tmp_added_reads tmp_names
 
     added_reads="$(get_diff "$file" \
         | grep -E "^\+" \
@@ -257,6 +258,17 @@ check_new_env_reads() {
         base_names="$(git show "$BASE_COMMIT:$file" 2>/dev/null | extract_env_names || true)"
     fi
 
+    # OMN-19623: feed both loops from real temp files, never a bare heredoc.
+    # Bash 5.1+ writes a heredoc's body into a pipe *before* forking the
+    # reader, and under macOS pipe-KVA pressure (many concurrent shells) the
+    # kernel can cap a freshly created pipe below the size bash assumes,
+    # deadlocking the write forever with nothing left to drain it. A regular
+    # file never goes through that pipe-based code path. See
+    # scripts/validation/check_no_cloud_bus.sh for the fleet incidents this
+    # matches (ledger FRICTION rows naming that sibling hook).
+    tmp_added_reads="$(mktemp "${TMPDIR:-/tmp}/check_env_reads_added.XXXXXX")"
+    printf '%s\n' "$added_reads" > "$tmp_added_reads"
+
     while IFS= read -r line; do
         [ -z "$line" ] && continue
         names="$(printf '%s\n' "$line" | extract_env_names || true)"
@@ -266,6 +278,8 @@ check_new_env_reads() {
             blocked=1
             continue
         fi
+        tmp_names="$(mktemp "${TMPDIR:-/tmp}/check_env_reads_names.XXXXXX")"
+        printf '%s\n' "$names" > "$tmp_names"
         while IFS= read -r name; do
             [ -z "$name" ] && continue
             if printf '%s\n' "$base_names" | grep -qx -- "$name"; then
@@ -277,12 +291,10 @@ check_new_env_reads() {
             report_block "$file" \
                 "env-var name '$name' is not read in this file at $BASE_LABEL"
             blocked=1
-        done <<EOF
-$names
-EOF
-    done <<EOF
-$added_reads
-EOF
+        done < "$tmp_names"
+        rm -f "$tmp_names"
+    done < "$tmp_added_reads"
+    rm -f "$tmp_added_reads"
 
     return $blocked
 }
