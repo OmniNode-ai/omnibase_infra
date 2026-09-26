@@ -10,7 +10,7 @@ resolution-markers = [
 [manifest]
 overrides = [
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", specifier = "==0.47.23" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=be874b620778118ba824134747cd549385cfdc5f" },
     { name = "omnibase-spi", specifier = "==0.23.5" },
 ]
 
@@ -2233,8 +2233,8 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.47.23"
-source = { registry = "https://pypi.org/simple" }
+version = "0.47.24"
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=be874b620778118ba824134747cd549385cfdc5f#be874b620778118ba824134747cd549385cfdc5f" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2249,10 +2249,6 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/38/bf/93003e6f7e81a934f759aef301cfe94830be82f39bb0a0e45634ad134612/omnibase_core-0.47.23.tar.gz", hash = "sha256:ba3e7c777201fa71a01389770603a14163cd5773e85ee7f526c03369b98a1721", size = 9852952, upload-time = "2026-09-25T02:54:56.778Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/08/ce5b0d5db73781f56ec0e7f5f0c40f7e6185dcb7bffaf9c0e9173c875f76/omnibase_core-0.47.23-py3-none-any.whl", hash = "sha256:51c86d9cffd8c4fe1f8b78999118cfb35fe9777cf6b3f100c4fed226164b363b", size = 7015911, upload-time = "2026-09-25T02:54:54.39Z" },
 ]
 
 [[package]]
@@ -2360,7 +2356,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25.0,<3.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", specifier = ">=0.47.23,<0.48.0" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?rev=be874b620778118ba824134747cd549385cfdc5f" },
     { name = "omnibase-spi", specifier = "==0.23.5" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },

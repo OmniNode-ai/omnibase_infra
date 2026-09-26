@@ -21,6 +21,8 @@ from typing import Any
 
 import pytest
 
+from omnibase_core.models.config_overlay import ModelRuntimeLaneDeclaration
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CENSUS_EVENT = REPO_ROOT / "scripts" / "lane_census_event.py"
 CENSUS_CHECK = REPO_ROOT / "scripts" / "lane-census-check.sh"
@@ -215,38 +217,43 @@ def test_ac1_the_refresh_publish_never_fails_the_census_collection() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_ac2_the_runtime_resolves_its_declared_lane() -> None:
-    from omnibase_infra.runtime.health.runtime_lane_identity import resolve_runtime_lane
-
-    assert resolve_runtime_lane({"ONEX_RUNTIME_LANE": "compose-dev"}) == "compose-dev"
-    assert resolve_runtime_lane({"ONEX_RUNTIME_LANE": " Onex-Lab "}) == "onex-lab"
-
-
-def test_ac2_an_undeclared_lane_is_none_not_a_guess() -> None:
-    from omnibase_infra.runtime.health.runtime_lane_identity import resolve_runtime_lane
-
-    assert resolve_runtime_lane({}) is None
-    assert resolve_runtime_lane({"ONEX_RUNTIME_LANE": ""}) is None
-
-
-def test_ac2_an_unknown_lane_name_is_refused_rather_than_passed_through() -> None:
-    """A typo would otherwise mint a phantom lane indistinguishable from a real one."""
-    from omnibase_infra.runtime.health.runtime_lane_identity import resolve_runtime_lane
-
-    assert resolve_runtime_lane({"ONEX_RUNTIME_LANE": "compose-dv"}) is None
-    assert resolve_runtime_lane({"ONEX_RUNTIME_LANE": "prod"}) is None
-
-
-def test_ac6_a_runtime_cannot_claim_a_lane_outside_the_lab() -> None:
-    """stability-test, judge and the collaborator lane are read-only surfaces."""
-    from omnibase_infra.runtime.health.runtime_lane_identity import (
-        KNOWN_LANES,
-        resolve_runtime_lane,
+def _lane(lane_id: str, *roles: str) -> ModelRuntimeLaneDeclaration:
+    return ModelRuntimeLaneDeclaration.model_validate(
+        {
+            "schema_version": "runtime_lane.v1",
+            "lane_id": lane_id,
+            "roles": list(roles),
+            "description": "test lane",
+        }
     )
 
-    assert {"compose-dev", "onex-lab", "onex-lab-k3s"} == KNOWN_LANES
-    for lane in ("stability-test", "judge", "lakshman"):
-        assert resolve_runtime_lane({"ONEX_RUNTIME_LANE": lane}) is None
+
+def test_ac2_a_lab_lane_keys_its_health_on_its_overlay_lane_id() -> None:
+    """OMN-19747: the lane comes from the deployment's runtime.lane overlay."""
+    from omnibase_infra.runtime.health.runtime_lane_identity import resolve_runtime_lane
+
+    assert resolve_runtime_lane(_lane("lab-lane-a", "lab")) == "lab-lane-a"
+    assert resolve_runtime_lane(_lane("any-new-lab", "lab")) == "any-new-lab"
+
+
+def test_ac2_no_established_lane_is_none_not_a_guess() -> None:
+    from omnibase_infra.runtime.health import runtime_lane_identity
+
+    runtime_lane_identity.clear_established_runtime_lane()
+    assert runtime_lane_identity.resolve_runtime_lane() is None
+
+
+def test_ac6_a_lane_without_the_lab_role_keys_no_health_row() -> None:
+    """What makes a lane a lab lane is the role its overlay grants, not its name."""
+    from omnibase_infra.runtime.health.runtime_lane_identity import resolve_runtime_lane
+
+    for lane, roles in (
+        ("read-only-lane", ()),
+        ("proof-lane", ()),
+        ("fault-lane", ("fault_injection",)),
+    ):
+        assert resolve_runtime_lane(_lane(lane, *roles)) is None
+    assert resolve_runtime_lane(_lane("any-new-lab", "lab")) == "any-new-lab"
 
 
 def test_ac2_the_health_event_carries_the_lane_and_defaults_to_none() -> None:

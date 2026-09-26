@@ -44,6 +44,7 @@ _SKIP_REASON = (
     "Upgrade to omnibase_core >= 0.6.3 to run these tests."
 )
 from omnibase_infra.protocols import ProtocolEventBusLike
+from omnibase_infra.runtime.health import runtime_lane_identity
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.service_kernel import (
     DEFAULT_GROUP_ID,
@@ -59,6 +60,20 @@ from omnibase_infra.runtime.service_kernel import (
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+_REAL_LANE_RESOLVER = runtime_lane_identity.resolve_runtime_lane_declaration
+
+
+@pytest.fixture(autouse=True)
+def declared_runtime_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[None, None, None]:
+    """bootstrap() resolves its lane first (OMN-19747); these tests are about the rest."""
+    from tests.unit.runtime.conftest import declare_runtime_lane_for_bootstrap
+
+    declare_runtime_lane_for_bootstrap(monkeypatch)
+    yield
+    runtime_lane_identity.clear_established_runtime_lane()
 
 
 @pytest.mark.unit
@@ -2055,3 +2070,63 @@ class TestEventBusTypeHonored:
         )
         assert "[ACTIVE" in event_bus_line
         assert "PARTIAL" not in event_bus_line
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
+class TestBootstrapLaneRefusal:
+    """bootstrap() refuses to start without a declared lane (OMN-19747, plan 3.3).
+
+    The real resolver runs here. Each case exits 1 before a contract is
+    discovered and before the runtime host is built, never DEGRADED.
+    """
+
+    @pytest.fixture(autouse=True)
+    def real_resolver(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from tests.unit.runtime.conftest import force_inmemory_runtime_config
+
+        force_inmemory_runtime_config(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            runtime_lane_identity,
+            "resolve_runtime_lane_declaration",
+            _REAL_LANE_RESOLVER,
+        )
+        home = tmp_path / "home"
+        (home / ".onex").mkdir(parents=True)
+        (home / ".onex" / "config.yaml").write_text("config_source: local-home\n")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "acme")
+        monkeypatch.delenv("INFISICAL_ADDR", raising=False)
+        monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
+
+    @pytest.mark.parametrize(
+        ("lane", "names"),
+        [
+            (None, "ONEX_RUNTIME_LANE"),
+            ("Not A Slug", "Not A Slug"),
+            ("undeclared-lane", "undeclared-lane"),
+        ],
+    )
+    async def test_bootstrap_refuses_before_discovery(
+        self,
+        lane: str | None,
+        names: str,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_wire_infrastructure: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        if lane is None:
+            monkeypatch.delenv("ONEX_RUNTIME_LANE", raising=False)
+        else:
+            monkeypatch.setenv("ONEX_RUNTIME_LANE", lane)
+        with (
+            patch("omnibase_infra.runtime.auto_wiring.discover_contracts") as discover,
+            patch("omnibase_infra.runtime.service_kernel.RuntimeHostProcess") as host,
+        ):
+            exit_code = await bootstrap()
+
+        assert exit_code == 1
+        discover.assert_not_called()
+        host.assert_not_called()
+        assert runtime_lane_identity.established_runtime_lane() is None
+        assert names in caplog.text
