@@ -45,6 +45,12 @@ on:
         default: true
         type: boolean
 
+# OMN-19640: cancel only superseded pull request runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+
 permissions:
   contents: read
 
@@ -110,9 +116,11 @@ jobs:
             --public-json "${PUBLIC_JSON}" \
             --policy config/runner_routing_policy.yaml || rc=$?
           if ! grep -q '^labels=' "${GITHUB_OUTPUT}"; then
-            echo 'labels=["ubuntu-latest"]' >> "${GITHUB_OUTPUT}"
-            echo 'decision=hosted' >> "${GITHUB_OUTPUT}"
-            echo 'reason=probe_error:module_unavailable' >> "${GITHUB_OUTPUT}"
+            {
+              echo 'labels=["ubuntu-latest"]'
+              echo 'decision=hosted'
+              echo 'reason=probe_error:module_unavailable'
+            } >> "${GITHUB_OUTPUT}"
           fi
           # OMN-18412 REFUSAL, exit 3: this placement is forbidden rather than
           # merely unavailable. Not swallowed -- the previous `|| true` would
