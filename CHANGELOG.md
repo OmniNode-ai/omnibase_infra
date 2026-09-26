@@ -1,3 +1,25 @@
+## v0.38.58 (2026-09-25)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.58 by the scheduled release train.
+- 13 release-relevant commit(s) merged since v0.38.57.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.57
+- feat: live omninode_internal ACL check, gated on a from-empty build (#4093)
+- fix: retire the tenant schema; public is the TENANT domain's schema (#4079)
+- feat: laptop profile, the ONEX stack plus your own runtime from one catalog bundle (#4089)
+- fix: task-class selection reads the request, not the material it carries (#4107)
+- feat: attach a lane-scoped node only on the runtime lanes its contract declares (#4077)
+- feat: onex skill publishes the dod_verify verdict to the dev lane after its in-memory dispatch, fail-soft (#4100)
+- feat: onex delegate --ticket carries the ticket in the request metadata (#4103)
+- feat: delegation runs compare only inside one complete cohort key (#4054)
+- feat: the forwarder mirrors delegate-skill terminals, metadata only (#4083)
+- feat: refuse a delegation before dispatch unless its bounded lane row agrees (#4056)
+- feat: phase 3 - option B, the mirror-only forwarder (#3798)
+- fix: report a delegation that failed before publish as itself (#4026)
+- fix: a pre-PR slot reaches a ready runtime: slot principal grants, slot intelligence migration, slot topics (#4070)
+
 ## v0.38.57 (2026-09-24)
 
 ### Release
