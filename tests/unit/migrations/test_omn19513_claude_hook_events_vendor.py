@@ -23,7 +23,7 @@ _CREATE = "0000_create_claude_hook_events.sql"
 _GRANT = "0001_grant_omninode_runtime_claude_hook_events.sql"
 _SHA256 = {
     _CREATE: "388faf7f8d683a28341b306a5d67dc208b98aaf5b8f39789b97361cba4ed72ae",
-    _GRANT: "e18cbfbaac9ea7d3701ce0a49ef499faa960cf8a962425e79d4d89f358995c96",
+    _GRANT: "c69298981a4a481d394c0f9cbf9c5374904644981073afa84ce87ae4ae4182d0",
 }
 _TABLES = ("claude_agent_spans", "claude_hook_events")
 
@@ -89,6 +89,75 @@ def test_both_tables_and_exact_runtime_grants_are_present() -> None:
             sql,
             re.IGNORECASE,
         )
+
+
+# The writer's whole scope (omnimarket node_projection_claude_hook_events,
+# handler_claude_hook_events_writer): SELECT for the parent-call lookup and the
+# tool-call recount, INSERT for the event insert and the span upsert, UPDATE for
+# the span upsert's DO UPDATE and the out-of-order parent repair, USAGE on each
+# BIGSERIAL cursor sequence for nextval(), and USAGE on the schema so the role
+# can resolve omninode_internal.* at all. Schema USAGE is name lookup only; it
+# confers no privilege on any relation in the schema. This set is also exactly
+# what the omninode_runtime principal is given in the topology instances.
+_EXPECTED_GRANTS = frozenset(
+    {
+        ("USAGE", "SCHEMA omninode_internal"),
+        *(
+            (privilege, f"omninode_internal.{table}")
+            for table in _TABLES
+            for privilege in ("SELECT", "INSERT", "UPDATE")
+        ),
+        *(
+            ("USAGE", f"SEQUENCE omninode_internal.{table}_projection_cursor_seq")
+            for table in _TABLES
+        ),
+    }
+)
+
+
+def _grants(sql: str) -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    # A GRANT statement opens a line; the 0000 precondition's quoted
+    # 'USAGE WITH GRANT OPTION' argument is a string literal, not a statement.
+    for statement in re.findall(
+        r"^\s*GRANT\b[^;]*;", sql, re.IGNORECASE | re.MULTILINE
+    ):
+        match = re.fullmatch(
+            r"GRANT\s+(?P<privs>[A-Z,\s]+?)\s+ON\s+(?P<target>.+?)\s+"
+            r"TO\s+omninode_runtime\s*;",
+            " ".join(statement.split()),
+        )
+        assert match, f"unparsed or non-omninode_runtime GRANT: {statement!r}"
+        for privilege in match["privs"].split(","):
+            found.add((privilege.strip(), match["target"]))
+    return found
+
+
+def test_the_grants_are_exactly_the_writer_scope() -> None:
+    """Every GRANT in both files, parsed, equals the writer's scope and no more.
+
+    No DELETE, TRUNCATE, REFERENCES, TRIGGER, CREATE or ALL; no schema-wide
+    ``ON ALL TABLES IN SCHEMA``; no ``WITH GRANT OPTION``; no other grantee.
+    A broader grant added later fails here by name.
+    """
+    assert _grants(_statements(_CREATE)) == set()
+    assert _grants(_statements(_GRANT)) == _EXPECTED_GRANTS
+    assert "WITH GRANT OPTION" not in _statements(_GRANT).upper()
+
+
+def test_every_issued_privilege_is_asserted_including_schema_usage() -> None:
+    """A grant that did not take must fail the migration, not the first write."""
+    grants = _statements(_GRANT)
+    assert re.search(
+        r"SELECT 1 / count\(\*\) AS omninode_runtime_schema_usage_grant_assertion\s+"
+        r"WHERE has_schema_privilege\(\s*'omninode_runtime',\s*"
+        r"'omninode_internal',\s*'USAGE'\s*\);",
+        grants,
+    )
+    for table in _TABLES:
+        for privilege in ("select", "insert", "update"):
+            assert f"AS {table}_{privilege}_grant_assertion" in grants
+        assert f"AS {table}_cursor_sequence_usage_assertion" in grants
 
 
 @pytest.mark.parametrize("filename", [_CREATE, _GRANT])
