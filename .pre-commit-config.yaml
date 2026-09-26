@@ -430,6 +430,23 @@ repos:
         files: ^(\.github/workflows/chain-canary-c12-provider-catalogue\.yml|scripts/ci/c12_provider_catalogue_(probe|observe)\.py|tests/ci/test_c12_provider_catalogue_probe_omn19195\.py|tests/fixtures/omn19195/.*)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19812: the C28 producer's grader. Pins that a green observation
+      # passes on all four clauses, that each broken property (a named
+      # subscription kind with no row or an uninstrumented one, a retained
+      # row that is not live, reducer publishes not attributed, an unreachable
+      # live group, a truncation with no cursor, a mutation that does not bite
+      # or bites the wrong branch, a natural validation error, an injection the
+      # seam did not observe) grades FAIL naming its check, that the seam's
+      # captured log lines attribute this probe's own errors and no others, and
+      # that a lane it cannot read is exit 2. Offline, so the grader is
+      # falsifiable here and not only on a lane.
+      - id: c28-consumer-flow-grading
+        name: C28 consumer-flow grader (OMN-19812)
+        entry: uv run --frozen pytest tests/ci/test_c28_consumer_flow_probe.py -q
+        language: system
+        files: ^(\.github/workflows/chain-canary-c28-consumer-flow\.yml|scripts/ci/c28_consumer_flow_probe\.py|tests/ci/test_c28_consumer_flow_probe\.py|tests/fixtures/omn19812/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-16987: the provider-rung liveness canary's grader and observer.
       # Pins that the recorded lab reading grades each rung as observed, that
       # an unresolved key is never a pass and sends no authenticated request,
