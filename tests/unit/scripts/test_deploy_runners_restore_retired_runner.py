@@ -32,6 +32,7 @@ import os
 import shutil
 import stat
 import subprocess
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -114,14 +115,40 @@ def broken_docker(tmp_path: Path) -> Path:
 @pytest.fixture
 def stopped_container() -> Iterator[str]:
     name = f"omn19397-stopped-{uuid.uuid4().hex[:12]}"
-    subprocess.run(
-        ["docker", "run", "-d", "--name", name, "alpine:3", "sleep", "3600"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(["docker", "stop", "-t", "1", name], check=True, capture_output=True)
-    yield name
-    subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+    try:
+        subprocess.run(
+            ["docker", "run", "-d", "--name", name, "alpine:3", "sleep", "3600"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["docker", "stop", "-t", "1", name], check=True, capture_output=True
+        )
+
+        deadline = time.monotonic() + 15.0
+        last_status = "unavailable"
+        while time.monotonic() < deadline:
+            inspect = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Status}}", name],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            last_status = (
+                inspect.stdout.strip() or inspect.stderr.strip() or "unavailable"
+            )
+            if inspect.returncode == 0 and last_status == "exited":
+                break
+            time.sleep(0.2)
+        else:
+            pytest.fail(
+                f"docker container {name} did not reach exited within 15 seconds "
+                f"after docker stop; last status: {last_status!r}"
+            )
+
+        yield name
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
 
 def _bash(
