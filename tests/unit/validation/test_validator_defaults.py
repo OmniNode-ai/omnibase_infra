@@ -11,6 +11,7 @@ Validates that:
 - Constants are properly used
 """
 
+import ast
 import inspect
 from collections.abc import Callable
 from pathlib import Path
@@ -432,6 +433,11 @@ class TestValidateInfraAllDefaults:
 class TestScriptDefaults:
     """Test scripts/validate.py uses correct defaults."""
 
+    @staticmethod
+    def _validate_script_tree() -> ast.Module:
+        """Parse the validation script for structural contract assertions."""
+        return ast.parse(Path("scripts/validate.py").read_text())
+
     def test_architecture_script_defaults(self) -> None:
         """Verify architecture validation script uses correct defaults."""
         # Check the script file directly
@@ -486,6 +492,65 @@ class TestScriptDefaults:
             "Unions validator should import and use INFRA_UNIONS_STRICT constant"
         )
         assert "strict=INFRA_UNIONS_STRICT" in script_content
+
+    def test_script_uses_public_contract_severity_enum(self) -> None:
+        """Contract linting imports its severity enum from the public package."""
+        imports = [
+            node
+            for node in ast.walk(self._validate_script_tree())
+            if isinstance(node, ast.ImportFrom)
+        ]
+        assert any(
+            node.module == "omnibase_infra.validation.enums"
+            and any(
+                alias.name == "EnumContractViolationSeverity" for alias in node.names
+            )
+            for node in imports
+        )
+
+    def test_dynamic_validator_boundaries_return_declared_bool_contracts(self) -> None:
+        """Dynamically loaded validator results retain their declared bool contract."""
+        expected_casts = {
+            "run_migration_freeze": 1,
+            "run_migration_sequence": 1,
+            "run_clean_root": 1,
+            "run_markdown_links": 2,
+            "run_db_quality_gate": 1,
+        }
+        functions = {
+            node.name: node
+            for node in self._validate_script_tree().body
+            if isinstance(node, ast.FunctionDef)
+        }
+
+        for function_name, expected_count in expected_casts.items():
+            casts = [
+                node
+                for node in ast.walk(functions[function_name])
+                if isinstance(node, ast.Return)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "cast"
+                and len(node.value.args) == 2
+                and isinstance(node.value.args[0], ast.Constant)
+                and node.value.args[0].value == "bool"
+                and isinstance(node.value.args[1], ast.Attribute)
+                and node.value.args[1].attr == "is_valid"
+            ]
+            assert len(casts) == expected_count, function_name
+
+    def test_cli_validator_map_has_one_bool_callable_contract(self) -> None:
+        """CLI fallback dispatch has one explicit bool-in/bool-out callable shape."""
+        validator_map = next(
+            node
+            for node in ast.walk(self._validate_script_tree())
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "validator_map"
+        )
+        assert (
+            ast.unparse(validator_map.annotation) == "dict[str, Callable[[bool], bool]]"
+        )
 
 
 class TestCLICommandDefaults:

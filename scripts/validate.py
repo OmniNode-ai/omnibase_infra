@@ -32,7 +32,9 @@ Usage:
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -227,8 +229,8 @@ def run_contracts(verbose: bool = False) -> bool:
 
     # Phase 2: Infrastructure contract linting
     try:
+        from omnibase_infra.validation.enums import EnumContractViolationSeverity
         from omnibase_infra.validation.linter_contract import (
-            EnumContractViolationSeverity,
             lint_contracts_in_directory,
         )
 
@@ -836,7 +838,7 @@ def run_migration_freeze(verbose: bool = False) -> bool:
             report = module.generate_report(result, repo_path)
             print(report)
 
-        return result.is_valid
+        return cast("bool", result.is_valid)
 
     except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Migration Freeze: ERROR ({type(e).__name__}: {e})")
@@ -882,7 +884,7 @@ def run_migration_sequence(verbose: bool = False) -> bool:
         if verbose or not result.is_valid or result.has_staged_migrations:
             print(report)
 
-        return result.is_valid
+        return cast("bool", result.is_valid)
 
     except RuntimeError as e:
         print(f"Migration Sequence: ERROR ({e})", file=sys.stderr)
@@ -933,7 +935,7 @@ def run_clean_root(verbose: bool = False) -> bool:
             report = module.generate_report(result, repo_path)
             print(report)
 
-        return result.is_valid
+        return cast("bool", result.is_valid)
 
     except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Clean Root: ERROR ({type(e).__name__}: {e})")
@@ -1145,7 +1147,7 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
                     f"{aggregated_result.links_checked} links checked)"
                 )
 
-            return aggregated_result.is_valid
+            return cast("bool", aggregated_result.is_valid)
 
         else:
             # Validate entire repository (original behavior)
@@ -1165,7 +1167,7 @@ def run_markdown_links(verbose: bool = False, files: list[str] | None = None) ->
                     f"{result.links_checked} links checked)"
                 )
 
-            return result.is_valid
+            return cast("bool", result.is_valid)
 
     except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"Markdown Links: ERROR ({type(e).__name__}: {e})")
@@ -1215,7 +1217,7 @@ def run_db_quality_gate(verbose: bool = False) -> bool:
         else:
             print(f"DB Quality Gate: PASS ({result.files_checked} files checked)")
 
-        return result.is_valid
+        return cast("bool", result.is_valid)
 
     except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
         print(f"DB Quality Gate: ERROR ({type(e).__name__}: {e})")
@@ -1332,7 +1334,7 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    validator_map = {
+    validator_map: dict[str, Callable[[bool], bool]] = {
         "architecture": run_architecture,
         "architecture_layers": run_architecture_layers,
         "migration_freeze": run_migration_freeze,
