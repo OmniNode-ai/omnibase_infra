@@ -4838,6 +4838,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     gate.add_argument(
+        "--instance-lanes-for",
+        default="",
+        metavar="REPO",
+        help=(
+            "OMN-19543: also read, ANY-OF, the receipt lane of every deploy-agent "
+            "instance whose row in config/deploy_lane_routing.yaml proves REPO "
+            "(omnimarket today: compose-dev-202, compose-dev-200). Needs --lane. "
+            "An unreadable table or a lane this enum does not declare refuses"
+        ),
+    )
+    gate.add_argument(
         "--require-lane",
         action="append",
         default=[],
@@ -4972,6 +4983,43 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--lane", required=True, choices=[e.value for e in EnumLabLane])
 
     return parser
+
+
+def _instance_receipt_lanes() -> Any:
+    """``scripts/ci/instance_receipt_lanes.py``, loaded by path (OMN-19543).
+
+    Lazily, and only by ``gate --instance-lanes-for``: that module needs PyYAML,
+    and every other path through this file stays stdlib-only, as with
+    ``_release_train_module``.
+    """
+    name = "_lab_pass_instance_receipt_lanes"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = Path(__file__).resolve().parent / "instance_receipt_lanes.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        msg = f"cannot load the instance receipt lanes from {path}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def instance_lanes_for(repo: str) -> list[EnumLabLane]:
+    """The receipt lanes of the instances that prove ``repo``, as enum values.
+
+    Raises ``ValueError`` for a table lane this enum does not declare, and the
+    reader's own error for an unreadable table; ``gate`` refuses on both.
+    """
+    return [
+        EnumLabLane(value)
+        for value in _instance_receipt_lanes().receipt_lanes_for(repo)
+    ]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -5232,6 +5280,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.lane
             else list(ANY_OF_DEFAULT_LANES)
         )
+        if args.instance_lanes_for:
+            if not args.lane:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: "
+                    "--instance-lanes-for needs --lane; refusing rather than "
+                    "adding instance lanes to the any-of default.",
+                    file=sys.stdout,
+                )
+                return 1
+            try:
+                extra = instance_lanes_for(args.instance_lanes_for)
+            except Exception as exc:  # noqa: BLE001 - an unread table refuses
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: the instance "
+                    f"receipt lanes for {args.instance_lanes_for} could not be read "
+                    f"({exc}); refusing rather than reading fewer lanes.",
+                    file=sys.stdout,
+                )
+                return 1
+            lanes.extend(lane for lane in extra if lane not in lanes)
         required = list(dict.fromkeys(EnumLabLane(v) for v in args.require_lane))
         required_sha: str | None = None
         required_note = ""
