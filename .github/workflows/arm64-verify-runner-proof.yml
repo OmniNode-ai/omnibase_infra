@@ -62,7 +62,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: [host-101, host-105]
+        host: [host-101, host-105, host-200]
     # Pinned to the architecture AND the class, in the fleet's own vocabulary.
     # Both labels are load-bearing: `omnibase-verify` alone would also match an
     # amd64 verify runner on the primary host, and this job's whole subject is
@@ -136,7 +136,17 @@ jobs:
       # The credential half. Named, hashed and length-checked -- never printed.
       # A verify job that cannot read the lab kubeconfig fails at its first
       # cluster call with an error that looks like a cluster problem.
+      #
+      # SKIPPED on host-200 (OMN-19657), deliberately: that runner is pinned to
+      # one lane's per-merge verify job, the same shape as host-202's, and
+      # reads the dev-200 compose lane's docker daemon through the
+      # host-gateway alias -- it carries no lab kubeconfig or operator-env
+      # mount by design (see docker-compose.runners-omninode-studio-runner.yml,
+      # "WHAT IS DELIBERATELY ABSENT"). host-202 is out of this workflow only
+      # because it is amd64, not because it is exempt from this rule; a future
+      # arm64 lane-pinned runner should skip this step the same way.
       - name: Assert the lab credentials are readable by the job user
+        if: matrix.host != 'host-200'
         run: |
           set -euo pipefail
           : "${KUBECONFIG:?KUBECONFIG must be set on a verify-class runner}"

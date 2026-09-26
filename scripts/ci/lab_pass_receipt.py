@@ -354,6 +354,14 @@ class EnumLabLane(StrEnum):
     reads OMN-19508 names (omnimarket's sibling read and its release-cut premise)
     may admit it.
 
+    ``COMPOSE_DEV_200`` (OMN-19543) is the third deployed dev lane, ``dev-200``
+    on the ``.200`` host (compose project ``omnibase-infra-dev-200``, ports
+    42085/42086), on exactly ``COMPOSE_DEV_202``'s terms: one emitter, omnimarket
+    changes only (operator ruling 2026-09-25T10:22:22Z, one deploy slot per lab
+    host), NOT in ``ANY_OF_DEFAULT_LANES``. Which repositories an instance lane
+    may prove is read from ``config/deploy_lane_routing.yaml``
+    (``scripts/ci/instance_receipt_lanes.py``), not from this enum.
+
     No other value is admissible, and in particular no governed lane
     (``prod``, ``stability-test``, ``judge``, or a collaborator lane) can name
     itself in a receipt. A lab pass is a statement about a lab. A governed
@@ -366,14 +374,16 @@ class EnumLabLane(StrEnum):
     COMPOSE_DEV_CHAIN = "compose-dev-chain"
     COMPOSE_DEV_CORPUS = "compose-dev-corpus"
     COMPOSE_DEV_202 = "compose-dev-202"
+    COMPOSE_DEV_200 = "compose-dev-200"
 
 
 #: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the three lab
 #: surfaces rule 24(b) means by "a passing lab receipt". The OMN-19312 verdict
 #: lanes are deliberately absent -- a chain canary PASS is not evidence that the
 #: candidate booted, and must never be able to stand in for that premise.
-#: ``COMPOSE_DEV_202`` is absent too (OMN-19507): it proves omnimarket changes
-#: only, so no unqualified read may take it for the any-of premise.
+#: ``COMPOSE_DEV_202`` is absent too (OMN-19507), and ``COMPOSE_DEV_200``
+#: (OMN-19543): they prove omnimarket changes only, so no unqualified read may
+#: take either for the any-of premise.
 ANY_OF_DEFAULT_LANES: Final[tuple[EnumLabLane, ...]] = (
     EnumLabLane.COMPOSE_DEV,
     EnumLabLane.ONEX_LAB,
@@ -4095,6 +4105,47 @@ def read_delivery_runs(
     return runs
 
 
+def endpoint_reemit_eligibility(
+    subject: str,
+    *,
+    repo: str,
+    workflow: str,
+    branch: str,
+    bound_seconds: float,
+    now: datetime,
+    read_runs: Callable[[str, str, str], list[ModelDeliveryRun]] = read_delivery_runs,
+) -> str:
+    """Decide whether an absent lower-endpoint receipt may be recovered.
+
+    OMN-19563. A queued verify run emits no receipt. When its command deploys
+    after that run ends, the next convergence observes the queued sha as its
+    exact initial revision -- the bounded lower endpoint -- rather than inside
+    the open re-emission window. The caller has already re-established live
+    containment for that endpoint; this second predicate proves the newest
+    staging delivery is waiting for the same exact subject inside its bound.
+
+    Any unreadable delivery surface stays closed. This function only admits an
+    absent receipt; unreadable or health-failing receipts are rejected by the
+    existing eligibility path before this function is called.
+    """
+    if not _SHA_RE.match(subject):
+        return "skip:endpoint-subject-invalid"
+    try:
+        runs = read_runs(repo, workflow, branch)
+    except Exception as exc:  # noqa: BLE001 - refusal is the fail-closed result
+        detail = " ".join(str(exc).split()) or type(exc).__name__
+        return f"skip:endpoint-delivery-unreadable {detail}"
+    selected, _reasons = select_refused_deliveries(
+        subject,
+        runs,
+        now=now,
+        bound_seconds=bound_seconds,
+    )
+    if selected:
+        return "reemit:absent-endpoint-delivery-waiting"
+    return "skip:endpoint-has-no-waiting-delivery"
+
+
 def rerun_refused_deliveries(
     repo: str,
     subjects: Sequence[str],
@@ -4809,10 +4860,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "this candidate is the window's LOWER endpoint, the revision the "
-            "lane was already on. An endpoint with no receipt is skipped: it "
-            "may not be a merge this lane ever watched."
+            "lane was already on. An endpoint with no receipt is eligible only "
+            "when the newest staging delivery is waiting for its exact sha."
         ),
     )
+    elig.add_argument(
+        "--endpoint-subject",
+        default="",
+        help=(
+            "OMN-19563: exact lower-endpoint sha. When its receipt is absent, "
+            "re-emission is allowed only while the newest staging delivery is "
+            "waiting for this subject."
+        ),
+    )
+    elig.add_argument("--repo", default=DEFAULT_REPO)
+    elig.add_argument(
+        "--delivery-workflow",
+        default="deliver-dev-candidate-to-staging.yml",
+    )
+    elig.add_argument("--delivery-branch", default="dev")
+    elig.add_argument("--overall-bound-seconds", type=float, default=14_400)
 
     gate = sub.add_parser("gate", help="fail closed unless a PASS receipt exists")
     gate.add_argument("--sha", required=True)
@@ -4825,6 +4892,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "repeatable, ANY-OF: one PASS among these satisfies the rule 24(b) "
             "premise. Defaults to compose-dev, onex-lab and onex-lab-k3s"
+        ),
+    )
+    gate.add_argument(
+        "--instance-lanes-for",
+        default="",
+        metavar="REPO",
+        help=(
+            "OMN-19543: also read, ANY-OF, the receipt lane of every deploy-agent "
+            "instance whose row in config/deploy_lane_routing.yaml proves REPO "
+            "(omnimarket today: compose-dev-202, compose-dev-200). Needs --lane. "
+            "An unreadable table or a lane this enum does not declare refuses"
         ),
     )
     gate.add_argument(
@@ -4962,6 +5040,43 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--lane", required=True, choices=[e.value for e in EnumLabLane])
 
     return parser
+
+
+def _instance_receipt_lanes() -> Any:
+    """``scripts/ci/instance_receipt_lanes.py``, loaded by path (OMN-19543).
+
+    Lazily, and only by ``gate --instance-lanes-for``: that module needs PyYAML,
+    and every other path through this file stays stdlib-only, as with
+    ``_release_train_module``.
+    """
+    name = "_lab_pass_instance_receipt_lanes"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = Path(__file__).resolve().parent / "instance_receipt_lanes.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        msg = f"cannot load the instance receipt lanes from {path}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def instance_lanes_for(repo: str) -> list[EnumLabLane]:
+    """The receipt lanes of the instances that prove ``repo``, as enum values.
+
+    Raises ``ValueError`` for a table lane this enum does not declare, and the
+    reader's own error for an unreadable table; ``gate`` refuses on both.
+    """
+    return [
+        EnumLabLane(value)
+        for value in _instance_receipt_lanes().receipt_lanes_for(repo)
+    ]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -5177,7 +5292,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         existing = args.existing
         if existing is None or not existing.is_file():
             if args.endpoint:
-                print("skip:endpoint-has-no-receipt")
+                if not args.endpoint_subject:
+                    print("skip:endpoint-has-no-receipt")
+                    return 0
+                print(
+                    endpoint_reemit_eligibility(
+                        args.endpoint_subject,
+                        repo=args.repo,
+                        workflow=args.delivery_workflow,
+                        branch=args.delivery_branch,
+                        bound_seconds=args.overall_bound_seconds,
+                        now=datetime.now(UTC),
+                    )
+                )
                 return 0
             print("reemit:absent")
             return 0
@@ -5222,6 +5349,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.lane
             else list(ANY_OF_DEFAULT_LANES)
         )
+        if args.instance_lanes_for:
+            if not args.lane:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: "
+                    "--instance-lanes-for needs --lane; refusing rather than "
+                    "adding instance lanes to the any-of default.",
+                    file=sys.stdout,
+                )
+                return 1
+            try:
+                extra = instance_lanes_for(args.instance_lanes_for)
+            except Exception as exc:  # noqa: BLE001 - an unread table refuses
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: the instance "
+                    f"receipt lanes for {args.instance_lanes_for} could not be read "
+                    f"({exc}); refusing rather than reading fewer lanes.",
+                    file=sys.stdout,
+                )
+                return 1
+            lanes.extend(lane for lane in extra if lane not in lanes)
         required = list(dict.fromkeys(EnumLabLane(v) for v in args.require_lane))
         required_sha: str | None = None
         required_note = ""

@@ -1008,10 +1008,49 @@ jobs:
             --bus-lane "dev" \
             --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml"
 
+      # OMN-19338 AC1. Suppressing the three steps below leaves a GREEN job that
+      # says nothing about why no receipt exists, which reads exactly like a
+      # lane nobody probed. The queued outcome is a statement about the QUEUE,
+      # not the lane, so it is RECORDED rather than asserted. The condition is
+      # the exact complement of the suppression guard, so every run takes one
+      # branch or the other and the two cannot drift apart.
+      - name: Record the queued outcome for a merge whose turn has not come
+        if: always() && steps.converge.outputs.emit_receipt == 'false'
+        env:
+          MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
+          RECEIPT_LANE: ${{ needs.trigger-rebuild.outputs.receipt_lane }}
+          QUEUE_EVIDENCE: ${{ steps.converge.outputs.evidence }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### ${RECEIPT_LANE} lab-pass: QUEUED (OMN-18976)"
+            echo ""
+            echo "No receipt was emitted for \`${MERGE_SHA}\`: its turn in the deploy"
+            echo "agent's queue had not come, so nothing here asserts anything about"
+            echo "the lane. NO artifact is uploaded either, and that is the"
+            echo "load-bearing half -- the delivery gate reads an absent receipt as"
+            echo "PENDING, which a later convergence can still turn into a PASS,"
+            echo "while a receipt-named artifact carrying no receipt reads as"
+            echo "UNREADABLE, a token no later PASS can undo."
+            echo ""
+            echo "Queue evidence from the convergence guard:"
+            echo ""
+            echo "    ${QUEUE_EVIDENCE:-(the guard wrote no evidence)}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # OMN-18247: the zero-byte case `if-no-files-found: error` cannot see,
       # since the directory matches whether or not the receipt carries bytes.
+      #
+      # OMN-19338: guarded on the same output the emit step reads, and for the
+      # same reason. `emit_receipt: false` is the OMN-18976 queued verdict --
+      # the merge's turn in the deploy agent's queue has not come, so NO
+      # receipt is written ON PURPOSE. Asserting one is present on that path
+      # asserts the absence of a file the design says must be absent, which
+      # fails a job that did nothing wrong. A missing receipt on a path that
+      # SHOULD have emitted still fails here, because this condition is false
+      # only for the one verdict that suppresses emission.
       - name: Assert the compose-dev lab-pass receipt is present and non-empty
-        if: always()
+        if: always() && steps.converge.outputs.emit_receipt != 'false'
         run: |
           set -euo pipefail
           python3 scripts/ci/assert_evidence_artifact.py \
@@ -1024,8 +1063,10 @@ jobs:
       # stale file is published under a sha it says nothing about. The
       # consuming gate in the delivering repository catches the disagreement,
       # but an hour later and in another repo's logs. This asserts it here.
+      # OMN-19338: same guard, same verdict. Identity is a question about a
+      # receipt that exists; on the queued path there is none to identify.
       - name: Assert the compose-dev receipt on disk is this job's own
-        if: always()
+        if: always() && steps.converge.outputs.emit_receipt != 'false'
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
         run: |
@@ -1034,8 +1075,19 @@ jobs:
             --path "${LAB_PASS_DIR}/receipt.json" \
             --sha "$MERGE_SHA" \
             --lane "$RECEIPT_LANE"
+      # OMN-19338, and this is the step whose absence of a guard did the
+      # damage. `path:` is the whole of LAB_PASS_DIR, and on the queued path
+      # that directory still holds the earlier probes' leftovers
+      # (`declared-groups.txt`, `lag-sample.json`) -- so `if-no-files-found:
+      # error` is satisfied by files that are not a receipt, and the upload
+      # publishes a receipt-NAMED artifact carrying no `receipt.json`. The
+      # consuming gate reads that as UNREADABLE, which is not in
+      # RERUN_ELIGIBLE_TOKENS, so the OMN-19233 re-run refuses forever and a
+      # verdict the design made recoverable becomes terminal. Suppressing the
+      # upload leaves the subject with no artifact at all, which reads as
+      # PENDING and stays recoverable, which is what OMN-18976 intended.
       - name: Upload the compose-dev lab-pass receipt
-        if: always()
+        if: always() && steps.converge.outputs.emit_receipt != 'false'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # The NAME is the key scripts/ci/lab_pass_receipt.py's gate queries
@@ -1116,7 +1168,9 @@ jobs:
     name: Re-emit receipts for shas queued behind this merge
     needs: [trigger-rebuild, verify-lane-converged]
     if: >-
-      needs.verify-lane-converged.result == 'success' &&
+      always() &&
+      needs.verify-lane-converged.result != 'skipped' &&
+      needs.verify-lane-converged.result != 'cancelled' &&
       needs.verify-lane-converged.outputs.reemit_candidates != '' &&
       needs.verify-lane-converged.outputs.reemit_candidates != '[]'
     # Hosted: this job reads two artifacts and writes a third. It touches no
@@ -1200,6 +1254,7 @@ jobs:
       - name: Decide whether this candidate may be answered for
         id: eligible
         env:
+          GH_TOKEN: ${{ github.token }}
           REEMIT_SHA: ${{ matrix.candidate.sha }}
           IS_ENDPOINT: ${{ matrix.candidate.endpoint }}
         run: |
@@ -1209,7 +1264,14 @@ jobs:
             ARGS+=(--existing "${LAB_PASS_EXISTING_DIR}/receipt.json")
           fi
           if [ "${IS_ENDPOINT}" = "true" ]; then
-            ARGS+=(--endpoint)
+            ARGS+=(
+              --endpoint
+              --endpoint-subject "${REEMIT_SHA}"
+              --repo "${GITHUB_REPOSITORY}"
+              --delivery-workflow "deliver-dev-candidate-to-staging.yml"
+              --delivery-branch "dev"
+              --overall-bound-seconds 14400
+            )
           fi
           DECISION=$(uv run python scripts/ci/lab_pass_receipt.py reemit-eligible "${ARGS[@]}")
           echo "decision: ${DECISION}"

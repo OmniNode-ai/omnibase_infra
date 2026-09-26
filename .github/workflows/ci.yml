@@ -303,6 +303,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # OMN-19613: depth 2 brings in the pull_request merge commit's first
+          # parent (the base tip it was merged onto), which is what
+          # scripts/ci/precommit_diff_scope.py diffs against to scope the
+          # per-file Plugin* guard below. Without it the scope fails closed to
+          # the whole tree, which is correct but slower.
+          fetch-depth: 2
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -344,6 +351,9 @@ jobs:
       - name: Check Kafka bootstrap no localhost fallback (OMN-8783)
         run: uv run python scripts/ci_check_kafka_no_localhost_default.py
 
+      - name: Check Kafka hardcoded broker fallbacks (whole-tree backstop)
+        run: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
+
       - name: Check no localhost env fallbacks in src/ (OMN-10732)
         run: uv run python scripts/validate_no_env_fallbacks.py
 
@@ -353,8 +363,21 @@ jobs:
       - name: Single-canonical in-memory event bus (OMN-13419)
         run: bash scripts/validation/check_no_infra_inmemory_import.sh
 
+      # OMN-19613: the guard is an AST check on each file's own classes, so a
+      # file the PR did not touch cannot turn it red. On pull_request it scans
+      # only the PR's files; it scans the whole tree on push (which proves the
+      # merged union on dev, OMN-18835), merge_group and dispatch, when the PR
+      # changes .pre-commit-config.yaml or this workflow, when the PR moves the
+      # omnibase-core pin in uv.lock (the validator's code lives in core), and
+      # whenever the base cannot be resolved. The step always runs; only the
+      # file list narrows, so the check never goes missing from a PR.
       - name: Check Plugin* lifecycle class guard (OMN-13284, relocated to omnibase_core)
-        run: uv run pre-commit run no-plugin-daemon-classes --all-files
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          scope="$(uv run python scripts/ci/precommit_diff_scope.py --event-name "$EVENT_NAME")"
+          mapfile -t scope_args <<< "$scope"
+          uv run pre-commit run no-plugin-daemon-classes "${scope_args[@]}"
 
       # OMN-13030: Deployed-SHA claims in handoff/OCC/evidence docs must carry an
       # adjacent `docker exec <container> cat /app/build-provenance.json` probe.
@@ -379,6 +402,20 @@ jobs:
       - name: operation_match operation-field gate (OMN-13530)
         run: uv run python -m omnibase_core.validators.operation_match_requires_operation src/omnibase_infra
 
+      # OMN-19613: the fourteen omnibase_infra validator modules below run in ONE
+      # interpreter. Each used to be its own `uv run python -m` step, and each of
+      # those cost 12-15 s on the runners (run 35616533588) even for a one-file
+      # input, because the cost was start-up and import, paid fourteen times on
+      # the job every test shard waits for. scripts/ci/run_validators_in_process.py
+      # calls each module's main(argv) with exactly the arguments its step passed,
+      # runs ALL of them even after a failure, exits 1 if any failed, and reports
+      # each failure as its own error annotation titled with the old step name,
+      # plus a per-validator exit/seconds table in the job summary.
+      # tests/ci/test_lint_validator_runner.py pins that no validator step exists
+      # outside this list. Add a new omnibase_infra validator as one more line in
+      # the heredoc, with its rationale as one more section above the step.
+      #
+      # --- handler_routing flat-schema gate (OMN-14141) ---
       # OMN-14141: every handler_routing.handlers[] entry must carry a nested
       # 'handler: {name, module}' mapping. The flat 'handler_class'/
       # 'handler_module' schema silently parses to ZERO dispatchers and then
@@ -387,9 +424,8 @@ jobs:
       # gate paired with the runtime parse guard in
       # auto_wiring/discovery._parse_handler_routing. SYNC with pre-commit hook
       # 'handler-routing-schema-gate'.
-      - name: handler_routing flat-schema gate (OMN-14141)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_routing_schema src/omnibase_infra
-
+      #
+      # --- tenant_scoped_ingress opt-in gate (OMN-14360) ---
       # OMN-14360 (OMN-14208 Path A): fail-closed gate on the
       # event_bus.tenant_scoped_ingress opt-in. A flag-true contract must bind
       # at least one tenant-<slug>.-prefixed subscribe_topic, and every other
@@ -404,12 +440,10 @@ jobs:
       # (not contract-validation.yml, which validates ticket contracts via a
       # reusable action with no uv setup) so it runs in this already-required
       # lint job against the pinned toolchain.
-      - name: tenant_scoped_ingress opt-in gate (OMN-14360)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.tenant_scoped_ingress_schema src/omnibase_infra
-
-      - name: Check handler Any signature gate (OMN-10820)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
-
+      #
+      # --- Check handler Any signature gate (OMN-10820) ---
+      #
+      # --- Check handler dispatch-entrypoint gate (OMN-14135) ---
       # OMN-14135: a contract-declared handler exposing NEITHER handle() nor
       # handle_async() is bound by auto-wiring to _missing_handle, which raises on
       # EVERY dispatch — while the contract validates, the node boots, and CI stays
@@ -420,9 +454,8 @@ jobs:
       # PR that adds a bad handler. Ratchet is frozen in
       # config/validation/handler_dispatch_entrypoint_baseline.yaml and is shrink-only.
       # SYNC with pre-commit hook 'handler-dispatch-entrypoint'.
-      - name: Check handler dispatch-entrypoint gate (OMN-14135)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_dispatch_entrypoint src/omnibase_infra
-
+      #
+      # --- Check contract topic category gate (OMN-18013) ---
       # OMN-18013 (operator ruling item 1), superseding the OMN-14605 gate. Routing is
       # now PER-TOPIC: derive_route_message_category stamps each ModelDispatchRoute
       # with the category derived from THAT ROUTE'S OWN topic name, so the
@@ -434,9 +467,8 @@ jobs:
       # with EnumMessageCategory.from_topic at dispatch on 32 live topics).
       # The OMN-14605 baseline is burned to zero and DELETED.
       # SYNC with pre-commit hook 'contract-topic-category'.
-      - name: Check contract topic category gate (OMN-18013)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.contract_topic_category --scope omnibase_infra
-
+      #
+      # --- Check handler event_type source gate (OMN-18013) ---
       # OMN-18013 (operator ruling item 2). The runtime stamps the DERIVED ALIAS for a
       # topic as event_type (derive_event_type_alias_for_topic, the single source on
       # both sides of the wire, OMN-17296) — never the topic string. Before OMN-18013
@@ -445,27 +477,24 @@ jobs:
       # message onto any dispatcher and was the only path by which a hand-typed alias
       # was ever reachable. That override is removed; this gate removes the shapes that
       # depended on it. SYNC with pre-commit hook 'handler-event-type-source'.
-      - name: Check handler event_type source gate (OMN-18013)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_event_type_source --scope omnibase_infra
-
+      #
+      # --- Check golden-chain contract input gate (OMN-18013) ---
       # OMN-18013 (operator ruling item 4). 108 test sites across the corpus passed a
       # full ONEX TOPIC as an envelope event_type — a spelling the bus never carries.
       # They were green only because derive_entry_message_types registers BOTH the
       # topic and the alias as dispatcher index keys, so the wrong one still resolved
       # inside the test while production used the other. SYNC with pre-commit hook
       # 'no-literal-event-type-in-tests'.
-      - name: Check golden-chain contract input gate (OMN-18013)
-        run: uv run python -m omnibase_infra.validators.no_literal_event_type_in_tests tests
-
+      #
+      # --- Check no baseline refreeze (OMN-18013) ---
       # OMN-18013 (operator ruling item 5). The subscriber-dispatcher-resolution and
       # mixed-category baselines were burned to zero and DELETED. A shrink-only ratchet
       # is better than an amnesty list but still takes a row from whoever cannot make
       # the gate pass — every OMN-16939 live victim was a baselined row. A file that
       # does not exist cannot take one. SYNC with pre-commit hook
       # 'no-baseline-refreeze'.
-      - name: Check no baseline refreeze (OMN-18013)
-        run: uv run python -m omnibase_infra.validators.no_baseline_refreeze .
-
+      #
+      # --- Check result-applier construction gate (OMN-15468) ---
       # OMN-15468: an applier built outside its factory silently loses BOTH
       # re-route mechanisms — the published_events map (class-based routing to a
       # declared `…Failed` topic) and the contract's declared failure terminal
@@ -474,9 +503,8 @@ jobs:
       # delegate-skill-completed.v1 carried status="failed" with a typed
       # terminal_failure_cause. SYNC with pre-commit hook
       # 'contract-result-applier-construction'.
-      - name: Check result-applier construction gate (OMN-15468)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.contract_result_applier_construction src/omnibase_infra
-
+      #
+      # --- Check subscriber dispatcher resolution gate (OMN-16939) ---
       # OMN-16939: the dispatcher-side sibling of the subscribe-wiring ratchet. A
       # declared subscribe_topic that resolves to NO registered dispatcher for its own
       # (category, message type) is consumed, DLQ'd and COMMITTED on every message —
@@ -489,9 +517,8 @@ jobs:
       # omnimarket victims went unseen). OMN-18013 burned this repo's 22-row baseline
       # to ZERO and DELETED the file; the validator has no --baseline flag left.
       # SYNC with pre-commit hook 'subscriber-dispatcher-resolution'.
-      - name: Check subscriber dispatcher resolution gate (OMN-16939)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.subscriber_dispatcher_resolution src/omnibase_infra
-
+      #
+      # --- Check operation_match fan-out gate (OMN-16088) ---
       # OMN-16088 (split from OMN-15978 AC4): an operation_match handler_routing entry
       # (carries `operation:`) with no `topic:`/`event_type:` scoping falls through to
       # _topics_for_handler_entry's unscoped branch and is assigned EVERY subscribe
@@ -503,9 +530,8 @@ jobs:
       # rows — and DELETED config/validation/operation_match_fanout_baseline.yaml;
       # no --baseline flag remains and `no-baseline-refreeze` refuses its return.
       # SYNC with pre-commit hook 'operation-match-fanout'.
-      - name: Check operation_match fan-out gate (OMN-16088)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.operation_match_fanout src/omnibase_infra
-
+      #
+      # --- Check envelope tenant dimension gate (OMN-16831) ---
       # OMN-16831 ruled item 2 (operator ruling 2026-08-28, option D). A producer
       # records which tenant its event belongs to AT WRITE TIME; the projection
       # tenant authority only verifies that claim and must never source one.
@@ -517,14 +543,28 @@ jobs:
       # each recorded a tenant somewhere and left the dimension off, and every one
       # ended at a tenant-classified projection write refused fail-closed.
       # SYNC with pre-commit hook 'envelope-tenant-dimension'.
-      - name: Check envelope tenant dimension gate (OMN-16831)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.envelope_tenant_dimension src/omnibase_infra
-
-      - name: Check type-ignore budget gate (OMN-10822)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
-
-      - name: LLM topology contract drift validator (OMN-11926)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.llm_topology_validator contracts/llm_endpoints.yaml
+      #
+      # --- Check type-ignore budget gate (OMN-10822) ---
+      #
+      # --- LLM topology contract drift validator (OMN-11926) ---
+      - name: omnibase_infra validators, one process (OMN-19613)
+        run: |
+          PYTHONPATH=src uv run python scripts/ci/run_validators_in_process.py <<'VALIDATORS'
+          handler_routing flat-schema gate (OMN-14141) | omnibase_infra.validators.handler_routing_schema src/omnibase_infra
+          tenant_scoped_ingress opt-in gate (OMN-14360) | omnibase_infra.validators.tenant_scoped_ingress_schema src/omnibase_infra
+          Check handler Any signature gate (OMN-10820) | omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
+          Check handler dispatch-entrypoint gate (OMN-14135) | omnibase_infra.validators.handler_dispatch_entrypoint src/omnibase_infra
+          Check contract topic category gate (OMN-18013) | omnibase_infra.validators.contract_topic_category --scope omnibase_infra
+          Check handler event_type source gate (OMN-18013) | omnibase_infra.validators.handler_event_type_source --scope omnibase_infra
+          Check golden-chain contract input gate (OMN-18013) | omnibase_infra.validators.no_literal_event_type_in_tests tests
+          Check no baseline refreeze (OMN-18013) | omnibase_infra.validators.no_baseline_refreeze .
+          Check result-applier construction gate (OMN-15468) | omnibase_infra.validators.contract_result_applier_construction src/omnibase_infra
+          Check subscriber dispatcher resolution gate (OMN-16939) | omnibase_infra.validators.subscriber_dispatcher_resolution src/omnibase_infra
+          Check operation_match fan-out gate (OMN-16088) | omnibase_infra.validators.operation_match_fanout src/omnibase_infra
+          Check envelope tenant dimension gate (OMN-16831) | omnibase_infra.validators.envelope_tenant_dimension src/omnibase_infra
+          Check type-ignore budget gate (OMN-10822) | omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
+          LLM topology contract drift validator (OMN-11926) | omnibase_infra.validators.llm_topology_validator contracts/llm_endpoints.yaml
+          VALIDATORS
 
       # OMN-13026: Transport-mock lint. Bare AsyncMock/MagicMock without
       # spec=/spec_set= on EventBus/transport/kafka surfaces. Ratchet: existing
@@ -899,6 +939,13 @@ jobs:
             --mode=self-test \
             --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py \
             --expected 9
+
+      # OMN-19612: validate-spdx-headers runs staged-file-scoped in
+      # .pre-commit-config.yaml (pass_filenames: true); this is its
+      # whole-tree CI counterpart so the header requirement still holds
+      # over the entire tree, not only a developer's staged diff.
+      - name: SPDX header check (OMN-19612)
+        run: uv run --frozen onex spdx validate src tests scripts
 
   infra-node-handler-ownership:
     needs: occ-preflight
@@ -3905,7 +3952,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: b0ce124838108bdce47f0e02245906ec5be4fde2
+          ref: 8b8d5d3b5dda51bdcc99168d4c358a6df0f19380
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -4852,6 +4899,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # OMN-17886 AC4: an EMPTY server for the live-ACL gate. The corpus has to
+      # build into the real database names (sixteen migrations run
+      # `\connect omnidash_analytics`), and the service above already holds a
+      # migrated omnibase_infra, so the gate gets a server of its own.
+      acl_gate_postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -5034,6 +5096,23 @@ jobs:
         run: |
           uv run pytest \
             tests/integration/migrations/test_omn15683_mixed_representation_conversion.py \
+            -v --tb=short -p no:randomly
+
+      # OMN-17886 AC4: build omnidash_analytics from EMPTY with the real forward
+      # runner, then diff its omninode_internal ACLs against the topology. A
+      # migration that confers an undeclared grant, or omits a declared one,
+      # fails here. The findings the corpus still produces are listed one by one
+      # in config/omninode_internal_live_acl_allowlist.yaml, which is
+      # shrink-only: an entry that stops reproducing fails the gate too.
+      - name: omninode_internal live-ACL gate (OMN-17886)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMN17886_GATE_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.acl_gate_postgres.ports['5432'] }}/postgres
+          # With a Postgres in hand a SKIP is a vacuous green.
+          OMN17886_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py \
             -v --tb=short -p no:randomly
 
       - name: Assert manifest tables exist

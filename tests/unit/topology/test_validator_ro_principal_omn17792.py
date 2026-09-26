@@ -69,7 +69,10 @@ _SHIPPED_INSTANCES = ("local", "onex-dev", "onex-prod")
 # Every schema the onex-dev application database declares. The role is a
 # read-only validation identity across the whole application database, so its
 # USAGE set is the declared schema set rather than a subset chosen by taste.
-EXPECTED_SCHEMAS = ("omninode_internal", "platform_catalog", "public", "tenant")
+# OMN-17887 (operator ruling 2026-09-24): the `tenant` schema is RETIRED -- the
+# TENANT domain's schema is `public` -- so there is no `tenant` USAGE to grant.
+EXPECTED_SCHEMAS = ("omninode_internal", "platform_catalog", "public")
+RETIRED_SCHEMA = "tenant"
 
 pytestmark = pytest.mark.unit
 
@@ -129,6 +132,10 @@ def test_validator_ro_declares_connect_and_schema_usage_and_nothing_else() -> No
 
     schema_grants = [g for g in grants if g["object_type"] == "SCHEMA"]
     assert tuple(sorted(g["schema"] for g in schema_grants)) == EXPECTED_SCHEMAS
+    assert RETIRED_SCHEMA not in {g["schema"] for g in schema_grants}, (
+        "validator_ro declares USAGE on the retired `tenant` schema (OMN-17887); "
+        "the TENANT domain's schema is `public`"
+    )
     for grant in schema_grants:
         assert list(grant["privileges"]) == ["USAGE"], (
             "USAGE only: CREATE on a schema makes this role the OWNER of every "
@@ -139,6 +146,32 @@ def test_validator_ro_declares_connect_and_schema_usage_and_nothing_else() -> No
         "validator_ro declares a grant that is neither DATABASE CONNECT nor "
         "SCHEMA USAGE -- read-only reach is the whole point of the principal"
     )
+
+
+@pytest.mark.parametrize("instance", _SHIPPED_INSTANCES)
+def test_validator_ro_usage_targets_only_declared_schemas_and_never_tenant(
+    instance: str,
+) -> None:
+    """OMN-17887: every USAGE grant names a schema the database declares, and
+    the retired `tenant` schema is neither declared nor granted, in the source
+    instance and in its rendered projection alike."""
+    for document in (
+        _instance(instance),
+        yaml.safe_load((PROJECTION_ROOT / f"{instance}.yaml").read_text("utf-8")),
+    ):
+        application = document["databases"]["application"]
+        declared = set(application["schemas"])
+        assert RETIRED_SCHEMA not in declared
+        usage = {
+            grant["schema"]
+            for grant in application["principals"][ROLE]["grants"]
+            if grant["object_type"] == "SCHEMA"
+        }
+        assert RETIRED_SCHEMA not in usage
+        assert usage <= declared, (
+            f"{ROLE} is granted USAGE on undeclared schema(s) "
+            f"{sorted(usage - declared)} in {instance}"
+        )
 
 
 def test_validator_ro_holds_no_write_or_ddl_privilege_anywhere() -> None:
