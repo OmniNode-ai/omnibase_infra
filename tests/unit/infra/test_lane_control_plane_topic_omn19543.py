@@ -32,6 +32,7 @@ fake ``rpk`` and pin:
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -121,6 +122,18 @@ def _run_oneshot(
     command = _services(_DEV_LANE)[_ONESHOT]["command"]
     # Compose turns `$$` into a literal `$` before the shell sees it.
     script = "\n".join(str(c) for c in command).replace("$$", "$")
+    # OMN-19731: the oneshot's scratch files (/tmp/topics.txt, /tmp/cfg.txt)
+    # are fixed /tmp paths, private inside its container but shared by every
+    # xdist worker on a CI host, so parallel tests read each other's listing.
+    # Rewrite these first because tmp_path may itself be under /tmp.
+    # Give each test its own copy of every one.
+    # The /tmp literals below MATCH the script's paths; nothing opens them.
+    container_tmp = r"/tmp/([A-Za-z0-9_.-]+)"  # noqa: S108
+    script = re.sub(container_tmp, lambda m: str(tmp_path / m.group(1)), script)
+    leftover = script.replace(str(tmp_path), "")
+    assert "/tmp/" not in leftover, (  # noqa: S108
+        "oneshot script still uses a fixed /tmp path shared across xdist workers"
+    )
     fake = tmp_path / "rpk"
     fake.write_text(_FAKE_RPK, encoding="utf-8")
     fake.chmod(0o755)

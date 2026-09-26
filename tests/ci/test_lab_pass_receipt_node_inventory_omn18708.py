@@ -467,3 +467,97 @@ class TestCliPlumbing:
     ) -> None:
         with pytest.raises(OSError, match="No such file"):
             load_node_inventory_json(tmp_path / "absent.json")
+
+
+# ---------------------------------------------------------------------------
+# OMN-19802: the manifest is read AFTER the settle wait, never before it
+# ---------------------------------------------------------------------------
+class TestTheManifestIsReadAfterTheSettleWait:
+    """``probe-lane`` must not read the manifest of a lane still coming up.
+
+    Measured on omnimarket compose-dev receipt artifact 10909257483 (sha
+    befa9cc0ab, 2026-09-26T15:24:50Z): ``node_inventory`` FAILED with
+    ``Errno 111 Connection refused`` on port 8085, annotated ``[lane ready
+    after 331s of a 900s settle budget]``, while ``ready_main`` on the same
+    port read 200. The manifest had been read BEFORE the settle wait and then
+    labelled as if it were read after. Here the lane refuses every connection
+    until the wait runs, which is exactly what a freshly recreated lane does.
+    """
+
+    def test_probe_lane_reads_the_manifest_after_the_settle_wait(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        events: list[str] = []
+        lane = {"up": False}
+        manifest = _manifest_body(
+            [
+                {
+                    "name": "alpha",
+                    "node_version": "1.0.0",
+                    "contract_content_hash": HASH_A,
+                }
+            ]
+        )
+
+        def _get(url: str, _timeout: float) -> tuple[int, str]:
+            events.append(url)
+            if not lane["up"]:
+                return 0, "URLError: <urlopen error [Errno 111] Connection refused>"
+            if url.endswith(INTROSPECTION_MANIFEST_PATH):
+                return 200, manifest
+            return 200, "{}"
+
+        def _wait(*_a: object, **_k: object) -> object:
+            events.append("<settle wait>")
+            lane["up"] = True
+            return type(
+                "O",
+                (),
+                {
+                    "phrase": "lane ready after 331s of a 900s settle budget",
+                    "timed_out": False,
+                    "waited_seconds": 331.0,
+                    "granted_seconds": 0.0,
+                },
+            )()
+
+        monkeypatch.setattr("scripts.ci.lab_pass_receipt._http_get", _get)
+        monkeypatch.setattr("scripts.ci.lab_pass_receipt.wait_for_lane_ready", _wait)
+        inventory_out = tmp_path / "inventory.json"
+
+        assert (
+            main(
+                [
+                    "probe-lane",
+                    "--lane",
+                    "compose-dev",
+                    "--main-url",
+                    "http://lane:8085",
+                    "--effects-url",
+                    "http://lane:8086",
+                    "--projection-url",
+                    "http://lane:3002",
+                    "--manifest-url",
+                    "http://lane:8085",
+                    "--node-inventory-out",
+                    str(inventory_out),
+                ]
+            )
+            == 0
+        )
+
+        manifest_reads = [
+            i for i, e in enumerate(events) if e.endswith(INTROSPECTION_MANIFEST_PATH)
+        ]
+        wait_at = events.index("<settle wait>")
+        # ONE read, and after the wait: the check and the triples still come
+        # from the same response.
+        assert len(manifest_reads) == 1, events
+        assert manifest_reads[0] > wait_at, events
+
+        checks = {c["name"]: c for c in json.loads(capsys.readouterr().out)}
+        assert checks[NODE_INVENTORY_CHECK]["ok"] is True, checks[NODE_INVENTORY_CHECK]
+        assert json.loads(inventory_out.read_text())[0]["name"] == "alpha"

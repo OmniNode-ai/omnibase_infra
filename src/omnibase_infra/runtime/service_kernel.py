@@ -82,6 +82,8 @@ from uuid import UUID
 import yaml
 
 if TYPE_CHECKING:
+    from aiokafka import AIOKafkaProducer
+
     from omnibase_core.models.core.model_deployment_topology import (
         ModelDeploymentTopology,
     )
@@ -123,6 +125,7 @@ from omnibase_infra.errors import (
 # selection in select_event_bus() handles the core→infra fallback.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models import ModelNodeIdentity
@@ -251,6 +254,12 @@ ENV_MARKETPLACE_SKILLS_ROOT = "ONEX_MARKETPLACE_SKILLS_ROOT"
 DEFAULT_INPUT_TOPIC = "requests"  # onex-topic-allow: pending contract auto-wiring
 DEFAULT_OUTPUT_TOPIC = "responses"  # onex-topic-allow: pending contract auto-wiring
 DEFAULT_GROUP_ID = "onex-runtime"
+DEFAULT_RUNTIME_LOG_BRIDGE_ALLOWLIST: tuple[str, ...] = (
+    "aiokafka.consumer",
+    "asyncpg",
+    "aiohttp",
+    "omnibase_infra.runtime.auto_wiring",
+)
 
 # OMN-8784: Deprecated topic env vars — hard-fail if set.
 # Topics must be derived from contract subscriptions/publishes, not env vars.
@@ -277,6 +286,29 @@ _KAFKA_BROKER_DENYLIST_PATTERNS: tuple[re.Pattern[str], ...] = (
 # Value: comma-separated host prefixes, e.g. "192.168.86.,10.0.0."
 # When unset, only the built-in denylist is enforced.
 ENV_KAFKA_BROKER_ALLOWLIST = "KAFKA_BROKER_ALLOWLIST"
+
+
+def _runtime_log_bridge_allowlist() -> list[str]:
+    """Resolve the logger namespaces captured by the runtime log bridge."""
+    allowlist_raw = os.environ.get(
+        "RUNTIME_LOG_BRIDGE_ALLOWLIST",
+        ",".join(DEFAULT_RUNTIME_LOG_BRIDGE_ALLOWLIST),
+    )
+    return [name.strip() for name in allowlist_raw.split(",") if name.strip()]
+
+
+async def _create_runtime_log_bridge_producer(
+    bootstrap_servers: str,
+) -> AIOKafkaProducer:
+    """Create the bridge producer with the runtime event bus Kafka transport."""
+    from aiokafka import AIOKafkaProducer
+
+    producer = AIOKafkaProducer(
+        bootstrap_servers=bootstrap_servers,
+        **build_aiokafka_auth_kwargs_from_env(),
+    )
+    await producer.start()
+    return producer
 
 
 def _resolve_marketplace_skills_root() -> str:
@@ -2021,12 +2053,9 @@ async def bootstrap() -> int:
         # them as structured Kafka events. Requires a dedicated producer.
         if use_kafka and RuntimeLogEventBridge.is_enabled() and kafka_bootstrap_servers:
             try:
-                from aiokafka import AIOKafkaProducer as _BridgeProducer
-
-                _bridge_producer = _BridgeProducer(
-                    bootstrap_servers=kafka_bootstrap_servers,
+                _bridge_producer = await _create_runtime_log_bridge_producer(
+                    kafka_bootstrap_servers
                 )
-                await _bridge_producer.start()
 
                 runtime_log_bridge = RuntimeLogEventBridge(
                     producer=_bridge_producer,
@@ -2035,13 +2064,7 @@ async def bootstrap() -> int:
                 )
 
                 # Parse allowlist from env or use defaults
-                allowlist_raw = os.environ.get(
-                    "RUNTIME_LOG_BRIDGE_ALLOWLIST",
-                    "aiokafka.consumer,asyncpg,aiohttp",
-                )
-                allowlist = [
-                    name.strip() for name in allowlist_raw.split(",") if name.strip()
-                ]
+                allowlist = _runtime_log_bridge_allowlist()
                 runtime_log_bridge.attach_to_loggers(allowlist)
                 await runtime_log_bridge.start()
 
@@ -5138,13 +5161,7 @@ async def bootstrap() -> int:
         # Stop RuntimeLogEventBridge (OMN-5525)
         if runtime_log_bridge is not None:
             try:
-                allowlist_raw = os.environ.get(
-                    "RUNTIME_LOG_BRIDGE_ALLOWLIST",
-                    "aiokafka.consumer,asyncpg,aiohttp",
-                )
-                allowlist = [
-                    name.strip() for name in allowlist_raw.split(",") if name.strip()
-                ]
+                allowlist = _runtime_log_bridge_allowlist()
                 runtime_log_bridge.detach_from_loggers(allowlist)
                 await runtime_log_bridge.stop()
                 # Stop the bridge's producer

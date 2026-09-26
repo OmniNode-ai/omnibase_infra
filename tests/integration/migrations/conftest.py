@@ -17,10 +17,13 @@ doing it against a cloud/RDS instance is not something a test may do at all.
 
 from __future__ import annotations
 
+import os
 import shutil
 import socket
 import subprocess
 import tempfile
+import time
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -32,6 +35,48 @@ import pytest
 # a skipped proof is visible, a downgraded one is not.
 PG_TOOLS_MISSING = any(
     shutil.which(tool) is None for tool in ("initdb", "pg_ctl", "psql")
+)
+
+#: ``psql`` is the one tool no backend can substitute: every live-apply proof
+#: drives the migration through ``psql -v ON_ERROR_STOP=1 -f <file>`` because
+#: that is the invocation ``run-forward-migrations.sh`` uses in production.
+PSQL_MISSING = shutil.which("psql") is None
+
+#: Same major version as the ``services.postgres`` image the CI jobs provision,
+#: so the container backend and the hosted jobs agree on server behaviour.
+_DOCKER_IMAGE = os.environ.get("ONEX_EPHEMERAL_PG_IMAGE", "postgres:16-alpine")
+
+#: Set to "1" to turn a SKIP into a hard failure. With a working backend in
+#: hand a skipped security proof is a vacuous green, and this suite exists
+#: precisely because enforcement once shipped ahead of provisioning unnoticed.
+_REQUIRE_ENV = "ONEX_MIGRATION_PROOF_REQUIRE_PG"
+
+
+def _docker_usable() -> bool:
+    """Whether a throwaway Postgres CONTAINER can stand in for ``initdb``.
+
+    Checked by running ``docker info`` rather than by the binary's presence: a
+    Docker CLI with no reachable daemon is the ordinary state on a runner, and
+    it answers ``which`` exactly as well as a working one.
+    """
+    if shutil.which("docker") is None:
+        return False
+    probe = subprocess.run(
+        ["docker", "info", "--format", "{{.ServerVersion}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return probe.returncode == 0
+
+
+#: A cluster can be built natively OR in a container. Modules that gate on
+#: availability must read THIS, not PG_TOOLS_MISSING: the native tools being
+#: absent stopped meaning "no cluster is possible" once the container backend
+#: existed, and a module that still gates on the old name skips a proof it
+#: could have run.
+EPHEMERAL_POSTGRES_UNAVAILABLE = PSQL_MISSING or (
+    PG_TOOLS_MISSING and not _docker_usable()
 )
 
 
@@ -104,13 +149,112 @@ class EphemeralPostgres:
         )
 
 
+def _unavailable(reason: str) -> None:
+    """Skip, or fail when the caller declared a backend must be present."""
+    if os.environ.get(_REQUIRE_ENV) == "1":
+        pytest.fail(f"{_REQUIRE_ENV}=1 but no Postgres backend is usable: {reason}")
+    pytest.skip(reason)
+
+
+def _docker_cluster() -> Iterator[EphemeralPostgres]:
+    """A throwaway cluster in a container, for hosts where ``initdb`` cannot run.
+
+    Two hosts need this and neither is exotic. A CI container installs
+    ``postgresql-client`` (psql) but not the server package, so ``initdb`` is
+    absent; and on macOS the SysV shared-memory ceiling (``kern.sysv.shmall``
+    defaults to 1024 pages = 4 MiB, shared with every other process) makes
+    ``initdb`` fail at ``shmget`` even with the binaries installed. Both
+    previously SKIPPED every live-apply proof in this directory, which is how
+    eight security proofs for OMN-15425 came to execute nowhere at all while
+    the suite still reported green.
+
+    One container per test, torn down after, so the per-test virgin-cluster
+    property the native backend provides is preserved exactly. That property is
+    load-bearing here: these proofs create, escalate and drop CLUSTER-WIDE
+    roles and revoke database-level CONNECT, so a reused cluster would let one
+    test's role state decide another test's verdict.
+
+    ``POSTGRES_HOST_AUTH_METHOD=trust`` mirrors the native backend's
+    ``initdb --auth=trust``, so no password has to be threaded through
+    ``psql()`` and the two backends stay behaviourally identical.
+    """
+    name = f"onexpg-{uuid.uuid4().hex[:12]}"
+    port = _free_port()
+    start = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--detach",
+            "--name",
+            name,
+            "--env",
+            "POSTGRES_HOST_AUTH_METHOD=trust",
+            "--env",
+            "POSTGRES_PASSWORD=",
+            "--publish",
+            f"127.0.0.1:{port}:5432",
+            _DOCKER_IMAGE,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if start.returncode != 0:
+        _unavailable(
+            f"could not start the {_DOCKER_IMAGE} container for the "
+            f"live-apply proof: {start.stderr.strip()}"
+        )
+
+    try:
+        deadline = time.monotonic() + 60.0
+        last = ""
+        while time.monotonic() < deadline:
+            # pg_isready INSIDE the container answers for the server; the
+            # connect below answers for the published port. Both are needed:
+            # the server accepts connections several hundred ms before the
+            # host-side mapping is reliably reachable.
+            ready = subprocess.run(
+                ["docker", "exec", name, "pg_isready", "-U", "postgres", "-q"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if ready.returncode == 0:
+                try:
+                    psycopg2.connect(
+                        host="127.0.0.1", port=port, user="postgres", dbname="postgres"
+                    ).close()
+                    break
+                except psycopg2.Error as exc:  # pragma: no cover - timing only
+                    last = str(exc)
+            time.sleep(0.25)
+        else:
+            pytest.fail(
+                f"the {_DOCKER_IMAGE} container never became reachable on "
+                f"127.0.0.1:{port} within 60s: {last}"
+            )
+        yield EphemeralPostgres(socket_dir="127.0.0.1", port=port)
+    finally:
+        subprocess.run(
+            ["docker", "rm", "--force", name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
 @pytest.fixture
 def ephemeral_postgres() -> Iterator[EphemeralPostgres]:
-    if PG_TOOLS_MISSING:
-        pytest.skip(
-            "initdb/pg_ctl/psql not on PATH — cannot spin up an ephemeral "
-            "Postgres cluster for the live-apply proof"
+    if PSQL_MISSING:
+        _unavailable(
+            "psql not on PATH — the live-apply proofs drive migrations through "
+            "the same psql invocation production uses and cannot substitute a "
+            "driver call for it"
         )
+    if PG_TOOLS_MISSING:
+        yield from _docker_cluster()
+        return
 
     scratch = tempfile.mkdtemp(prefix="onexpg_")
     data_dir = Path(scratch) / "data"
@@ -125,6 +269,14 @@ def ephemeral_postgres() -> Iterator[EphemeralPostgres]:
     )
     if init.returncode != 0:
         shutil.rmtree(scratch, ignore_errors=True)
+        # Present-but-unusable is a real host state, not a defect in the proof:
+        # macOS refuses the SysV segment initdb asks for once kern.sysv.shmall
+        # (4 MiB by default, shared machine-wide) is consumed. Falling through
+        # to the container backend keeps the proof running instead of turning a
+        # host limit into a red suite.
+        if _docker_usable():
+            yield from _docker_cluster()
+            return
         pytest.fail(f"initdb failed for the ephemeral test cluster: {init.stderr}")
 
     start = subprocess.run(
