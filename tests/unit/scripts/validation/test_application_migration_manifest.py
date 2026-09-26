@@ -819,8 +819,14 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # dod_verify_runs.delegation_correlation_id column, so a delegation run
     # joins to its ticket and to the DoD verdict that judged it. Both additive
     # (expand-only), vendored FIRST per the vendor-parity ordering.
-    # OMN-19716 adds the topic-activity table and grant migrations.
-    assert len(result.declarations) == 218
+    # 216 -> 217 for OMN-19721: node_projection_runtime_error_fingerprints/0002
+    # adds the nullable runtime_error_fingerprints.last_applied_event_id column,
+    # so a broker redelivery of one runtime-error event is counted once.
+    # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
+    # 217 -> 219 for OMN-19716: node_projection_topic_activity/0000 creates the
+    # topic_activity table and 0001 grants the runtime role SELECT, INSERT and
+    # UPDATE on it. Vendored FIRST per the vendor-parity ordering.
+    assert len(result.declarations) == 219
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
