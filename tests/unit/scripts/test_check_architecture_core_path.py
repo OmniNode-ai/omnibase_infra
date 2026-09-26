@@ -14,13 +14,46 @@ import pytest
 SCRIPT = Path(__file__).parents[3] / "scripts" / "check_architecture.sh"
 
 
-def _source_tree(tmp_path: Path) -> Path:
-    package = tmp_path / "omnibase_core" / "src" / "omnibase_core"
+def _source_tree(
+    tmp_path: Path,
+    *,
+    project_name: str = "omnibase_core",
+    origin_url: str = "git@github.com:OmniNode-ai/omnibase_core.git",
+    literal_name: bool = False,
+    make_commit: bool = True,
+    pyproject_toml: str | None = None,
+) -> Path:
+    project_root = tmp_path / "omnibase_core"
+    package = project_root / "src" / "omnibase_core"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("__all__ = []\n")
-    (tmp_path / "omnibase_core" / "pyproject.toml").write_text(
-        "[project]\nname = 'omnibase-core'\nversion = '0.0.0'\n"
+    name_quote = "'" if literal_name else '"'
+    (project_root / "pyproject.toml").write_text(
+        pyproject_toml
+        or f'[project]\nname = {name_quote}{project_name}{name_quote}\nversion = "0.0.0"\n'
     )
+    subprocess.run(["git", "init", "-q", str(project_root)], check=True)
+    subprocess.run(
+        ["git", "-C", str(project_root), "remote", "add", "origin", origin_url],
+        check=True,
+    )
+    if make_commit:
+        subprocess.run(["git", "-C", str(project_root), "add", "."], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(project_root),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-qm",
+                "fixture",
+            ],
+            check=True,
+        )
     return package
 
 
@@ -50,9 +83,46 @@ def _run_without_path(
 
 
 @pytest.mark.unit
-def test_valid_source_package_is_accepted(tmp_path: Path) -> None:
-    result = _run(_source_tree(tmp_path))
+@pytest.mark.parametrize(
+    "origin_url",
+    [
+        "git@github.com:OmniNode-ai/omnibase_core.git",
+        "https://github.com/OmniNode-ai/omnibase_core.git",
+        "ssh://git@github.com/OmniNode-ai/omnibase_core.git",
+    ],
+)
+def test_valid_source_package_is_accepted(tmp_path: Path, origin_url: str) -> None:
+    result = _run(_source_tree(tmp_path, origin_url=origin_url))
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_valid_literal_toml_project_name_is_accepted(tmp_path: Path) -> None:
+    result = _run(_source_tree(tmp_path, literal_name=True))
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_unborn_canonical_checkout_is_rejected(tmp_path: Path) -> None:
+    result = _run(_source_tree(tmp_path, make_commit=False))
+    assert result.returncode == 2
+    assert "source package" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "pyproject_toml",
+    [
+        '[project]\nname = "omnibase_corex"\nversion = "0.0.0"\n',
+        '[project]\nname = "omnibase_core" trailing\nversion = "0.0.0"\n',
+    ],
+)
+def test_near_or_malformed_project_name_is_rejected(
+    tmp_path: Path, pyproject_toml: str
+) -> None:
+    result = _run(_source_tree(tmp_path, pyproject_toml=pyproject_toml))
+    assert result.returncode == 2
+    assert "source package" in result.stderr
 
 
 @pytest.mark.unit
@@ -125,6 +195,31 @@ def test_invalid_environment_override_does_not_fall_back(tmp_path: Path) -> None
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    "origin_url",
+    [
+        "git@github.com:OmniNode-ai/not-omnibase-core.git",
+        "git@evilgithub.com:OmniNode-ai/omnibase_core.git",
+        "https://notgithub.com/OmniNode-ai/omnibase_core.git",
+    ],
+)
+def test_environment_override_rejects_noncanonical_checkout(
+    tmp_path: Path, origin_url: str
+) -> None:
+    decoy = _source_tree(
+        tmp_path,
+        origin_url=origin_url,
+    )
+    env = os.environ.copy()
+    env["OMNIBASE_CORE_PATH"] = str(decoy)
+
+    result = _run_without_path(tmp_path, env=env)
+
+    assert result.returncode == 2
+    assert "OMNIBASE_CORE_PATH" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     "forbidden_root", ["site-packages", "dist-packages", ".venv", "venv"]
 )
 def test_symlinked_forbidden_source_root_is_rejected(
@@ -135,7 +230,7 @@ def test_symlinked_forbidden_source_root_is_rejected(
     physical.mkdir(parents=True)
     (physical / "__init__.py").write_text("__all__ = []\n")
     (tmp_path / forbidden_root / "pyproject.toml").write_text(
-        "[project]\nname = 'omnibase-core'\nversion = '0.0.0'\n"
+        "[project]\nname = 'omnibase_core'\nversion = '0.0.0'\n"
     )
     logical_root = tmp_path / "linked"
     logical_root.symlink_to(tmp_path / forbidden_root, target_is_directory=True)
@@ -253,6 +348,58 @@ def test_no_argument_linked_source_precedes_omni_home_fallback(
 
     assert result.returncode == 0, result.stderr
     assert str(linked_core) in result.stdout
+
+
+@pytest.mark.unit
+def test_fallback_ignores_decoy_sibling_project(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _source_tree(workspace, project_name="not_omnibase_core")
+
+    infra_repo = workspace / "omnibase_infra"
+    infra_repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(infra_repo)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(infra_repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        ],
+        check=True,
+    )
+    linked = workspace / "omnibase_infra-linked"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(infra_repo),
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            str(linked),
+            "HEAD",
+        ],
+        check=True,
+    )
+    fallback_home = tmp_path / "fallback-home"
+    fallback_core = _source_tree(fallback_home)
+    env = os.environ.copy()
+    env.pop("OMNIBASE_CORE_PATH", None)
+    env["OMNI_HOME"] = str(fallback_home)
+
+    result = _run_without_path(linked, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert str(fallback_core) in result.stdout
 
 
 @pytest.mark.unit

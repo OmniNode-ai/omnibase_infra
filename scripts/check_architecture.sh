@@ -553,8 +553,47 @@ EOF
 # Path Detection
 # =============================================================================
 
-# Accept only a checked-out omnibase_core source package. Arbitrary directories,
-# empty directories, and installed wheels must never become green no-op targets.
+# Accept only the canonical omnibase_core checkout source package. Arbitrary
+# directories, lookalike projects, empty directories, and installed wheels must
+# never become green no-op targets.
+project_identity_is_canonical() {
+    local project_root="$1"
+    awk '
+        /^[[:space:]]*\[project\][[:space:]]*(#.*)?$/ { in_project = 1; next }
+        /^[[:space:]]*\[/ { in_project = 0 }
+        in_project &&
+            /^[[:space:]]*name[[:space:]]*=[[:space:]]*("omnibase_core"|'"'"'omnibase_core'"'"')[[:space:]]*(#.*)?$/ {
+            found = 1
+            exit
+        }
+        END { exit(found ? 0 : 1) }
+    ' "${project_root}/pyproject.toml"
+}
+
+checkout_identity_is_canonical() {
+    local project_root="$1" checkout_root origin_url
+    command -v git >/dev/null 2>&1 || return 1
+    checkout_root=$(git -C "${project_root}" rev-parse --show-toplevel 2>/dev/null) \
+        || return 1
+    checkout_root=$(cd -P -- "${checkout_root}" 2>/dev/null && pwd -P) || return 1
+    [[ "${checkout_root}" == "${project_root}" ]] || return 1
+    git -C "${project_root}" rev-parse --verify 'HEAD^{commit}' >/dev/null 2>&1 || return 1
+    origin_url=$(git -C "${project_root}" remote get-url origin 2>/dev/null) || return 1
+    case "${origin_url%/}" in
+        git@github.com:OmniNode-ai/omnibase_core|\
+        git@github.com:OmniNode-ai/omnibase_core.git|\
+        https://github.com/OmniNode-ai/omnibase_core|\
+        https://github.com/OmniNode-ai/omnibase_core.git|\
+        ssh://git@github.com/OmniNode-ai/omnibase_core|\
+        ssh://git@github.com/OmniNode-ai/omnibase_core.git)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 resolve_source_package_path() {
     local candidate="$1" resolved project_root
     [[ -d "${candidate}" ]] || return 1
@@ -572,6 +611,8 @@ resolve_source_package_path() {
     [[ -f "${resolved}/__init__.py" ]] || return 1
     project_root=$(cd -P -- "${resolved}/../.." 2>/dev/null && pwd -P) || return 1
     [[ -f "${project_root}/pyproject.toml" ]] || return 1
+    project_identity_is_canonical "${project_root}" || return 1
+    checkout_identity_is_canonical "${project_root}" || return 1
     echo "${resolved}"
 }
 

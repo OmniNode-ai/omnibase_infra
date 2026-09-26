@@ -107,8 +107,8 @@ def run_architecture_layers(verbose: bool = False) -> bool:
     script_path = Path(__file__).parent / "check_architecture.sh"
 
     if not script_path.exists():
-        print(f"Architecture Layers: SKIP (script not found: {script_path})")
-        return True
+        print(f"Architecture Layers: ERROR (script not found: {script_path})")
+        return False
 
     try:
         # Build command with appropriate flags
@@ -153,8 +153,8 @@ def run_architecture_layers(verbose: bool = False) -> bool:
         print("  Fix: Try running with --verbose to see progress")
         return False
     except FileNotFoundError:
-        print("Architecture Layers: SKIP (bash not available)")
-        return True
+        print("Architecture Layers: ERROR (bash not available)")
+        return False
     except PermissionError as e:
         print(f"Architecture Layers: ERROR (Permission denied: {e})")
         print("  Fix: Ensure execute permissions on check_architecture.sh")
