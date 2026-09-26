@@ -12,6 +12,51 @@
 --   runs only at initdb and the lab volume persists, so the schema it already
 --   created stays until this file drops it.
 --
+-- ============================================================================
+-- WHY IT LIVES UNDER THIS NODE
+-- ============================================================================
+-- Dropping a schema is schema-level DDL, and no node stream owns schema-level
+-- DDL in omnidash_analytics. On dev 8a177b86c (read 2026-09-26T19:43Z) no
+-- file under docker/migrations/forward/nodes/ issues CREATE, ALTER or DROP
+-- SCHEMA, and several say in their headers that they deliberately do not.
+-- Every TENANT-domain stream in _ledger/application-migrations.tsv is a
+-- table-owning node: at that sha there are 14 such streams, and each one's own
+-- files create at least one table. No stream owns this statement.
+--
+-- It rides the node-owned loop because the flat corpus cannot reach
+-- omnidash_analytics. omninode_infra's migrate Job
+-- (k8s/migrations/omnibase-infra-migrate.yaml, read at omninode_infra dev
+-- 6961104b) applies the flat corpus to DB_NAME="omnibase_infra" only: its flat
+-- loop fails the Job on any file whose first `\connect` gives a directive_db
+-- other than "$DB_NAME", unless the file is on the Job's tombstone allowlist.
+-- In this repo, tests/ci/test_flat_migration_no_foreign_connect_gate.py
+-- rejects a new flat migration whose `\connect` names a database other than
+-- omnibase_infra unless it is listed in
+-- docker/migrations/forward/cross-database-flat-migrations.yaml (OMN-15819).
+-- The node-owned loop connects to omnidash_analytics directly
+-- (NODE_POSTGRES_DB in scripts/run-forward-migrations.sh, NODE_DB_NAME in the
+-- Job).
+--
+-- The stream was chosen on the question asked on OMN-17887 (comment d80e502d)
+-- and answered on 2026-09-26: node_projection_tenant_credentials, a
+-- TENANT-domain stream. The file is forward-only in
+-- config/migration_classes.yaml because the class checker
+-- (scripts/validation/check_migration_class.py) treats any DROP that way: DROP
+-- is on its list of destructive statements, so a file that carries one cannot
+-- be declared expand-only, and this file is not the destructive half of an
+-- expand/contract pair. The drop does not touch the stream's own table: 003
+-- requires it at public.tenant_inference_credentials.
+--
+-- Homing a schema-level drop under one table-owning node is an ownership
+-- compromise, and it is called out here rather than hidden. It is the same
+-- trade node_projection_delegation_inference_response/0004 makes when it homes
+-- a cross-node grant block under one node.
+--
+-- The prefix is 004_, not 0004_. This stream already holds 0000_, 0001_,
+-- 0002_ and 003_, and both runners apply a node directory's files in sorted
+-- lexical order (scripts/run-forward-migrations.sh section 3, and the Job's
+-- node loop). 0004_ sorts before 003_; 004_ sorts after it.
+--
 -- LANES, AS MEASURED BEFORE THIS FILE WAS WRITTEN
 --   onex-lab (k3s on .201, omnidash_analytics): present with 0 relations
 --     (readback on OMN-17887, comment 539eab9c, 2026-09-25). Its owner was not
