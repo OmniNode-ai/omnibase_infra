@@ -58,6 +58,8 @@ class ModelConsumerFlowDelta(BaseModel):
         messages_out: Envelopes successfully published by the handler's result.
         messages_dlq: Envelopes routed to a DLQ or the platform quarantine sink.
         handler_errors: Dispatches whose handler raised.
+        declares_output: Whether the subscription's handler contract declares
+            at least one bus publish topic. ``None`` means not known.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -78,6 +80,10 @@ class ModelConsumerFlowDelta(BaseModel):
     messages_out: int = Field(default=0, ge=0)
     messages_dlq: int = Field(default=0, ge=0)
     handler_errors: int = Field(default=0, ge=0)
+    declares_output: bool | None = Field(
+        default=None,
+        description="Whether the handler contract declares any bus output",
+    )
 
     @field_validator("window_start", "window_end")
     @classmethod
