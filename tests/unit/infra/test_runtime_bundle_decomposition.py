@@ -76,6 +76,11 @@ _PRE_GROWTH_ENV_VARS = frozenset(
         # omnidash projection DSN: present in ~/.omnibase/.env alongside
         # POSTGRES_PASSWORD; used by intelligence-api and projection consumers.
         "OMNIDASH_ANALYTICS_DB_URL",
+        # OMN-19749: every runtime kernel names its lane (the deployment's
+        # runtime.lane overlay document declares it). Deploy-time renders of
+        # the catalog are validated with --no-interpolate, so a lab host
+        # that has not set it yet is not blocked by this requirement.
+        "ONEX_RUNTIME_LANE",
         # core bundle's Infisical requirements are resolved transitively
         "INFISICAL_CLIENT_ID",
         "INFISICAL_CLIENT_SECRET",

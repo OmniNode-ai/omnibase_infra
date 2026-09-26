@@ -44,7 +44,7 @@
 # `seed-infisical` delegates to scripts/seed-infisical.py.
 
 .PHONY: help up up-auth up-runtime down down-auth down-runtime down-all status \
-        seed-keycloak seed-infisical _check-docker _check-env-file \
+        seed-keycloak seed-infisical _check-docker _check-env-file _check-local-lane \
         local-env up-local status-local delegate-local down-local down-local-volumes
 
 OMNIBASE_ENV_FILE ?= $(HOME)/.omnibase/.env
@@ -132,7 +132,7 @@ local-env: ## Write the laptop env file and model overlay from their templates (
 	fi
 	@echo "==> Model endpoint: the line marked model_endpoint in $(LOCAL_OVERLAY_FILE)"
 
-up-local: _check-docker local-env ## Laptop profile: build the runtime image and boot the stack + your runtime
+up-local: _check-docker local-env _check-local-lane ## Laptop profile: build the runtime image and boot the stack + your runtime
 	@echo "==> Starting the laptop profile (compose project $(LOCAL_PROJECT))..."
 	$(ONEX_CLI) up local --env-file "$(LOCAL_ENV_FILE)" --build
 	@echo "==> Started. A cold runtime takes several minutes to report healthy; run 'make status-local'."
@@ -164,6 +164,17 @@ down-local-volumes: _check-docker ## Laptop profile: stop it and delete its volu
 # than letting `docker compose ...` fail with a cryptic message. omnibase_infra
 # is the boundary where Docker becomes a hard requirement (per OMN-10377 /
 # OMN-10378); the public `omnibase` repo never assumes it.
+# OMN-19749: the laptop runtimes read their runtime.lane overlay document from
+# the local-home files `onex local init` writes. Refuse before rendering when they
+# are missing: Docker would otherwise create each missing bind source as an empty
+# directory, and the runtime would then refuse to start with no lane declared.
+_check-local-lane:
+	@if [ ! -f "$(HOME)/.onex/config.yaml" ] || [ ! -d "$(HOME)/.omninode/config" ]; then \
+	  echo "ERROR: this machine has no local overlay: $(HOME)/.onex/config.yaml or $(HOME)/.omninode/config is missing."; \
+	  echo "  Run 'onex local init' once; it writes both, including the runtime.lane document for lane 'local'."; \
+	  exit 1; \
+	fi
+
 _check-docker:
 	@if ! command -v docker > /dev/null 2>&1; then \
 	  echo "ERROR: docker is not installed."; \

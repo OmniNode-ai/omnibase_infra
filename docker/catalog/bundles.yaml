@@ -124,6 +124,15 @@ local:
     DEPLOY_AGENT_HMAC_SECRET: ""
   inject_volumes:
     - "${ONEX_LOCAL_BIFROST_OVERLAY:?ONEX_LOCAL_BIFROST_OVERLAY must name your model overlay file (template: docker/lane-overlays/local.bifrost.example.yaml)}:/app/config/delegation/local.bifrost.yaml:ro"
+    # OMN-19749: the runtime kernels read their overlay documents from
+    # local-home, the files `onex local init` writes on this machine: the
+    # bootstrap file that selects the source, and the documents directory,
+    # keyed <environment>/<lane>/<key>.json (the runtime.lane document among
+    # them). INFISICAL_ADDR is bound empty above, so this is the one source.
+    # `make up-local` refuses before rendering when either is missing, so
+    # Docker never creates them as empty directories.
+    - "${HOME:?HOME must be set}/.onex/config.yaml:/home/omniinfra/.onex/config.yaml:ro"
+    - "${HOME:?HOME must be set}/.omninode/config:/home/omniinfra/.omninode/config:ro"
   inject_required_env:
     - ONEX_LOCAL_BIFROST_OVERLAY
 runtime-integrations:

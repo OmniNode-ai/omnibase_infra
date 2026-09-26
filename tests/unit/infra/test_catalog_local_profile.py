@@ -36,12 +36,14 @@ _OVERLAY_TEMPLATE = _REPO / "docker" / "lane-overlays" / "local.bifrost.example.
 _PROJECT = "omnibase-infra-local"
 _OVERLAY_PIN = "/app/config/delegation/local.bifrost.yaml"
 
-#: Every name the laptop profile may ask its operator for. Two local passwords
-#: and the path of the model overlay; nothing else.
+#: Every name the laptop profile may ask its operator for. Two local passwords,
+#: the path of the model overlay, and the lane its runtime is (OMN-19749, set by
+#: the env template to the lane `onex local init` declares); nothing else.
 _LAPTOP_REQUIRED_ENV = {
     "POSTGRES_PASSWORD",
     "VALKEY_PASSWORD",
     "ONEX_LOCAL_BIFROST_OVERLAY",
+    "ONEX_RUNTIME_LANE",
 }
 
 #: Lab and ops credentials the profile must never require.
@@ -62,7 +64,7 @@ _FORBIDDEN_FRAGMENTS = (
 )
 
 
-def test_laptop_required_env_is_two_passwords_and_the_overlay_path() -> None:
+def test_laptop_required_env_is_two_passwords_the_overlay_path_and_the_lane() -> None:
     resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
     assert resolved.required_env == _LAPTOP_REQUIRED_ENV
 
