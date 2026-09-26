@@ -21,7 +21,6 @@ from omnibase_core.models.execution_graph_replay import (
     ModelExecutionGraphReplay,
     ModelExecutionGraphReplayPolicy,
     ModelExecutionGraphSourceRef,
-    ModelExecutionGraphTopologyVersion,
     ModelExecutionGraphUnresolved,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.chain_replay import (
@@ -53,9 +52,13 @@ class DelegationExecutionGraphFold:
         ):
             raise ValueError("bounded evidence has a foreign correlation")
 
-        hop_topics = {topic for hop in request.topology.hops for topic in hop.topics}
+        hop_topics = {
+            topic for hop in request.topology.declared_chain for topic in hop.topics
+        }
         reroute_topics = {
-            topic for hop in request.topology.hops for topic in hop.reroute_parents
+            topic
+            for hop in request.topology.declared_chain
+            for topic in hop.reroute_parents
         } - hop_topics
         present_reroute_topics = {
             item.topic for item in normalized.envelopes
@@ -88,7 +91,7 @@ class DelegationExecutionGraphFold:
         grades = {
             row.envelope_id: row
             for row in assemble_replay_and_verify(
-                request.correlation_id, observed, request.topology.hops
+                request.correlation_id, observed, request.topology.declared_chain
             )
         }
 
@@ -149,10 +152,7 @@ class DelegationExecutionGraphFold:
         )
         replay = ModelExecutionGraphReplay(
             fold_version=request.fold_version,
-            topology_version=ModelExecutionGraphTopologyVersion(
-                contract_version=request.topology_contract_version,
-                topology_sha256=request.topology.topology_sha256,
-            ),
+            topology_version=request.topology.version,
             grader_version=request.grader_version,
             verdict_reducer_version=request.verdict_reducer_version,
             policy=ModelExecutionGraphReplayPolicy(

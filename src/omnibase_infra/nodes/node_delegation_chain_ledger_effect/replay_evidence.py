@@ -19,11 +19,11 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_norma
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_observed_envelope_evidence import (
     ModelObservedEnvelopeEvidence,
 )
-from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_pinned_chain_topology import (
-    ModelPinnedChainTopology,
-)
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_unresolved_parent import (
     ModelUnresolvedParent,
+)
+from omnibase_infra.runtime.execution_graph_topology_registry import (
+    PinnedExecutionGraphTopology,
 )
 
 
@@ -55,9 +55,11 @@ def select_bounded_evidence(
     return tuple(selected)
 
 
-def _topology_positions(topology: ModelPinnedChainTopology) -> dict[str, int]:
+def _topology_positions(topology: PinnedExecutionGraphTopology) -> dict[str, int]:
     return {
-        topic: index for index, hop in enumerate(topology.hops) for topic in hop.topics
+        topic: index
+        for index, hop in enumerate(topology.declared_chain)
+        for topic in hop.topics
     }
 
 
@@ -78,7 +80,7 @@ def _causal_sort_key(
 
 def normalize_and_topologically_order(
     evidence: Iterable[ModelObservedEnvelopeEvidence],
-    topology: ModelPinnedChainTopology,
+    topology: PinnedExecutionGraphTopology,
 ) -> ModelNormalizedReplayEvidence:
     """Collapse exact redelivery while retaining source and causal order.
 
@@ -136,7 +138,7 @@ def normalize_and_topologically_order(
         indegree[item.envelope_id] += 1
 
     positions = _topology_positions(topology)
-    unknown_position = len(topology.hops)
+    unknown_position = len(topology.declared_chain)
 
     def sort_key(envelope_id: UUID) -> tuple[int, str, int, int, str]:
         return _causal_sort_key(by_id[envelope_id], positions, unknown_position)

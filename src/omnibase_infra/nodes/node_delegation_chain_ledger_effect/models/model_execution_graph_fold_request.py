@@ -18,21 +18,20 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_observed_envelope_evidence import (
     ModelObservedEnvelopeEvidence,
 )
-from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_pinned_chain_topology import (
-    ModelPinnedChainTopology,
+from omnibase_infra.runtime.execution_graph_topology_registry import (
+    PinnedExecutionGraphTopology,
 )
 
 
 class ModelExecutionGraphFoldRequest(BaseModel):
     """All semantic inputs are immutable evidence or explicit pinned versions."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
 
     correlation_id: UUID
     tenant_id: UUID
     bounded_evidence: tuple[ModelObservedEnvelopeEvidence, ...]
-    topology: ModelPinnedChainTopology
-    topology_contract_version: ModelSemVer
+    topology: PinnedExecutionGraphTopology
     fold_version: ModelSemVer
     grader_version: ModelSemVer
     verdict_reducer_version: ModelSemVer

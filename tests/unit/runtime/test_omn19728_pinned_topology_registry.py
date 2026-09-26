@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from omnibase_infra.runtime.execution_graph_topology_registry import (
     ExecutionGraphTopologySnapshotCandidate,
     PackagedExecutionGraphTopologyContract,
     PinnedExecutionGraphTopology,
+    _resolve_payload,
     build_snapshot_from_chain_contract,
 )
 
@@ -85,3 +87,27 @@ def test_registry_refuses_missing_or_tampered_snapshot(tmp_path: Path) -> None:
     (tmp_path / packaged.name).write_text(json.dumps(altered), encoding="utf-8")
     with pytest.raises(ValueError, match="digest"):
         empty_registry.resolve(built.version)
+
+
+@pytest.mark.unit
+def test_registry_refuses_content_addressed_disconnected_cycle() -> None:
+    packaged = PackagedExecutionGraphTopologyContract().snapshot_path(
+        build_snapshot_from_chain_contract(
+            CONTRACT_PATH, EnumOmnimarketTopic.EVT_DOD_VERIFY_COMPLETED_V1.value
+        ).version
+    )
+    payload = json.loads(packaged.read_text(encoding="utf-8"))
+    payload["chain_topology"] = [
+        {"topic": "head", "parent": None},
+        {"topic": "left", "parent": "right"},
+        {"topic": "right", "parent": "left"},
+    ]
+    identity = {
+        key: value for key, value in payload.items() if key != "topology_sha256"
+    }
+    payload["topology_sha256"] = sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+    with pytest.raises(ValueError, match="parent cycle"):
+        _resolve_payload(payload)

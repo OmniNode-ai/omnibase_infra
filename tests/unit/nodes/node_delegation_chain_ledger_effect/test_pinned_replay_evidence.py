@@ -10,6 +10,7 @@ snapshot.
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 from uuid import UUID
 
@@ -22,15 +23,16 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_decla
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_observed_envelope_evidence import (
     ModelObservedEnvelopeEvidence,
 )
-from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_pinned_chain_topology import (
-    ModelPinnedChainTopology,
-)
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_unresolved_parent import (
     ModelUnresolvedParent,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.replay_evidence import (
     normalize_and_topologically_order,
     select_bounded_evidence,
+)
+from omnibase_infra.runtime.execution_graph_topology_registry import (
+    PinnedExecutionGraphTopology,
+    _resolve_payload,
 )
 
 CORRELATION = UUID("11111111-2222-3333-4444-555555555555")
@@ -61,12 +63,18 @@ def _evidence(
     )
 
 
-def _topology(*hops: ModelDeclaredChainHop) -> ModelPinnedChainTopology:
-    return ModelPinnedChainTopology.create(
-        topology_contract_ref="node:delegation-chain@1.0.0",
-        replay_algorithm_version="1",
-        hops=hops,
-    )
+def _topology(*hops: ModelDeclaredChainHop) -> PinnedExecutionGraphTopology:
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "contract_version": {"major": 1, "minor": 0, "patch": 0},
+        "source_contract_sha256": "a" * 64,
+        "chain_topology": [hop.model_dump(mode="json") for hop in hops],
+        "verdict_topic": "verdict",
+    }
+    payload["topology_sha256"] = sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return _resolve_payload(payload)
 
 
 def test_pinned_snapshot_is_canonical_and_rejects_disconnected_cycle() -> None:
@@ -77,11 +85,14 @@ def test_pinned_snapshot_is_canonical_and_rejects_disconnected_cycle() -> None:
     first = _topology(*valid)
     second = _topology(*valid)
 
-    assert first.topology_sha256 == second.topology_sha256
-    assert ModelPinnedChainTopology.model_validate(first.model_dump()) == first
-    with pytest.raises(ValueError, match="schema_version"):
-        ModelPinnedChainTopology.model_validate(
-            {**first.model_dump(mode="json"), "schema_version": 2}
+    assert first.version == second.version
+    assert first.declared_chain == valid
+    with pytest.raises(TypeError, match="verified artifact"):
+        PinnedExecutionGraphTopology(
+            version=first.version,
+            source_contract_sha256=first.source_contract_sha256,
+            declared_chain=first.declared_chain,
+            read_set=first.read_set,
         )
 
     disconnected_cycle = (
@@ -89,7 +100,7 @@ def test_pinned_snapshot_is_canonical_and_rejects_disconnected_cycle() -> None:
         ModelDeclaredChainHop(topic="left", parent="right"),
         ModelDeclaredChainHop(topic="right", parent="left"),
     )
-    with pytest.raises(ValueError, match=r"unreachable|cycle"):
+    with pytest.raises(ValueError, match=r"parent cycle"):
         _topology(*disconnected_cycle)
 
 
@@ -202,8 +213,8 @@ def _fixture_evidence(path_name: str) -> tuple[ModelObservedEnvelopeEvidence, ..
             ),
             observed_index=index,
             fingerprint=f"fixture-topic:{record['topic']}",
-            partition=int(record["partition"]),
-            kafka_offset=int(record["kafka_offset"]),
+            partition=int(str(record["partition"])),
+            kafka_offset=int(str(record["kafka_offset"])),
         )
         for index, record in enumerate(records)
     )
@@ -211,7 +222,7 @@ def _fixture_evidence(path_name: str) -> tuple[ModelObservedEnvelopeEvidence, ..
 
 def _fixture_topology(
     evidence: tuple[ModelObservedEnvelopeEvidence, ...],
-) -> ModelPinnedChainTopology:
+) -> PinnedExecutionGraphTopology:
     topics = tuple(dict.fromkeys(item.topic for item in evidence))
     return _topology(
         ModelDeclaredChainHop(topic=topics[0], parent=None),

@@ -27,6 +27,9 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.handlers.handler_d
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_declared_chain_hop import (
     ModelDeclaredChainHop,
 )
+from omnibase_infra.nodes.node_delegation_chain_ledger_effect.topology_validation import (
+    validate_declared_topology,
+)
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     _PINNED_READ_SET_MINT,
     PinnedExecutionGraphReadSet,
@@ -121,6 +124,7 @@ def _resolve_payload(payload: object) -> PinnedExecutionGraphTopology:
         raise ValueError("pinned topology artifact digest mismatch")
     try:
         declared = _parse_declared_topology(chain_raw)
+        validate_declared_topology(declared)
         contract_version = _contract_version(payload.get("contract_version"))
     except RuntimeError as exc:
         raise ValueError("invalid pinned chain topology") from exc
