@@ -1095,6 +1095,10 @@ route:
         - ONEX Validators
         - Pin Reachability (OMN-15538)
         - pr-title / check-title
+        # OMN-19655: the pre-merge PyPI pin-resolvability gate. Enforced by the
+        # CI Summary poller via EXPECTED_EXTERNAL_CONTEXTS and absent from
+        # branch protection, which is exactly the shape this list records.
+        - pypi-pin-resolvability
         - receipt-honesty
         - required-check-skip-guard / check-skip-vectors
         - Runner Route (OMN-18031) / route
