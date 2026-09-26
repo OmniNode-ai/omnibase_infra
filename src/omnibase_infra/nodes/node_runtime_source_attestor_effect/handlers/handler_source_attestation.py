@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # Sentinel values that indicate a build without attestation
 _INVALID_HASHES: frozenset[str] = frozenset({"unknown", "", "dev"})
 
-_DEFAULT_REPO_URL = "https://github.com/OmniNode-ai/omnibase_infra.git"
+_DEFAULT_REPO_URL = "https://github.com/OmniNode-ai/omnibase_infra.git"  # url-authority-ok: source repository identity, not runtime routing
 _DEFAULT_DRIFT_THRESHOLD = 5
 _DEFAULT_FRICTION_DIR = Path(".onex_state/friction")
 

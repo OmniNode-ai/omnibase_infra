@@ -37,7 +37,7 @@ import yaml
 BASELINE_FILE = Path("config/validation/test-failure-baseline.yaml")
 JUNIT_XML = Path("dev-baseline-junit.xml")
 BASELINE_TTL_DAYS = 7
-LINEAR_API_URL = "https://api.linear.app/graphql"
+LINEAR_API_URL = "https://api.linear.app/graphql"  # url-authority-ok: fixed Linear public API, not ONEX routing
 # Omninode team + "Urgent" priority
 LINEAR_PRIORITY_URGENT = 1
 LINEAR_TEAM_KEY = "OMN"

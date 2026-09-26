@@ -74,22 +74,10 @@ logger = logging.getLogger(__name__)
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_LEDGER_APPEND: str = "ledger-append-handler"
 
-# SQL for idempotent append with duplicate detection
-# Uses RETURNING to detect whether insert succeeded (returns row) or
-# ON CONFLICT was triggered (returns nothing)
 _SQL_APPEND = """
 INSERT INTO event_ledger (
-    topic,
-    partition,
-    kafka_offset,
-    event_key,
-    event_value,
-    onex_headers,
-    envelope_id,
-    correlation_id,
-    event_type,
-    source,
-    event_timestamp
+    topic, partition, kafka_offset, event_key, event_value, onex_headers,
+    envelope_id, correlation_id, event_type, source, event_timestamp
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (topic, partition, kafka_offset) DO NOTHING
 RETURNING ledger_entry_id
@@ -103,8 +91,8 @@ class HandlerLedgerAppend:
     composing with HandlerDb for PostgreSQL operations. It provides:
 
     - Base64 decoding of event payloads to bytes
-    - Idempotent INSERT via ON CONFLICT DO NOTHING
-    - Duplicate detection via RETURNING clause
+    - Atomic commit-order ingest cursor allocation in PostgreSQL
+    - Exact duplicate detection without consuming another sequence
     - Type-safe input/output with Pydantic models
 
     Attributes:
@@ -259,7 +247,7 @@ class HandlerLedgerAppend:
         # Serialize onex_headers to JSON string for JSONB column
         onex_headers_json = json.dumps(payload.onex_headers)
 
-        # Build parameters for INSERT
+        # Build parameters for INSERT.
         # Order must match $1..$11 in _SQL_APPEND
         parameters: list[object] = [
             payload.topic,  # $1
@@ -281,7 +269,7 @@ class HandlerLedgerAppend:
 
         # Build envelope for HandlerDb
         envelope: dict[str, object] = {
-            "operation": "db.query",  # Use query because RETURNING produces rows
+            "operation": "db.query",
             "payload": {
                 "sql": _SQL_APPEND,
                 "parameters": parameters,
@@ -302,8 +290,6 @@ class HandlerLedgerAppend:
         # Execute via HandlerDb
         db_result = await self._db_handler.execute(envelope)
 
-        # Check if RETURNING produced a row (insert succeeded) or not (duplicate)
-        # db_result.result is guaranteed non-None for successful db operations
         if db_result.result is None:
             ctx = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
@@ -314,7 +300,6 @@ class HandlerLedgerAppend:
 
         rows = db_result.result.payload.rows
         if rows and len(rows) > 0:
-            # Insert succeeded - extract ledger_entry_id from RETURNING
             ledger_entry_id = UUID(str(rows[0]["ledger_entry_id"]))
             duplicate = False
             logger.debug(
@@ -327,7 +312,6 @@ class HandlerLedgerAppend:
                 },
             )
         else:
-            # ON CONFLICT DO NOTHING triggered - duplicate
             ledger_entry_id = None
             duplicate = True
             logger.debug(

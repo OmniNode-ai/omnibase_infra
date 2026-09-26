@@ -141,6 +141,12 @@ from omnibase_infra.runtime.models import (
 from omnibase_infra.runtime.models.model_component_health import (
     ModelComponentHealth,
 )
+from omnibase_infra.runtime.models.model_execution_graph_read_ingress_config import (
+    ModelExecutionGraphReadIngressConfig,
+)
+from omnibase_infra.runtime.models.model_execution_graph_trusted_gateway_config import (
+    ModelExecutionGraphTrustedGatewayConfig,
+)
 from omnibase_infra.runtime.models.model_materialized_resources import (
     ModelMaterializedResources,
 )
@@ -191,6 +197,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.envelope.model_message_envelope import (
         ModelMessageEnvelope,
     )
+    from omnibase_core.protocols.crypto.protocol_key_provider import ProtocolKeyProvider
     from omnibase_infra.event_bus.models import ModelEventMessage
     from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
     from omnibase_infra.handlers.handler_infisical import HandlerInfisical
@@ -6262,6 +6269,9 @@ class RuntimeHostProcess:
         topic_deny_patterns: tuple[str, ...] = ()
         if self._runtime_node_graph_config is not None:
             topic_deny_patterns = self._runtime_node_graph_config.topic_deny_patterns
+        graph_ingress, graph_key_provider = (
+            self._execution_graph_read_ingress_dependencies()
+        )
         self._event_bus_wiring = EventBusSubcontractWiring(
             event_bus=cast("ProtocolEventBusSubscriber", self._event_bus),
             dispatch_engine=self._dispatch_engine,
@@ -6270,6 +6280,8 @@ class RuntimeHostProcess:
             service=self._node_identity.service,
             version=self._node_identity.version,
             topic_deny_patterns=topic_deny_patterns,
+            execution_graph_read_ingress=graph_ingress,
+            execution_graph_read_key_provider=graph_key_provider,
         )
 
         # Wire subscriptions for each handler with a contract.
@@ -6370,6 +6382,41 @@ class RuntimeHostProcess:
                 extra={"handler_count": len(self._handler_descriptors)},
             )
 
+    def _execution_graph_read_ingress_dependencies(
+        self,
+    ) -> tuple[ModelExecutionGraphReadIngressConfig | None, ProtocolKeyProvider | None]:
+        """Build graph-read trust only from explicit, usable runtime configuration."""
+        raw = self._config.get("execution_graph_read_gateway") if self._config else None
+        if raw is None:
+            return None, None
+        try:
+            config = ModelExecutionGraphTrustedGatewayConfig.model_validate(raw)
+            from omnibase_core.crypto import FileKeyProvider
+            from omnibase_infra.runtime.execution_graph_read_authority import (
+                TrustedExecutionGraphGatewayPolicy,
+                TrustedGatewaySignerScope,
+            )
+
+            provider = FileKeyProvider(config.public_key_path)
+            if provider.get_public_key(config.runtime_id) is None:
+                raise ValueError("graph gateway key file lacks configured runtime_id")
+            scope = TrustedGatewaySignerScope(
+                config.runtime_id, config.realm, config.bus_id
+            )
+            return (
+                ModelExecutionGraphReadIngressConfig(
+                    command_topic=config.command_topic,
+                    gateway_policy=TrustedExecutionGraphGatewayPolicy(
+                        frozenset({scope})
+                    ),
+                ),
+                provider,
+            )
+        except Exception as exc:
+            raise ProtocolConfigurationError(
+                f"invalid execution graph read gateway config: {exc}"
+            ) from exc
+
     async def _wire_package_node_subscriptions(self) -> None:
         """Wire Kafka subscriptions for package-discovered node contracts.
 
@@ -6421,6 +6468,9 @@ class RuntimeHostProcess:
                 topic_deny_patterns = (
                     self._runtime_node_graph_config.topic_deny_patterns
                 )
+            graph_ingress, graph_key_provider = (
+                self._execution_graph_read_ingress_dependencies()
+            )
             self._event_bus_wiring = EventBusSubcontractWiring(
                 event_bus=cast("ProtocolEventBusSubscriber", self._event_bus),
                 dispatch_engine=self._dispatch_engine,
@@ -6429,6 +6479,8 @@ class RuntimeHostProcess:
                 service=self._node_identity.service,
                 version=self._node_identity.version,
                 topic_deny_patterns=topic_deny_patterns,
+                execution_graph_read_ingress=graph_ingress,
+                execution_graph_read_key_provider=graph_key_provider,
             )
 
         (

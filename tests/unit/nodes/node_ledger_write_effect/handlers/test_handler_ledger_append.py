@@ -233,7 +233,6 @@ class TestHandlerLedgerAppendDuplicateDetection:
     async def test_duplicate_event_returns_no_entry_id(self) -> None:
         """When RETURNING produces no rows (ON CONFLICT), result has duplicate=True."""
         handler, db_handler = make_handler_with_mock_db()
-        # Empty rows = ON CONFLICT DO NOTHING was triggered
         db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
 
         payload = make_minimal_payload()

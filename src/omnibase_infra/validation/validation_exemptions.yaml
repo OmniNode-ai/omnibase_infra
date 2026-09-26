@@ -2666,6 +2666,22 @@ pattern_exemptions:
     documentation:
       - OMN-1898 ticket description (Identity Alignment section)
     ticket: OMN-1899
+  - file_pattern: 'runtime/models/model_execution_graph_trusted_gateway_config\.py'
+    violation_pattern: "Field 'runtime_id' should use UUID type instead of str"
+    reason: >
+      This trusted signer is a human-readable runtime name and must match ModelMessageEnvelope.runtime_id for signature verification.
+
+    documentation:
+      - OMN-1898 ModelMessageEnvelope identity contract
+    ticket: OMN-19728
+  - file_pattern: 'runtime/models/model_execution_graph_trusted_gateway_config\.py'
+    violation_pattern: "Field 'bus_id' should use UUID type instead of str"
+    reason: >
+      This bus is a named trust-domain route and must match ModelMessageEnvelope.bus_id for signature verification.
+
+    documentation:
+      - OMN-1898 ModelMessageEnvelope identity contract
+    ticket: OMN-19728
   # ==========================================================================
   # Agent Status Event Model Exemptions (OMN-1849)
   # ==========================================================================
