@@ -5,11 +5,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
 
 from scripts.ci.ci_summary_gate import SOFT_ALLOWLIST, STRICT_GATE_JOBS
+from scripts.ci.detect_test_paths import (
+    PRE_COMMIT_CONFIG_PATH,
+    compute_selection,
+)
 
 pytestmark = [pytest.mark.unit]
 
@@ -17,6 +22,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 PRECOMMIT_CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
 REQUIRED_CHECKS = REPO_ROOT / ".github" / "required-checks.yaml"
+ADJ = REPO_ROOT / "scripts" / "ci" / "test_selection_adjacency.yaml"
+THIS_TEST = "tests/ci/test_staged_precommit_backstops_omn19612.py"
 
 # These hooks were already staged-file scoped before OMN-19612. Keeping the
 # baseline explicit makes a newly staged-scoped hook fail this test until its
@@ -89,9 +96,10 @@ ADVISORY_STEP_NAMES = frozenset(
         "Run orchestration-monolith ratchet report (ARCH-004 Signal B)",
     }
 )
+ALLOWED_BACKSTOP_STEP_CONDITIONS = frozenset({"always()", "success()", "!cancelled()"})
 
 
-def _load_yaml(path: Path) -> dict:
+def _load_yaml(path: Path) -> dict[object, Any]:
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict), f"{path.name} did not parse to a mapping"
     return loaded
@@ -117,11 +125,11 @@ def _staged_scoped_hook_ids() -> set[str]:
     }
 
 
-def _workflow() -> dict:
+def _workflow() -> dict[object, Any]:
     return _load_yaml(CI_WORKFLOW)
 
 
-def _job(job_id: str) -> dict:
+def _job(job_id: str) -> dict[str, Any]:
     job = _workflow()["jobs"][job_id]
     assert isinstance(job, dict)
     return job
@@ -129,6 +137,11 @@ def _job(job_id: str) -> dict:
 
 def _commands(job_id: str) -> str:
     return "\n".join(str(step.get("run", "")) for step in _job(job_id)["steps"])
+
+
+def _normalise_condition(value: object) -> str:
+    condition = str(value).strip()
+    return condition.removeprefix("${{").removesuffix("}}").strip()
 
 
 def test_every_new_staged_hook_has_a_declared_whole_tree_backstop() -> None:
@@ -147,6 +160,26 @@ def test_whole_tree_counterpart_is_in_its_required_job(
     for fragment in required_fragments:
         assert fragment in commands, f"{hook_id} lost whole-tree fragment {fragment!r}"
 
+    backstop_steps = [
+        step
+        for step in job["steps"]
+        if all(fragment in str(step.get("run", "")) for fragment in required_fragments)
+    ]
+    assert backstop_steps, (
+        f"{hook_id} has no single step in {job_id} containing all whole-tree "
+        f"fragments: {required_fragments!r}"
+    )
+    for step in backstop_steps:
+        if "if" not in step:
+            continue
+        condition = _normalise_condition(step["if"])
+        step_name = str(step.get("name", "<unnamed>"))
+        assert condition in ALLOWED_BACKSTOP_STEP_CONDITIONS, (
+            f"{hook_id} whole-tree step {step_name!r} has conditional `if`: "
+            f"{step['if']!r}; allowed unconditional forms are "
+            f"{sorted(ALLOWED_BACKSTOP_STEP_CONDITIONS)!r}"
+        )
+
     assert "if" not in job, f"{job_id} acquired a job-level condition"
     assert job.get("continue-on-error") is not True
     checked_steps = [
@@ -163,6 +196,36 @@ def test_whole_tree_counterpart_is_in_its_required_job(
     job_name = str(job["name"])
     assert job_name in STRICT_GATE_JOBS
     assert job_name not in SOFT_ALLOWLIST
+
+
+def test_this_pin_is_selected_for_changes_to_its_inputs() -> None:
+    for changed_files in (
+        [PRE_COMMIT_CONFIG_PATH],
+        [".github/workflows/ci.yml"],
+    ):
+        selection = compute_selection(
+            changed_files=changed_files,
+            adjacency_path=ADJ,
+            ref_name="dev",
+            event_name="pull_request",
+            feature_flag_enabled=True,
+        )
+        assert selection.is_full_suite or any(
+            THIS_TEST.startswith(selected_path)
+            for selected_path in selection.selected_paths
+        ), (
+            f"{changed_files!r} does not select {THIS_TEST}: "
+            f"{selection.selected_paths!r}"
+        )
+
+
+def test_pytest_job_does_not_path_gate_this_pin() -> None:
+    condition = str(_job("test-parallel").get("if", "")).lower()
+    for path_signal in ("path", ".pre-commit-config", "ci.yml"):
+        assert path_signal not in condition, (
+            "test-parallel path-gates the OMN-19612 pin via its job-level "
+            f"condition: {condition!r}"
+        )
 
 
 def test_required_summary_and_workflow_trigger_cannot_drop_the_backstops() -> None:
