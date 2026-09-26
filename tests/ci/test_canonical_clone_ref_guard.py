@@ -421,6 +421,73 @@ def test_fetch_and_fast_forward_are_permitted(
     assert _ref(clone, env, "refs/heads/dev") == ahead
 
 
+def test_checkout_b_reaffirming_the_current_branch_is_permitted(
+    registry: Path, upstream: Path, clone: Path
+) -> None:
+    """OMN-18608: this is exactly the standing reconciler's own repair step
+    (`deploy_source_ref.py`'s ``reconcile_clone()``, reached from
+    ``reconcile-host.sh`` via the `onex` wrapper's below-floor self-heal) --
+    ``git checkout --force -B <branch> <target_sha>`` while the clone is
+    ALREADY on ``<branch>``.
+
+    git emits a HEAD reference-transaction line for every ``checkout -B``, even
+    one that changes nothing about which branch HEAD tracks, and the guard had
+    no idempotency check for that line (unlike the `refs/heads/*` case a few
+    lines below, which already special-cases `current == new`). Measured live
+    on the operator Mac 2026-09-26T17:39:30Z: every canonical clone was already
+    on `dev` and the reconciler's fast-forward step was refused as if it were a
+    real branch switch, so the workspace floor was never re-proven and every
+    evidence-minting `onex` subcommand (including `onex skill dod_verify`) kept
+    refusing EXIT_BELOW_FLOOR.
+    """
+    env = _base_env(registry)
+    before_symref = _head_symref(clone, env)
+    assert before_symref == "refs/heads/dev"
+    before_head = _ref(clone, env, "HEAD")
+    _commit(upstream, env, "three.txt", "three\n")
+    assert _git("fetch", "-q", "origin", cwd=clone, env=env).returncode == 0
+    target = _ref(clone, env, "refs/remotes/origin/dev")
+    assert target != before_head, "fixture did not actually move the upstream"
+
+    result = _git("checkout", "--force", "-B", "dev", target, cwd=clone, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert _head_symref(clone, env) == "refs/heads/dev"
+    assert _ref(clone, env, "refs/heads/dev") == target
+
+
+def test_checkout_b_to_a_different_branch_is_still_refused(
+    registry: Path, clone: Path
+) -> None:
+    """The idempotency check above must not widen the door for a REAL switch.
+
+    Same verb (`checkout -B`) as the permitted case, but the target names a
+    branch HEAD is not already on -- this must deny exactly like the plain
+    `checkout sidebranch` case already covered by
+    `test_branch_switch_is_refused_and_head_does_not_move`.
+    """
+    env = _base_env(registry)
+    assert (
+        _git("branch", "sidebranch", "origin/sidebranch", cwd=clone, env=env).returncode
+        == 0
+    )
+    before = _head_symref(clone, env)
+
+    result = _git(
+        "checkout",
+        "--force",
+        "-B",
+        "sidebranch",
+        "origin/sidebranch",
+        cwd=clone,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "a branch switch" in result.stderr
+    assert _head_symref(clone, env) == before
+
+
 def test_tags_are_permitted(registry: Path, clone: Path) -> None:
     env = _base_env(registry)
     result = _git("tag", "some-tag", cwd=clone, env=env)

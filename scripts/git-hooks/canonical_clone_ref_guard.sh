@@ -63,7 +63,12 @@
 #          and is refused one line later by its HEAD symref move, which linking
 #          a worktree does not make.
 #   ALLOW  fast-forwarding an existing refs/heads/* ref   the `pull --ff-only` path
-#   DENY   any HEAD update: a symref move is a branch switch, an oid is a detach
+#   ALLOW  a HEAD symref move that reaffirms the branch HEAD is already on
+#          -- git emits this line on every `checkout -B <branch>` even when it
+#          changes nothing about which branch HEAD tracks (OMN-18608); see
+#          head_reaffirms_current_branch
+#   DENY   any OTHER HEAD update: a symref move to a different branch is a
+#          branch switch, an oid is a detach
 #   DENY   rewinding or diverting an existing refs/heads/* ref (branch -f,
 #          reset --hard backwards, update-ref to an unrelated commit, a non-ff
 #          `fetch <src>:<dst>`)
@@ -379,6 +384,49 @@ worktree_is_initializing() {
   return 1
 }
 
+# head_reaffirms_current_branch <new> (OMN-18608)
+#
+# True when a HEAD transaction line whose `new` value is `ref:refs/heads/<x>`
+# is NOT a real branch switch -- HEAD was already that same symref before this
+# transaction.
+#
+# git emits a HEAD reference-transaction line on every `checkout -B <branch>`,
+# even when `<branch>` is the branch HEAD is already on and the command moves
+# nothing about which branch HEAD tracks. Measured (git 2.50.1, 2026-09-26) in
+# a throwaway repo with a `.git/hooks/reference-transaction` logger and no
+# `core.hooksPath` mutation: `git checkout --force -B dev <ff-sha>` while
+# already on `dev` produced BOTH a `refs/heads/dev` line (a genuine
+# fast-forward, correctly allowed below by the `current == new` / ancestor
+# check) AND a `HEAD` line reading `old=000...0 new=ref:refs/heads/dev`, with
+# no `old`/`new` change to distinguish it from a real switch.
+#
+# The `refs/heads/*` case below already has this idempotency check (`if
+# [[ "$current" == "$new" ]]; then continue; fi`); the HEAD case never did, so
+# it denied every same-branch reaffirmation as if it were a branch switch. This
+# is exactly the standing reconciler's own repair step
+# (`deploy_source_ref.py`'s `reconcile_clone()`, `runtime_build/'
+# `reconcile_deploy_clones.sh` -> `reconcile-host.sh` -> the `onex` wrapper's
+# below-floor self-heal), so the workspace floor was never re-proven and every
+# evidence-minting `onex` subcommand kept refusing EXIT_BELOW_FLOOR even when
+# every canonical clone was already sitting on its tracking branch (measured
+# live 2026-09-26T17:39:30Z: 5 clones, all on `dev`, every reconcile refused
+# 'a branch switch').
+#
+# `git symbolic-ref -q HEAD`, called from inside this hook at the `prepared`
+# stage, still reads the PRE-transaction value (measured, same repro) -- the
+# same fact the `refs/heads/*` case already relies on via `git rev-parse
+# --verify` for its own `current` before the update lands.
+#
+# This does NOT widen the door for a real switch: a detached HEAD resolves no
+# symref at all (empty `current_symref`, so the comparison never matches), and
+# a switch to a DIFFERENT branch compares a different string and still denies.
+head_reaffirms_current_branch() {
+  local new="$1" current_symref
+  current_symref="$(git symbolic-ref -q HEAD 2>/dev/null || true)"
+  [[ -n "$current_symref" ]] || return 1
+  [[ "$new" == "ref:$current_symref" ]]
+}
+
 # restore_after_refusal -- the `aborted` half of the OMN-18358 fix.
 #
 # Runs ONLY when the marker this hook wrote at `prepared` names the same
@@ -483,6 +531,11 @@ while read -r old new ref; do
       fi
       case "$new" in
         ref:*)
+          if head_reaffirms_current_branch "$new"; then
+            # A checkout/reset that re-affirms the branch HEAD is ALREADY on
+            # (OMN-18608) -- not a switch, so nothing to log or restore.
+            continue
+          fi
           deny "$ref" "a branch switch" \
             "A canonical clone left on a feature branch silently serves stale content to every lane that resolves it."
           ;;
