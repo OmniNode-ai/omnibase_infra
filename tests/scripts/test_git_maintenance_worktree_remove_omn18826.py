@@ -36,7 +36,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "git-maintenance.sh"
 
 
-def _env(registry: Path, worktrees: Path) -> dict[str, str]:
+FAKE_GH = """#!/usr/bin/env bash
+# Test double for `gh pr list ... --jq length`: no branch has an open PR.
+echo 0
+"""
+
+
+def _env(registry: Path, worktrees: Path, ledger: Path, bindir: Path) -> dict[str, str]:
     env = dict(os.environ)
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_SYSTEM"] = os.devnull
@@ -46,6 +52,10 @@ def _env(registry: Path, worktrees: Path) -> dict[str, str]:
     env["GIT_COMMITTER_EMAIL"] = env["GIT_AUTHOR_EMAIL"]
     env["OMNI_HOME"] = str(registry)
     env["WORKTREE_ROOT"] = str(worktrees)
+    # OMN-19396: the worktree phase needs an explicit ledger and asks gh about
+    # open pull requests; both are sandboxed here.
+    env["ONEX_LEDGER_PATH"] = str(ledger)
+    env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '')}"
     env.pop("GIT_PREFIX", None)
     # git exports the repo-scoping variables into every hook process and they
     # OVERRIDE both `cwd=` and `git -C`, so a fixture that misses one rewrites
@@ -71,17 +81,36 @@ def _git(
 class World:
     """A registry with one clone and a worktrees root, ready for worktrees.
 
-    The clone has no remote on purpose: the script's branch phase fetches first
-    and skips a repo whose fetch fails, so phase 1 is inert here and every
-    assertion below is about the worktree phase.
+    The clone has a bare `origin` under tmp_path, and every worktree's branch is
+    pushed to it: since OMN-19396 the worktree phase keeps any worktree with
+    commits on no remote-tracking ref. Phase 1 only reports here, because no
+    test passes --delete-remote-branches.
     """
 
     def __init__(self, tmp_path: Path) -> None:
         self.registry = tmp_path / "omni_home"
         self.worktrees = tmp_path / "omni_worktrees"
+        self.origin = tmp_path / "origin.git"
+        ledger = tmp_path / "ledger.md"
+        bindir = tmp_path / "bin"
         self.registry.mkdir()
         self.worktrees.mkdir()
-        self.env = _env(self.registry, self.worktrees)
+        bindir.mkdir()
+        ledger.write_text("# ledger\n", encoding="utf-8")
+        gh = bindir / "gh"
+        gh.write_text(FAKE_GH, encoding="utf-8")
+        gh.chmod(0o755)
+        self.env = _env(self.registry, self.worktrees, ledger, bindir)
+        _git(
+            "init",
+            "-q",
+            "--bare",
+            "-b",
+            "main",
+            str(self.origin),
+            cwd=tmp_path,
+            env=self.env,
+        )
         self.clone = self.registry / "fixture_repo"
         self.clone.mkdir()
         _git("init", "-q", "-b", "main", cwd=self.clone, env=self.env)
@@ -91,6 +120,8 @@ class World:
         (self.clone / "root.txt").write_text("root\n", encoding="utf-8")
         _git("add", "-A", cwd=self.clone, env=self.env)
         _git("commit", "-q", "-m", "seed", cwd=self.clone, env=self.env)
+        _git("remote", "add", "origin", str(self.origin), cwd=self.clone, env=self.env)
+        _git("push", "-q", "-u", "origin", "main", cwd=self.clone, env=self.env)
 
     def add_worktree(self, ticket: str, name: str = "fixture_repo") -> Path:
         path = self.worktrees / ticket / name
@@ -105,6 +136,9 @@ class World:
             cwd=self.clone,
             env=self.env,
         )
+        _git(
+            "push", "-q", "-u", "origin", f"wt/{ticket}/{name}", cwd=path, env=self.env
+        )
         return path
 
     def admin_dir(self, worktree: Path) -> Path:
@@ -113,6 +147,10 @@ class World:
         return Path(line.removeprefix("gitdir: ").strip())
 
     def run(self) -> subprocess.CompletedProcess[str]:
+        # Sandbox assertion before the destructive run (OMN-19396).
+        tmp = self.registry.parent.resolve()
+        for key in ("OMNI_HOME", "WORKTREE_ROOT", "ONEX_LEDGER_PATH"):
+            assert Path(self.env[key]).resolve().is_relative_to(tmp), self.env[key]
         return subprocess.run(
             ["bash", str(SCRIPT), "--execute", "--prune-worktrees"],
             env=scrub_git_location_env(self.env),

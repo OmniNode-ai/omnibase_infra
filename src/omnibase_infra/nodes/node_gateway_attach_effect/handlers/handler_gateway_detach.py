@@ -15,6 +15,7 @@ I/O boundary), mirroring ``HandlerGatewayAttach._fetch_jwks`` /
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 import httpx
@@ -56,6 +57,8 @@ from omnibase_infra.nodes.node_gateway_attach_effect.services.protocol_gateway_s
 from omnibase_infra.runtime.secret_resolver import SecretResolver
 
 __all__ = ["HandlerGatewayDetach"]
+
+logger = logging.getLogger(__name__)
 
 
 class SessionNotFoundError(Exception):
@@ -147,6 +150,22 @@ class HandlerGatewayDetach(MixinAsyncCircuitBreaker):
 
         await self._session_store.delete(request.session_id)
         now = datetime.now(UTC)
+
+        # OMN-17423 AC3: one non-secret line per lifecycle transition, so a
+        # credential-redaction grep of this surface can tell a clean log from
+        # a silent one. Identifiers only -- the access token is a ``SecretStr``
+        # and never reaches a log record.
+        logger.info(
+            "gateway session detached: session_id=%s",
+            session.session_id,
+            extra={
+                "event": "gateway.session.detached",
+                "session_id": str(session.session_id),
+                "tenant_id": str(session.tenant_id),
+                "tenant_slug": session.tenant_slug,
+                "edge_instance_id": session.edge_instance_id,
+            },
+        )
         event = ModelGatewaySessionEvent(
             event_type=EnumGatewaySessionEventType.DETACHED,
             session_id=session.session_id,
