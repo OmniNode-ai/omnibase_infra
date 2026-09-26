@@ -53,6 +53,17 @@ if grep -qxF -- "$branch" "$FAKE_GH_OPEN_PRS"; then echo 1; else echo 0; fi
 """
 
 
+FAKE_SNAPSHOT_HELPER = """import json, os, sys
+wt = sys.argv[1]
+if os.environ.get("FAKE_SNAPSHOT_FAIL"):
+    print(json.dumps({"ok": False})); sys.exit(3)
+d = os.path.join(os.environ["OMNI_HOME"], ".onex_state", "worktree-removal-snapshots",
+                 os.path.basename(os.path.dirname(wt)))
+os.makedirs(d)
+print(json.dumps({"ok": True, "directory": d}))
+"""
+
+
 def _inside(path: str, root: Path) -> bool:
     return Path(path).resolve().is_relative_to(root.resolve())
 
@@ -94,6 +105,18 @@ class Sandbox:
         # git exports repo-scoping variables into hook processes and they
         # override both cwd= and git -C (OMN-14891 / OMN-18434).
         self.env = scrub_git_location_env(env)
+
+        # The shared pre-removal save (omniclaude worktree_removal_snapshot.py,
+        # OMN-19539), reduced to its contract: exit 0 and a JSON line naming the
+        # saved directory, or exit 3 when FAKE_SNAPSHOT_FAIL is set. Its own
+        # behaviour is tested where it lives.
+        helper = (
+            self.registry / "omniclaude" / "scripts" / "worktree_removal_snapshot.py"
+        )
+        helper.parent.mkdir(parents=True)
+        helper.write_text(FAKE_SNAPSHOT_HELPER, encoding="utf-8")
+        self.snapshots = self.registry / ".onex_state" / "worktree-removal-snapshots"
+        self.env.pop("FAKE_SNAPSHOT_FAIL", None)
 
         self.git("init", "-q", "--bare", "-b", "main", str(self.origin), cwd=tmp_path)
         self.clone = self.registry / "fixture_repo"
@@ -406,6 +429,67 @@ def test_control_regenerable_cache_does_not_block_removal(box: Sandbox) -> None:
     assert not worktree.exists(), result.stdout
     assert "[removed] OMN-CACHE" in result.stdout, result.stdout
     assert not (box.worktrees / "OMN-CACHE").exists()
+
+
+def test_an_env_inside_an_ignored_regenerable_dir_is_kept(box: Sandbox) -> None:
+    """OMN-19539: `git status --ignored` collapses an ignored `dist/` to one
+    line, so a name-only check read the `.env` inside it as build output."""
+    (box.clone / ".gitignore").write_text(".env\n.venv/\ndist/\n", encoding="utf-8")
+    box.git("commit", "-q", "-am", "ignore dist", cwd=box.clone)
+    box.git("push", "-q", "origin", "main", cwd=box.clone)
+    worktree = box.add_worktree("OMN-DISTENV")
+    (worktree / "dist").mkdir()
+    (worktree / "dist" / "bundle.js").write_text("built\n", encoding="utf-8")
+    (worktree / "dist" / ".env").write_text("TOKEN=x\n", encoding="utf-8")
+
+    result = box.run("--execute", "--prune-worktrees")
+
+    assert (worktree / "dist" / ".env").exists(), result.stdout
+    assert "secrets-shaped file inside dist/" in result.stdout, result.stdout
+
+
+def test_control_an_ignored_dist_without_secrets_is_regenerable(box: Sandbox) -> None:
+    (box.clone / ".gitignore").write_text(".env\n.venv/\ndist/\n", encoding="utf-8")
+    box.git("commit", "-q", "-am", "ignore dist", cwd=box.clone)
+    box.git("push", "-q", "origin", "main", cwd=box.clone)
+    worktree = box.add_worktree("OMN-DISTONLY")
+    (worktree / "dist").mkdir()
+    (worktree / "dist" / "bundle.js").write_text("built\n", encoding="utf-8")
+
+    result = box.run("--execute", "--prune-worktrees")
+
+    assert not worktree.exists(), result.stdout
+    assert "[removed] OMN-DISTONLY" in result.stdout, result.stdout
+
+
+def test_every_removal_is_saved_first(box: Sandbox) -> None:
+    worktree = box.add_worktree("OMN-SAVED")
+
+    result = box.run("--execute", "--prune-worktrees")
+
+    assert not worktree.exists(), result.stdout
+    assert (box.snapshots / "OMN-SAVED").is_dir(), result.stdout
+    assert result.stdout.index("[saved]") < result.stdout.index("[removed] OMN-SAVED")
+
+
+def test_a_failed_save_keeps_the_worktree(box: Sandbox) -> None:
+    worktree = box.add_worktree("OMN-UNSAVED")
+
+    result = box.run("--execute", "--prune-worktrees", FAKE_SNAPSHOT_FAIL="1")
+
+    assert worktree.exists(), result.stdout
+    assert "pre-removal snapshot failed" in result.stdout, result.stdout
+    assert "[incomplete] OMN-UNSAVED" in result.stdout, result.stdout
+
+
+def test_a_missing_helper_keeps_the_worktree(box: Sandbox) -> None:
+    worktree = box.add_worktree("OMN-NOHELPER")
+    (box.registry / "omniclaude" / "scripts" / "worktree_removal_snapshot.py").unlink()
+
+    result = box.run("--execute", "--prune-worktrees")
+
+    assert worktree.exists(), result.stdout
+    assert "snapshot helper missing" in result.stdout, result.stdout
 
 
 def test_script_never_deletes_recursively() -> None:
