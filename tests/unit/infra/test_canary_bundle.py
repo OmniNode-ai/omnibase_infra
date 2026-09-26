@@ -128,6 +128,8 @@ def test_canary_bundle_required_env_subset_of_core_baseline() -> None:
             "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST",
             "LOCAL_LLM_SHARED_SECRET",
             "OMNIDASH_ANALYTICS_DB_URL",
+            # OMN-19749: every runtime kernel names its lane.
+            "ONEX_RUNTIME_LANE",
             # core bundle Infisical vars (transitive via includes: [core])
             "INFISICAL_CLIENT_ID",
             "INFISICAL_CLIENT_SECRET",
