@@ -94,7 +94,7 @@ def _make_contract(
                     ModelDbTableDeclaration(
                         name="node_service_registry",
                         database_ref="application",
-                        schema="tenant",
+                        schema="public",
                         migration="tests/node_service_registry.sql",
                         access="read_write",
                         role="service_registry",
@@ -400,7 +400,7 @@ def test_wire_handler_entry_uses_projection_path_when_db_io_declared(
 
     assert contract.db_io is not None
     assert contract.db_io.db_tables[0].database_ref == "application"
-    assert contract.db_io.db_tables[0].schema == "tenant"
+    assert contract.db_io.db_tables[0].schema == "public"
 
 
 @pytest.mark.integration
@@ -427,7 +427,7 @@ def test_projection_callback_rejects_missing_db_url_at_wiring(tmp_path: Path) ->
         with pytest.raises(ValueError, match="tenant_projection"):
             _make_projection_dispatch_callback(
                 CountingHandler(),
-                projection_database_target("delegation_events", schema="tenant"),
+                projection_database_target("delegation_events", schema="public"),
                 (),
             )
 

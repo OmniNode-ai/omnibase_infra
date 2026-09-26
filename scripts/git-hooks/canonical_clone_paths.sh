@@ -255,8 +255,6 @@ canonical_clone_context() {
     exempt=1
   elif is_under "$top_level" "$omni_home/omni_worktrees"; then
     exempt=1
-  elif is_under "$top_level" "$(dirname "$omni_home")/omni_worktrees"; then
-    exempt=1
   elif [[ "$is_linked_worktree" == "1" ]]; then
     exempt=1
   else

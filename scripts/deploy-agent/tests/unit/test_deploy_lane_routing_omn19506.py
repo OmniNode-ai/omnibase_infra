@@ -69,7 +69,9 @@ routes:
     instance: dev-202
 """
 
-TABLE_WITHOUT_ROUTES = TABLE_WITH_OMNIMARKET_ROUTE.split("routes:")[0] + "routes: []\n"
+TABLE_WITHOUT_ROUTES = (
+    TABLE_WITH_OMNIMARKET_ROUTE.split("routes:", maxsplit=1)[0] + "routes: []\n"
+)
 
 
 def _command(
@@ -289,7 +291,8 @@ def test_routing_default_must_be_the_pinned_instance() -> None:
 def test_routing_default_the_committed_table_names_the_pinned_default() -> None:
     table = load_routing_table()
     assert table.default_instance == PINNED_DEFAULT_INSTANCE
-    assert set(table.instances) == {"dev-201", "dev-202"}
+    # OMN-19543 adds the .200 instance, routed nothing.
+    assert set(table.instances) == {"dev-201", "dev-202", "dev-200"}
 
 
 @pytest.mark.parametrize(

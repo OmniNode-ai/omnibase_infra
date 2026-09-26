@@ -767,6 +767,22 @@ services:
         if [ "$$(/usr/bin/rpk cluster config get enable_sasl $$ADMIN)" = "true" ]; then
           export RPK_USER="$$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$$DEV_KAFKA_SASL_PASSWORD" RPK_SASL_MECHANISM=SCRAM-SHA-256
         fi
+        # OMN-19543: onex.tenant.events is onex-api's control-plane topic. An
+        # instance lane (dev-202, dev-200, ...) disables onex-api, so nothing
+        # else creates it and projection-tenant-registry-writer subscribes to a
+        # missing topic. One partition, as onex-api creates it. The create may
+        # lose a race to onex-api on .201; the read-back is the gate.
+        CP_TOPIC=onex.tenant.events
+        /usr/bin/rpk topic list > /tmp/topics.txt
+        if ! awk -v t="$$CP_TOPIC" 'NR>1 && $$1==t {found=1} END {exit !found}' /tmp/topics.txt; then
+          /usr/bin/rpk topic create "$$CP_TOPIC" -p 1 || echo "OMN-19543: create of $$CP_TOPIC returned non-zero; reading back"
+          /usr/bin/rpk topic list > /tmp/topics.txt
+          if ! awk -v t="$$CP_TOPIC" 'NR>1 && $$1==t {found=1} END {exit !found}' /tmp/topics.txt; then
+            echo "OMN-19543 FAIL: control-plane topic $$CP_TOPIC is absent after create" >&2
+            exit 1
+          fi
+        fi
+        echo "OMN-19543: control-plane topic $$CP_TOPIC present"
         /usr/bin/rpk topic list > /tmp/topics.txt
         DLQ=$$(awk 'NR>1 && tolower($$1) ~ /dlq/ {print $$1}' /tmp/topics.txt)
         echo "OMN-19082: $$(awk 'NR>1' /tmp/topics.txt | wc -l) topics, $$(echo "$$DLQ" | awk 'NF' | wc -l) DLQ topics"
@@ -1157,6 +1173,10 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      # OMN-19543: the one-shot creates onex.tenant.events, the only topic this
+      # writer reads, on lanes where onex-api (its owner) does not run.
+      redpanda-partition-cap:
+        condition: service_completed_successfully
     # The `if __name__ == "__main__"` entrypoint on the handler module, exactly
     # as the onex-dev Deployment invokes it. Same class, same code path, same
     # image contents -- the only difference between the two lanes is the
