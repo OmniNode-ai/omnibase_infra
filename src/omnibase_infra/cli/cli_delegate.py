@@ -597,6 +597,21 @@ def _backend_pin_defect(
     escalation spend. It makes that spend impossible to mistake for the pinned
     run. Refusing to escalate off a pin at all is a change to the routing port
     in ``omnimarket`` and is not in this layer's gift.
+
+    OMN-19765: on a machine with a locally registered BYOK key, the local
+    path's ``substitute_local_byok_route`` (``omnimarket/routing/
+    local_byok_route.py``) replaces a HOUSE rung this CLI's pin named (e.g.
+    ``cloud-glm``) with the declared customer-paid rung (``byok-glm``) BEFORE
+    dispatch — a routing decision, not an escalation, and the FIRST and only
+    attempt still answers. Comparing ``served`` to the raw pin string alone
+    made that indistinguishable from a real escalation off the pin (run
+    ``86538bdd-0a35-47c6-98e1-b4d13ad39e55``, first-attempt success, exited 1
+    anyway). The attempt's own ``substituted_from_backend_id`` — set by the
+    routing layer that performed the substitution, never inferred here — names
+    which backend, if any, was substituted TO produce ``served``; the pin is
+    honoured when that equals the requested id, and still refused when no
+    substitution occurred or it substituted a DIFFERENT backend, which is what
+    keeps a real escalation refused.
     """
     if requested_backend_id is None:
         return None
@@ -604,7 +619,12 @@ def _backend_pin_defect(
         return None
     accepted = result.accepted_attempt
     served = (accepted.backend_id or "").strip() if accepted is not None else ""
-    if served == requested_backend_id:
+    substituted_from = (
+        (accepted.substituted_from_backend_id or "").strip()
+        if accepted is not None
+        else ""
+    )
+    if served == requested_backend_id or substituted_from == requested_backend_id:
         return None
     return (
         f"delegation was pinned to backend {requested_backend_id!r} but the "

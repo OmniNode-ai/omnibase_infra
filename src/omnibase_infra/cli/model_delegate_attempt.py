@@ -42,6 +42,12 @@ class ModelDelegateAttempt(BaseModel):
     acceptance_reason: str | None = Field(default=None)
     input_tokens_measured: int | None = Field(default=None)
     input_token_budget: int | None = Field(default=None)
+    # OMN-19765: the pinned or house backend the local BYOK route (omnimarket
+    # ``substitute_local_byok_route``) replaced to produce THIS attempt's
+    # ``backend_id``, or ``None`` when no substitution occurred. Read alongside
+    # ``backend_id`` by the pin check so an in-process BYOK-substituted answer
+    # is not mistaken for an escalation off the pin.
+    substituted_from_backend_id: str | None = Field(default=None)
 
     @property
     def is_accepted(self) -> bool:
