@@ -135,9 +135,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # cannot install them itself: `playwright install --with-deps` needs apt as
 # root, and the sudoers rule below grants one confined `rm -rf` and nothing
 # else. The list is the library half of `playwright install-deps --dry-run
-# chromium` on 22.04. Its xvfb and font packages are left out: the fleet runs
-# Chromium headless, and libpango/libcairo pull fontconfig and a default font
-# in on their own. runner-image-build-smoke resolves every soname inside the
+# chromium` on 22.04; the fonts and xvfb half is the next block (OMN-19659).
+# runner-image-build-smoke resolves every soname inside the
 # built image, and tests/ci/test_runner_image_playwright_chromium_libs_omn19206.py
 # pins the package list.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -163,6 +162,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxfixes3 \
     libxkbcommon0 \
     libxrandr2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Playwright's fonts and virtual display (OMN-19659): the other half of the same
+# `install-deps chromium` command, `nativeDeps['ubuntu22.04-x64'].tools` in
+# playwright-core 1.63.0 (the version omniweb dev pins). The block above left
+# these out on the theory that libpango/libcairo pull a default font in. They
+# pull DejaVu and nothing else: emoji, CJK and Thai render as tofu, and omniweb
+# stages fonts-liberation per job by hand because Chromium aborted on SIGTRAP
+# shaping a web font with no usable font set (OMN-18165). xvfb gives a headed
+# launch a display without a job installing one. The package list is pinned in
+# tests/ci/test_runner_image_playwright_chromium_libs_omn19206.py, and
+# docker/runners/playwright-smoke.sh launches Chromium inside the built
+# image and requires every font family by name.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-freefont-ttf \
+    fonts-ipafont-gothic \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-tlwg-loma-otf \
+    fonts-unifont \
+    fonts-wqy-zenhei \
+    libfontconfig1 \
+    libfreetype6 \
+    xfonts-cyrillic \
+    xfonts-scalable \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # OMN-15134: scoped NOPASSWD sudo rule -- `runner` may run exactly

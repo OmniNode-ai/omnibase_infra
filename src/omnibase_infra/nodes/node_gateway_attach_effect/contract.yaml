@@ -79,6 +79,18 @@
 #     by the new max_attach_token_lifetime_seconds. Bumps minor:
 #     ModelGatewayAttachConfig gains a field and previously-accepted
 #     dual-audience / over-long tokens are now rejected.
+#   - OMN-17423: the three success paths emit one INFO log record each --
+#     gateway.session.attached / .heartbeat / .detached -- carrying the
+#     session identifiers and nothing else. Patch bump: no model, wire or
+#     topic change. The reason is AC3 of that ticket. Attach and detach had
+#     no logger at all and heartbeat logged only its abnormal paths, so a
+#     credential-redaction grep of this surface returned zero whether the
+#     log was redacted or simply empty, and every such zero was
+#     unfalsifiable. A located traversal is what turns that zero into
+#     evidence. The fields are server-minted, non-secret correlators
+#     (session_id, tenant_id, tenant_slug, edge_instance_id, plus expires_at
+#     on attach and session_status on heartbeat); the access token stays a
+#     SecretStr with one unwrap point per handler, per OMN-18385 above.
 name: "node_gateway_attach_effect"
 contract_name: "node_gateway_attach_effect"
 node_name: "node_gateway_attach_effect"
@@ -86,11 +98,11 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 0
   minor: 5
-  patch: 2
+  patch: 3
 node_version:
   major: 0
   minor: 4
-  patch: 1
+  patch: 2
 runtime_profiles:
   - effects
   - canary
