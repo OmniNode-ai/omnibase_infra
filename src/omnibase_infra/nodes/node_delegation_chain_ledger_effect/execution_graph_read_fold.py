@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Latest-only adapter from admitted ledger structure to the pure chain fold.
+"""Offset-bounded adapter from admitted ledger structure to the pure chain fold.
 
-Legacy Kafka offsets cannot anchor a stable historical replay. This adapter
-therefore emits no replay cursor and refuses bounded requests until a verified
-writer watermark and historical cutover contract exist.
+The selected rows and returned cursors are deterministic for a captured read.
+Kafka offsets are not writer watermarks: an earlier offset may arrive later,
+so append invariance is pending the separately ticketed watermark contract.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from uuid import UUID
 from omnibase_core.models.execution_graph_replay import (
     EnumExecutionGraphCursorMode,
     ModelExecutionGraphRequest,
+    ModelExecutionGraphSourceCursor,
 )
 from omnibase_core.models.execution_graph_replay.model_execution_graph_terminal_refusal import (
     ModelExecutionGraphTerminalRefusal,
@@ -34,6 +35,9 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_execu
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_observed_envelope_evidence import (
     ModelObservedEnvelopeEvidence,
+)
+from omnibase_infra.nodes.node_delegation_chain_ledger_effect.replay_evidence import (
+    select_bounded_evidence,
 )
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     ExecutionGraphLedgerRecord,
@@ -120,8 +124,8 @@ def _admitted_structure(
     return tuple(evidence)
 
 
-class LatestOnlyExecutionGraphFold:
-    """Callable executor adapter; only latest captured chains can complete."""
+class ExecutionGraphReadFold:
+    """Callable executor adapter over one admitted current evidence snapshot."""
 
     def __init__(
         self, *, workflow_type: str, read_clock: Callable[[], datetime]
@@ -148,26 +152,42 @@ class LatestOnlyExecutionGraphFold:
         ):
             raise PermissionError("graph fold requires admitted signed ownership")
 
-        if request.cursor_mode is EnumExecutionGraphCursorMode.BOUNDED:
-            return self._refusal(
-                authority,
-                code="historical_replay_unavailable",
-                message="Historical replay is unavailable for this graph source.",
-            )
-
         try:
+            current_evidence = _admitted_structure(admission, topology)
+            if request.cursor_mode is EnumExecutionGraphCursorMode.BOUNDED:
+                source_cursors = request.source_cursors or ()
+                if any(
+                    cursor.topic not in topology.read_set.topics
+                    for cursor in source_cursors
+                ):
+                    raise ValueError("cursor is outside the pinned read set")
+                bounded_evidence = select_bounded_evidence(
+                    current_evidence, source_cursors
+                )
+            else:
+                bounds: dict[tuple[str, int], int] = {}
+                for item in current_evidence:
+                    key = (item.topic, item.partition)
+                    bounds[key] = max(bounds.get(key, -1), item.kafka_offset)
+                source_cursors = tuple(
+                    ModelExecutionGraphSourceCursor(
+                        topic=topic,
+                        partition=partition,
+                        max_kafka_offset=max_kafka_offset,
+                    )
+                    for (topic, partition), max_kafka_offset in sorted(bounds.items())
+                )
+                bounded_evidence = current_evidence
             graph = self._fold.handle(
                 ModelExecutionGraphFoldRequest(
                     correlation_id=authority.correlation_id,
                     tenant_id=authority.tenant_id,
-                    bounded_evidence=_admitted_structure(admission, topology),
+                    bounded_evidence=bounded_evidence,
                     topology=topology,
                     fold_version=_FOLD_VERSION,
                     grader_version=_GRADER_VERSION,
                     verdict_reducer_version=_VERDICT_REDUCER_VERSION,
-                    # Empty by design: legacy offsets describe source positions
-                    # but are not stable historical replay bounds.
-                    source_cursors=(),
+                    source_cursors=source_cursors,
                     read_at=self._read_clock(),
                     withheld_count=admission.withheld_count,
                 )
@@ -202,4 +222,4 @@ class LatestOnlyExecutionGraphFold:
         )
 
 
-__all__ = ["LatestOnlyExecutionGraphFold"]
+__all__ = ["ExecutionGraphReadFold"]

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Latest graph folding exposes captured structure, never historical claims."""
+"""Graph read folding selects explicit offset bounds without stability claims."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from omnibase_core.models.execution_graph_replay import (
     ModelExecutionGraphTopologyVersion,
 )
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.nodes.node_delegation_chain_ledger_effect.execution_graph_latest_fold import (
-    LatestOnlyExecutionGraphFold,
+from omnibase_infra.nodes.node_delegation_chain_ledger_effect.execution_graph_read_fold import (
+    ExecutionGraphReadFold,
 )
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     DelegationOwnerProof,
@@ -134,14 +134,12 @@ def _admission(
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_latest_folds_owned_rows_without_leaking_raw_body_or_cursor_claim() -> (
-    None
-):
+async def test_latest_folds_owned_rows_without_leaking_raw_body() -> None:
     request = ModelExecutionGraphRequest(
         correlation_id=uuid4(), cursor_mode=EnumExecutionGraphCursorMode.LATEST
     )
     tenant_id = uuid4()
-    terminal = await LatestOnlyExecutionGraphFold(
+    terminal = await ExecutionGraphReadFold(
         workflow_type="delegation-execution-graph-read",
         read_clock=lambda: READ_AT,
     )(
@@ -154,13 +152,20 @@ async def test_latest_folds_owned_rows_without_leaking_raw_body_or_cursor_claim(
     assert terminal.status == "completed"
     assert terminal.result is not None
     assert len(terminal.result.replay.nodes) == 2
-    assert terminal.result.replay.source_cursors == ()
+    assert terminal.result.replay.source_cursors == (
+        ModelExecutionGraphSourceCursor(
+            topic=CHILD_TOPIC, partition=0, max_kafka_offset=7
+        ),
+        ModelExecutionGraphSourceCursor(
+            topic=HEAD_TOPIC, partition=0, max_kafka_offset=12
+        ),
+    )
     assert "SECRET_NOT_FOR_GRAPH" not in terminal.model_dump_json()
 
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_bounded_historical_request_returns_signed_terminal_refusal() -> None:
+async def test_bounded_request_folds_only_selected_partition_offsets() -> None:
     request = ModelExecutionGraphRequest(
         correlation_id=uuid4(),
         cursor_mode=EnumExecutionGraphCursorMode.BOUNDED,
@@ -168,10 +173,13 @@ async def test_bounded_historical_request_returns_signed_terminal_refusal() -> N
             ModelExecutionGraphSourceCursor(
                 topic=HEAD_TOPIC, partition=0, max_kafka_offset=12
             ),
+            ModelExecutionGraphSourceCursor(
+                topic=CHILD_TOPIC, partition=0, max_kafka_offset=7
+            ),
         ),
     )
     tenant_id = uuid4()
-    terminal = await LatestOnlyExecutionGraphFold(
+    terminal = await ExecutionGraphReadFold(
         workflow_type="delegation-execution-graph-read",
         read_clock=lambda: READ_AT,
     )(
@@ -181,10 +189,46 @@ async def test_bounded_historical_request_returns_signed_terminal_refusal() -> N
         _admission(request, tenant_id),
     )
 
-    assert terminal.status == "failed"
-    assert terminal.result is None
-    assert terminal.refusal is not None
-    assert terminal.refusal.code == "historical_replay_unavailable"
+    assert terminal.status == "completed"
+    assert terminal.result is not None
+    assert len(terminal.result.replay.nodes) == 2
+    assert terminal.result.replay.source_cursors == tuple(
+        sorted(request.source_cursors or (), key=lambda cursor: cursor.topic)
+    )
+    assert terminal.refusal is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_bounded_request_excludes_rows_above_selected_offset() -> None:
+    request = ModelExecutionGraphRequest(
+        correlation_id=uuid4(),
+        cursor_mode=EnumExecutionGraphCursorMode.BOUNDED,
+        source_cursors=(
+            ModelExecutionGraphSourceCursor(
+                topic=HEAD_TOPIC, partition=0, max_kafka_offset=12
+            ),
+            ModelExecutionGraphSourceCursor(
+                topic=CHILD_TOPIC, partition=0, max_kafka_offset=6
+            ),
+        ),
+    )
+    tenant_id = uuid4()
+    terminal = await ExecutionGraphReadFold(
+        workflow_type="delegation-execution-graph-read",
+        read_clock=lambda: READ_AT,
+    )(
+        request,
+        _authority(request, tenant_id),
+        _topology(),
+        _admission(request, tenant_id),
+    )
+
+    assert terminal.status == "completed"
+    assert terminal.result is not None
+    assert len(terminal.result.replay.nodes) == 1
+    assert terminal.result.replay.nodes[0].topic == HEAD_TOPIC
+    assert terminal.result.replay.edges == ()
 
 
 @pytest.mark.asyncio
@@ -212,7 +256,7 @@ async def test_latest_refuses_admitted_reroute_without_partial_success() -> None
         withheld_envelope_ids=(),
         withheld_count=0,
     )
-    terminal = await LatestOnlyExecutionGraphFold(
+    terminal = await ExecutionGraphReadFold(
         workflow_type="delegation-execution-graph-read",
         read_clock=lambda: READ_AT,
     )(request, _authority(request, tenant_id), _topology(), admission)
