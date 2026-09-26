@@ -40,14 +40,19 @@ _PUBLISHED_0_38_57 = [
 ]
 
 
-def _pyproject(tmp_path: Path, deps: list[str]) -> Path:
+def _pyproject(
+    tmp_path: Path, deps: list[str], overrides: list[str] | None = None
+) -> Path:
     body = "\n".join(f'    "{d}",' for d in deps)
-    path = tmp_path / "pyproject.toml"
-    path.write_text(
+    text = (
         f'[project]\nname = "omnibase-infra"\nversion = "0.38.58"\n'
-        f"dependencies = [\n{body}\n]\n",
-        encoding="utf-8",
+        f"dependencies = [\n{body}\n]\n"
     )
+    if overrides is not None:
+        pins = "\n".join(f'    "{o}",' for o in overrides)
+        text += f"\n[tool.uv]\noverride-dependencies = [\n{pins}\n]\n"
+    path = tmp_path / "pyproject.toml"
+    path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -93,7 +98,7 @@ def test_a_stranded_core_pin_is_an_advance(tmp_path: Path) -> None:
     assert verdict.stranded is True
     assert verdict.published_version == "0.38.57"
     assert [(a.name, a.published, a.dev) for a in verdict.advances] == [
-        ("omnibase-core", "0.47.22", "0.47.23")
+        ("omnibase-core", "==0.47.22", "0.47.23")
     ]
 
 
@@ -144,6 +149,144 @@ def test_a_new_exact_sibling_the_release_does_not_carry_is_an_advance(
     ]
 
 
+# ---------------------------------------------------------------------------
+# OMN-19655 part 1: infra publishes a compatible core RANGE and keeps the exact
+# pin only in [tool.uv] override-dependencies. The exact version dev resolves
+# is the override; the published requirement can be any specifier shape.
+# ---------------------------------------------------------------------------
+
+#: The Requires-Dist shape infra publishes once the range lands (PyPI
+#: normalises clause order, so the ceiling comes first).
+_PUBLISHED_RANGE = [
+    "omnibase-compat==0.5.7",
+    "omnibase-core<0.48.0,>=0.47.23",
+    "omnibase-spi==0.23.5",
+]
+
+
+@pytest.mark.unit
+def test_dev_resolves_the_override_pin_not_the_published_range(tmp_path: Path) -> None:
+    """Today's dev after the change, against the published 0.38.57: still stranded.
+
+    [project.dependencies] carries only a range, so a reader of that table alone
+    would find no core pin and call infra in step. The override is what dev
+    builds and tests against, and 0.38.57's ==0.47.22 does not admit it.
+    """
+    verdict = advance.decide(
+        package="omnibase-infra",
+        pyproject=_pyproject(
+            tmp_path,
+            ["omnibase-core>=0.47.23,<0.48.0", "omnibase-spi==0.23.5"],
+            overrides=["omnibase-core==0.47.23", "omnibase-spi==0.23.5"],
+        ),
+        fetch=_fetch("0.38.57", _PUBLISHED_0_38_57),
+    )
+    assert [(a.name, a.published, a.dev) for a in verdict.advances] == [
+        ("omnibase-core", "==0.47.22", "0.47.23")
+    ]
+
+
+@pytest.mark.unit
+def test_a_patch_advance_inside_the_published_range_is_not_stranded(
+    tmp_path: Path,
+) -> None:
+    """The point of the range: a core patch on dev strands no downstream.
+
+    The published infra admits 0.47.24, so a downstream floor raise to 0.47.24
+    resolves against it without a new infra release.
+    """
+    verdict = advance.decide(
+        package="omnibase-infra",
+        pyproject=_pyproject(
+            tmp_path,
+            ["omnibase-core>=0.47.23,<0.48.0"],
+            overrides=["omnibase-core==0.47.24"],
+        ),
+        fetch=_fetch("0.38.58", _PUBLISHED_RANGE),
+    )
+    assert verdict.stranded is False
+    assert verdict.advances == ()
+
+
+@pytest.mark.unit
+def test_a_minor_advance_past_the_published_ceiling_is_stranded(
+    tmp_path: Path,
+) -> None:
+    verdict = advance.decide(
+        package="omnibase-infra",
+        pyproject=_pyproject(
+            tmp_path,
+            ["omnibase-core>=0.48.0,<0.49.0"],
+            overrides=["omnibase-core==0.48.0"],
+        ),
+        fetch=_fetch("0.38.58", _PUBLISHED_RANGE),
+    )
+    assert [(a.name, a.published, a.dev) for a in verdict.advances] == [
+        ("omnibase-core", "<0.48.0,>=0.47.23", "0.48.0")
+    ]
+
+
+@pytest.mark.unit
+def test_a_dev_version_below_the_published_floor_is_not_an_advance(
+    tmp_path: Path,
+) -> None:
+    """Not admitted, but not ahead either: a downgrade strands nobody downstream."""
+    verdict = advance.decide(
+        package="omnibase-infra",
+        pyproject=_pyproject(tmp_path, [], overrides=["omnibase-core==0.47.22"]),
+        fetch=_fetch("0.38.58", _PUBLISHED_RANGE),
+    )
+    assert verdict.stranded is False
+
+
+@pytest.mark.unit
+def test_an_unreadable_published_specifier_counts_as_an_advance(
+    tmp_path: Path,
+) -> None:
+    """Fail toward the train: the train's own premises still decide the cut."""
+    verdict = advance.decide(
+        package="omnibase-infra",
+        pyproject=_pyproject(tmp_path, [], overrides=["omnibase-core==0.47.23"]),
+        fetch=_fetch("0.38.58", ["omnibase-core===0.47.23-local"]),
+    )
+    assert [(a.name, a.dev) for a in verdict.advances] == [("omnibase-core", "0.47.23")]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("specifier", "version", "admitted"),
+    [
+        ("==0.47.22", "0.47.22", True),
+        ("==0.47.22", "0.47.23", False),
+        ("<0.48.0,>=0.47.23", "0.47.23", True),
+        ("<0.48.0,>=0.47.23", "0.47.99", True),
+        ("<0.48.0,>=0.47.23", "0.48.0", False),
+        ("<0.48.0,>=0.47.23", "0.47.22", False),
+        (">0.47.22", "0.47.22", False),
+        ("<=0.47.23", "0.47.23", True),
+        ("!=0.47.23,>=0.47.0", "0.47.23", False),
+        ("~=0.47.23", "0.47.30", True),
+        ("~=0.47.23", "0.48.0", False),
+        ("", "0.47.23", True),
+        ("===0.47.23-local", "0.47.23", None),
+    ],
+)
+def test_specifier_admits(specifier: str, version: str, admitted: bool | None) -> None:
+    assert advance.specifier_admits(specifier, version) is admitted
+
+
+@pytest.mark.unit
+def test_published_sibling_requirements_keep_any_shape_and_drop_conditionals() -> None:
+    assert advance.published_sibling_requirements(
+        [
+            "omnibase-core<0.48.0,>=0.47.23",
+            "omnibase_spi (==0.23.5)",
+            'omnibase-compat==0.5.7; extra == "compat"',
+            "pydantic<3.0.0,>=2.11.7",
+        ]
+    ) == {"omnibase-core": "<0.48.0,>=0.47.23", "omnibase-spi": "==0.23.5"}
+
+
 @pytest.mark.unit
 def test_main_writes_the_verdict_and_the_step_output(
     tmp_path: Path,
@@ -163,7 +306,7 @@ def test_main_writes_the_verdict_and_the_step_output(
     payload = json.loads(capsys.readouterr().out)
     assert payload["stranded"] is True
     assert payload["advances"] == [
-        {"name": "omnibase-core", "published": "0.47.22", "dev": "0.47.23"}
+        {"name": "omnibase-core", "published": "==0.47.22", "dev": "0.47.23"}
     ]
     assert "stranded=true" in output.read_text(encoding="utf-8")
 

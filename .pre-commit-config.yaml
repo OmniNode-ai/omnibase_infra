@@ -622,6 +622,17 @@ repos:
         files: ^pyproject\.toml$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19655: omnibase-core is published as >=FLOOR,<NEXT_MINOR and pinned
+      # exactly only in [tool.uv] override-dependencies; the range must admit
+      # the override. CI holds the same invariant through
+      # tests/scripts/test_check_sibling_compatible_range.py.
+      - id: check-core-compatible-range
+        name: omnibase-core compatible range admits the override pin (OMN-19655)
+        entry: uv run --frozen python scripts/ci/check_sibling_compatible_range.py --pyproject pyproject.toml --package omnibase-core
+        language: system
+        files: ^pyproject\.toml$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-11069: Block new os.environ/os.getenv reads outside approved overlay modules
       - id: check-env-reads
         name: Block new os.environ reads (use overlay-resolved config)
