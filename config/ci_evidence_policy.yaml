@@ -103,6 +103,21 @@ evidence_artifacts:
       - c12-provider-catalogue.json
     rationale: >-
       One row per check over the deployed catalogue (parity both directions, no Claude entry, no house entry, the intake route's binding) plus the negative-test injections run in the same process, with the image and the sha256 of the catalogue, the platform contract and both deployed modules. The injections are what make a green readable: a checker that always answers clean produces the same shipped reading, and only the injections tell the two apart.
+  # --- chain-canary-c28-consumer-flow.yml: the C28 verdict (OMN-19812) -----
+  #
+  # As with C11 and C12, the probe's EXIT CODE is the verdict and this record
+  # is how a reader sees the four clauses without reading a log. An empty
+  # record beside a green run would claim the exposure was walked, the tests
+  # mutated and the seam fed a malformed payload with nothing behind it.
+  - id: c28-consumer-flow
+    workflow: .github/workflows/chain-canary-c28-consumer-flow.yml
+    job: c28-consumer-flow
+    producer_step: "Re-measure C28 on the dev lane and grade it"
+    artifact_name: c28-consumer-flow
+    required_paths:
+      - c28-consumer-flow.json
+    rationale: >-
+      One row per check over the four clauses the 2026-09-19 hand readback took (both named subscription kinds instrumented and live, the OMN-17214 negative tests passing and biting per branch, the since-cursor walk reaching every live consumer group, and the boot premise with its injected positive control), plus the boot identity, the matched kind rows, the per-mutation test outcomes, the walk's page table and the unreachable set. The positive control is what makes the zero readable: a dead log read and a clean seam both count zero, and only the injected payload tells them apart.
   # --- provider-rung-canary.yml: per-rung liveness (OMN-16987) --------------
   #
   # The probe's EXIT CODE is the verdict; this record is the per-rung table a

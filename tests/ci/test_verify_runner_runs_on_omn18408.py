@@ -174,6 +174,23 @@ NEW_VERIFY_JOBS = (
         "c16-receipt-identity",
         "C16 receipt identity (dev lane)",
     ),
+    # OMN-19812: the C28 consumer-flow producer. Born on the label, for the
+    # reasons the C12 producer is: it reads the dev lane through this host's
+    # docker socket (runtime container logs, `rpk` inside the broker
+    # container, a `psql` select inside the lane's Postgres) and its
+    # projection-api through this host's gateway alias. Its one lane write is
+    # a single malformed payload on the stall-alert trigger topic per run, the
+    # positive control the hand readback it replaces also published, so the
+    # zero it counts is a measurement; it restarts and reconfigures nothing.
+    #
+    # It needs the HOST label for the identical reason: on another lab host's
+    # daemon none of those containers exist, so an unpinned run would exit 2
+    # on every tick and be read as a lane outage.
+    (
+        "chain-canary-c28-consumer-flow.yml",
+        "c28-consumer-flow",
+        "C28 consumer flow (dev lane)",
+    ),
     # OMN-19445: the R1/MD-14 front-door probe. Born on the label, and it
     # clears the OMN-18602 bar the same way the read-only canaries above do:
     # it never mutates the lane, only runs `onex delegate` against it and

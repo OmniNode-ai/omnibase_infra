@@ -69,6 +69,8 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "c12-provider-catalogue",
     # OMN-19181: the C16 receipt-identity record.
     "c16-receipt-identity",
+    # OMN-19812: the C28 consumer-flow record.
+    "c28-consumer-flow",
     "lab-load",
     # OMN-19233: the staging delivery gate's verdict, read by the re-run selector.
     "lab-pass-gate-verdict",
