@@ -90,6 +90,7 @@ databases:
               - savings_correlation_finalizations
               - savings_injection_signals
               - savings_validator_catch_signals
+              - session_content
               - topic_produce_windows
               - work_events
             privileges:
@@ -358,5 +359,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: e565b45aedccdfcff0c1c1920f043566118d9871fd73c8f8c24d2aedf3c9b1cb
+  sha256: 9c42e5d4ce39afa308b094d99e7b9f617e6a0744a8693be8371e66c5ee1a1094
 topology_instance: onex-prod
