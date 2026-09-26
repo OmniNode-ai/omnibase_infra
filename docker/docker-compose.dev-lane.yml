@@ -395,6 +395,34 @@ services:
       - postgres
       - -c
       - max_connections=400
+  # OMN-19461: ONE ISSUER FOR THE LANE, WHOEVER ASKS.
+  #
+  # With no hostname configured, Keycloak stamps `iss` from the Host of each
+  # token request: a token minted in-network carries
+  # http://keycloak:8080/realms/omninode, one minted from the host carries
+  # http://localhost:28080/realms/omninode. The validators on this lane
+  # disagreed accordingly. Every runtime service expects the browser-visible
+  # issuer (KEYCLOAK_ISSUER in the base x-runtime-env block) and onex-api
+  # expected the in-network one, so no single token satisfied both, and every
+  # gateway attach failed with TokenValidationError at the node (OMN-19373 AC1).
+  #
+  # KC_HOSTNAME pins the frontend URL, so `iss` is the browser-visible value
+  # for every token regardless of which host minted it.
+  # KC_HOSTNAME_BACKCHANNEL_DYNAMIC keeps the token, introspection and JWKS
+  # endpoints answering in-network at keycloak:8080, which is what every
+  # container here calls; Keycloak requires KC_HOSTNAME to be a full URL when
+  # backchannel resolution is dynamic. Measured on this lane
+  # 2026-09-26T20:20Z: discovery at keycloak:8080 reports issuer
+  # localhost:28080 with an in-network token_endpoint and jwks_uri, a token
+  # minted at keycloak:8080 carries iss=localhost:28080, and the admin REST
+  # API answers 200 in-network.
+  #
+  # HERE AND NOT IN THE BASE: the other lanes run their own Keycloak on their
+  # own published port, and a base value would name this lane's port for them.
+  keycloak:
+    environment:
+      KC_HOSTNAME: "http://localhost:28080"
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
   # ===========================================================================
   # (6a) BROKER READINESS THAT READS A PARTITION -- OMN-18789
   # ===========================================================================
@@ -1863,7 +1891,22 @@ services:
       # client id + secret; the three onex-api-specific CLAIM names below are
       # absent lane-wide, which is why they are pinned here rather than
       # inherited from a variable that does not exist.
-      KEYCLOAK_ISSUER_URL: "http://keycloak:8080/realms/omninode"
+      #
+      # OMN-19461: the expected issuer and the JWKS key source are two
+      # different facts. KEYCLOAK_ISSUER_URL is the `iss` a token must carry:
+      # the browser-visible issuer this lane's Keycloak stamps on every token
+      # (see the keycloak block above), and the same value every runtime
+      # service validates as KEYCLOAK_ISSUER. KEYCLOAK_JWKS_URL is where the
+      # signing keys are fetched from: the in-network Keycloak, because
+      # localhost:28080 is the container itself from in here. Before
+      # omninode_infra carried the split, this one value did both jobs, had to
+      # name the in-network host to fetch keys, and so rejected every token the
+      # runtime accepted: no ga-* client could attach on this lane.
+      # Requires an ONEX_API_IMAGE built from omninode_infra at or after the
+      # OMN-19461 merge. An older image ignores KEYCLOAK_JWKS_URL and derives
+      # its key source from the issuer, which is unreachable from here.
+      KEYCLOAK_ISSUER_URL: "http://localhost:28080/realms/omninode"
+      KEYCLOAK_JWKS_URL: "http://keycloak:8080/realms/omninode/protocol/openid-connect/certs"
       KEYCLOAK_AUDIENCE: "onex-api"
       KEYCLOAK_TENANT_ID_CLAIM: "tenant_id"
       KEYCLOAK_TENANT_SLUG_CLAIM: "tenant_slug"
