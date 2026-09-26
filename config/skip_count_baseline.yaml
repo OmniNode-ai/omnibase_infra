@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 586
+    max_skips: 587
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -105,6 +105,13 @@ suites:
           node_ids:
             - tests.integration.migrations.test_omninode_internal_live_acl_gate_omn17886::test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist
             - tests.integration.migrations.test_omninode_internal_live_acl_omn17886::test_live_catalog_green_red_and_default_rule
+        - measured_at: '2026-09-26'
+          measured_by: OMN-19543
+          delta: 1
+          reason: >-
+            One positive control across a seam that has not landed yet, the same shape as the OMN-19507 entry above for the .202 runner: test_the_dev_200_route_labels_have_a_runner_to_land_on in tests/ci/test_studio_verify_runner_omn19657.py. It asserts that the verify labels the deploy-lane routing table declares for the dev-200 instance are satisfiable by the new .200 (stickybeatz-studio) verify runner this PR adds. The dev-200 instance declares no verify block in config/deploy_lane_routing.yaml until a sibling PR lands one, so on this base the test skips with a named reason instead of passing without looking. The other tests in the module assert the runner's compose labels, that host-200 is its own exclusive label, the absence of forbidden mounts (lab kubeconfig, operator env, OMNI_HOME clone bind), and its CPU/memory caps, all from committed state, and run in every job. The skip ends in the same change that gives dev-200 a verify block: the test then runs, and that change removes this id from this baseline.
+          node_ids:
+            - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -704,3 +711,4 @@ suites:
       - tests.unit.tools.test_python_source_topic_extraction::test_actual_topic_constants_extractable
       - tests.unit.topology.test_validator_ro_principal_omn17792::test_validator_ro_reaches_a_cluster_only_where_the_seam_is_invoked
       - tests.unit.validators.test_topology_validator::test_canonical_contract_file_is_valid
+      - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on

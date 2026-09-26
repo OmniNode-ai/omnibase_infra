@@ -893,6 +893,7 @@ def _make_dispatch_callback(
     event_model: ModelHandlerRef | None = None,
     handler_node_kind: EnumNodeKind | None = None,
     published_event_names: frozenset[str] | None = None,
+    pre_dispatch_guard: Callable[[object], None] | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
@@ -1085,6 +1086,8 @@ def _make_dispatch_callback(
             if failure_result is not None:
                 return failure_result
             raise
+        if pre_dispatch_guard is not None:
+            pre_dispatch_guard(typed_payload)
         if handler_takes_envelope:
             handler_envelope = _materialize_typed_event_envelope(
                 envelope,
@@ -5481,6 +5484,7 @@ def _make_stateful_dispatch_callback(
     event_bus: object | None = None,
     output_topic_map: dict[str, str] | None = None,
     completion_bound: ModelCompletionBound | None = None,
+    pre_dispatch_guard: Callable[[object], None] | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback for contracts that declare ``state_io``.
 
@@ -5550,7 +5554,11 @@ def _make_stateful_dispatch_callback(
     persist``) therefore self-heals a stuck row INLINE rather than depending
     on this exception to trigger redelivery.
     """
-    inner_callback = _make_dispatch_callback(handler_instance, event_model)
+    inner_callback = _make_dispatch_callback(
+        handler_instance,
+        event_model,
+        pre_dispatch_guard=pre_dispatch_guard,
+    )
 
     # OMN-16924: the durable binding is overlay-configurable. ``database`` and
     # ``table`` go through the sanctioned ``${env.VAR:default}`` contract-overlay
@@ -11479,6 +11487,33 @@ async def _wire_single_contract(
     )
 
 
+def _delegation_fault_pre_dispatch_guard(
+    *,
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+    event_bus: object | None,
+) -> Callable[[object], None] | None:
+    """Return the consumer-bound fault-pin guard for the one typed request leg."""
+
+    if (
+        contract.name != "node_delegation_orchestrator"
+        or entry.event_model is None
+        or entry.event_model.name != "ModelDelegationRequest"
+    ):
+        return None
+    from omnibase_infra.runtime.dogfood_delegation_fault_routes import (
+        validate_dogfood_delegation_fault_request,
+    )
+
+    def _guard(payload: object) -> None:
+        validate_dogfood_delegation_fault_request(
+            request=payload,
+            event_bus=event_bus,
+        )
+
+    return _guard
+
+
 def _prepare_handler_wiring(
     *,
     contract: ModelDiscoveredContract,
@@ -11888,6 +11923,11 @@ def _prepare_handler_wiring(
             event_bus=event_bus,
             output_topic_map=_outbox_topic_map,
             completion_bound=_read_completion_bound(contract.contract_path),
+            pre_dispatch_guard=_delegation_fault_pre_dispatch_guard(
+                contract=contract,
+                entry=entry,
+                event_bus=event_bus,
+            ),
         )
         logger.info(
             "Auto-wired stateful handler with state_io in-row outbox "

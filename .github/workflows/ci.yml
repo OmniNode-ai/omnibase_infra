@@ -351,6 +351,9 @@ jobs:
       - name: Check Kafka bootstrap no localhost fallback (OMN-8783)
         run: uv run python scripts/ci_check_kafka_no_localhost_default.py
 
+      - name: Check Kafka hardcoded broker fallbacks (whole-tree backstop)
+        run: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
+
       - name: Check no localhost env fallbacks in src/ (OMN-10732)
         run: uv run python scripts/validate_no_env_fallbacks.py
 
@@ -924,6 +927,13 @@ jobs:
             --mode=self-test \
             --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py \
             --expected 9
+
+      # OMN-19612: validate-spdx-headers runs staged-file-scoped in
+      # .pre-commit-config.yaml (pass_filenames: true); this is its
+      # whole-tree CI counterpart so the header requirement still holds
+      # over the entire tree, not only a developer's staged diff.
+      - name: SPDX header check (OMN-19612)
+        run: uv run --frozen onex spdx validate src tests scripts
 
   infra-node-handler-ownership:
     needs: occ-preflight

@@ -78,6 +78,22 @@ if [ -z "$matches" ]; then
     exit 0
 fi
 
+# OMN-19623: feed the loop from a real temp file, never a bare here-string.
+# Bash 5.1+ writes a here-string's body into a pipe *before* forking the
+# reader, falling back to a temp file only above ~64KB. Under macOS pipe-KVA
+# pressure (many concurrent shells -- e.g. many fleet agent lanes committing
+# at once) the kernel caps a freshly created pipe's buffer well below the
+# size bash assumes, and the write blocks forever with nothing left to drain
+# it: no child process, 0% CPU, the same bash holding both the read and
+# write end of one pipe (this exact signature was sampled three separate
+# times on this fleet via ps/lsof; see docs/tracking/ROLLING_WORK_LEDGER.md
+# FRICTION rows naming this script, OMN-19623). A regular file never goes
+# through that pipe-based code path -- `< "$tmp_matches"` opens it via
+# open(2) -- so this closes the whole bug class regardless of pipe pressure.
+tmp_matches="$(mktemp "${TMPDIR:-/tmp}/check_no_cloud_bus.XXXXXX")"
+trap 'rm -f "$tmp_matches"' EXIT
+printf '%s\n' "$matches" > "$tmp_matches"
+
 while IFS= read -r line_content; do
     file="${line_content%%:*}"
     rest="${line_content#*:}"
@@ -91,7 +107,7 @@ while IFS= read -r line_content; do
 
     violations=$((violations + 1))
     echo "VIOLATION: $file:$line_num: $line_text"
-done <<< "$matches"
+done < "$tmp_matches"
 
 if [ "$violations" -gt 0 ]; then
     echo ""

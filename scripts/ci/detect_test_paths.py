@@ -53,10 +53,13 @@ SCRIPTS_TEST_PREFIXES = ("tests/scripts/", "tests/unit/scripts/")
 _SCAN_SKIP_DIR_NAMES = frozenset(
     {"__pycache__", ".pytest_cache", ".git", ".venv", "node_modules"}
 )
+# OMN-19612: hook-scope changes must exercise their whole-tree CI backstops.
+PRE_COMMIT_CONFIG_PATH = ".pre-commit-config.yaml"
 CI_PROCESS_TEST_PATHS = (
     ".github/workflows/",
     "scripts/ci/",
     "config/runner_routing_policy.yaml",
+    PRE_COMMIT_CONFIG_PATH,
 )
 
 # --- The CI-contract class (OMN-16745) -------------------------------------
@@ -496,7 +499,8 @@ def resolve_test_paths(
         (scripts/ci/ additionally keeps its tests/ci/ CI-process mapping).
       - Changes under .github/workflows/ (and the other CI-process paths):
         include CI_CONTRACT_TEST_ROOT, the CI-contract class -- see the ruling
-        on that constant.
+        on that constant. A .pre-commit-config.yaml change additionally keeps
+        the conservative tests/unit/ coverage it had before that mapping.
       - ANY changed path under tests/ is covered by the returned selection --
         its own directory at minimum (OMN-15245), or, for a collectable module
         sitting directly in the tests/ root, the module itself (OMN-16745).
@@ -540,6 +544,12 @@ def _resolve(
             for prefix in CI_PROCESS_TEST_PATHS
         ):
             selected.add(CI_CONTRACT_TEST_ROOT)
+
+        if path == PRE_COMMIT_CONFIG_PATH:
+            # ADDITIVE, not a swap (OMN-19612): like MIGRATION_TREE_PREFIX,
+            # adding a targeted path suppresses compute_selection's fallback.
+            # Keep the real tests/unit/ coverage that read this config.
+            selected.add(TEST_UNIT_PREFIX)
 
         if path.startswith(SCRIPTS_PREFIX):
             # OMN-15245: scripts/ holds deploy-path and governance-guard code

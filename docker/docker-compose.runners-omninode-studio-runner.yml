@@ -1,0 +1,144 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19657 -- the .200 host's verify runner, for the dev-200 lane.
+#
+# WHY A SEPARATE FILE. Same reason as the .101, .105 and .202 files: compose
+# interpolates the whole file before selecting services, so each host keeps
+# its own fail-closed variable contract. See config/runner_fleet.yaml's
+# `hosts:` comment for the inventory row this file realises.
+#
+# WHAT THIS HOST IS. A Mac Studio (M2 Ultra), arm64, Docker Desktop, always
+# on (it is the primary work box, not a machine that sleeps -- no pmset or
+# LaunchDaemon keep-awake is needed or declared here). It takes the VERIFY
+# class only, the same reasoning host-101/host-105/host-202 share: this class
+# is cloud/lane-touching and carries no architecture assumption, so it is the
+# one that can sit on an arm64 host without any workflow changing. It is
+# deliberately NOT labelled `omnibase-ci`: an action-class job must never be
+# placed on the host that serves the always-on gpt-oss-120b planner
+# (:8130) and the dev-200 compose lane.
+#
+# WHAT THIS RUNNER IS FOR. The per-merge verify job for a merge the deploy
+# agent routed to dev-200 (config/deploy_lane_routing.yaml, once that
+# instance's `verify:` block lands per OMN-19543/OMN-19507) reads that lane's
+# docker daemon and its published ports. Both live on .200, so the job must
+# run on .200 -- the same reason `host-202` is on omnipc2-verify-runner-1 and
+# `host-201` is on omninode-verify-runner-1. Shaped after the .202 file, not
+# the .101/.105 ones: like dev-202's verify job, this reads one lane's docker
+# state through the host gateway alias, not cloud APIs, so it carries no
+# kubeconfig or operator-env credential mount.
+#
+# VERIFY-RUNNER REACH. docker-compose.dev-200.yml publishes the dev-200 lane's
+# ports LOOPBACK-ONLY (127.0.0.1:42xxx), documented there ("VERIFY-RUNNER
+# REACH"): on Docker Desktop, a container's `host.docker.internal` is
+# forwarded to the HOST's loopback interface, not its LAN address -- measured
+# 2026-09-25, a server on 127.0.0.1:42999 answered a busybox container at
+# `host.docker.internal:42999` but refused the same probe over
+# 192.168.86.200:42999. So `host.docker.internal` (via the `host-gateway`
+# alias below) is the only path a verify job on this runner has into the
+# dev-200 lane, exactly like .202's runner has into dev-202.
+#
+# MACOS DIFFERENCES FROM THE PRIMARY (LINUX) HOST, each deliberate, same as
+# the .101/.105 files:
+#   - no `group_add`. That literal GID is the primary host's docker group.
+#     Docker Desktop's socket inside the VM is root-owned and the image's
+#     entrypoint already fixes the socket GID in its root phase before
+#     dropping to `runner`, so a static GID would be wrong here and is not
+#     needed.
+#   - `/var/run/docker.sock` on this host is a symlink into the user's Docker
+#     Desktop socket. Bound at the classic path so nothing inside the
+#     container has to know that.
+#
+# WHAT IS DELIBERATELY ABSENT, relative to omninode-verify-runner-1 and the
+# .101/.105 files, each line load-bearing:
+#   - no operator env file and no lab credentials directory. The dev-200
+#     verify job reads the lane through the docker socket and the host
+#     gateway, and its bus credentials (if any) arrive as Actions secrets.
+#     Nothing on .200 needs to be copied into this container.
+#   - no OMNI_HOME or clone bind, no DEPLOY_RUNNER_TOKEN release-train wiring,
+#     no write surface into a compose lane. The docker socket is a read use
+#     here (revision labels, `docker exec` health and psql reads), the same
+#     use the .201 and .202 verify runners make of theirs.
+#
+# STANDING IT UP. Same recipe as .202's runner (see that file's own header):
+# not `deploy-runners.sh --add`, which is scoped to services declared in the
+# PRIMARY host's compose file. From this host (jonah@stickybeatz-studio, this
+# is the Mac the fleet artifacts already live on as the omni_home canonical
+# clone):
+#
+#   RUNNER_DIR=$HOME/.omnibase/runners
+#   mkdir -p "$RUNNER_DIR"
+#   rsync docker/runners/{entrypoint.sh,runner-job-started.sh,healthcheck.sh}
+#   and this file to "$RUNNER_DIR/docker/", the fleet image built or loaded as
+#   omninode-runner:latest, then
+#
+#   STUDIO_RUNNER_TOKEN=<org registration token, minted by an operator; see
+#     OMN-19657 return note -- this lane does not mint one> \
+#     docker compose -p omninode-studio-runner \
+#     -f "$RUNNER_DIR/docker/docker-compose.runners-omninode-studio-runner.yml" \
+#     up -d --no-deps omninode-studio-runner-1
+#
+# The explicit project name matters: without `-p`, compose names the project
+# after the directory (`docker`), a name every other per-host file in that
+# directory would share.
+#
+# VERIFICATION (read-only, once registered):
+#   gh api orgs/OmniNode-ai/actions/runners --paginate \
+#     --jq '.runners[] | select(.name=="omninode-studio-runner-1")'
+#   -- expect status "online", labels self-hosted/omnibase-verify/host-200/
+#      linux/arm64/arch-arm64.
+#   docker exec omninode-studio-runner-1 sh -c \
+#     'id; docker info --format "{{.ServerVersion}} {{.OSType}}/{{.Architecture}}"'
+#   -- expect the job user to read the socket and see the host's own Docker
+#      Desktop daemon.
+#   A workflow_dispatch of .github/workflows/arm64-verify-runner-proof.yml
+#   with the `host-200` matrix leg is the same four-assertion proof the
+#   .101/.105 hosts get (arch, toolchain, credentials -- this host mounts
+#   none, so that step is skipped by the job's own guard -- and the docker
+#   socket).
+services:
+  omninode-studio-runner-1:
+    image: omninode-runner:latest
+    container_name: omninode-studio-runner-1
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    environment:
+      # `arm64` plus the explicit OMN-17477 arch label, the same vocabulary
+      # the .101/.105 hosts use. `host-200` mirrors `host-201`/`host-202`: a
+      # job pinning a HOST and a job pinning an ARCHITECTURE each get their
+      # own label instead of overloading one to mean both.
+      RUNNER_LABELS: self-hosted,omnibase-verify,host-200,linux,arm64,arch-arm64
+      RUNNER_NAME: omninode-studio-runner-1
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${STUDIO_RUNNER_TOKEN:-}
+      RUNNER_GROUP: omnibase-deploy
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      # Inside this container `localhost` is the container itself, not .200.
+      LANE_PROBE_HOST: host.docker.internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      # OMN-19070: the disk-admission self-pause marker directory every
+      # runner running the job-started hook mounts.
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - omninode-studio-runner-1-creds:/home/runner/.runner-creds
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  omninode-studio-runner-1-creds:

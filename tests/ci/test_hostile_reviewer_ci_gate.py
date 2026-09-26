@@ -117,16 +117,19 @@ def test_hostile_reviewer_gate_blocks_on_failed_review_or_missing_preflight() ->
 
 
 def test_hostile_review_job_uses_live_local_models() -> None:
-    """deepseek-r1 no longer serves on the local fleet (OMN-14176); the gate
-    must target the currently-live qwen3-review / qwen3-review-b pair so it
-    can actually reach >=1 model instead of permanently degrading."""
+    """The gate targets live local models (OMN-14176). Since OMN-17492 those
+    are two DIFFERENT models: qwen3-review (.201) and gpt-oss-review (.200).
+    qwen3-review-b named the same .201 model as qwen3-review, so it is no
+    longer a voter; test_hostile_review_distinct_reviewers_omn17492.py pins
+    the full roster."""
     workflow = _load_yaml(HOSTILE_REVIEWER_WORKFLOW)
     review_job = workflow["jobs"]["hostile-review"]
     steps = review_job["steps"]
     review_step = next(s for s in steps if s.get("name") == "Run adversarial review")
     script = review_step["run"]
-    assert "--model qwen3-review" in script
-    assert "--model qwen3-review-b" in script
+    assert "--model qwen3-review " in script
+    assert "--model gpt-oss-review" in script
+    assert "--model qwen3-review-b" not in script
 
 
 def test_hostile_review_wires_shared_secret_from_ci_secrets() -> None:

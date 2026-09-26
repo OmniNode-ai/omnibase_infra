@@ -185,6 +185,73 @@ def _refuse_unbounded_declarations(lanes: dict[str, object]) -> None:
                 )
 
 
+def claimed_bounded_lane(
+    *, environment: str, broker: str, lanes: dict[str, object]
+) -> str | None:
+    """Return the bounded lane a runtime identity claims, or None.
+
+    Public so another bounded-lane gate (the dogfood fault pin) classifies a
+    runtime by exactly the rule this route gate uses: a lane name, a declared
+    ``(runtime_environment, internal listener)`` pair, or a declared external
+    broker. The shared compose listener alone never claims a lane.
+    """
+    return _claimed_lane(
+        environment=environment.strip(), broker=broker.strip(), lanes=lanes
+    )
+
+
+def validate_bounded_lane_broker_identity(
+    *,
+    lane: str,
+    lane_data: dict[str, object],
+    runtime_environment: str,
+    runtime_bootstrap_servers: str,
+) -> str:
+    """Validate a claimed lane's runtime identity against its declaration.
+
+    Returns the lane's declared external broker. Raises
+    ``InfraUnavailableError`` when the lane declares no broker, its topology's
+    external member is not that broker, the runtime environment is neither the
+    lane nor its declared topology environment, or the runtime broker is neither
+    the declared broker nor the topology's internal listener.
+    """
+    broker = runtime_bootstrap_servers.strip()
+    declared_broker = str(lane_data.get("broker") or "").strip()
+    if not declared_broker:
+        raise InfraUnavailableError(
+            f"bounded delegation lane {lane!r} declares no broker"
+        )
+    topology = _parse_topology(lane, lane_data)
+    if topology is not None and topology.external_bootstrap_servers != declared_broker:
+        raise InfraUnavailableError(
+            f"bounded delegation lane {lane!r} topology external identity "
+            f"{topology.external_bootstrap_servers!r} is not its declared broker "
+            f"{declared_broker!r}"
+        )
+    allowed_environments = {lane}
+    if topology is not None and topology.runtime_environment is not None:
+        allowed_environments.add(topology.runtime_environment)
+    if runtime_environment not in allowed_environments:
+        raise InfraUnavailableError(
+            f"a broker declared for bounded delegation lane {lane!r} was selected "
+            f"under unexpected runtime environment {runtime_environment!r}"
+        )
+    broker_matches = broker == declared_broker or (
+        topology is not None and broker == topology.internal_bootstrap_servers
+    )
+    if not broker_matches:
+        raise InfraUnavailableError(
+            f"bounded delegation lane {lane!r} broker mismatch: runtime bus uses "
+            f"{broker!r}, declaration names {declared_broker!r}"
+            + (
+                f" (internal {topology.internal_bootstrap_servers!r})"
+                if topology is not None
+                else ""
+            )
+        )
+    return declared_broker
+
+
 def resolve_bounded_delegation_route(
     *,
     transport: object,
@@ -284,39 +351,12 @@ def resolve_bounded_delegation_route(
             f"{manifest_sha256}"
         )
 
-    declared_broker = str(lane_data.get("broker") or "").strip()
-    if not declared_broker:
-        raise InfraUnavailableError(
-            f"bounded delegation lane {lane!r} declares no broker"
-        )
-    topology = _parse_topology(lane, lane_data)
-    if topology is not None and topology.external_bootstrap_servers != declared_broker:
-        raise InfraUnavailableError(
-            f"bounded delegation lane {lane!r} topology external identity "
-            f"{topology.external_bootstrap_servers!r} is not its declared broker "
-            f"{declared_broker!r}"
-        )
-    allowed_environments = {lane}
-    if topology is not None and topology.runtime_environment is not None:
-        allowed_environments.add(topology.runtime_environment)
-    if environment not in allowed_environments:
-        raise InfraUnavailableError(
-            f"a broker declared for bounded delegation lane {lane!r} was selected "
-            f"under unexpected runtime environment {environment!r}"
-        )
-    broker_matches = broker == declared_broker or (
-        topology is not None and broker == topology.internal_bootstrap_servers
+    declared_broker = validate_bounded_lane_broker_identity(
+        lane=lane,
+        lane_data=lane_data,
+        runtime_environment=environment,
+        runtime_bootstrap_servers=broker,
     )
-    if not broker_matches:
-        raise InfraUnavailableError(
-            f"bounded delegation lane {lane!r} broker mismatch: runtime bus uses "
-            f"{broker!r}, declaration names {declared_broker!r}"
-            + (
-                f" (internal {topology.internal_bootstrap_servers!r})"
-                if topology is not None
-                else ""
-            )
-        )
 
     rows = lane_data.get("delegation_routes")
     if not isinstance(rows, list) or len(rows) != 1:
@@ -375,5 +415,7 @@ def resolve_bounded_delegation_route(
 
 __all__ = [
     "BOUNDED_DELEGATION_LANES",
+    "claimed_bounded_lane",
     "resolve_bounded_delegation_route",
+    "validate_bounded_lane_broker_identity",
 ]

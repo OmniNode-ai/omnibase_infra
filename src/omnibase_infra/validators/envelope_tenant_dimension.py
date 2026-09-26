@@ -148,12 +148,23 @@ def _findings_for_source(text: str, rel_path: str) -> list[UndeclaredTenantFindi
     return out
 
 
-def findings(root: Path) -> list[UndeclaredTenantFinding]:
-    """Every envelope construction under ``root`` that declares no tenant."""
+def findings_paths(paths: Sequence[Path]) -> list[UndeclaredTenantFinding]:
+    """Every envelope construction in the supplied files or directories."""
     out: list[UndeclaredTenantFinding] = []
-    for path in sorted(root.rglob("*.py")):
+    source_paths: set[Path] = set()
+    for candidate in paths:
+        if candidate.is_file() and candidate.suffix == ".py":
+            source_paths.add(candidate)
+        elif candidate.is_dir():
+            source_paths.update(candidate.rglob("*.py"))
+    for path in sorted(source_paths):
         out.extend(_findings_for_source(path.read_text(encoding="utf-8"), str(path)))
     return out
+
+
+def findings(root: Path) -> list[UndeclaredTenantFinding]:
+    """Every envelope construction under ``root`` that declares no tenant."""
+    return findings_paths([root])
 
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -163,21 +174,21 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
             "dimension (OMN-16831 ruled item 2)."
         )
     )
-    parser.add_argument("root", nargs="?", default=str(PACKAGE_ROOT))
+    parser.add_argument("paths", nargs="*", type=Path, default=[PACKAGE_ROOT])
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
-    root = Path(args.root)
-    if not root.is_dir():
-        sys.stderr.write(
-            f"[envelope-tenant-dimension] FAIL: {root} is not a directory, so "
-            "nothing was checked. A gate that cannot read its own subject has "
-            "not passed; it has not run.\n"
-        )
-        return 1
-    found = findings(root)
+    paths = list(args.paths)
+    for path in paths:
+        if not path.exists():
+            sys.stderr.write(
+                f"[envelope-tenant-dimension] FAIL: {path} does not exist, so "
+                "the requested subject was not checked.\n"
+            )
+            return 1
+    found = findings_paths(paths)
     if found:
         sys.stderr.write(
             "[envelope-tenant-dimension] FAIL: a producer did not say which "
@@ -190,7 +201,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     sys.stderr.write(
         f"[envelope-tenant-dimension] OK: every {ENVELOPE_CLASS} construction "
-        f"under {root} declares its tenant dimension.\n"
+        f"in {len(paths)} requested path(s) declares its tenant dimension.\n"
     )
     return 0
 
