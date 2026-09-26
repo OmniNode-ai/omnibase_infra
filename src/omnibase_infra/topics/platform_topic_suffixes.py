@@ -755,6 +755,19 @@ SUFFIX_DELEGATION_COMPLETED: str = "onex.evt.omnibase-infra.delegation-completed
 SUFFIX_DELEGATION_FAILED: str = "onex.evt.omnibase-infra.delegation-failed.v1"
 """Event topic for failed delegation attempts."""
 
+SUFFIX_DELEGATION_COMPLETED_V2: str = "onex.evt.omnibase-infra.delegation-completed.v2"
+"""V2 event topic for completed delegation terminals."""
+
+SUFFIX_DELEGATION_FAILED_ROUTED_V2: str = (
+    "onex.evt.omnibase-infra.delegation-failed-routed.v2"
+)
+"""V2 event topic for routed delegation failure terminals."""
+
+SUFFIX_DELEGATION_FAILED_UNROUTED_V2: str = (
+    "onex.evt.omnibase-infra.delegation-failed-unrouted.v2"
+)
+"""V2 event topic for unrouted delegation failure terminals."""
+
 SUFFIX_DELEGATION_QUALITY_GATE_RESULT: str = (
     "onex.evt.omnibase-infra.quality-gate-result.v1"
 )
@@ -1310,6 +1323,21 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(
         suffix=SUFFIX_DELEGATION_FAILED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_COMPLETED_V2,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_FAILED_ROUTED_V2,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_DELEGATION_FAILED_UNROUTED_V2,
         partitions=3,
         kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),

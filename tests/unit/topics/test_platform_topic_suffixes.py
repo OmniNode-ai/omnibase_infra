@@ -414,6 +414,38 @@ class TestOmnibaseInfraTopicSuffixes:
         suffixes = {spec.suffix for spec in ALL_OMNIBASE_INFRA_TOPIC_SPECS}
         assert SUFFIX_RUNTIME_HEALTH_CHECK in suffixes
 
+    def test_delegation_terminal_v2_topics_preserve_v1_provisioning(self) -> None:
+        from omnibase_infra.topics import (
+            SUFFIX_DELEGATION_COMPLETED,
+            SUFFIX_DELEGATION_COMPLETED_V2,
+            SUFFIX_DELEGATION_FAILED_ROUTED_V2,
+            SUFFIX_DELEGATION_FAILED_UNROUTED_V2,
+        )
+
+        specs_by_suffix = {spec.suffix: spec for spec in ALL_OMNIBASE_INFRA_TOPIC_SPECS}
+        assert SUFFIX_DELEGATION_COMPLETED_V2 == (
+            "onex.evt.omnibase-infra.delegation-completed.v2"
+        )
+        assert SUFFIX_DELEGATION_FAILED_ROUTED_V2 == (
+            "onex.evt.omnibase-infra.delegation-failed-routed.v2"
+        )
+        assert SUFFIX_DELEGATION_FAILED_UNROUTED_V2 == (
+            "onex.evt.omnibase-infra.delegation-failed-unrouted.v2"
+        )
+        for v2_suffix in (
+            SUFFIX_DELEGATION_COMPLETED_V2,
+            SUFFIX_DELEGATION_FAILED_ROUTED_V2,
+            SUFFIX_DELEGATION_FAILED_UNROUTED_V2,
+        ):
+            assert (
+                specs_by_suffix[v2_suffix].partitions
+                == specs_by_suffix[SUFFIX_DELEGATION_COMPLETED].partitions
+            )
+            assert (
+                specs_by_suffix[v2_suffix].kafka_config
+                == specs_by_suffix[SUFFIX_DELEGATION_COMPLETED].kafka_config
+            )
+
 
 class TestProvisionedTopicSpecs:
     """Tests for the combined provisioned topic spec registry."""
