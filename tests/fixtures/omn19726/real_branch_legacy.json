@@ -1,0 +1,26 @@
+{
+  "fixture_schema": "execution-graph-lab-readback/v1",
+  "source": "read-only .201 event_ledger and ledger_chain, 2026-09-26",
+  "correlation_id": "057d45de-f73c-4005-9127-c7e786f7efa4",
+  "owner_tenant_id": "820272f9-4aaf-5add-a2df-0af942852ab2",
+  "cursor_semantics": "legacy Kafka positions for diagnostics only; no historical prefix guarantee",
+  "records": [
+    {"topic": "onex.cmd.omnimarket.delegate-skill.v1", "partition": 0, "kafka_offset": 2553, "envelope_id": "97767c23-a7e5-485f-b747-0e0bf6ee24e7", "parent_envelope_id": null, "stored_hop_index": 0, "stored_replay_green": true, "stored_verifier_verdict": "pass"},
+    {"topic": "onex.cmd.omnibase-infra.delegation-request.v1", "partition": 0, "kafka_offset": 2174, "envelope_id": "d88c5031-0da9-462a-80ef-8cc817934cc6", "parent_envelope_id": "97767c23-a7e5-485f-b747-0e0bf6ee24e7", "stored_hop_index": 1, "stored_replay_green": true, "stored_verifier_verdict": "pass"},
+    {"topic": "onex.cmd.omnibase-infra.delegation-routing-request.v1", "partition": 0, "kafka_offset": 4248, "envelope_id": "03a706bd-fc2d-5908-8f0c-7db1805ff538", "parent_envelope_id": "d88c5031-0da9-462a-80ef-8cc817934cc6", "stored_hop_index": 2, "stored_replay_green": true, "stored_verifier_verdict": "pass"},
+    {"topic": "onex.evt.omnibase-infra.routing-decision.v1", "partition": 0, "kafka_offset": 4201, "envelope_id": "abcc31e1-c2b1-50bf-8707-1ca185798a20", "parent_envelope_id": "03a706bd-fc2d-5908-8f0c-7db1805ff538", "stored_hop_index": 3, "stored_replay_green": true, "stored_verifier_verdict": "pass"},
+    {"topic": "onex.evt.omnimarket.delegate-skill-completed.v1", "partition": 0, "kafka_offset": 1831, "envelope_id": "3bd23897-9700-595e-bf1f-a0920479b238", "parent_envelope_id": "97767c23-a7e5-485f-b747-0e0bf6ee24e7", "stored_hop_index": 4, "stored_replay_green": true, "stored_verifier_verdict": "pass"},
+    {"topic": "onex.evt.omnibase-infra.quality-gate-result.v1", "partition": 0, "kafka_offset": 3489, "envelope_id": "a4a048d8-4fa3-5cc9-82d3-ae93ac41b198", "parent_envelope_id": "1e9c0972-ddf9-5e80-9e3e-5034296e2764", "stored_hop_index": null, "stored_replay_green": null, "stored_verifier_verdict": null},
+    {"topic": "onex.evt.omnibase-infra.inference-response.v1", "partition": 0, "kafka_offset": 3514, "envelope_id": "f00c434e-4abe-506e-b323-d936e98651f7", "parent_envelope_id": "fc1148f4-0854-589d-aa6d-e86dae1b0e96", "stored_hop_index": null, "stored_replay_green": null, "stored_verifier_verdict": null}
+  ],
+  "expected": {
+    "raw_rows": 7,
+    "unique_envelope_ids": 7,
+    "chain_heads": 1,
+    "graded_hops": 5,
+    "stored_grades_matching_current_pure_grader": 5,
+    "tenantless_unreachable_evidence": 2,
+    "joined_dod_verdicts": 0,
+    "session_anchor": null
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "fixture_schema": "execution-graph-lab-readback/v1",
+  "source": "read-only .201 event_ledger, 2026-09-26",
+  "correlation_id": "fc31f4d2-6549-4a10-bc67-854be924eca3",
+  "owner_tenant_id": "820272f9-4aaf-5add-a2df-0af942852ab2",
+  "cursor_semantics": "legacy Kafka positions for diagnostics only; no historical prefix guarantee",
+  "records": [
+    {"topic": "onex.cmd.omnimarket.delegate-skill.v1", "partition": 0, "kafka_offset": 2459, "envelope_id": "2b2407d8-b391-432c-ac59-d167f3e09a15", "parent_envelope_id": null},
+    {"topic": "onex.cmd.omnibase-infra.delegation-request.v1", "partition": 0, "kafka_offset": 2098, "envelope_id": "69130858-73b1-42d3-8d6a-b0115819a265", "parent_envelope_id": "2b2407d8-b391-432c-ac59-d167f3e09a15"},
+    {"topic": "onex.cmd.omnibase-infra.delegation-routing-request.v1", "partition": 0, "kafka_offset": 4130, "envelope_id": "21bad303-2cde-5a46-aa0f-342dceca8b1e", "parent_envelope_id": "69130858-73b1-42d3-8d6a-b0115819a265"},
+    {"topic": "onex.evt.omnibase-infra.routing-decision.v1", "partition": 0, "kafka_offset": 4083, "envelope_id": "ab30e909-607a-5850-b463-344a86dd888a", "parent_envelope_id": "21bad303-2cde-5a46-aa0f-342dceca8b1e"},
+    {"topic": "onex.evt.omnibase-infra.quality-gate-result.v1", "partition": 0, "kafka_offset": 3371, "envelope_id": "9bc17122-4fa1-5426-be4f-ff034b9354dd", "parent_envelope_id": "c7923d6d-fb66-5531-a1bd-2b068fde8826"},
+    {"topic": "onex.evt.omnibase-infra.quality-gate-result.v1", "partition": 0, "kafka_offset": 3372, "envelope_id": "9bc17122-4fa1-5426-be4f-ff034b9354dd", "parent_envelope_id": "c7923d6d-fb66-5531-a1bd-2b068fde8826"},
+    {"topic": "onex.cmd.omnibase-infra.delegation-routing-request.v1", "partition": 0, "kafka_offset": 4131, "envelope_id": "1009c841-4cac-5990-8642-b8498026ebb4", "parent_envelope_id": "9bc17122-4fa1-5426-be4f-ff034b9354dd"},
+    {"topic": "onex.evt.omnibase-infra.routing-decision.v1", "partition": 0, "kafka_offset": 4084, "envelope_id": "ab30e909-607a-5850-b463-344a86dd888a", "parent_envelope_id": "1009c841-4cac-5990-8642-b8498026ebb4"},
+    {"topic": "onex.evt.omnibase-infra.inference-response.v1", "partition": 0, "kafka_offset": 3415, "envelope_id": "2dd0cb1f-38e6-5d0e-8ece-8b15e9f600ac", "parent_envelope_id": "47ccc9b6-2006-531c-9108-58629fdaaef6"},
+    {"topic": "onex.evt.omnibase-infra.inference-response.v1", "partition": 0, "kafka_offset": 3416, "envelope_id": "2dd0cb1f-38e6-5d0e-8ece-8b15e9f600ac", "parent_envelope_id": "47ccc9b6-2006-531c-9108-58629fdaaef6"},
+    {"topic": "onex.evt.omnimarket.delegate-skill-completed.v1", "partition": 0, "kafka_offset": 1757, "envelope_id": "2ddf03b7-7071-50da-8004-0d9677766741", "parent_envelope_id": "2b2407d8-b391-432c-ac59-d167f3e09a15"}
+  ],
+  "expected": {
+    "raw_rows": 11,
+    "unique_envelope_ids": 8,
+    "chain_heads": 1,
+    "stored_green_hops": 6,
+    "reroute_request_parent_envelope_id": "9bc17122-4fa1-5426-be4f-ff034b9354dd",
+    "conflicting_envelope_id": "ab30e909-607a-5850-b463-344a86dd888a",
+    "refusal": "envelope_id_collision",
+    "joined_dod_verdicts": 0
+  }
+}
