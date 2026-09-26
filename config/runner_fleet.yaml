@@ -106,6 +106,21 @@ hosts:
     runner_name_prefix: omnipc2-verify-runner
     expected_count: 1
     classes: [verify]
+  # .200 -- Mac Studio M2 Ultra, arm64, always-on (OMN-19657, operator approval
+  # ledger 2026-09-25T18:27:30Z, answering the open question at ledger
+  # 2026-09-25T10:29:02Z). One verify runner, labelled host-200, for the
+  # dev-200 lane's per-merge verify job: that job reads the dev-200 compose
+  # lane's docker daemon (OMN-19543) and so must run on this host, the same
+  # reason host-201/host-202 are pinned to their own lanes. Docker Desktop,
+  # same macOS shape as .101/.105 (no group_add, socket GID fixed by the
+  # entrypoint's root phase). Always awake by construction -- it is the
+  # primary work box, not a machine that sleeps -- so no pmset or LaunchDaemon
+  # keep-awake is declared for it.
+  - host: stickybeatz-studio.tail75df5e.ts.net
+    arch: arm64
+    runner_name_prefix: omninode-studio-runner
+    expected_count: 1
+    classes: [verify]
 # Docker subnet-pool alerting (OMN-12566). The runner host's default address
 # pool can subnet a bounded number of networks before `docker network create`
 # fails with "all predefined address pools have been fully subnetted". Alert at

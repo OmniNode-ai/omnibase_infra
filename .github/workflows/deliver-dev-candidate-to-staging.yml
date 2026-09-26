@@ -1248,17 +1248,17 @@ jobs:
           # check_lane_sibling_revision.py, immediately before the receipt is
           # written.
           #
-          # OMN-19508: an omnimarket revision may instead be proven on the
-          # second deployed dev lane on .202, whose receipt lane is
-          # compose-dev-202 (operator ruling 2026-09-25T00:56:45Z, omnimarket
-          # only). The list is ANY-OF, so a PASS on either admits it and a
-          # revision with neither is refused. Every other sibling stays on
-          # compose-dev alone, and the own-sha read above is unchanged.
-          SIBLING_LANES=(--lane compose-dev)
-          if [ "${PINNED_REPO}" = "omnimarket" ]; then
-            SIBLING_LANES+=(--lane compose-dev-202)
-          fi
-          uv run --no-project --with pydantic \
+          # OMN-19508, OMN-19543: a sibling revision may instead be proven on
+          # the receipt lane of a deploy-agent instance whose row in
+          # config/deploy_lane_routing.yaml proves that repo (today omnimarket
+          # only: compose-dev-202 on .202 and compose-dev-200 on .200, operator
+          # rulings 2026-09-25T00:56:45Z and 2026-09-25T10:22:22Z). The gate
+          # reads those lanes itself (--instance-lanes-for) and the list is
+          # ANY-OF, so a PASS on any admits it and a revision with none is
+          # refused. A repo no instance proves stays on compose-dev alone, an
+          # unreadable table refuses, and the own-sha read above is unchanged.
+          SIBLING_LANES=(--lane compose-dev --instance-lanes-for "${PINNED_REPO}")
+          uv run --no-project --with pydantic --with pyyaml \
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${PINNED_REVISION}" \
             --repo "OmniNode-ai/${PINNED_REPO}" \

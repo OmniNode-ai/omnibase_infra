@@ -72,7 +72,7 @@ _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 _DEV_202_OVERLAY = _DOCKER / "docker-compose.dev-202.yml"
 _DEV_202_UNIT = _DEPLOY_DIR / "deploy-agent-dev-202.service"
 _DEV_UNIT = _DEPLOY_DIR / "deploy-agent-dev.service"
-_ENV_TEMPLATE = _DEPLOY_DIR / "dev-202.env.template"
+_ENV_TEMPLATE = _DEPLOY_DIR / "dev-instance.env.template"
 
 SHA = "a" * 40
 

@@ -178,6 +178,7 @@ def _load_sibling(name: str) -> Any:
 #: The rule-24(b) receipt reader. Its primitives are the ONLY path to a receipt
 #: here; this module classifies what they return and never queries in parallel.
 lab_pass_receipt = _load_sibling("lab_pass_receipt")
+instance_receipt_lanes = _load_sibling("instance_receipt_lanes")
 
 #: The runtime-change path classifier, in ``scripts/`` rather than ``scripts/ci``.
 #: The SAME module ``trigger_rebuild_on_merge.py`` reads its own patterns from,
@@ -249,25 +250,39 @@ class EnumLabEvidence(StrEnum):
     #: to. True of omnibase_infra and omnimarket, the only two repos that carry
     #: a rebuild trigger.
     COMPOSE_DEV = "compose-dev"
-    #: A PASS under ``compose-dev`` OR ``compose-dev-202`` (OMN-19508). The second
-    #: deployed dev lane on the .202 host proves omnimarket changes only, by the
-    #: operator ruling of 2026-09-25T00:56:45Z, so the loader refuses this value
-    #: for any other repo; omnibase_infra stays on ``compose-dev``.
-    COMPOSE_DEV_OR_DEV_202 = "compose-dev-or-compose-dev-202"
+    #: A PASS under ``compose-dev`` OR under the receipt lane of any deploy-agent
+    #: instance whose routing-table row proves the repo (OMN-19508 for dev-202,
+    #: OMN-19543 made the set data): ``config/deploy_lane_routing.yaml``,
+    #: ``instances.<name>.lane.receipt_lane`` and ``.proves``. The operator's
+    #: rulings (2026-09-25T00:56:45Z for .202, 2026-09-25T10:22:22Z for one slot
+    #: per lab host) let omnimarket changes be proven on those lanes and keep
+    #: omnibase_infra on ``compose-dev``, so the loader refuses this value for a
+    #: repo no instance proves.
+    COMPOSE_DEV_OR_INSTANCE = "compose-dev-or-instance-lanes"
     #: The repo has no lab lane of its own. A declaration, with its reason, not
     #: a way around the bar -- the reason is printed on every decision it makes.
     NONE = "none"
 
 
-#: The repos the operator ruled may be proven on the .202 dev lane (OMN-19508).
-COMPOSE_DEV_202_PROVEN_REPOS: Final = frozenset({"omnimarket"})
+def lab_evidence_lanes(evidence: EnumLabEvidence, repo: str) -> tuple[Any, ...]:
+    """The receipt lanes, in reading order, whose PASS satisfies ``evidence``.
 
-
-def lab_evidence_lanes(evidence: EnumLabEvidence) -> tuple[Any, ...]:
-    """The receipt lanes, in reading order, whose PASS satisfies ``evidence``."""
+    ``compose-dev`` first, then each instance lane that proves ``repo`` in
+    routing-table order. A table lane the receipt enum does not know is a
+    configuration error, never a lane silently dropped.
+    """
     lanes = lab_pass_receipt.EnumLabLane
-    if evidence is EnumLabEvidence.COMPOSE_DEV_OR_DEV_202:
-        return (lanes.COMPOSE_DEV, lanes.COMPOSE_DEV_202)
+    if evidence is EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE:
+        declared = instance_receipt_lanes.receipt_lanes_for(repo)
+        try:
+            instance = tuple(lanes(lane) for lane in declared)
+        except ValueError as exc:
+            msg = (
+                f"config/deploy_lane_routing.yaml names a receipt lane that "
+                f"lab_pass_receipt.EnumLabLane does not declare: {exc}"
+            )
+            raise ReleaseTrainConfigError(msg) from exc
+        return (lanes.COMPOSE_DEV, *instance)
     if evidence is EnumLabEvidence.COMPOSE_DEV:
         return (lanes.COMPOSE_DEV,)
     return ()
@@ -513,15 +528,15 @@ def _parse_entry(repo: str, entry: Any, path: Path) -> ModelRepoReleasePolicy:
         raise ReleaseTrainConfigError(msg) from exc
 
     if (
-        lab_evidence is EnumLabEvidence.COMPOSE_DEV_OR_DEV_202
-        and repo not in COMPOSE_DEV_202_PROVEN_REPOS
+        lab_evidence is EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE
+        and not instance_receipt_lanes.receipt_lanes_for(repo)
     ):
         msg = (
             f"{path}: repo {repo} declares lab_evidence "
-            f"'{EnumLabEvidence.COMPOSE_DEV_OR_DEV_202.value}'. Only "
-            f"{sorted(COMPOSE_DEV_202_PROVEN_REPOS)} may be proven on the .202 "
-            "dev lane (operator ruling 2026-09-25T00:56:45Z); omnibase_infra "
-            "stays proven on .201."
+            f"'{EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE.value}', but no instance in "
+            "config/deploy_lane_routing.yaml proves it. The instance lanes prove "
+            "omnimarket changes only (operator rulings 2026-09-25T00:56:45Z and "
+            "2026-09-25T10:22:22Z); omnibase_infra stays proven on .201."
         )
         raise ReleaseTrainConfigError(msg)
 
@@ -1233,8 +1248,9 @@ def classify_lab_receipt(
     WHICH LANES (OMN-19508)
     -----------------------
     ``lanes`` defaults to ``compose-dev`` alone. A repo whose policy names
-    ``compose-dev-or-compose-dev-202`` is read on ``compose-dev`` first, then
-    ``compose-dev-202``, and a PASS on either satisfies the premise. When none
+    ``compose-dev-or-instance-lanes`` is read on ``compose-dev`` first, then on
+    each instance lane that proves it (``compose-dev-202``, ``compose-dev-200``,
+    in routing-table order), and a PASS on any satisfies the premise. When none
     passes, the refusal is the FIRST lane's, with the others' outcomes appended.
     """
     read = tuple(lanes) if lanes else (lab_pass_receipt.EnumLabLane.COMPOSE_DEV,)
@@ -1515,7 +1531,7 @@ def decide(
         list_artifacts=list_artifacts,
         download_receipt=download_receipt,
         rebuild_pending=rebuild_pending,
-        lanes=lab_evidence_lanes(policy.lab_evidence),
+        lanes=lab_evidence_lanes(policy.lab_evidence, policy.repo),
     )
     if reason is not None:
         if not candidate.sha and candidate.unresolved_reason:
