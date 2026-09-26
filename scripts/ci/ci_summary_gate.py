@@ -679,6 +679,16 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # POST_FIXTURE_WINDOW_CONTEXTS, which carries the admission argument, and
     # placed at the tail for the reason the entry above states.
     "wheel-content-parity",
+    # OMN-19655: the pre-merge twin of the release workflow's PyPI pin-
+    # resolvability step. It builds the pull request's wheel and runs the SAME
+    # script the release runs, so a floor raise no published sibling can
+    # co-resolve fails before merge instead of failing every release after it
+    # (omnimarket#2819, omnimarket#2896). Registered here for the OMN-16878
+    # reason the kb-doc-gate note above gives: `dev` requires exactly ONE
+    # context, so this tuple IS the external enforcement surface on this repo.
+    # Admitted under POST_FIXTURE_WINDOW_CONTEXTS, which carries the admission
+    # argument, and placed at the tail for the reason the entry above states.
+    "pypi-pin-resolvability",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -805,6 +815,29 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         #     directory, a failed wheel build, and a build root the repo's own
         #     ignore patterns match all refuse rather than pass.
         "wheel-content-parity",
+        # OMN-19655: the pin-resolvability caller lands in this same PR on
+        # 2026-09-25, so no merged PR in either fixture window could have
+        # produced this check-run. Comes out at the next fixture re-capture.
+        #
+        # ADMISSION IS BY CONSTRUCTION PLUS MEASURED REPLAYS:
+        #   * The producer (.github/workflows/pin-resolvability-gate.yml)
+        #     declares `pull_request` with no `types:`, no `branches:` filter
+        #     and no `paths:` filter, plus `merge_group`, and its single job
+        #     carries no `needs:` and no job-level `if:`, so it reports on
+        #     every pull-request shape. A change touching no declared
+        #     dependency is judged not applicable and succeeds by design: it
+        #     cannot change what resolves. tests/ci/
+        #     test_pin_resolvability_gate_workflow.py pins all of that.
+        #   * It runs scripts/ci/verify_pypi_pin_resolvability.py, the script
+        #     release.yml runs before publishing, with no force or skip input.
+        #   * It is proven able to FAIL on real input: omnimarket at the #2896
+        #     merge commit 933d0ca8, with the index held to 2026-09-25T18:00Z,
+        #     exits 1 naming omnimarket's omnibase-core>=0.47.23 floor against
+        #     omnibase-infra 0.38.57's ==0.47.22 pin, the failure omnimarket's
+        #     Release on Merge hit on every dev push that day.
+        #   * It is proven able to PASS: omnimarket at 933d0ca8's parent exits
+        #     0 under the same index, and this repository's dev head exits 0.
+        "pypi-pin-resolvability",
     }
 )
 

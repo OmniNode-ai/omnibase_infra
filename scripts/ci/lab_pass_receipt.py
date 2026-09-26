@@ -354,6 +354,14 @@ class EnumLabLane(StrEnum):
     reads OMN-19508 names (omnimarket's sibling read and its release-cut premise)
     may admit it.
 
+    ``COMPOSE_DEV_200`` (OMN-19543) is the third deployed dev lane, ``dev-200``
+    on the ``.200`` host (compose project ``omnibase-infra-dev-200``, ports
+    42085/42086), on exactly ``COMPOSE_DEV_202``'s terms: one emitter, omnimarket
+    changes only (operator ruling 2026-09-25T10:22:22Z, one deploy slot per lab
+    host), NOT in ``ANY_OF_DEFAULT_LANES``. Which repositories an instance lane
+    may prove is read from ``config/deploy_lane_routing.yaml``
+    (``scripts/ci/instance_receipt_lanes.py``), not from this enum.
+
     No other value is admissible, and in particular no governed lane
     (``prod``, ``stability-test``, ``judge``, or a collaborator lane) can name
     itself in a receipt. A lab pass is a statement about a lab. A governed
@@ -366,14 +374,16 @@ class EnumLabLane(StrEnum):
     COMPOSE_DEV_CHAIN = "compose-dev-chain"
     COMPOSE_DEV_CORPUS = "compose-dev-corpus"
     COMPOSE_DEV_202 = "compose-dev-202"
+    COMPOSE_DEV_200 = "compose-dev-200"
 
 
 #: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the three lab
 #: surfaces rule 24(b) means by "a passing lab receipt". The OMN-19312 verdict
 #: lanes are deliberately absent -- a chain canary PASS is not evidence that the
 #: candidate booted, and must never be able to stand in for that premise.
-#: ``COMPOSE_DEV_202`` is absent too (OMN-19507): it proves omnimarket changes
-#: only, so no unqualified read may take it for the any-of premise.
+#: ``COMPOSE_DEV_202`` is absent too (OMN-19507), and ``COMPOSE_DEV_200``
+#: (OMN-19543): they prove omnimarket changes only, so no unqualified read may
+#: take either for the any-of premise.
 ANY_OF_DEFAULT_LANES: Final[tuple[EnumLabLane, ...]] = (
     EnumLabLane.COMPOSE_DEV,
     EnumLabLane.ONEX_LAB,
