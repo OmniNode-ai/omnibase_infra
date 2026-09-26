@@ -7190,6 +7190,7 @@ def _make_event_bus_callback(
     propagate_publish_failures: bool = False,
     allowed_dispatcher_ids: Collection[str] | None = None,
     consumer_group: str | None = None,
+    declares_output: bool | None = None,
     failure_terminal_topics: Sequence[str] = (),
     terminal_answer_topic: str | None = None,
 ) -> Callable[..., Awaitable[None]]:
@@ -7226,6 +7227,12 @@ def _make_event_bus_callback(
     ``None`` (the default) disables counting for callers/tests that do not wire
     a group -- it never fabricates one, because a fabricated group id would
     produce flow rows attributed to a consumer that does not exist.
+
+    ``declares_output`` (OMN-19733) is the subscription contract's bus-output
+    capability. The caller derives it from the typed ``event_bus.publish_topics``
+    allowlist, the same source used to decide whether a dispatch result applier
+    can publish. ``None`` preserves compatibility for direct callback callers
+    without a contract.
 
     ``failure_terminal_topics`` (OMN-16812): the FAILURE terminal topics this
     contract declares, read through ``_declared_failure_terminal_topics`` -- the
@@ -7264,7 +7271,11 @@ def _make_event_bus_callback(
         # Register before any traffic so a subscription that takes NOTHING still
         # emits a zero row every window. Absent rows and zero rows mean
         # different things (unknown vs observed-idle) and must not be conflated.
-        flow_counters.register(consumer_group, topic)
+        flow_counters.register(
+            consumer_group,
+            topic,
+            declares_output=declares_output,
+        )
 
     dispatcher_scope = _require_contract_dispatcher_scope(
         allowed_dispatcher_ids,
@@ -8031,6 +8042,7 @@ def _make_raw_event_projection_callback(
     *,
     allowed_dispatcher_ids: Collection[str] | None = None,
     consumer_group: str | None = None,
+    declares_output: bool | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a callback for raw Kafka `ModelEventMessage` projection contracts.
 
@@ -8061,7 +8073,11 @@ def _make_raw_event_projection_callback(
         # emits a zero row every window. Same seam, same ordering and the same
         # reason as the sibling branch -- absent rows and zero rows mean
         # different things and must not be conflated.
-        flow_counters.register(consumer_group, topic)
+        flow_counters.register(
+            consumer_group,
+            topic,
+            declares_output=declares_output,
+        )
 
     dispatcher_scope = _require_contract_dispatcher_scope(
         allowed_dispatcher_ids,
@@ -11055,6 +11071,10 @@ async def _subscribe_contract_topics(
     )
     effective_result_applier = result_applier
     output_topic = _select_dispatch_result_output_topic(contract)
+    # This is the authoritative output-capability source: the same typed
+    # publish allowlist that gates result-applier construction below. A terminal
+    # event can only be selected when it is present in this allowlist.
+    declares_output = bool(contract.event_bus.publish_topics)
     # OMN-16798: ``db_io`` used to suppress this applier entirely. That is the
     # same conflation OMN-16767 removed from arm selection, one hop later:
     # ``db_io`` declares GOVERNED DB ACCESS (which tables, under which role) and
@@ -11182,6 +11202,7 @@ async def _subscribe_contract_topics(
                 # audit/projection subscription kinds registered no flow counter
                 # and emitted no row at all.
                 consumer_group=consumer_group,
+                declares_output=declares_output,
             )
         else:
             callback = _make_event_bus_callback(
@@ -11203,6 +11224,7 @@ async def _subscribe_contract_topics(
                 # and the topic while a message is in flight, so it is where
                 # per-(consumer_group, topic) throughput is counted.
                 consumer_group=consumer_group,
+                declares_output=declares_output,
                 # OMN-16812: the SAME declared failure terminals the applier's
                 # OMN-15468 guard re-routes a failure-verdict RETURN value to.
                 # A handler that RAISES produces no return value to re-route,
