@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from heapq import heappop, heappush
 from uuid import UUID
 
+from omnibase_core.models.execution_graph_replay import ModelExecutionGraphSourceCursor
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_envelope_delivery_count import (
     ModelEnvelopeDeliveryCount,
 )
@@ -24,6 +25,34 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_pinne
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_unresolved_parent import (
     ModelUnresolvedParent,
 )
+
+
+def select_bounded_evidence(
+    evidence: Iterable[ModelObservedEnvelopeEvidence],
+    cursors: Iterable[ModelExecutionGraphSourceCursor],
+) -> tuple[ModelObservedEnvelopeEvidence, ...]:
+    """Select rows at explicit Kafka offset bounds for each partition.
+
+    A missing cursor contributes no evidence. This selection is deterministic
+    for a supplied evidence set but is not append-invariant: the Phase 0
+    report proved a lower offset can arrive after a higher one. The watermark
+    follow-up ticket owns the stronger cursor contract.
+    """
+    bounds: dict[tuple[str, int], ModelExecutionGraphSourceCursor] = {}
+    for cursor in cursors:
+        key = (cursor.topic, cursor.partition)
+        if key in bounds:
+            raise ValueError(f"duplicate execution graph source cursor {key!r}")
+        bounds[key] = cursor
+
+    selected: list[ModelObservedEnvelopeEvidence] = []
+    for item in evidence:
+        bound = bounds.get((item.topic, item.partition))
+        if bound is None:
+            continue
+        if item.kafka_offset <= bound.max_kafka_offset:
+            selected.append(item)
+    return tuple(selected)
 
 
 def _topology_positions(topology: ModelPinnedChainTopology) -> dict[str, int]:
@@ -158,4 +187,4 @@ def normalize_and_topologically_order(
     )
 
 
-__all__ = ["normalize_and_topologically_order"]
+__all__ = ["normalize_and_topologically_order", "select_bounded_evidence"]

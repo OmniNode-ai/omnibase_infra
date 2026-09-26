@@ -15,6 +15,7 @@ from uuid import UUID
 
 import pytest
 
+from omnibase_core.models.execution_graph_replay import ModelExecutionGraphSourceCursor
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_declared_chain_hop import (
     ModelDeclaredChainHop,
 )
@@ -29,6 +30,7 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_unres
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.replay_evidence import (
     normalize_and_topologically_order,
+    select_bounded_evidence,
 )
 
 CORRELATION = UUID("11111111-2222-3333-4444-555555555555")
@@ -125,6 +127,28 @@ def test_exact_redelivery_collapses_but_conflicting_same_id_refuses() -> None:
         )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Pending 2026-09-26-omn-19726-watermark-cursor-ticket-draft.md: "
+        "Phase 0 finding 2 proves an offset bound can admit a lower offset "
+        "that lands later after the swallowed-exception/auto-commit path."
+    ),
+)
+def test_offset_bound_cannot_prove_append_invariance_after_late_lower_offset() -> None:
+    head = _evidence(HEAD, "head", None, 0, kafka_offset=5)
+    child = _evidence(CHILD, "child", HEAD, 1, kafka_offset=5)
+    late = _evidence(SIBLING, "child", HEAD, 2, kafka_offset=4)
+    bounds = (
+        ModelExecutionGraphSourceCursor(topic="head", partition=0, max_kafka_offset=5),
+        ModelExecutionGraphSourceCursor(topic="child", partition=0, max_kafka_offset=5),
+    )
+    before = select_bounded_evidence((head, child), bounds)
+    after = select_bounded_evidence((head, child, late), bounds)
+
+    assert before == after == (head, child)
+
+
 def test_topological_order_is_deterministic_and_preserves_observed_order() -> None:
     child = _evidence(CHILD, "child", HEAD, 0)
     sibling = _evidence(SIBLING, "sibling", HEAD, 1)
@@ -195,11 +219,11 @@ def _fixture_topology(
     )
 
 
-def test_clean_lab_fixture_keeps_all_evidence_and_marks_two_unresolved() -> None:
+def test_clean_lab_fixture_preserves_raw_rows_and_chain_only_subset() -> None:
     fixture_name = "real_branch_legacy.json"
     records = _fixture_records(fixture_name)
     evidence = _fixture_evidence(fixture_name)
-    normalized = normalize_and_topologically_order(
+    raw_normalized = normalize_and_topologically_order(
         evidence, _fixture_topology(evidence)
     )
 
@@ -207,19 +231,37 @@ def test_clean_lab_fixture_keeps_all_evidence_and_marks_two_unresolved() -> None
     graded = tuple(
         record for record in records if record["stored_replay_green"] is True
     )
+    chain_topics = {str(record["topic"]) for record in graded}
+    chain_evidence = tuple(item for item in evidence if item.topic in chain_topics)
+    normalized = normalize_and_topologically_order(
+        chain_evidence, _fixture_topology(chain_evidence)
+    )
 
+    assert len(records) == 7
     assert len(graded) == 5
+    assert len(chain_evidence) == 5
     assert all(
         record["parent_envelope_id"] is None
         or str(record["parent_envelope_id"]) in envelope_ids
         for record in graded
     )
-    assert len(normalized.unresolved) == 2
-    assert set(normalized.topological_order) == {item.envelope_id for item in evidence}
+    assert len(raw_normalized.unresolved) == 2
+    assert normalized.unresolved == ()
+    assert set(normalized.topological_order) == {
+        item.envelope_id for item in chain_evidence
+    }
 
 
-def test_conflicting_reroute_lab_fixture_refuses_reused_envelope_id() -> None:
+def test_fc31f4d2_routing_decision_collision_refuses_instead_of_collapsing() -> None:
     evidence = _fixture_evidence("real_reroute_conflict_legacy.json")
+
+    colliding = [
+        item
+        for item in evidence
+        if str(item.envelope_id) == "ab30e909-607a-5850-b463-344a86dd888a"
+    ]
+    assert [item.kafka_offset for item in colliding] == [4083, 4084]
+    assert colliding[0].parent_envelope_id != colliding[1].parent_envelope_id
 
     with pytest.raises(ValueError, match="identity collision"):
         normalize_and_topologically_order(evidence, _fixture_topology(evidence))

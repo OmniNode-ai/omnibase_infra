@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,6 +23,8 @@ class ModelObservedEnvelopeEvidence(BaseModel):
     observed_index: int = Field(ge=0)
     partition: int = Field(ge=0)
     kafka_offset: int = Field(ge=0)
+    event_timestamp: datetime | None = None
+    ledger_written_at: datetime | None = None
 
     @property
     def identity_claim(self) -> tuple[str, UUID | None, UUID, str]:
