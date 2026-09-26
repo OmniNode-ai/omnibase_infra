@@ -24,11 +24,10 @@ Ticket: OMN-19572
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -70,11 +69,21 @@ class HandlerLabProofRun:
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        base_env: Mapping[str, str] | None = None,
     ) -> None:
-        """Take the process runner, sleep and clock as seams so tests need no host."""
+        """Take the process runner, sleep, clock and base environment as seams.
+
+        ``base_env`` is the environment every step starts from, injected by the
+        process boundary that owns it (``scripts/lab_proof/run_lab_proof.py``
+        passes its own). The handler never reads the process environment
+        itself. With no ``base_env``, a step that declares no ``env`` inherits
+        the process environment the ordinary way (``env=None``), and a step
+        that declares one runs with exactly its declared variables.
+        """
         self._runner = runner
         self._sleep = sleep
         self._clock = clock
+        self._base_env = dict(base_env) if base_env is not None else None
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -127,6 +136,12 @@ class HandlerLabProofRun:
             observations=tuple(observations),
         )
 
+    def _step_env(self, step: ModelLabProofStep) -> dict[str, str] | None:
+        """The environment one step runs with: the injected base, then its own."""
+        if self._base_env is None and not step.env:
+            return None
+        return {**(self._base_env or {}), **step.env}
+
     def _run_step(
         self, step: ModelLabProofStep, log_path: Path
     ) -> ModelLabProofObservation:
@@ -150,7 +165,7 @@ class HandlerLabProofRun:
                     completed = self._runner(
                         list(step.argv),
                         cwd=step.cwd,
-                        env={**os.environ, **step.env},
+                        env=self._step_env(step),
                         capture_output=True,
                         text=True,
                         timeout=step.timeout_seconds,

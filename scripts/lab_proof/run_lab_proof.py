@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -137,7 +138,7 @@ def _run(
     (out / f"{label}-plan.json").write_text(
         plan.model_dump_json(indent=2), encoding="utf-8"
     )
-    report = HandlerLabProofRun().handle(plan)
+    report = HandlerLabProofRun(base_env=os.environ).handle(plan)
     (out / f"{label}-report.json").write_text(
         report.model_dump_json(indent=2), encoding="utf-8"
     )

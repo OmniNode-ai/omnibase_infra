@@ -407,3 +407,56 @@ def test_remove_tree_refuses_anything_but_lane_root_slash_run_id(
     assert not run.exists()
     assert _py(PATH_ABSENT_PY, str(run)).stdout.strip() == ""
     assert _py(PATH_ABSENT_PY, str(lane)).stdout.strip() == "present"
+
+
+class EnvRecordingRunner:
+    """Records the env keyword each step was launched with."""
+
+    def __init__(self) -> None:
+        self.envs: list[dict[str, str] | None] = []
+
+    def __call__(
+        self, argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        env = kwargs.get("env")
+        self.envs.append(None if env is None else dict(env))  # type: ignore[call-overload]
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+def test_steps_start_from_the_injected_base_env_and_their_own_wins(
+    tmp_path: Path,
+) -> None:
+    runner = EnvRecordingRunner()
+    handler = HandlerLabProofRun(
+        runner=runner,
+        sleep=lambda _s: None,
+        clock=lambda: 0.0,
+        base_env={"PATH": "/lab/bin", "MODE": "base"},
+    )
+    steps = [
+        _step("plain", _ID.HOST_LOAD, _P.SETUP, tmp_path),
+        _step("own", _ID.BUILD_BASE, _P.SETUP, tmp_path, env={"MODE": "step"}),
+    ]
+    handler.handle(_plan(tmp_path, steps))
+    assert runner.envs == [
+        {"PATH": "/lab/bin", "MODE": "base"},
+        {"PATH": "/lab/bin", "MODE": "step"},
+    ]
+
+
+def test_without_a_base_env_the_handler_never_copies_the_process_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LAB_PROOF_LEAK_PROBE", "leaked")
+    runner = EnvRecordingRunner()
+    handler = HandlerLabProofRun(
+        runner=runner, sleep=lambda _s: None, clock=lambda: 0.0
+    )
+    steps = [
+        _step("plain", _ID.HOST_LOAD, _P.SETUP, tmp_path),
+        _step("own", _ID.BUILD_BASE, _P.SETUP, tmp_path, env={"MODE": "step"}),
+    ]
+    handler.handle(_plan(tmp_path, steps))
+    # No declared env: subprocess inherits the ordinary way (env=None).
+    # Declared env: exactly the declared variables, nothing copied in.
+    assert runner.envs == [None, {"MODE": "step"}]
