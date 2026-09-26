@@ -214,6 +214,12 @@ _warn_on_shadowed_path_onex
 # in argv counts on its own.
 _is_evidence_invocation() {
   local arg word
+  # `--help` prints usage and exits before any command runs, so it mints no
+  # evidence. Refusing it below the floor hid a subcommand's flags at the moment
+  # a lane needed them to diagnose that very refusal (OMN-19709).
+  for arg in "$@"; do
+    [[ "$arg" == "--help" ]] && return 1
+  done
   for arg in "$@"; do
     for word in $ONEX_EVIDENCE_FLAGS; do
       [[ "$arg" == "$word" || "$arg" == "$word="* ]] && return 0

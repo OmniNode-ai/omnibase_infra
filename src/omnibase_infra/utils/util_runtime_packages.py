@@ -13,10 +13,12 @@ import os
 
 ENV_ACTIVE_RUNTIME_PACKAGES = "ONEX_ACTIVE_RUNTIME_PACKAGES"
 ENV_GATEWAY_CLOUD_MIRRORING_ENABLED = "ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED"
+ENV_AUTOWIRING_DISCOVERY_CACHE = "ONEX_AUTOWIRING_DISCOVERY_CACHE"
 _CONDITIONALLY_OWNED_TOPIC_PRODUCERS = frozenset(
     {"omniclaude", "omniintelligence", "omnimemory"}
 )
 _TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSY_VALUES = frozenset({"0", "false", "no", "off"})
 _ENV_GET = vars(os)["environ"].get
 
 
@@ -102,10 +104,34 @@ def is_gateway_cloud_mirroring_enabled(raw_value: str | None = None) -> bool:
     return raw_value.strip().lower() in _TRUTHY_VALUES
 
 
+def is_autowiring_discovery_cache_enabled(raw_value: str | None = None) -> bool:
+    """Return True when ``discover_contracts()`` may reuse an unchanged manifest.
+
+    Unlike the other switches here this defaults **ON**, because the memo it
+    governs is validated rather than trusted: the caller re-reads the
+    entry-point set and stats every contract file on every call, so a stale
+    answer requires a contract file to change with its mtime and size both
+    preserved. Measured in the deployed ``omninode-runtime-effects`` pod on
+    onex-dev 2026-09-26, the scan it avoids cost 24.036s and ran every ~316s,
+    long enough to push a gateway heartbeat past its acceptance tolerance
+    (OMN-19373 / OMN-15957).
+
+    Set ``ONEX_AUTOWIRING_DISCOVERY_CACHE`` to 0/false/no/off to restore the
+    pre-OMN-19373 behaviour of re-parsing on every call, without a deploy.
+    """
+    if raw_value is None:
+        raw_value = _ENV_GET(ENV_AUTOWIRING_DISCOVERY_CACHE)
+    if raw_value is None:
+        return True
+    return raw_value.strip().lower() not in _FALSY_VALUES
+
+
 __all__ = [
     "ENV_ACTIVE_RUNTIME_PACKAGES",
+    "ENV_AUTOWIRING_DISCOVERY_CACHE",
     "ENV_GATEWAY_CLOUD_MIRRORING_ENABLED",
     "get_active_runtime_packages",
+    "is_autowiring_discovery_cache_enabled",
     "is_gateway_cloud_mirroring_enabled",
     "is_runtime_package_active",
     "is_runtime_topic_active",
