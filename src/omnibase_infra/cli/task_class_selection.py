@@ -52,17 +52,22 @@ from pathlib import Path
 import yaml
 
 from omnibase_infra.cli.model_selectable_task_class import ModelSelectableTaskClass
+from omnibase_infra.cli.model_task_class_execution_budget import (
+    ModelTaskClassExecutionBudget,
+)
 from omnibase_infra.cli.model_task_type_resolution import ModelTaskTypeResolution
 from omnibase_infra.enums.enum_task_type_resolution import EnumTaskTypeResolution
 
 __all__ = [
     "EnumTaskTypeResolution",
     "ModelSelectableTaskClass",
+    "ModelTaskClassExecutionBudget",
     "ModelTaskTypeResolution",
     "TaskClassContractError",
     "DEFAULT_TASK_TYPE",
     "load_selectable_task_classes",
     "load_selection_fallback",
+    "resolve_task_class_execution_budget",
     "resolve_task_class_contract_path",
     "resolve_task_type",
 ]
@@ -171,6 +176,46 @@ def load_selectable_task_classes(
             f"task-class contract at {contract_path} exposes no public class"
         )
     return tuple(selectable)
+
+
+def resolve_task_class_execution_budget(
+    contract_path: Path,
+    *,
+    task_type: str,
+) -> ModelTaskClassExecutionBudget:
+    """Read the selected task class's declared execution budget.
+
+    The CLI already resolves this packaged contract for task-class selection.
+    Re-reading that same authority is intentional: the consumer's wall-clock
+    deadline must not be a second, stale CLI default.
+    """
+    try:
+        raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise TaskClassContractError(
+            f"task-class contract at {contract_path} could not be read: {exc}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise TaskClassContractError(
+            f"task-class contract at {contract_path} is not a mapping"
+        )
+    budgets = raw.get("execution_budgets")
+    if not isinstance(budgets, dict):
+        raise TaskClassContractError(
+            f"task-class contract at {contract_path} declares no execution_budgets map"
+        )
+    declared = budgets.get(task_type)
+    if not isinstance(declared, dict):
+        raise TaskClassContractError(
+            f"task class {task_type!r} declares no execution budget in {contract_path}"
+        )
+    try:
+        return ModelTaskClassExecutionBudget.model_validate(declared)
+    except ValueError as exc:
+        raise TaskClassContractError(
+            f"task class {task_type!r} has an invalid execution budget in "
+            f"{contract_path}: {exc}"
+        ) from exc
 
 
 def load_selection_fallback(contract_path: Path) -> str:

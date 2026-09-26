@@ -34,7 +34,6 @@ _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
 _PREFERRED_DELEGATION_PACKAGE = "omnimarket"
 _REQUESTER = "delegate_skill"
-_DEFAULT_TIMEOUT_SECONDS = 600.0
 
 
 @dataclass(
@@ -244,6 +243,8 @@ class RuntimeDelegationDispatchPort:
         source_file_path: str | None,
         source_session_id: str | None,
         wait: bool,
+        execution_timeout_seconds: int,
+        terminal_delivery_margin_seconds: int,
         output_schema_key: str | None = None,
         quality_contract_mode: str = "extend_task_class",
         acceptance_criteria: tuple[str, ...] = (),
@@ -278,12 +279,10 @@ class RuntimeDelegationDispatchPort:
                 "backend_id pin is not yet supported on the deployed bus "
                 "dispatch path (RuntimeDelegationDispatchPort)"
             )
-        if response_contract is not None:
-            raise NotImplementedError(
-                "response_contract is not yet supported on the deployed bus "
-                "dispatch path (RuntimeDelegationDispatchPort)"
-            )
-
+        if execution_timeout_seconds <= 0:
+            raise ValueError("execution_timeout_seconds must be positive")
+        if terminal_delivery_margin_seconds <= 0:
+            raise ValueError("terminal_delivery_margin_seconds must be positive")
         routes = self._resolved_routes()
         selected = _select_delegation_route(routes)
         request_payload: dict[str, object] = {
@@ -298,6 +297,9 @@ class RuntimeDelegationDispatchPort:
             "quality_contract_mode": quality_contract_mode,
             "acceptance_criteria": list(acceptance_criteria),
             "tenant_id": tenant_id,
+            "response_contract": response_contract,
+            "execution_timeout_seconds": execution_timeout_seconds,
+            "terminal_delivery_margin_seconds": terminal_delivery_margin_seconds,
             # OMN-18321 / OMN-18172: carried ONTO THE WIRE, not merely accepted.
             # Accepting the keyword and dropping it would trade a loud TypeError
             # for a silent classification hole -- precisely the silent-drop
@@ -321,7 +323,11 @@ class RuntimeDelegationDispatchPort:
             },
             correlation_id=correlation_id,
             response_topic=self._response_topic or selected.route.terminal_events[0],
-            timeout_seconds=_DEFAULT_TIMEOUT_SECONDS if wait else 1.0,
+            timeout_seconds=(
+                float(execution_timeout_seconds + terminal_delivery_margin_seconds)
+                if wait
+                else 1.0
+            ),
         )
         broker = RuntimePatternBBroker(
             self._event_bus,
