@@ -148,6 +148,9 @@ adjacency:
   # learning: node_model_router_compute (part of `nodes`) imports RoutingGate
   # from here (OMN-7404); changing learning must also re-run nodes tests.
   learning: {reverse_deps: [nodes]}
+  # lab_proof: the lab proof node handlers (part of `nodes`) import its
+  # models and registry (OMN-19565); changing it must also re-run nodes tests.
+  lab_proof: {reverse_deps: [nodes]}
   migrations: {reverse_deps: []}
   resources: {reverse_deps: []}
   schemas: {reverse_deps: []}

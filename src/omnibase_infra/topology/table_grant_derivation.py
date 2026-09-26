@@ -252,6 +252,28 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="aggregate_token_usage",
         ),
     ),
+    # OMN-19716: topic_activity is vendored and shipped by this infra pull
+    # request before its producing contract is present in the pinned omnimarket
+    # checkout. Retire this bridge when omnimarket#2953 merges and the pin
+    # advances to a commit carrying that contract's read_write declaration.
+    ContractTableDeclaration(
+        node="legacy_migration:topic_activity",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_topic_activity/"
+            "0000_create_topic_activity.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="topic_activity",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_topic_activity/"
+                "0000_create_topic_activity.sql"
+            ),
+            access="read_write",
+            role="topic_activity",
+        ),
+    ),
     # OMN-18863: the runtime-error fingerprints entry that used to sit here was
     # DELETED when the pin advanced to ac35d56338b3, which is omnimarket#2664's
     # squash, because the contract declares the relation itself now. That is the
@@ -348,6 +370,82 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read",
             role="aggregate_savings_overview",
+        ),
+    ),
+    # OMN-17886 AC2 step 1: three omninode_internal relations whose owner is an
+    # omnibase_infra node that writes with direct SQL rather than through the
+    # runtime's projection wiring, so no db_io.db_tables entry declares them and
+    # no omnimarket contract ever will. Like the savings views above, these are
+    # steady state, not interim bridges: they are not in the OMN-18863 expiry
+    # map, because there is no retiring pull request to name.
+    #
+    # Access is what the handlers do, read from the code rather than from the
+    # grants that happen to exist:
+    #   * savings_injection_signals, savings_validator_catch_signals: INSERT and
+    #     SELECT; savings_correlation_finalizations: SELECT 1 and INSERT ... ON
+    #     CONFLICT DO NOTHING (node_savings_estimation_compute,
+    #     handler_savings_correlation). read_write matches the SELECT, INSERT,
+    #     UPDATE the creating migrations grant.
+    #
+    # gateway_link_health is not declared yet, although its write effect
+    # upserts it: no migration GRANTs it, so its omninode_runtime privileges
+    # come only from the default-privilege rules, and declaring it now would be
+    # a declared grant nothing delivers (check_topology_grant_delivery). It is
+    # declared together with its explicit GRANT migration (AC2 step 2). The
+    # gateway_link_health_status VIEW is not declared at all: no runtime node
+    # reads or writes it, so its privileges are revoked rather than declared.
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_savings_estimation_compute",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+            "0001_create_savings_signal_tables.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="savings_injection_signals",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+                "0001_create_savings_signal_tables.sql"
+            ),
+            access="read_write",
+            role="savings_injection_signals",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_savings_estimation_compute",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+            "0001_create_savings_signal_tables.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="savings_validator_catch_signals",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+                "0001_create_savings_signal_tables.sql"
+            ),
+            access="read_write",
+            role="savings_validator_catch_signals",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_savings_estimation_compute",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+            "0002_create_savings_correlation_finalizations.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="savings_correlation_finalizations",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+                "0002_create_savings_correlation_finalizations.sql"
+            ),
+            access="read_write",
+            role="savings_correlation_finalizations",
         ),
     ),
 )

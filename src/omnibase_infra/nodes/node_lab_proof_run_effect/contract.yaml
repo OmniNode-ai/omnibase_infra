@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeLabProofRunEffect
+#
+# The one lab proof node that touches a host. It executes a plan rendered by
+# node_lab_proof_plan_compute (argv steps, never shell text), always runs the
+# plan's teardown and zero-residue steps, and returns what it observed. It
+# judges nothing: node_lab_proof_plan_compute's lab_proof.verdict does.
+#
+# Operator ruling 2026-09-25T13:07:40Z (rolling ledger, lane merge-drain-83):
+# every code PR gets a lab proof on a lab host before merge.
+#
+# Related tickets:
+#   - OMN-19572: the omnibase_core foundation_override profile
+#   - OMN-19565: the proof-profile registry
+#   - OMN-19564: epic, a lab proof for every code PR
+name: "node_lab_proof_run_effect"
+contract_name: "node_lab_proof_run_effect"
+node_name: "node_lab_proof_run_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that executes one rendered lab proof plan on the lab host it runs on. Setup and prove steps run in order and stop at the first failing must-succeed step; teardown and residue steps always run. Each step is an argv with a working directory, a timeout, optional polling and mechanical expectations (exit 0, exact stdout, empty or non-empty stdout, counted patterns). Full output goes to a per-step log file on the host; the report carries tails and counts.
+
+input_model:
+  name: "ModelLabProofPlan"
+  module: "omnibase_infra.lab_proof.model_lab_proof_plan"
+  description: "The rendered plan: subject, run directory, log directory and ordered steps."
+output_model:
+  name: "ModelLabProofRunReport"
+  module: "omnibase_infra.lab_proof.model_lab_proof_run_report"
+  description: "One observation per planned step, in plan order, and the step that aborted setup if one did."
+capabilities:
+  - name: "lab_proof.run"
+    description: "Execute a lab proof plan on this host"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "lab_proof.run"
+      handler:
+        name: "HandlerLabProofRun"
+        module: "omnibase_infra.nodes.node_lab_proof_run_effect.handlers.handler_lab_proof_run"
+      description: "Run each planned argv, always tear down, record observations"
+      supported_operations:
+        - "lab_proof.run"
+      input_model:
+        name: "ModelLabProofPlan"
+        module: "omnibase_infra.lab_proof.model_lab_proof_plan"
+        description: "The plan to execute."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "StepFailed"
+      description: "A step exited non-zero, timed out or missed an expectation; recorded as an observation, never raised"
+      recoverable: false
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 60
+  checks:
+    - name: "run_handler_loaded"
+      type: "handler"
+      critical: true
+metadata:
+  description: "Runs a lab proof plan on a lab host and always leaves the host as it found it"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-09-25"
+  tags:
+    - effect
+    - lab
+    - proof
+  related_tickets:
+    - "OMN-19572"
+    - "OMN-19565"
+    - "OMN-19564"
