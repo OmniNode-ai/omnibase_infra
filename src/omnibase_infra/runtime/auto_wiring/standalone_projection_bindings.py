@@ -103,7 +103,9 @@ class StandaloneProjectionBindings:
         )
         binding = by_table.get(table)
         if binding is None:
-            raise KeyError(
+            # ValueError, the same refusal the resolver raises, so a runner
+            # reports one error type for "this table has no binding".
+            raise ValueError(
                 f"table {table!r} has no declared {operation} binding; "
                 f"declared tables: {sorted(self.tables)!r}"
             )

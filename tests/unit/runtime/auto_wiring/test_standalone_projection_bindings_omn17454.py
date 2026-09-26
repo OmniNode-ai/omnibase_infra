@@ -26,6 +26,7 @@ from omnibase_core.models.contracts.subcontracts.model_db_table_declaration impo
 )
 from omnibase_infra.runtime.auto_wiring.standalone_projection_bindings import (
     PROJECTION_WATERMARK_TABLE,
+    StandaloneProjectionBindings,
     resolve_standalone_projection_bindings,
 )
 from omnibase_infra.topology import load_topology_profile
@@ -110,12 +111,16 @@ def test_an_unset_env_carrier_is_refused_naming_the_binding(
     monkeypatch.setenv("OMNINODE_INTERNAL_DB_URL", _INTERNAL_DSN)
     monkeypatch.delenv("ONEX_TENANT_DB_URL", raising=False)
 
-    with pytest.raises(ValueError, match="tenant_projection") as refused:
+    with pytest.raises(ValueError, match="ONEX_TENANT_DB_URL") as refused:
         resolve_standalone_projection_bindings(
             (_TENANT_TABLE, _INTERNAL_TABLE), load_topology_profile("local")
         )
 
-    assert "ONEX_TENANT_DB_URL" in str(refused.value)
+    # The binding and its principal are asserted separately: the principal
+    # ``tenant_projection_writer`` contains the binding name, so a bare
+    # ``tenant_projection`` match would pass a message that dropped the binding.
+    assert "binding 'tenant_projection'" in str(refused.value)
+    assert "principal 'tenant_projection_writer'" in str(refused.value)
     assert _INTERNAL_DSN not in str(refused.value)
 
 
@@ -171,6 +176,23 @@ def test_no_dsn_value_appears_in_the_resolved_repr() -> None:
     rendered = repr(resolved)
     assert _TENANT_DSN not in rendered
     assert _INTERNAL_DSN not in rendered
+
+
+@pytest.mark.unit
+def test_a_watermark_with_no_write_binding_is_refused_naming_the_table() -> None:
+    # The resolver always adds the watermark and refuses any table it cannot
+    # bind, so only a hand-built value reaches this; the runner must still get
+    # a named refusal it can report, not a lookup error from a private map.
+    bindings = StandaloneProjectionBindings(
+        physical_database="omnidash_analytics",
+        bindings={},
+        tables=("delegation_events",),
+        _write_binding_by_table={"delegation_events": "tenant_projection"},
+        _read_binding_by_table={},
+    )
+
+    with pytest.raises(ValueError, match="projection_watermarks"):
+        _ = bindings.watermark_binding
 
 
 @pytest.mark.unit
