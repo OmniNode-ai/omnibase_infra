@@ -85,11 +85,54 @@ if [ "$DELETE_REMOTE_BRANCHES" = true ] && [ "$DRY_RUN" = false ]; then
   [ -r "$ONEX_LEDGER_PATH" ] && [ -f "$ONEX_LEDGER_PATH" ] || refuse "ONEX_LEDGER_PATH is not a readable file: $ONEX_LEDGER_PATH"
 fi
 
+# Names that can carry credentials or local secret configuration. Match on the
+# basename, case-insensitively, at any depth. These names are never regenerable,
+# even when an ignore rule collapses a parent cache such as dist/ to one status
+# entry. Keep this aligned with the shared worktree-removal snapshot vocabulary
+# plus this repository's Infisical and runner-monitor credential files.
+SECRET_BEARING_GLOBS=(
+  '.env' '.env.*' '*.env' '*.env.*' '.envrc' '.monitor-env'
+  '*.pem' '*.key' '*.p12' '*.pfx' '*.jks' '*.keystore'
+  'id_rsa*' 'id_dsa*' 'id_ecdsa*' 'id_ed25519*'
+  '.netrc' '.npmrc' '.pypirc' '.pgpass' '.git-credentials'
+  'credentials' 'credentials.*' 'service-account*.json'
+  'secret' 'secrets' 'secret.*' 'secrets.*' '*.secret' '*.secrets'
+  'kubeconfig' '*.kubeconfig' '*.tfvars' '*.tfvars.json' '*.tfstate' '*.tfstate.*'
+  'settings.local.json' '.infisical-identity*' '.infisical-admin-token*'
+)
+
+is_secret_bearing_name() {
+  local name pattern
+  name=$(basename "${1%/}" | tr '[:upper:]' '[:lower:]')
+  for pattern in "${SECRET_BEARING_GLOBS[@]}"; do
+    # Each array entry is intentionally a glob, not a literal string.
+    # shellcheck disable=SC2254
+    case "$name" in $pattern) return 0 ;; esac
+  done
+  return 1
+}
+
+# Print secret-bearing paths under a directory. A failed traversal returns
+# non-zero so callers keep the worktree rather than treating an unreadable
+# directory as safe.
+secret_bearing_under() {
+  local dir="$1" found pattern rc=0
+  local -a expression=()
+  for pattern in "${SECRET_BEARING_GLOBS[@]}"; do
+    [ "${#expression[@]}" -eq 0 ] || expression+=(-o)
+    expression+=(-iname "$pattern")
+  done
+  found=$(find "$dir" \( "${expression[@]}" \) -print) || rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  printf '%s' "$found"
+}
+
 # Ignored paths that are regenerable caches. Any OTHER ignored path (.env,
 # settings.local.json, scratch output) keeps the worktree: `git worktree remove`
 # deletes ignored files, and those are not recoverable from git.
 is_regenerable_ignored() {
   local p="${1%/}"
+  is_secret_bearing_name "$p" && return 1
   case "$(basename "$p")" in
     .venv|venv|node_modules|__pycache__|.pytest_cache|.mypy_cache|.ruff_cache) return 0 ;;
     .coverage|.coverage.*|coverage.xml|htmlcov|.tox|.nox|dist|build|*.egg-info|.eggs) return 0 ;;
@@ -226,7 +269,7 @@ remove_one_worktree() {
 # lines and returns 1 when it must stay. On success prints nothing and sets
 # WT_BRANCH, WT_CLONE and WT_ADMIN for the caller.
 check_worktree_removable() {
-  local wt="$1" out err rc ahead stashes line p kept=0
+  local wt="$1" out err rc ahead stashes line p secret kept=0
   WT_BRANCH=""; WT_CLONE=""; WT_ADMIN=""
 
   WT_ADMIN=$(sed -n 's/^gitdir: //p' "$wt/.git" | head -1)
@@ -251,6 +294,16 @@ check_worktree_removable() {
         p="${line#!! }"
         if ! is_regenerable_ignored "$p"; then
           echo "  [keep] $wt: holds ignored file not recoverable from git: $p"; kept=1; break
+        fi
+        if [ -d "$wt/${p%/}" ]; then
+          rc=0
+          secret=$(secret_bearing_under "$wt/${p%/}") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "  [keep] $wt: cannot inspect all of $p (exit $rc), so it is not treated as regenerable"; kept=1; break
+          fi
+          if [ -n "$secret" ]; then
+            echo "  [keep] $wt: holds ignored file not recoverable from git: ${secret#"$wt"/}"; kept=1; break
+          fi
         fi
         ;;
       *) echo "  [keep] $wt: has uncommitted changes"; kept=1; break ;;

@@ -4,52 +4,40 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 SCRIPT = Path(__file__).parents[3] / "scripts" / "check-env-reads.sh"
-
-
-def _hermetic_git_env() -> dict[str, str]:
-    """Environment with inherited ``GIT_*`` vars stripped.
-
-    When this suite runs inside a git hook (e.g. the local ``pre-push``
-    smart-tests hook), git exports ``GIT_DIR`` / ``GIT_INDEX_FILE`` /
-    ``GIT_PREFIX`` into the environment. Those leak into the subprocess ``git``
-    commands below and retarget them at the ambient repo instead of
-    ``tmp_path`` (``git commit --allow-empty`` then fails against the parent's
-    locked index). Stripping every ``GIT_*`` var makes the temp-repo operations
-    hermetic regardless of the caller's git context.
-    """
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
 
 def _run_in_git_repo(tmp_path: Path, staged_files: dict[str, str]) -> tuple[int, str]:
     """Set up a minimal git repo, stage files, run check-env-reads.sh --staged."""
-    git_env = _hermetic_git_env()
     subprocess.run(
         ["git", "init"],
         cwd=tmp_path,
         check=True,
         capture_output=True,
-        env=git_env,
+        env=scrub_git_location_env(),
     )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
         cwd=tmp_path,
         check=True,
         capture_output=True,
-        env=git_env,
+        env=scrub_git_location_env(),
     )
     subprocess.run(
         ["git", "config", "user.name", "Test"],
         cwd=tmp_path,
         check=True,
         capture_output=True,
-        env=git_env,
+        env=scrub_git_location_env(),
     )
     # Initial empty commit so staged diff has a base
     subprocess.run(
@@ -57,7 +45,7 @@ def _run_in_git_repo(tmp_path: Path, staged_files: dict[str, str]) -> tuple[int,
         cwd=tmp_path,
         check=True,
         capture_output=True,
-        env=git_env,
+        env=scrub_git_location_env(),
     )
 
     for rel_path, content in staged_files.items():
@@ -69,7 +57,7 @@ def _run_in_git_repo(tmp_path: Path, staged_files: dict[str, str]) -> tuple[int,
             cwd=tmp_path,
             check=True,
             capture_output=True,
-            env=git_env,
+            env=scrub_git_location_env(),
         )
 
     result = subprocess.run(
@@ -78,7 +66,7 @@ def _run_in_git_repo(tmp_path: Path, staged_files: dict[str, str]) -> tuple[int,
         capture_output=True,
         text=True,
         check=False,
-        env=git_env,
+        env=scrub_git_location_env(),
     )
     return result.returncode, result.stdout + result.stderr
 
@@ -321,15 +309,19 @@ class TestCheckEnvReadsSecretNameDeclarationGate:
 # git repo; none of them inspects the script's source text.
 
 
-def _init_repo(tmp_path: Path) -> dict[str, str]:
-    git_env = _hermetic_git_env()
+def _init_repo(tmp_path: Path) -> None:
     for args in (
         ["git", "init", "-b", "base"],
         ["git", "config", "user.email", "test@example.com"],
         ["git", "config", "user.name", "Test"],
     ):
-        subprocess.run(args, cwd=tmp_path, check=True, capture_output=True, env=git_env)
-    return git_env
+        subprocess.run(
+            args,
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            env=scrub_git_location_env(),
+        )
 
 
 def _write(tmp_path: Path, files: dict[str, str]) -> None:
@@ -354,17 +346,21 @@ def _run_change(
     base commit, gate run against that base SHA) -- the same script, the same
     checks, the other endpoint pair.
     """
-    git_env = _init_repo(tmp_path)
+    _init_repo(tmp_path)
     _write(tmp_path, base_files)
     subprocess.run(
-        ["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True, env=git_env
+        ["git", "add", "-A"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        env=scrub_git_location_env(),
     )
     subprocess.run(
         ["git", "commit", "-m", "base"],
         cwd=tmp_path,
         check=True,
         capture_output=True,
-        env=git_env,
+        env=scrub_git_location_env(),
     )
     base_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -372,14 +368,18 @@ def _run_change(
         check=True,
         capture_output=True,
         text=True,
-        env=git_env,
+        env=scrub_git_location_env(),
     ).stdout.strip()
 
     _write(tmp_path, changed_files)
     for rel_path in deleted:
         (tmp_path / rel_path).unlink()
     subprocess.run(
-        ["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True, env=git_env
+        ["git", "add", "-A"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        env=scrub_git_location_env(),
     )
 
     argv = [str(SCRIPT), mode]
@@ -389,7 +389,7 @@ def _run_change(
             cwd=tmp_path,
             check=True,
             capture_output=True,
-            env=git_env,
+            env=scrub_git_location_env(),
         )
         argv.append(base_sha)
 
@@ -399,7 +399,7 @@ def _run_change(
         capture_output=True,
         text=True,
         check=False,
-        env=git_env,
+        env=scrub_git_location_env(),
     )
     return result.returncode, result.stdout + result.stderr
 
@@ -702,3 +702,30 @@ class TestCheckEnvReadsBaseModeParity:
         )
         assert code == 1
         assert "A_BRAND_NEW_NAME" in output
+
+
+def test_gate_does_not_feed_a_read_loop_via_bare_heredoc_or_here_string() -> None:
+    """OMN-19623 static ratchet, sibling of the one in
+    tests/unit/scripts/validation/test_check_no_cloud_bus.py: a `while ...
+    read` loop redirected from a bare `<<EOF ... EOF` heredoc or a `<<<`
+    here-string goes through bash's pipe-based heredoc/here-string machinery,
+    which deadlocks under macOS pipe-KVA pressure (bash 5.1+ writes the body
+    into a pipe *before* forking the reader). This script had two such loops
+    (`done <<EOF` / `$names` / `$added_reads`, in `check_new_env_reads`);
+    both must stay fed from a real temp file (`< "$tmp"`), never a heredoc.
+    """
+    executable_lines = [
+        line
+        for line in SCRIPT.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    offending = [
+        line
+        for line in executable_lines
+        if "done" in line and ("<<<" in line or "<<EOF" in line or "<<'EOF'" in line)
+    ]
+    assert not offending, (
+        "OMN-19623: a `done <<EOF`/`done <<<` heredoc/here-string feed is back "
+        f"on a while-read loop; this deadlocks under bash 5.1+ pipe pressure. "
+        f"Feed the loop from a temp file instead: {offending}"
+    )

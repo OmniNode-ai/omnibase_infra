@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
+import omnibase_infra.runtime.dogfood_delegation_fault_routes as fault_routes
+from omnibase_core.models.delegation.wire import ModelDelegationRequest
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
@@ -22,6 +26,7 @@ from omnibase_infra.runtime.service_delegation_dispatch_port import (
     _normalize_result_payload,
     _select_delegation_route,
 )
+from omnibase_infra.runtime.service_pattern_b_broker import TerminalPayload
 
 pytestmark = pytest.mark.unit
 
@@ -223,6 +228,10 @@ async def _dispatch_with_fake_broker(
     captured_payloads: list[dict[str, object]] = []
     captured_broker_kwargs: list[dict[str, object]] = []
 
+    class FakeRuntimeBus:
+        environment = "test"
+        bootstrap_servers = "localhost:9092"
+
     class FakeBroker:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             self.args = _args
@@ -246,8 +255,15 @@ async def _dispatch_with_fake_broker(
         "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
         FakeBroker,
     )
+    # Route admission is exercised by the bounded-route suite. These generic
+    # payload tests use an intentionally non-bounded lane so they can assert
+    # dispatch serialization without depending on a neighboring Market checkout.
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port.resolve_bounded_delegation_route",
+        lambda **_kwargs: None,
+    )
     port = RuntimeDelegationDispatchPort(
-        event_bus=object(),  # type: ignore[arg-type]
+        event_bus=FakeRuntimeBus(),  # type: ignore[arg-type]
         routes={
             "omnimarket.node_delegation_orchestrator.delegation.orchestrate": route
         },
@@ -284,6 +300,8 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
     assert payloads[0]["task_type"] == "document"
     assert payloads[0]["requested_timeout_seconds"] == 240
     assert "terminal_delivery_margin_seconds" not in payloads[0]
+    assert "no_escalation" not in payloads[0]
+    assert ModelDelegationRequest.model_validate(payloads[0]).no_escalation is False
     assert broker_kwargs[0]["command_topic"] == route.command_topic
 
 
@@ -338,6 +356,41 @@ async def test_runtime_delegation_dispatch_port_accepts_absent_optional_bus_feat
 
 
 @pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_forwards_declared_fault_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A validated isolated pin is carried unchanged onto the public bus wire."""
+    monkeypatch.setattr(
+        fault_routes,
+        "resolve_dogfood_delegation_fault_route",
+        lambda **_kwargs: SimpleNamespace(
+            no_escalation=True,
+            requested_timeout_seconds=240,
+        ),
+    )
+
+    _, payloads, _, _ = await _dispatch_with_fake_broker(
+        monkeypatch,
+        backend_id="dogfood-fault-429",
+        no_escalation=True,
+    )
+
+    assert payloads[0]["backend_id"] == "dogfood-fault-429"
+    assert payloads[0]["no_escalation"] is True
+    assert payloads[0]["requested_timeout_seconds"] == 240
+    assert ModelDelegationRequest.model_validate(payloads[0]).no_escalation is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_rejects_unpinned_no_escalation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fault-only retry policy cannot be requested without its route pin."""
+    with pytest.raises(ValueError, match="requires backend_id"):
+        await _dispatch_with_fake_broker(monkeypatch, no_escalation=True)
+
+
+@pytest.mark.asyncio
 async def test_runtime_delegation_dispatch_port_forwards_response_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -359,7 +412,6 @@ async def test_runtime_delegation_dispatch_port_forwards_response_contract(
 @pytest.mark.parametrize(
     ("dispatch_kwargs", "unsupported_feature"),
     [
-        ({"backend_id": "local-coder-mlx"}, "backend_id"),
         ({"system_prompt": "Answer tersely."}, "system_prompt"),
         ({"temperature": 0.2}, "temperature"),
         (
@@ -636,3 +688,116 @@ def test_no_hardcoded_deployment_class_default_in_the_normalizer() -> None:
         "resolved fields, never defaulted to a fabricated deployment class; "
         f"found {offending}"
     )
+
+
+@pytest.mark.asyncio
+async def test_final_evidence_sink_receives_the_actual_raw_terminal_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Final capture keeps the consumed envelope, not the port's normalized view."""
+
+    route = _route(
+        package_name="omnimarket",
+        terminal_events=(
+            "onex.evt.omnimarket.delegation-completed.v1",
+            "onex.evt.omnimarket.delegation-failed.v1",
+        ),
+    )
+    correlation_id = uuid4()
+    raw_terminal = (
+        b'{"event_type":"onex.evt.omnimarket.delegation-completed.v1",'
+        b'"correlation_id":"' + str(correlation_id).encode() + b'",'
+        b'"payload":{"payload":{"content":"ok"}}}'
+    )
+    observed: list[object] = []
+
+    class FakeRuntimeBus:
+        environment = "test"
+        bootstrap_servers = "localhost:9092"
+
+    class FakeBroker:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def dispatch_request(
+            self,
+            command: ModelDispatchBusCommand,
+            *,
+            terminal_observer: object | None = None,
+        ) -> tuple[object, ModelDispatchBusTerminalResult]:
+            terminal = TerminalPayload(
+                payload={"payload": {"content": "ok"}},
+                topic=route.terminal_events[0],
+                raw_envelope=raw_terminal,
+                partition=3,
+                offset="17",
+            )
+            if terminal_observer is not None:
+                await terminal_observer(terminal)  # type: ignore[operator]
+            return route, ModelDispatchBusTerminalResult(
+                correlation_id=command.correlation_id,
+                status="completed",
+                payload=terminal.payload,
+                completed_at=datetime.now(UTC),
+            )
+
+    async def sink(evidence: object) -> None:
+        observed.append(evidence)
+
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port.RuntimePatternBBroker",
+        FakeBroker,
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.service_delegation_dispatch_port.resolve_bounded_delegation_route",
+        lambda **_kwargs: None,
+    )
+    port = RuntimeDelegationDispatchPort(
+        FakeRuntimeBus(),  # type: ignore[arg-type]
+        routes={"delegation.orchestrate": route},
+        terminal_evidence_sink=sink,
+    )
+
+    result = await port.dispatch(
+        prompt="prove the actual terminal boundary",
+        task_type="document",
+        correlation_id=correlation_id,
+        max_tokens=32,
+        source_file_path=None,
+        source_session_id=None,
+        wait=True,
+        tenant_id="tenant-k1-k6",
+    )
+
+    evidence = observed.pop()
+    assert evidence.raw_envelope == raw_terminal  # type: ignore[union-attr]
+    assert evidence.encoding == "utf-8"  # type: ignore[union-attr]
+    assert evidence.topic == route.terminal_events[0]  # type: ignore[union-attr]
+    assert evidence.partition == 3  # type: ignore[union-attr]
+    assert evidence.offset == "17"  # type: ignore[union-attr]
+    assert evidence.correlation_id == correlation_id  # type: ignore[union-attr]
+    assert evidence.tenant_id == "tenant-k1-k6"  # type: ignore[union-attr]
+    # The normal response is intentionally a separate derived view.
+    assert json.dumps(result, sort_keys=True).encode() != raw_terminal
+
+
+@pytest.mark.asyncio
+async def test_final_evidence_sink_requires_the_actual_dispatch_tenant() -> None:
+    async def sink(_evidence: object) -> None:
+        raise AssertionError("sink must not be called before tenant validation")
+
+    port = RuntimeDelegationDispatchPort(
+        object(),  # type: ignore[arg-type]
+        terminal_evidence_sink=sink,
+    )
+
+    with pytest.raises(ValueError, match="requires the actual dispatch tenant_id"):
+        await port.dispatch(
+            prompt="missing tenant",
+            task_type="document",
+            correlation_id=uuid4(),
+            max_tokens=None,
+            source_file_path=None,
+            source_session_id=None,
+            wait=True,
+        )
