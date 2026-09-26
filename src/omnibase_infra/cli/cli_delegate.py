@@ -1469,6 +1469,49 @@ def load_supported_criteria() -> frozenset[str] | None:
     return frozenset(str(item) for item in supported)
 
 
+def load_acceptance_capable_criteria() -> frozenset[str] | None:
+    """Return the criterion slugs that can ACCEPT an answer alone, or ``None``.
+
+    OMN-13370 split the declared criteria into two kinds. Most are reject-only:
+    ``concise``, ``task_completed``, ``plain_text_only``, ``no_refusal`` and the
+    rest can fail an answer but never promote one to accepted. A few hold
+    adequacy authority. Under ``--criteria-mode replace-task-class`` the
+    caller's criteria are the whole bar, so a set holding no authority is
+    refused by the quality gate on every rung, whatever the answer
+    (OMN-19557).
+
+    The split is resolved HERE from the installed omnimarket's quality gate,
+    by asking the gate's own two functions about each declared slug in replace
+    mode (no task-class rules declared), so this CLI never carries a copy that
+    can drift from the gate. ``None`` means omnimarket or those functions are
+    unresolvable; the caller then refuses nothing, exactly as
+    :func:`load_supported_criteria` does, because this command cannot dispatch
+    without the co-install and its next guard reports the real cause.
+    """
+    supported = load_supported_criteria()
+    if supported is None:
+        return None
+    try:
+        gate = importlib.import_module(
+            "omnimarket.nodes.node_delegation_quality_gate_reducer.handlers."
+            "handler_quality_gate"
+        )
+        merge_rule_sets = gate._merge_rule_sets
+        has_adequacy_authority = gate._has_adequacy_authority
+    except (ImportError, AttributeError):
+        return None
+    capable: set[str] = set()
+    for slug in supported:
+        deterministic, heuristic = merge_rule_sets(
+            declared_deterministic=(),
+            declared_heuristic=(),
+            caller_criteria=(slug,),
+        )
+        if has_adequacy_authority(deterministic, heuristic):
+            capable.add(slug)
+    return frozenset(capable)
+
+
 def _validate_backend_pin(backend_id: str | None) -> str | None:
     """Normalise ``--backend-id`` and refuse an empty one (OMN-19124).
 
@@ -1558,6 +1601,44 @@ def _validate_criteria(criteria: tuple[str, ...]) -> tuple[str, ...]:
             "max_words_per_sentence_<N>."
         )
     return criteria
+
+
+def _validate_replace_mode_authority(
+    criteria: tuple[str, ...],
+    criteria_mode: str | None,
+    *,
+    response_contract: dict[str, object] | None,
+) -> None:
+    """Refuse a replacing criteria set that can never accept an answer (OMN-19557).
+
+    ``replace-task-class`` drops the task class's definition of done and with it
+    the class's acceptance authority (for prose classes, the judge). If none of
+    the caller's criteria holds authority of its own, the quality gate refuses
+    every answer ``TASK_MISMATCH: no deterministic acceptance or judge adequacy
+    authority``: measured on 2026-09-25, local rungs scoring 1.0 were refused and
+    the whole ladder, cloud rungs included, was climbed to a failed terminal.
+    The outcome is fixed before the first call, so it is refused before the
+    first call.
+
+    A declared ``--response-contract`` is its own authority (the gate validates
+    against it instead of the criteria), so it is never refused here.
+    """
+    if criteria_mode != "replace-task-class" or response_contract is not None:
+        return
+    capable = load_acceptance_capable_criteria()
+    if capable is None or set(criteria) & capable:
+        return
+    stated = ", ".join(criteria) if criteria else "none"
+    raise ValueError(
+        "--criteria-mode replace-task-class with these criteria can never be "
+        f"accepted (criteria: {stated}). Replacing drops the task class's own "
+        "acceptance authority, and each of these criteria is reject-only: it "
+        "can fail an answer but never accept one (OMN-13370). Every rung would "
+        "be refused however good its answer, and the whole ladder climbed "
+        "(OMN-19557). Do one of: drop --criteria-mode so your criteria are "
+        "ADDED to the task class's bar; add one criterion that can accept "
+        f"({', '.join(sorted(capable))}); or declare --response-contract."
+    )
 
 
 def _resolve_task_class_flag(
@@ -1906,12 +1987,14 @@ def _timeout_receipt(
     type=str,
     multiple=True,
     help=(
-        "An acceptance criterion this answer must meet, repeatable. Stating "
-        "your own criteria is how you stop being graded against a rubric you "
-        "did not ask for: on 2026-09-15 a drafting prompt was refused on every "
-        "rung for missing source citations, because the task class it landed "
-        "on grades research. With --criteria-mode replace-task-class these "
-        "criteria BECOME the bar; by default they are added to it."
+        "A declared criterion slug this answer must meet, such as concise or "
+        "final_artifact_only; repeatable. It is not free text: an unknown value "
+        "is refused with the full list of slugs. Stating your own criteria is "
+        "how you stop being graded against a rubric you did not ask for: on "
+        "2026-09-15 a drafting prompt was refused on every rung for missing "
+        "source citations, because the task class it landed on grades "
+        "research. With --criteria-mode replace-task-class these criteria "
+        "BECOME the bar; by default they are added to it."
     ),
 )
 @click.option(
@@ -1923,7 +2006,10 @@ def _timeout_receipt(
         "Whether --criteria are added to the task class's own definition of "
         "done (the default) or REPLACE it. Only meaningful with --criteria. "
         "'replace-task-class' is the escape hatch from a shape floor that does "
-        "not apply to your task."
+        "not apply to your task. Most slugs are reject-only (they can fail an "
+        "answer, never accept one), so a replacing set must hold at least one "
+        "slug that can accept, or a --response-contract; otherwise it is "
+        "refused before dispatch, because no answer could pass it (OMN-19557)."
     ),
 )
 @click.option(
@@ -2155,13 +2241,18 @@ def delegate_command(
     """
     try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
+        acceptance_criteria = _validate_criteria(tuple(criteria))
+        declared_contract = _load_response_contract(response_contract)
+        _validate_replace_mode_authority(
+            acceptance_criteria, criteria_mode, response_contract=declared_contract
+        )
         exit_code = run_delegate(
             prompt=prompt,
             task_type=_resolve_task_class_flag(task_type, task_class_alias),
             backend_id=_validate_backend_pin(backend_id),
-            acceptance_criteria=_validate_criteria(tuple(criteria)),
+            acceptance_criteria=acceptance_criteria,
             criteria_mode=criteria_mode,
-            response_contract=_load_response_contract(response_contract),
+            response_contract=declared_contract,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
             source=source,
