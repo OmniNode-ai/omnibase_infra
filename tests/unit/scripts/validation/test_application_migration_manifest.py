@@ -826,7 +826,9 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 217 -> 219 for OMN-19716: node_projection_topic_activity/0000 creates the
     # topic_activity table and 0001 grants the runtime role SELECT, INSERT and
     # UPDATE on it. Vendored FIRST per the vendor-parity ordering.
-    assert len(result.declarations) == 219
+    # 219 -> 221 for OMN-19513: the claude_hook_events and claude_agent_spans
+    # create/grant pair is vendored ahead of omnimarket#2956.
+    assert len(result.declarations) == 221
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

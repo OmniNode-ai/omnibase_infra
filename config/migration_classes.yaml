@@ -171,6 +171,8 @@ migrations:
   forward/nodes/node_projection_capsule_store/080_grant_omninode_runtime_capsule_store.sql: expand-only
   forward/nodes/node_projection_ci_attempt_outcome/0000_create_ci_attempt_outcome.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_ci_attempt_outcome/0001_grant_omninode_runtime_ci_attempt_outcome.sql: expand-only
+  forward/nodes/node_projection_claude_hook_events/0000_create_claude_hook_events.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.claude_hook_events); UNIQUE INDEX on an existing table (omninode_internal.claude_agent_spans)
+  forward/nodes/node_projection_claude_hook_events/0001_grant_omninode_runtime_claude_hook_events.sql: expand-only
   forward/nodes/node_projection_consumer_flow/0000_create_consumer_flow_windows.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_consumer_flow/0001_add_projection_cursor.sql: forward-only # ALTER TABLE ALTER COLUMN; UNIQUE INDEX on an existing table
   forward/nodes/node_projection_consumer_flow/0001_reconcile_consumer_flow_window_columns.sql: forward-only # ALTER TABLE ALTER COLUMN
