@@ -89,3 +89,25 @@ lanes:
       - seconds: 137
         sha: 1e405f7c035f8bbae174645398966b3da9f594d7
         note: OMN-19504 B1 on .202, omninode-runtime start to /health 200 in 137.0s
+  compose-dev-200:
+    # OMN-19507: the dev-200 lane on .200 (docker-compose.dev-200.yml, the same
+    # infra + dev-lane composition as dev-202). The same 900s as compose-dev,
+    # so the verify job's derived 45-minute ceiling holds for whichever
+    # instance a merge is routed to. Bounded above by the same 1800s
+    # start_period, which the overlay does not change.
+    settle_budget_seconds: 900
+    compose_file: docker/docker-compose.infra.yml
+    readiness_services:
+      - omninode-runtime
+      - runtime-effects
+      - projection-api
+    # The first real deploy of the lane by the agent's own job code (lab proof,
+    # job fec4e429, 2026-09-25, on a host at load1 50-79 on 24 cpu). Compose-up
+    # at 16:09:57Z; runtime-effects answered only after one verify recreate.
+    observed_boot_seconds:
+      - seconds: 359
+        sha: f43e7d9b3a38d5262fa1ba54ad1d457e5304fb59
+        note: OMN-19507 lab proof on .200, job fec4e429, omninode-runtime /health passed after 358.7s
+      - seconds: 712
+        sha: f43e7d9b3a38d5262fa1ba54ad1d457e5304fb59
+        note: OMN-19507 lab proof on .200, job fec4e429, compose-up 16:09:57Z to runtime-effects /health 16:21:49Z, one verify recreate

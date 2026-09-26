@@ -294,6 +294,12 @@ SYNC_PATHS=(
     "docker/runners/healthcheck.sh"
     "docker/runners/model-review-healthcheck.sh"
     "docker/runners/model-review-observation.json"
+    # OMN-19659: the in-image Playwright/Chromium launch smoke run inside the
+    # built image via stdin from runner-image-build-smoke and the canary
+    # workflow. It bind-mounts under docker/runners/ like every other hook
+    # script here, so it must converge the same way or it silently drifts
+    # from the fleet the way OMN-16056 did.
+    "docker/runners/playwright-smoke.sh"
     # OMN-19077: the aggregate cgroup the general pool runs in. install_runner_slice
     # copies it into /etc/systemd/system on the host and reads it back.
     "docker/runners/systemd/omnirunners.slice"
