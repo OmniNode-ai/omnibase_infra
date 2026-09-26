@@ -410,46 +410,36 @@ def test_stability_lane_renders_the_standalone_projection_writers() -> None:
 
 
 @pytest.mark.integration
-def test_stability_writers_use_the_lane_base_analytics_dsn_and_no_new_variable() -> (
-    None
-):
-    """Exactly one DB variable per writer, and it is the one this lane already has.
+def test_stability_writers_bind_the_declared_database_principals() -> None:
+    """The three OMN-17454 split writers need both existing topology DSNs.
 
-    ``BaseProjectionRunner`` resolves its DSN through
-    ``ModelProjectionRuntimeBinding.from_legacy_settings()``, which prefers
-    ``OMNIDASH_ANALYTICS_DB_URL``; ``bind_projection_database_url()`` is only
-    called on the in-process dispatch path, which by construction never runs for
-    these. So one variable is the whole credential.
-
-    The dev lane spells that DSN with ``ROLE_OMNIDASH_PASSWORD`` (OMN-15363's
-    non-BYPASSRLS ``role_omnidash`` identity). That variable does not exist on
-    this lane, and introducing it here would be a NEW credential variable —
-    forbidden while OMN-17556 is moving this whole surface to store-resolved
-    ``secret_ref`` values. These services therefore carry the form this lane
-    already inherits from ``docker-compose.infra.yml``, and nothing else.
+    Other writers retain their legacy analytics binding until their own
+    contract and physical-schema cutovers. The new variables are already
+    required by the base runtime env; this test checks the rendered principals.
     """
     services = cast("dict[str, Any]", _compose_config_json()["services"])
+    split = {
+        "projection-delegation-writer",
+        "projection-savings-writer",
+        "projection-tenant-credentials-writer",
+    }
 
     for name in sorted(WRITER_SERVICES):
         environment = cast("dict[str, Any]", services[name]["environment"])
         db_keys = sorted(key for key in environment if key.endswith("_DB_URL"))
-        assert db_keys == ["OMNIDASH_ANALYTICS_DB_URL"], (
-            f"{name} declares {db_keys!r}. A standalone writer needs exactly one "
-            "DSN — the analytics one it projects into. Any second DB variable is "
-            "an unresolved binding this process never reads."
-        )
+        expected = ["OMNIDASH_ANALYTICS_DB_URL"]
+        if name in split:
+            expected.extend(["OMNINODE_INTERNAL_DB_URL", "ONEX_TENANT_DB_URL"])
+            assert environment["ONEX_DATABASE_TOPOLOGY_PROFILE"] == "stability-test"
+            assert environment["OMNINODE_INTERNAL_DB_URL"].startswith(
+                "postgresql://omninode_runtime:"
+            ), name
+            assert environment["ONEX_TENANT_DB_URL"].startswith(
+                "postgresql://tenant_projection_writer:"
+            ), name
+        assert db_keys == expected, (name, db_keys)
         assert "omnidash_analytics" in environment["OMNIDASH_ANALYTICS_DB_URL"]
-        forbidden = sorted(
-            key
-            for key in environment
-            if key in {"ROLE_OMNIDASH_PASSWORD", "ONEX_TENANT_DB_URL"}
-        )
-        assert not forbidden, (
-            f"{name} introduces {forbidden!r} on the stability lane. Neither "
-            "exists here today; adding one is a new credential variable, which "
-            "the OMN-17562 ruling forbids while OMN-17556 lands store-resolved "
-            "credentials."
-        )
+        assert "ROLE_OMNIDASH_PASSWORD" not in environment, name
 
 
 @pytest.mark.integration
