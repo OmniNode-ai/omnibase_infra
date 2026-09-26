@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Final
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested
 
@@ -107,6 +107,9 @@ class ModelRoutingTable(BaseModel):
     default_instance: str
     instances: dict[str, ModelAgentInstance]
     routes: tuple[ModelRoute, ...]
+    #: OMN-19507. Hosts no instance may name and no agent may run as, each with
+    #: the reason it is out of the deploy pool.
+    excluded_hosts: dict[str, str] = Field(default_factory=dict)
 
     def route(self, runtime_lane: EnumRuntimeLane, requested_by: str) -> str:
         """The instance that runs a command, from this table alone."""
@@ -138,6 +141,7 @@ def parse_routing_table(text: str) -> ModelRoutingTable:
     raw_instances = raw.get("instances")
     if not isinstance(raw_instances, dict) or not raw_instances:
         raise RoutingTableError("routing table declares no instances")
+    excluded = _parse_excluded_hosts(raw.get("excluded_hosts"))
     instances: dict[str, ModelAgentInstance] = {}
     groups: set[str] = set()
     hostnames: set[str] = set()
@@ -155,6 +159,11 @@ def parse_routing_table(text: str) -> ModelRoutingTable:
         groups.add(group)
         names = tuple(str(h).strip().lower() for h in spec.get("hostnames") or ())
         for host in names:
+            if host in excluded:
+                raise RoutingTableError(
+                    f"instance {name!r} names host {host!r}, which is excluded from "
+                    f"the deploy pool: {excluded[host]}"
+                )
             if host in hostnames:
                 raise RoutingTableError(f"hostname {host!r} names two instances")
             hostnames.add(host)
@@ -200,8 +209,33 @@ def parse_routing_table(text: str) -> ModelRoutingTable:
         )
 
     return ModelRoutingTable(
-        default_instance=default, instances=instances, routes=tuple(routes)
+        default_instance=default,
+        instances=instances,
+        routes=tuple(routes),
+        excluded_hosts=excluded,
     )
+
+
+def _parse_excluded_hosts(raw: object) -> dict[str, str]:
+    """``excluded_hosts:`` -- lowercased first hostname label -> reason.
+
+    OMN-19507. A host is out of the deploy pool by a ruling, and the reason is
+    required so the table says which one. Absent means none.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise RoutingTableError("excluded_hosts must map a hostname to its reason")
+    excluded: dict[str, str] = {}
+    for host, reason in raw.items():
+        name = str(host).strip().lower()
+        why = str(reason or "").strip()
+        if not name or not why:
+            raise RoutingTableError(
+                f"excluded host {host!r} needs a hostname and a reason"
+            )
+        excluded[name] = why
+    return excluded
 
 
 #: The agent's own clone: this file is ``<repo>/scripts/deploy-agent/deploy_agent/``.
@@ -236,6 +270,14 @@ def resolve_instance(
     is cannot tell its own commands from the other's.
     """
     source = os.environ if env is None else env
+    host = (hostname or socket.gethostname()).strip().lower().split(".")[0]
+    # OMN-19507: checked before the instance name, so an env file copied onto an
+    # excluded host cannot name its way into the pool.
+    if host in table.excluded_hosts:
+        raise RoutingTableError(
+            f"host {host!r} is excluded from the deploy pool: "
+            f"{table.excluded_hosts[host]}"
+        )
     named = source.get(ENV_INSTANCE, "").strip()
     if named:
         if named not in table.instances:
@@ -244,7 +286,6 @@ def resolve_instance(
                 f"(declared: {', '.join(sorted(table.instances))})"
             )
         return table.instances[named]
-    host = (hostname or socket.gethostname()).strip().lower().split(".")[0]
     for instance in table.instances.values():
         if host in instance.hostnames:
             return instance

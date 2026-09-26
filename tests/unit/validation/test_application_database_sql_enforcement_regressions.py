@@ -26,43 +26,43 @@ _TOPOLOGY = load_topology_profile("local")
     ("statement", "expected"),
     [
         ("CREATE INDEX ON events (payload);", "schema-qualified"),
-        ("CREATE UNIQUE INDEX ON public.events (payload);", "public"),
+        ("CREATE UNIQUE INDEX ON tenant.events (payload);", "unknown topology schema"),
         ("TABLE events;", "schema-qualified"),
         ("SELECT * FROM ONLY (events);", "schema-qualified"),
-        ("COMMENT ON TABLE public.events IS 'owned';", "public"),
+        ("COMMENT ON TABLE tenant.events IS 'owned';", "unknown topology schema"),
         (
-            "CREATE FUNCTION tenant.safe_report() RETURNS bigint "
+            "CREATE FUNCTION omninode_internal.safe_report() RETURNS bigint "
             "LANGUAGE sql AS $$ SELECT count(*) FROM events $$;",
             "schema-qualified",
         ),
         (
-            "CREATE FUNCTION tenant.safe_report() RETURNS void "
+            "CREATE FUNCTION omninode_internal.safe_report() RETURNS void "
             "LANGUAGE plpgsql AS 'BEGIN EXECUTE ''DROP TABLE public.events''; END';",
             "dynamic SQL",
         ),
         (
-            "CREATE FUNCTION tenant.safe_report() RETURNS bigint LANGUAGE sql "
+            "CREATE FUNCTION omninode_internal.safe_report() RETURNS bigint LANGUAGE sql "
             "AS E'SELECT count(*) FROM events';",
             "cannot be proven statically",
         ),
         (
-            "CREATE FUNCTION tenant.safe_report() RETURNS bigint LANGUAGE sql "
+            "CREATE FUNCTION omninode_internal.safe_report() RETURNS bigint LANGUAGE sql "
             "RETURN (SELECT count(*) FROM events);",
             "schema-qualified",
         ),
         ("LOCK TABLE events IN ACCESS EXCLUSIVE MODE;", "schema-qualified"),
-        ("LOCK public.events IN ACCESS EXCLUSIVE MODE;", "public"),
+        ("LOCK tenant.events IN ACCESS EXCLUSIVE MODE;", "unknown topology schema"),
         ("REINDEX TABLE events;", "schema-qualified"),
         ("VACUUM events;", "schema-qualified"),
         ("ANALYZE events;", "schema-qualified"),
         ("CLUSTER events;", "schema-qualified"),
-        ("CLUSTER (VERBOSE) public.events;", "public"),
+        ("CLUSTER (VERBOSE) tenant.events;", "unknown topology schema"),
         (
-            "SELECT * INTO public.events_copy FROM tenant.events;",
-            "public",
+            "SELECT * INTO tenant.events_copy FROM omninode_internal.events;",
+            "unknown topology schema",
         ),
         (
-            "SELECT * INTO events_copy FROM tenant.events;",
+            "SELECT * INTO events_copy FROM omninode_internal.events;",
             "schema-qualified",
         ),
     ],
@@ -71,37 +71,67 @@ def test_valid_postgresql_target_forms_cannot_bypass_lint(
     statement: str,
     expected: str,
 ) -> None:
+    # OMN-17887: the schema-refusal rows name the retired `tenant` schema.
+    # `public` is now the TENANT domain's declared schema, so a `public.<name>`
+    # target is no longer a lint refusal; it is held to exact ownership instead
+    # (see test_valid_postgresql_public_target_forms_are_held_to_ownership).
     assert expected in "\n".join(lint_application_database_sql(statement, _TOPOLOGY))
 
 
 @pytest.mark.parametrize(
     "statement",
     [
-        "CREATE INDEX ON tenant.events (payload);",
-        "CREATE UNIQUE INDEX ON tenant.events (payload);",
-        "TABLE tenant.events;",
-        "SELECT * FROM ONLY (tenant.events);",
-        "COMMENT ON TABLE tenant.events IS 'owned';",
+        "CREATE UNIQUE INDEX ON public.events (payload);",
+        "COMMENT ON TABLE public.events IS 'owned';",
+        "LOCK public.events IN ACCESS EXCLUSIVE MODE;",
+        "CLUSTER (VERBOSE) public.events;",
+    ],
+)
+def test_valid_postgresql_public_target_forms_are_held_to_ownership(
+    statement: str,
+) -> None:
+    """OMN-17887: a `public` target in every grammar form is still seen.
+
+    The lint no longer refuses `public.<name>` outright, so the only thing
+    between an undeclared public relation and deployment is the gate's
+    exactly-one-ownership check -- which can only fire on a requirement the
+    parser actually emitted.
+    """
+    requirements = application_database_sql_target_requirements(statement, _TOPOLOGY)
+
+    assert any(
+        requirement.location == ("public", "events") for requirement in requirements
+    )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "CREATE INDEX ON omninode_internal.events (payload);",
+        "CREATE UNIQUE INDEX ON omninode_internal.events (payload);",
+        "TABLE omninode_internal.events;",
+        "SELECT * FROM ONLY (omninode_internal.events);",
+        "COMMENT ON TABLE omninode_internal.events IS 'owned';",
         (
-            "CREATE FUNCTION tenant.safe_report() RETURNS bigint "
-            "LANGUAGE sql AS $$ SELECT count(*) FROM tenant.events $$;"
+            "CREATE FUNCTION omninode_internal.safe_report() RETURNS bigint "
+            "LANGUAGE sql AS $$ SELECT count(*) FROM omninode_internal.events $$;"
         ),
         """
         DO $$
         BEGIN
-          IF to_regclass('tenant.events') IS NOT NULL THEN
-            GRANT SELECT ON tenant.events TO tenant_reader;
+          IF to_regclass('omninode_internal.events') IS NOT NULL THEN
+            GRANT SELECT ON omninode_internal.events TO tenant_reader;
           END IF;
         END
         $$;
         """,
-        "LOCK TABLE tenant.events IN ACCESS EXCLUSIVE MODE;",
-        "LOCK tenant.events IN ACCESS EXCLUSIVE MODE;",
-        "REINDEX TABLE tenant.events;",
-        "VACUUM tenant.events;",
-        "ANALYZE tenant.events;",
-        "CLUSTER tenant.events;",
-        "CLUSTER (VERBOSE) tenant.events;",
+        "LOCK TABLE omninode_internal.events IN ACCESS EXCLUSIVE MODE;",
+        "LOCK omninode_internal.events IN ACCESS EXCLUSIVE MODE;",
+        "REINDEX TABLE omninode_internal.events;",
+        "VACUUM omninode_internal.events;",
+        "ANALYZE omninode_internal.events;",
+        "CLUSTER omninode_internal.events;",
+        "CLUSTER (VERBOSE) omninode_internal.events;",
     ],
 )
 def test_valid_postgresql_target_forms_emit_ownership_requirements(
@@ -110,17 +140,18 @@ def test_valid_postgresql_target_forms_emit_ownership_requirements(
     requirements = application_database_sql_target_requirements(statement, _TOPOLOGY)
 
     assert any(
-        requirement.location == ("tenant", "events") for requirement in requirements
+        requirement.location == ("omninode_internal", "events")
+        for requirement in requirements
     )
 
 
 def test_select_into_emits_an_exact_created_table_identity() -> None:
-    sql = "SELECT * INTO tenant.events_copy FROM tenant.events;"
+    sql = "SELECT * INTO omninode_internal.events_copy FROM omninode_internal.events;"
 
     assert tuple(
         (identity.schema, identity.name, identity.kind.value)
         for identity in application_database_created_catalog_identities(sql)
-    ) == (("tenant", "events_copy", "table"),)
+    ) == (("omninode_internal", "events_copy", "table"),)
 
 
 def test_view_case_expression_with_extract_from_is_not_a_relation_target() -> None:
@@ -147,30 +178,30 @@ def test_view_case_expression_with_extract_from_is_not_a_relation_target() -> No
     ("statement", "expected_locations"),
     [
         (
-            "LOCK TABLE ONLY tenant.events, omninode_internal.runtime_state "
+            "LOCK TABLE ONLY omninode_internal.events, omninode_internal.runtime_state "
             "IN ACCESS EXCLUSIVE MODE;",
-            {("tenant", "events"), ("omninode_internal", "runtime_state")},
+            {("omninode_internal", "events"), ("omninode_internal", "runtime_state")},
         ),
         (
-            "REINDEX (VERBOSE) TABLE CONCURRENTLY tenant.events;",
-            {("tenant", "events")},
+            "REINDEX (VERBOSE) TABLE CONCURRENTLY omninode_internal.events;",
+            {("omninode_internal", "events")},
         ),
         (
-            'REINDEX (TABLESPACE "fast)tier") TABLE tenant.events;',
-            {("tenant", "events")},
+            'REINDEX (TABLESPACE "fast)tier") TABLE omninode_internal.events;',
+            {("omninode_internal", "events")},
         ),
         (
-            "VACUUM (ANALYZE, VERBOSE) tenant.events (payload), "
+            "VACUUM (ANALYZE, VERBOSE) omninode_internal.events (payload), "
             "omninode_internal.runtime_state;",
-            {("tenant", "events"), ("omninode_internal", "runtime_state")},
+            {("omninode_internal", "events"), ("omninode_internal", "runtime_state")},
         ),
         (
-            "ANALYZE (SKIP_LOCKED TRUE) VERBOSE tenant.events;",
-            {("tenant", "events")},
+            "ANALYZE (SKIP_LOCKED TRUE) VERBOSE omninode_internal.events;",
+            {("omninode_internal", "events")},
         ),
         (
-            "CLUSTER VERBOSE tenant.events USING events_payload_idx;",
-            {("tenant", "events")},
+            "CLUSTER VERBOSE omninode_internal.events USING events_payload_idx;",
+            {("omninode_internal", "events")},
         ),
     ],
 )
@@ -190,12 +221,12 @@ def test_maintenance_grammar_variants_emit_every_ownership_requirement(
     [
         (
             "SELECT 'INTO public.decoy' AS payload "
-            "INTO tenant.events_copy FROM tenant.events;"
+            "INTO omninode_internal.events_copy FROM omninode_internal.events;"
         ),
         (
-            "WITH source AS (SELECT * FROM tenant.events) "
+            "WITH source AS (SELECT * FROM omninode_internal.events) "
             "SELECT 'INTO public.decoy' AS payload "
-            "INTO tenant.events_copy FROM source;"
+            "INTO omninode_internal.events_copy FROM source;"
         ),
     ],
 )
@@ -205,7 +236,7 @@ def test_select_into_created_identity_ignores_literals_and_leading_ctes(
     assert tuple(
         (identity.schema, identity.name, identity.kind.value)
         for identity in application_database_created_catalog_identities(statement)
-    ) == (("tenant", "events_copy", "table"),)
+    ) == (("omninode_internal", "events_copy", "table"),)
 
 
 @pytest.mark.parametrize(
@@ -275,11 +306,11 @@ def test_created_function_identity_strips_argument_names() -> None:
         "CLUSTER;",
         "CLUSTER VERBOSE;",
         "CLUSTER (VERBOSE);",
-        "REINDEX INDEX tenant.events_payload_idx;",
-        "REINDEX SCHEMA tenant;",
+        "REINDEX INDEX omninode_internal.events_payload_idx;",
+        "REINDEX SCHEMA omninode_internal;",
         "REINDEX DATABASE omnidash_analytics;",
         "REINDEX SYSTEM omnidash_analytics;",
-        'REINDEX (TABLESPACE "fast)tier") INDEX tenant.events_payload_idx;',
+        'REINDEX (TABLESPACE "fast)tier") INDEX omninode_internal.events_payload_idx;',
     ],
 )
 def test_broad_or_non_table_maintenance_operations_fail_closed(
@@ -295,8 +326,8 @@ def test_broad_or_non_table_maintenance_operations_fail_closed(
     [
         "GRANT CONNECT ON DATABASE omnidash_analytics TO onex_api;",
         "REVOKE CONNECT ON DATABASE omnidash_analytics FROM PUBLIC;",
-        "GRANT USAGE ON SCHEMA tenant TO onex_api;",
-        "REVOKE ALL ON FUNCTION tenant.safe_report() FROM PUBLIC;",
+        "GRANT USAGE ON SCHEMA omninode_internal TO onex_api;",
+        "REVOKE ALL ON FUNCTION omninode_internal.safe_report() FROM PUBLIC;",
     ],
 )
 def test_database_schema_and_principal_privilege_tokens_are_not_relations(
@@ -308,28 +339,29 @@ def test_database_schema_and_principal_privilege_tokens_are_not_relations(
 @pytest.mark.parametrize(
     "statement",
     [
-        'VACUUM tenant."events""rogue";',
-        'LOCK tenant."events""rogue" IN ACCESS EXCLUSIVE MODE;',
-        'REINDEX TABLE tenant."events""rogue";',
-        'ANALYZE tenant."events""rogue";',
-        'CLUSTER tenant."events""rogue";',
+        'VACUUM omninode_internal."events""rogue";',
+        'LOCK omninode_internal."events""rogue" IN ACCESS EXCLUSIVE MODE;',
+        'REINDEX TABLE omninode_internal."events""rogue";',
+        'ANALYZE omninode_internal."events""rogue";',
+        'CLUSTER omninode_internal."events""rogue";',
     ],
 )
 def test_escaped_quoted_relation_identifiers_remain_exact(statement: str) -> None:
     requirements = application_database_sql_target_requirements(statement, _TOPOLOGY)
 
     assert any(
-        requirement.location == ("tenant", 'events"rogue')
+        requirement.location == ("omninode_internal", 'events"rogue')
         for requirement in requirements
     )
     assert all(
-        requirement.location != ("tenant", "events") for requirement in requirements
+        requirement.location != ("omninode_internal", "events")
+        for requirement in requirements
     )
 
 
 def test_escaped_quoted_schema_identifier_cannot_alias_a_topology_schema() -> None:
     violations = lint_application_database_sql(
-        'VACUUM "tenant""rogue".events;',
+        'VACUUM "omninode_internal""rogue".events;',
         _TOPOLOGY,
     )
 
@@ -337,7 +369,7 @@ def test_escaped_quoted_schema_identifier_cannot_alias_a_topology_schema() -> No
 
 
 def test_select_into_preserves_escaped_quoted_created_identity() -> None:
-    sql = 'SELECT * INTO tenant."events_copy""rogue" FROM tenant.events;'
+    sql = 'SELECT * INTO omninode_internal."events_copy""rogue" FROM omninode_internal.events;'
 
     with pytest.raises(ValueError, match="name"):
         application_database_created_catalog_identities(sql)
@@ -346,27 +378,29 @@ def test_select_into_preserves_escaped_quoted_created_identity() -> None:
 @pytest.mark.parametrize(
     "statement",
     [
-        "VACUUM tenant.eventsé;",
-        "LOCK tenant.eventsé IN ACCESS EXCLUSIVE MODE;",
-        "REINDEX TABLE tenant.eventsé;",
-        "ANALYZE tenant.eventsé;",
-        "CLUSTER tenant.eventsé;",
+        "VACUUM omninode_internal.eventsé;",
+        "LOCK omninode_internal.eventsé IN ACCESS EXCLUSIVE MODE;",
+        "REINDEX TABLE omninode_internal.eventsé;",
+        "ANALYZE omninode_internal.eventsé;",
+        "CLUSTER omninode_internal.eventsé;",
     ],
 )
 def test_unicode_unquoted_relation_identifiers_remain_exact(statement: str) -> None:
     requirements = application_database_sql_target_requirements(statement, _TOPOLOGY)
 
     assert any(
-        requirement.location == ("tenant", "eventsé") for requirement in requirements
+        requirement.location == ("omninode_internal", "eventsé")
+        for requirement in requirements
     )
     assert all(
-        requirement.location != ("tenant", "events") for requirement in requirements
+        requirement.location != ("omninode_internal", "events")
+        for requirement in requirements
     )
 
 
 def test_unicode_escape_identifiers_fail_closed_explicitly() -> None:
     violations = lint_application_database_sql(
-        r'VACUUM U&"tenant".events;',
+        r'VACUUM U&"omninode_internal".events;',
         _TOPOLOGY,
     )
 
@@ -385,14 +419,14 @@ def test_nested_block_comments_fail_closed_explicitly() -> None:
 @pytest.mark.parametrize(
     "statement",
     [
-        "VACUUM /* tenant.events /* nested */ tenant.events */ public.events;",
-        "LOCK TABLE /* tenant.events /* nested */ tenant.events */ public.events;",
-        "REINDEX /* tenant.events /* nested */ tenant.events */ TABLE public.events;",
-        "ANALYZE /* tenant.events /* nested */ tenant.events */ public.events;",
-        "CLUSTER /* tenant.events /* nested */ tenant.events */ public.events;",
+        "VACUUM /* omninode_internal.events /* nested */ omninode_internal.events */ public.events;",
+        "LOCK TABLE /* omninode_internal.events /* nested */ omninode_internal.events */ public.events;",
+        "REINDEX /* omninode_internal.events /* nested */ omninode_internal.events */ TABLE public.events;",
+        "ANALYZE /* omninode_internal.events /* nested */ omninode_internal.events */ public.events;",
+        "CLUSTER /* omninode_internal.events /* nested */ omninode_internal.events */ public.events;",
         (
-            "SELECT * INTO /* tenant.events_copy /* nested */ "
-            "tenant.events_copy */ public.events_copy FROM tenant.events;"
+            "SELECT * INTO /* omninode_internal.events_copy /* nested */ "
+            "omninode_internal.events_copy */ public.events_copy FROM omninode_internal.events;"
         ),
     ],
 )
@@ -406,7 +440,7 @@ def test_nested_block_comment_decoys_fail_closed_for_every_target_form(
 
 def test_unclosed_block_comments_fail_closed_explicitly() -> None:
     violations = lint_application_database_sql(
-        "SELECT * FROM tenant.events /* unclosed",
+        "SELECT * FROM omninode_internal.events /* unclosed",
         _TOPOLOGY,
     )
 
@@ -414,43 +448,73 @@ def test_unclosed_block_comments_fail_closed_explicitly() -> None:
 
 
 def test_escape_string_quote_cannot_mask_a_real_public_target() -> None:
+    # OMN-17887: a masked target must still be seen both where the lint refuses
+    # it (the retired `tenant` schema) and where it is held to ownership
+    # (`public`, the TENANT domain's schema).
     violations = lint_application_database_sql(
+        "SELECT E'foo\\'bar' FROM tenant.events;",
+        _TOPOLOGY,
+    )
+    requirements = application_database_sql_target_requirements(
         "SELECT E'foo\\'bar' FROM public.events;",
         _TOPOLOGY,
     )
 
-    assert "public" in "\n".join(violations)
+    assert "'tenant.events' uses unknown topology schema" in "\n".join(violations)
+    assert any(
+        requirement.location == ("public", "events") for requirement in requirements
+    )
 
 
 def test_quote_inside_delimited_identifier_cannot_mask_a_real_public_target() -> None:
+    # OMN-17887: see test_escape_string_quote_cannot_mask_a_real_public_target.
     violations = lint_application_database_sql(
+        'SELECT 1 AS "foo\'bar" FROM tenant.events;',
+        _TOPOLOGY,
+    )
+    requirements = application_database_sql_target_requirements(
         'SELECT 1 AS "foo\'bar" FROM public.events;',
         _TOPOLOGY,
     )
 
-    assert "public" in "\n".join(violations)
+    assert "'tenant.events' uses unknown topology schema" in "\n".join(violations)
+    assert any(
+        requirement.location == ("public", "events") for requirement in requirements
+    )
 
 
 def test_select_into_ignores_into_keyword_inside_a_delimited_alias() -> None:
+    # OMN-17887: the refused real target is now the retired `tenant` schema; a
+    # `public` INTO target is a created identity held to the ownership census.
     sql = (
-        'SELECT 1 AS "INTO tenant.events_copy" '
-        "INTO public.events_copy FROM tenant.events;"
+        'SELECT 1 AS "INTO omninode_internal.events_copy" '
+        "INTO tenant.events_copy FROM omninode_internal.events;"
+    )
+    public_sql = (
+        'SELECT 1 AS "INTO omninode_internal.events_copy" '
+        "INTO public.events_copy FROM omninode_internal.events;"
     )
 
-    assert "public" in "\n".join(lint_application_database_sql(sql, _TOPOLOGY))
-    assert tuple(
-        (identity.schema, identity.name, identity.kind.value)
-        for identity in application_database_created_catalog_identities(sql)
-    ) == (("public", "events_copy", "table"),)
-
-
-def test_escape_string_before_select_into_preserves_the_created_target() -> None:
-    sql = "SELECT E'foo\\'bar' INTO tenant.events_copy FROM tenant.events;"
-
+    assert "'tenant.events_copy' uses unknown topology schema" in "\n".join(
+        lint_application_database_sql(sql, _TOPOLOGY)
+    )
     assert tuple(
         (identity.schema, identity.name, identity.kind.value)
         for identity in application_database_created_catalog_identities(sql)
     ) == (("tenant", "events_copy", "table"),)
+    assert tuple(
+        (identity.schema, identity.name, identity.kind.value)
+        for identity in application_database_created_catalog_identities(public_sql)
+    ) == (("public", "events_copy", "table"),)
+
+
+def test_escape_string_before_select_into_preserves_the_created_target() -> None:
+    sql = "SELECT E'foo\\'bar' INTO omninode_internal.events_copy FROM omninode_internal.events;"
+
+    assert tuple(
+        (identity.schema, identity.name, identity.kind.value)
+        for identity in application_database_created_catalog_identities(sql)
+    ) == (("omninode_internal", "events_copy", "table"),)
 
 
 # ---------------------------------------------------------------------------
@@ -462,38 +526,38 @@ def test_escape_string_before_select_into_preserves_the_created_target() -> None
 _VIEW_BODY_CTE_STATEMENTS: tuple[tuple[str, str], ...] = (
     (
         "plain",
-        "CREATE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+        "CREATE VIEW omninode_internal.v AS WITH totals AS (SELECT 1 AS n) "
         "SELECT totals.n FROM totals;",
     ),
     (
         "or-replace",
-        "CREATE OR REPLACE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+        "CREATE OR REPLACE VIEW omninode_internal.v AS WITH totals AS (SELECT 1 AS n) "
         "SELECT totals.n FROM totals;",
     ),
     (
         "materialized",
-        "CREATE MATERIALIZED VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+        "CREATE MATERIALIZED VIEW omninode_internal.v AS WITH totals AS (SELECT 1 AS n) "
         "SELECT totals.n FROM totals;",
     ),
     (
         "recursive-cte",
-        "CREATE VIEW tenant.v AS WITH RECURSIVE walk AS ("
+        "CREATE VIEW omninode_internal.v AS WITH RECURSIVE walk AS ("
         "SELECT 1 AS n UNION ALL SELECT n + 1 FROM walk WHERE n < 5) "
         "SELECT walk.n FROM walk;",
     ),
     (
         "column-list",
-        "CREATE VIEW tenant.v (n) AS WITH totals AS (SELECT 1 AS n) "
+        "CREATE VIEW omninode_internal.v (n) AS WITH totals AS (SELECT 1 AS n) "
         "SELECT totals.n FROM totals;",
     ),
     (
         "security-invoker-option-list",
-        "CREATE OR REPLACE VIEW tenant.v WITH (security_invoker = true) AS "
+        "CREATE OR REPLACE VIEW omninode_internal.v WITH (security_invoker = true) AS "
         "WITH totals AS (SELECT 1 AS n) SELECT totals.n FROM totals;",
     ),
     (
         "chained-ctes-cross-joined",
-        "CREATE OR REPLACE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n), "
+        "CREATE OR REPLACE VIEW omninode_internal.v AS WITH totals AS (SELECT 1 AS n), "
         "failure_categories AS (SELECT 2 AS rows), "
         "tokens_by_model AS (SELECT 3 AS tokens) "
         "SELECT totals.n, failure_categories.rows AS failure_categories, "
@@ -522,12 +586,16 @@ def test_view_body_cte_parse_matches_the_observed_promotion_failure() -> None:
     parts that mattered: a CREATE OR REPLACE VIEW whose body opens a three-CTE
     WITH chain, a jsonb aggregate with its own nested parentheses and ORDER BY,
     and a trailing column alias that shadows one of the CTE names.
+
+    OMN-17887: these are TENANT-domain relations, so they are qualified with
+    `public` (the TENANT domain's schema); the retired `tenant` schema this
+    reduction originally named would now fail as an unknown topology schema.
     """
     sql = """
-CREATE OR REPLACE VIEW tenant.projection_delegation_quality_gate AS
+CREATE OR REPLACE VIEW public.projection_delegation_quality_gate AS
 WITH totals AS (
     SELECT COALESCE(AVG(actual_score), 0)::float AS avg_actual_score
-    FROM tenant.delegation_events
+    FROM public.delegation_events
 ),
 failure_categories AS (
     SELECT COALESCE(
@@ -537,11 +605,11 @@ failure_categories AS (
         ),
         '[]'::jsonb
     ) AS rows
-    FROM tenant.delegation_events
+    FROM public.delegation_events
 ),
 tokens_by_model AS (
     SELECT COALESCE(jsonb_agg(jsonb_build_object('model', model)), '[]'::jsonb) AS rows
-    FROM tenant.delegation_events
+    FROM public.delegation_events
 )
 SELECT
     totals.avg_actual_score,
@@ -559,19 +627,19 @@ CROSS JOIN tokens_by_model;
     ("statement", "expected"),
     [
         # An unqualified relation in the post-WITH tail still fails. Uses
-        # unmapped_events (not delegation_events) -- OMN-16237 makes
-        # delegation_events itself pass unqualified, since it is enumerated
-        # in the shared physical-schema-mapping allowlist; this table name
-        # is deliberately NOT in that allowlist so the CTE-scoping behavior
+        # unmapped_events, a name deliberately NOT in the shared
+        # physical-schema-mapping allowlist, so the CTE-scoping behavior
         # under test stays independent of the allowlist pass-through.
+        # (delegation_events was in that allowlist via the tenant bridge
+        # until OMN-17887 deleted it.)
         (
-            "CREATE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+            "CREATE VIEW omninode_internal.v AS WITH totals AS (SELECT 1 AS n) "
             "SELECT * FROM totals CROSS JOIN unmapped_events;",
             "'unmapped_events' must be schema-qualified",
         ),
         # An unqualified relation inside a CTE body still fails.
         (
-            "CREATE VIEW tenant.v AS WITH totals AS "
+            "CREATE VIEW omninode_internal.v AS WITH totals AS "
             "(SELECT * FROM unmapped_events) SELECT * FROM totals;",
             "'unmapped_events' must be schema-qualified",
         ),
@@ -583,13 +651,13 @@ CROSS JOIN tokens_by_model;
         ),
         # A CTE name is only in scope for its own statement, never the next one.
         (
-            "CREATE VIEW tenant.v AS WITH totals AS (SELECT 1 AS n) "
+            "CREATE VIEW omninode_internal.v AS WITH totals AS (SELECT 1 AS n) "
             "SELECT totals.n FROM totals; SELECT * FROM totals;",
             "'totals' must be schema-qualified",
         ),
         # A later CTE is not visible to an earlier sibling's body.
         (
-            "CREATE VIEW tenant.v AS WITH first_cte AS (SELECT * FROM second_cte), "
+            "CREATE VIEW omninode_internal.v AS WITH first_cte AS (SELECT * FROM second_cte), "
             "second_cte AS (SELECT 1 AS n) SELECT * FROM first_cte;",
             "'second_cte' must be schema-qualified",
         ),
@@ -606,7 +674,7 @@ def test_view_body_cte_recognition_never_exempts_a_real_relation(
 # OMN-16237: the static schema-qualification lint must consult the SAME
 # physical-schema allowlist the runtime grants system already trusts
 # (physical_grant_schema_for_table / INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_
-# UNTIL_OMN15359, TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359) instead
+# UNTIL_OMN15359; the tenant half was deleted by OMN-17887) instead
 # of unconditionally rejecting every unqualified or public-qualified
 # application relation. A table only satisfies the allowlist pass-through by
 # being enumerated there -- it must never become a blanket public exemption.
@@ -656,8 +724,8 @@ def test_allowlisted_physically_public_table_passes_unqualified_or_public(
             "'not_an_allowlisted_table' must be schema-qualified",
         ),
         (
-            "ALTER TABLE public.not_an_allowlisted_table ADD COLUMN x text;",
-            "'public.not_an_allowlisted_table' is prohibited in public",
+            "ALTER TABLE tenant.not_an_allowlisted_table ADD COLUMN x text;",
+            "'tenant.not_an_allowlisted_table' uses unknown topology schema",
         ),
     ],
 )
@@ -667,8 +735,31 @@ def test_non_allowlisted_table_in_public_still_fails(
 ) -> None:
     """The allowlist is a narrow, enumerated pass-through, never a blanket
     public/unqualified exemption -- a table absent from the shared allowlist
-    must still be rejected exactly as before."""
+    must still be rejected exactly as before.
+
+    OMN-17887: the second row used to be ``public.not_an_allowlisted_table``
+    refused as "prohibited in public". `public` is now the TENANT domain's
+    declared schema, so that target is held to exact ownership instead
+    (test_non_allowlisted_public_table_is_held_to_exact_ownership) and this row
+    now refuses the retired `tenant` schema."""
     assert expected in "\n".join(lint_application_database_sql(statement, _TOPOLOGY))
+
+
+def test_non_allowlisted_public_table_is_held_to_exact_ownership() -> None:
+    """OMN-17887: a public table absent from the allowlist is not waved through.
+
+    It emits an exact ownership requirement, which the SQL gate refuses unless
+    exactly one ownership declaration answers for it.
+    """
+    requirements = application_database_sql_target_requirements(
+        "ALTER TABLE public.not_an_allowlisted_table ADD COLUMN x text;",
+        _TOPOLOGY,
+    )
+
+    assert any(
+        requirement.location == ("public", "not_an_allowlisted_table")
+        for requirement in requirements
+    )
 
 
 def test_known_physically_public_sequence_passes_static_lint() -> None:
@@ -687,10 +778,22 @@ def test_known_physically_public_sequence_passes_static_lint() -> None:
     )
 
 
-def test_unlisted_public_sequence_still_fails_static_lint() -> None:
-    assert "public.unowned_id_seq" in "\n".join(
+def test_unlisted_public_sequence_is_held_to_ownership_not_passed_through() -> None:
+    """OMN-17887: `public` is the TENANT domain's declared schema, so an unlisted
+    public sequence is no longer a lint refusal; it must still emit an exact
+    ownership requirement, and the retired `tenant` schema is still refused."""
+    requirements = application_database_sql_target_requirements(
+        "GRANT USAGE ON SEQUENCE public.unowned_id_seq TO omninode_runtime;",
+        _TOPOLOGY,
+    )
+
+    assert any(
+        requirement.location == ("public", "unowned_id_seq")
+        for requirement in requirements
+    )
+    assert "'tenant.unowned_id_seq' uses unknown topology schema" in "\n".join(
         lint_application_database_sql(
-            "GRANT USAGE ON SEQUENCE public.unowned_id_seq TO omninode_runtime;",
+            "GRANT USAGE ON SEQUENCE tenant.unowned_id_seq TO omninode_runtime;",
             _TOPOLOGY,
         )
     )

@@ -28,6 +28,7 @@ comment, and every one of these files carries comments that name both labels.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -226,11 +227,48 @@ def _jobs(workflow: str) -> dict[str, Any]:
     return jobs
 
 
+#: OMN-19507 AC2: the two per-merge convergence jobs run where the deploy-agent
+#: route sends the merge. Their ``runs-on`` is this expression, fed by the
+#: trigger job's ``verify_runs_on`` output, which
+#: ``scripts/ci/deploy_lane_verify_route.py`` resolves from
+#: ``config/deploy_lane_routing.yaml``.
+ROUTED_RUNS_ON = "${{ fromJSON(needs.trigger-rebuild.outputs.verify_runs_on) }}"
+ROUTED_JOBS = frozenset(
+    {
+        ("runtime-rebuild-trigger.yml", "verify-lane-converged"),
+        ("runtime-rebuild-trigger-reusable.yml", "verify-sibling-converged"),
+    }
+)
+
+
+def _routed_labels() -> Any:
+    """What a routed job's ``runs-on`` resolves to under the COMMITTED table.
+
+    The table routes every merge to dev-201 today, so this is the literal the
+    two jobs carried before OMN-19507; a route to dev-202 would move them to
+    that instance's own host-scoped runner, pinned in
+    tests/ci/test_deploy_lane_verify_route_omn19507.py.
+    """
+    from scripts.ci.deploy_lane_verify_route import job_outputs, load_table, resolve
+
+    labels = {
+        job_outputs(resolve(load_table(), runtime_lane="dev", requested_by=requester))[
+            "verify_runs_on"
+        ]
+        for requester in ("gha/omnibase_infra/pr-1", "gha/omnimarket/pr-1")
+    }
+    assert len(labels) == 1, labels
+    return json.loads(labels.pop())
+
+
 def _runs_on(workflow: str, job_key: str) -> Any:
     jobs = _jobs(workflow)
     assert job_key in jobs, f"{workflow} has no job {job_key!r} (jobs: {sorted(jobs)})"
     job = jobs[job_key]
     assert "runs-on" in job, f"{workflow}:{job_key} declares no runs-on"
+    if (workflow, job_key) in ROUTED_JOBS:
+        assert job["runs-on"] == ROUTED_RUNS_ON, (workflow, job_key, job["runs-on"])
+        return _routed_labels()
     return job["runs-on"]
 
 
@@ -270,7 +308,12 @@ def test_no_other_job_in_the_repo_uses_the_verify_label() -> None:
         if not isinstance(jobs, dict):
             continue
         for job_key, job in jobs.items():
-            if isinstance(job, dict) and job.get("runs-on") == VERIFY_LABEL:
+            if not isinstance(job, dict):
+                continue
+            if job.get("runs-on") == VERIFY_LABEL or (
+                job.get("runs-on") == ROUTED_RUNS_ON
+                and _routed_labels() == VERIFY_LABEL
+            ):
                 found.add((path.name, job_key))
 
     assert found == {(wf, key) for wf, key, _ in VERIFY_JOBS}
@@ -287,6 +330,13 @@ def test_every_moved_job_is_host_scoped_not_merely_class_scoped() -> None:
     cannot observe the .201 lane at all, which surfaces as a lane outage rather
     than as a routing mistake. That is the reading this test exists to prevent.
     """
+    from scripts.ci.deploy_lane_verify_route import load_table
+
+    for name, spec in load_table()["instances"].items():
+        labels = spec["verify"]["runner_labels"]
+        assert any(label.startswith("host-") for label in labels), (
+            f"routed instance {name} is scoped to the verify CLASS but not to a HOST"
+        )
     for workflow, job_key, _ in VERIFY_JOBS:
         runs_on = _runs_on(workflow, job_key)
         assert HOST_LABEL in runs_on, (

@@ -2034,7 +2034,7 @@ def _run_live_function_definition_control(
     """Prove non-body routine metadata drift changes the audited fingerprint."""
     admin.commit()
     with admin.cursor() as cursor:
-        cursor.execute("ALTER FUNCTION tenant.safe_report() STABLE")
+        cursor.execute("ALTER FUNCTION public.safe_report() STABLE")
     state = _function_state(admin, declaration, evidence)
     _assert_red(
         "security-definer-volatility-drift",
@@ -2192,7 +2192,12 @@ def _run_cross_gate_controls(
     identities: tuple[ModelApplicationDatabasePoolIdentity, ...],
 ) -> int:
     sql_controls: Mapping[str, tuple[str, str]] = {
-        "public-table": ("CREATE TABLE public.events (id uuid);", "public"),
+        # OMN-17887: `public` is the TENANT domain's schema, so a public table is
+        # no longer refused as such; the retired `tenant` schema is.
+        "retired-tenant-schema": (
+            "CREATE TABLE tenant.events (id uuid);",
+            "unknown topology schema",
+        ),
         "unqualified-table": (
             "CREATE TABLE events (id uuid);",
             "schema-qualified",
@@ -2203,7 +2208,7 @@ def _run_cross_gate_controls(
         ),
         "unqualified-read": ("SELECT * FROM events;", "schema-qualified"),
         "unqualified-merge": (
-            "MERGE INTO events USING tenant.incoming ON false WHEN NOT MATCHED THEN DO NOTHING;",
+            "MERGE INTO events USING public.incoming ON false WHEN NOT MATCHED THEN DO NOTHING;",
             "schema-qualified",
         ),
         "unqualified-grant": (
@@ -2211,7 +2216,7 @@ def _run_cross_gate_controls(
             "schema-qualified",
         ),
         "unqualified-foreign-key": (
-            "CREATE TABLE tenant.child (id uuid REFERENCES parent(id));",
+            "CREATE TABLE public.child (id uuid REFERENCES parent(id));",
             "schema-qualified",
         ),
     }
@@ -2260,11 +2265,11 @@ def main() -> None:
             (state.declaration.schema, state.declaration.name): state
             for state in relation_states
         }
-        tenant = states_by_name[("tenant", "events")]
-        identity_root = states_by_name[("tenant", "tenants")]
+        tenant = states_by_name[("public", "events")]
+        identity_root = states_by_name[("public", "tenants")]
         internal = states_by_name[("omninode_internal", "runtime_state")]
-        view = states_by_name[("tenant", "events_view")]
-        function = states_by_name[("tenant", "safe_report")]
+        view = states_by_name[("public", "events_view")]
+        function = states_by_name[("public", "safe_report")]
 
         relation_violations = validate_application_database_catalog_census(
             relation_states,
@@ -2309,7 +2314,7 @@ def main() -> None:
     if pool_violations:
         raise AssertionError(f"green pool identity proof failed: {pool_violations}")
     if lint_application_database_sql(
-        "CREATE TABLE tenant.seeded_green (id uuid PRIMARY KEY);", _TOPOLOGY
+        "CREATE TABLE public.seeded_green (id uuid PRIMARY KEY);", _TOPOLOGY
     ):
         raise AssertionError("qualified green migration SQL was rejected")
 
