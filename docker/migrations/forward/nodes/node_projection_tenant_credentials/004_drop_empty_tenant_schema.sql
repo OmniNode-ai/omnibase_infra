@@ -12,25 +12,30 @@
 --   that bootstrap runs only at initdb and the lab volume persists, so the
 --   schema it already created stays until this file drops it.
 --
---   One conditional grant is left, in a file this change cannot edit:
+--   One conditional grant is left, in a file this change does not edit:
 --   nodes/node_projection_delegation_inference_response/0004 runs
 --   `GRANT USAGE ON SCHEMA tenant TO tenant_projection_writer` when a schema
 --   named `tenant` exists, so on onex-lab the schema can carry that grant. 0004
 --   is already declared in _ledger/application-migrations.tsv, and
---   scripts/validation/check_migration_append_only.py refuses an edit to a
---   declared file. The grant is an ACL entry on the schema, not an object that
---   depends on it, so RESTRICT does not refuse on it and it is removed with the
---   schema. So is a default-privileges entry scoped to the schema (ALTER
---   DEFAULT PRIVILEGES ... IN SCHEMA tenant). The integration test's
+--   scripts/validation/check_migration_append_only.py refuses an in-place edit
+--   to a declared file unless the same change supersedes it with a
+--   higher-numbered file in that node and a row in
+--   _ledger/migration-supersessions.tsv. The grant is an ACL entry on the
+--   schema, not an object that depends on it, so RESTRICT does not refuse on it
+--   and it is removed with the schema. A default-privileges entry scoped to the
+--   schema (ALTER DEFAULT PRIVILEGES ... IN SCHEMA tenant) does depend on it,
+--   but automatically (pg_depend deptype 'a'), so RESTRICT does not refuse on
+--   it either and drops it with the schema. The integration test's
 --   onex-lab-shaped case carries both.
 --
---   Elsewhere on dev 8a177b86c, `tenant` is still named by the manual
+--   Elsewhere on dev 8a177b86c, a GRANT, REVOKE or ALTER DEFAULT PRIVILEGES on
+--   a schema named `tenant` appears only in the manual
 --   rollback/rollback_103_create_tenant_projection_writer_role.sql, which
---   revokes only when the schema exists, and by three proof harnesses
+--   revokes only when the schema exists, and in three proof harnesses
 --   (docker/application-acl-proof/seed.sql,
 --   docker/domain-adapter-proof/prove.py and
---   scripts/ci/prove_application_database_acl.py) that act on a `tenant`
---   created inside their own throwaway postgres:16-alpine containers.
+--   scripts/ci/prove_application_database_acl.py) that act on a `tenant` they
+--   create inside their own throwaway postgres:16-alpine containers.
 --
 -- ============================================================================
 -- WHY IT LIVES UNDER THIS NODE
@@ -91,11 +96,13 @@
 --
 -- EXECUTING ROLE
 --   DROP SCHEMA needs ownership of `tenant`: the executing role must own it, be a
---   member of its owner role, or be a superuser. It needs no CREATE privilege on
---   the database. On onex-lab the node loop connects as role_omnidash, which the
---   lab bootstrap makes a member of owner_onex_tenant (omninode_infra c2a58281,
---   k8s/onex-lab/substitutions/postgres.yaml:397); the compose lanes run as
---   postgres. Where `tenant` exists under an owner the executing role cannot act
+--   member of its owner role that inherits the owner's privileges (a NOINHERIT
+--   member must SET ROLE first), or be a superuser. It needs no CREATE privilege
+--   on the database. On onex-lab the node loop connects as role_omnidash, which
+--   the lab bootstrap makes a member of owner_onex_tenant (omninode_infra
+--   c2a58281, k8s/onex-lab/substitutions/postgres.yaml:397); whether that
+--   membership inherits was not read on the lab, and a role inherits by
+--   default. The compose lanes run as postgres. Where `tenant` exists under an owner the executing role cannot act
 --   as, this file fails with "must be owner of schema tenant", that lane's
 --   migrate run stops, and nothing is ledgered.
 --
