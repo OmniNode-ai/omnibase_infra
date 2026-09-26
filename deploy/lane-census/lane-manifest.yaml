@@ -596,6 +596,15 @@ lanes:
   # ---------------------------------------------------------------------------
   # Prospective OMN-18693 dogfood boundary: owner Codex; optional lane only.
   # No production or runtime evidence is asserted here; it is not deployed.
+  # verified: 2026-09-25T01:20Z via read-only `docker ps -a --filter
+  #   label=com.docker.compose.project=omnibase-infra-dogfood` on the lab-200 host
+  #   (hostname Stickybeatz-Studio.local), OMN-18931, the attestation for the two
+  #   delegation-fault containers this PR declares. STATE AT THIS LINE: 10 dogfood
+  #   containers, none of them omnibase-infra-dogfood-delegation-fault-429 or -503,
+  #   so both are DECLARED-AHEAD-OF-STATE until the lane is next brought up from this
+  #   compose file. Positive control, same session and host: the unfiltered
+  #   `docker ps -a` grouped by compose project returns the same 10 rows under
+  #   omnibase-infra-dogfood. No lane was mutated: every command was a read.
   dogfood:
     hosts: [lab-105, lab-101, lab-200]
     compose_file: docker/docker-compose.dogfood.yml
@@ -628,6 +637,12 @@ lanes:
         kind: service
         replicas: 1
       - name: omnimarket-dogfood-projection-api
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dogfood-delegation-fault-429
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-dogfood-delegation-fault-503
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------
