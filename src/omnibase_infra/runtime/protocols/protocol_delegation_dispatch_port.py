@@ -70,6 +70,14 @@ class ProtocolDelegationDispatchPort(Protocol):
         # landed consumer that passes it.
         provenance: ModelDelegationProvenance | None = None,
         backend_id: str | None = None,
+        # OMN-19817: the OmniMarket consumer protocol declares this since
+        # omnimarket#2841 (OMN-18931), and RuntimeDelegationDispatchPort has
+        # accepted and published it since omnibase_infra#4088. The protocol was
+        # the one half left behind, which the consumer-kwarg-parity hook caught
+        # on every omnibase_infra commit. Defaulted, per the note above: the
+        # consumer passes it only when true, through a TypedDict-typed helper
+        # splat, so a released port predating the keyword keeps working.
+        no_escalation: bool = False,
         response_contract: dict[str, object] | None = None,
         system_prompt: str | None = None,
         temperature: float | None = None,
