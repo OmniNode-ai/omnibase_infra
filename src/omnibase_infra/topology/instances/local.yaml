@@ -90,6 +90,7 @@ databases:
               - savings_correlation_finalizations
               - savings_injection_signals
               - savings_validator_catch_signals
+              - session_content
               - topic_produce_windows
               - work_events
             privileges: [INSERT, SELECT, UPDATE]

@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 587
+    max_skips: 591
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -112,6 +112,16 @@ suites:
             One positive control across a seam that has not landed yet, the same shape as the OMN-19507 entry above for the .202 runner: test_the_dev_200_route_labels_have_a_runner_to_land_on in tests/ci/test_studio_verify_runner_omn19657.py. It asserts that the verify labels the deploy-lane routing table declares for the dev-200 instance are satisfiable by the new .200 (stickybeatz-studio) verify runner this PR adds. The dev-200 instance declares no verify block in config/deploy_lane_routing.yaml until a sibling PR lands one, so on this base the test skips with a named reason instead of passing without looking. The other tests in the module assert the runner's compose labels, that host-200 is its own exclusive label, the absence of forbidden mounts (lab kubeconfig, operator env, OMNI_HOME clone bind), and its CPU/memory caps, all from committed state, and run in every job. The skip ends in the same change that gives dev-200 a verify block: the test then runs, and that change removes this id from this baseline.
           node_ids:
             - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on
+        - measured_at: '2026-09-26'
+          measured_by: OMN-19550
+          delta: 4
+          reason: >-
+            Four live-apply proofs for the vendored session_content projection migration (docker/migrations/forward/nodes/node_projection_session_content/0001_create_session_content.sql), in tests/integration/migrations/test_session_content_live_apply_omn19550.py: the created shape and primary key, the omninode_runtime grants (SELECT, INSERT and UPDATE, no DELETE), an idempotent re-apply, and two refusals (a row-holding drifted table stopped by the NOT NULL post-condition before any grant, and a missing runtime role). They use the EphemeralPostgres fixture, the same treatment as the OMN-18903 entry above: the parallel splits install no PostgreSQL server binaries, so they collect these and skip them by name instead of degrading to a weaker backend. The fifth test in the module, the bridging-declaration check, needs no server and runs in every split. Stated plainly: this class runs in no continuous-integration job on this repository today (the standing gap the OMN-18903 entry names). What stands behind these four is a run of the whole module at the exact pull-request head 8fd228597c on lab host .105 against PostgreSQL 16.14, 5 passed in 3.61s at 2026-09-26T17:46:28Z, receipt .onex_state/prepr-proof/OMN-19550-pr4154-lab105-20260926T174628Z/receipt.txt sha256 cf1f0e3c0581b1127b6ed1fe077bc14d7035c4efdc21b15879d1af73583a5afb.
+          node_ids:
+            - tests.integration.migrations.test_session_content_live_apply_omn19550::test_session_content_apply_is_idempotent
+            - tests.integration.migrations.test_session_content_live_apply_omn19550::test_session_content_apply_refuses_a_drifted_table_before_any_grant
+            - tests.integration.migrations.test_session_content_live_apply_omn19550::test_session_content_apply_rejects_missing_runtime_role
+            - tests.integration.migrations.test_session_content_live_apply_omn19550::test_session_content_live_apply_creates_shape_and_runtime_acl
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -712,3 +722,7 @@ suites:
       - tests.unit.topology.test_validator_ro_principal_omn17792::test_validator_ro_reaches_a_cluster_only_where_the_seam_is_invoked
       - tests.unit.validators.test_topology_validator::test_canonical_contract_file_is_valid
       - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on
+      - tests.integration.migrations.test_session_content_live_apply_omn19550::test_session_content_apply_is_idempotent
+      - tests.integration.migrations.test_session_content_live_apply_omn19550::test_session_content_apply_refuses_a_drifted_table_before_any_grant
+      - tests.integration.migrations.test_session_content_live_apply_omn19550::test_session_content_apply_rejects_missing_runtime_role
+      - tests.integration.migrations.test_session_content_live_apply_omn19550::test_session_content_live_apply_creates_shape_and_runtime_acl
