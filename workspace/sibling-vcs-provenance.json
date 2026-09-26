@@ -1,4 +1,7 @@
 {
-  "siblings": {},
-  "_note": "Placeholder committed so the Dockerfile COPY always resolves. In workspace mode, stage_workspace.sh overwrites this with the real per-repo {vcs_ref, vcs_dirty, vcs_branch} provenance (OMN-13030). Release mode ignores it."
+  "siblings": {
+    "omnibase_core": {"vcs_ref": "5b27eb5c33a3f61fa2a358341ffc38ba22071837", "vcs_dirty": false, "vcs_branch": "HEAD"},
+    "omnibase_compat": {"vcs_ref": "3b3a8e8d7c3abcd4d1b346dcd535967890aa92a1", "vcs_dirty": false, "vcs_branch": "HEAD"},
+    "omnimarket": {"vcs_ref": "3182b4d72f11fe027649b50032d49c17f892713e", "vcs_dirty": false, "vcs_branch": "HEAD"}
+  }
 }

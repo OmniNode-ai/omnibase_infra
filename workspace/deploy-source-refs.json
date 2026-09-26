@@ -1,0 +1,36 @@
+{
+  "generated_by": "deploy_source_ref.py checkout",
+  "ref_pinned": true,
+  "repos": {
+    "omnibase_compat": {
+      "before_sha": "3b3a8e8d7c3abcd4d1b346dcd535967890aa92a1",
+      "dirty": false,
+      "expected_sha": "3b3a8e8d7c3abcd4d1b346dcd535967890aa92a1",
+      "head_sha": "3b3a8e8d7c3abcd4d1b346dcd535967890aa92a1",
+      "hotpatch": true,
+      "path": "/data/omninode/omni_home/omnibase_compat",
+      "ref": "3b3a8e8d7c3abcd4d1b346dcd535967890aa92a1",
+      "repo": "omnibase_compat"
+    },
+    "omnibase_core": {
+      "before_sha": "5b27eb5c33a3f61fa2a358341ffc38ba22071837",
+      "dirty": false,
+      "expected_sha": "5b27eb5c33a3f61fa2a358341ffc38ba22071837",
+      "head_sha": "5b27eb5c33a3f61fa2a358341ffc38ba22071837",
+      "hotpatch": true,
+      "path": "/data/omninode/omni_home/omnibase_core",
+      "ref": "5b27eb5c33a3f61fa2a358341ffc38ba22071837",
+      "repo": "omnibase_core"
+    },
+    "omnimarket": {
+      "before_sha": "3182b4d72f11fe027649b50032d49c17f892713e",
+      "dirty": false,
+      "expected_sha": "3182b4d72f11fe027649b50032d49c17f892713e",
+      "head_sha": "3182b4d72f11fe027649b50032d49c17f892713e",
+      "hotpatch": true,
+      "path": "/data/omninode/omni_home/omnimarket",
+      "ref": "3182b4d72f11fe027649b50032d49c17f892713e",
+      "repo": "omnimarket"
+    }
+  }
+}
