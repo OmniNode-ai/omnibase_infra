@@ -5,8 +5,8 @@
 """Handler for ledger append operations with idempotent write support.
 
 This handler composes with HandlerDb for PostgreSQL operations, providing
-a typed interface for appending events to the audit ledger with duplicate
-detection via ON CONFLICT DO NOTHING.
+a typed interface for appending events to the audit ledger with a transactionally
+assigned per-partition ingest cursor.
 
 Bytes Encoding:
     The ModelPayloadLedgerAppend contains base64-encoded event_key and event_value
@@ -14,9 +14,9 @@ Bytes Encoding:
     to bytes before passing to PostgreSQL, which stores them as BYTEA.
 
 Idempotency:
-    Uses INSERT ... ON CONFLICT (topic, partition, kafka_offset) DO NOTHING RETURNING.
-    If RETURNING returns no rows, the event was already in the ledger (duplicate).
-    Duplicates are not errors - they enable idempotent replay.
+    The database function serializes writes per (topic, partition), allocates
+    an ingest sequence only for a new row, and identifies exact redelivery.
+    A conflicting body at one Kafka position is rejected rather than hidden.
 
 Design Decision - Composition with HandlerDb:
     This handler delegates SQL execution to HandlerDb rather than using asyncpg
@@ -74,25 +74,14 @@ logger = logging.getLogger(__name__)
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_LEDGER_APPEND: str = "ledger-append-handler"
 
-# SQL for idempotent append with duplicate detection
-# Uses RETURNING to detect whether insert succeeded (returns row) or
-# ON CONFLICT was triggered (returns nothing)
+# One SQL statement calls the database function so its clock allocation and
+# ledger insert commit atomically. Kafka offset remains source identity only.
 _SQL_APPEND = """
-INSERT INTO event_ledger (
-    topic,
-    partition,
-    kafka_offset,
-    event_key,
-    event_value,
-    onex_headers,
-    envelope_id,
-    correlation_id,
-    event_type,
-    source,
-    event_timestamp
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-ON CONFLICT (topic, partition, kafka_offset) DO NOTHING
-RETURNING ledger_entry_id
+SELECT ledger_entry_id, duplicate, ingest_epoch, ingest_seq
+FROM public.append_event_ledger_with_watermark(
+    $1::text, $2::integer, $3::bigint, $4::bytea, $5::bytea,
+    $6::jsonb, $7::uuid, $8::uuid, $9::text, $10::text, $11::timestamptz
+)
 """
 
 
@@ -103,8 +92,8 @@ class HandlerLedgerAppend:
     composing with HandlerDb for PostgreSQL operations. It provides:
 
     - Base64 decoding of event payloads to bytes
-    - Idempotent INSERT via ON CONFLICT DO NOTHING
-    - Duplicate detection via RETURNING clause
+    - Atomic commit-order ingest cursor allocation in PostgreSQL
+    - Exact duplicate detection without consuming another sequence
     - Type-safe input/output with Pydantic models
 
     Attributes:
@@ -221,8 +210,7 @@ class HandlerLedgerAppend:
     ) -> ModelLedgerAppendResult:
         """Append an event to the audit ledger.
 
-        Decodes base64 event data, executes idempotent INSERT, and detects
-        duplicates via the RETURNING clause.
+        Decodes base64 event data and calls the atomic ledger append function.
 
         Args:
             payload: Event payload containing Kafka position and event data.
@@ -259,7 +247,7 @@ class HandlerLedgerAppend:
         # Serialize onex_headers to JSON string for JSONB column
         onex_headers_json = json.dumps(payload.onex_headers)
 
-        # Build parameters for INSERT
+        # Build parameters for the stored append function.
         # Order must match $1..$11 in _SQL_APPEND
         parameters: list[object] = [
             payload.topic,  # $1
@@ -281,7 +269,7 @@ class HandlerLedgerAppend:
 
         # Build envelope for HandlerDb
         envelope: dict[str, object] = {
-            "operation": "db.query",  # Use query because RETURNING produces rows
+            "operation": "db.query",
             "payload": {
                 "sql": _SQL_APPEND,
                 "parameters": parameters,
@@ -302,8 +290,9 @@ class HandlerLedgerAppend:
         # Execute via HandlerDb
         db_result = await self._db_handler.execute(envelope)
 
-        # Check if RETURNING produced a row (insert succeeded) or not (duplicate)
-        # db_result.result is guaranteed non-None for successful db operations
+        # The function always returns exactly one explicit result row. Legacy
+        # duplicates can legitimately carry a NULL/NULL ingest pair; no
+        # historical cursor is invented for them.
         if db_result.result is None:
             ctx = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
@@ -313,10 +302,39 @@ class HandlerLedgerAppend:
             raise RuntimeHostError("Database operation returned no result", context=ctx)
 
         rows = db_result.result.payload.rows
-        if rows and len(rows) > 0:
-            # Insert succeeded - extract ledger_entry_id from RETURNING
-            ledger_entry_id = UUID(str(rows[0]["ledger_entry_id"]))
-            duplicate = False
+        if not rows or len(rows) != 1:
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="ledger.append",
+            )
+            raise RuntimeHostError(
+                "Ledger append function did not return exactly one row", context=ctx
+            )
+
+        row = rows[0]
+        duplicate = row["duplicate"]
+        epoch = row["ingest_epoch"]
+        sequence = row["ingest_seq"]
+        if not isinstance(duplicate, bool) or (
+            (epoch is None) != (sequence is None)
+            or (epoch is None and not duplicate)
+            or (
+                epoch is not None
+                and (epoch != 1 or not isinstance(sequence, int) or sequence < 1)
+            )
+        ):
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="ledger.append",
+            )
+            raise RuntimeHostError(
+                "Ledger append function returned an invalid ingest cursor",
+                context=ctx,
+            )
+        if not duplicate:
+            ledger_entry_id = UUID(str(row["ledger_entry_id"]))
             logger.debug(
                 "Event appended to ledger",
                 extra={
@@ -327,9 +345,8 @@ class HandlerLedgerAppend:
                 },
             )
         else:
-            # ON CONFLICT DO NOTHING triggered - duplicate
+            # Preserve the existing result-model contract for duplicates.
             ledger_entry_id = None
-            duplicate = True
             logger.debug(
                 "Duplicate event detected (already in ledger)",
                 extra={

@@ -85,6 +85,10 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # projection, which is the only writer of public.event_ledger, and the
     # chain-ledger writer, which is dispatched BY the terminal.
     "onex.evt.omnimarket.delegate-skill-failed.v1": "Published by omnimarket node_delegate_skill_orchestrator as its failure terminal (runtime_dispatch.terminal_events.failure), cross-repo; consumed by the OMN-18937 ledger projection and chain-ledger writer | owner: jonah | expiry: 2026-12-01",
+    # OMN-19728: the DoD verification terminal is declared by omnimarket
+    # node_dod_verify, outside this repository's publisher scan. The ledger
+    # needs its raw event for bounded verdict replay.
+    "onex.evt.omnimarket.dod-verify-completed.v1": "Published by omnimarket node_dod_verify (contract.yaml terminal_event), cross-repo; consumed by the OMN-19728 ledger projection | owner: jonah | expiry: 2026-12-26",
     # Pattern B dispatch commands enter through local runtime transport / skill clients;
     # RuntimePatternBBroker consumes them but no contract-declared node publishes them.
     "onex.cmd.omnibase-infra.pattern-b-dispatch.v1": "Published by local runtime transport / runtime-backed skill clients | owner: jonah | expiry: 2026-12-01",

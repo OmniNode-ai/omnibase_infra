@@ -23,4 +23,5 @@ class EnumOmnimarketTopic(str, Enum):
     EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1 = "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"  # onex.evt.omnimarket.build-loop-orchestrator-completed.v1
     EVT_DELEGATE_SKILL_COMPLETED_V1 = "onex.evt.omnimarket.delegate-skill-completed.v1"  # onex.evt.omnimarket.delegate-skill-completed.v1
     EVT_DELEGATE_SKILL_FAILED_V1 = "onex.evt.omnimarket.delegate-skill-failed.v1"  # onex.evt.omnimarket.delegate-skill-failed.v1
+    EVT_DOD_VERIFY_COMPLETED_V1 = "onex.evt.omnimarket.dod-verify-completed.v1"  # onex.evt.omnimarket.dod-verify-completed.v1
     EVT_RUNTIME_DEPLOYMENT_PROOF_V1 = "onex.evt.omnimarket.runtime-deployment-proof.v1"  # onex.evt.omnimarket.runtime-deployment-proof.v1

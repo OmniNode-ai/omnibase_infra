@@ -117,6 +117,7 @@ migrations:
   forward/103_create_tenant_projection_writer_role.sql: forward-only # ALTER ROLE
   forward/105_create_ledger_chain.sql: expand-only
   forward/106_add_delegation_workflow_state_traffic_class.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT CK_DELEGATION_WORKFLOW_STATE_TRAFFIC_CLASS
+  forward/108_add_event_ledger_ingest_watermark.sql: forward-only # CREATE OR REPLACE FUNCTION and constraints on an existing table
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
