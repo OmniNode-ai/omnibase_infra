@@ -24,50 +24,27 @@ no lane on it.
 
 This module is the gate for that class. It asserts the DEPLOYMENT declares the
 lane and that the declared spelling is one the emitter's own resolver accepts,
-so a drift between the compose file and ``KNOWN_LANES`` -- a rename, a typo, an
+so a drift between the compose file and the lane's overlay scope -- a rename, a typo, an
 anchor dropped from a merge list -- fails here rather than as another silent
 total loss on the lab.
 
 Every constant this compares against is spelled in THIS repository: the compose
-overlays it parses and ``KNOWN_LANES`` from the resolver under test. Nothing is
+overlays it parses and the core overlay scope model. Nothing is
 read out of a sibling clone, so the module collects and runs on a CI runner
 rather than skipping there.
 """
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 import yaml
 
-from omnibase_infra.runtime.health import runtime_lane_identity
-from omnibase_infra.runtime.health.runtime_lane_identity import (
-    ENV_RUNTIME_LANE,
-    KNOWN_LANES,
-    resolve_declared_runtime_lane,
-    resolve_runtime_lane,
-)
+from omnibase_core.models.config_overlay import ModelConfigOverlayScope
+from omnibase_infra.runtime.health.runtime_lane_identity import ENV_RUNTIME_LANE
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.fixture
-def fresh_warn_once_state() -> Iterator[None]:
-    """Give each test a process that has not yet warned.
-
-    The absent-lane warning is once per process by design, so its suppression
-    is process state. Without this reset the second of the two warning tests
-    would observe the first one's suppression and pass or fail for a reason
-    that has nothing to do with what it asserts -- and the same holds for any
-    earlier test in the session that happened to resolve a lane-less
-    environment.
-    """
-    runtime_lane_identity._warn_absent_lane.cache_clear()
-    yield
-    runtime_lane_identity._warn_absent_lane.cache_clear()
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -207,14 +184,12 @@ def test_dev_lane_declares_the_runtime_lane_on_its_health_emitting_service() -> 
     )
 
 
-def test_the_declared_lane_is_one_the_emitter_resolver_accepts() -> None:
-    """The deployment and the emitter must agree, not merely both exist.
+def test_the_declared_lane_is_a_lane_id_an_overlay_can_declare() -> None:
+    """The deployment and its overlay must agree, not merely both exist.
 
-    The resolver refuses an unrecognised value and returns ``None`` rather than
-    passing it through, so a typo in the compose file produces exactly the
-    failure this ticket is about -- an event with no lane -- and produces it
-    silently. Reading the declared value back through the resolver under test is
-    what turns that into a red test instead of another quiet total loss.
+    OMN-19747: the lane's roles come from its runtime.lane overlay document,
+    stored at the scope segment this value names. A value that is not a scope
+    segment could never have a document, so the runtime would refuse to start.
     """
     declared = _lane_declarations(DEV_LANE_OVERLAY)
     value = declared.get(LANE_SPEAKING_SERVICE)
@@ -222,14 +197,8 @@ def test_the_declared_lane_is_one_the_emitter_resolver_accepts() -> None:
     assert value is not None, (
         "no lane is declared at all -- see the sibling test in this module"
     )
-    resolved = resolve_runtime_lane({ENV_RUNTIME_LANE: value})
-    assert resolved is not None, (
-        f"the dev lane declares {ENV_RUNTIME_LANE}={value!r}, which "
-        f"resolve_runtime_lane refuses: it is not in {sorted(KNOWN_LANES)}. A "
-        "refused value is indistinguishable at the consumer from no value at "
-        "all, so this drifts into a silent drop rather than an error."
-    )
-    assert resolved == DEV_LANE_VALUE
+    ModelConfigOverlayScope(environment="local", lane=value)
+    assert value == DEV_LANE_VALUE
 
 
 def test_exactly_one_dev_lane_service_speaks_for_the_lane() -> None:
@@ -273,12 +242,6 @@ def test_excluded_lanes_declare_only_their_own_non_lab_lane(
             f"{overlay.name} service {service} declares {ENV_RUNTIME_LANE}="
             f"{lane!r}; this overlay may declare only its own lane {own_lane!r}"
         )
-        assert resolve_runtime_lane({ENV_RUNTIME_LANE: lane}) is None, (
-            f"{overlay.name} declares {lane!r}, which the health emitter keys "
-            "onto a lab lane-health row. stability-test, judge and the "
-            "collaborator lane are outside that vocabulary on purpose "
-            "(OMN-18769 AC6)."
-        )
 
 
 def test_the_stability_test_main_runtime_names_its_lane() -> None:
@@ -301,61 +264,4 @@ def test_the_stability_test_main_runtime_names_its_lane() -> None:
     assert declared == {LANE_SPEAKING_SERVICE: "stability-test"}, (
         f"{overlay.name} declares {declared!r}; the main runtime must declare "
         f"{ENV_RUNTIME_LANE}=stability-test (OMN-19408)"
-    )
-    assert resolve_declared_runtime_lane({ENV_RUNTIME_LANE: "stability-test"}) == (
-        "stability-test"
-    )
-
-
-def test_an_absent_lane_is_announced_rather_than_returned_in_silence(
-    caplog: pytest.LogCaptureFixture,
-    fresh_warn_once_state: None,
-) -> None:
-    """The missing half of the original wiring was never said out loud.
-
-    The resolver already warns about an UNRECOGNISED value and says nothing at
-    all about an ABSENT one -- which is the case that actually happened and ran
-    for the life of the deployment. A runtime that cannot name its lane is
-    emitting health events no lane-keyed consumer can use, and it is the only
-    process in a position to say so.
-    """
-    with caplog.at_level(logging.WARNING):
-        assert resolve_runtime_lane({}) is None
-
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert warnings, (
-        f"resolve_runtime_lane returned None for an absent {ENV_RUNTIME_LANE} "
-        "and logged nothing. That silence is the defect: the runtime knows it "
-        "cannot name its lane, and the consumer that drops the event cannot "
-        "tell a lane-less emitter from a lane it does not hold."
-    )
-    assert any(ENV_RUNTIME_LANE in r.getMessage() for r in warnings), (
-        "the warning does not name the variable a reader has to set: "
-        f"{[r.getMessage() for r in warnings]}"
-    )
-
-
-def test_the_absent_lane_warning_does_not_repeat_every_check_interval(
-    caplog: pytest.LogCaptureFixture,
-    fresh_warn_once_state: None,
-) -> None:
-    """Said once per process, not once per health tick.
-
-    The resolver is called on every emit, which is every check interval for the
-    life of the container. A warning on each one is the volume that gets a line
-    filtered out, and a filtered warning is worth less than none because it
-    looks like coverage.
-    """
-    with caplog.at_level(logging.WARNING):
-        for _ in range(5):
-            assert resolve_runtime_lane({}) is None
-
-    warnings = [
-        r
-        for r in caplog.records
-        if r.levelno >= logging.WARNING and ENV_RUNTIME_LANE in r.getMessage()
-    ]
-    assert len(warnings) == 1, (
-        f"the absent-lane warning fired {len(warnings)} times across five "
-        "resolutions; it must be emitted once per process"
     )
