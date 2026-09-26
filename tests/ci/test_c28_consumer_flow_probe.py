@@ -11,9 +11,9 @@ the lane the verdict turns on.
 
 Three inputs are REAL BYTES, captured from that lane rather than typed:
 
-* ``runtime_seam_probe_prefixed.captured.log`` -- the seam's own log lines for a
+* ``runtime_seam_probe_prefixed.captured.txt`` -- the seam's own log lines for a
   malformed payload this probe published (correlation prefixed ``c28c28c2-c28c-``).
-* ``runtime_seam_unprefixed.captured.log`` -- the same seam refusing a payload
+* ``runtime_seam_unprefixed.captured.txt`` -- the same seam refusing a payload
   published by hand with an ordinary correlation id, which is exactly what a
   natural error looks like to the probe and must count as one.
 * ``rpk_describe_partitions.captured.txt`` -- ``rpk topic describe -p`` output.
@@ -408,7 +408,7 @@ def _lines(name: str) -> list[str]:
 
 def test_errors_this_probe_caused_are_attributed_to_it() -> None:
     total, own, natural = probe.natural_validation_errors(
-        _lines("runtime_seam_probe_prefixed.captured.log")
+        _lines("runtime_seam_probe_prefixed.captured.txt")
     )
     assert total > 0
     assert own == total
@@ -417,7 +417,7 @@ def test_errors_this_probe_caused_are_attributed_to_it() -> None:
 
 def test_an_error_with_an_ordinary_correlation_counts_as_natural() -> None:
     total, own, natural = probe.natural_validation_errors(
-        _lines("runtime_seam_unprefixed.captured.log")
+        _lines("runtime_seam_unprefixed.captured.txt")
     )
     assert total > 0
     assert own == 0
@@ -427,7 +427,7 @@ def test_an_error_with_an_ordinary_correlation_counts_as_natural() -> None:
 def test_an_unpaired_error_is_never_excused() -> None:
     lines = [
         ln
-        for ln in _lines("runtime_seam_probe_prefixed.captured.log")
+        for ln in _lines("runtime_seam_probe_prefixed.captured.txt")
         if "boundary_swallow" not in ln
     ]
     total, own, natural = probe.natural_validation_errors(lines)
