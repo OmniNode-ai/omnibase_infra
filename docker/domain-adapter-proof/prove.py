@@ -495,6 +495,125 @@ def _prove_rollback_clears_reused_connection(
         shared.close()
 
 
+def _prove_replay_reconciles_to_one_row(
+    tenant_target: ProjectionDatabaseTarget,
+) -> None:
+    """A redelivered tenant event reconciles; it does not duplicate or re-attribute.
+
+    OMN-15425 AC4 names "replay reconciliation" and nothing here proved it. It is
+    not the same claim as the upsert unit tests: at-least-once delivery is a
+    property of the BUS, so the row this proves is the one a real redelivery
+    produces -- same correlation_id, same verified authority, a second write
+    issued against the real relation under the real NOBYPASSRLS role.
+
+    Three things are asserted, and the third is the one that would go unnoticed:
+
+    1. The second write succeeds. A replay that errored would DLQ a fact the
+       lane already holds.
+    2. Exactly ONE row exists for that correlation_id, read back AS THE ADMIN so
+       the count cannot be satisfied by the writer's own row scope -- a
+       tenant-scoped count would read 1 even if a second tenant's duplicate sat
+       beside it.
+    3. The row's tenant_id is unchanged and its payload is the REPLAYED value.
+       A reconciliation that kept the first payload would be an insert-once
+       cache, not an upsert, and a projection frozen at its first delivery is
+       the failure this criterion exists to catch.
+    """
+
+    authority, event = _verified_dispatch(TENANT_A)
+    adapter = _adapter(tenant_target, authority, event)
+    correlation = uuid4()
+    try:
+        assert adapter.upsert(
+            TENANT_TABLE,
+            "correlation_id",
+            {"correlation_id": correlation, "task_type": "replay-first"},
+        )
+        # The identical envelope, delivered again. Same authority, same key.
+        assert adapter.upsert(
+            TENANT_TABLE,
+            "correlation_id",
+            {"correlation_id": correlation, "task_type": "replay-second"},
+        )
+    finally:
+        adapter.close()
+
+    rows = _admin_rows(
+        "SELECT tenant_id, task_type FROM tenant."
+        + TENANT_TABLE
+        + " WHERE correlation_id = %s",
+        (correlation,),
+    )
+    assert len(rows) == 1, f"replay left {len(rows)} rows, expected 1"
+    assert rows[0][0] == TENANT_A
+    assert rows[0][1] == "replay-second", (
+        "the replay did not update the row: a projection frozen at its first "
+        "delivery reports stale facts forever"
+    )
+
+
+def _prove_restart_reads_back_what_the_previous_process_wrote(
+    tenant_target: ProjectionDatabaseTarget,
+) -> None:
+    """A restarted writer sees the prior process's row, holding no state to do it.
+
+    OMN-15425 AC4 names a "restart proof" and nothing here proved it. The risk
+    it addresses is specific: every part of the tenant binding -- the DSN, the
+    role, the transaction-local ``app.tenant_id`` -- is established per
+    connection, so a projection that only works while one adapter stays open
+    would pass every other proof in this file and fail on the first pod
+    restart. onex-dev restarts these pods on every deploy.
+
+    A restart is modelled as the thing that actually distinguishes it: the first
+    adapter is CLOSED, so its connections and their SET LOCAL state are gone,
+    and a second adapter is built from a freshly verified authority rather than
+    the first one's object. Reusing the same authority instance would leave the
+    proof passing on in-process state, which is the failure being excluded.
+    """
+
+    first_authority, first_event = _verified_dispatch(TENANT_A)
+    first = _adapter(tenant_target, first_authority, first_event)
+    correlation = uuid4()
+    try:
+        assert first.upsert(
+            TENANT_TABLE,
+            "correlation_id",
+            {"correlation_id": correlation, "task_type": "before-restart"},
+        )
+    finally:
+        first.close()
+
+    # The restart. Nothing from the process above survives into the one below.
+    second_authority, second_event = _verified_dispatch(TENANT_A)
+    assert second_authority is not first_authority
+    second = _adapter(tenant_target, second_authority, second_event)
+    try:
+        found = second.query(TENANT_TABLE, {"correlation_id": correlation})
+        assert len(found) == 1, (
+            "the restarted writer cannot see the row the previous process "
+            "wrote, so tenant scope is being established from in-process state"
+        )
+        assert found[0]["tenant_id"] == TENANT_A
+        assert found[0]["task_type"] == "before-restart"
+        # And it can still WRITE, not merely read: a restart that reattaches
+        # read-only would look healthy until the next event arrived.
+        assert second.upsert(
+            TENANT_TABLE,
+            "correlation_id",
+            {"correlation_id": correlation, "task_type": "after-restart"},
+        )
+    finally:
+        second.close()
+
+    rows = _admin_rows(
+        "SELECT task_type FROM tenant."
+        + TENANT_TABLE
+        + " WHERE correlation_id = %s",
+        (correlation,),
+    )
+    assert [row[0] for row in rows] == ["after-restart"]
+
+
 def _prove_signature_failures() -> None:
     malformed = _signed_fixture("not-a-uuid", bound_tenant=TENANT_A)
     sentinel = _signed_fixture(str(UUID(int=0)), bound_tenant=UUID(int=0))
@@ -597,6 +716,10 @@ def main() -> None:
     _prove_no_authority_records_the_claim(tenant_target)
 
     _prove_rollback_clears_reused_connection(tenant_target)
+
+    # OMN-15425 AC4: the two halves this file did not cover.
+    _prove_replay_reconciles_to_one_row(tenant_target)
+    _prove_restart_reads_back_what_the_previous_process_wrote(tenant_target)
 
     internal = _adapter(internal_target)
     internal_id = uuid4()
