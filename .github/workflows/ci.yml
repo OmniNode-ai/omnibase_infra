@@ -351,6 +351,9 @@ jobs:
       - name: Check Kafka bootstrap no localhost fallback (OMN-8783)
         run: uv run python scripts/ci_check_kafka_no_localhost_default.py
 
+      - name: Check Kafka hardcoded broker fallbacks (whole-tree backstop)
+        run: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
+
       - name: Check no localhost env fallbacks in src/ (OMN-10732)
         run: uv run python scripts/validate_no_env_fallbacks.py
 
@@ -902,6 +905,18 @@ jobs:
           echo "================================================================"
           uv run python scripts/batch_validate_node_contracts.py --verbose
 
+      # OMN-19565: the lab proof profile registry, config/lab_proof_profiles.yaml.
+      # Every registry repository has exactly one row, every step names a node
+      # and an operation that node's contract routes, and no row claims
+      # `enforce: true` before its bar is recorded. The self-test proves the
+      # one-row-per-repository rule is not vacuous: each one-row-removed copy
+      # must be refused. SYNC with the .pre-commit-config.yaml hook
+      # `lab-proof-profiles`.
+      - name: Lab proof profile registry (OMN-19565)
+        run: |
+          uv run python scripts/ci/validate_lab_proof_profiles.py
+          uv run python scripts/ci/validate_lab_proof_profiles.py --self-test
+
       # OMN-17423 AC4. The runtime CredentialRedactionFilter installed by
       # service_kernel.configure_logging() is defense in depth; this gate is
       # the enforcement layer, refusing the source pattern before a handler
@@ -924,6 +939,13 @@ jobs:
             --mode=self-test \
             --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py \
             --expected 9
+
+      # OMN-19612: validate-spdx-headers runs staged-file-scoped in
+      # .pre-commit-config.yaml (pass_filenames: true); this is its
+      # whole-tree CI counterpart so the header requirement still holds
+      # over the entire tree, not only a developer's staged diff.
+      - name: SPDX header check (OMN-19612)
+        run: uv run --frozen onex spdx validate src tests scripts
 
   infra-node-handler-ownership:
     needs: occ-preflight

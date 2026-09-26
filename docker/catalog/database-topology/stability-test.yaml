@@ -87,7 +87,9 @@ databases:
               - projection_watermarks
               - runner_fleet_liveness
               - runtime_error_fingerprints
-              - session_content
+              - savings_correlation_finalizations
+              - savings_injection_signals
+              - savings_validator_catch_signals
               - topic_produce_windows
               - work_events
             privileges:
@@ -356,5 +358,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 035ca8442dc08c03cf91bf6505d80fd447defe0c8a4453fcdf52af04bc7fcad1
+  sha256: 438ac358796031551ec954b6c797294012467be9a73b4df9f041836790b3afe3
 topology_instance: local

@@ -87,7 +87,9 @@ databases:
               - projection_watermarks
               - runner_fleet_liveness
               - runtime_error_fingerprints
-              - session_content
+              - savings_correlation_finalizations
+              - savings_injection_signals
+              - savings_validator_catch_signals
               - topic_produce_windows
               - work_events
             privileges:
@@ -356,5 +358,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 1095bcded316fe2775452bc4006d466496a6d08144619a03d59a5182c188119f
+  sha256: e565b45aedccdfcff0c1c1920f043566118d9871fd73c8f8c24d2aedf3c9b1cb
 topology_instance: onex-prod

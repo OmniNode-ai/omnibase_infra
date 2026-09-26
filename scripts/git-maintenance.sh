@@ -30,6 +30,13 @@ set -euo pipefail
 #       * `gh` reports no open pull request for the branch;
 #       * the rolling ledger holds no open CLAIM naming the ticket dir, the
 #         branch or the ticket id;
+#   - a secrets-shaped file (.env, a key, settings.local.json) is never
+#     regenerable, wherever it sits: a `.env` inside an ignored `dist/` keeps the
+#     worktree although `git status --ignored` names only `dist/` (OMN-19539);
+#   - before any removal, the worktree's diff and its untracked and ignored-but-
+#     not-regenerable files are saved under $OMNI_HOME/.onex_state by the shared
+#     helper omniclaude/scripts/worktree_removal_snapshot.py; a missing helper
+#     or a failed save keeps the worktree (OMN-19539, operator ruling 2026-09-25);
 #   - one kept worktree keeps its whole ticket dir untouched;
 #   - removal is `git worktree remove` without `--force`, one worktree at a time.
 #     Nothing is ever deleted recursively: non-git content (files, hidden dirs,
@@ -85,11 +92,54 @@ if [ "$DELETE_REMOTE_BRANCHES" = true ] && [ "$DRY_RUN" = false ]; then
   [ -r "$ONEX_LEDGER_PATH" ] && [ -f "$ONEX_LEDGER_PATH" ] || refuse "ONEX_LEDGER_PATH is not a readable file: $ONEX_LEDGER_PATH"
 fi
 
+# Names that can carry credentials or local secret configuration. Match on the
+# basename, case-insensitively, at any depth. These names are never regenerable,
+# even when an ignore rule collapses a parent cache such as dist/ to one status
+# entry. Keep this aligned with the shared worktree-removal snapshot vocabulary
+# plus this repository's Infisical and runner-monitor credential files.
+SECRET_BEARING_GLOBS=(
+  '.env' '.env.*' '*.env' '*.env.*' '.envrc' '.monitor-env'
+  '*.pem' '*.key' '*.p12' '*.pfx' '*.jks' '*.keystore'
+  'id_rsa*' 'id_dsa*' 'id_ecdsa*' 'id_ed25519*'
+  '.netrc' '.npmrc' '.pypirc' '.pgpass' '.git-credentials'
+  'credentials' 'credentials.*' 'service-account*.json'
+  'secret' 'secrets' 'secret.*' 'secrets.*' '*.secret' '*.secrets'
+  'kubeconfig' '*.kubeconfig' '*.tfvars' '*.tfvars.json' '*.tfstate' '*.tfstate.*'
+  'settings.local.json' '.infisical-identity*' '.infisical-admin-token*'
+)
+
+is_secret_bearing_name() {
+  local name pattern
+  name=$(basename "${1%/}" | tr '[:upper:]' '[:lower:]')
+  for pattern in "${SECRET_BEARING_GLOBS[@]}"; do
+    # Each array entry is intentionally a glob, not a literal string.
+    # shellcheck disable=SC2254
+    case "$name" in $pattern) return 0 ;; esac
+  done
+  return 1
+}
+
+# Print secret-bearing paths under a directory. A failed traversal returns
+# non-zero so callers keep the worktree rather than treating an unreadable
+# directory as safe.
+secret_bearing_under() {
+  local dir="$1" found pattern rc=0
+  local -a expression=()
+  for pattern in "${SECRET_BEARING_GLOBS[@]}"; do
+    [ "${#expression[@]}" -eq 0 ] || expression+=(-o)
+    expression+=(-iname "$pattern")
+  done
+  found=$(find "$dir" \( "${expression[@]}" \) -print) || rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  printf '%s' "$found"
+}
+
 # Ignored paths that are regenerable caches. Any OTHER ignored path (.env,
 # settings.local.json, scratch output) keeps the worktree: `git worktree remove`
 # deletes ignored files, and those are not recoverable from git.
 is_regenerable_ignored() {
   local p="${1%/}"
+  is_secret_bearing_name "$p" && return 1
   case "$(basename "$p")" in
     .venv|venv|node_modules|__pycache__|.pytest_cache|.mypy_cache|.ruff_cache) return 0 ;;
     .coverage|.coverage.*|coverage.xml|htmlcov|.tox|.nox|dist|build|*.egg-info|.eggs) return 0 ;;
@@ -97,6 +147,8 @@ is_regenerable_ignored() {
   esac
   return 1
 }
+
+SNAPSHOT_HELPER="$OMNI_HOME/omniclaude/scripts/worktree_removal_snapshot.py"
 
 # Print the open CLAIM rows (by timestamp) that mention any of the given keys as
 # a whole token. A CLAIM is closed by a TERMINAL whose closes-CLAIM token ends
@@ -182,7 +234,20 @@ open_pr_count() {
 # Prints its report to stdout. Returns 0 on a complete removal, 1 otherwise.
 remove_one_worktree() {
   local wt="$1" clone_dir="$2" admin_dir="$3"
-  local head_oid="" stderr_file="" rc=0 survivors=0
+  local head_oid="" stderr_file="" rc=0 survivors=0 saved=""
+
+  # Save before removing (OMN-19539). A missing helper or a failed save keeps
+  # the worktree; nothing is removed unsaved.
+  if [ ! -f "$SNAPSHOT_HELPER" ]; then
+    echo "  [kept] $wt: pre-removal snapshot helper missing ($SNAPSHOT_HELPER)"
+    return 1
+  fi
+  saved=$(python3 "$SNAPSHOT_HELPER" "$wt" --reason git-maintenance.sh) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  [kept] $wt: pre-removal snapshot failed (exit $rc): $saved"
+    return 1
+  fi
+  echo "  [saved] $wt: $saved"
 
   # Record what a reconstruction would need BEFORE touching the tree, because a
   # failed removal destroys the index and the admin directory that hold it.
@@ -226,7 +291,7 @@ remove_one_worktree() {
 # lines and returns 1 when it must stay. On success prints nothing and sets
 # WT_BRANCH, WT_CLONE and WT_ADMIN for the caller.
 check_worktree_removable() {
-  local wt="$1" out err rc ahead stashes line p kept=0
+  local wt="$1" out err rc ahead stashes line p secret kept=0
   WT_BRANCH=""; WT_CLONE=""; WT_ADMIN=""
 
   WT_ADMIN=$(sed -n 's/^gitdir: //p' "$wt/.git" | head -1)
@@ -251,6 +316,16 @@ check_worktree_removable() {
         p="${line#!! }"
         if ! is_regenerable_ignored "$p"; then
           echo "  [keep] $wt: holds ignored file not recoverable from git: $p"; kept=1; break
+        fi
+        if [ -d "$wt/${p%/}" ]; then
+          rc=0
+          secret=$(secret_bearing_under "$wt/${p%/}") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "  [keep] $wt: cannot inspect all of $p (exit $rc), so it is not treated as regenerable"; kept=1; break
+          fi
+          if [ -n "$secret" ]; then
+            echo "  [keep] $wt: holds ignored file not recoverable from git: ${secret#"$wt"/} (a secrets-shaped file inside $p)"; kept=1; break
+          fi
         fi
         ;;
       *) echo "  [keep] $wt: has uncommitted changes"; kept=1; break ;;

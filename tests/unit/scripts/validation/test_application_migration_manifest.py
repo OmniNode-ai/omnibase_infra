@@ -819,10 +819,13 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # dod_verify_runs.delegation_correlation_id column, so a delegation run
     # joins to its ticket and to the DoD verdict that judged it. Both additive
     # (expand-only), vendored FIRST per the vendor-parity ordering.
-    # 216 -> 217 for OMN-19550: node_projection_session_content/0001 creates
+    # 216 -> 217 for OMN-19721: node_projection_runtime_error_fingerprints/0002
+    # adds the nullable runtime_error_fingerprints.last_applied_event_id column,
+    # so a broker redelivery of one runtime-error event is counted once.
+    # 217 -> 218 for OMN-19550: node_projection_session_content/0001 creates
     # omninode_internal.session_content and grants the projection writer role.
     # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
-    assert len(result.declarations) == 217
+    assert len(result.declarations) == 218
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

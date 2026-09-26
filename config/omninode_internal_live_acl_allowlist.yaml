@@ -18,42 +18,28 @@
 # by migration or by a declaration, never by listing it.
 #
 # Measured 2026-09-24 on a fresh PostgreSQL 16 cluster, profile onex-dev: 20 findings.
+# AC2 step 1 (2026-09-25) declared the three savings_* tables in
+# table_grant_derivation.py, removing their 9 entries: 11 remain.
 entries:
-  # AC2 step 1: node_gateway_link_health_write_effect declares no db_io for these.
+  # AC2 step 2: node_gateway_link_health_write_effect upserts gateway_link_health, but
+  # no migration GRANTs it; it is declared with its explicit GRANT migration.
   - finding: UNDECLARED_GRANT omninode_runtime INSERT ON omninode_internal.gateway_link_health
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_gateway_link_health_write_effect)
+    removed_by: OMN-17886 AC2 step 2 (explicit GRANT migration for gateway_link_health, declared in the same change)
   - finding: UNDECLARED_GRANT omninode_runtime SELECT ON omninode_internal.gateway_link_health
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_gateway_link_health_write_effect)
+    removed_by: OMN-17886 AC2 step 2 (explicit GRANT migration for gateway_link_health, declared in the same change)
   - finding: UNDECLARED_GRANT omninode_runtime UPDATE ON omninode_internal.gateway_link_health
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_gateway_link_health_write_effect)
+    removed_by: OMN-17886 AC2 step 2 (explicit GRANT migration for gateway_link_health, declared in the same change)
+  # AC2 revoke: the gateway_link_health_status VIEW. No runtime node uses it, so
+  # omninode_runtime's privileges on it are removed rather than declared.
   - finding: UNDECLARED_GRANT omninode_runtime INSERT ON omninode_internal.gateway_link_health_status
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_gateway_link_health_write_effect)
+    removed_by: OMN-17886 AC2 revoke (no runtime node reads or writes the gateway_link_health_status view; these privileges come only from the default-privilege rules, so they are revoked, not declared)
   - finding: UNDECLARED_GRANT omninode_runtime SELECT ON omninode_internal.gateway_link_health_status
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_gateway_link_health_write_effect)
+    removed_by: OMN-17886 AC2 revoke (no runtime node reads or writes the gateway_link_health_status view; these privileges come only from the default-privilege rules, so they are revoked, not declared)
   - finding: UNDECLARED_GRANT omninode_runtime UPDATE ON omninode_internal.gateway_link_health_status
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_gateway_link_health_write_effect)
+    removed_by: OMN-17886 AC2 revoke (no runtime node reads or writes the gateway_link_health_status view; these privileges come only from the default-privilege rules, so they are revoked, not declared)
   # AC2 step 1: node_projection_runner_fleet deletes; `access: read_write` cannot say so yet.
   - finding: UNDECLARED_GRANT omninode_runtime DELETE ON omninode_internal.runner_fleet_liveness
     removed_by: OMN-17886 AC2 step 1 (a DELETE declaration for runner_fleet_liveness)
-  # AC2 step 1: node_savings_estimation_compute declares no db_io at all.
-  - finding: UNDECLARED_GRANT omninode_runtime INSERT ON omninode_internal.savings_correlation_finalizations
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_savings_estimation_compute)
-  - finding: UNDECLARED_GRANT omninode_runtime SELECT ON omninode_internal.savings_correlation_finalizations
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_savings_estimation_compute)
-  - finding: UNDECLARED_GRANT omninode_runtime UPDATE ON omninode_internal.savings_correlation_finalizations
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_savings_estimation_compute)
-  - finding: UNDECLARED_GRANT omninode_runtime INSERT ON omninode_internal.savings_injection_signals
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_savings_estimation_compute)
-  - finding: UNDECLARED_GRANT omninode_runtime SELECT ON omninode_internal.savings_injection_signals
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_savings_estimation_compute)
-  - finding: UNDECLARED_GRANT omninode_runtime UPDATE ON omninode_internal.savings_injection_signals
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_savings_estimation_compute)
-  - finding: UNDECLARED_GRANT omninode_runtime INSERT ON omninode_internal.savings_validator_catch_signals
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_savings_estimation_compute)
-  - finding: UNDECLARED_GRANT omninode_runtime SELECT ON omninode_internal.savings_validator_catch_signals
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_savings_estimation_compute)
-  - finding: UNDECLARED_GRANT omninode_runtime UPDATE ON omninode_internal.savings_validator_catch_signals
-    removed_by: OMN-17886 AC2 step 1 (db_io for node_savings_estimation_compute)
   # AC2 step 2: the explicit-grant migration delivers the declared schema USAGE.
   - finding: MISSING_DECLARED_SCHEMA_GRANT validator_ro USAGE ON SCHEMA omninode_internal
     removed_by: OMN-17886 AC2 step 2 (explicit-grant migration)

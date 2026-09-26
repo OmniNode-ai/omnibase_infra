@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Release-train policy (OMN-18595).
+#
+# WHAT THIS FILE IS
+#   The whole per-repo configuration of the scheduled release train
+#   (.github/workflows/release-train-nightly.yml -> scripts/ci/release_train.py).
+#   The train carries NO built-in default for any field here: a repo that is not
+#   declared refuses rather than being run against a guess, because a guess about
+#   which paths are release-relevant is a guess about what gets published.
+#
+# ARMING A REPO IS ONE FIELD, AND IT IS DELIBERATE
+#   `mode: cut` lets the train open a release PR for that repo. `mode: report_only`
+#   decides and reports and never cuts. Flipping one to `cut` is a reviewed edit
+#   with its own PR, and tests/scripts/test_release_train_nightly.py asserts the
+#   armed set, so arming cannot happen as a side effect of some other change.
+#
+# THE LAB-EVIDENCE FIELD IS A STATEMENT OF FACT, NOT A DIAL
+#   Operator ruling (ROLLING_WORK_LEDGER.md:4258) names a PASS lab-pass receipt
+#   as the cut premise. Measured 2026-09-17, only omnibase_infra and omnimarket
+#   carry a rebuild trigger and emit one at all; the other five repos are
+#   libraries with no lab lane of their own and cannot produce a receipt for any
+#   sha. `lab_evidence: none` records that, with its reason, and the reason is
+#   printed on every decision the train makes for that repo. It is not a way past
+#   the bar: every repo declaring it is also `report_only` today, so nothing is
+#   cut on a weaker premise pending an operator decision on what a library repo's
+#   equivalent premise should be.
+#
+# release_relevant_paths
+#   What can change the published artifact. `src` is the packaged tree and
+#   `pyproject.toml` carries the dependency floor that ships with it. Commits
+#   that are the release machinery's own bookkeeping -- the post-release dev
+#   version bump, the release PR itself -- are excluded by subject in
+#   scripts/ci/release_train.py, because the bump edits pyproject.toml and would
+#   otherwise make the train cut an empty release every night forever.
+repos:
+  omnibase_infra:
+    package: omnibase-infra
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: compose-dev
+    lab_evidence_note: >-
+      the compose dev lane on the lab host. runtime-rebuild-trigger.yml emits a lab-pass-receipt-compose-dev-<sha> artifact in this repo for a RUNTIME-AFFECTING merge only -- its receipt job is gated on published == 'true' and runtime_lane == 'dev' -- so a workflow-only or scripts-only merge has no receipt of its own, at any time, and never will. Measured 2026-09-18: seven of the eight most recent dev merges carried none, by design. The premise therefore asks for the receipt of the nearest runtime-affecting ancestor of the head, and accepts it only when no commit between that ancestor and the head is runtime-affecting by the trigger's own classifier (OMN-18664). One runtime-affecting commit in that gap voids the inheritance and the train refuses, naming it.
+    mode: cut
+  omnimarket:
+    package: omnimarket
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: compose-dev-or-compose-dev-202
+    lab_evidence_note: >-
+      the compose dev lane on .201, or the second deployed dev lane dev-202 on .202 (receipt lane compose-dev-202, OMN-19508): the operator ruled on 2026-09-25T00:56:45Z that omnimarket changes may be proven on either, and only omnimarket (the loader refuses this value for any other repo). compose-dev is read first, then compose-dev-202, and a PASS on either satisfies the premise. This repo carries its own runtime-rebuild-trigger.yml and its receipts are published here, in the repo the sha belongs to. As in omnibase_infra, a receipt exists only for a RUNTIME-AFFECTING merge, so the premise asks for the nearest runtime-affecting ancestor of the head and accepts it only when nothing between that ancestor and the head is runtime-affecting (OMN-18664).
+    mode: report_only
+    mode_note: >-
+      release-on-merge.yml already releases this repo on every source-touching merge to dev (OMN-18010), proven by the automated post-release bump PRs from 0.4.85 onward. A second cutter would race it. The train reports this repo instead, so a run that finds unreleased work here is the signal that release-on-merge has stopped firing.
+  omnibase_core:
+    package: omnibase-core
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml; this repo reaches the lab only vendored into an omnibase_infra candidate, so no receipt is keyed by one of its shas
+    mode: cut
+    mode_note: >-
+      green dev CI on the candidate's gating commit is the cut premise here. A cut on this repo is a PyPI publish plus a main fast-forward, never a deploy, and no lab lane exists that could receipt it. The repos that DO reach a runtime pick these releases up through governed pin bumps carrying their own lab receipt, so the lab proof point sits with the consumer, which is where it belongs. Operator ruling 2026-09-17, the cut path. Ancestry verified 2026-09-17 before arming: main IS an ancestor of dev, main-only 0, dev-only 4, so the release fast- forward can succeed. Green verified live the same day, all 37 required contexts on dev reporting success for the gating commit.
+  omnibase_spi:
+    package: omnibase-spi
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml; not vendored into the runtime image either, so nothing keys a receipt to one of its shas
+    mode: cut
+    mode_note: >-
+      green dev CI on the candidate's gating commit is the cut premise here. A cut on this repo is a PyPI publish plus a main fast-forward, never a deploy, and no lab lane exists that could receipt it. The repos that DO reach a runtime pick these releases up through governed pin bumps carrying their own lab receipt, so the lab proof point sits with the consumer, which is where it belongs. Operator ruling 2026-09-17, the cut path. Ancestry verified 2026-09-17 before arming: main IS an ancestor of dev, main-only 0, dev-only 18, so the release fast- forward can succeed. Green verified live the same day, all 24 required contexts on dev reporting success for the gating commit.
+  omnimemory:
+    package: omnimemory
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml
+    mode: cut
+    mode_note: >-
+      green dev CI on the candidate's gating commit is the cut premise here. A cut on this repo is a PyPI publish plus a main fast-forward, never a deploy, and no lab lane exists that could receipt it. The repos that DO reach a runtime pick these releases up through governed pin bumps carrying their own lab receipt, so the lab proof point sits with the consumer. Operator ruling 2026-09-17, the cut path. Ancestry verified before arming: main IS an ancestor of dev, main-only 0, dev-only 34. CORRECTION: an earlier revision of this entry held this repo at report_only on a skipped required context. That verdict was MY READER'S BUG, twice over, not a fact about this repo: it took an arbitrary one of several check runs sharing a name, and then the fetch projected away the very timestamps the recency fix ordered on. With both corrected, every required context on this repo's gating commit reports success.
+  omniintelligence:
+    package: omniintelligence
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml
+    mode: report_only
+    mode_note: >-
+      ONE blocker now, and it is the backlog: 67 unreleased source commits measured 2026-09-17 against a tag dated 2026-05-26, so arming a patch cut over three months of accumulated change is the hazard OMN-18010 put out of scope and this repo needs a deliberate minor release first. The dependency-cascade blocker this entry also carried until 2026-09-19 is CLEARED and is no longer a reason to hold the repo: the cascade could not move this repo's omnibase-infra pin at all while its lock failed to resolve, omniintelligence#918 (squash 274f097f) removed the source override that caused that, and the cascade then ran green -- proof run 35412730230, job Cascade / Bump omniintelligence, conclusion success, with dev's lock now resolving omnibase-infra 0.38.32. The mode is unchanged because the two blockers were independent; only one of them cleared.
+  omniclaude:
+    package: omniclaude
+    default_branch: dev
+    release_relevant_paths: [src, pyproject.toml]
+    lab_evidence: none
+    lab_evidence_note: >-
+      no lab lane of its own and no runtime-rebuild-trigger.yml; the plugin's deploy surface is a plugin update, not a runtime lane
+    mode: report_only
+    mode_note: >-
+      65 unreleased source commits measured 2026-09-17 against a tag dated 2026-06-02, the same catch-up hazard as omniintelligence. NOT an ancestry blocker: CLAUDE.md records this repo's main as behind with 15 main-only commits and states the fast-forward cannot succeed, which was true on 2026-09-15 and is not true now; re-read 2026-09-17 gives main-only 0, dev-only 37, and git merge-base --is-ancestor returns true.

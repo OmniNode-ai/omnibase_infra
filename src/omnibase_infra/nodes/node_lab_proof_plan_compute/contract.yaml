@@ -1,0 +1,169 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeLabProofPlanCompute
+#
+# Two pure halves of a lab proof, either side of the host work:
+#   lab_proof.plan     a registry profile row plus the PR under test -> ordered
+#                      argv steps (node_lab_proof_run_effect executes them)
+#   lab_proof.verdict  the plan plus what its run observed -> PASS, FAIL,
+#                      INCONCLUSIVE or DEV_INHERITED, with every mandatory check
+#
+# Operator ruling 2026-09-25T13:07:40Z (rolling ledger, lane merge-drain-83),
+# verbatim: "OK so it seems to me like we need to start using this for all PR's
+# not just one set change the runtime". The profile rows live in
+# config/lab_proof_profiles.yaml; this node renders the ones whose execution is
+# `node` (today: foundation_override, for omnibase_core, omnibase_spi and
+# omnibase_compat).
+#
+# WHY THE BUNDLE FACTS ARE HERE. The proof boots the catalog's `local` bundle,
+# whose compose project, container names, image name and host ports are fixed
+# today (docker/catalog/bundles.yaml, `local:`). They are declared once, in this
+# contract, and parsed into ModelLabProofBundlePolicy, whose fields are all
+# required. When the scheduler (OMN-19569) derives a project and ports per slot,
+# this block is what changes.
+#
+# Related tickets:
+#   - OMN-19572: the omnibase_core foundation_override profile
+#   - OMN-19565: the proof-profile registry
+#   - OMN-19564: epic, a lab proof for every code PR
+name: "node_lab_proof_plan_compute"
+contract_name: "node_lab_proof_plan_compute"
+node_name: "node_lab_proof_plan_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+description: >
+  Compute node with two pure handlers. lab_proof.plan renders one proof run from a registry profile row, the subject PR commit, the host's lane directory and the bundle facts below into ordered argv steps with working directories, timeouts, polling and mechanical expectations; it refuses a row that does not run by nodes, a proof kind with no plan, and a subject from another repository. lab_proof.verdict evaluates the row's mandatory checks from the run's observations and decides the outcome, with an optional base-control result that turns a FAIL reproduced at the merge base into DEV_INHERITED.
+
+input_model:
+  name: "ModelLabProofPlanRequest"
+  module: "omnibase_infra.lab_proof.model_lab_proof_plan_request"
+  description: "Profile row, subject, run id, lane directory, pinned infra commit, model endpoint, positive-control project, negative-control flag and bundle policy."
+output_model:
+  name: "ModelLabProofPlan"
+  module: "omnibase_infra.lab_proof.model_lab_proof_plan"
+  description: "Ordered argv steps plus the identity they prove."
+capabilities:
+  - name: "lab_proof.plan"
+    description: "Render one lab proof run"
+  - name: "lab_proof.verdict"
+    description: "Decide one lab proof run's outcome"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "lab_proof.plan"
+      handler:
+        name: "HandlerLabProofPlan"
+        module: "omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_plan"
+      description: "Profile row plus subject to ordered argv steps"
+      supported_operations:
+        - "lab_proof.plan"
+      input_model:
+        name: "ModelLabProofPlanRequest"
+        module: "omnibase_infra.lab_proof.model_lab_proof_plan_request"
+        description: "Input for one plan."
+    - operation: "lab_proof.verdict"
+      handler:
+        name: "HandlerLabProofVerdict"
+        module: "omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_verdict"
+      description: "Plan plus run report to outcome and checks"
+      supported_operations:
+        - "lab_proof.verdict"
+      input_model:
+        name: "ModelLabProofVerdictRequest"
+        module: "omnibase_infra.lab_proof.model_lab_proof_verdict_request"
+        description: "Input for one verdict."
+# THE BUNDLE FACTS. Parsed into ModelLabProofBundlePolicy; every key is required.
+config:
+  local_bundle:
+    bundle: "local"
+    # Public https clones only: the subject repository at the commit under test
+    # and omnibase_infra at the pinned commit the runtime image is built from.
+    clone_base_url: "https://github.com"
+    infra_repo: "OmniNode-ai/omnibase_infra"
+    compose_project: "omnibase-infra-local"
+    runtime_image: "omnibase-infra-local-runtime"
+    # The catalog CLI loads this after the bundle env (catalog/cli.py
+    # _load_stack_env). The base image is built with a bare compose build so it
+    # can be re-tagged before `up`, and that build must be handed the same file:
+    # without it the render refuses on ONEX_ACTIVE_RUNTIME_PACKAGES (measured on
+    # .105, 2026-09-25T15:33Z, run core-1766-r1). Listed first so the bundle env
+    # file, listed after it, wins, as it does in the CLI.
+    runtime_policy_env: "docker/runtime-policy.env"
+    container_runtime_main: "omnibase-infra-local-omninode-runtime"
+    container_runtime_effects: "omnibase-infra-local-runtime-effects"
+    container_migration_gate: "omnibase-infra-local-migration-gate"
+    # postgres, redpanda, valkey, runtime main, runtime effects
+    host_ports: [5436, 19092, 16379, 8085, 8086]
+    # A prover measured main and effects healthy about 6 minutes after up on a
+    # warm .101 (STATUS ledger:4129); 15 minutes is the recipe's bound.
+    health_interval_seconds: 15
+    health_deadline_seconds: 900
+    # The two startup lines interim recipe B treats as a failed boot.
+    wiring_failure_patterns:
+      - "Auto-wiring failed for"
+      - "Cannot register duplicate dispatcher ID"
+    # Which contracts failed, not only how many lines said so. The laptop bundle
+    # boots with wiring strictness off, and on dev it quarantines contracts that
+    # need a topology DSN the bundle does not carry (26 on main and 6 on effects,
+    # measured on .105 at 2026-09-25T15:43Z, run core-1766-dev2). A proof passes
+    # this check when the PR adds no failing contract the merge base lacks.
+    wiring_failure_extract: "Auto-wiring contract '([^']+)' failed"
+    # Every foundation package and both consumers of them, imported inside the
+    # runtime containers after the override.
+    consumer_modules:
+      - "omnibase_compat"
+      - "omnibase_core"
+      - "omnibase_spi"
+      - "omnibase_infra"
+      - "omnimarket"
+    delegation_prompt: "Reply with the single word: ready"
+    delegation_timeout_seconds: 300
+    # The uv the runtime image itself is built with (docker/Dockerfile.runtime
+    # UV_VERSION), so the override installs with the same resolver.
+    uv_image: "ghcr.io/astral-sh/uv:0.6.14"
+    override_dockerfile: "docker/lab_proof/Dockerfile.foundation-override"
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "LabProofPlanError"
+      description: "The request cannot be rendered into a safe plan (execution not node, no plan for the proof kind, subject from another repository)"
+      recoverable: false
+    - name: "LabProofVerdictError"
+      description: "The verdict cannot be computed (report of another run, a check not evaluated from a node run, a base result that is not a base control)"
+      recoverable: false
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 60
+  checks:
+    - name: "plan_handler_loaded"
+      type: "handler"
+      critical: true
+metadata:
+  description: "Renders lab proof runs from the profile registry and decides their outcomes"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-09-25"
+  tags:
+    - compute
+    - lab
+    - proof
+  related_tickets:
+    - "OMN-19572"
+    - "OMN-19565"
+    - "OMN-19564"

@@ -42,6 +42,14 @@ echo 0
 """
 
 
+FAKE_SNAPSHOT_HELPER = """import json, os, sys
+d = os.path.join(os.environ["OMNI_HOME"], ".onex_state", "worktree-removal-snapshots",
+                 os.path.basename(os.path.dirname(sys.argv[1])))
+os.makedirs(d, exist_ok=True)
+print(json.dumps({"ok": True, "directory": d}))
+"""
+
+
 def _env(registry: Path, worktrees: Path, ledger: Path, bindir: Path) -> dict[str, str]:
     env = dict(os.environ)
     env["GIT_CONFIG_GLOBAL"] = os.devnull
@@ -101,6 +109,13 @@ class World:
         gh.write_text(FAKE_GH, encoding="utf-8")
         gh.chmod(0o755)
         self.env = _env(self.registry, self.worktrees, ledger, bindir)
+        # Every removal is saved first by the shared helper (OMN-19539); a
+        # stand-in honouring its contract, the one the prune-safety suite uses.
+        helper = (
+            self.registry / "omniclaude" / "scripts" / "worktree_removal_snapshot.py"
+        )
+        helper.parent.mkdir(parents=True)
+        helper.write_text(FAKE_SNAPSHOT_HELPER, encoding="utf-8")
         _git(
             "init",
             "-q",
