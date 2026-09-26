@@ -72,6 +72,9 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "lab-load",
     # OMN-19233: the staging delivery gate's verdict, read by the re-run selector.
     "lab-pass-gate-verdict",
+    # OMN-18976: the lane observed on a merge that published no rebuild, the
+    # source the re-emission job re-keys onto merges no run answered for.
+    "lab-pass-observation-compose-dev",
     "lab-pass-receipt-compose-dev",
     # OMN-18572: the same lane, keyed by the OMNINODE_INFRA commit that changed
     # its onex-api image. A third claim about a third repository's commits; the
