@@ -1,0 +1,116 @@
+---
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# release-train-dependency-advance.yml (OMN-19655)
+#
+# WHY THIS EXISTS
+#   Up to 0.38.58 omnibase_infra published its siblings as exact pins
+#   (omnibase-core==X). A core release reaches this repo's dev through the
+#   dependency cascade's bump PR, and then nothing cut infra: the release train
+#   runs once a night and a hand cut waits for someone to notice. Until infra
+#   releases, the newest published infra still pins the OLD core exactly, so
+#   every downstream that raises its core floor cannot be installed.
+#   omnimarket's release failed on every dev push on 2026-09-24 (core 0.47.22)
+#   and again all day on 2026-09-25 (core 0.47.23; infra 0.38.57 pinned
+#   ==0.47.22) for exactly this reason.
+#
+#   Since OMN-19655 part 1 infra publishes omnibase-core as >=FLOOR,<NEXT_MINOR
+#   and pins it exactly only in [tool.uv] override-dependencies, so a core
+#   patch inside the published range no longer strands anyone. The measure
+#   compares the version dev RESOLVES (the override) with whatever the newest
+#   release REQUIRES, in any specifier shape.
+#
+#   This workflow closes the ordering gap. When dev resolves a sibling above
+#   what the newest published omnibase-infra admits
+#   (scripts/ci/release_dependency_advance.py),
+#   it dispatches release-train-nightly.yml for omnibase_infra. The train's own
+#   premises (unreleased work, the compose-dev lab receipt, dev CI) still
+#   decide whether it cuts, and its report says why when it does not. This is
+#   a trigger, never an override: it cannot cut, tag, publish or merge.
+#
+# WHEN
+#   After every Runtime Rebuild Trigger run on dev completes, because that run
+#   carries the lab receipt the train's premise reads, so a bump merge is judged
+#   as soon as its receipt can exist. Hourly as a backstop for a missed or
+#   queued rebuild event, and by dispatch.
+#
+# NOT RE-DISPATCHED WHILE A RELEASE PR IS OPEN
+#   The train's duplicate guard is keyed on its branch name. An open release PR
+#   already carries the advance, so a second dispatch would only add a SKIP row.
+#
+# TOKEN
+#   The default workflow token, with actions: write only. A workflow_dispatch
+#   event created by that token DOES start the dispatched workflow (GitHub
+#   suppresses only push-style events from it), and the train mints its own
+#   App tokens for everything it writes.
+
+name: Release Train (dependency advance)
+
+on:
+  workflow_run:
+    workflows: ["Runtime Rebuild Trigger"]
+    types: [completed]
+    branches: [dev]
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-train-dependency-advance
+  cancel-in-progress: true
+
+jobs:
+  advance:
+    name: Dispatch the train when a sibling pin runs ahead of the release
+    runs-on: >-
+      ${{
+        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: dev
+          persist-credentials: false
+
+      - name: Measure dev's sibling pins against the newest published omnibase-infra
+        id: advance
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/release_dependency_advance.py \
+            --package omnibase-infra \
+            --pyproject pyproject.toml | tee -a "${GITHUB_STEP_SUMMARY}"
+
+      - name: Dispatch the release train for omnibase_infra
+        if: steps.advance.outputs.stranded == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PUBLISHED: ${{ steps.advance.outputs.published_version }}
+        run: |
+          set -euo pipefail
+          open=$(gh pr list --repo "${REPO}" --state open --base dev \
+            --search "chore: release omnibase_infra in:title" \
+            --json number --jq 'length')
+          case "${open}" in
+            ''|*[!0-9]*)
+              echo "::error::could not read the open release PRs (got '${open}'); not dispatching"
+              exit 1
+              ;;
+          esac
+          if [ "${open}" -gt 0 ]; then
+            echo "::notice::a release PR for omnibase_infra is already open; it carries the advance, so the train is not re-dispatched"
+            exit 0
+          fi
+          echo "::notice::published omnibase-infra ${PUBLISHED} does not admit a sibling version dev resolves; dispatching the release train for omnibase_infra"
+          gh workflow run release-train-nightly.yml --repo "${REPO}" --ref dev \
+            -f repos=omnibase_infra

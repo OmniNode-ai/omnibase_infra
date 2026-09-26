@@ -6,8 +6,10 @@ Task B6 of the second-deploy-slot plan (epic OMN-19500). The operator ruled on
 2026-09-25T00:56:45Z that omnimarket changes may be proven on the second
 deployed dev lane on .202 (receipt lane ``compose-dev-202``), and only
 omnimarket: omnibase_infra stays proven on .201. So omnimarket's policy names
-``compose-dev-or-compose-dev-202``, the loader refuses that value for any other
-repo, and the premise reads ``compose-dev`` first, then ``compose-dev-202``.
+``compose-dev-or-instance-lanes`` (OMN-19543 made the instance set the routing
+table's, which also carries dev-200), the loader refuses that value for a repo
+no instance proves, and the premise reads ``compose-dev`` first, then each
+instance lane.
 Every green assertion has a refusing sibling.
 """
 
@@ -82,11 +84,11 @@ def _classify(receipts: dict[Any, Any], evidence: Any) -> tuple[Any, str]:
         SHA,
         list_artifacts=list_artifacts,
         download_receipt=download_receipt,
-        lanes=rt.lab_evidence_lanes(evidence),
+        lanes=rt.lab_evidence_lanes(evidence, "omnimarket"),
     )
 
 
-EITHER = rt.EnumLabEvidence.COMPOSE_DEV_OR_DEV_202
+EITHER = rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE
 
 
 def test_release_train_lab_evidence_compose_dev_202_pass_alone_admits() -> None:
@@ -142,5 +144,5 @@ def test_release_train_lab_evidence_compose_dev_202_refused_for_omnibase_infra(
     raw["repos"]["omnibase_infra"]["lab_evidence"] = EITHER.value
     path = tmp_path / "policy.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    with pytest.raises(rt.ReleaseTrainConfigError, match=r"stays proven on \.201"):
+    with pytest.raises(rt.ReleaseTrainConfigError, match=r"no instance in"):
         rt.load_policy(path)
