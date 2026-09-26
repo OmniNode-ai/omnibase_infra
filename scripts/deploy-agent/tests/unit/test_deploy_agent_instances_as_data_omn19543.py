@@ -334,10 +334,12 @@ class TestLaunchAgent:
         env = _rendered_dev_200()["EnvironmentVariables"]
         unit = _unit_env_names(_DEV_202_UNIT)
         assert sorted(unit - set(env)) == []
-        # What the plist adds, each for a stated reason in the template.
+        # What the plist adds, each for a stated reason in the template. PATH
+        # is not among them: the dev-202 unit declares its own (OMN-19522), so
+        # the first assertion above already requires the plist to carry it.
+        # Its value is per platform (launchd has no %h), so it is not compared.
         assert set(env) - unit == {
             "HOME",
-            "PATH",
             "OMNI_HOME",
             "DEPLOY_AGENT_REPO_DIR",
             "DEPLOY_AGENT_BIND_HOST",
