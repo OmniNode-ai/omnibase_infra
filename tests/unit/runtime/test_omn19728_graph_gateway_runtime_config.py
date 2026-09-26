@@ -7,10 +7,12 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 
@@ -56,3 +58,26 @@ def test_graph_gateway_runtime_config_refuses_missing_or_unregistered_key(
     )
     with pytest.raises(ProtocolConfigurationError):
         host._execution_graph_read_ingress_dependencies()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_advertised_incomplete_gateway_fails_before_event_bus_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.version_compatibility.log_and_verify_versions",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.venv_purity.assert_venv_purity", lambda: None
+    )
+    config = _config(tmp_path / "missing.json")
+    bus = AsyncMock(spec=EventBusInmemory)
+    host = RuntimeHostProcess(config=config, event_bus=bus)
+
+    with pytest.raises(
+        ProtocolConfigurationError, match="execution graph read gateway"
+    ):
+        await host._start_runtime()
+    bus.start.assert_not_awaited()

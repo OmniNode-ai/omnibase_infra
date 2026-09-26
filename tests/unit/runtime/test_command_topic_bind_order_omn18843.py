@@ -99,6 +99,7 @@ def _host_with_descriptors(descriptors: dict[str, _Descriptor]) -> RuntimeHostPr
     host._handler_descriptors = descriptors
     host._runtime_node_graph_config = None
     host._event_bus_wiring = None
+    host._config = {}
 
     class _Identity:
         service = "omnibase-infra"
