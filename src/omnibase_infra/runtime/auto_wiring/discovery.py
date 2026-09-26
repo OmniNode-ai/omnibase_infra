@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import inspect
 import logging
-import os
 from collections.abc import Mapping
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -44,6 +43,7 @@ from omnibase_infra.runtime.util_contract_content_hash import (
 )
 from omnibase_infra.utils.util_runtime_packages import (
     get_active_runtime_packages,
+    is_autowiring_discovery_cache_enabled,
     is_gateway_cloud_mirroring_enabled,
     is_runtime_package_active,
     is_runtime_topic_active,
@@ -116,12 +116,6 @@ def _skip_dormant_cloud_gateway(contract: ModelDiscoveredContract) -> bool:
     return True
 
 
-#: Environment variable that switches the memo below off. Any of 0/false/off/no
-#: restores the pre-OMN-19373 behaviour of re-parsing on every call, so an
-#: operator can rule out the cache without a deploy.
-DISCOVERY_CACHE_ENV = "ONEX_AUTOWIRING_DISCOVERY_CACHE"
-
-
 class _DiscoveryMemo:
     """One-slot holder for the last completed scan.
 
@@ -158,15 +152,6 @@ _DISCOVERY_MEMO = _DiscoveryMemo()
 def discover_contracts_cache_clear() -> None:
     """Drop the memo. For tests, and for any caller that installs a package."""
     _DISCOVERY_MEMO.clear()
-
-
-def _memo_enabled() -> bool:
-    return os.environ.get(DISCOVERY_CACHE_ENV, "1").strip().lower() not in {
-        "0",
-        "false",
-        "off",
-        "no",
-    }
 
 
 def _discovery_inputs(
@@ -280,7 +265,7 @@ def discover_contracts() -> ModelAutoWiringManifest:
     """
     active_packages = get_active_runtime_packages()
 
-    if not _memo_enabled():
+    if not is_autowiring_discovery_cache_enabled():
         manifest, _ = _scan_contracts(active_packages)
         return manifest
 
