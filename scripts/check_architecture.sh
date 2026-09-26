@@ -553,47 +553,171 @@ EOF
 # Path Detection
 # =============================================================================
 
-find_omnibase_core_path() {
-    local custom_path="${1:-}"
+# Candidate checkout identity is evaluated with these trusted system binaries
+# only. Do not derive either executable or PATH from the invoking hook process.
+readonly CORE_CHECKOUT_ENV_BIN="/usr/bin/env"
+readonly CORE_CHECKOUT_GIT_BIN="/usr/bin/git"
+readonly CORE_CHECKOUT_AWK_BIN="/usr/bin/awk"
+readonly CORE_CHECKOUT_PATH="/usr/bin:/bin"
 
-    # If custom path provided, use it
-    if [[ -n "${custom_path}" ]]; then
-        if [[ -d "${custom_path}" ]]; then
-            echo "${custom_path}"
+# A candidate Core checkout must establish its own identity. Pre-push exports
+# Git variables for the invoking infra worktree, and command-config variables
+# can otherwise replace a candidate's remote in-memory. The enclosing Git
+# environment remains available to sibling discovery below; only candidate
+# identity calls run in this minimal allowlisted environment.
+core_checkout_git() {
+    [[ -x "${CORE_CHECKOUT_ENV_BIN}" && -x "${CORE_CHECKOUT_GIT_BIN}" ]] || return 1
+
+    "${CORE_CHECKOUT_ENV_BIN}" -i \
+        PATH="${CORE_CHECKOUT_PATH}" \
+        LC_ALL=C \
+        GIT_CONFIG_NOSYSTEM=1 \
+        GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_TERMINAL_PROMPT=0 \
+        "${CORE_CHECKOUT_GIT_BIN}" "$@"
+}
+
+project_identity_is_canonical() {
+    local project_root="$1"
+
+    "${CORE_CHECKOUT_AWK_BIN}" '
+        /^[[:space:]]*\[project\][[:space:]]*(#.*)?$/ { in_project = 1; next }
+        /^[[:space:]]*\[/ { in_project = 0 }
+        in_project &&
+            /^[[:space:]]*name[[:space:]]*=[[:space:]]*("omnibase_core"|'"'"'omnibase_core'"'"')[[:space:]]*(#.*)?$/ {
+            found = 1
+            exit
+        }
+        END { exit(found ? 0 : 1) }
+    ' "${project_root}/pyproject.toml"
+}
+
+local_origin_is_canonical() {
+    local project_root="$1" origin_url
+
+    origin_url=$(core_checkout_git -C "${project_root}" config --local --get-all remote.origin.url) \
+        || return 1
+    [[ -n "${origin_url}" && "${origin_url}" != *$'\n'* ]] || return 1
+
+    case "${origin_url}" in
+        git@github.com:OmniNode-ai/omnibase_core|\
+        git@github.com:OmniNode-ai/omnibase_core.git|\
+        https://github.com/OmniNode-ai/omnibase_core|\
+        https://github.com/OmniNode-ai/omnibase_core.git|\
+        ssh://git@github.com/OmniNode-ai/omnibase_core|\
+        ssh://git@github.com/OmniNode-ai/omnibase_core.git)
             return 0
-        else
-            echo "ERROR: Specified path does not exist: ${custom_path}" >&2
-            return 2
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+checkout_identity_is_canonical() {
+    local project_root="$1" checkout_root
+
+    checkout_root=$(core_checkout_git -C "${project_root}" rev-parse --show-toplevel 2>/dev/null) \
+        || return 1
+    checkout_root=$(cd -P -- "${checkout_root}" 2>/dev/null && pwd -P) || return 1
+    [[ "${checkout_root}" == "${project_root}" ]] || return 1
+    core_checkout_git -C "${project_root}" rev-parse --verify 'HEAD^{commit}' >/dev/null 2>&1 \
+        || return 1
+    core_checkout_git -C "${project_root}" ls-files --error-unmatch -- \
+        src/omnibase_core/__init__.py >/dev/null 2>&1 || return 1
+    local_origin_is_canonical "${project_root}"
+}
+
+resolve_source_package_path() {
+    local candidate="$1" resolved project_root
+
+    [[ -d "${candidate}" ]] || return 1
+    resolved=$(cd -P -- "${candidate}" 2>/dev/null && pwd -P) || return 1
+    case "${resolved}" in
+        */site-packages|*/site-packages/*|*/dist-packages|*/dist-packages/*|*/.venv/*|*/venv/*)
+            return 1
+            ;;
+    esac
+    [[ "$(basename "${resolved}")" == "omnibase_core" ]] || return 1
+    [[ "$(basename "$(dirname "${resolved}")")" == "src" ]] || return 1
+    [[ -f "${resolved}/__init__.py" ]] || return 1
+    project_root=$(cd -P -- "${resolved}/../.." 2>/dev/null && pwd -P) || return 1
+    [[ "${resolved}" == "${project_root}/src/omnibase_core" ]] || return 1
+    [[ -f "${project_root}/pyproject.toml" ]] || return 1
+    project_identity_is_canonical "${project_root}" || return 1
+    checkout_identity_is_canonical "${project_root}" || return 1
+
+    echo "${resolved}"
+}
+
+sibling_core_from_git_clone() {
+    local common_dir clone_root
+
+    common_dir=$(core_checkout_git rev-parse --git-common-dir 2>/dev/null) || return 1
+    [[ -n "${common_dir}" ]] || return 1
+    [[ "${common_dir}" == /* ]] || common_dir="$(pwd -P)/${common_dir}"
+    clone_root=$(cd -P -- "$(dirname "${common_dir}")" 2>/dev/null && pwd -P) || return 1
+
+    echo "$(dirname "${clone_root}")/omnibase_core/src/omnibase_core"
+}
+
+find_omnibase_core_path() {
+    local custom_path="${1:-}" resolved_path
+
+    # Explicit targets are authoritative. Never silently scan a different path.
+    if [[ -n "${custom_path}" ]]; then
+        if resolved_path=$(resolve_source_package_path "${custom_path}"); then
+            echo "${resolved_path}"
+            return 0
         fi
+        echo "ERROR: Specified path is not an omnibase_core source package: ${custom_path}" >&2
+        return 2
     fi
 
-    # Try common local paths before installed packages. In workspace worktrees,
-    # the installed package can resolve through a venv/site-packages tree and
-    # make this grep-based pre-push validator exceed its timeout.
-    local local_paths=(
-        "${OMNI_HOME:-}/omnibase_core/src/omnibase_core"
+    # Environment overrides are explicit and fail closed on invalid input.
+    if [[ -n "${OMNIBASE_CORE_PATH:-}" ]]; then
+        if resolved_path=$(resolve_source_package_path "${OMNIBASE_CORE_PATH}"); then
+            echo "${resolved_path}"
+            return 0
+        fi
+        echo "ERROR: OMNIBASE_CORE_PATH is not an omnibase_core source package: ${OMNIBASE_CORE_PATH}" >&2
+        return 2
+    fi
+
+    # Prefer the source sibling of the invoking linked worktree, then local
+    # source layouts. Installed wheels and venv copies are never valid targets.
+    local local_paths=()
+    local git_sibling
+    if git_sibling=$(sibling_core_from_git_clone); then
+        local_paths+=("${git_sibling}")
+    fi
+    local_paths+=(
         "./src/omnibase_core"
         "../omnibase_core/src/omnibase_core"
         "../omnibase_core"
     )
+    if [[ -n "${OMNI_HOME:-}" ]]; then
+        local_paths+=("${OMNI_HOME}/omnibase_core/src/omnibase_core")
+    fi
 
     for path in "${local_paths[@]}"; do
-        if [[ -n "${path}" && -d "${path}" ]]; then
-            (cd "${path}" && pwd)
+        if resolved_path=$(resolve_source_package_path "${path}"); then
+            echo "${resolved_path}"
             return 0
         fi
     done
 
-    # Try to find installed package using Python
+    # Editable installs can still resolve to a source checkout. Reject wheel and
+    # venv paths rather than allowing a slow or empty fallback target.
     local python_path
     python_path=$(python3 -c "import omnibase_core; import os; print(os.path.dirname(omnibase_core.__file__))" 2>/dev/null) || true
 
-    if [[ -n "${python_path}" && -d "${python_path}" ]]; then
-        echo "${python_path}"
+    if [[ -n "${python_path}" ]] && resolved_path=$(resolve_source_package_path "${python_path}"); then
+        echo "${resolved_path}"
         return 0
     fi
 
-    echo "ERROR: Could not find omnibase_core. Use --path to specify location." >&2
+    echo "ERROR: Could not find a safe omnibase_core source package; no fallback is permitted." >&2
     return 2
 }
 
@@ -843,14 +967,12 @@ main() {
 
     # Handle case where no Python files found
     if [[ "${file_count}" -eq 0 ]]; then
-        print_skip "No Python files found in target directory: ${core_path}"
-        print_skip "Reason: Directory may be empty or contain no .py files"
-        print_skip "Action: This is OK if omnibase_core is not installed in this environment"
+        echo "ERROR: No Python files found in source target: ${core_path}" >&2
         if [[ "${OUTPUT_JSON}" == "true" ]]; then
-            JSON_EXIT_CODE=0
+            JSON_EXIT_CODE=2
             output_json
         fi
-        exit 0
+        exit 2
     fi
 
     # Always show what's being excluded for CI debugging
