@@ -1212,7 +1212,7 @@ repair_unowned_cli_venv() {
     say "  repair     : FAILED (exit $rc) -- $candidate/.venv left as found"
     while IFS= read -r line; do
       [[ -n "$line" ]] && say "    $line"
-    done <<< "$out"
+    done < <(printf '%s\n' "$out")
     return 1
   fi
 
@@ -1366,7 +1366,7 @@ lane_hook_report() {
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     say "  $line"
-  done <<<"$out"
+  done < <(printf '%s\n' "$out")
   return "$rc"
 }
 

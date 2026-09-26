@@ -385,6 +385,15 @@ repos:
       # the offline tests, which include the committed file against THIS
       # repository's workflows; the ci.yml "Lab Probe Windows (OMN-19412)" job
       # (a STRICT CI Summary gate) also reads omninode_infra and omnimarket.
+      # OMN-19565: the lab proof profile registry. SYNC with the ci.yml step
+      # 'Lab proof profile registry (OMN-19565)' in the ONEX Validators job.
+      - id: lab-proof-profiles
+        name: lab proof profile registry has one valid row per repository (OMN-19565)
+        entry: uv run --frozen python scripts/ci/validate_lab_proof_profiles.py
+        language: system
+        files: ^(config/lab_proof_profiles\.yaml|src/omnibase_infra/lab_proof/.*|src/omnibase_infra/nodes/node_lab_proof_.*|scripts/ci/validate_lab_proof_profiles\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: lab-probe-windows
         name: lab probe-window file agrees with the workflows (OMN-19412)
         entry: uv run --frozen pytest tests/ci/test_check_lab_probe_windows.py -q

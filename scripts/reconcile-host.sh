@@ -86,6 +86,10 @@
 #   OMNI_HOME                       required unless --omni-home (rule 8: no default)
 #   ONEX_RECONCILE_CLONE_DELEGATE   override the clone reconciler (tests)
 #   ONEX_RECONCILE_VENV_DELEGATE    override the venv reconciler (tests)
+#   ONEX_RECONCILE_STEP_TIMEOUT_S    wall-clock budget for each delegate
+#                                   (default: 1800 seconds)
+#   ONEX_RECONCILE_MAX_HOLDER_AGE_S age after which a live local lock holder is
+#                                   reported separately (default: 7200 seconds)
 #   ONEX_RECONCILE_ALERT_CMD        command receiving the alert text on argv;
 #                                   defaults to the Slack chat.postMessage path
 #   ONEX_RECONCILE_RECEIPT          receipt path (default
@@ -96,6 +100,9 @@
 #   0  every surface verdicted MOVED or ALREADY_AT_TARGET; floor stamped
 #   2  a surface FAILED verification, or a surface is UNCOVERED
 #   3  INDETERMINATE configuration (no OMNI_HOME, no git, no python3)
+#   4  DECLINED because a young live peer holds the lock
+#   5  a delegated reconcile step exceeded its wall-clock budget
+#   6  a live local process has held the lock past the maximum holder age
 #
 # There is NO bypass variable, and adding one would defeat the ticket.
 # ----------------------------------------------------------------------------
@@ -115,6 +122,8 @@ readonly EXIT_INDETERMINATE=3
 # PEER IS ANSWERING IT RIGHT NOW, which is the normal outcome when several hook
 # ticks fire at once and must not raise an alarm.
 readonly EXIT_DECLINED=4
+readonly EXIT_STEP_TIMEOUT=5
+readonly EXIT_STALE_LIVE_HOLDER=6
 
 MODE="repair"
 VERBOSE=0
@@ -193,6 +202,17 @@ source "$PRIVILEGE_LIB"
 
 CLONE_DELEGATE="${ONEX_RECONCILE_CLONE_DELEGATE:-$SCRIPT_DIR/runtime_build/reconcile_deploy_clones.sh}"
 VENV_DELEGATE="${ONEX_RECONCILE_VENV_DELEGATE:-$SCRIPT_DIR/reconcile-workspace-venvs.sh}"
+STEP_TIMEOUT_SECONDS="${ONEX_RECONCILE_STEP_TIMEOUT_S:-1800}"
+MAX_HOLDER_AGE_SECONDS="${ONEX_RECONCILE_MAX_HOLDER_AGE_S:-7200}"
+
+if [[ ! "$STEP_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  say "INDETERMINATE: ONEX_RECONCILE_STEP_TIMEOUT_S must be a positive integer; got '$STEP_TIMEOUT_SECONDS'."
+  exit "$EXIT_INDETERMINATE"
+fi
+if [[ ! "$MAX_HOLDER_AGE_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  say "INDETERMINATE: ONEX_RECONCILE_MAX_HOLDER_AGE_S must be a positive integer; got '$MAX_HOLDER_AGE_SECONDS'."
+  exit "$EXIT_INDETERMINATE"
+fi
 
 RECEIPT="${ONEX_RECONCILE_RECEIPT:-$OMNI_HOME/.onex-workspace-reconcile.json}"
 FLOOR="$OMNI_HOME/.onex-workspace-floor.json"
@@ -339,6 +359,38 @@ lock_reclaim_reason() {
     "$pid" "$age"
 }
 
+# Populate the LIVE_HOLDER_* fields only when the existing holder is a local,
+# still-running process whose RECORDED start time is beyond the operator-facing
+# maximum. This is deliberately separate from reclaim: age is a reason to make
+# a wedged live process loud, never authority to kill it or break its lock.
+stale_live_holder() {
+  local pid host started_at started_epoch now age
+  LIVE_HOLDER_PID=""
+  LIVE_HOLDER_HOST=""
+  LIVE_HOLDER_AGE=""
+
+  pid="$(lock_holder_field pid || true)"
+  host="$(lock_holder_field host || true)"
+  started_at="$(lock_holder_field started_at || true)"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ "$host" == "$(hostname)" ]] || return 1
+  [[ -n "$started_at" ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+
+  started_epoch="$("$PYTHON_BIN" -c \
+    'import datetime, sys; print(int(datetime.datetime.strptime(sys.argv[1], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.UTC).timestamp()))' \
+    "$started_at" 2>/dev/null || true)"
+  [[ "$started_epoch" =~ ^[0-9]+$ ]] || return 1
+  now="$(date +%s)"
+  age=$(( now - started_epoch ))
+  (( age > MAX_HOLDER_AGE_SECONDS )) || return 1
+
+  LIVE_HOLDER_PID="$pid"
+  LIVE_HOLDER_HOST="$host"
+  LIVE_HOLDER_AGE="$age"
+  return 0
+}
+
 write_lock_holder() {
   printf 'pid=%s\nhost=%s\nstarted_at=%s\n' \
     "$$" "$(hostname)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK_HOLDER"
@@ -347,6 +399,11 @@ write_lock_holder() {
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   reclaim="$(lock_reclaim_reason)"
   if [[ -z "$reclaim" ]]; then
+    if stale_live_holder; then
+      say "STALE-LIVE-HOLDER: pid $LIVE_HOLDER_PID on $LIVE_HOLDER_HOST has held the lock for ${LIVE_HOLDER_AGE}s (max ${MAX_HOLDER_AGE_SECONDS}s); this run does not kill it"
+      say "  Remedy: inspect pid $LIVE_HOLDER_PID on $LIVE_HOLDER_HOST and stop it only after confirming why it is stuck; the next tick will reclaim the dead holder."
+      exit "$EXIT_STALE_LIVE_HOLDER"
+    fi
     say "another reconcile-host is running ($LOCK_DIR); nothing to do."
     say "  held by pid $(lock_holder_field pid || printf '<unrecorded>') on" \
       "$(lock_holder_field host || printf '<unrecorded>') since" \
@@ -366,8 +423,65 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
 fi
 write_lock_holder
 # `rm -rf`, not `rmdir`: the lock is no longer an empty directory.
-cleanup() { rm -rf "$LOCK_DIR" 2>/dev/null || true; }
+# A delegate runs in its own process group (run_reconcile_step), so a signal
+# sent to this shell's group no longer reaches it. Stop that group here too, or
+# a TERM to the holder would release the lock while its delegate kept writing.
+CURRENT_STEP_PGID=""
+cleanup() {
+  if [[ -n "$CURRENT_STEP_PGID" ]]; then
+    kill -TERM -- "-$CURRENT_STEP_PGID" 2>/dev/null || true
+  fi
+  rm -rf "$LOCK_DIR" 2>/dev/null || true
+}
 trap cleanup EXIT INT TERM
+
+# Run one delegate in a process group created solely for that child tree. The
+# watchdog itself stays in this shell so it can release the lock through the
+# existing EXIT trap. macOS has no guaranteed timeout(1), while its system Perl
+# can make the group without depending on launchd's restricted PATH.
+STEP_TIMED_OUT=0
+run_reconcile_step() { # step-name direct|as_owner command [args...]
+  local step="$1" launch_mode="$2" child_pid started now term_deadline
+  shift 2
+  STEP_TIMED_OUT=0
+
+  if [[ "$launch_mode" == "as_owner" ]]; then
+    /usr/bin/perl -e 'setpgrp(0, 0) or die "setpgrp: $!\n"; exec @ARGV or die "exec: $!\n"' \
+      "${RUN_AS[@]}" "$@" &
+  else
+    /usr/bin/perl -e 'setpgrp(0, 0) or die "setpgrp: $!\n"; exec @ARGV or die "exec: $!\n"' "$@" &
+  fi
+  child_pid=$!
+  CURRENT_STEP_PGID="$child_pid"
+  started="$(date +%s)"
+
+  while kill -0 "$child_pid" 2>/dev/null; do
+    now="$(date +%s)"
+    if (( now - started >= STEP_TIMEOUT_SECONDS )); then
+      STEP_TIMED_OUT=1
+      kill -TERM -- "-$child_pid" 2>/dev/null || true
+      term_deadline=$(( now + 5 ))
+      while kill -0 -- "-$child_pid" 2>/dev/null; do
+        now="$(date +%s)"
+        if (( now >= term_deadline )); then
+          kill -KILL -- "-$child_pid" 2>/dev/null || true
+          break
+        fi
+        sleep 1
+      done
+      wait "$child_pid" 2>/dev/null || true
+      CURRENT_STEP_PGID=""
+      say "TIMEOUT: $step exceeded ${STEP_TIMEOUT_SECONDS}s; killed its process group"
+      return 1
+    fi
+    sleep 1
+  done
+
+  local rc=0
+  wait "$child_pid" || rc=$?
+  CURRENT_STEP_PGID=""
+  return "$rc"
+}
 
 # --------------------------------------------------------------------------- #
 # Alerting
@@ -417,7 +531,7 @@ judge() { # surface before after target
   # ends up parsed as a verdict.
   out="$("$PYTHON_BIN" "$VERIFIER" verdict --surface "$surface" \
     --before "$before" --after "$after" --target "$target" 2>/dev/null)"
-  IFS=$'\t' read -r _ name detail <<<"$out"
+  IFS=$'\t' read -r _ name detail < <(printf '%s\n' "$out")
   record "$surface" "${name:-INDETERMINATE}" "${detail:-verifier produced no verdict}"
 }
 
@@ -528,9 +642,12 @@ if [[ "$MODE" == "repair" ]]; then
     # The delegate fetches AND checks out, so it is the larger of the two write
     # paths into these clones. Guarding only the fetch above would have fixed
     # the smaller half and left the damage accumulating (OMN-17366).
-    as_owner env OMNI_HOME="$OMNI_HOME" RECONCILE_BRANCH="$BRANCH" \
-      bash "$CLONE_DELEGATE" >&2 || \
+    if ! run_reconcile_step "clone delegate" as_owner env \
+        OMNI_HOME="$OMNI_HOME" RECONCILE_BRANCH="$BRANCH" \
+        bash "$CLONE_DELEGATE" >&2; then
+      (( STEP_TIMED_OUT == 0 )) || exit "$EXIT_STEP_TIMEOUT"
       say "clone delegate exited non-zero; the readback below is what decides."
+    fi
   fi
 fi
 
@@ -543,7 +660,7 @@ for repo in "${present_clones[@]}"; do
   if health="$("$PYTHON_BIN" "$VERIFIER" clone-health --clone "$clone" 2>/dev/null)"; then
     judge "clone:$repo" "${before_heads[$idx]}" "$(clone_head "$clone")" "$(clone_target "$clone")"
   else
-    IFS=$'\t' read -r _ _ health_reason <<<"$health"
+    IFS=$'\t' read -r _ _ health_reason < <(printf '%s\n' "$health")
     # The core.bare=true trap: fetch succeeds, checkout cannot. Reported ahead
     # of the HEAD comparison, because that comparison alone would say
     # DID_NOT_MOVE without saying WHY -- and a refusal that does not name the
@@ -623,8 +740,11 @@ if [[ "$MODE" == "repair" ]]; then
     # --branch here, which is precisely when a silent disagreement would be
     # hardest to spot.
     trace "bash $VENV_DELEGATE --omni-home $OMNI_HOME --branch $BRANCH"
-    bash "$VENV_DELEGATE" --omni-home "$OMNI_HOME" --branch "$BRANCH" >&2 || \
+    if ! run_reconcile_step "venv delegate" direct bash "$VENV_DELEGATE" \
+        --omni-home "$OMNI_HOME" --branch "$BRANCH" >&2; then
+      (( STEP_TIMED_OUT == 0 )) || exit "$EXIT_STEP_TIMEOUT"
       say "venv delegate exited non-zero; the readback below is what decides."
+    fi
     SP="$(site_packages "$DISPATCH_VENV" || true)"
   fi
 fi
@@ -734,7 +854,7 @@ path_onex_shadow_check
   printf '  "surfaces": [\n'
   sep=""
   for line in "${SURFACE_LINES[@]}"; do
-    IFS='|' read -r s v d <<<"$line"
+    IFS='|' read -r s v d < <(printf '%s\n' "$line")
     printf '%s    {"surface": "%s", "verdict": "%s", "detail": "%s"}' "$sep" "$s" "$v" "${d//\"/\'}"
     # $'...' , not "..." (OMN-17800). Bash interprets \n only in ANSI-C quoting,
     # and this value is then handed to printf as a %s ARGUMENT, where printf does
