@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 from collections.abc import Mapping
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -115,8 +116,150 @@ def _skip_dormant_cloud_gateway(contract: ModelDiscoveredContract) -> bool:
     return True
 
 
+#: Environment variable that switches the memo below off. Any of 0/false/off/no
+#: restores the pre-OMN-19373 behaviour of re-parsing on every call, so an
+#: operator can rule out the cache without a deploy.
+DISCOVERY_CACHE_ENV = "ONEX_AUTOWIRING_DISCOVERY_CACHE"
+
+
+class _DiscoveryMemo:
+    """One-slot holder for the last completed scan.
+
+    A holder rather than three module globals so the memo can be replaced by
+    mutation instead of rebinding, which keeps the hot path free of ``global``.
+    Module state is deliberate: the sweep this exists to make cheap calls
+    ``discover_contracts()`` from a fresh task every ~316s within one process.
+    """
+
+    __slots__ = ("inputs", "manifest", "stats")
+
+    def __init__(self) -> None:
+        self.clear()
+
+    def clear(self) -> None:
+        self.inputs: tuple[object, ...] | None = None
+        self.stats: Mapping[str, tuple[int, int]] | None = None
+        self.manifest: ModelAutoWiringManifest | None = None
+
+    def store(
+        self,
+        inputs: tuple[object, ...],
+        stats: Mapping[str, tuple[int, int]],
+        manifest: ModelAutoWiringManifest,
+    ) -> None:
+        self.inputs = inputs
+        self.stats = stats
+        self.manifest = manifest
+
+
+_DISCOVERY_MEMO = _DiscoveryMemo()
+
+
+def discover_contracts_cache_clear() -> None:
+    """Drop the memo. For tests, and for any caller that installs a package."""
+    _DISCOVERY_MEMO.clear()
+
+
+def _memo_enabled() -> bool:
+    return os.environ.get(DISCOVERY_CACHE_ENV, "1").strip().lower() not in {
+        "0",
+        "false",
+        "off",
+        "no",
+    }
+
+
+def _discovery_inputs(
+    active_packages: frozenset[str] | None,
+) -> tuple[object, ...]:
+    """Everything outside the contract files that can change the manifest.
+
+    The entry-point set (name, distribution, version) plus the two environment
+    switches the scan's skip predicates read:
+    ``_contract_targets_active_runtime_packages`` via ``active_packages`` and
+    ``_skip_dormant_cloud_gateway`` via cloud mirroring. A contract file's own
+    bytes are covered separately by the stat map, so they are not repeated here.
+    """
+    eps = tuple(
+        sorted(
+            (
+                ep.name,
+                ep.dist.name if ep.dist is not None else "unknown",
+                ep.dist.version if ep.dist is not None else "0.0.0",
+            )
+            for ep in entry_points(group=ENTRY_POINT_GROUP)
+        )
+    )
+    packages = tuple(sorted(active_packages)) if active_packages is not None else None
+    return (eps, packages, is_gateway_cloud_mirroring_enabled())
+
+
+def _stat_map(paths: tuple[Path, ...]) -> dict[str, tuple[int, int]] | None:
+    """Mtime+size per contract file, or None if any of them cannot be stat'd.
+
+    Returning None on a missing file deliberately forces the full scan rather
+    than treating the absence as "unchanged" — the scan is what turns a vanished
+    contract into a recorded :class:`ModelDiscoveryError`.
+    """
+    out: dict[str, tuple[int, int]] = {}
+    for path in paths:
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        out[str(path)] = (st.st_mtime_ns, st.st_size)
+    return out
+
+
+def _resolve_active_contract_paths(
+    active_packages: frozenset[str] | None,
+) -> tuple[tuple[Path, ...], bool]:
+    """Resolve each active entry point's contract path without parsing it.
+
+    This is the cheap half of the scan — measured in the deployed pod on
+    2026-09-26 at 0.052s for 544 entry points against 24.099s for the parsing
+    half — and it is what lets the memo be validated rather than trusted.
+
+    Returns ``(paths, complete)``. ``complete`` is False when any entry point
+    failed to load or resolve, which forces the full scan so the error is
+    recorded instead of being served from the memo.
+    """
+    paths: list[Path] = []
+    for ep in entry_points(group=ENTRY_POINT_GROUP):
+        dist = ep.dist
+        dist_name = dist.name if dist is not None else "unknown"
+        if not is_runtime_package_active(dist_name, active_packages):
+            continue
+        try:
+            node_cls = ep.load()
+            paths.append(_resolve_contract_path(node_cls))
+        except Exception:  # noqa: BLE001 - any failure means "rescan properly"
+            return tuple(paths), False
+    return tuple(paths), True
+
+
 def discover_contracts() -> ModelAutoWiringManifest:
     """Scan all ``onex.nodes`` entry points and build an auto-wiring manifest.
+
+    **Memoized since OMN-19373.** A repeat call whose entry points, runtime-lane
+    environment and contract-file mtimes/sizes are all unchanged returns the
+    previous manifest instead of re-parsing. Measured in the deployed
+    ``omninode-runtime-effects`` pod on onex-dev, 2026-09-26: this function took
+    24.036s and an immediate second call took 23.922s, of which
+    ``_parse_contract`` over 544 entry points was 24.099s — the sweep was
+    re-reading files that cannot change inside a container image.
+
+    That mattered beyond CPU. ``omninode-runtime-effects`` re-runs this sweep
+    every ~316s, and a gateway heartbeat issued during one was answered only as
+    the sweep ended — beat 6 of the 2026-09-26T15:46Z readback returned 200
+    after 15.333s, a 25.103s server-recorded gap against OMN-15957's 20s
+    acceptance tolerance. Making the repeat scan cheap is what removes that
+    stall; widening timeouts only moved where it showed up.
+
+    The memo is validated, not trusted: every call re-reads the entry-point set
+    and stats every contract file, and any difference — including a file that
+    has vanished — triggers the full scan. Set
+    ``ONEX_AUTOWIRING_DISCOVERY_CACHE=0`` to disable it.
 
     For each entry point, the engine:
 
@@ -135,9 +278,47 @@ def discover_contracts() -> ModelAutoWiringManifest:
     Returns:
         A :class:`ModelAutoWiringManifest` with all discovered contracts and errors.
     """
+    active_packages = get_active_runtime_packages()
+
+    if not _memo_enabled():
+        manifest, _ = _scan_contracts(active_packages)
+        return manifest
+
+    inputs = _discovery_inputs(active_packages)
+    cached = _DISCOVERY_MEMO.manifest
+    if cached is not None and _DISCOVERY_MEMO.inputs == inputs:
+        paths, complete = _resolve_active_contract_paths(active_packages)
+        if complete:
+            current = _stat_map(paths)
+            if current is not None and current == _DISCOVERY_MEMO.stats:
+                logger.debug(
+                    "Auto-wiring discovery served from memo: "
+                    "%d contracts, %d contract files unchanged",
+                    cached.total_discovered,
+                    len(current),
+                )
+                return cached
+
+    manifest, scanned_paths = _scan_contracts(active_packages)
+    stats = _stat_map(scanned_paths)
+    if stats is not None:
+        _DISCOVERY_MEMO.store(inputs, stats, manifest)
+    return manifest
+
+
+def _scan_contracts(
+    active_packages: frozenset[str] | None,
+) -> tuple[ModelAutoWiringManifest, tuple[Path, ...]]:
+    """Run the full scan, parsing every active entry point's contract.
+
+    Returns the manifest and every contract path that was resolved. The paths
+    come back so the caller can fingerprint them, and they include files whose
+    contract was then skipped (inactive package domain, dormant cloud gateway,
+    duplicate name) because editing any of those changes the outcome.
+    """
     contracts: list[ModelDiscoveredContract] = []
     errors: list[ModelDiscoveryError] = []
-    active_packages = get_active_runtime_packages()
+    resolved_paths: list[Path] = []
     # Tracks first-seen package for each contract name — used to detect
     # cross-package duplicates before they reach the dispatch engine.
     seen_contract_names: dict[str, str] = {}
@@ -188,6 +369,8 @@ def discover_contracts() -> ModelAutoWiringManifest:
                 )
             )
             continue
+
+        resolved_paths.append(contract_path)
 
         try:
             contract = _parse_contract(
@@ -265,9 +448,12 @@ def discover_contracts() -> ModelAutoWiringManifest:
             dist_version,
         )
 
-    return ModelAutoWiringManifest(
-        contracts=tuple(contracts),
-        errors=tuple(errors),
+    return (
+        ModelAutoWiringManifest(
+            contracts=tuple(contracts),
+            errors=tuple(errors),
+        ),
+        tuple(resolved_paths),
     )
 
 
