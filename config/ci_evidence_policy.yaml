@@ -99,15 +99,15 @@ evidence_artifacts:
   # so the uploader is satisfied. Rule 24(b) fails staging delivery closed on a
   # missing receipt for a sha, so a receipt that exists and says nothing is the
   # worst of the three states -- it passes the uploader and fails the reader.
-  - id: lab-pass-receipt-onex-lab
+  - id: lab-pass-receipt-kind-smoke
     workflow: .github/workflows/deliver-dev-candidate-to-staging.yml
     job: candidate-boot-gate
-    producer_step: "Emit the onex-lab lab-pass receipt"
-    artifact_name: lab-pass-receipt-onex-lab-${{ github.sha }}
+    producer_step: "Emit the kind-smoke render and wiring receipt"
+    artifact_name: lab-pass-receipt-kind-smoke-${{ github.sha }}
     required_paths:
       - /tmp/lab-pass-receipt/receipt.json
     rationale: >-
-      The onex-lab lab pass for the delivered sha. deliver-dev-candidate-to- staging.yml's lab-pass-gate job refuses the staging announcement without a PASS receipt for the exact sha (rule 24(b)).
+      The per-candidate kind cluster's render and wiring smoke check for the delivered sha (OMN-18276). It is NOT a lab pass and cannot satisfy rule 24(b) — `kind-smoke` is absent from GATE_ELIGIBLE_LANES — but its absence is still a failure worth declaring: it is the only durable record that the candidate rendered and wired at all.
   - id: lab-pass-receipt-compose-dev
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: verify-lane-converged
@@ -135,15 +135,15 @@ evidence_artifacts:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
       The .201 compose dev lane's lab pass for an OMNINODE_INFRA commit that changed the lane's onex-api image (rule 24(a), OMN-18572). Keyed by the omninode_infra sha, because that is the revision the lane's onex-api container was proven to carry; it collides with neither the omnibase_infra receipt nor a sibling's, which are claims about different repositories' commits. It lands on the omninode_infra run, since a called reusable workflow's artifacts belong to the caller.
-  - id: lab-pass-receipt-onex-lab-k3s
+  - id: lab-pass-receipt-onex-lab
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: verify-lab-overlay-converged
-    producer_step: "Emit the onex-lab-k3s lab-pass receipt"
-    artifact_name: lab-pass-receipt-onex-lab-k3s-${{ needs.trigger-rebuild.outputs.source_sha }}
+    producer_step: "Emit the onex-lab lab-pass receipt"
+    artifact_name: lab-pass-receipt-onex-lab-${{ needs.trigger-rebuild.outputs.source_sha }}
     required_paths:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
-      The k3s onex-lab overlay's half of rule 24(a), on its own lane name so it cannot supersede the boot gate's onex-lab receipt for the same sha.
+      THE rule 24(b) lab pass: the persistent k3s onex-lab overlay running the merged sha. deliver-dev-candidate-to-staging.yml's lab-pass-gate job refuses the staging announcement without a PASS receipt of this exact name for the exact delivered sha (OMN-18276). It is the only emitter of this name.
   # --- the non-required check failure-rate report (OMN-18254) --------------
   #
   # Declared because its ABSENCE is the failure it exists to prevent. This

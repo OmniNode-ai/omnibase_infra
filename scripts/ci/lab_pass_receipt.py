@@ -286,31 +286,33 @@ PROJECTION_TOPIC_REQUIRED_FIELDS = frozenset(
 
 
 class EnumLabLane(StrEnum):
-    """The lab surfaces rule 24(a) names as receipt emitters.
+    """The surfaces a lab-pass receipt may name, and what each one proves.
 
     ``COMPOSE_DEV`` is the ``.201`` compose dev lane (compose project
-    ``omnibase-infra``, ports 8085/8086). ``ONEX_LAB`` is the ``k8s/onex-lab``
-    overlay applied from the same head.
+    ``omnibase-infra``, ports 8085/8086). ``ONEX_LAB`` is the PERSISTENT k3s
+    lab cluster -- the ``k8s/onex-lab`` overlay applied to the lab host's own
+    node by ``apply_lab_lane.sh``, driven by the deploy agent as part of one
+    rebuild correlation (OMN-18200). Both are real, long-lived hosts running
+    the lab's own secret store with the lane's tenant minted, and both are what
+    Operating Rule 24 means by "the lab".
 
-    ``ONEX_LAB_K3S`` (OMN-18200) is the PERSISTENT lab cluster -- the same
-    overlay, applied to the k3s node on the lab host by
-    ``k8s/onex-lab/apply_lab_lane.sh`` rather than to a per-candidate ``kind``
-    cluster. It is a separate value rather than a second emitter on ``ONEX_LAB``
-    for two reasons, both load-bearing:
+    ``KIND_SMOKE`` (OMN-18276) is NOT a lab lane. It is the per-candidate
+    ``kind`` cluster the delivery workflow's ``candidate-boot-gate`` job
+    creates and destroys inside its own run: one node, one side-loaded image,
+    an inert credential store and no bus. It proves the manifests RENDER and
+    the runtime WIRES, which is a useful smoke check and a poor lab pass, so it
+    carries its own lane value and is excluded from ``GATE_ELIGIBLE_LANES``.
 
-    *``evaluate_gate`` assumes one emitter per name.* It sorts an exact-name
-    artifact query newest-first and reads only the newest, on the premise that a
-    later artifact for a name is a re-run of the same job. Two unrelated
-    emitters on one name would therefore let whichever finished last silently
-    supersede the other's verdict, with nothing recording that a verdict had
-    been discarded.
-
-    *They are not the same claim.* ``ONEX_LAB`` proves the candidate BOOTS
-    against the real manifests on a throwaway node with one side-loaded image and
-    an inert credential store. ``ONEX_LAB_K3S`` proves the persistent lane a
-    chain runner actually grades against is RUNNING the merged sha, with the lab
-    host's own secret store bound and the lane's tenant minted. A receipt that
-    conflated them would answer a question nobody asked.
+    WHY THE VALUE MOVED. Until OMN-18276 ``onex-lab`` named the kind cluster
+    and the persistent lab was a second value, ``onex-lab-k3s``. Because
+    ``evaluate_gate`` was satisfied by ANY named lane passing, the kind boot
+    alone satisfied rule 24(b) -- measured on merge
+    ``17696113e3ccb15adaa9031e07043e41d1d45396``, a 543-line rewrite of the
+    Kafka consume loop that reached staging with both persistent-lab jobs
+    ``skipped``. The name now follows the doctrine: ``onex-lab`` is the lab,
+    and the throwaway node is called what it is. There is deliberately no
+    ``onex-lab-k3s`` alias -- two names for one lane is how a reader resolves
+    the wrong artifact.
 
     No other value is admissible, and in particular no governed lane
     (``prod``, ``stability-test``, ``judge``, or a collaborator lane) can name
@@ -319,7 +321,33 @@ class EnumLabLane(StrEnum):
 
     COMPOSE_DEV = "compose-dev"
     ONEX_LAB = "onex-lab"
-    ONEX_LAB_K3S = "onex-lab-k3s"
+    KIND_SMOKE = "kind-smoke"
+
+
+#: The lanes whose receipt can satisfy rule 24(b). ``KIND_SMOKE`` is absent by
+#: construction: a throwaway node is evidence that the candidate boots, never
+#: evidence that the change ran on the lab.
+GATE_ELIGIBLE_LANES: Final[tuple[EnumLabLane, ...]] = (
+    EnumLabLane.COMPOSE_DEV,
+    EnumLabLane.ONEX_LAB,
+)
+
+#: What the delivery gate requires when no lane is named: the persistent k3s
+#: lab (OMN-18276 AC2). ``COMPOSE_DEV`` stays gate-ELIGIBLE because the sibling
+#: delivery path names it explicitly (OMN-17057), but it is not the default --
+#: the two lanes prove different things and the one this ticket is about is the
+#: overlay apply.
+DEFAULT_GATE_LANES: Final[tuple[EnumLabLane, ...]] = (EnumLabLane.ONEX_LAB,)
+
+#: The exact token an emitter running on a throwaway cluster must stamp into
+#: its provenance check's evidence, and which a persistent lane's receipt may
+#: not carry on any check. An exact token rather than a keyword sweep: a fuzzy
+#: match on the word "kind" would fire on ordinary English in evidence prose.
+EPHEMERAL_CLUSTER_MARKER: Final[str] = "cluster=ephemeral-kind"
+
+#: The check every ``KIND_SMOKE`` receipt owes, naming the cluster it ran on.
+#: AC3's "named as exactly that in its receipt".
+CLUSTER_PROVENANCE_CHECK: Final[str] = "cluster_provenance"
 
 
 class EnumLabPassResult(StrEnum):
@@ -514,10 +542,12 @@ class ModelLabPassReceipt:
     #: The deploy agent's correlation id for the rebuild this receipt attests
     #: to. Required with no default (rule 8: fail fast rather than guess), and
     #: explicitly nullable, because an emitter that cannot resolve it must say
-    #: so rather than invent one. The ``onex-lab`` boot gate has no agent command
-    #: at all and always carries ``null``; ``onex-lab-k3s`` DOES carry one, since
-    #: its apply is performed by the agent as part of one rebuild correlation
-    #: (OMN-18200), which is another respect in which the two are not one lane.
+    #: so rather than invent one. OMN-18276 makes the pairing an INVARIANT
+    #: rather than a convention: ``onex-lab`` and ``compose-dev`` are applied by
+    #: the deploy agent as one rebuild correlation (OMN-18200) and must carry
+    #: the id, while ``kind-smoke`` has no deploy agent in its story at all and
+    #: must carry ``null``. That is the structural difference a relabelled kind
+    #: receipt cannot talk its way past -- see ``_validate_lane_provenance``.
     agent_command_id: str | None
     #: OMN-18708. The (name, node_version, contract_content_hash) triples the
     #: LANE reported for itself, read from its introspection manifest by the
@@ -542,6 +572,7 @@ class ModelLabPassReceipt:
         self._validate_result_matches_checks()
         self._validate_window()
         self._validate_node_inventory()
+        self._validate_lane_provenance()
 
     def _validate_version(self) -> None:
         if self.receipt_version != RECEIPT_VERSION:
@@ -640,6 +671,96 @@ class ModelLabPassReceipt:
                 "carries no node_inventory. The check asserts the lane named "
                 "its nodes; a receipt that then carries none does not support "
                 "its own check."
+            )
+            raise ValueError(msg)
+
+    def _validate_lane_provenance(self) -> None:
+        """A receipt cannot claim a lab it did not run on (OMN-18276).
+
+        Two independent conditions, because each catches a different forgery
+        and neither implies the other.
+
+        *The evidence may not contradict the lane.* An emitter on a throwaway
+        cluster stamps ``EPHEMERAL_CLUSTER_MARKER`` into its provenance check.
+        A receipt that carries that token while naming a persistent lab lane is
+        refused -- that is the "``lane`` says ``onex-lab``, evidence says kind"
+        case this ticket is named for, and it is refused on the READ path too
+        because ``from_json`` runs this constructor.
+
+        *The correlation id pairs with the lane.* ``ONEX_LAB``'s overlay apply
+        IS the deploy agent's, as one rebuild correlation (OMN-18200), so its
+        receipt owes that id; the kind boot has no deploy agent anywhere in its
+        story, so its receipt must carry ``null``. This half is the structural
+        one: a relabelled kind receipt has no id to supply, and inventing one
+        means forging a value ``parse_agent_command_id`` shapes.
+
+        ``COMPOSE_DEV`` is deliberately exempt from the id half. OMN-18573 made
+        a null id there a REAL answer -- "no command was published", which the
+        convergence guard then reports as INDETERMINATE rather than inventing a
+        start time -- and requiring one here would refuse the very receipt that
+        ticket exists to allow. The evidence half still covers that lane.
+
+        The id half is also scoped to a PASS, and that scoping is load-bearing
+        rather than a softening. A FAILING lab pass is exactly as worth
+        recording as a passing one -- it is how "it failed" is told apart from
+        "nobody ran it" -- and when no rebuild was published there is no
+        correlation to cite, so an unconditional requirement would refuse to
+        CONSTRUCT the failure receipt, the emitter would upload nothing, and
+        the gate would read a missing receipt where a recorded failure exists.
+        What the rule forbids is a receipt CLAIMING the persistent lab passed
+        while naming no apply that could have made it pass.
+
+        The honest limit, stated rather than implied: this binds a receipt to a
+        CLASS of cluster, not to one named host. Nothing here proves which
+        persistent lab answered -- only that a throwaway one did not.
+        """
+        ephemeral = [
+            c.name for c in self.checks if EPHEMERAL_CLUSTER_MARKER in c.evidence
+        ]
+        if self.lane in GATE_ELIGIBLE_LANES:
+            if ephemeral:
+                msg = (
+                    f"lane={self.lane.value!r} is a persistent lab lane, but "
+                    f"check(s) {sorted(ephemeral)} declare an ephemeral cluster "
+                    f"({EPHEMERAL_CLUSTER_MARKER!r}). A receipt whose evidence "
+                    "names a throwaway kind node cannot claim the lab that "
+                    "rule 24(b) gates on."
+                )
+                raise ValueError(msg)
+            if (
+                self.lane is EnumLabLane.ONEX_LAB
+                and self.result is EnumLabPassResult.PASS
+                and self.agent_command_id is None
+            ):
+                msg = (
+                    f"lane={self.lane.value!r} carries agent_command_id=None. "
+                    "This lane's overlay apply IS the deploy agent's, as one "
+                    "rebuild correlation (OMN-18200), so a receipt for it owes "
+                    "that id; an emitter with no correlation to cite is not "
+                    "emitting for the persistent k3s lab."
+                )
+                raise ValueError(msg)
+            return
+
+        # The ephemeral smoke lane, which owes the opposite of both.
+        if self.agent_command_id is not None:
+            msg = (
+                f"lane={self.lane.value!r} carries "
+                f"agent_command_id={self.agent_command_id!r}. The per-candidate "
+                "kind boot has no deploy agent in its story; an id here means "
+                "the receipt is describing some other lane's work."
+            )
+            raise ValueError(msg)
+        provenance = next(
+            (c for c in self.checks if c.name == CLUSTER_PROVENANCE_CHECK), None
+        )
+        if provenance is None or EPHEMERAL_CLUSTER_MARKER not in provenance.evidence:
+            msg = (
+                f"lane={self.lane.value!r} must carry a "
+                f"{CLUSTER_PROVENANCE_CHECK!r} check whose evidence declares "
+                f"{EPHEMERAL_CLUSTER_MARKER!r}. AC3: the throwaway boot is "
+                "named as exactly what it is in its own receipt, so no later "
+                "reader has to infer it from the lane value alone."
             )
             raise ValueError(msg)
 
@@ -2053,23 +2174,35 @@ def verify_emitted(path: Path, sha: str, lane: EnumLabLane, out: Any) -> int:
     return 0
 
 
-def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -> int:
-    """Fail closed unless a PASS receipt exists for the EXACT sha.
+#: How often the gate re-reads the artifact surface while waiting. 60s is one
+#: API call a minute against a 5,000/hour budget shared fleet-wide, which is
+#: the cheapest poll that still resolves the wait promptly.
+DEFAULT_GATE_POLL_SECONDS: Final[float] = 60.0
 
-    Every terminal branch prints the sha. "The gate failed" with no commit named
-    is unactionable at 3am, and the whole point of a sha-keyed receipt is that
-    the answer is about one commit.
+
+@dataclass(frozen=True)
+class ModelGateAttempt:
+    """One read of the artifact surface for every named lane.
+
+    ``terminal`` is the field that keeps the wait honest. A lane that has
+    published a receipt saying FAIL has answered; waiting longer cannot change
+    a verdict that is already recorded, and burning the whole budget on it
+    would turn a clear refusal into a timeout nobody can read.
     """
-    if not _SHA_RE.match(sha):
-        print(
-            f"::error::lab-pass gate: {sha!r} is not a 40-character lowercase "
-            "commit sha. Refusing to resolve an abbreviated ref.",
-            file=out,
-        )
-        return 1
 
+    found: tuple[ModelLabPassReceipt, ...]
+    problems: tuple[str, ...]
+    satisfied: bool
+    terminal: bool
+
+
+def _gate_attempt(
+    repo: str, sha: str, lanes: Sequence[EnumLabLane]
+) -> ModelGateAttempt:
     found: list[ModelLabPassReceipt] = []
     problems: list[str] = []
+    passing_lanes: set[EnumLabLane] = set()
+    terminal = False
 
     for lane in lanes:
         name = artifact_name(lane, sha)
@@ -2107,19 +2240,109 @@ def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -
             )
             continue
         found.append(receipt)
+        if receipt.result == EnumLabPassResult.PASS:
+            passing_lanes.add(lane)
+        else:
+            terminal = True
+
+    return ModelGateAttempt(
+        found=tuple(found),
+        problems=tuple(problems),
+        satisfied=all(lane in passing_lanes for lane in lanes),
+        terminal=terminal,
+    )
+
+
+def evaluate_gate(
+    repo: str,
+    sha: str,
+    lanes: Sequence[EnumLabLane],
+    out: Any,
+    *,
+    wait_seconds: float = 0.0,
+    poll_interval_seconds: float = DEFAULT_GATE_POLL_SECONDS,
+    sleep: Any = time.sleep,
+    monotonic: Any = time.monotonic,
+) -> int:
+    """Fail closed unless EVERY named lane has a PASS receipt for the EXACT sha.
+
+    Every terminal branch prints the sha. "The gate failed" with no commit named
+    is unactionable at 3am, and the whole point of a sha-keyed receipt is that
+    the answer is about one commit.
+
+    EVERY named lane, not any of them (OMN-18276). The previous rule -- any one
+    named lane passing satisfies the gate -- is what let the throwaway ``kind``
+    boot stand in for the persistent lab: both lanes were read, the kind receipt
+    was always present because it is emitted inside the delivery run itself, and
+    the persistent lab's verdict was therefore never load-bearing. A caller that
+    wants "either of these two" must now say which one it means.
+
+    ``wait_seconds`` exists because the persistent lab's receipt is emitted by a
+    DIFFERENT workflow run, on the lab host, after the deploy agent has applied
+    the overlay. Measured on four 2026-09-18/19 deliveries, it lands 31 to 88
+    minutes after the delivery run starts -- always after the point this gate
+    used to run. Waiting is what makes the requirement satisfiable; it is not a
+    softening, because the wait expiring is a refusal like any other.
+    """
+    if not _SHA_RE.match(sha):
+        print(
+            f"::error::lab-pass gate: {sha!r} is not a 40-character lowercase "
+            "commit sha. Refusing to resolve an abbreviated ref.",
+            file=out,
+        )
+        return 1
+
+    if not lanes:
+        print(
+            f"::error::lab-pass gate: no lane named for sha {sha}. A gate that "
+            "reads nothing passes everything.",
+            file=out,
+        )
+        return 1
+
+    ineligible = sorted(
+        {lane.value for lane in lanes} - {e.value for e in GATE_ELIGIBLE_LANES}
+    )
+    if ineligible:
+        print(
+            f"::error::lab-pass gate: lane(s) {ineligible} cannot satisfy rule "
+            f"24(b) for sha {sha}. The per-candidate kind boot "
+            f"({EnumLabLane.KIND_SMOKE.value}) is a render and wiring smoke "
+            "check on a throwaway node -- it proves the candidate boots, never "
+            "that the change ran on the lab. Gate-eligible lanes are "
+            f"{[e.value for e in GATE_ELIGIBLE_LANES]}.",
+            file=out,
+        )
+        return 1
+
+    deadline = monotonic() + max(wait_seconds, 0.0)
+    attempt = _gate_attempt(repo, sha, lanes)
+    waited = False
+    while not attempt.satisfied and not attempt.terminal and monotonic() < deadline:
+        waited = True
+        remaining = int(deadline - monotonic())
+        print(
+            f"lab-pass gate: no PASS receipt yet for {sha} on "
+            f"{', '.join(lane.value for lane in lanes)}; the persistent lab "
+            f"emits from its own run, so waiting (~{remaining}s of budget left).",
+            file=out,
+            flush=True,
+        )
+        sleep(min(poll_interval_seconds, max(deadline - monotonic(), 0.0)))
+        attempt = _gate_attempt(repo, sha, lanes)
 
     print(f"lab-pass gate (rule 24(b), OMN-17530) for sha {sha}", file=out)
     print(f"  repository : {repo}", file=out)
     print(f"  lanes read : {', '.join(lane.value for lane in lanes)}", file=out)
-    for receipt in found:
+    print("  rule       : every lane named above must carry a PASS", file=out)
+    for receipt in attempt.found:
         print("", file=out)
         print(render_receipt(receipt), file=out)
-    for problem in problems:
+    for problem in attempt.problems:
         print(f"  unreadable : {problem}", file=out)
 
-    passing = [r for r in found if r.result == EnumLabPassResult.PASS]
-    if passing:
-        lanes_passing = ", ".join(r.lane.value for r in passing)
+    if attempt.satisfied:
+        lanes_passing = ", ".join(r.lane.value for r in attempt.found)
         print("", file=out)
         print(
             f"lab-pass gate PASSED for {sha} on lane(s): {lanes_passing}.",
@@ -2135,7 +2358,7 @@ def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -
     # what made the 2026-09-16/17 receipts read as lane failures.
     unestablished = [
         (receipt, check)
-        for receipt in found
+        for receipt in attempt.found
         for check in receipt.checks
         if check.outcome is EnumLabPassCheckOutcome.INDETERMINATE
     ]
@@ -2149,9 +2372,21 @@ def evaluate_gate(repo: str, sha: str, lanes: Sequence[EnumLabLane], out: Any) -
             "the lane was shown to misbehave.",
             file=out,
         )
+    if waited and not attempt.terminal:
+        print(
+            f"::error::lab-pass gate: waited {int(wait_seconds)}s for a PASS "
+            f"receipt on {', '.join(lane.value for lane in lanes)} for {sha} "
+            "and none arrived. Either the lab apply for this sha is still "
+            "running or slower than the declared budget, or the persistent lab "
+            "was never asked to run it -- the rebuild trigger publishes no "
+            "rebuild for a merge its runtime-path classifier does not match, "
+            "and a sha the lab never ran is exactly what rule 24(b) refuses.",
+            file=out,
+        )
     print(
         f"::error::lab-pass gate FAILED for {sha}: no PASS lab-pass receipt "
-        f"exists for this exact sha on any of {', '.join(lane.value for lane in lanes)}. "
+        f"exists for this exact sha on every one of "
+        f"{', '.join(lane.value for lane in lanes)}. "
         "Rule 24(b) — the lab is the first place a change runs; staging is "
         "promotion — so this candidate is not deliverable. This is not a skip: a "
         "missing, unreadable, malformed, INDETERMINATE or FAIL receipt all fail "
@@ -2305,8 +2540,35 @@ def build_parser() -> argparse.ArgumentParser:
         "--lane",
         action="append",
         default=[],
-        choices=[e.value for e in EnumLabLane],
-        help="repeatable; defaults to every lab lane",
+        # GATE_ELIGIBLE_LANES, not every lane: `kind-smoke` is refused by
+        # argparse itself, so the refusal cannot be argued with in YAML and
+        # does not depend on a reviewer noticing the lane value in a diff.
+        choices=[e.value for e in GATE_ELIGIBLE_LANES],
+        help=(
+            "repeatable; EVERY named lane must carry a PASS. Defaults to "
+            f"{[e.value for e in DEFAULT_GATE_LANES]}, the persistent lab "
+            "(OMN-18276)."
+        ),
+    )
+    gate.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "seconds to wait for a PASS receipt to appear. The persistent "
+            "lab emits from its OWN workflow run on the lab host, 31-88 "
+            "minutes after the delivery run starts on four measured 2026-09 "
+            "deliveries, so a delivery gate that does not wait asks a "
+            "question the surface cannot yet answer. A present FAIL receipt "
+            "ends the wait immediately: a recorded verdict does not improve "
+            "with time. The default of 0 is one read, for an ad hoc query."
+        ),
+    )
+    gate.add_argument(
+        "--poll-interval-seconds",
+        type=float,
+        default=DEFAULT_GATE_POLL_SECONDS,
+        help="how often to re-read the artifact surface while waiting",
     )
 
     verify = sub.add_parser(
@@ -2426,9 +2688,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         lanes = (
             [EnumLabLane(value) for value in args.lane]
             if args.lane
-            else list(EnumLabLane)
+            else list(DEFAULT_GATE_LANES)
         )
-        return evaluate_gate(args.repo, args.sha, lanes, sys.stdout)
+        return evaluate_gate(
+            args.repo,
+            args.sha,
+            lanes,
+            sys.stdout,
+            wait_seconds=args.wait_seconds,
+            poll_interval_seconds=args.poll_interval_seconds,
+        )
 
     raise AssertionError(f"unreachable subcommand {args.command!r}")  # pragma: no cover
 

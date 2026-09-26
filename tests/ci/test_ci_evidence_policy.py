@@ -71,8 +71,14 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "lab-pass-receipt-compose-dev-onex-api",
     # OMN-18268: the same lane, keyed by a SIBLING repository's merged sha.
     "lab-pass-receipt-compose-dev-sibling",
+    # OMN-18276: the per-candidate kind cluster's render/wiring smoke check. On
+    # its own id because it is NOT a lab pass and cannot satisfy rule 24(b);
+    # declared because its absence is still a failure worth catching.
+    "lab-pass-receipt-kind-smoke",
+    # OMN-18276: THE rule 24(b) lab pass -- the persistent k3s onex-lab
+    # overlay. Until then this name belonged to the kind boot above and the
+    # persistent lane was called `onex-lab-k3s`.
     "lab-pass-receipt-onex-lab",
-    "lab-pass-receipt-onex-lab-k3s",
     "nonrequired-check-report",
     "saturation-record",
 )

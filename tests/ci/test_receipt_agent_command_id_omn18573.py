@@ -75,7 +75,7 @@ EMITTING_JOBS: dict[Path, set[str]] = {
         "verify-lane-converged",
         "verify-lab-overlay-converged",
     },
-    # One emitter, not two: the reusable has no onex-lab-k3s job at all. The lab
+    # One emitter, not two: the reusable has no onex-lab job at all. The lab
     # overlay is applied by omnibase_infra's own caller, so there is no second
     # invocation here that could deliberately omit the argument (AC2).
     REPO_ROOT / ".github/workflows/runtime-rebuild-trigger-reusable.yml": {

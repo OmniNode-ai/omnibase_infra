@@ -962,7 +962,7 @@ class DeployAgent:
         except Exception:
             logger.exception(
                 "lab overlay re-apply raised instead of recording for %s; the "
-                "onex-lab-k3s receipt for this sha will report a missing record",
+                "onex-lab receipt for this sha will report a missing record",
                 sha,
             )
         # Read AFTER the try/except, deliberately: an apply that raised partway
@@ -1158,7 +1158,7 @@ class DeployAgent:
         if not LAB_OVERLAY_ENABLED:
             logger.info(
                 "lab overlay %s DISABLED by DEPLOY_AGENT_LAB_OVERLAY=off; "
-                "no onex-lab-k3s record will exist for %s",
+                "no onex-lab record will exist for %s",
                 action,
                 self._current_git_sha,
             )

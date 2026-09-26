@@ -69,3 +69,49 @@ lanes:
       - seconds: 668
         sha: 732fd291a98afeac849a4904670b210096649529
         note: runtime-rebuild-trigger run 34825117758, "lane ready after 668s of an 837s settle budget"
+# ---------------------------------------------------------------------------
+# OMN-18276 -- the DELIVERY GATE's wait budget.
+#
+# WHAT IT IS. `lab-pass-gate` in deliver-dev-candidate-to-staging.yml asks the
+# artifact surface for the PERSISTENT lab's receipt for the delivered sha. That
+# receipt is emitted by a different workflow (runtime-rebuild-trigger.yml), in
+# a different run, on the lab host, after the deploy agent has applied the
+# k3s onex-lab overlay. It is therefore not there when the gate first looks,
+# and a gate that does not wait asks a question the surface cannot yet answer.
+#
+# WHY IT IS DECLARED HERE. Same reason as the settle budgets above: so the
+# job's ceiling is DERIVED from a declared number that observation bounds from
+# below, rather than being a knob somebody lowers to make a red job green.
+# `wait_budget_seconds + reserved_tail_seconds` IS the job's timeout-minutes,
+# and tests/ci/test_lab_pass_receipt_persistent_lab_omn18276.py asserts the
+# arithmetic against the workflow.
+#
+# WHY WAITING IS NOT A SOFTENING. The wait expiring is a refusal like any
+# other: there is no --force, no skip input, and the expiry branch names both
+# causes it could have (a slow apply, or a sha the rebuild trigger's
+# runtime-path classifier never published a rebuild for).
+delivery_gate:
+  # 5400s = 1.23x the worst observation below. Bounded ABOVE by the practical
+  # ceiling that a wait longer than the lab's own end-to-end pipeline stops
+  # measuring the lab and starts measuring the queue in front of it.
+  wait_budget_seconds: 5400
+  # Checkout, uv install, the final summary, and the runner's own teardown.
+  reserved_tail_seconds: 600
+  # Every observation is (persistent-lab receipt artifact created_at) minus
+  # (the moment this job could first have looked, i.e. the kind-smoke receipt's
+  # created_at on the same delivered sha), read live from the Actions artifact
+  # API on 2026-09-19. The lower bound is the MAX of these, so adding a slower
+  # observation without raising the budget turns the test red.
+  observed_wait_seconds:
+    - seconds: 947
+      sha: 999e8a499d40721a75fe9cf43c7be1ffe6ca61c2
+      note: delivery run 35404318943; kind 23:21:19Z, persistent lab 23:37:06Z
+    - seconds: 2647
+      sha: 1f1a2ed9a743dfde2a22fcb5e4bb70180bf9d06e
+      note: delivery run 35387019344; kind 19:52:22Z, persistent lab 20:36:29Z
+    - seconds: 2676
+      sha: 27bfe930ea5550dba104bf84204c87533948a507
+      note: delivery run 35413940487; kind 02:06:42Z, persistent lab 02:51:18Z
+    - seconds: 4373
+      sha: b160b9be12f955a8f6296bbfe12a50bb448323df
+      note: delivery run 35383855713; kind 19:19:02Z, persistent lab 20:31:55Z

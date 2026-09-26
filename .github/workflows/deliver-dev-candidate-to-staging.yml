@@ -217,7 +217,7 @@ jobs:
     # destroys a Kubernetes cluster and side-loads a multi-gigabyte image. The
     # .201 fleet runs the lab lanes; a per-candidate kind cluster does not belong
     # on the same Docker daemon.
-    name: Boot the candidate on an ephemeral cluster
+    name: Render and wiring smoke check on an ephemeral kind cluster
     needs: [build-runtime-candidate, build-migrate-bundle]
     runs-on: ubuntu-latest
     # OMN-17778: raised with BOOT_WAIT_SECONDS 900 -> 1800. Run 33771560584 used
@@ -851,11 +851,25 @@ jobs:
           path: /tmp/boot-gate-diagnostics
           retention-days: 14
 
-      # OMN-17530 rule 24(a). This job IS the onex-lab lab pass; until now it
-      # left nothing behind that outlived the run. The receipt is a durable,
-      # sha-keyed record of what was exercised, which the lab-pass-gate job
-      # below reads and which anybody can read afterwards to answer "was this
-      # commit ever booted on a lab lane".
+      # OMN-18276. THIS JOB IS NOT THE LAB PASS, and until now it said it was.
+      # It emitted lane `onex-lab` — rule 24's name for the PERSISTENT k3s lab
+      # — from a kind cluster this run creates and destroys: one node, one
+      # side-loaded image, an inert credential store, no bus. Because the gate
+      # below was satisfied by ANY lane passing, and this receipt is always
+      # present because it is written inside the delivery run itself, the
+      # persistent lab's verdict was never load-bearing. Measured: merge
+      # 17696113e3ccb15adaa9031e07043e41d1d45396 (a 543-line rewrite of the
+      # Kafka consume loop) was announced to staging by run 35418114021 on this
+      # receipt alone, with both persistent-lab jobs `skipped` on rebuild run
+      # 35418113915.
+      #
+      # The lane is now `kind-smoke`, which is not gate-eligible at any call
+      # site (GATE_ELIGIBLE_LANES), and the receipt carries a
+      # `cluster_provenance` check naming the throwaway node it ran on — AC3's
+      # "named as exactly that in its receipt and its check name". The receipt
+      # is still emitted, and is still worth emitting: "the candidate renders
+      # and wires" is a real answer, it is just not the answer rule 24(b) asks
+      # for.
       #
       # if: always() on BOTH steps deliberately. A FAILED lab pass is exactly as
       # worth recording as a passing one -- a receipt that only exists when
@@ -863,16 +877,17 @@ jobs:
       # and those are the two states the gate must tell apart. The emit step
       # itself exits non-zero on a FAIL receipt, so the failure stays visible on
       # this run; the artifact is uploaded either way.
-      - name: Emit the onex-lab lab-pass receipt
+      - name: Emit the kind-smoke render and wiring receipt
         if: always()
         run: |
           set -euo pipefail
           uv run --no-project --with pydantic \
             python3 omnibase_infra/scripts/ci/lab_pass_receipt.py emit \
             --sha "${GITHUB_SHA}" \
-            --lane onex-lab \
+            --lane kind-smoke \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --check "cluster_provenance:ok:cluster=ephemeral-kind ${KIND_VERSION} node ${KIND_NODE_IMAGE}, created by run ${GITHUB_RUN_ID} and destroyed with it; one side-loaded image, an inert credential store and no bus. This is a render and wiring smoke check, NOT the rule 24 lab pass." \
             --check "manifests_render:${{ steps.render.outcome == 'success' && 'ok' || 'fail' }}:kubectl kustomize ${LAB_OVERLAY} against omninode_infra@dev ${MANIFEST_SHA:-unknown}" \
             --check "strict_wiring_mode:${{ steps.apply.outcome == 'success' && 'ok' || 'fail' }}:ONEX_WIRING_STRICT_MODE read back off EVERY applied Deployment that runs the auto-wiring kernel, derived from the render (runtime image, no command override), fail-closed on an empty set (OMN-18324)" \
             --check "migrations_applied:${{ steps.migrate.outcome == 'success' && 'ok' || 'fail' }}:${MIGRATE_JOB_NAME} Job on the candidate migration bundle" \
@@ -885,20 +900,20 @@ jobs:
       # and is zero bytes satisfies it, passes the uploader, and then fails the
       # lab-pass gate that reads it — the worst of the three states, because the
       # failure surfaces one workflow away from its cause.
-      - name: Assert the onex-lab lab-pass receipt is present and non-empty
+      - name: Assert the kind-smoke receipt is present and non-empty
         if: always()
         run: |
           set -euo pipefail
           python3 omnibase_infra/scripts/ci/assert_evidence_artifact.py \
-            --artifact lab-pass-receipt-onex-lab \
+            --artifact lab-pass-receipt-kind-smoke \
             --require /tmp/lab-pass-receipt/receipt.json
-      - name: Upload the onex-lab lab-pass receipt
+      - name: Upload the kind-smoke receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # The artifact NAME is the key the gate queries by. It must match
           # scripts/ci/lab_pass_receipt.py's artifact_name() exactly.
-          name: lab-pass-receipt-onex-lab-${{ github.sha }}
+          name: lab-pass-receipt-kind-smoke-${{ github.sha }}
           path: /tmp/lab-pass-receipt
           retention-days: 90
           if-no-files-found: error
@@ -950,11 +965,150 @@ jobs:
   # receipt all fail here. There is no --force, no skip input, and no `if:`
   # override -- tests/ci/test_lab_pass_receipt_gate_omn17530.py asserts each of
   # those, so adding one is a red test rather than a review catch.
-  lab-pass-gate:
-    name: Require a passing lab-pass receipt for this sha
-    needs: [candidate-boot-gate]
+  # OMN-18276 -- WAS THE PERSISTENT LAB EVER ASKED TO RUN THIS SHA?
+  #
+  # The gate below requires the persistent lab's receipt. That receipt is
+  # emitted by runtime-rebuild-trigger.yml, whose emitting jobs are gated on
+  # `published == 'true'` -- i.e. on the CANONICAL runtime-path classifier
+  # (omniclaude's deploy-gate validator) matching the merge. This workflow's
+  # own `paths:` filter is WIDER than that classifier, so some merges trigger a
+  # delivery while publishing no rebuild at all, and for those the lab has
+  # nothing to say and never will.
+  #
+  # Measured: merge 17696113e3ccb15adaa9031e07043e41d1d45396 changed 543 lines
+  # of src/omnibase_infra/event_bus/event_bus_kafka.py -- a path the canonical
+  # classifier does not match -- so rebuild run 35418113915 skipped both
+  # persistent-lab jobs while delivery run 35418114021 announced the candidate
+  # to staging anyway, on the throwaway kind receipt alone.
+  #
+  # This job resolves that premise from the SAME classifier the publisher uses,
+  # loaded from the same canonical source, so the two cannot drift into
+  # disagreeing. When the lab was never asked, the gate below is SKIPPED, and
+  # because `dispatch-to-staging` reaches it through `needs:` with GitHub's
+  # default `success()`, a skipped gate leaves the announcement unfired. A skip
+  # here can only CLOSE the path to staging; there is no value of this output
+  # that opens one the gate would otherwise have refused.
+  #
+  # It deliberately does NOT widen the classifier. That the event-bus tree is
+  # unmatched is a real defect and a separate one; the honest consequence of
+  # this job is that such a change stops reaching staging unproven, rather than
+  # reaching it unproven and silently.
+  resolve-lab-premise:
+    name: Resolve whether the persistent lab was asked to run this sha
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      runtime_affecting: ${{ steps.classify.outputs.runtime_affecting }}
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Two commits: the delivered sha and its first parent, which is what
+          # `git show --name-only` needs to name the files it introduced.
+          fetch-depth: 2
+          persist-credentials: false
+
+      # The same canonical classifier runtime-rebuild-trigger.yml loads, from
+      # the same ref. One owner of "what is a runtime path", two consumers.
+      - name: Fetch canonical deploy-path classifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omniclaude
+          ref: main
+          path: .deploy-gate-source
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/deploy-gate/validate_pr_deploy_required.py
+          sparse-checkout-cone-mode: false
+
+      - name: Classify the delivered sha
+        id: classify
+        env:
+          DELIVERED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Fail closed on every branch: an unreadable diff, an unloadable
+          # classifier or an unexpected exception all report `true`, which
+          # REQUIRES the lab receipt. The unsafe direction here is claiming a
+          # change is inert when nobody could tell.
+          python3 - <<'CLASSIFY' | tee /tmp/lab-premise.txt
+          import pathlib, subprocess, sys
+
+          sys.path.insert(0, "scripts")
+          verdict = True
+          reason = ""
+          try:
+              from runtime_change_classifier import (
+                  classify_runtime_paths,
+                  load_runtime_path_classifier,
+              )
+
+              changed = subprocess.run(
+                  ["git", "show", "--name-only", "--format=", "HEAD"],
+                  capture_output=True, text=True, check=True,
+              ).stdout.split()
+              classifier = load_runtime_path_classifier(
+                  pathlib.Path(
+                      ".deploy-gate-source/.github/actions/deploy-gate/"
+                      "validate_pr_deploy_required.py"
+                  )
+              )
+              runtime_paths = classify_runtime_paths(changed, classifier)
+              verdict = bool(runtime_paths)
+              reason = (
+                  f"{len(runtime_paths)} runtime path(s) of {len(changed)} changed: "
+                  + ", ".join(sorted(runtime_paths)[:10])
+                  if runtime_paths
+                  else f"none of {len(changed)} changed file(s) is a runtime path"
+              )
+          except Exception as exc:  # noqa: BLE001 - fail closed, see above
+              reason = f"classification failed ({exc!r}); requiring the lab receipt"
+
+          print(f"runtime_affecting={'true' if verdict else 'false'}")
+          print(f"reason={reason}")
+          CLASSIFY
+          {
+            grep '^runtime_affecting=' /tmp/lab-premise.txt
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Lab premise (OMN-18276)"
+            echo ""
+            echo '```'
+            cat /tmp/lab-premise.txt 2>/dev/null || echo "(the classifier produced no output)"
+            echo '```'
+            echo ""
+            echo "\`false\` means the canonical runtime-path classifier matched nothing,"
+            echo "so runtime-rebuild-trigger.yml publishes no rebuild, the persistent lab"
+            echo "never runs this sha, and rule 24(b) refuses it for staging. The lab-pass"
+            echo "gate is skipped and the announcement stays unfired."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  lab-pass-gate:
+    name: Require a passing PERSISTENT-lab receipt for this sha
+    needs: [candidate-boot-gate, resolve-lab-premise]
+    # OMN-18276. Runs when the persistent lab was asked to run this sha, and on
+    # the sibling-pinned path, where the thing being promoted is the SIBLING's
+    # revision and its own compose-dev receipt is what gates it (OMN-17057).
+    # Skipping leaves `dispatch-to-staging` unfired through `needs:` +
+    # `success()`, so this condition can only close the path, never open it.
+    if: >-
+      needs.resolve-lab-premise.outputs.runtime_affecting == 'true' ||
+      github.event.client_payload.pinned_repo != ''
+    runs-on: ubuntu-latest
+    # DERIVED, not chosen: config/lab_pass_settle_budget.yaml's
+    # `delivery_gate.wait_budget_seconds` (5400) + `reserved_tail_seconds`
+    # (600) = 6000s = 100 minutes, asserted by
+    # tests/ci/test_lab_pass_receipt_persistent_lab_omn18276.py. The wait is
+    # what makes "require the persistent lab" satisfiable at all: that receipt
+    # is emitted by another workflow on the lab host and lands 16-73 minutes
+    # after this job could first look (four measured 2026-09-18/19 deliveries).
+    timeout-minutes: 100
     permissions:
       # The only capability this job needs: read the artifact surface. It has
       # no write anywhere, and deliberately no cluster or broker access -- the
@@ -976,7 +1130,13 @@ jobs:
       - name: Install uv (the receipt reader's runtime)
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
-      - name: Read the lab-pass receipt for the delivered sha
+      # No --lane: the default is the PERSISTENT lab (DEFAULT_GATE_LANES), which
+      # is the whole point of OMN-18276. Before it, this call defaulted to EVERY
+      # lane and was satisfied by any one of them passing -- so the kind boot
+      # emitted two jobs earlier in this same run always answered first, and the
+      # persistent lab's verdict was never load-bearing.
+      - name: Read the persistent lab's receipt for the delivered sha
+        if: needs.resolve-lab-premise.outputs.runtime_affecting == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -985,6 +1145,8 @@ jobs:
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${GITHUB_SHA}" \
             --repo "${GITHUB_REPOSITORY}" \
+            --wait-seconds 5400 \
+            --poll-interval-seconds 60 \
             | tee /tmp/lab-pass-gate.txt
 
       # OMN-17057. The gate above asks about THIS repository's sha. On a
@@ -1034,6 +1196,22 @@ jobs:
             --repo "OmniNode-ai/${PINNED_REPO}" \
             --lane compose-dev \
             | tee /tmp/lab-pass-gate-sibling.txt
+
+      # OMN-18276. Both reads above are conditional -- the self read on the lab
+      # premise, the sibling read on a pin -- and a job whose every check was
+      # skipped SUCCEEDS, which would let `dispatch-to-staging` fire on a gate
+      # that read nothing. "A gate that reads nothing passes everything" is the
+      # failure mode this whole file exists to remove, so it is asserted rather
+      # than reasoned about.
+      - name: Assert at least one lab-pass gate actually ran
+        run: |
+          set -euo pipefail
+          if [ ! -s /tmp/lab-pass-gate.txt ] && [ ! -s /tmp/lab-pass-gate-sibling.txt ]; then
+            echo "::error::lab-pass gate: neither the self nor the sibling read" \
+              "produced output for ${GITHUB_SHA}. This job cannot report a" \
+              "premise it never established."
+            exit 1
+          fi
 
       - name: Summarise
         if: always()

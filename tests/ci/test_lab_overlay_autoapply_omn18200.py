@@ -32,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
 READER = REPO_ROOT / "scripts" / "ci" / "fetch_lab_overlay_record.py"
 JOB = "verify-lab-overlay-converged"
-LANE = "onex-lab-k3s"
+LANE = "onex-lab"
 SHA = "a" * 40
 
 
@@ -120,7 +120,7 @@ def test_the_uploaded_artifact_name_matches_what_the_gate_queries(
     finally:
         sys.path.pop(0)
 
-    expected = artifact_name(EnumLabLane.ONEX_LAB_K3S, SHA)
+    expected = artifact_name(EnumLabLane.ONEX_LAB, SHA)
     assert expected == f"lab-pass-receipt-{LANE}-{SHA}"
 
     uploads = [
@@ -198,11 +198,23 @@ def test_the_checkout_is_pinned_to_the_trusted_base_ref(job: dict[str, Any]) -> 
 # --------------------------------------------------------------------------- #
 # the lane value is distinct from the boot gate's                             #
 # --------------------------------------------------------------------------- #
-def test_the_k3s_lane_does_not_share_the_boot_gates_artifact_name() -> None:
-    """``onex-lab`` is already the ephemeral kind cluster's lane, emitted for the
-    same sha on this same repository by deliver-dev-candidate-to-staging.yml.
-    ``evaluate_gate`` reads the NEWEST artifact per name, so two emitters on one
-    name would silently discard one verdict."""
+def test_the_persistent_lab_does_not_share_the_boot_gates_artifact_name() -> None:
+    """One artifact name, one emitter — with the two owners swapped by OMN-18276.
+
+    ``evaluate_gate`` reads the NEWEST artifact per name, on the premise that a
+    later artifact for a name is a re-run of the same job. Two unrelated
+    emitters on one name would let whichever finished last silently supersede
+    the other's verdict.
+
+    What changed: ``onex-lab`` used to be the ephemeral kind cluster's lane and
+    this persistent lane was called ``onex-lab-k3s``. Since the gate was
+    satisfied by ANY lane passing, that arrangement let the kind boot answer
+    rule 24(b) on its own — measured on merge
+    17696113e3ccb15adaa9031e07043e41d1d45396, delivered to staging with both
+    persistent-lab jobs skipped. ``onex-lab`` now means the persistent lab, the
+    boot gate is ``kind-smoke``, and the separation this test guards is the
+    same separation, pointing the other way.
+    """
     sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
     try:
         from lab_pass_receipt import EnumLabLane, artifact_name
@@ -210,18 +222,24 @@ def test_the_k3s_lane_does_not_share_the_boot_gates_artifact_name() -> None:
         sys.path.pop(0)
 
     assert artifact_name(EnumLabLane.ONEX_LAB, SHA) != artifact_name(
-        EnumLabLane.ONEX_LAB_K3S, SHA
+        EnumLabLane.KIND_SMOKE, SHA
     )
 
     delivery = (
         REPO_ROOT / ".github" / "workflows" / "deliver-dev-candidate-to-staging.yml"
     ).read_text(encoding="utf-8")
-    assert "lab-pass-receipt-onex-lab-${{ github.sha }}" in delivery, (
-        "the premise of the separate lane value is that the boot gate already "
-        "owns the onex-lab name; if that upload moved, re-derive the split"
+    assert "lab-pass-receipt-kind-smoke-${{ github.sha }}" in delivery, (
+        "the boot gate must own the kind-smoke name; if that upload moved, "
+        "re-derive the split"
     )
+    assert "lab-pass-receipt-onex-lab-${{ github.sha }}" not in delivery, (
+        "the boot gate must never publish the persistent lab's artifact name — "
+        "that IS the OMN-18276 defect"
+    )
+
     trigger = WORKFLOW.read_text(encoding="utf-8")
-    assert "lab-pass-receipt-onex-lab-${{" not in trigger
+    assert "lab-pass-receipt-onex-lab-${{" in trigger
+    assert "lab-pass-receipt-kind-smoke-${{" not in trigger
 
 
 # --------------------------------------------------------------------------- #

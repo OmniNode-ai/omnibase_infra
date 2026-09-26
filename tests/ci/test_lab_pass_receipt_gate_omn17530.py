@@ -482,10 +482,24 @@ class _Surface:
         return _zip_of(self.bodies[name])
 
 
-def _run_gate(surface: _Surface, monkeypatch: Any, sha: str = SHA) -> tuple[int, str]:
+def _run_gate(
+    surface: _Surface,
+    monkeypatch: Any,
+    sha: str = SHA,
+    lanes: tuple[EnumLabLane, ...] = (EnumLabLane.COMPOSE_DEV,),
+) -> tuple[int, str]:
+    """OMN-18276: name the lane under test rather than passing every lane.
+
+    Two things moved underneath this helper. ``kind-smoke`` is not
+    gate-eligible, so ``list(EnumLabLane)`` is no longer a legal argument at
+    all; and the gate now requires EVERY named lane to pass rather than any
+    one of them, so passing a set wider than the receipt under test would
+    assert the opposite of what each case means. These cases all build a
+    ``compose-dev`` receipt, so that is the lane they ask about.
+    """
     monkeypatch.setattr("scripts.ci.lab_pass_receipt._gh_api", surface)
     out = io.StringIO()
-    code = evaluate_gate(REPO, sha, list(EnumLabLane), out)
+    code = evaluate_gate(REPO, sha, list(lanes), out)
     return code, out.getvalue()
 
 
@@ -559,15 +573,37 @@ class TestGate:
         assert code == 1
         assert "unreadable" in output
 
-    def test_either_lab_lane_satisfies_the_gate(self, monkeypatch: Any) -> None:
-        """Rule 24(b) asks for 'a passing lab receipt', not a specific lane's."""
+    def test_each_lab_lane_satisfies_a_gate_that_names_it(
+        self, monkeypatch: Any
+    ) -> None:
+        """SUPERSEDED BY OMN-18276, and the supersession is the point.
+
+        This case used to read "either lab lane satisfies the gate", on the
+        reading that rule 24(b) asks for "a passing lab receipt" and not for a
+        specific lane's. That reading is what let the throwaway ``kind`` boot
+        stand in for the persistent lab: it emitted lane ``onex-lab`` from
+        inside the delivery run, so a receipt for it was always present, and
+        the persistent lab's verdict was therefore never load-bearing.
+        Measured on merge 17696113e3ccb15adaa9031e07043e41d1d45396.
+
+        The gate now requires EVERY lane it is asked about. A caller wanting
+        "this lane" says so — which is what both live call sites already do.
+        """
         receipt = _receipt(lane=EnumLabLane.ONEX_LAB)
         surface = _Surface(
             {artifact_name(EnumLabLane.ONEX_LAB, SHA): receipt.to_json()}
         )
-        code, output = _run_gate(surface, monkeypatch)
+        code, output = _run_gate(surface, monkeypatch, lanes=(EnumLabLane.ONEX_LAB,))
         assert code == 0
         assert "onex-lab" in output
+
+        # ... and naming a second lane it has no receipt for now refuses.
+        code, _ = _run_gate(
+            surface,
+            monkeypatch,
+            lanes=(EnumLabLane.ONEX_LAB, EnumLabLane.COMPOSE_DEV),
+        )
+        assert code == 1
 
     def test_an_abbreviated_sha_is_refused_before_any_lookup(
         self, monkeypatch: Any
@@ -642,11 +678,14 @@ class TestGateWiring:
         rebuild = Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
             encoding="utf-8"
         )
-        # onex-lab, from the boot gate; compose-dev, from the .201 convergence job.
+        # OMN-18276: kind-smoke, from the boot gate (a render/wiring check, not
+        # a lab pass); compose-dev AND the persistent onex-lab overlay, both
+        # from the .201 rebuild trigger.
         assert "lab_pass_receipt.py emit" in deliver
-        assert "--lane onex-lab" in deliver
+        assert "--lane kind-smoke" in deliver
         assert "lab_pass_receipt.py emit" in rebuild
         assert "--lane compose-dev" in rebuild
+        assert "--lane onex-lab" in rebuild
 
 
 class TestComposeDevProbeReachesTheLane:

@@ -187,7 +187,7 @@ logger = logging.getLogger(__name__)
 #: the host's own secret store bound and the lane's tenant minted, which is the
 #: surface ``provider_key_chain.sh`` and the m3 chain runners actually grade
 #: against.
-LAB_LANE_VALUE = "onex-lab-k3s"
+LAB_LANE_VALUE = "onex-lab"
 
 #: The lab namespace. Matches ``apply_lab_lane.sh``'s own default.
 LAB_NAMESPACE = "onex-dev"
@@ -279,7 +279,7 @@ OMNIMARKET_VERSION_PROGRAM = (
 )
 
 #: Named rather than silently absent, so a reader can see what an
-#: ``onex-lab-k3s`` receipt does NOT cover. Each needs a surface this module
+#: ``onex-lab`` receipt does NOT cover. Each needs a surface this module
 #: does not reach today. Widening the set means adding the probe AND the check
 #: name in one change -- never the name alone.
 PROBES_NOT_YET_WIRED: tuple[str, ...] = (

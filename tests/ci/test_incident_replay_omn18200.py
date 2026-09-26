@@ -176,7 +176,7 @@ def test_the_receipt_built_from_that_check_is_a_FAIL(replay_server: str) -> None
 
     receipt = build_receipt(
         sha=INCIDENT_SHA,
-        lane=EnumLabLane.ONEX_LAB_K3S,
+        lane=EnumLabLane.ONEX_LAB,
         started_at=_ts("2026-09-11T23:20:26Z"),
         finished_at=_ts("2026-09-11T23:50:26Z"),
         checks=[ModelLabPassCheck(**check) for check in checks],
