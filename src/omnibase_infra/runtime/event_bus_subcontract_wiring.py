@@ -492,21 +492,28 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         signed_topics = {
             self.resolve_topic(topic) for topic in subcontract.signed_ingress_topics
         }
+        subscribed_topics = {
+            self.resolve_topic(topic) for topic in subcontract.subscribe_topics
+        }
+        if not signed_topics <= subscribed_topics:
+            raise ProtocolConfigurationError(
+                "signed ingress topics must be declared subscriptions"
+            )
         configured_topic = (
             self._execution_graph_read_ingress.command_topic
             if self._execution_graph_read_ingress is not None
             else None
         )
-        if signed_topics and (
-            self._execution_graph_read_key_provider is None
-            or signed_topics != {configured_topic}
+        if (
+            configured_topic is not None
+            and signed_topics
+            and signed_topics != {configured_topic}
         ):
             raise ProtocolConfigurationError(
                 "signed ingress requires matching verifier configuration"
             )
         if (
-            configured_topic
-            in {self.resolve_topic(topic) for topic in subcontract.subscribe_topics}
+            configured_topic in subscribed_topics
             and configured_topic not in signed_topics
         ):
             raise ProtocolConfigurationError(
@@ -515,6 +522,13 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
 
         for topic_suffix in subcontract.subscribe_topics:
             full_topic = self.resolve_topic(topic_suffix)
+            if full_topic in signed_topics and configured_topic is None:
+                self._logger.info(
+                    "Skipping optional signed ingress without verifier: topic=%s, node=%s",
+                    full_topic,
+                    node_name,
+                )
+                continue
 
             # Validate topic against deny patterns before subscribing
             validate_topic(full_topic, self._topic_deny_patterns)
@@ -1477,6 +1491,11 @@ def load_event_bus_subcontract(
             set(event_bus_data) - supported_fields - _EVENT_BUS_WIRING_METADATA_FIELDS
         )
         if unknown_fields:
+            if "signed_ingress_topics" in event_bus_data:
+                raise ProtocolConfigurationError(
+                    "invalid signed ingress subcontract fields: "
+                    f"{sorted(unknown_fields)}"
+                )
             _logger.warning(
                 "Invalid event_bus subcontract in %s: unsupported fields: %s",
                 contract_path,
@@ -1499,6 +1518,13 @@ def load_event_bus_subcontract(
         )
         return None
     except ValidationError as e:
+        if (
+            isinstance(event_bus_data, dict)
+            and "signed_ingress_topics" in event_bus_data
+        ):
+            raise ProtocolConfigurationError(
+                "invalid signed ingress subcontract declaration"
+            ) from e
         _logger.warning(
             "Invalid event_bus subcontract in %s: %s",
             contract_path,

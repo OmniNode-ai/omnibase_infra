@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_core.crypto.crypto_ed25519_signer import generate_keypair
 from omnibase_core.models.contracts.subcontracts.model_event_bus_subcontract import (
@@ -32,6 +34,7 @@ from omnibase_infra.runtime.dispatch_envelope_context import (
 )
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
+    load_event_bus_subcontract,
 )
 from omnibase_infra.runtime.execution_graph_read_authority import (
     ExecutionGraphReadAuthorityError,
@@ -233,6 +236,99 @@ async def test_declared_signed_ingress_cannot_wire_without_verifier() -> None:
         signed_ingress_topics=[topic],
     )
 
+    await wiring.wire_subscriptions(subcontract, "graph-read")
+    bus.subscribe.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unconfigured_signed_ingress_keeps_ordinary_subscription() -> None:
+    signed = "onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1"
+    ordinary = "onex.evt.omnibase-infra.other-completed.v1"
+    bus = AsyncMock(spec=ProtocolEventBusSubscriber)
+    wiring = EventBusSubcontractWiring(
+        event_bus=bus,
+        dispatch_engine=AsyncMock(),
+        environment="test",
+        node_name="mixed",
+        service="omnibase-infra",
+        version="v1",
+    )
+    subcontract = ModelEventBusSubcontract(
+        version=ModelSemVer(major=1, minor=0, patch=0),
+        subscribe_topics=[signed, ordinary],
+        signed_ingress_topics=[signed],
+    )
+
+    await wiring.wire_subscriptions(subcontract, "mixed")
+
+    bus.subscribe.assert_awaited_once()
+    assert bus.subscribe.await_args.kwargs["topic"] == ordinary
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_signed_ingress_mismatch_refuses_before_subscription() -> None:
+    declared = "onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1"
+    configured = "onex.cmd.omnibase-infra.other-requested.v1"
+    bus = AsyncMock(spec=ProtocolEventBusSubscriber)
+    wiring = EventBusSubcontractWiring(
+        event_bus=bus,
+        dispatch_engine=AsyncMock(),
+        environment="test",
+        node_name="graph-read",
+        service="omnibase-infra",
+        version="v1",
+        execution_graph_read_ingress=ModelExecutionGraphReadIngressConfig(
+            command_topic=configured, gateway_policy=_POLICY
+        ),
+        execution_graph_read_key_provider=InMemoryKeyProvider(),
+    )
+    subcontract = ModelEventBusSubcontract(
+        version=ModelSemVer(major=1, minor=0, patch=0),
+        subscribe_topics=[declared],
+        signed_ingress_topics=[declared],
+    )
+
     with pytest.raises(ProtocolConfigurationError, match="signed ingress"):
         await wiring.wire_subscriptions(subcontract, "graph-read")
     bus.subscribe.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_signed_ingress_declaration_must_be_subscribed() -> None:
+    declared = "onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1"
+    bus = AsyncMock(spec=ProtocolEventBusSubscriber)
+    wiring = EventBusSubcontractWiring(
+        event_bus=bus,
+        dispatch_engine=AsyncMock(),
+        environment="test",
+        node_name="graph-read",
+        service="omnibase-infra",
+        version="v1",
+    )
+    with pytest.raises(ValidationError, match="signed_ingress_topics"):
+        ModelEventBusSubcontract(
+            version=ModelSemVer(major=1, minor=0, patch=0),
+            subscribe_topics=["onex.evt.omnibase-infra.other-completed.v1"],
+            signed_ingress_topics=[declared],
+        )
+    bus.subscribe.assert_not_called()
+
+
+@pytest.mark.unit
+def test_malformed_signed_ingress_contract_refuses_at_load(tmp_path: Path) -> None:
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        """event_bus:
+  subscribe_topics:
+    - onex.evt.omnibase-infra.other-completed.v1
+  signed_ingress_topics:
+    - onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProtocolConfigurationError, match="signed ingress"):
+        load_event_bus_subcontract(contract)
