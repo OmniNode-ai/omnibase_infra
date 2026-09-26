@@ -290,7 +290,7 @@ def _added_backend_entry(
     assert binding.provider is not None
     assert binding.tier is not None
     assert binding.credential is not None
-    return {
+    entry: dict[object, object] = {
         "backend_id": binding.backend_key,
         "provider": binding.provider,
         "endpoint_url": binding.endpoint_url if binding.serving else None,
@@ -301,6 +301,16 @@ def _added_backend_entry(
         "secret_ref": binding.credential.secret_ref,
         "capabilities": list(binding.capabilities),
     }
+    # OMN-19215: passed through for the routing authority, which checks the
+    # tier and rung names against the ladder it loads. Absent means absent, so
+    # an added backend with no placement renders exactly as it did before.
+    if binding.placement is not None:
+        # AC4: ``mode`` is written only when it is not the default, so a
+        # fallback placement renders byte-identical to the pre-mode shape.
+        entry["placement"] = binding.placement.model_dump(
+            mode="json", exclude_defaults=True
+        )
+    return entry
 
 
 def _merge_lane_overlay(
