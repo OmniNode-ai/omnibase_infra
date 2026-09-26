@@ -179,6 +179,52 @@ def fresh_build(server: _Server) -> Iterator[_Server]:
             server.psql(f"DROP DATABASE IF EXISTS {db} WITH (FORCE)")
 
 
+_RUNTIME = "omninode_runtime"
+# Written by node_savings_estimation_compute through direct SQL, so they are
+# declared by the supplemental path in table_grant_derivation.py (AC2 step 1).
+_SAVINGS_TABLES = (
+    "savings_injection_signals",
+    "savings_validator_catch_signals",
+    "savings_correlation_finalizations",
+)
+
+
+_LIVE_PRIVILEGES_SQL = (
+    "SELECT a.privilege_type FROM pg_class c "
+    "JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(c.relacl) a "
+    "WHERE n.nspname = 'omninode_internal' AND c.relname = :'relname' "
+    "AND a.grantee = :'grantee'::regrole;\n"
+)
+
+
+def _live_privileges(server: _Server, table: str, grantee: str) -> set[str]:
+    # Read from the relation's own ACL, not information_schema: those views
+    # only show grants involving a role the session is a member of. The names
+    # go in as psql variables, which psql quotes; it expands them only in
+    # input it reads, not in -c, hence stdin.
+    result = subprocess.run(
+        [
+            "psql",
+            "-At",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-v",
+            f"relname={table}",
+            "-v",
+            f"grantee={grantee}",
+            "-d",
+            NODE_DB,
+        ],
+        input=_LIVE_PRIVILEGES_SQL,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=server.env(),
+    )
+    assert result.returncode == 0, result.stderr
+    return set(result.stdout.split())
+
+
 def test_allowlist_entries_are_unique_and_name_their_removal() -> None:
     entries = _load_allowlist()
     findings = [entry["finding"] for entry in entries]
@@ -226,6 +272,25 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     # reading an empty or missing schema.
     declared_relations = declared_acl(load_topology_profile(PROFILE)).relations
     assert report["observed_relation_count"] >= len(declared_relations) > 0, report
+
+    # AC2 step 1 (amendment 3): the three savings_* tables are declared, not
+    # allow-listed, and the build delivers exactly the declared privileges.
+    # Asserted per table, so a regression is named by table rather than
+    # folded into the findings diff below.
+    allowlisted = " ".join(entry["finding"] for entry in _load_allowlist())
+    for table in _SAVINGS_TABLES:
+        declared = {
+            privilege
+            for principal, relation, privilege in declared_acl(
+                load_topology_profile(PROFILE)
+            ).table_grants
+            if principal == _RUNTIME and relation == table
+        }
+        assert declared, (
+            f"the {PROFILE} topology declares no {_RUNTIME} grant on {table}"
+        )
+        assert _live_privileges(fresh_build, table, _RUNTIME) == declared, table
+        assert table not in allowlisted, f"{table} is still on the allow-list"
 
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}
