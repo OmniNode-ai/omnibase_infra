@@ -292,6 +292,43 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
+    #
+    # OMN-19550: the same infra-first window, for session_content -- the full
+    # prompt, tool input, tool result and assistant reply captured for one
+    # session content chunk. This repository vendors the create migration
+    # BEFORE omnimarket lands the node package that declares the relation in
+    # its contract, because omnimarket's node-migration-vendor-parity gate
+    # refuses a node migration with no vendored counterpart here. So for one
+    # window the shipped topology instances declare a relation the PINNED
+    # contracts cannot derive.
+    #
+    # Regenerating against the pin instead of bridging would DELETE that
+    # declaration while the vendored migration still grants the relation,
+    # tripping the OMN-18768 reverse ratchet and refusing the projection
+    # binding at boot. This entry is SELF-EXPIRING: it is registered in
+    # _INTERIM_ENTRIES in
+    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes red
+    # on the pin advance that makes it redundant and says to delete it.
+    #
+    # Retired by: omnimarket#2905 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:session_content",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_session_content/"
+            "0001_create_session_content.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="session_content",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_session_content/"
+                "0001_create_session_content.sql"
+            ),
+            access="write",
+            role="session_content",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426

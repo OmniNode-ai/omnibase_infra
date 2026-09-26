@@ -218,7 +218,8 @@ def test_reconciliation_never_reintroduces_a_drop(
         # self-inflicted false positive.
         upper = mask_literals(block).upper()
         for forbidden in ("DROP TABLE", "DROP COLUMN", "TRUNCATE", "DELETE FROM"):
-            assert forbidden not in upper, (
+            pattern = r"\b" + r"\s+".join(forbidden.split()) + r"\b"
+            assert re.search(pattern, upper) is None, (
                 f"{migration_id}: '{forbidden}' inside an OMN-15376 "
                 f"reconciliation block. That block runs against tables whose row "
                 f"count is unknown; converge the shape, never destroy the data."
