@@ -42,7 +42,27 @@ concurrency:
 
 jobs:
   public-repo-hygiene:
-    uses: OmniNode-ai/omniclaude/.github/workflows/public-repo-hygiene-reusable.yml@a0142e360643dc919d9d3bd54bf14f7b26a9b5e6
+    # OMN-19766: bumped from a0142e36 because the gate now refuses without a
+    # LAB vocabulary, and a0142e36's workflow neither fetches nor passes one.
+    #
+    # WHY THE OLD PIN BROKE WITHOUT ANYTHING HERE CHANGING. a0142e36 checks its
+    # validator out at `inputs.validator_ref || github.job_workflow_sha`. In the
+    # failing runs that context was empty, so `ref:` was empty and
+    # actions/checkout fell back to omniclaude's DEFAULT BRANCH -- run
+    # 36274095035 fetched `+refs/heads/dev:refs/remotes/origin/dev` for
+    # OmniNode-ai/omniclaude, not the pinned sha. So the workflow was pinned and
+    # its validator floated: omniclaude's dev grew the lab-vocabulary
+    # requirement (9 references at 0d80bf53, 0 at a0142e36) and every PR in this
+    # repository began failing closed on a file the pinned workflow never
+    # fetches. That floating-ref defect belongs to omniclaude and is filed
+    # separately; this bump is what makes THIS repository's gate self-consistent
+    # again, and it is the same revision onex_change_control already runs green.
+    #
+    # `validator_ref` is passed EXPLICITLY rather than left to the fallback, so
+    # the validator cannot drift from the workflow again even if that context is
+    # empty. A pin that silently degrades to HEAD is not a pin.
+    uses: OmniNode-ai/omniclaude/.github/workflows/public-repo-hygiene-reusable.yml@0d80bf531d13d988d0890ba80a1f8cf7f2e1a436
     with:
       mode: report
+      validator_ref: 0d80bf531d13d988d0890ba80a1f8cf7f2e1a436
     secrets: inherit
