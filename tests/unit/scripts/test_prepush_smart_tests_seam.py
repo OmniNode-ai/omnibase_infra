@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import ast
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "scripts/hooks/prepush_smart_tests.sh"
 FUNCTION_NAME = "filter_prepush_runnable_paths"
 WHOLE_SUITE_PREDICATE = "selection_is_whole_suite"
+OVERRIDE_SCRUBBER = "scrub_prepush_override_env"
+ORDINARY_RUNNER = "run_prepush_ordinary_tests"
+ALLOWLISTED_INTEGRATION_RUNNER = "run_prepush_allowlisted_integration_tests"
+PARTITIONED_RUNNER = "run_prepush_partitioned_tests"
 SLOT_BACKED_IMPACTED_SCOPE = "tests/unit/runtime/"
 
 # The one integration subtree the hook is allowed to run locally (OMN-16825).
@@ -137,6 +142,120 @@ def _run_selection_is_whole_suite(target: str, paths: list[str]) -> bool:
     return result.returncode == 0
 
 
+def _bash_array(name: str, values: list[str]) -> str:
+    return f"{name}=({' '.join(shlex.quote(value) for value in values)})"
+
+
+def _extract_hook_execution_block(source: str) -> str:
+    """Return the hook's actual local-execution controller through its exit."""
+    start = source.index("if ! type prepush_developer_shell_path")
+    end = source.rindex('exit "$RC"') + len('exit "$RC"')
+    return source[start:end]
+
+
+def _run_real_partitioned_hook(
+    tmp_path: Path,
+    *,
+    is_full: bool,
+    remote_full_suite_verified: bool,
+    whole_suite_equivalent: bool = False,
+    ordinary_paths: list[str],
+    integration_paths: list[str],
+    pytest_extra_args: str = "",
+) -> list[list[str]]:
+    """Run the hook's real local-execution controller with token-recording uv.
+
+    This is intentionally an execution seam, not a source assertion. The
+    shipped runner functions AND the controller that calls them are copied
+    directly from the hook into a minimal bash harness. The fake ``uv``
+    receives the exact argv that the real hook would give pytest. That makes
+    option order (especially the final enforced marker), the two-invocation
+    partition, and remote-evidence elision observable without starting a real
+    test suite from this unit test.
+    """
+    bash = shutil.which("bash")
+    assert bash is not None, "bash not available"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    argv_log = tmp_path / "uv-argv.log"
+    fake_uv = fake_bin / "uv"
+    fake_uv.write_text(
+        "#!/usr/bin/env bash\n"
+        "{\n"
+        "  printf 'CALL\\n'\n"
+        '  for arg in "$@"; do printf \'ARG:%s\\n\' "$arg"; done\n'
+        '} >> "$UV_ARGV_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    source = HOOK.read_text(encoding="utf-8")
+    selected_paths = [*ordinary_paths, *integration_paths]
+    fragment = tmp_path / "partitioned-hook.sh"
+    fragment.write_text(
+        "set -euo pipefail\n"
+        "log() {\n"
+        '  if [ "$REQUIRE_WHOLE_SUITE_GUARD" -eq 1 ] && [ "$WHOLE_SUITE_GUARD_CALLED" -ne 1 ]; then return 91; fi\n'
+        "}\n"
+        "die() { return 2; }\n"
+        "guard_full_suite_host() { WHOLE_SUITE_GUARD_CALLED=1; }\n"
+        f"selection_is_whole_suite() {{ return {int(not whole_suite_equivalent)}; }}\n"
+        'prepush_developer_shell_path() { printf "%s" "$PATH"; }\n'
+        + _extract_function(source, OVERRIDE_SCRUBBER)
+        + "\n"
+        + _extract_function(source, ORDINARY_RUNNER)
+        + "\n"
+        + _extract_function(source, ALLOWLISTED_INTEGRATION_RUNNER)
+        + "\n"
+        + _extract_function(source, PARTITIONED_RUNNER)
+        + "\n"
+        + f"IS_FULL={str(is_full).lower()}\n"
+        + f"REMOTE_FULL_SUITE_VERIFIED={int(remote_full_suite_verified)}\n"
+        + "REMOTE_LAB_RUN_VERDICT=0\n"
+        + "REASON=seam\n"
+        + f"REQUIRE_WHOLE_SUITE_GUARD={int(whole_suite_equivalent)}\n"
+        + "WHOLE_SUITE_GUARD_CALLED=0\n"
+        + 'FULL_SUITE_TARGET="tests/unit/"\n'
+        + 'SLOT_BACKED_IMPACTED_SCOPE="tests/unit/runtime/"\n'
+        + "RC=0\n"
+        + _bash_array("PATHS", selected_paths)
+        + "\n"
+        + f"PATHS_STR={shlex.quote(' '.join(selected_paths) + (' ' if selected_paths else ''))}\n"
+        + _bash_array("ORDINARY_PATHS", ordinary_paths)
+        + "\n"
+        + _bash_array("RUNNABLE_INTEGRATION_PATHS", integration_paths)
+        + "\n"
+        + f"ORDINARY_PATHS_STR={shlex.quote(' '.join(ordinary_paths) + (' ' if ordinary_paths else ''))}\n"
+        + f"RUNNABLE_INTEGRATION_STR={shlex.quote(' '.join(integration_paths) + (' ' if integration_paths else ''))}\n"
+        + f"export PREPUSH_PYTEST_ARGS={shlex.quote(pytest_extra_args)}\n"
+        + _extract_hook_execution_block(source)
+        + "\n",
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["UV_ARGV_LOG"] = str(argv_log)
+    result = subprocess.run(
+        [bash, str(fragment)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    calls: list[list[str]] = []
+    current: list[str] | None = None
+    for line in argv_log.read_text(encoding="utf-8").splitlines():
+        if line == "CALL":
+            current = []
+            calls.append(current)
+        else:
+            assert current is not None and line.startswith("ARG:"), line
+            current.append(line.removeprefix("ARG:"))
+    return calls
+
+
 def test_hook_exists_and_defines_the_filter() -> None:
     assert HOOK.is_file()
     assert f"{FUNCTION_NAME}() {{" in HOOK.read_text()
@@ -171,6 +290,127 @@ def test_hook_still_ignores_integration_in_the_pytest_invocation() -> None:
     # The filter complements --ignore=tests/integration; it does not replace it.
     # A source diff can still pull an integration test in transitively.
     assert HOOK.read_text().count("--ignore=tests/integration") >= 2
+
+
+# ---------------------------------------------------------------------------
+# OMN-17793: integration markers outside tests/integration/ stay out of push
+# ---------------------------------------------------------------------------
+
+
+def test_partitioned_runner_executes_mixed_selection_in_two_lanes(
+    tmp_path: Path,
+) -> None:
+    """Ordinary targets get the safety marker; chains run as an explicit root."""
+    ordinary = "tests/unit/scripts/test_prepush_smart_tests_seam.py"
+    chains = "tests/integration/chains/test_event_chain_gate.py"
+    calls = _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        ordinary_paths=[ordinary],
+        integration_paths=[chains],
+    )
+    assert calls == [
+        [
+            "run",
+            "pytest",
+            ordinary,
+            "--ignore=tests/integration",
+            "--tb=short",
+            "-m",
+            "not integration",
+        ],
+        [
+            "run",
+            "pytest",
+            chains,
+            "--ignore=tests/integration",
+            "--tb=short",
+        ],
+    ]
+
+
+def test_partitioned_runner_does_not_invoke_empty_ordinary_pytest(
+    tmp_path: Path,
+) -> None:
+    """A chains-only selection must not produce pytest's no-tests exit 5."""
+    chains = "tests/integration/chains/"
+    assert _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        ordinary_paths=[],
+        integration_paths=[chains],
+    ) == [
+        [
+            "run",
+            "pytest",
+            chains,
+            "--ignore=tests/integration",
+            "--tb=short",
+        ]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("is_full", "whole_suite_equivalent"),
+    [(True, False), (False, True)],
+    ids=["full-escalation", "whole-suite-equivalent-impacted-selection"],
+)
+def test_remote_full_unit_evidence_elides_ordinary_but_not_chains(
+    tmp_path: Path, is_full: bool, whole_suite_equivalent: bool
+) -> None:
+    """Remote unit evidence does not cover separately allowlisted chains.
+
+    The false branch is the whole-suite-equivalent impacted route. It must call
+    the partition controller too, rather than merely share the helper's
+    implementation in isolation.
+    """
+    chains = "tests/integration/chains/"
+    assert _run_real_partitioned_hook(
+        tmp_path,
+        is_full=is_full,
+        remote_full_suite_verified=True,
+        whole_suite_equivalent=whole_suite_equivalent,
+        ordinary_paths=["tests/unit/"],
+        integration_paths=[chains],
+    ) == [
+        [
+            "run",
+            "pytest",
+            chains,
+            "--ignore=tests/integration",
+            "--tb=short",
+        ]
+    ]
+
+
+def test_ordinary_marker_deselection_overrides_entry_pytest_marker(
+    tmp_path: Path,
+) -> None:
+    """The enforced marker is the final token even if the entry adds ``-m``."""
+    calls = _run_real_partitioned_hook(
+        tmp_path,
+        is_full=False,
+        remote_full_suite_verified=False,
+        ordinary_paths=["tests/scripts/"],
+        integration_paths=[],
+        pytest_extra_args="-m integration --maxfail=1",
+    )
+    assert calls == [
+        [
+            "run",
+            "pytest",
+            "tests/scripts/",
+            "--ignore=tests/integration",
+            "--tb=short",
+            "-m",
+            "integration",
+            "--maxfail=1",
+            "-m",
+            "not integration",
+        ]
+    ]
 
 
 # ---------------------------------------------------------------------------
