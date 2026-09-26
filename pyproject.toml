@@ -257,7 +257,7 @@ dev = [
 override-dependencies = [
     # OMN-19655: the one exact omnibase-core pin. uv.lock and the runtime image
     # resolve from here; [project.dependencies] publishes the compatible range.
-    "omnibase-core==0.47.23",
+    "omnibase-core==0.47.24",
     "omnibase-spi==0.23.5",
     "omnibase-compat==0.5.7",
 ]
