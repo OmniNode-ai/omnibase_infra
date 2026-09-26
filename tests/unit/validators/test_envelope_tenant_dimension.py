@@ -48,6 +48,7 @@ import pytest
 from omnibase_infra.validators.envelope_tenant_dimension import (
     PACKAGE_ROOT,
     findings,
+    findings_paths,
 )
 
 _HEADER = "from omnibase_core.models.events.model_event_envelope import (\n    ModelEventEnvelope,\n)\n"
@@ -141,6 +142,18 @@ def test_an_unrelated_call_is_not_flagged(tmp_path: Path) -> None:
     )
 
     assert findings(root) == []
+
+
+@pytest.mark.unit
+def test_findings_can_scope_to_one_staged_file(tmp_path: Path) -> None:
+    staged = tmp_path / "staged.py"
+    staged.write_text(
+        _HEADER + "e = ModelEventEnvelope(payload={}, tenant_id=None)\n",
+        encoding="utf-8",
+    )
+    _write(tmp_path, "e = ModelEventEnvelope(payload={})\n")
+
+    assert findings_paths([staged]) == []
 
 
 @pytest.mark.unit
