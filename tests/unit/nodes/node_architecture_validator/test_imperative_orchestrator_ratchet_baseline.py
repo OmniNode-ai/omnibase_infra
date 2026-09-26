@@ -12,7 +12,10 @@ Covers:
 
 from __future__ import annotations
 
+import importlib.util
+import subprocess
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -40,6 +43,52 @@ EXPECTED_OWNER_TICKETS: dict[str, str] = {
 # Repo root = five parents up from the scanner module; the test file is deeper,
 # so resolve relative to the repo root we already know via the baseline path.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _load_validate_module() -> ModuleType:
+    """Load the executable validator script for its worktree identity helper."""
+    script_path = _REPO_ROOT / "scripts" / "validate.py"
+    spec = importlib.util.spec_from_file_location("validate_under_test", script_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_git(directory: Path, *args: str) -> None:
+    """Run a Git setup command for an isolated temporary worktree."""
+    subprocess.run(
+        ["git", *args],
+        check=True,
+        cwd=directory,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _create_linked_worktree(tmp_path: Path) -> tuple[Path, Path]:
+    """Create canonical and arbitrarily named linked Git worktrees."""
+    canonical_checkout = tmp_path / "omnibase_infra"
+    canonical_checkout.mkdir()
+    _run_git(canonical_checkout, "init")
+    _run_git(canonical_checkout, "config", "user.email", "validator@example.test")
+    _run_git(canonical_checkout, "config", "user.name", "Validator Test")
+    (canonical_checkout / "README.md").write_text("fixture\n", encoding="utf-8")
+    _run_git(canonical_checkout, "add", "README.md")
+    _run_git(canonical_checkout, "commit", "-m", "fixture")
+
+    linked_worktree = tmp_path / "arbitrarily-named-linked-worktree"
+    _run_git(
+        canonical_checkout,
+        "worktree",
+        "add",
+        "-b",
+        "linked-worktree",
+        str(linked_worktree),
+        "HEAD",
+    )
+    return canonical_checkout, linked_worktree
 
 
 def _load_live_baseline() -> dict[str, BaselineEntry]:
@@ -111,3 +160,32 @@ def test_every_live_baseline_entry_has_owner_ticket() -> None:
     for key, entry in baseline.items():
         assert key == _baseline_key(entry.repo, entry.node)
         assert entry.owner_ticket, f"{entry.node} missing owner_ticket"
+
+
+@pytest.mark.unit
+def test_canonical_repo_identity_matches_arbitrarily_named_linked_worktree(
+    tmp_path: Path,
+) -> None:
+    """A linked worktree must use the canonical baseline key, not its path name."""
+    canonical_checkout, linked_worktree = _create_linked_worktree(tmp_path)
+    validate_module = _load_validate_module()
+
+    canonical_identity = validate_module.resolve_canonical_repo_identity(
+        canonical_checkout
+    )
+    linked_identity = validate_module.resolve_canonical_repo_identity(linked_worktree)
+
+    assert canonical_identity == "omnibase_infra"
+    assert linked_identity == canonical_identity
+    assert _baseline_key(linked_identity, "node_chain_orchestrator") == _baseline_key(
+        canonical_identity, "node_chain_orchestrator"
+    )
+
+
+@pytest.mark.unit
+def test_canonical_repo_identity_rejects_non_git_directory(tmp_path: Path) -> None:
+    """Missing Git topology must fail closed rather than use a path basename."""
+    validate_module = _load_validate_module()
+
+    with pytest.raises(RuntimeError, match="Cannot establish canonical Git identity"):
+        validate_module.resolve_canonical_repo_identity(tmp_path)
