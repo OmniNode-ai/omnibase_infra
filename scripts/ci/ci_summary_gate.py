@@ -319,6 +319,14 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # so it always completes, and registering it here is what makes a skip or
     # an absence fail CI Summary rather than read green.
     "Lab Probe Windows (OMN-19412)",  # lab-probe-windows
+    # OMN-19677: shrink-only debt baselines via the shared omniclaude reusable.
+    # A reusable caller reports as '<caller display name> / <inner job>'; these
+    # callers are unconditional, so a skip is anomalous.
+    "Noncanonical Class Allowlist One-way (OMN-19677) / anti-growth-baseline",
+    "Topic Naming Baseline One-way (OMN-19677) / anti-growth-baseline",
+    "Validator Requirements Baseline One-way (OMN-19677) / anti-growth-baseline",
+    "Runtime Profiles Allowlist One-way (OMN-19677) / anti-growth-baseline",
+    "Skip Count Baseline One-way (OMN-19677) / anti-growth-baseline",
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
@@ -424,6 +432,10 @@ SOFT_ALLOWLIST: frozenset[str] = frozenset(
         "Cross-Repo Migration Conflicts",  # migration-conflict-check; not required
         "Kafka Boundary Compat (OMN-3256)",  # advisory; carries xfail known-drift
         "AI-Slop Pattern Check (strict, PR diff)",  # aislop-sweep gates the tree
+        # OMN-14909: report-only telemetry needs ci-summary, so it is never
+        # completed while the poller runs; allowlisted so a re-run of CI Summary
+        # can never read a prior attempt's red telemetry as a failure.
+        "CI cascade reason-graph (report-only)",
         # Structural path filter — reusable caller, excluded from the condition:
         "zone-filter",  # zone-filter (reusable) inner jobs surface prefixed
     }
