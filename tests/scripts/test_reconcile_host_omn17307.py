@@ -453,6 +453,92 @@ def test_onex_path_shadow_fails_the_run_in_both_modes(ws: Workspace) -> None:
         )
 
 
+def test_onex_path_shadow_regular_file_names_what_it_found(ws: Workspace) -> None:
+    """The regular-file (uv-tool-shim) case names its shape as ``a regular file``.
+
+    Same fixture as the test above; this asserts the specific wording OMN-19810
+    AC2 needs so a future edit cannot quietly drop the "what it found" detail
+    while leaving the pass/fail verdict unchanged.
+    """
+    _build_green_fixture(ws)
+
+    fake_home = ws.root.parent / "shadow_home_regular"
+    shadow = fake_home / ".local" / "bin" / "onex"
+    shadow.parent.mkdir(parents=True)
+    shadow.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    shadow.chmod(0o755)
+
+    proc = _run(ws, home=str(fake_home))
+
+    assert proc.returncode == EXIT_FAILED, proc.stderr
+    assert "onex-path-shadow" in proc.stderr, proc.stderr
+    assert "a regular file" in proc.stderr, proc.stderr
+
+
+def test_onex_path_shadow_symlink_to_wrapper_passes(ws: Workspace) -> None:
+    """OMN-19810: a symlink resolving to the canonical wrapper is not a shadow.
+
+    The orchestrator session can deliberately place ``$HOME/.local/bin/onex``
+    as a symlink onto ``$SCRIPT_DIR/onex`` so a bare ``onex`` is on PATH for
+    interactive use. That is the sanctioned wrapper, reached through a
+    different route, not the ``uv tool install`` shim this surface exists to
+    catch, and must not fail the run.
+    """
+    _build_green_fixture(ws)
+
+    wrapper = ws.scripts / "onex"
+    wrapper.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    wrapper.chmod(0o755)
+
+    fake_home = ws.root.parent / "shadow_home_symlink_ok"
+    shadow = fake_home / ".local" / "bin" / "onex"
+    shadow.parent.mkdir(parents=True)
+    shadow.symlink_to(wrapper)
+
+    for mode_args in ((), ("--check",)):
+        proc = _run(ws, *mode_args, home=str(fake_home))
+        assert proc.returncode == EXIT_OK, (mode_args, proc.stderr)
+        assert "onex-path-shadow: SHADOWED" not in proc.stderr, (
+            mode_args,
+            proc.stderr,
+        )
+
+
+def test_onex_path_shadow_symlink_elsewhere_fails_and_names_the_target(
+    ws: Workspace,
+) -> None:
+    """A symlink to anywhere other than the canonical wrapper still shadows it.
+
+    OMN-19810 AC3: the fix must not become "any symlink passes" -- only a
+    symlink whose fully-resolved target IS the wrapper is exempt. This proves
+    a symlink pointed at some other binary still fails, and that the failure
+    names the resolved target it actually found (not just "shadowed").
+    """
+    _build_green_fixture(ws)
+
+    wrapper = ws.scripts / "onex"
+    wrapper.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    wrapper.chmod(0o755)
+
+    other = ws.root.parent / "other_onex_build" / "onex"
+    other.parent.mkdir(parents=True)
+    other.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    other.chmod(0o755)
+    resolved_other = str(other.resolve())
+
+    fake_home = ws.root.parent / "shadow_home_symlink_elsewhere"
+    shadow = fake_home / ".local" / "bin" / "onex"
+    shadow.parent.mkdir(parents=True)
+    shadow.symlink_to(other)
+
+    proc = _run(ws, home=str(fake_home))
+
+    assert proc.returncode == EXIT_FAILED, proc.stderr
+    assert "onex-path-shadow" in proc.stderr, proc.stderr
+    assert resolved_other in proc.stderr, proc.stderr
+    assert str(wrapper) in proc.stderr, proc.stderr
+
+
 # --------------------------------------------------------------------------- #
 # AC2 -- the venv surface
 # --------------------------------------------------------------------------- #
