@@ -317,3 +317,43 @@ def mock_load_node_graph_config() -> Generator[MagicMock, None, None]:
         return_value=_default_node_graph_config(),
     ) as mock_fn:
         yield mock_fn
+
+
+def declare_runtime_lane_for_bootstrap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give ``bootstrap()`` a declared lane without an overlay on disk (OMN-19747).
+
+    ``bootstrap()`` resolves its lane from the deployment's ``runtime.lane``
+    overlay before it discovers a contract, and refuses to start without one.
+    A kernel test about what follows that step replaces only the resolver; the
+    resolver itself is covered by ``test_startup_lane_resolution.py``, and the
+    kernel's refusal by ``TestBootstrapLaneRefusal`` in ``test_kernel.py``.
+    """
+    from omnibase_core.enums.enum_config_overlay_source import (
+        EnumConfigOverlaySource,
+    )
+    from omnibase_core.models.config_overlay import (
+        ModelConfigOverlayScope,
+        ModelRuntimeLaneDeclaration,
+    )
+    from omnibase_infra.config_overlay.models import ModelRuntimeLaneResolution
+    from omnibase_infra.runtime.health import runtime_lane_identity
+
+    resolution = ModelRuntimeLaneResolution(
+        declaration=ModelRuntimeLaneDeclaration.model_validate(
+            {
+                "schema_version": "runtime_lane.v1",
+                "lane_id": "kernel-test-lane",
+                "roles": [],
+                "description": "a lane declared for kernel unit tests",
+            }
+        ),
+        scope=ModelConfigOverlayScope(environment="test", lane="kernel-test-lane"),
+        source=EnumConfigOverlaySource.LOCAL_HOME,
+        location="/nonexistent/runtime.lane.json",
+        sha256="0" * 64,
+    )
+    monkeypatch.setattr(
+        runtime_lane_identity,
+        "resolve_runtime_lane_declaration",
+        lambda **_: resolution,
+    )

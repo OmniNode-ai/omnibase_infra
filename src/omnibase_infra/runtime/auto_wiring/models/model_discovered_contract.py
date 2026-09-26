@@ -11,6 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
     ModelDbOwnershipSubcontract,
 )
+from omnibase_core.models.contracts.subcontracts.model_runtime_lane_role_requirement import (
+    ModelRuntimeLaneRoleRequirement,
+)
 from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
     ModelRuntimeLaneScope,
 )
@@ -74,13 +77,20 @@ class ModelDiscoveredContract(BaseModel):
     runtime_lanes: ModelRuntimeLaneScope | None = Field(
         default=None,
         description=(
-            "Optional runtime lanes this contract may attach on (OMN-19408), "
-            "parsed from the top-level contract.yaml `runtime_lanes` list. "
-            "None means unscoped: the contract attaches on any lane whose "
-            "runtime profile owns it. When set, the ownership filter attaches "
-            "it only on a runtime whose declared ONEX_RUNTIME_LANE is in the "
-            "scope, and fails closed with a discovery error on a runtime that "
-            "declares no registered lane."
+            "Transitional (OMN-19408; removed by OMN-19753): runtime lane ids "
+            "this contract may attach on, from the top-level `runtime_lanes` "
+            "list. None means unscoped by lane id. When set, the ownership "
+            "filter attaches it only on a runtime whose resolved lane id is "
+            "listed. New contracts declare runtime_lane_roles instead."
+        ),
+    )
+    runtime_lane_roles: ModelRuntimeLaneRoleRequirement | None = Field(
+        default=None,
+        description=(
+            "Lane roles this contract needs (OMN-19747), from the top-level "
+            "`runtime_lane_roles` list. None means any lane. When set, the "
+            "ownership filter attaches it only on a runtime whose lane, as the "
+            "deployment's runtime.lane overlay declares it, holds every role."
         ),
     )
     compatibility_publish_topics: tuple[str, ...] = Field(

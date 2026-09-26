@@ -25,6 +25,9 @@ import yaml
 from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
     ModelDbOwnershipSubcontract,
 )
+from omnibase_core.models.contracts.subcontracts.model_runtime_lane_role_requirement import (
+    ModelRuntimeLaneRoleRequirement,
+)
 from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
     ModelRuntimeLaneScope,
 )
@@ -451,6 +454,7 @@ def _parse_contract(
 
     runtime_profiles = _extract_runtime_profiles(raw)
     runtime_lanes = _extract_runtime_lanes(raw)
+    runtime_lane_roles = _extract_runtime_lane_roles(raw)
     db_io_raw = raw.get("db_io")
     db_io = (
         ModelDbOwnershipSubcontract.model_validate(db_io_raw)
@@ -476,6 +480,7 @@ def _parse_contract(
         package_version=package_version,
         runtime_profiles=runtime_profiles,
         runtime_lanes=runtime_lanes,
+        runtime_lane_roles=runtime_lane_roles,
         compatibility_publish_topics=raw.get("compatibility_publish_topics"),
         terminal_event=(
             raw.get("terminal_event")
@@ -567,6 +572,23 @@ def _extract_runtime_lanes(raw: Mapping[str, object]) -> ModelRuntimeLaneScope |
     if lanes_raw is None:
         return None
     return ModelRuntimeLaneScope.model_validate({"lanes": lanes_raw})
+
+
+def _extract_runtime_lane_roles(
+    raw: Mapping[str, object],
+) -> ModelRuntimeLaneRoleRequirement | None:
+    """Extract the lane roles a contract needs (OMN-19747).
+
+    Read from the top-level ``runtime_lane_roles`` key only. Absent means the
+    contract needs no particular kind of lane. A present value is validated by
+    the core model: an unknown role or an empty list raises, which the caller
+    records as a discovery error for this contract. A malformed requirement
+    never degrades to "any lane".
+    """
+    roles_raw = raw.get("runtime_lane_roles")
+    if roles_raw is None:
+        return None
+    return ModelRuntimeLaneRoleRequirement.model_validate({"roles": roles_raw})
 
 
 def _parse_handler_routing(
