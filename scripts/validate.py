@@ -32,6 +32,7 @@ Usage:
 
 import argparse
 import sys
+import tomllib
 from pathlib import Path
 
 # Add src to path for local development
@@ -97,6 +98,37 @@ KNOWN_ISSUES: dict[str, tuple[str, str]] = {
 # new os.environ/os.getenv reads (OMN-13566), and a knob here would be one more
 # lever that looks like a legitimate way to make a gate stop complaining.
 _ARCHITECTURE_LAYERS_TIMEOUT_SECONDS = 600
+
+
+def _canonical_repository_name(repo_root: Path) -> str | None:
+    """Return the baseline repository key declared by this repository.
+
+    A worktree directory is intentionally caller-selected, so its basename is
+    not a stable architecture-ratchet identity. The committed project metadata
+    is the repository-owned value that the baseline keys use instead. Missing
+    or malformed metadata is an error: the ratchet must not guess a key.
+    """
+    metadata_path = repo_root / "pyproject.toml"
+    try:
+        metadata = tomllib.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        print(
+            "Imperative Orchestrators: ERROR "
+            f"(cannot read repository metadata {metadata_path}: {exc})"
+        )
+        return None
+
+    project = metadata.get("project")
+    if not isinstance(project, dict):
+        print("Imperative Orchestrators: ERROR (missing [project] metadata)")
+        return None
+
+    name = project.get("name")
+    if not isinstance(name, str) or not name.strip():
+        print("Imperative Orchestrators: ERROR (missing project.name metadata)")
+        return None
+
+    return name
 
 
 def run_architecture_layers(verbose: bool = False) -> bool:
@@ -617,10 +649,9 @@ def run_imperative_orchestrators(
     from pathlib import Path as _Path
 
     repo_root = _Path.cwd()
-    # Derive the repo key from the working tree (worktrees nest the repo name in
-    # a ticket dir, so the immediate dir name is authoritative) instead of
-    # hardcoding it; baseline entries are keyed by repo::node.
-    repo_name = repo_root.name
+    repo_name = _canonical_repository_name(repo_root)
+    if repo_name is None:
+        return False
     baseline = load_baseline(
         repo_root / "architecture-handshakes" / "imperative-orchestrator-baseline.yaml"
     )
