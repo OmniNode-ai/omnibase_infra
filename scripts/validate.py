@@ -38,6 +38,56 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
+def resolve_canonical_repo_identity(repo_root: Path) -> str:
+    """Return the canonical repository identity for a Git worktree.
+
+    Ratchet baselines are keyed by the canonical clone name, not by a linked
+    worktree's arbitrary directory name. Git's common directory is shared by
+    the canonical checkout and every linked worktree, so its parent is the
+    only accepted source of that identity.
+
+    Args:
+        repo_root: Root of the checkout executing the validator.
+
+    Raises:
+        RuntimeError: If Git cannot prove a canonical common-directory
+            topology for ``repo_root``.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(
+            f"Cannot establish canonical Git identity for {repo_root}"
+        ) from error
+
+    common_dir = Path(result.stdout.strip())
+    if (
+        result.returncode != 0
+        or not common_dir.is_absolute()
+        or common_dir.name != ".git"
+        or not common_dir.is_dir()
+        or not common_dir.parent.name
+    ):
+        raise RuntimeError(f"Cannot establish canonical Git identity for {repo_root}")
+
+    return common_dir.parent.name
+
+
 def run_architecture(verbose: bool = False) -> bool:
     """Run architecture validation with infrastructure-specific exemptions."""
     try:
@@ -574,10 +624,7 @@ def run_imperative_orchestrators(
     from pathlib import Path as _Path
 
     repo_root = _Path.cwd()
-    # Derive the repo key from the working tree (worktrees nest the repo name in
-    # a ticket dir, so the immediate dir name is authoritative) instead of
-    # hardcoding it; baseline entries are keyed by repo::node.
-    repo_name = repo_root.name
+    repo_name = resolve_canonical_repo_identity(repo_root)
     baseline = load_baseline(
         repo_root / "architecture-handshakes" / "imperative-orchestrator-baseline.yaml"
     )
@@ -663,10 +710,7 @@ def run_orchestration_monoliths(
     from pathlib import Path as _Path
 
     repo_root = _Path.cwd()
-    # Derive the repo key from the working tree (worktrees nest the repo name in
-    # a ticket dir, so the immediate dir name is authoritative); baseline entries
-    # are keyed by repo::node.
-    repo_name = repo_root.name
+    repo_name = resolve_canonical_repo_identity(repo_root)
     baseline = load_monolith_baseline(
         repo_root / "architecture-handshakes" / "orchestration-monolith-baseline.yaml"
     )
@@ -742,7 +786,7 @@ def run_orchestrator_reducer_state(
     from pathlib import Path as _Path
 
     repo_root = _Path.cwd()
-    repo_name = repo_root.name
+    repo_name = resolve_canonical_repo_identity(repo_root)
 
     if files:
         node_dirs = node_dirs_for_changed_files(repo_root, files)
