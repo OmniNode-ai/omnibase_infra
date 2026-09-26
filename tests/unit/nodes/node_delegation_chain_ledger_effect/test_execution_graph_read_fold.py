@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -229,6 +230,32 @@ async def test_bounded_request_excludes_rows_above_selected_offset() -> None:
     assert len(terminal.result.replay.nodes) == 1
     assert terminal.result.replay.nodes[0].topic == HEAD_TOPIC
     assert terminal.result.replay.edges == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_full_read_withheld_count_is_visible_without_exposing_rows() -> None:
+    request = ModelExecutionGraphRequest(
+        correlation_id=uuid4(), cursor_mode=EnumExecutionGraphCursorMode.LATEST
+    )
+    tenant_id = uuid4()
+    admission = replace(
+        _admission(request, tenant_id),
+        withheld_envelope_ids=(uuid4(), uuid4()),
+        withheld_count=2,
+    )
+    terminal = await ExecutionGraphReadFold(
+        workflow_type="delegation-execution-graph-read",
+        read_clock=lambda: READ_AT,
+    )(request, _authority(request, tenant_id), _topology(), admission)
+
+    assert terminal.status == "completed"
+    assert terminal.result is not None
+    assert terminal.result.replay.withheld_count == 2
+    assert all(
+        str(envelope_id) not in terminal.model_dump_json()
+        for envelope_id in admission.withheld_envelope_ids
+    )
 
 
 @pytest.mark.asyncio

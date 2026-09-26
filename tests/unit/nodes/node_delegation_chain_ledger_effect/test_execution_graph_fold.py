@@ -16,6 +16,7 @@ from omnibase_core.models.execution_graph_replay import (
     ModelExecutionGraph,
     ModelExecutionGraphSourceCursor,
     ModelExecutionGraphStoredChainAnnotation,
+    ModelExecutionGraphStoredVerdictAnnotation,
 )
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.execution_graph_fold import (
@@ -84,6 +85,7 @@ def _record(
 def _request(
     *,
     stored_chain: tuple[ModelExecutionGraphStoredChainAnnotation, ...] = (),
+    stored_verdicts: tuple[ModelExecutionGraphStoredVerdictAnnotation, ...] = (),
     read_at: datetime | None = None,
 ) -> ModelExecutionGraphFoldRequest:
     topology = _topology(
@@ -111,6 +113,7 @@ def _request(
         ),
         read_at=read_at or datetime(2026, 9, 26, tzinfo=UTC),
         stored_chain=stored_chain,
+        stored_verdicts=stored_verdicts,
     )
 
 
@@ -156,6 +159,32 @@ def test_stored_rewrite_changes_annotations_but_not_replay() -> None:
         mode="json"
     )
     assert first.annotations != changed.annotations
+    assert next(node for node in changed.replay.nodes if node.id == LEFT).replay_green
+    assert changed.annotations.stored_chain[0].replay_green is False
+
+
+def test_same_key_stored_verdict_reprocessing_changes_only_annotations() -> None:
+    completed_at = datetime(2026, 9, 26, tzinfo=UTC)
+    stored = ModelExecutionGraphStoredVerdictAnnotation(
+        ticket_id="OMN-19729",
+        correlation_id=CORRELATION,
+        completed_at=completed_at,
+        status="verified",
+        outcome="done",
+        projection_cursor=7,
+    )
+    handler = DelegationExecutionGraphFold()
+    first = handler.handle(_request(stored_verdicts=(stored,)))
+    reprocessed = handler.handle(
+        _request(stored_verdicts=(stored.model_copy(update={"outcome": "refused"}),))
+    )
+
+    assert first.replay.model_dump(mode="json") == reprocessed.replay.model_dump(
+        mode="json"
+    )
+    assert first.annotations.stored_verdicts != reprocessed.annotations.stored_verdicts
+    assert first.annotations.stored_verdicts[0].projection_cursor == 7
+    assert reprocessed.annotations.stored_verdicts[0].projection_cursor == 7
 
 
 def test_timestamp_change_affects_only_labels() -> None:
@@ -164,7 +193,10 @@ def test_timestamp_change_affects_only_labels() -> None:
         update={
             "bounded_evidence": tuple(
                 item.model_copy(
-                    update={"event_timestamp": datetime(2040, 1, 1, tzinfo=UTC)}
+                    update={
+                        "event_timestamp": datetime(2040, 1, 1, tzinfo=UTC),
+                        "ledger_written_at": datetime(2041, 1, 1, tzinfo=UTC),
+                    }
                 )
                 for item in first_request.bounded_evidence
             )
@@ -178,6 +210,22 @@ def test_timestamp_change_affects_only_labels() -> None:
         mode="json"
     )
     assert first.labels != changed.labels
+
+
+def test_same_pinned_versions_refold_to_identical_replay_bytes() -> None:
+    request = _request()
+    handler = DelegationExecutionGraphFold()
+
+    first = handler.handle(request)
+    second = handler.handle(
+        request.model_copy(update={"read_at": datetime(2040, 1, 1, tzinfo=UTC)})
+    )
+
+    assert first.replay.model_dump(mode="json") == second.replay.model_dump(mode="json")
+    assert first.replay.fold_version == request.fold_version
+    assert first.replay.grader_version == request.grader_version
+    assert first.replay.verdict_reducer_version == request.verdict_reducer_version
+    assert first.replay.topology_version == request.topology.version
 
 
 def test_cursor_input_order_does_not_change_replay_bytes() -> None:
