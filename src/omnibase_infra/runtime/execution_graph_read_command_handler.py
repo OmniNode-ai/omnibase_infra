@@ -46,7 +46,8 @@ type ExecutionGraphReadFold = Callable[
     Awaitable[ModelExecutionGraphTerminalResult],
 ]
 type ExecutionGraphTerminalPublisher = Callable[
-    [ModelExecutionGraphTerminalResult], Awaitable[None]
+    [VerifiedExecutionGraphReadAuthority, ModelExecutionGraphTerminalResult],
+    Awaitable[None],
 ]
 
 
@@ -96,7 +97,7 @@ class ExecutionGraphReadCommandExecutor:
         admission = admit_current_ownership(evidence, self._topology.read_set)
         terminal = await self._fold(request, authority, self._topology, admission)
         self._validate_terminal(terminal, authority)
-        await self._publish_terminal(terminal)
+        await self._publish_terminal(authority, terminal)
         return terminal
 
     def _validate_terminal(

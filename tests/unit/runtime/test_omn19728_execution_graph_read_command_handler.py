@@ -236,7 +236,11 @@ async def test_signed_owner_first_admission_precedes_fold_and_published_terminal
         calls.append("fold")
         return _failed_terminal(authority)
 
-    async def publish(terminal: ModelExecutionGraphTerminalResult) -> None:
+    async def publish(
+        received_authority: VerifiedExecutionGraphReadAuthority,
+        terminal: ModelExecutionGraphTerminalResult,
+    ) -> None:
+        assert received_authority is authority
         assert terminal == _failed_terminal(authority)
         assert calls == ["owner-first-read", "fold"]
         calls.append("publish")

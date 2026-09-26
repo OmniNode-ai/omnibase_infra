@@ -2682,6 +2682,22 @@ pattern_exemptions:
     documentation:
       - OMN-1898 ModelMessageEnvelope identity contract
     ticket: OMN-19728
+  - file_pattern: 'runtime/models/model_execution_graph_terminal_publisher_config\.py'
+    violation_pattern: "Field 'runtime_id' should use UUID type instead of str"
+    reason: >
+      The terminal signer uses the human-readable runtime identity required by ModelMessageEnvelope.runtime_id.
+
+    documentation:
+      - OMN-1898 ModelMessageEnvelope identity contract
+    ticket: OMN-19728
+  - file_pattern: 'runtime/models/model_execution_graph_terminal_publisher_config\.py'
+    violation_pattern: "Field 'bus_id' should use UUID type instead of str"
+    reason: >
+      The terminal bus is a named trust-domain route required by ModelMessageEnvelope.bus_id.
+
+    documentation:
+      - OMN-1898 ModelMessageEnvelope identity contract
+    ticket: OMN-19728
   # ==========================================================================
   # Agent Status Event Model Exemptions (OMN-1849)
   # ==========================================================================
