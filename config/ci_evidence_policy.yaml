@@ -207,6 +207,15 @@ evidence_artifacts:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
       The .201 compose dev lane's lab pass for the merged sha (rule 24(a)). The lane half of the name is the routed deploy-agent instance's receipt lane (OMN-19507 AC2, config/deploy_lane_routing.yaml); omnibase_infra merges route to dev-201, so it reads compose-dev.
+  - id: lab-pass-observation-compose-dev
+    workflow: .github/workflows/runtime-rebuild-trigger.yml
+    job: verify-lane-converged
+    producer_step: "Emit the compose-dev lab-pass receipt"
+    artifact_name: lab-pass-observation-${{ needs.trigger-rebuild.outputs.receipt_lane }}-${{ needs.trigger-rebuild.outputs.source_sha }}
+    required_paths:
+      - ${LAB_PASS_DIR}/receipt.json
+    rationale: >-
+      The dev lane probed as it is, on a merge that published no rebuild, when the lane contains receipt-less runtime-affecting merges no run ever answered for (OMN-18976, the durable floor). It is keyed by the non-runtime merge and uploaded under a name no gate reads: it is the source the re-emission job re-keys onto each of those merges, exactly as a converged run's own receipt is. Written only while the deploy agent is idle, so a lane mid-rebuild is never probed for it.
   - id: lab-pass-receipt-compose-dev-reemitted
     workflow: .github/workflows/runtime-rebuild-trigger.yml
     job: reemit-queued-receipts
