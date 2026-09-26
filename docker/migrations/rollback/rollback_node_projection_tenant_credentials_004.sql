@@ -1,0 +1,22 @@
+-- OMN-17887: Rollback for
+-- nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql.
+--
+-- MANUAL EXECUTION ONLY, AND ONLY ON onex-lab. Never auto-applied (rollback/ is
+-- not mounted to docker-entrypoint-initdb.d and no runner reads it).
+--
+-- onex-lab is the one lane where the forward file was expected to drop
+-- something: the empty `tenant` schema its bootstrap created with owner
+-- owner_onex_tenant. This recreates that schema, empty, with the same owner. On
+-- every other lane `tenant` was absent, the forward file changed nothing, and
+-- this file must not be run there: it would create a schema that no
+-- declaration, grant or bridge entry names.
+--
+-- It restores the schema only. It does not remove the forward file's ledger
+-- row, so the node loop will not drop the schema again unless that row is
+-- removed too, and it does not restore a rollback eligibility the forward file
+-- never had (it is declared forward-only in config/migration_classes.yaml).
+--
+-- Run as a role that may create schemas in omnidash_analytics and act as
+-- owner_onex_tenant.
+
+CREATE SCHEMA IF NOT EXISTS tenant AUTHORIZATION owner_onex_tenant;

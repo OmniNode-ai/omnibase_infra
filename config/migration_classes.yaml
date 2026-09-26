@@ -324,6 +324,7 @@ migrations:
   forward/nodes/node_projection_tenant_credentials/0001_relax_name_provider_not_null.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_tenant_credentials/0002_credential_identity_not_null.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_INFEREN
   forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql: expand-only
+  forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql: forward-only # DROP
   forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_REGISTR
   forward/nodes/node_projection_tenant_registry/0001_grant_omninode_runtime_tenant_registry_mirror.sql: expand-only
   forward/nodes/node_projection_traces/0001_create_traces.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT TRACES_PKEY; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_TRACES_EVENT_COUNT; A

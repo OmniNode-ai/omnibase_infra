@@ -5098,6 +5098,23 @@ jobs:
             tests/integration/migrations/test_omn15683_mixed_representation_conversion.py \
             -v --tb=short -p no:randomly
 
+      # OMN-17887: the migration that drops onex-lab's empty `tenant` schema,
+      # applied by the real forward runner as a NOSUPERUSER role_omnidash to a
+      # schema that is absent, empty, holding a relation, foreign-owned, and
+      # already dropped. It shares the OMN-17886 gate's empty server and runs
+      # first: it refuses a server that already has its two databases or three
+      # roles, and drops all of them afterwards, so the gate still starts empty.
+      - name: Drop-empty-tenant-schema migration proof (OMN-17887)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMN17887_GATE_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.acl_gate_postgres.ports['5432'] }}/postgres
+          # With a Postgres in hand a SKIP is a vacuous green.
+          OMN17887_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_drop_empty_tenant_schema_omn17887.py \
+            -v --tb=short -p no:randomly
+
       # OMN-17886 AC4: build omnidash_analytics from EMPTY with the real forward
       # runner, then diff its omninode_internal ACLs against the topology. A
       # migration that confers an undeclared grant, or omits a declared one,

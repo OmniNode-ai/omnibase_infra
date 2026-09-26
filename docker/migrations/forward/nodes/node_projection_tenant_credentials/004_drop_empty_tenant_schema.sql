@@ -1,0 +1,53 @@
+-- OMN-17887: drop the empty `tenant` schema that onex-lab's bootstrap left behind.
+--
+-- WHY
+--   The ruling on OMN-17887 (2026-09-24, recorded on the ticket as comment
+--   fbad6d0c, condition 3) retires the `tenant` schema, makes `public` the tenant
+--   schema for good, and says that where onex-lab still has `tenant` and it is
+--   empty, it is dropped by forward migration. Every declaration, grant and
+--   bridge entry that named `tenant` is already gone (omnimarket#2847,
+--   omninode_infra#1660, omnibase_infra#4079, omninode_infra#1673).
+--   omninode_infra#1673 (e8f90853) also removed the lab bootstrap's
+--   `CREATE SCHEMA tenant AUTHORIZATION owner_onex_tenant`, but that bootstrap
+--   runs only at initdb and the lab volume persists, so the schema it already
+--   created stays until this file drops it.
+--
+-- LANES, AS MEASURED BEFORE THIS FILE WAS WRITTEN
+--   onex-lab (k3s on .201, omnidash_analytics): present with 0 relations
+--     (readback on OMN-17887, comment 539eab9c, 2026-09-25). Its owner was not
+--     read on the lab; the bootstrap line that created it, removed by
+--     omninode_infra#1673, named owner owner_onex_tenant.
+--   .201 shared dev lane (compose): absent, 2026-09-24T11:13:47Z.
+--   onex-dev RDS: absent, 2026-09-05 (SSM command 09b0d95b).
+--   No other lane was read. Where `tenant` is absent this file is a NOTICE and
+--   nothing else.
+--
+-- EXECUTING ROLE
+--   DROP SCHEMA needs ownership of `tenant`: the executing role must own it, be a
+--   member of its owner role, or be a superuser. It needs no CREATE privilege on
+--   the database. On onex-lab the node loop connects as role_omnidash, which the
+--   lab bootstrap makes a member of owner_onex_tenant (omninode_infra c2a58281,
+--   k8s/onex-lab/substitutions/postgres.yaml:397); the compose lanes run as
+--   postgres. Where `tenant` exists under an owner the executing role cannot act
+--   as, this file fails with "must be owner of schema tenant", that lane's
+--   migrate run stops, and nothing is ledgered.
+--
+-- FAIL-CLOSED, NEVER CASCADE
+--   RESTRICT refuses to drop a schema that holds any object and names the
+--   object. A non-empty `tenant` is not the empty schema the ruling covers, so
+--   this file stops rather than delete anything. Do not change it to CASCADE.
+--
+-- POST-CONDITION
+--   Static, in the style of 098 (no DO block): the division fails while a
+--   schema named `tenant` still exists.
+--
+-- ROLLBACK
+--   rollback/rollback_node_projection_tenant_credentials_004.sql: manual, and
+--   for onex-lab only. On a lane where `tenant` was absent this file changed
+--   nothing, so there is nothing to undo.
+--
+-- Proved by tests/integration/migrations/test_drop_empty_tenant_schema_omn17887.py.
+
+DROP SCHEMA IF EXISTS tenant RESTRICT;
+
+SELECT 1 / (1 - count(*))::int AS tenant_schema_absent_assertion FROM pg_catalog.pg_namespace WHERE nspname = 'tenant';
