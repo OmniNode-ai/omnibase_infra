@@ -34,10 +34,21 @@ THE FOUR CLAUSES
                      ``result.txt`` is the accepted response.
     local_model      the receipt's routing tier is ``local``, its model is the
                      id the local server itself reports serving, its endpoint
-                     is that server's loopback address, and every attempt on
-                     the ladder was a local one.
+                     is that server's declared address and port, and every
+                     attempt on the ladder was a local one.
     zero_provider    the whole customer session made no connect() to any
-                     non-loopback address and performed no name lookup.
+                     address other than loopback and the declared model
+                     server, and performed no name lookup.
+
+THE MODEL SERVER THE CUSTOMER DECLARES (OMN-19805)
+    A customer's own model may run on the machine itself or on another machine
+    in the customer's own private network (a GPU box beside the laptop). The
+    probe takes that server's address as ``--model-host``: an IP literal, so the
+    run needs no name lookup, and loopback or a private address only. A public
+    address is refused before anything runs, because a model reached over the
+    internet is a provider. Only a connect to exactly that host and port counts
+    as the model; every other non-loopback connect is external. The default is
+    loopback, which is the original shape of this criterion.
 
 AN UNPROVEN ZERO IS A FAILURE, NOT A PASS
     "No provider call was recorded" means nothing unless the instrument that
@@ -45,7 +56,7 @@ AN UNPROVEN ZERO IS A FAILURE, NOT A PASS
     positive controls make that falsifiable in the same invocation:
 
     1. the configured run MUST show a connect() to the model server's own
-       loopback port, AND the server's own token counter must have moved.
+       declared address and port, AND the server's own token counter must have moved.
        Zero model connects means strace was blind to the process that did the
        work, so the zero it reports for provider calls is unproven.
     2. a deliberate outbound connect, traced by the SAME wrapper and classified
@@ -129,6 +140,9 @@ OVERLAY_RELATIVE_PATH: Final[str] = ".omninode/delegation/bifrost_overrides.yaml
 OUTBOUND_CONTROL_HOST: Final[str] = "1.1.1.1"
 OUTBOUND_CONTROL_PORT: Final[int] = 443
 
+#: The model host when the customer declares none: their own machine.
+LOOPBACK_MODEL_HOST: Final[str] = "127.0.0.1"
+
 #: The shipped local backends the customer overlay points at their own model.
 #: The shipped routing sends code classes to ``local-coder`` and prose classes
 #: (``document`` among them) to ``local-heavy-reasoning``, so both are declared.
@@ -185,6 +199,47 @@ def _is_loopback(host: str) -> bool:
     return address.is_loopback
 
 
+def _ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return address.ipv4_mapped
+    return address
+
+
+def validate_model_host(host: str) -> str:
+    """The declared model host, or ProbeInputError when it cannot be one.
+
+    An IP literal only (a hostname would need the name lookup this probe
+    grades as a failure), and loopback or private only: a public address is a
+    provider, not the customer's own model.
+    """
+    address = _ip(host)
+    if address is None:
+        raise ProbeInputError(
+            f"model host {host!r} is not an IP literal; a customer-local model is "
+            "declared by address so the run needs no name lookup"
+        )
+    if not (address.is_loopback or (address.is_private and not address.is_global)):
+        raise ProbeInputError(
+            f"model host {host!r} is neither loopback nor a private address; a model "
+            "reached over the public internet is a provider, not a customer-local model"
+        )
+    return str(address)
+
+
+def _is_model_host(host: str, model_host: str) -> bool:
+    """Whether ``host`` is the declared model host. Any loopback matches loopback."""
+    address, declared = _ip(host), _ip(model_host)
+    if address is None or declared is None:
+        return False
+    if declared.is_loopback:
+        return address.is_loopback
+    return address == declared
+
+
 def classify(
     family: str,
     host: str | None,
@@ -192,15 +247,16 @@ def classify(
     path: str | None,
     *,
     model_port: int,
+    model_host: str = LOOPBACK_MODEL_HOST,
 ) -> str:
     """Name what a connect() was for. The grader's whole vocabulary."""
     if family in ("AF_INET", "AF_INET6") and host is not None:
+        if port == model_port and _is_model_host(host, model_host):
+            return "model"
         if not _is_loopback(host):
             return "external"
         if port == 53:
             return "name_lookup"
-        if port == model_port:
-            return "model"
         return "loopback_other"
     if family == "AF_UNIX":
         # glibc asks nscd before it asks DNS; a connect to its socket is a
@@ -211,7 +267,9 @@ def classify(
     return "other_family"
 
 
-def parse_connects(strace_text: str, *, model_port: int) -> list[Connect]:
+def parse_connects(
+    strace_text: str, *, model_port: int, model_host: str = LOOPBACK_MODEL_HOST
+) -> list[Connect]:
     """Every connect() in a ``strace -f -e trace=connect`` log, classified.
 
     ``<... connect resumed>`` continuation lines carry no address and are
@@ -251,7 +309,14 @@ def parse_connects(strace_text: str, *, model_port: int) -> list[Connect]:
                 host,
                 port,
                 path,
-                classify(family, host, port, path, model_port=model_port),
+                classify(
+                    family,
+                    host,
+                    port,
+                    path,
+                    model_port=model_port,
+                    model_host=model_host,
+                ),
             )
         )
     return connects
@@ -296,12 +361,18 @@ def _load_json(text: str | None) -> Any:
         return None
 
 
+def declared_model_host(obs: Mapping[str, Any]) -> str:
+    """The model host a recorded session declared. A record without one used loopback."""
+    return str(obs.get("model_host") or LOOPBACK_MODEL_HOST)
+
+
 def _session_connects(
     obs: Mapping[str, Any], step: str, model_port: int
 ) -> list[Connect]:
     return parse_connects(
         obs.get("steps", {}).get(step, {}).get("strace", "") or "",
         model_port=model_port,
+        model_host=declared_model_host(obs),
     )
 
 
@@ -446,8 +517,10 @@ def grade_local_model(obs: Mapping[str, Any], receipt: Any) -> Clause:
     clause = Clause("local_model")
     served = obs.get("served_models")
     model_port = obs.get("model_port")
+    model_host = declared_model_host(obs)
     clause.evidence["served_models"] = served
     clause.evidence["model_port"] = model_port
+    clause.evidence["model_host"] = model_host
     if not served:
         clause.reasons.append("the local server's own /v1/models readback is absent")
         return clause
@@ -475,9 +548,9 @@ def grade_local_model(obs: Mapping[str, Any], receipt: Any) -> Clause:
             f"receipt model {model!r} is not an id the local server serves ({served})"
         )
     parsed = urllib.parse.urlparse(endpoint or "")
-    if not parsed.hostname or not _is_loopback(parsed.hostname):
+    if not parsed.hostname or not _is_model_host(parsed.hostname, model_host):
         clause.reasons.append(
-            f"receipt endpoint {endpoint!r} is not a loopback address"
+            f"receipt endpoint {endpoint!r} is not the declared model host {model_host}"
         )
     elif parsed.port != model_port:
         clause.reasons.append(
@@ -506,6 +579,8 @@ def grade_local_model(obs: Mapping[str, Any], receipt: Any) -> Clause:
 def grade_zero_provider(obs: Mapping[str, Any]) -> Clause:
     clause = Clause("zero_provider")
     model_port = int(obs.get("model_port") or 0)
+    model_host = declared_model_host(obs)
+    clause.evidence["model_host"] = model_host
     steps = obs.get("steps") or {}
     session_steps = [s for s in ("init", "unconfigured", "configured") if s in steps]
     clause.evidence["traced_steps"] = session_steps
@@ -521,7 +596,8 @@ def grade_zero_provider(obs: Mapping[str, Any]) -> Clause:
         lookups = [c.as_dict() for c in connects if c.kind == "name_lookup"]
         if external:
             clause.reasons.append(
-                f"{step}: {len(external)} connect(s) to a non-loopback address: {external[:5]}"
+                f"{step}: {len(external)} connect(s) to an address that is neither loopback "
+                f"nor the declared model server: {external[:5]}"
             )
         if lookups:
             clause.reasons.append(
@@ -552,7 +628,11 @@ def grade_zero_provider(obs: Mapping[str, Any]) -> Clause:
         )
     else:
         control_counts = count_kinds(
-            parse_connects(control.get("strace", "") or "", model_port=model_port)
+            parse_connects(
+                control.get("strace", "") or "",
+                model_port=model_port,
+                model_host=model_host,
+            )
         )
         clause.evidence["outbound_control"] = control_counts
         if control_counts.get("external", 0) < 1:
@@ -637,7 +717,7 @@ def grade(obs: Mapping[str, Any], *, as_of: str | None = None) -> Record:
 
 
 def _http_get(url: str, timeout: float = 10.0) -> str:
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - loopback URL from argv
+    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - validated loopback or private model URL from argv
         body: bytes = response.read()
     return body.decode("utf-8", "replace")
 
@@ -647,18 +727,51 @@ def served_model_ids(base_url: str) -> list[str]:
     return sorted({str(item["id"]) for item in payload.get("data", []) if "id" in item})
 
 
-def tokens_predicted(base_url: str) -> int:
-    """llama-server's own generated-token counter (``--metrics``)."""
-    for line in _http_get(f"{base_url}/metrics").splitlines():
-        if line.startswith("llamacpp:tokens_predicted_total"):
-            return int(float(line.split()[-1]))
+#: The server's own generated-token counter, per server build. llama-server
+#: exposes the first with ``--metrics``; vLLM exposes the second, once per
+#: engine and model label set, so every sample is summed.
+TOKEN_COUNTERS: Final[tuple[str, ...]] = (
+    "llamacpp:tokens_predicted_total",
+    "vllm:generation_tokens_total",
+)
+
+
+def tokens_predicted_from_metrics(text: str) -> int:
+    """Sum the first token counter present in a Prometheus text exposition."""
+    for counter in TOKEN_COUNTERS:
+        samples = [
+            line
+            for line in text.splitlines()
+            if line.startswith(counter)
+            and line[len(counter) : len(counter) + 1] in ("{", " ")
+        ]
+        if samples:
+            return sum(int(float(line.split()[-1])) for line in samples)
     raise ProbeInputError(
-        "model server exposes no llamacpp:tokens_predicted_total; start it with --metrics"
+        f"model server exposes none of {list(TOKEN_COUNTERS)}; a llama-server "
+        "needs --metrics"
     )
 
 
-def bifrost_overlay_yaml(served_model: str, model_port: int, max_tokens: int) -> str:
-    """The customer's overlay: the shipped local backends, pointed at loopback."""
+def tokens_predicted(base_url: str) -> int:
+    """The model server's own generated-token counter."""
+    return tokens_predicted_from_metrics(_http_get(f"{base_url}/metrics"))
+
+
+def model_base_url(model_host: str, model_port: int) -> str:
+    """``http://host:port`` for a validated IP literal, bracketing IPv6."""
+    host = f"[{model_host}]" if ":" in model_host else model_host
+    return f"http://{host}:{model_port}"
+
+
+def bifrost_overlay_yaml(
+    served_model: str,
+    model_port: int,
+    max_tokens: int,
+    model_host: str = LOOPBACK_MODEL_HOST,
+) -> str:
+    """The customer's overlay: the shipped local backends, pointed at their model."""
+    endpoint = f"{model_base_url(model_host, model_port)}/v1/chat/completions"
     lines = [
         'config_version: "2.1.0"',
         'schema_version: "bifrost_delegation.v1"',
@@ -667,8 +780,8 @@ def bifrost_overlay_yaml(served_model: str, model_port: int, max_tokens: int) ->
     for backend_id in LOCAL_BACKEND_IDS:
         lines += [
             f"  - backend_id: {backend_id}",
-            # A customer has no contract resolver: their own loopback model is what C13 names.
-            f'    endpoint_url: "http://127.0.0.1:{model_port}/v1/chat/completions"',  # url-authority-ok: customer loopback model
+            # A customer has no contract resolver: their own model is what C13 names.
+            f'    endpoint_url: "{endpoint}"',
             f'    model_name: "{served_model}"',
             "    tier: local",
             "    timeout_ms: 240000",
@@ -773,6 +886,8 @@ def _run_step(
 
 
 def observe_live(args: argparse.Namespace) -> dict[str, Any]:
+    # First: a public model host is refused before anything else is checked or run.
+    model_host = validate_model_host(args.model_host)
     strace = shutil.which("strace")
     if strace is None:
         raise ProbeInputError(
@@ -787,7 +902,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     onex = customer_bin / "onex"
     if not onex.exists():
         raise ProbeInputError(f"no onex at {onex}; the customer install did not happen")
-    base_url = f"http://127.0.0.1:{args.model_port}"  # url-authority-ok: the probe's own loopback model server
+    base_url = model_base_url(model_host, int(args.model_port))
     try:
         served = served_model_ids(base_url)
         tokens_before_unconfigured = tokens_predicted(base_url)
@@ -840,7 +955,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     overlay_path.parent.mkdir(parents=True, exist_ok=True)
     overlay_path.write_text(
         bifrost_overlay_yaml(
-            args.served_model, int(args.model_port), int(args.max_tokens)
+            args.served_model, int(args.model_port), int(args.max_tokens), model_host
         )
     )
     # The negative control's own run directory is set aside so the configured
@@ -927,6 +1042,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         "as_of": datetime.datetime.now(datetime.UTC).isoformat(),
         "prompt": args.prompt,
         "model_port": int(args.model_port),
+        "model_host": model_host,
         "served_models": served,
         "model_artifact": {
             "file": args.model_file,
@@ -1004,6 +1120,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--workdir", required=True)
     run.add_argument("--trace-dir", required=True)
     run.add_argument("--model-port", required=True, type=int)
+    # The customer's own model server: loopback, or a private address in the
+    # customer's own network (OMN-19805). Never a public address.
+    run.add_argument("--model-host", default=LOOPBACK_MODEL_HOST)
     run.add_argument("--served-model", required=True)
     run.add_argument("--model-file", default="")
     run.add_argument("--model-sha256", default="")
