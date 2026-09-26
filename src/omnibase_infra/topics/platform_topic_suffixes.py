@@ -755,12 +755,6 @@ SUFFIX_DELEGATION_COMPLETED: str = "onex.evt.omnibase-infra.delegation-completed
 SUFFIX_DELEGATION_FAILED: str = "onex.evt.omnibase-infra.delegation-failed.v1"
 """Event topic for failed delegation attempts."""
 
-SUFFIX_DELEGATION_COMPLETED_V2: str = "onex.evt.omnibase-infra.delegation-completed.v2"
-"""Additive v2 event topic for successful delegation completions (OMN-17013)."""
-
-SUFFIX_DELEGATION_FAILED_V2: str = "onex.evt.omnibase-infra.delegation-failed.v2"
-"""Additive v2 event topic for failed delegation attempts (OMN-17013)."""
-
 SUFFIX_DELEGATION_QUALITY_GATE_RESULT: str = (
     "onex.evt.omnibase-infra.quality-gate-result.v1"
 )
@@ -1316,19 +1310,6 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(
         suffix=SUFFIX_DELEGATION_FAILED,
-        partitions=3,
-        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
-    ),
-    # OMN-17013: v2 terminal topics remain additive while v1 stays readable.
-    # The producer owns activation; this registry keeps static topic parity
-    # aligned with the forwarder mirror declaration and tenant provisioning.
-    ModelTopicSpec(
-        suffix=SUFFIX_DELEGATION_COMPLETED_V2,
-        partitions=3,
-        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
-    ),
-    ModelTopicSpec(
-        suffix=SUFFIX_DELEGATION_FAILED_V2,
         partitions=3,
         kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),

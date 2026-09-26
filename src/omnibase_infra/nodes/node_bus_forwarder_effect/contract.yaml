@@ -13,7 +13,7 @@ node_version:
   minor: 1
   patch: 2
 description: >
-  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16204: mirror_topics.outbound widened with the bare omniclaude session-started/session-ended.v1 lifecycle pair (content-free, per operator OD-9 ruling 2026-08-18) -- contract-armed only, actual cloud delivery still gated behind OMN-14323 gate 1 (MSK network/IAM). OMN-17013: additive v2 delegation terminal topics are contract-armed for consumer-before-producer tenant forwarding while v1 remains readable.
+  Trust-boundary effect node that mirrors contract-declared tenant gateway topics between a local runtime bus and the hosted cloud Kafka edge. The node owns all publishes; handlers only validate and return transformed envelopes. OMN-15792: the outbound handler resolves its physical wire topic through the single runtime topic resolver (resolve_physical_topic) instead of calling the prefix_topic primitive directly -- internal implementation change, wire format and behavior unchanged. OMN-16204: mirror_topics.outbound widened with the bare omniclaude session-started/session-ended.v1 lifecycle pair (content-free, per operator OD-9 ruling 2026-08-18) -- contract-armed only, actual cloud delivery still gated behind OMN-14323 gate 1 (MSK network/IAM). OMN-17013: additive v2 delegation terminal topics configure consumer-before-producer forwarding while v1 remains readable; this mirror declaration does not provision v2.
 
 runtime_profiles:
   - canary
@@ -54,9 +54,9 @@ config:
         - "onex.evt.omnibase-infra.inference-response.v1"
         - "onex.evt.omnibase-infra.delegation-completed.v1"
         - "onex.evt.omnibase-infra.delegation-failed.v1"
-        # OMN-17013: additive v2 terminal receipts.  The orchestrator owns
-        # producer activation; retaining v1 above keeps the overlap window
-        # readable while tenant provisioning can prepare v2 wire topics.
+        # OMN-17013: additive v2 terminal receipts. The orchestrator owns
+        # producer declaration, provisioning, and activation; this only
+        # configures forwarding while retaining the readable v1 overlap.
         - "onex.evt.omnibase-infra.delegation-completed.v2"
         - "onex.evt.omnibase-infra.delegation-failed.v2"
         - "onex.evt.omniintelligence.llm-call-completed.v1"
