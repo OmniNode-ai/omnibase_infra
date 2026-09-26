@@ -160,7 +160,7 @@ class TestHandlerRuntimeErrorTriage:
         )
         event = _make_error_event()
 
-        result = await handler.handle(event)
+        result = await handler.triage_runtime_error(event)
 
         assert result.action == "alert"
         assert result.matched_rule == "alert_all"
@@ -189,7 +189,7 @@ class TestHandlerRuntimeErrorTriage:
         )
         event = _make_error_event()
 
-        result = await handler.handle(event)
+        result = await handler.triage_runtime_error(event)
 
         assert result.action == "suppress"
         assert result.incident_state == "suppressed"
@@ -217,7 +217,7 @@ class TestHandlerRuntimeErrorTriage:
         )
         event = _make_error_event()
 
-        result = await handler.handle(event)
+        result = await handler.triage_runtime_error(event)
 
         assert result.action == "ticket"
         assert result.incident_state == "ticketed"
@@ -246,7 +246,7 @@ class TestHandlerRuntimeErrorTriage:
         event = _make_error_event(
             error_category=EnumRuntimeErrorCategory.KAFKA_CONSUMER,
         )
-        result = await handler.handle(event)
+        result = await handler.triage_runtime_error(event)
 
         assert result.correlated_consumer_fingerprint == "consumer-fp-123"
 
@@ -271,7 +271,7 @@ class TestHandlerRuntimeErrorTriage:
             error_category=EnumRuntimeErrorCategory.DATABASE,
             raw_message="connection refused",
         )
-        result = await handler.handle(event)
+        result = await handler.triage_runtime_error(event)
 
         assert result.correlated_consumer_fingerprint is None
 
@@ -301,7 +301,7 @@ class TestHandlerRuntimeErrorTriage:
             raw_message="connection error",
         )
 
-        result = await handler.handle(event)
+        result = await handler.triage_runtime_error(event)
 
         assert result.matched_rule == "high_priority"
         assert result.action == "ticket"
@@ -370,10 +370,20 @@ class TestNoOrphanedErrorTriagedEmission:
             pytest.fail(
                 f"triage handler still demands a bus dependency to construct: {exc}"
             )
-        result = await handler.handle(_make_error_event())
+        result = await handler.triage_runtime_error(_make_error_event())
 
         assert result.action == "alert"
         assert result.matched_rule == "alert_all"
+
+    async def test_handle_returns_an_empty_effect_output(self) -> None:
+        """The bus-dispatched entrypoint must not turn triage details into an event."""
+        handler = HandlerRuntimeErrorTriage()
+
+        output = await handler.handle(_make_error_event())
+
+        assert output.node_kind.value == "effect"
+        assert output.events == ()
+        assert output.result is None
 
     def test_topic_registry_no_longer_declares_the_orphan(self) -> None:
         """The topic key and its provisioning spec are removed with the emission."""
