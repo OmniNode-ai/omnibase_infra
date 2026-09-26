@@ -19,11 +19,17 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from typing import TYPE_CHECKING
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.runtime.projection_tenant_authority import (
     VerifiedProjectionTenantAuthority,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.runtime.execution_graph_read_authority import (
+        VerifiedExecutionGraphReadAuthority,
+    )
 
 # The dispatch payload remains strictly JSON-safe.  The original typed envelope
 # travels beside it only to preserve transport identity such as envelope_id.  It
@@ -38,6 +44,9 @@ _CURRENT_DISPATCH_ENVELOPE: ContextVar[ModelEventEnvelope[object] | None] = Cont
 _CURRENT_PROJECTION_TENANT_AUTHORITY: ContextVar[
     VerifiedProjectionTenantAuthority | None
 ] = ContextVar("onex_current_projection_tenant_authority", default=None)
+_CURRENT_EXECUTION_GRAPH_READ_AUTHORITY: ContextVar[object | None] = ContextVar(
+    "onex_current_execution_graph_read_authority", default=None
+)
 
 
 @contextmanager
@@ -75,9 +84,36 @@ def current_projection_tenant_authority() -> VerifiedProjectionTenantAuthority |
     return _CURRENT_PROJECTION_TENANT_AUTHORITY.get()
 
 
+@contextmanager
+def bind_execution_graph_read_authority(
+    authority: VerifiedExecutionGraphReadAuthority,
+) -> Iterator[None]:
+    """Bind exactly one verified graph-read capability for one dispatch."""
+    from omnibase_infra.runtime.execution_graph_read_authority import (
+        VerifiedExecutionGraphReadAuthority,
+    )
+
+    if type(authority) is not VerifiedExecutionGraphReadAuthority:
+        raise TypeError("execution graph authority must be a verified capability")
+    token = _CURRENT_EXECUTION_GRAPH_READ_AUTHORITY.set(authority)
+    try:
+        yield
+    finally:
+        _CURRENT_EXECUTION_GRAPH_READ_AUTHORITY.reset(token)
+
+
+def current_execution_graph_read_authority() -> (
+    VerifiedExecutionGraphReadAuthority | None
+):
+    """Return the verified graph-read capability for this dispatch, if any."""
+    return _CURRENT_EXECUTION_GRAPH_READ_AUTHORITY.get()  # type: ignore[return-value]
+
+
 __all__ = [
     "bind_dispatch_envelope",
+    "bind_execution_graph_read_authority",
     "bind_projection_tenant_authority",
     "current_dispatch_envelope",
+    "current_execution_graph_read_authority",
     "current_projection_tenant_authority",
 ]

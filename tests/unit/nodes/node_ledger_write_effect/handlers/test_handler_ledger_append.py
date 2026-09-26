@@ -71,10 +71,7 @@ def make_handler_with_mock_db(
 def make_db_result(rows: list[dict[str, object]]) -> MagicMock:
     """Build a mock ModelHandlerOutput[ModelDbQueryResponse] with given rows."""
     correlation_id = uuid4()
-    function_rows = [
-        {"duplicate": False, "ingest_epoch": 1, "ingest_seq": 1, **row} for row in rows
-    ]
-    payload = ModelDbQueryPayload(rows=function_rows, row_count=len(function_rows))
+    payload = ModelDbQueryPayload(rows=rows, row_count=len(rows))
     response = ModelDbQueryResponse(
         status=EnumResponseStatus.SUCCESS,
         payload=payload,
@@ -210,7 +207,7 @@ class TestHandlerLedgerAppendInitialization:
 
 
 class TestHandlerLedgerAppendDuplicateDetection:
-    """Tests for the stored function's explicit duplicate and cursor result."""
+    """Tests for duplicate detection via RETURNING clause."""
 
     @pytest.mark.asyncio
     @pytest.mark.unit
@@ -234,20 +231,9 @@ class TestHandlerLedgerAppendDuplicateDetection:
     @pytest.mark.asyncio
     @pytest.mark.unit
     async def test_duplicate_event_returns_no_entry_id(self) -> None:
-        """An exact duplicate is explicit and does not claim legacy ordering."""
+        """When RETURNING produces no rows (ON CONFLICT), result has duplicate=True."""
         handler, db_handler = make_handler_with_mock_db()
-        db_handler.execute = AsyncMock(
-            return_value=make_db_result(
-                rows=[
-                    {
-                        "ledger_entry_id": str(uuid4()),
-                        "duplicate": True,
-                        "ingest_epoch": None,
-                        "ingest_seq": None,
-                    }
-                ]
-            )
-        )
+        db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
 
         payload = make_minimal_payload()
         result = await handler.append(payload)
@@ -261,11 +247,7 @@ class TestHandlerLedgerAppendDuplicateDetection:
     async def test_duplicate_preserves_topic_partition_offset(self) -> None:
         """Duplicate result carries original topic/partition/offset for tracing."""
         handler, db_handler = make_handler_with_mock_db()
-        db_handler.execute = AsyncMock(
-            return_value=make_db_result(
-                rows=[{"duplicate": True, "ingest_epoch": 1, "ingest_seq": 1}]
-            )
-        )
+        db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
 
         payload = make_minimal_payload(
             topic="prod.orders.v2", partition=3, kafka_offset=999
@@ -275,36 +257,6 @@ class TestHandlerLedgerAppendDuplicateDetection:
         assert result.topic == "prod.orders.v2"
         assert result.partition == 3
         assert result.kafka_offset == 999
-
-    @pytest.mark.asyncio
-    @pytest.mark.unit
-    async def test_mixed_null_cursor_is_refused(self) -> None:
-        """A partially versioned row must not leak into a bounded replay."""
-        handler, db_handler = make_handler_with_mock_db()
-        db_handler.execute = AsyncMock(
-            return_value=make_db_result(
-                rows=[
-                    {
-                        "ledger_entry_id": str(uuid4()),
-                        "ingest_epoch": 1,
-                        "ingest_seq": None,
-                    }
-                ]
-            )
-        )
-
-        with pytest.raises(RuntimeHostError, match="invalid ingest cursor"):
-            await handler.append(make_minimal_payload())
-
-    @pytest.mark.asyncio
-    @pytest.mark.unit
-    async def test_missing_function_row_is_refused(self) -> None:
-        """A missing result is not misreported as an exact duplicate."""
-        handler, db_handler = make_handler_with_mock_db()
-        db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
-
-        with pytest.raises(RuntimeHostError, match="exactly one row"):
-            await handler.append(make_minimal_payload())
 
     @pytest.mark.asyncio
     @pytest.mark.unit
@@ -503,11 +455,7 @@ class TestHandlerLedgerAppendHandle:
     async def test_handle_coerces_dict_payload(self) -> None:
         """handle() validates a raw dict payload into ModelPayloadLedgerAppend."""
         handler, db_handler = make_handler_with_mock_db()
-        db_handler.execute = AsyncMock(
-            return_value=make_db_result(
-                rows=[{"duplicate": True, "ingest_epoch": 1, "ingest_seq": 1}]
-            )
-        )
+        db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
 
         envelope = MagicMock()
         envelope.payload = {
@@ -529,11 +477,7 @@ class TestHandlerLedgerAppendHandle:
     async def test_handle_propagates_envelope_correlation_id(self) -> None:
         """handle() copies correlation_id from the envelope onto the output."""
         handler, db_handler = make_handler_with_mock_db()
-        db_handler.execute = AsyncMock(
-            return_value=make_db_result(
-                rows=[{"duplicate": True, "ingest_epoch": 1, "ingest_seq": 1}]
-            )
-        )
+        db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
 
         correlation_id = uuid4()
         envelope = MagicMock()
@@ -551,11 +495,7 @@ class TestHandlerLedgerAppendHandle:
     ) -> None:
         """handle() never leaves correlation_id unset — it defaults to a fresh UUID."""
         handler, db_handler = make_handler_with_mock_db()
-        db_handler.execute = AsyncMock(
-            return_value=make_db_result(
-                rows=[{"duplicate": True, "ingest_epoch": 1, "ingest_seq": 1}]
-            )
-        )
+        db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
 
         envelope = MagicMock()
         envelope.payload = make_minimal_payload(correlation_id=None)

@@ -100,6 +100,7 @@ from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
 from omnibase_core.models.dispatch.model_message_delivery_context import (
     ModelMessageDeliveryContext,
 )
+from omnibase_core.models.envelope.model_message_envelope import ModelMessageEnvelope
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
@@ -137,11 +138,18 @@ from omnibase_infra.runtime.delivery_context import (
     delivery_context_from_message,
     engine_type_accepts_delivery,
 )
+from omnibase_infra.runtime.dispatch_envelope_context import (
+    bind_execution_graph_read_authority,
+)
 from omnibase_infra.topics import TopicResolver, create_topic_resolver
 from omnibase_infra.utils import compute_consumer_group_id
 from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
 if TYPE_CHECKING:
+    from omnibase_core.protocols.crypto.protocol_key_provider import ProtocolKeyProvider
+    from omnibase_infra.runtime.models.model_execution_graph_read_ingress_config import (
+        ModelExecutionGraphReadIngressConfig,
+    )
     from omnibase_infra.runtime.service_dispatch_result_applier import (
         DispatchResultApplier,
     )
@@ -302,6 +310,9 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         retry_config: ModelConsumerRetryConfig | None = None,
         offset_policy: ModelOffsetPolicyConfig | None = None,
         topic_deny_patterns: tuple[str, ...] = (),
+        execution_graph_read_ingress: ModelExecutionGraphReadIngressConfig
+        | None = None,
+        execution_graph_read_key_provider: ProtocolKeyProvider | None = None,
     ) -> None:
         """Initialize event bus wiring.
 
@@ -355,6 +366,12 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             raise ValueError("service must be a non-empty string")
         if not version or not version.strip():
             raise ValueError("version must be a non-empty string")
+        if (execution_graph_read_ingress is None) != (
+            execution_graph_read_key_provider is None
+        ):
+            raise ValueError(
+                "execution graph ingress config and key provider are required together"
+            )
 
         self._event_bus = event_bus
         self._dispatch_engine = dispatch_engine
@@ -369,6 +386,8 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         self._retry_config = retry_config or ModelConsumerRetryConfig.create_standard()
         self._offset_policy = offset_policy or ModelOffsetPolicyConfig()
         self._topic_deny_patterns = topic_deny_patterns
+        self._execution_graph_read_ingress = execution_graph_read_ingress
+        self._execution_graph_read_key_provider = execution_graph_read_key_provider
         self._unsubscribe_callables: list[Callable[[], Awaitable[None]]] = []
         self._logger = logging.getLogger(__name__)
         # Track retry attempts per correlation_id for infrastructure errors.
@@ -469,6 +488,30 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 node_name,
             )
             return
+
+        signed_topics = {
+            self.resolve_topic(topic) for topic in subcontract.signed_ingress_topics
+        }
+        configured_topic = (
+            self._execution_graph_read_ingress.command_topic
+            if self._execution_graph_read_ingress is not None
+            else None
+        )
+        if signed_topics and (
+            self._execution_graph_read_key_provider is None
+            or signed_topics != {configured_topic}
+        ):
+            raise ProtocolConfigurationError(
+                "signed ingress requires matching verifier configuration"
+            )
+        if (
+            configured_topic
+            in {self.resolve_topic(topic) for topic in subcontract.subscribe_topics}
+            and configured_topic not in signed_topics
+        ):
+            raise ProtocolConfigurationError(
+                "signed ingress verifier topic must be declared by the contract"
+            )
 
         for topic_suffix in subcontract.subscribe_topics:
             full_topic = self.resolve_topic(topic_suffix)
@@ -852,7 +895,55 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             )
 
             try:
-                envelope = self._deserialize_to_envelope(message, topic)
+                graph_authority = None
+                if (
+                    self._execution_graph_read_ingress is not None
+                    and topic == self._execution_graph_read_ingress.command_topic
+                ):
+                    provider = self._execution_graph_read_key_provider
+                    if provider is None:
+                        raise ProtocolConfigurationError(
+                            "signed ingress lacks a verified key provider"
+                        )
+                    try:
+                        from omnibase_infra.runtime.execution_graph_read_authority import (
+                            ExecutionGraphReadAuthorityError,
+                            verify_signed_execution_graph_read_authority,
+                        )
+
+                        signed = ModelMessageEnvelope[object].model_validate(
+                            json.loads(message.value.decode("utf-8"))
+                        )
+                        graph_authority = verify_signed_execution_graph_read_authority(
+                            signed,
+                            provider,
+                            self._execution_graph_read_ingress.gateway_policy,
+                        )
+                        payload = signed.payload
+                        if not isinstance(payload, dict):
+                            raise ExecutionGraphReadAuthorityError(
+                                "graph read signed payload is not an event envelope"
+                            )
+                        expected_event_type = self._derive_event_type_from_topic(topic)
+                        if payload.get("event_type") != expected_event_type:
+                            raise ExecutionGraphReadAuthorityError(
+                                "graph read event type does not match command topic"
+                            )
+                    except (
+                        ExecutionGraphReadAuthorityError,
+                        ValidationError,
+                        json.JSONDecodeError,
+                        UnicodeDecodeError,
+                    ) as exc:
+                        raise ProtocolConfigurationError(
+                            "execution graph command requires trusted signed authority",
+                            context=ModelInfraErrorContext.with_correlation(
+                                operation="execution_graph_ingress"
+                            ),
+                        ) from exc
+                    envelope = ModelEventEnvelope[object].model_validate(payload)
+                else:
+                    envelope = self._deserialize_to_envelope(message, topic)
                 correlation_id = envelope.correlation_id or uuid4()
 
                 self._logger.info(
@@ -932,9 +1023,15 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     )
                     else {}
                 )
-                result = await self._dispatch_engine.dispatch(
-                    topic, envelope, **delivery_kwargs
-                )
+                if graph_authority is None:
+                    result = await self._dispatch_engine.dispatch(
+                        topic, envelope, **delivery_kwargs
+                    )
+                else:
+                    with bind_execution_graph_read_authority(graph_authority):
+                        result = await self._dispatch_engine.dispatch(
+                            topic, envelope, **delivery_kwargs
+                        )
                 self._logger.info(
                     "[WIRING-CALLBACK] Dispatch complete: topic=%s, "
                     "correlation_id=%s, result_type=%s, node=%s",

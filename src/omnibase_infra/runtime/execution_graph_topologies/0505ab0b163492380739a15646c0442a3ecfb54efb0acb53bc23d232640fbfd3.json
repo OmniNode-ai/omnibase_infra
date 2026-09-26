@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "contract_version": {
+    "major": 1,
+    "minor": 3,
+    "patch": 0
+  },
+  "source_contract_sha256": "2b81e859e9faddd437831634f5799883665ec5c5a1a1bf594b3c3f11b1c0903f",
+  "chain_topology": [
+    {
+      "topic": "onex.cmd.omnimarket.delegate-skill.v1",
+      "parent": null
+    },
+    {
+      "topic": "onex.cmd.omnibase-infra.delegation-request.v1",
+      "parent": "onex.cmd.omnimarket.delegate-skill.v1"
+    },
+    {
+      "topic": "onex.cmd.omnibase-infra.delegation-routing-request.v1",
+      "parent": "onex.cmd.omnibase-infra.delegation-request.v1",
+      "reroute_parents": [
+        "onex.evt.omnibase-infra.quality-gate-result.v1",
+        "onex.evt.omnibase-infra.inference-response.v1"
+      ]
+    },
+    {
+      "topic": "onex.evt.omnibase-infra.routing-decision.v1",
+      "parent": "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    },
+    {
+      "topic": "onex.evt.omnimarket.delegate-skill-completed.v1",
+      "parent": "onex.cmd.omnimarket.delegate-skill.v1",
+      "alternatives": [
+        "onex.evt.omnimarket.delegate-skill-failed.v1"
+      ]
+    }
+  ],
+  "verdict_topic": "onex.evt.omnimarket.dod-verify-completed.v1",
+  "topology_sha256": "0505ab0b163492380739a15646c0442a3ecfb54efb0acb53bc23d232640fbfd3"
+}
