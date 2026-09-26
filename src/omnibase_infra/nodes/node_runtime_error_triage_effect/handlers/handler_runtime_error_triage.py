@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.health.enum_runtime_error_category import (
     EnumRuntimeErrorCategory,
@@ -120,7 +121,23 @@ class HandlerRuntimeErrorTriage:
         """Behavioral classification: side-effecting triage operation."""
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(
+    async def handle(self, event: ModelRuntimeErrorEvent) -> ModelHandlerOutput[None]:
+        """Run triage as a DB-writing effect with no bus output.
+
+        The persisted triage details are available from
+        :meth:`triage_runtime_error` for direct callers. The auto-wired Kafka
+        boundary must receive an effect output with no events: this contract
+        declares no ``publish_topics``, so returning the details as a bare
+        ``BaseModel`` would make them an undeliverable bus output.
+        """
+        await self.triage_runtime_error(event)
+        return ModelHandlerOutput.for_effect(
+            input_envelope_id=event.event_id,
+            correlation_id=event.correlation_id,
+            handler_id=type(self).__name__,
+        )
+
+    async def triage_runtime_error(
         self, event: ModelRuntimeErrorEvent
     ) -> ModelRuntimeErrorTriageResult:
         """Apply first-match-wins triage to a runtime error event.
@@ -129,7 +146,8 @@ class HandlerRuntimeErrorTriage:
             event: The runtime error event to triage.
 
         Returns:
-            ModelRuntimeErrorTriageResult with action taken and metadata.
+            Persisted triage details for a direct caller. This value is not a
+            Kafka output; :meth:`handle` wraps it in an empty effect output.
         """
         if self._db_pool is None:
             logger.warning(
