@@ -257,7 +257,9 @@ dev = [
 override-dependencies = [
     # OMN-19655: the one exact omnibase-core pin. uv.lock and the runtime image
     # resolve from here; [project.dependencies] publishes the compatible range.
-    "omnibase-core==0.47.23",
+    # OMN-19749 TEMPORARY (draft only, never lands): core at the omnibase_core#1786
+    # squash, the unreleased 0.47.24 dev line, until a core release carries it.
+    "omnibase-core==0.47.24",
     "omnibase-spi==0.23.5",
     "omnibase-compat==0.5.7",
 ]
@@ -268,6 +270,13 @@ override-dependencies = [
 # omnibase-spi git-rev overrides DELETED — resolved from PyPI once 0.46.1 /
 # 0.23.0 are published.
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", rev = "2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
+# OMN-19749 TEMPORARY: the runtime.lane example tests import the lane declaration
+# types and schema that omnibase_core#1786 (squash be874b620, on core dev) adds
+# and no published core carries yet. This override exists only so the draft's
+# hooks and CI exercise the change; it is replaced by the released core pin
+# before the PR is handed off, and the CI lineage check keeps the PR unmergeable
+# while it is here.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "be874b620778118ba824134747cd549385cfdc5f" } # raw-override-ok: OMN-19749 until=2026-10-03
 # OMN-12549 CLOSED: the cross-repo seam is now on PyPI (omnibase-core 0.46.3,
 # omnibase-spi 0.23.1). The temporary immutable-rev git overrides for
 # omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
