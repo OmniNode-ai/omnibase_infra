@@ -1361,6 +1361,23 @@ cases:
     test: tests/ci/test_incident_replay_omn19412.py::test_the_real_guard_refuses_the_row_list_on_the_captured_c11
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A PROBE WINDOW LIST THAT OMITTED A PROBE. Until config/lab_probe_windows.yaml the only list of lab probe windows was one ledger row, omni_home docs/tracking/ROLLING_WORK_LEDGER.md at 2026-09-23T20:23:28Z (lane merge-drain-7f), which named C16 and C15 and derived four runtime-merge blackouts from them (20:45Z-21:45Z, 22:55Z-23:45Z, 00:55Z-01:45Z, 02:45Z-03:45Z). It did not name C11, whose job reads the same dev lane at 02:17Z, 08:17Z, 14:17Z and 20:17Z, none of them inside any of those blackouts, so a runtime merge at 02:00Z was within the row's rules and would have redeployed the lane under C11's run. Nothing could have noticed, because a prose list has no reader that compares it with the workflows. The case does not claim such a merge happened; the gap in the list is the defect. NOT A RECONSTRUCTION -- the artifact is the C11 workflow read with git show out of the object store at the dev commit the lane branched from, re-fetchable at the recorded locator and unmodified. The test drives the real check with the row's own list (the committed C15 and C16 entries) over those bytes and requires the unlisted-probe refusal naming the C11 workflow and its cron; a second assertion shows, from the same bytes, that every C11 start falls outside all four of the row's blackouts, so the refusal is not vacuous. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every workflow would replay this perfectly and block every pull request, so the same function is driven over the same bytes with the committed C11 entry and required to return no error.
+  - id: omn19565-lab-evidence-none-left-library-prs-unproved
+    guard: scripts/ci/validate_lab_proof_profiles.py
+    incident: OMN-19565
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn19565.py::test_the_same_guard_accepts_the_committed_registry
+    artifact:
+      fixture: tests/fixtures/omn19565/release_train_policy.yaml.captured
+      sha256: ffa119e3655fb832ecd260043253887ec7f8b924e42cc7e91b2d9b5feaf4280d
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@c7150a15a94d5c4cc929de5f07bab2e7b622b497:config/release_train_policy.yaml
+      captured_at: '2026-09-25T14:57:02Z'
+      captured_by: lane lab-proof-build-1 (OMN-19565)
+    test: tests/ci/test_incident_replay_omn19565.py::test_the_real_guard_refuses_the_registry_the_captured_file_describes
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A PER-REPOSITORY LAB-EVIDENCE DECLARATION THAT ACCEPTED "NONE". Until config/lab_proof_profiles.yaml, config/release_train_policy.yaml was the only file that declared, per repository, what lab evidence stands behind a change, and it declared lab_evidence none for five of its seven repositories (omnibase_core, omnibase_spi, omnimemory, omniintelligence, omniclaude), with its own header saying they cannot produce a receipt for any sha. Every check that read the file was green, and a pull request in any of those repositories merged with no lab proof of any kind. The operator ruled on 2026-09-25T13:07:40Z (omni_home rolling ledger, lane merge-drain-83) that every code PR gets a lab proof before merge through a per-repository profile declared as data. NOT A RECONSTRUCTION -- the artifact is config/release_train_policy.yaml read with git show out of the object store at the omnibase_infra dev commit this lane branched from, re-fetchable at the recorded locator and unmodified. The test builds the proof registry those bytes describe, a row only for the two repositories whose captured lab_evidence is not none, drives the real check over it, and requires a refusal naming every repository the captured file left at none. THE DISCRIMINATOR IS LOAD-BEARING: a check that refused every registry would replay this perfectly and block every pull request, so the same check is driven over the committed registry, which carries a row for every repository, and required to accept.
   - id: omn14141-a-bundled-runner-must-not-swallow-the-flat-schema-red
     guard: scripts/ci/run_validators_in_process.py
     incident: OMN-14141

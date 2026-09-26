@@ -1,0 +1,3 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Integration tests for the lab-proof registry and node pipeline."""

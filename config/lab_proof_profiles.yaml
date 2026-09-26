@@ -1,0 +1,498 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Lab proof profiles: one row per registry repository (OMN-19565, epic OMN-19564).
+#
+# WHY THIS FILE EXISTS
+#   Operator ruling 2026-09-25T13:07:40Z (rolling ledger, lane merge-drain-83),
+#   verbatim: "OK so it seems to me like we need to start using this for all PR's
+#   not just one set change the runtime". Every code PR gets a lab proof on a lab
+#   host before merge, through a per-repository proof profile declared as data.
+#   Documentation-only PRs and bot change-control companions are exempt by
+#   default. Enforcement follows proof: `enforce` stays false until the bar in
+#   plan section 6 is met for the row's profile_version, and the typed model
+#   refuses `enforce: true` until the receipt projection that records the bar
+#   exists (OMN-19566, OMN-19584).
+#   Plan: knowledge-base-internal beta/plans/2026-09-25-lab-proof-for-every-pr-plan.md.
+#
+# HOW IT IS CHECKED
+#   uv run python scripts/ci/validate_lab_proof_profiles.py
+#   Typed model: src/omnibase_infra/lab_proof/model_lab_proof_profile_registry.py.
+#   It refuses a registry repository with no row, a row for an unlisted
+#   repository, a step naming no node or no routed operation, enforce true, a
+#   runnable row missing its checks, host selector, negative control or budget,
+#   and a measured budget with no source row.
+#
+# STATUS
+#   live      safe to run now; a prover may take this profile's PRs.
+#   pilot     isolated and safe, not yet run to the bar; a harness failure is
+#             INCONCLUSIVE, never FAIL, and never goes to the red-fix lane.
+#   not_safe  do not run; status_reason says why.
+#   exempt    documentation; nothing to prove.
+#
+# EXECUTION
+#   node           the steps below run as nodes (plan -> run -> verdict).
+#   manual_recipe  a prover runs the hand-run recipe named by recipe_ref until
+#                  the scheduler (OMN-19569) runs it; recipes live in the omni_home
+#                  operator workspace, lab-proof-all-prs-2026-09-25/interim-recipes.md.
+#   none           nothing runs (not_safe or exempt).
+schema_version: 1
+registry_source: "omni_home CLAUDE.md, Repository Registry table and the private-clone paragraph under it (read 2026-09-25)"
+registry_repos:
+  - OmniNode-ai/omnimarket
+  - OmniNode-ai/omnibase_infra
+  - OmniNode-ai/omnibase_core
+  - OmniNode-ai/omnibase_compat
+  - OmniNode-ai/omnibase_spi
+  - OmniNode-ai/omniintelligence
+  - OmniNode-ai/omnimemory
+  - OmniNode-ai/omniclaude
+  - OmniNode-ai/omniclaude-internal
+  - OmniNode-ai/omnidash
+  - OmniNode-ai/omniweb
+  - OmniNode-ai/omninode_infra
+  - OmniNode-ai/onex_change_control
+  - OmniNode-ai/omni_home
+  - OmniNode-ai/knowledge-base
+  - OmniNode-ai/knowledge-base-internal
+  # Added to the omni_home registry 2026-09-24, after plan section 5 was
+  # written; listed so its absence from the plan is visible, not silent.
+  - OmniNode-ai/omnibase_internal
+excluded_repos:
+  - repo: OmniNode-ai/omnidash-archived
+    reason: "archived legacy dashboard; takes no pull requests"
+# A bot-authored change-control companion: the change-control bot, in the
+# change-control repository, touching only contract, receipt, binding and
+# evidence data. Grants are deliberately NOT companion paths: a prod grant is a
+# CODEOWNERS-reviewed change (CLAUDE.md rule 2a), never an automatic exemption.
+change_control_companion:
+  repo: OmniNode-ai/onex_change_control
+  authors:
+    - "onexbot-occ-writer[bot]"
+  path_globs:
+    - "contracts/OMN-*.yaml"
+    - "drift/dod_receipts/**"
+    - "drift/occ_bindings/**"
+    - "evidence/**"
+profiles:
+  - profile_key: omnimarket.runtime_image
+    profile_version: 1
+    repo: OmniNode-ai/omnimarket
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: runtime
+        proof_kind: runtime_image
+        status: live
+        status_reason: "the provers' current method: the laptop-bundle runtime image built with OMNIMARKET_REF at the PR head"
+        execution: manual_recipe
+        recipe_ref: "interim-recipes.md section A"
+        match:
+          base_branches: [dev]
+          include_globs: ["**"]
+        host_selector:
+          allowed_hosts: ["192.168.86.202", "192.168.86.101", "192.168.86.105"]
+          required_tools: [git, docker, uv]
+          min_free_mem_mib: 8192
+          max_load_ratio: 1.0
+        mandatory_checks:
+          - runtime_image_identity
+          - migration_gate_healthy
+          - runtime_main_healthy
+          - runtime_effects_healthy
+          - focused_tests
+          - changed_path_live
+        negative_control:
+          kind: base_rerun
+        timeout_minutes: 45
+        budget_minutes: 16
+        budget_basis: measured
+        budget_source: "STATUS ledger:3897 and TERMINAL ledger:3839 (13 to 16 min on .202 and .101)"
+  - profile_key: omnibase_infra.runtime_and_scripts
+    profile_version: 1
+    repo: OmniNode-ai/omnibase_infra
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: runtime
+        proof_kind: runtime_image
+        status: live
+        status_reason: "the provers' current method: a local test merge of the head into dev, built and booted as the laptop bundle"
+        execution: manual_recipe
+        recipe_ref: "interim-recipes.md section B"
+        match:
+          base_branches: [dev]
+          include_globs: ["**"]
+          predicate: runtime_affecting
+        host_selector:
+          allowed_hosts: ["192.168.86.202", "192.168.86.101"]
+          required_tools: [git, docker, uv]
+          min_free_mem_mib: 8192
+          max_load_ratio: 1.0
+        mandatory_checks:
+          - runtime_image_identity
+          - migration_gate_healthy
+          - runtime_main_healthy
+          - runtime_effects_healthy
+          - no_wiring_failures
+          - focused_tests
+          - changed_path_live
+        negative_control:
+          kind: base_rerun
+        timeout_minutes: 45
+        budget_minutes: 14
+        budget_basis: measured
+        budget_source: "TERMINAL ledger:3839 (14 min)"
+      - variant_key: scripts
+        proof_kind: script_replay
+        status: live
+        status_reason: "only for a changed script that has a read-only or plan mode; workflow-only PRs wait on operator question Q3 of the plan"
+        execution: manual_recipe
+        recipe_ref: "interim-recipes.md section C"
+        match:
+          base_branches: [dev]
+          include_globs: ["scripts/**", ".github/**", "config/**", "docker/**"]
+          predicate: not_runtime_affecting
+        host_selector:
+          allowed_hosts: ["192.168.86.202", "192.168.86.101"]
+          required_tools: [git, uv]
+          min_free_mem_mib: 2048
+          max_load_ratio: 1.0
+        mandatory_checks:
+          - script_replay_read_only
+          - focused_tests
+        negative_control:
+          kind: base_rerun
+        timeout_minutes: 20
+        budget_minutes: 8
+        budget_basis: estimate
+  - profile_key: omnibase_core.foundation_override
+    profile_version: 1
+    repo: OmniNode-ai/omnibase_core
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: foundation
+        proof_kind: foundation_override
+        status: pilot
+        status_reason: "the PR head is installed over the runtime image's pinned omnibase_core and the laptop bundle is booted on it; not yet run to the five-pass bar"
+        execution: node
+        match:
+          base_branches: [dev]
+          include_globs: ["**"]
+        host_selector:
+          allowed_hosts: ["192.168.86.202"]
+          required_tools: [git, docker, uv, make, python3]
+          min_free_mem_mib: 8192
+          max_load_ratio: 1.0
+        steps:
+          - "node_lab_proof_plan_compute:lab_proof.plan"
+          - "node_lab_proof_run_effect:lab_proof.run"
+          - "node_lab_proof_plan_compute:lab_proof.verdict"
+        mandatory_checks:
+          - subject_head_identity
+          - focused_tests
+          - override_installed_identity
+          - migration_gate_healthy
+          - runtime_main_healthy
+          - runtime_effects_healthy
+          - consumer_import_smoke
+          - no_wiring_failures
+          - golden_chain_delegation
+        negative_control:
+          kind: sabotage_import
+          sabotage_path: src/omnibase_core/__init__.py
+        foundation:
+          distribution: omnibase-core
+          import_package: omnibase_core
+        timeout_minutes: 60
+        budget_minutes: 40
+        budget_basis: estimate
+  - profile_key: omnibase_compat.foundation_override
+    profile_version: 1
+    repo: OmniNode-ai/omnibase_compat
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: foundation
+        proof_kind: foundation_override
+        status: pilot
+        status_reason: "the PR head is installed over the runtime image's omnibase_compat tarball pin and the laptop bundle is booted on it; not yet run end to end"
+        execution: node
+        match:
+          base_branches: [main]
+          include_globs: ["**"]
+        host_selector:
+          allowed_hosts: ["192.168.86.202"]
+          required_tools: [git, docker, uv, make, python3]
+          min_free_mem_mib: 8192
+          max_load_ratio: 1.0
+        steps:
+          - "node_lab_proof_plan_compute:lab_proof.plan"
+          - "node_lab_proof_run_effect:lab_proof.run"
+          - "node_lab_proof_plan_compute:lab_proof.verdict"
+        mandatory_checks:
+          - subject_head_identity
+          - focused_tests
+          - override_installed_identity
+          - migration_gate_healthy
+          - runtime_main_healthy
+          - runtime_effects_healthy
+          - consumer_import_smoke
+          - no_wiring_failures
+          - golden_chain_delegation
+        negative_control:
+          kind: sabotage_import
+          sabotage_path: src/omnibase_compat/__init__.py
+        foundation:
+          distribution: omnibase-compat
+          import_package: omnibase_compat
+        timeout_minutes: 60
+        budget_minutes: 40
+        budget_basis: estimate
+  - profile_key: omnibase_spi.foundation_override
+    profile_version: 1
+    repo: OmniNode-ai/omnibase_spi
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: foundation
+        proof_kind: foundation_override
+        status: pilot
+        # The interim recipes marked spi NOT SAFE for want of an install path
+        # (not vendored; installed from PyPI). The derived image installs the
+        # PR head over whatever the image pinned, so that reason no longer holds.
+        status_reason: "the PR head is installed over the runtime image's PyPI omnibase_spi and the laptop bundle is booted on it; not yet run end to end"
+        execution: node
+        match:
+          base_branches: [dev, main]
+          include_globs: ["**"]
+        host_selector:
+          allowed_hosts: ["192.168.86.202"]
+          required_tools: [git, docker, uv, make, python3]
+          min_free_mem_mib: 8192
+          max_load_ratio: 1.0
+        steps:
+          - "node_lab_proof_plan_compute:lab_proof.plan"
+          - "node_lab_proof_run_effect:lab_proof.run"
+          - "node_lab_proof_plan_compute:lab_proof.verdict"
+        mandatory_checks:
+          - subject_head_identity
+          - focused_tests
+          - override_installed_identity
+          - migration_gate_healthy
+          - runtime_main_healthy
+          - runtime_effects_healthy
+          - consumer_import_smoke
+          - no_wiring_failures
+          - golden_chain_delegation
+        negative_control:
+          kind: sabotage_import
+          sabotage_path: src/omnibase_spi/__init__.py
+        foundation:
+          distribution: omnibase-spi
+          import_package: omnibase_spi
+        timeout_minutes: 60
+        budget_minutes: 40
+        budget_basis: estimate
+  - profile_key: omniintelligence.pypi_sibling_override
+    profile_version: 1
+    repo: OmniNode-ai/omniintelligence
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: service
+        proof_kind: pypi_sibling_override
+        status: not_safe
+        status_reason: "its service is not in the laptop bundle; an import smoke passed off as the profile would be a false proof"
+        execution: none
+  - profile_key: omnimemory.pypi_sibling_override
+    profile_version: 1
+    repo: OmniNode-ai/omnimemory
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: service
+        proof_kind: pypi_sibling_override
+        status: not_safe
+        status_reason: "its service is not in the laptop bundle; an import smoke passed off as the profile would be a false proof"
+        execution: none
+  - profile_key: omniclaude.plugin_session
+    profile_version: 1
+    repo: OmniNode-ai/omniclaude
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: plugin
+        proof_kind: plugin_session
+        status: not_safe
+        status_reason: "a lab Claude session's hooks emit through the host's configured emit path to a lab broker; no isolated bus target is proven"
+        execution: none
+  - profile_key: omniclaude_internal.plugin_session
+    profile_version: 1
+    repo: OmniNode-ai/omniclaude-internal
+    exempt_classes: [docs_only]
+    # Skill text is documentation; a SKILL.md-only PR is exempt.
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: scripts
+        proof_kind: plugin_session
+        status: not_safe
+        status_reason: "skill scripts call GitHub write APIs and the ledger; no sandbox for them exists yet"
+        execution: none
+  - profile_key: omnidash.web_render
+    profile_version: 1
+    repo: OmniNode-ai/omnidash
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: render
+        proof_kind: web_render
+        status: pilot
+        status_reason: "build plus Playwright in file mode on .101, the one lab host with node; never run end to end"
+        execution: manual_recipe
+        recipe_ref: "interim-recipes.md section H"
+        match:
+          base_branches: [dev, main]
+          include_globs: ["**"]
+        host_selector:
+          allowed_hosts: ["192.168.86.101"]
+          required_tools: [git, node, npm]
+          min_free_mem_mib: 4096
+          max_load_ratio: 1.0
+        mandatory_checks:
+          - render_and_browser_walk
+          - focused_tests
+        negative_control:
+          kind: base_rerun
+        timeout_minutes: 30
+        budget_minutes: 12
+        budget_basis: estimate
+  - profile_key: omniweb.web_render
+    profile_version: 1
+    repo: OmniNode-ai/omniweb
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: render
+        proof_kind: web_render
+        status: not_safe
+        status_reason: "the only open PR is a draft and the browser walk it depends on (OMN-18366) is in flight"
+        execution: none
+  - profile_key: omninode_infra.k8s_namespace
+    profile_version: 1
+    repo: OmniNode-ai/omninode_infra
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: manifests
+        proof_kind: k8s_namespace
+        status: not_safe
+        status_reason: "an apply mutates the shared .201 k3s, and no lab host has kind; a render-only check is CI, not a lab proof"
+        execution: none
+  - profile_key: onex_change_control.script_replay
+    profile_version: 1
+    repo: OmniNode-ai/onex_change_control
+    exempt_classes: [docs_only, bot_change_control_companion]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: validators
+        proof_kind: script_replay
+        status: live
+        status_reason: "the changed validator at head and at base over the same main corpus; read-only"
+        execution: manual_recipe
+        recipe_ref: "interim-recipes.md section F"
+        match:
+          base_branches: [dev, main]
+          include_globs: ["src/**", "scripts/**"]
+        host_selector:
+          allowed_hosts: ["192.168.86.202", "192.168.86.101", "192.168.86.105"]
+          required_tools: [git, uv]
+          min_free_mem_mib: 2048
+          max_load_ratio: 1.0
+        mandatory_checks:
+          - script_replay_read_only
+          - focused_tests
+        negative_control:
+          kind: base_rerun
+        timeout_minutes: 15
+        budget_minutes: 5
+        budget_basis: estimate
+  - profile_key: omni_home.script_replay
+    profile_version: 1
+    repo: OmniNode-ai/omni_home
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: scripts
+        proof_kind: script_replay
+        status: live
+        status_reason: "ledger and commit-lock scripts run against a copy of the ledger on a lab host, never the live ledger"
+        execution: manual_recipe
+        recipe_ref: "interim-recipes.md section G"
+        match:
+          base_branches: [main]
+          include_globs: ["scripts/**", "tests/**", ".claude/**"]
+        host_selector:
+          allowed_hosts: ["192.168.86.202", "192.168.86.101", "192.168.86.105"]
+          required_tools: [git, python3]
+          min_free_mem_mib: 1024
+          max_load_ratio: 1.0
+        mandatory_checks:
+          - script_replay_read_only
+          - focused_tests
+        negative_control:
+          kind: base_rerun
+        timeout_minutes: 15
+        budget_minutes: 5
+        budget_basis: estimate
+  - profile_key: omnibase_internal.script_replay
+    profile_version: 1
+    repo: OmniNode-ai/omnibase_internal
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: tooling
+        proof_kind: script_replay
+        status: not_safe
+        status_reason: "joined the registry after plan section 5 was written (operator tooling: the typed work-ledger append); no profile designed yet"
+        execution: none
+  - profile_key: knowledge_base.exempt
+    profile_version: 1
+    repo: OmniNode-ai/knowledge-base
+    exempt_classes: [docs_only]
+    docs_globs: ["**"]
+    enforce: false
+    variants:
+      - variant_key: docs
+        proof_kind: exempt
+        status: exempt
+        status_reason: "documentation repository"
+        execution: none
+  - profile_key: knowledge_base_internal.exempt
+    profile_version: 1
+    repo: OmniNode-ai/knowledge-base-internal
+    exempt_classes: [docs_only]
+    docs_globs: ["**"]
+    enforce: false
+    variants:
+      - variant_key: docs
+        proof_kind: exempt
+        status: exempt
+        status_reason: "documentation repository; its index checks run in CI"
+        execution: none
