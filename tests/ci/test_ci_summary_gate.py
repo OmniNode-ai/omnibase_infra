@@ -647,6 +647,32 @@ class TestExternalContextAssertion:
         code, _ = evaluate(_all_gates("success"), check_runs=None, external_contexts=())
         assert code == EXIT_SUCCESS
 
+    def test_ci_workflow_trigger_includes_merge_group(self) -> None:
+        """Queue entries must create the dev branch's required CI Summary."""
+        triggers = _load_workflow(CI_WORKFLOW).get(True)
+        assert isinstance(triggers, dict)
+        assert "merge_group" in triggers
+
+    def test_main_merge_group_succeeds_without_check_runs_file(
+        self, tmp_path: Path
+    ) -> None:
+        """A green queue run has no PR-scoped external check-run payload."""
+        from scripts.ci import ci_summary_gate
+
+        jobs_file = tmp_path / "jobs.json"
+        jobs_file.write_text(json.dumps(_all_gates("success")), encoding="utf-8")
+
+        code = ci_summary_gate.main(
+            [
+                "--event-name",
+                "merge_group",
+                "--jobs-file",
+                str(jobs_file),
+            ]
+        )
+
+        assert code == EXIT_SUCCESS
+
     def test_latest_wins_resolution_matches_github(self) -> None:
         """A rerun's green supersedes the earlier red for the same name.
 

@@ -25,6 +25,8 @@ here rather than in untestable bash.
 
 The module performs **no** network I/O. The workflow is responsible for fetching
 PR JSON via ``gh`` and passing it in; this module only classifies and decides.
+OMN-19697 also uses the live merge-queue query shape to choose whether arming
+needs bare ``--auto`` or the non-queue ``--squash --auto`` form.
 """
 
 from __future__ import annotations
@@ -97,6 +99,42 @@ def is_benign_enqueue_error(message: str) -> bool:
     """True when an enqueue error is a benign already-queued race (benign)."""
     lowered = message.lower()
     return any(marker in lowered for marker in _BENIGN_ENQUEUE_MARKERS)
+
+
+def merge_queue_present(payload: dict[str, Any]) -> bool:
+    """Return whether a validated GraphQL response contains a merge queue.
+
+    An explicit ``null`` is the only reliable no-queue signal. Any malformed or
+    error-bearing response is undetermined and must fail closed.
+    """
+    if "errors" in payload:
+        raise ValueError("merge queue query returned errors")
+
+    data = payload.get("data")
+    if not isinstance(data, dict) or "repository" not in data:
+        raise ValueError("merge queue query has no repository data")
+
+    repository = data["repository"]
+    if not isinstance(repository, dict) or "mergeQueue" not in repository:
+        raise ValueError("merge queue query has no mergeQueue field")
+
+    merge_queue = repository["mergeQueue"]
+    if merge_queue is None:
+        return False
+    if not isinstance(merge_queue, dict):
+        raise ValueError("mergeQueue must be an object or null")
+
+    queue_id = merge_queue.get("id")
+    if not isinstance(queue_id, str) or not queue_id.strip():
+        raise ValueError("mergeQueue object has no non-empty id")
+    return True
+
+
+def arm_args(*, queue_present: bool) -> tuple[str, ...]:
+    """Return the ``gh pr merge`` arguments for the branch's queue state."""
+    if queue_present:
+        return ("--auto",)
+    return ("--squash", "--auto")
 
 
 def is_armed(pr: dict[str, Any]) -> bool:
@@ -190,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
             Prints the EnumEnqueueAction value to stdout.
         verify    --pr-json <json>
             Exit 0 if the PR is in the queue, exit 1 otherwise.
+        arm-args  --merge-queue-json <json>
+            Print queue-aware ``gh pr merge`` arming arguments.
     """
     parser = argparse.ArgumentParser(description="Merge-queue enqueue decision logic")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -200,6 +240,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_verify = sub.add_parser("verify", help="Verify a PR actually entered the queue")
     p_verify.add_argument("--pr-json", required=True)
+
+    p_arm_args = sub.add_parser(
+        "arm-args", help="Choose queue-aware auto-merge arming arguments"
+    )
+    p_arm_args.add_argument("--merge-queue-json", required=True)
 
     args = parser.parse_args(argv)
 
@@ -216,6 +261,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         sys.stdout.write("not_in_queue\n")
         return 1
+
+    if args.command == "arm-args":
+        try:
+            payload = json.loads(args.merge_queue_json)
+            if not isinstance(payload, dict):
+                raise ValueError("merge queue JSON must be an object")
+            queue_present = merge_queue_present(payload)
+        except (json.JSONDecodeError, ValueError) as exc:
+            sys.stderr.write(
+                f"error: could not determine merge queue presence: {exc}\n"
+            )
+            return 2
+        sys.stdout.write(" ".join(arm_args(queue_present=queue_present)) + "\n")
+        return 0
 
     parser.error(f"unknown command: {args.command}")
     return 2
