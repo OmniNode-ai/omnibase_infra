@@ -332,14 +332,16 @@ FENCED_DELEGATION_IDS = (
     "node:node_projection_delegation:"
     "0026_delegation_judge_verdict_events_rls_tenant_isolation.sql",
 )
-# The subset of the delegation hold that no lane may release today. Both are
-# here: 0023 aborts against the converted column, and 0026 locks the lane's own
-# async judge-verdict writer out of its table (measured 2026-09-08). 0026 is
-# releasable the moment that writer threads the row's tenant into the adapter.
+# The subset of the delegation hold that no lane may release today: 0023 alone,
+# because it aborts against the converted column. 0026 left this set on
+# 2026-09-26 (OMN-15092). It was here because releasing it locked the lane's own
+# async judge-verdict writer out of its table (measured 2026-09-08); that writer
+# now threads the row's tenant into the adapter (OMN-17627), which was the
+# release condition, so the dev arm releases it. It stays in
+# FENCED_DELEGATION_IDS above: a baseline removal is FATAL under the item-4
+# FORCE-RLS guard.
 UNRELEASABLE_DELEGATION_IDS = (
     "node:node_projection_delegation:0023_delegation_rls_tenant_isolation.sql",
-    "node:node_projection_delegation:"
-    "0026_delegation_judge_verdict_events_rls_tenant_isolation.sql",
 )
 # The registration hold, as of OMN-17150 (2026-08-31): 0002 ALONE.
 #
@@ -652,8 +654,14 @@ DEV_LANE_VALUE = "dev"
 # omni_home docs/tracking/ROLLING_WORK_LEDGER.md, which authorizes resuming
 # tenant row-level security on relations the OMN-15354 manifest classifies
 # TENANT, lab first and staging second.
+# OMN-15092, 2026-09-26: 0026 joined this arm under the same authorization. It
+# puts the tenant boundary on delegation_judge_verdict_events, the last
+# TENANT-classified relation the dev lane left without one. Its 2026-09-08
+# refusal was a writer defect, fixed by OMN-17627, not a property of the SQL.
 LANE_RELEASED_IDS = (
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
+    "node:node_projection_delegation:"
+    "0026_delegation_judge_verdict_events_rls_tenant_isolation.sql",
     "node:node_projection_delegation:"
     "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
     "node:node_projection_delegation:"
@@ -1131,6 +1139,8 @@ def test_dev_lane_releases_exactly_the_ruled_set() -> None:
     )
     assert set(LANE_RELEASED_IDS) - set(FENCED_REGISTRATION_IDS) == {
         "node:node_projection_delegation:"
+        "0026_delegation_judge_verdict_events_rls_tenant_isolation.sql",
+        "node:node_projection_delegation:"
         "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
         "node:node_projection_delegation:"
         "0041_delegation_budget_state_rls_tenant_isolation.sql",
@@ -1161,9 +1171,9 @@ def test_unreleasable_delegation_ids_are_not_releasable_on_any_lane() -> None:
     after its ENABLE/FORCE and DROP POLICY have already committed. 0031, 0032
     and 0033 are retired conversions, and neither runner has any supersession
     awareness, so releasing one applies a superseded conversion on every lane
-    that has not already recorded it. 0026 is here too: releasing it was
-    measured on the .201 dev lane to refuse every write the lane's own async
-    judge-verdict writer issues. 0034 joined them on 2026-09-08, superseded by
+    that has not already recorded it. 0026 was here until 2026-09-26, when its
+    writer-side release condition was met (OMN-17627) and the dev arm released
+    it (OMN-15092). 0034 joined them on 2026-09-08, superseded by
     0036 under OMN-15683 -- it resolves identity on m.tenant_slug alone and
     aborts on the 26 already-canonical-UUID rows onex-dev holds. OMN-15683
     released 0036 on the dev/lab lane; that one id is deliberately outside this
