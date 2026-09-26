@@ -762,15 +762,31 @@ class DispatchResultApplier:
                     publish_payload = self._publish_payload_for_output_event(
                         output_event
                     )
-                    # Deterministic envelope_id: uuid5(correlation_id, "type:index")
-                    # ensures redeliveries produce identical IDs, enabling
-                    # downstream consumers to deduplicate at-least-once events.
-                    # NOTE: If correlation_id is a uuid4 fallback (see above),
-                    # each retry generates a new namespace, defeating deduplication.
-                    deterministic_id = uuid5(
-                        effective_correlation_id,
-                        f"{type(output_event).__name__}:{idx}",
-                    )
+                    # A correlation identifies a workflow, not the input that
+                    # caused one particular output.  Scope children to the
+                    # consumed envelope so redelivery of that input remains
+                    # idempotent while a later reroute in the same workflow
+                    # receives a distinct evidence identity.  The dispatcher
+                    # and fully-qualified model type distinguish independent
+                    # runtime outputs of the same consumed event.
+                    #
+                    # A dispatch with no consumed envelope is a genuine chain
+                    # head (see above), so retain the established
+                    # correlation-scoped identity contract for that path.
+                    if consumed_envelope is None:
+                        deterministic_id = uuid5(
+                            effective_correlation_id,
+                            f"{type(output_event).__name__}:{idx}",
+                        )
+                    else:
+                        deterministic_id = uuid5(
+                            consumed_envelope.envelope_id,
+                            (
+                                f"{result.dispatcher_id}:"
+                                f"{type(output_event).__module__}."
+                                f"{type(output_event).__qualname__}:{idx}"
+                            ),
+                        )
                     # A self-edge is refused by the envelope model, and
                     # refusing it here too keeps a pathological equality from
                     # taking the publish down. Equality means the deterministic

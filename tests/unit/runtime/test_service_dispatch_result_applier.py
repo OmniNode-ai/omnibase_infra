@@ -24,10 +24,12 @@ from uuid import UUID, uuid4, uuid5
 import pytest
 from pydantic import BaseModel
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.runtime.dispatch_envelope_context import bind_dispatch_envelope
 from omnibase_infra.runtime.service_dispatch_result_applier import (
     DispatchResultApplier,
 )
@@ -293,7 +295,7 @@ class TestEventPublishing:
 
     @pytest.mark.asyncio
     async def test_deterministic_envelope_id(self) -> None:
-        """Envelope IDs must be uuid5(correlation_id, 'ClassName:idx')."""
+        """A genuine chain head keeps the correlation-scoped identity contract."""
         bus = AsyncMock(spec=ProtocolEventBusLike)
         cid = uuid4()
         event = _StubEvent(value="det")
@@ -311,6 +313,72 @@ class TestEventPublishing:
         expected_id = uuid5(cid, "_StubEvent:0")
         published_envelope = bus.publish_envelope.call_args.kwargs["envelope"]
         assert published_envelope.envelope_id == expected_id
+
+    @pytest.mark.asyncio
+    async def test_consumed_input_redelivery_keeps_output_identity_and_carries_edge(
+        self,
+    ) -> None:
+        """One consumed envelope deterministically produces one attributable output."""
+        bus = AsyncMock(spec=ProtocolEventBusLike)
+        correlation_id = uuid4()
+        consumed = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=_StubEvent(value="input"),
+            correlation_id=correlation_id,
+            tenant_id="tenant-a",
+        )
+        result = _make_result(
+            output_events=[_StubEvent(value="output")],
+            correlation_id=correlation_id,
+        )
+        applier = DispatchResultApplier(event_bus=bus, output_topic="out.topic")
+
+        with bind_dispatch_envelope(consumed):
+            await applier.apply(result)
+        first = bus.publish_envelope.call_args.kwargs["envelope"]
+
+        with bind_dispatch_envelope(consumed):
+            await applier.apply(result)
+        second = bus.publish_envelope.call_args.kwargs["envelope"]
+
+        assert second.envelope_id == first.envelope_id
+        assert first.parent_envelope_id == consumed.envelope_id
+        assert first.tenant_id == "tenant-a"
+
+    @pytest.mark.asyncio
+    async def test_distinct_consumed_inputs_same_correlation_get_distinct_output_ids(
+        self,
+    ) -> None:
+        """Reroutes in one workflow cannot overwrite each other's evidence."""
+        bus = AsyncMock(spec=ProtocolEventBusLike)
+        correlation_id = uuid4()
+        first_input = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=_StubEvent(value="input-a"),
+            correlation_id=correlation_id,
+        )
+        second_input = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=_StubEvent(value="input-b"),
+            correlation_id=correlation_id,
+        )
+        result = _make_result(
+            output_events=[_StubEvent(value="output")],
+            correlation_id=correlation_id,
+        )
+        applier = DispatchResultApplier(event_bus=bus, output_topic="out.topic")
+
+        with bind_dispatch_envelope(first_input):
+            await applier.apply(result)
+        first = bus.publish_envelope.call_args.kwargs["envelope"]
+
+        with bind_dispatch_envelope(second_input):
+            await applier.apply(result)
+        second = bus.publish_envelope.call_args.kwargs["envelope"]
+
+        assert first.envelope_id != second.envelope_id
+        assert first.parent_envelope_id == first_input.envelope_id
+        assert second.parent_envelope_id == second_input.envelope_id
 
     @pytest.mark.asyncio
     async def test_no_publish_when_no_events(self) -> None:
