@@ -70,6 +70,11 @@
 name: Chain Canary — C28 consumer flow
 
 on:
+  # TEMPORARY (OMN-19812): lets this branch run on the lab runner before the
+  # file exists on the default branch, where workflow_dispatch cannot reach
+  # it. Removed in the next commit, before review.
+  push:
+    branches: ['jonah/omn-19812-c28-consumer-flow-probe']
   schedule:
     # 4x/day at :13, offset from C11 (:17), C12 (:27), C16 (:29),
     # chain-canary (:41 odd hours), provider-rung (:47), dev-lane-liveness
