@@ -213,6 +213,85 @@ BASE_FIELDS = {
 _SECRET_CLEARING_FLAGS = ("bearerOnly", "publicClient")
 _SERVER_MANAGED_CLIENT_FIELDS = frozenset({"access", "id"})
 
+# Roster fields Keycloak stores as unordered collections and returns in its own
+# order. Comparing them as lists reports drift on every reconcile forever.
+_UNORDERED_COLLECTION_FIELDS = frozenset({"redirectUris", "webOrigins"})
+
+# Attribute keys Keycloak maintains itself and the roster never declares.
+# Excluded BY NAME rather than by "ignore anything the roster does not declare",
+# so a key someone adds out of band still reports as drift instead of becoming
+# invisible. Widening this set is a deliberate change with a red test (OMN-18600
+# AC3) to prompt it.
+_SERVER_MANAGED_ATTRIBUTE_KEYS = frozenset({"realm_client"})
+
+
+def _field_has_drifted(field: str, live_value: Any, desired_value: Any) -> bool:
+    """Compare one roster field against its live value (OMN-18600).
+
+    Three fields need more than ``!=``:
+
+    * ``redirectUris`` and ``webOrigins`` are sets to Keycloak, which returns
+      them in whatever order it likes. Compared as lists they differ on every
+      reconcile even when the membership is identical.
+    * ``attributes`` carries ``realm_client``, which Keycloak adds itself.
+      Compared whole-map it differs on every reconcile even when every declared
+      value matches.
+
+    Measured on the `.201` dev lane 2026-09-17: `omniweb`, `omnidash-spa` and
+    `onex-customer` reported all three as drifted on consecutive runs that
+    changed nothing, with the collections set-equal and the attribute maps
+    differing only by that one key.
+
+    Why it matters more than tidy output: any drift sends the client down the
+    full-representation update path, and that is the path whose secret-clearing
+    side effect destroyed `onex-api`'s secret under OMN-16504. Three clients
+    took it on every run for no reason.
+
+    Every other field still compares exactly, and a real difference in
+    membership or in a declared value is still drift -- see the fail-closed
+    tests in test_seed_keycloak_drift_comparison.py.
+    """
+    if (
+        field in _UNORDERED_COLLECTION_FIELDS
+        and isinstance(live_value, list)
+        and isinstance(desired_value, list)
+    ):
+        return sorted(map(str, live_value)) != sorted(map(str, desired_value))
+
+    if (
+        field == "attributes"
+        and isinstance(live_value, dict)
+        and isinstance(desired_value, dict)
+    ):
+        return _comparable_attributes(live_value) != _comparable_attributes(
+            desired_value
+        )
+
+    return bool(live_value != desired_value)
+
+
+def _comparable_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+    """Drop the keys Keycloak owns, so only the roster's own keys compare."""
+    return {
+        key: value
+        for key, value in attributes.items()
+        if key not in _SERVER_MANAGED_ATTRIBUTE_KEYS
+    }
+
+
+def _drifted_fields(spec: dict[str, Any], existing: dict[str, Any]) -> list[str]:
+    """Every roster-declared base field whose live value differs.
+
+    One definition, two callers: the read-only preflight and the reconcile
+    loop it precedes. A survey that disagreed with the loop about what has
+    drifted would be worse than no survey.
+    """
+    return sorted(
+        field
+        for field in BASE_FIELDS - {"defaultClientScopes"}
+        if field in spec and _field_has_drifted(field, existing.get(field), spec[field])
+    )
+
 
 def _resolve_client_secret(client_spec: dict[str, Any]) -> str | None:
     secret_env = client_spec.get("secretEnv")
@@ -270,6 +349,21 @@ def _build_update_payload(
     }
     for field in drift_fields:
         update_payload[field] = spec[field]
+    if "attributes" in drift_fields:
+        # OMN-18600: applying the roster's attributes wholesale would drop the
+        # keys Keycloak maintains itself. Keycloak re-adds them, so the old
+        # every-run drift was partly self-inflicted: the PUT dropped the key,
+        # Keycloak restored it, and the next comparison saw a difference again.
+        # Carrying them forward keeps that loop closed even when a declared
+        # attribute genuinely changes.
+        update_payload["attributes"] = {
+            **{
+                key: value
+                for key, value in (existing.get("attributes") or {}).items()
+                if key in _SERVER_MANAGED_ATTRIBUTE_KEYS
+            },
+            **spec["attributes"],
+        }
     for secret_clearing_flag in _SECRET_CLEARING_FLAGS:
         if secret_clearing_flag not in drift_fields:
             update_payload.pop(secret_clearing_flag, None)
@@ -611,11 +705,9 @@ def _reconcile_client(
             _die(f"Client '{client_id}' created but could not be re-fetched")
         all_changed.append("created")
     else:
-        # Drift detection on base fields
-        drift_fields: list[str] = []
-        for field in BASE_FIELDS - {"defaultClientScopes"}:
-            if field in spec and existing.get(field) != spec[field]:
-                drift_fields.append(field)
+        # Drift detection on base fields (OMN-18600: set-wise for the unordered
+        # collections, roster-keys-only for attributes -- see _field_has_drifted)
+        drift_fields: list[str] = _drifted_fields(spec, existing)
         if drift_fields:
             # OMN-16504: send ONLY the drifted fields, never the full live
             # representation.
@@ -1097,11 +1189,7 @@ def _preflight_client(
     live_value_present: bool | None = None
     drift_fields: list[str] = []
     if existing is not None:
-        drift_fields = sorted(
-            field
-            for field in BASE_FIELDS - {"defaultClientScopes"}
-            if field in spec and existing.get(field) != spec[field]
-        )
+        drift_fields = _drifted_fields(spec, existing)
         if _live_client_requires_secret(existing):
             compare_against = (
                 env_var
