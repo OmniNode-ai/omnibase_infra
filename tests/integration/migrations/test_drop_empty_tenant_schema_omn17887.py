@@ -27,13 +27,20 @@ What differs from the lanes, stated so nobody reads more into a green:
 * The compose runner uses one identity for both databases, so ``role_omnidash``
   also owns the fixture's ``omnibase_infra``, which it does not on any lane.
 
-Where the Postgres comes from, as in the OMN-17886 gate:
+Where the Postgres comes from:
 
-* ``OMN17887_GATE_DB_URL`` (a superuser URL) names a running server. The test
-  creates the two databases and three roles below and drops them afterwards, so
-  it refuses a server where any of them already exists.
-* Otherwise an ephemeral cluster is started with initdb/pg_ctl.
-* ``OMN17887_REQUIRE_PG=1`` turns "no Postgres available" into a failure.
+* ``OMN17887_GATE_DB_URL`` (a superuser URL) names a running server, as in the
+  OMN-17886 gate. The test creates the two databases and four roles below and
+  drops them afterwards, so it refuses a server where any of them already
+  exists.
+* Otherwise the shared ``ephemeral_postgres`` fixture starts a throwaway
+  cluster: initdb/pg_ctl where they work, else a ``postgres:16-alpine``
+  container. The module gates on ``EPHEMERAL_POSTGRES_UNAVAILABLE`` (psql
+  missing, or neither initdb/pg_ctl nor a reachable Docker daemon), not on the
+  native tools alone.
+* ``OMN17887_REQUIRE_PG=1`` turns "no Postgres available" into a failure. It is
+  passed on to the shared fixture as ``ONEX_MIGRATION_PROOF_REQUIRE_PG=1``, so a
+  container that will not start fails too instead of skipping.
 """
 
 from __future__ import annotations
@@ -50,7 +57,7 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
-from tests.integration.migrations.conftest import PG_TOOLS_MISSING
+from tests.integration.migrations.conftest import EPHEMERAL_POSTGRES_UNAVAILABLE
 
 pytestmark = pytest.mark.integration
 
@@ -71,6 +78,10 @@ NODE_DB = "omnidash_analytics"
 RUNNER_ROLE = "role_omnidash"
 TENANT_OWNER = "owner_onex_tenant"
 UNRELATED_OWNER = "omn17887_unrelated_owner"
+# The grantee of the one conditional grant still left on `tenant`:
+# node_projection_delegation_inference_response/0004 runs
+# `GRANT USAGE ON SCHEMA tenant TO tenant_projection_writer` when it exists.
+WRITER_ROLE = "tenant_projection_writer"
 _REQUIRE_PG = os.environ.get("OMN17887_REQUIRE_PG") == "1"
 
 _EMPTY_LEDGER_FILES = (
@@ -168,8 +179,17 @@ def server(request: pytest.FixtureRequest) -> Iterator[_Server]:
             password=unquote(parsed.password or ""),
         )
         return
-    if PG_TOOLS_MISSING:
-        _unavailable("no OMN17887_GATE_DB_URL and initdb/pg_ctl/psql are not on PATH")
+    if EPHEMERAL_POSTGRES_UNAVAILABLE:
+        _unavailable(
+            "no OMN17887_GATE_DB_URL, and no ephemeral Postgres: psql is not on "
+            "PATH, or neither initdb/pg_ctl nor a reachable Docker daemon is"
+        )
+    if _REQUIRE_PG:
+        # The shared fixture skips a container that will not start unless it is
+        # told a backend is required (conftest.py, _unavailable).
+        request.getfixturevalue("monkeypatch").setenv(
+            "ONEX_MIGRATION_PROOF_REQUIRE_PG", "1"
+        )
     pg = request.getfixturevalue("ephemeral_postgres")
     yield _Server(host=pg.socket_dir, port=pg.port, user="postgres", password="")
 
@@ -212,6 +232,12 @@ class _Lab:
 
     def superuser(self, sql: str) -> None:
         result = self.server.psql("-c", sql, dbname=NODE_DB)
+        assert result.returncode == 0, result.stderr
+
+    def as_runner(self, sql: str) -> None:
+        result = self.server.psql(
+            "-c", sql, dbname=NODE_DB, user=RUNNER_ROLE, password=self.runner_password
+        )
         assert result.returncode == 0, result.stderr
 
     def run_runner(self) -> subprocess.CompletedProcess[str]:
@@ -260,6 +286,26 @@ class _Lab:
         owner, relations = row.split("|")
         return owner, int(relations)
 
+    def tenant_acl(self) -> list[str]:
+        acl = self.server.query(
+            "SELECT coalesce(array_to_string(nspacl, ','), '') "
+            "FROM pg_catalog.pg_namespace WHERE nspname = 'tenant'",
+            dbname=NODE_DB,
+        )
+        return acl.split(",") if acl else []
+
+    def schema_scoped_default_acls(self) -> int:
+        # Rows keep their schema's oid, so a row the drop left behind still
+        # counts here after `tenant` is gone.
+        return int(
+            self.server.query(
+                "SELECT count(*) FROM pg_catalog.pg_default_acl "
+                f"WHERE defaclrole = '{TENANT_OWNER}'::regrole "
+                "AND defaclnamespace <> 0",
+                dbname=NODE_DB,
+            )
+        )
+
     def ledger(self) -> list[str]:
         rows = self.server.query(
             "SELECT migration_stream || '|' || domain || '|' || checksum "
@@ -274,7 +320,8 @@ class _Lab:
 def lab(server: _Server, tmp_path: Path) -> Iterator[_Lab]:
     names = ", ".join(f"'{name}'" for name in (INFRA_DB, NODE_DB))
     roles = ", ".join(
-        f"'{name}'" for name in (RUNNER_ROLE, TENANT_OWNER, UNRELATED_OWNER)
+        f"'{name}'"
+        for name in (RUNNER_ROLE, TENANT_OWNER, UNRELATED_OWNER, WRITER_ROLE)
     )
     present = server.query(
         f"SELECT string_agg(datname, ',') FROM pg_database WHERE datname IN ({names})"
@@ -292,6 +339,9 @@ def lab(server: _Server, tmp_path: Path) -> Iterator[_Lab]:
         f"CREATE ROLE {TENANT_OWNER} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB "
         "NOCREATEROLE NOREPLICATION",
         f"CREATE ROLE {UNRELATED_OWNER} NOLOGIN",
+        # As 0004 creates it.
+        f"CREATE ROLE {WRITER_ROLE} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB "
+        "NOCREATEROLE NOREPLICATION",
         f"GRANT {TENANT_OWNER} TO {RUNNER_ROLE}",
         f"CREATE DATABASE {INFRA_DB} OWNER {RUNNER_ROLE}",
         f"CREATE DATABASE {NODE_DB} OWNER {RUNNER_ROLE}",
@@ -328,7 +378,7 @@ def lab(server: _Server, tmp_path: Path) -> Iterator[_Lab]:
     finally:
         for database in (NODE_DB, INFRA_DB):
             server.psql("-c", f"DROP DATABASE IF EXISTS {database} WITH (FORCE)")
-        for role in (RUNNER_ROLE, TENANT_OWNER, UNRELATED_OWNER):
+        for role in (RUNNER_ROLE, TENANT_OWNER, UNRELATED_OWNER, WRITER_ROLE):
             dropped = server.psql("-c", f"DROP ROLE IF EXISTS {role}")
             assert dropped.returncode == 0, dropped.stderr
 
@@ -366,13 +416,25 @@ def test_a_absent_schema_is_a_no_op(lab: _Lab) -> None:
 
 
 def test_b_empty_schema_owned_through_membership_is_dropped(lab: _Lab) -> None:
+    # onex-lab's likely shape: the empty schema, the USAGE grant 0004 leaves on
+    # it when it exists (applied by the node loop as the runner), and a
+    # default-privileges entry scoped to it. Neither is an object in the
+    # schema, so RESTRICT must not refuse on them, and both must go with it.
     lab.superuser(f"CREATE SCHEMA tenant AUTHORIZATION {TENANT_OWNER}")
+    lab.as_runner(f"GRANT USAGE ON SCHEMA tenant TO {WRITER_ROLE}")
+    lab.superuser(
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {TENANT_OWNER} IN SCHEMA tenant "
+        f"GRANT SELECT ON TABLES TO {WRITER_ROLE}"
+    )
     assert lab.tenant() == (TENANT_OWNER, 0)
+    assert f"{WRITER_ROLE}=U/{TENANT_OWNER}" in lab.tenant_acl()
+    assert lab.schema_scoped_default_acls() == 1
 
     result = lab.run_runner()
 
     assert result.returncode == 0, _output(result)
     assert lab.tenant() is None, "tenant is still present after the runner ran"
+    assert lab.schema_scoped_default_acls() == 0
     assert lab.ledger() == [_expected_ledger_row()]
 
 

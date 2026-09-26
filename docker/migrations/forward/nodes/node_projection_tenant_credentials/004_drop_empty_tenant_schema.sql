@@ -4,13 +4,33 @@
 --   The ruling on OMN-17887 (2026-09-24, recorded on the ticket as comment
 --   fbad6d0c, condition 3) retires the `tenant` schema, makes `public` the tenant
 --   schema for good, and says that where onex-lab still has `tenant` and it is
---   empty, it is dropped by forward migration. Every declaration, grant and
---   bridge entry that named `tenant` is already gone (omnimarket#2847,
---   omninode_infra#1660, omnibase_infra#4079, omninode_infra#1673).
---   omninode_infra#1673 (e8f90853) also removed the lab bootstrap's
---   `CREATE SCHEMA tenant AUTHORIZATION owner_onex_tenant`, but that bootstrap
---   runs only at initdb and the lab volume persists, so the schema it already
---   created stays until this file drops it.
+--   empty, it is dropped by forward migration. Every declaration and bridge
+--   entry that named `tenant`, and every unconditional grant on it, is already
+--   gone (omnimarket#2847, omninode_infra#1660, omnibase_infra#4079,
+--   omninode_infra#1673). omninode_infra#1673 (e8f90853) also removed the lab
+--   bootstrap's `CREATE SCHEMA tenant AUTHORIZATION owner_onex_tenant`, but
+--   that bootstrap runs only at initdb and the lab volume persists, so the
+--   schema it already created stays until this file drops it.
+--
+--   One conditional grant is left, in a file this change cannot edit:
+--   nodes/node_projection_delegation_inference_response/0004 runs
+--   `GRANT USAGE ON SCHEMA tenant TO tenant_projection_writer` when a schema
+--   named `tenant` exists, so on onex-lab the schema can carry that grant. 0004
+--   is already declared in _ledger/application-migrations.tsv, and
+--   scripts/validation/check_migration_append_only.py refuses an edit to a
+--   declared file. The grant is an ACL entry on the schema, not an object that
+--   depends on it, so RESTRICT does not refuse on it and it is removed with the
+--   schema. So is a default-privileges entry scoped to the schema (ALTER
+--   DEFAULT PRIVILEGES ... IN SCHEMA tenant). The integration test's
+--   onex-lab-shaped case carries both.
+--
+--   Elsewhere on dev 8a177b86c, `tenant` is still named by the manual
+--   rollback/rollback_103_create_tenant_projection_writer_role.sql, which
+--   revokes only when the schema exists, and by three proof harnesses
+--   (docker/application-acl-proof/seed.sql,
+--   docker/domain-adapter-proof/prove.py and
+--   scripts/ci/prove_application_database_acl.py) that act on a `tenant`
+--   created inside their own throwaway postgres:16-alpine containers.
 --
 -- ============================================================================
 -- WHY IT LIVES UNDER THIS NODE
@@ -30,12 +50,14 @@
 -- loop fails the Job on any file whose first `\connect` gives a directive_db
 -- other than "$DB_NAME", unless the file is on the Job's tombstone allowlist.
 -- In this repo, tests/ci/test_flat_migration_no_foreign_connect_gate.py
--- rejects a new flat migration whose `\connect` names a database other than
--- omnibase_infra unless it is listed in
--- docker/migrations/forward/cross-database-flat-migrations.yaml (OMN-15819).
--- The node-owned loop connects to omnidash_analytics directly
--- (NODE_POSTGRES_DB in scripts/run-forward-migrations.sh, NODE_DB_NAME in the
--- Job).
+-- rejects any new flat migration whose first `\connect` names a database
+-- other than omnibase_infra. The ledger it reads,
+-- docker/migrations/forward/cross-database-flat-migrations.yaml, admits only
+-- the frozen OMN-15819 seed set (MANIFEST_FROZEN_SEED in
+-- scripts/ci/check_flat_migration_foreign_connect.py), so adding an entry
+-- there does not admit a new file. The node-owned loop connects to
+-- omnidash_analytics directly (NODE_POSTGRES_DB in
+-- scripts/run-forward-migrations.sh, NODE_DB_NAME in the Job).
 --
 -- The stream was chosen on the question asked on OMN-17887 (comment d80e502d)
 -- and answered on 2026-09-26: node_projection_tenant_credentials, a
