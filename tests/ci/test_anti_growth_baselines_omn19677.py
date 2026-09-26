@@ -92,7 +92,8 @@ def test_shrink_only_baseline_is_wired_locally_and_in_ci(
     assert job["name"] == name
     assert job["uses"] == REUSABLE
     assert job["with"] == {"baseline-path": baseline_path, "parser": parser}
-    assert not ({"if", "needs", "secrets", "permissions"} & job.keys())
+    assert not ({"if", "needs", "secrets"} & job.keys())
+    assert job["permissions"] == {"contents": "read"}
 
     assert f"{name} / anti-growth-baseline" in ci_summary_gate.STRICT_GATE_JOBS
 

@@ -1106,6 +1106,9 @@ jobs:
   # registered as a strict CI Summary gate.
   topic-naming-baseline-oneway:
     name: Topic Naming Baseline One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
     uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
     with:
       baseline-path: scripts/validation/topic_naming_baseline.txt
@@ -2665,6 +2668,9 @@ jobs:
   # registered as a strict CI Summary gate.
   skip-count-baseline-oneway:
     name: Skip Count Baseline One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
     uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
     with:
       baseline-path: config/skip_count_baseline.yaml
@@ -3445,6 +3451,9 @@ jobs:
   # registered as a strict CI Summary gate.
   validator-requirements-baseline-oneway:
     name: Validator Requirements Baseline One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
     uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
     with:
       baseline-path: architecture-handshakes/validator-requirements-baseline.yaml
@@ -3501,6 +3510,9 @@ jobs:
   # registered as a strict CI Summary gate.
   runtime-profiles-allowlist-oneway:
     name: Runtime Profiles Allowlist One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
     uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
     with:
       baseline-path: config/validation/runtime_profiles_allowlist.yaml
@@ -3566,6 +3578,9 @@ jobs:
   # registered as a strict CI Summary gate.
   noncanonical-class-allowlist-oneway:
     name: Noncanonical Class Allowlist One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
     uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
     with:
       baseline-path: .onex_ratchets/noncanonical_class_allowlist.yaml
