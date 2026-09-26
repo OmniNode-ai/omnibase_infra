@@ -50,6 +50,13 @@ class ModelEventMessage(BaseModel):
     headers: ModelEventHeaders
     offset: str | None = Field(default=None)
     partition: int | None = Field(default=None)
+    # The normalized ONEX headers above are intentionally closed. Archive replay
+    # consumers need the exact broker header sequence, including duplicates and
+    # opaque bytes, beside that ordinary view.
+    original_kafka_headers: tuple[tuple[str, bytes | None], ...] | None = Field(
+        default=None, exclude=True, repr=False
+    )
+    broker_timestamp_ms: int | None = Field(default=None, ge=0, exclude=True)
 
     model_config = ConfigDict(
         frozen=True, extra="forbid", arbitrary_types_allowed=True, from_attributes=True

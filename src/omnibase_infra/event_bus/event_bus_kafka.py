@@ -4734,7 +4734,11 @@ class EventBusKafka(
 
         headers_dict: dict[str, str] = {}
         for key, value in kafka_headers:
-            if value is not None:
+            # Unknown Kafka headers may contain opaque non-UTF8 bytes. Keep
+            # those in original_kafka_headers, never in the ONEX header model.
+            if value is not None and (
+                key in ModelEventHeaders.model_fields or key == _REPLAY_COUNT_HEADER
+            ):
                 headers_dict[key] = value.decode("utf-8")
 
         correlation_id = self._parse_uuid_header(headers_dict.get("correlation_id"))
@@ -4861,6 +4865,7 @@ class EventBusKafka(
         offset = getattr(msg, "offset", None)
         partition = getattr(msg, "partition", None)
         kafka_headers = getattr(msg, "headers", None)
+        broker_timestamp_ms = getattr(msg, "timestamp", None)
 
         # Convert key to bytes if it's a string
         if isinstance(key, str):
@@ -4879,6 +4884,14 @@ class EventBusKafka(
             headers=headers,
             offset=str(offset) if offset is not None else None,
             partition=partition,
+            original_kafka_headers=(
+                tuple(kafka_headers) if kafka_headers is not None else None
+            ),
+            broker_timestamp_ms=(
+                broker_timestamp_ms
+                if isinstance(broker_timestamp_ms, int) and broker_timestamp_ms >= 0
+                else None
+            ),
         )
 
 

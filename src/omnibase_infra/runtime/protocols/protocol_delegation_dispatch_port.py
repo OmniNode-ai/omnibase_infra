@@ -70,6 +70,7 @@ class ProtocolDelegationDispatchPort(Protocol):
         # landed consumer that passes it.
         provenance: ModelDelegationProvenance | None = None,
         backend_id: str | None = None,
+        no_escalation: bool = False,
         response_contract: dict[str, object] | None = None,
         system_prompt: str | None = None,
         temperature: float | None = None,
