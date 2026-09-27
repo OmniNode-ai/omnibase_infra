@@ -492,3 +492,136 @@ def test_unterminated_fence_swallows_the_rest_of_the_body(tmp_path: Path) -> Non
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "dev"
+
+
+# --- OMN-19807: merge_group events read the queued PR's live body -------------
+
+_QUEUE_SHA = "65bdea8632" + "0" * 30
+_SOURCE_SHA = "95fbd51900dcd3aad9730fbeff04bcb78fc491e1"
+
+
+def _merge_group_event(tmp_path: Path, head_ref: str) -> Path:
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "merge_group": {"head_ref": head_ref, "base_ref": "refs/heads/dev"},
+                "repository": {"full_name": "OmniNode-ai/omnibase_infra"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return event_path
+
+
+def _paired_api(queued_body: str | None, queued_status: int = 200):  # type: ignore[no-untyped-def]
+    calls: list[str] = []
+
+    def api_get(url: str) -> tuple[int, dict[str, object] | None, str]:
+        calls.append(url)
+        if url.endswith("/repos/OmniNode-ai/omnibase_infra/pulls/4165"):
+            if queued_status != 200:
+                return queued_status, None, f"HTTP {queued_status}"
+            return 200, {"body": queued_body}, "HTTP 200"
+        if url.endswith("/repos/OmniNode-ai/omnimarket/pulls/2953"):
+            return (
+                200,
+                {
+                    "state": "open",
+                    "draft": False,
+                    "base": {"ref": "dev"},
+                    "head": {
+                        "ref": "jonah/omn-19716-topic-activity-projection",
+                        "sha": _SOURCE_SHA,
+                        "repo": {"full_name": "OmniNode-ai/omnimarket"},
+                    },
+                },
+                "HTTP 200",
+            )
+        raise AssertionError(f"unexpected API read {url}")
+
+    return api_get, calls
+
+
+@pytest.mark.parametrize(
+    "head_ref",
+    [
+        f"refs/heads/gh-readonly-queue/dev/pr-4165-{_QUEUE_SHA}",
+        f"gh-readonly-queue/dev/pr-4165-{_QUEUE_SHA}",
+    ],
+)
+def test_merge_group_reads_the_queued_pr_body_and_its_paired_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    head_ref: str,
+) -> None:
+    body = "\n".join(
+        [
+            "Node-Migration-Source-PR: omnimarket#2953",
+            f"Node-Migration-Source-SHA: {_SOURCE_SHA}",
+        ]
+    )
+    api_get, calls = _paired_api(body)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(_merge_group_event(tmp_path, head_ref)))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    monkeypatch.setattr(resolver, "_api_get", api_get)
+
+    assert resolver.main() == 0
+    assert capsys.readouterr().out.strip() == _SOURCE_SHA
+    assert calls[0].endswith("/repos/OmniNode-ai/omnibase_infra/pulls/4165")
+
+
+def test_merge_group_without_trailers_still_resolves_dev(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    api_get, _ = _paired_api("Refs OMN-19807")
+    monkeypatch.setenv(
+        "GITHUB_EVENT_PATH",
+        str(
+            _merge_group_event(
+                tmp_path, f"refs/heads/gh-readonly-queue/dev/pr-4165-{_QUEUE_SHA}"
+            )
+        ),
+    )
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    monkeypatch.setattr(resolver, "_api_get", api_get)
+
+    assert resolver.main() == 0
+    assert capsys.readouterr().out.strip() == "dev"
+
+
+def test_merge_group_with_unreadable_pr_body_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    api_get, _ = _paired_api(None, queued_status=404)
+    monkeypatch.setenv(
+        "GITHUB_EVENT_PATH",
+        str(
+            _merge_group_event(
+                tmp_path, f"refs/heads/gh-readonly-queue/dev/pr-4165-{_QUEUE_SHA}"
+            )
+        ),
+    )
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    monkeypatch.setattr(resolver, "_api_get", api_get)
+
+    assert resolver.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out.strip() == ""
+    assert "fail-closed" in captured.err
+
+
+def test_merge_group_with_a_foreign_head_ref_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    api_get, calls = _paired_api("Refs OMN-19807")
+    monkeypatch.setenv(
+        "GITHUB_EVENT_PATH", str(_merge_group_event(tmp_path, "refs/heads/feature/x"))
+    )
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    monkeypatch.setattr(resolver, "_api_get", api_get)
+
+    assert resolver.main() == 1
+    assert "not a merge-queue ref" in capsys.readouterr().err
+    assert calls == []
