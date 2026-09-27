@@ -479,3 +479,106 @@ def test_cloud_lane_overlay_still_resolves_only_from_its_own_pin(
         environ={"BIFROST_LANE_OVERLAY_PATH": str(_CLOUD_OVERLAY)},
     )
     assert rendered == target
+
+
+# ---------------------------------------------------------------------------
+# OMN-19432: a typed-decision backend (TypeSafe Jev) renders without the chat
+# path, is never counted as a delegation rung, and a bare base is still refused.
+# ---------------------------------------------------------------------------
+
+_TYPED_DECISION_ENDPOINT = "https://decisions.example.invalid/v1/systemone"
+
+
+def _write_base_with_typed_decision_backend(
+    path: Path, *, decision_endpoint: str, cloud_endpoint: str | None = _CLOUD_ENDPOINT
+) -> None:
+    _write_mixed_base_contract(path, cloud_endpoint=cloud_endpoint)
+    contract = yaml.safe_load(path.read_text(encoding="utf-8"))
+    contract["backends"].append(
+        {
+            "backend_id": "cloud-typed-decision",
+            "provider": "typesafe",
+            "model_name": "jev-latest",
+            "endpoint_url": decision_endpoint,
+            "secret_ref": "llm.typesafe.api_key",
+            "tier": "typed_decision",
+        }
+    )
+    path.write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_typed_decision_backend_renders_its_operation_url_verbatim(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_with_typed_decision_backend(
+        source, decision_endpoint=_TYPED_DECISION_ENDPOINT
+    )
+
+    render_bifrost_delegation_contract(
+        source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+    )
+
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+    assert by_id["cloud-typed-decision"]["endpoint_url"] == _TYPED_DECISION_ENDPOINT
+
+
+@pytest.mark.unit
+def test_chat_backend_without_the_chat_path_is_still_refused(tmp_path: Path) -> None:
+    """Positive control for the test above: the same non-chat URL on a backend
+    that is NOT declared typed_decision still fails the render."""
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_mixed_base_contract(source, cloud_endpoint=_TYPED_DECISION_ENDPOINT)
+
+    with pytest.raises(ProtocolConfigurationError, match="must be complete"):
+        render_bifrost_delegation_contract(
+            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+        )
+    assert not target.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "bare",
+    [
+        "https://decisions.example.invalid/v1",
+        "https://decisions.example.invalid/v1beta/",
+        "https://decisions.example.invalid",
+        "http://decisions.example.invalid/v1/systemone",
+    ],
+)
+def test_typed_decision_backend_bare_base_or_plain_http_is_refused(
+    tmp_path: Path, bare: str
+) -> None:
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_with_typed_decision_backend(source, decision_endpoint=bare)
+
+    with pytest.raises(ProtocolConfigurationError, match="typed-decision endpoint"):
+        render_bifrost_delegation_contract(
+            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+        )
+    assert not target.exists()
+
+
+@pytest.mark.unit
+def test_typed_decision_backend_is_not_an_active_delegation_endpoint(
+    tmp_path: Path,
+) -> None:
+    """A contract whose only endpoint is a typed-decision one has no rung to
+    delegate to, so the render still refuses it as having no active endpoint."""
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_with_typed_decision_backend(
+        source, decision_endpoint=_TYPED_DECISION_ENDPOINT, cloud_endpoint=None
+    )
+
+    with pytest.raises(ProtocolConfigurationError, match="no active endpoint"):
+        render_bifrost_delegation_contract(
+            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+        )
+    assert not target.exists()

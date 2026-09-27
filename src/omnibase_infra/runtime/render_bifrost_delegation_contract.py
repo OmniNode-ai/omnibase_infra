@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.resources
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -53,6 +54,16 @@ _CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
 #: The base contract's own declaration that a backend is served from the lab.
 _LOCAL_TIER = "local"
+#: OMN-19432: the base contract's own declaration that a backend answers TYPED
+#: DECISIONS on its provider's own schema (TypeSafe Jev's System One API)
+#: rather than OpenAI chat completions. Such a backend is never a rung: no
+#: routing rule or tier ladder names it, so it is not an "active endpoint" for
+#: delegation, and its complete URL names its own operation instead of ending
+#: in the chat path.
+_TYPED_DECISION_TIER = "typed_decision"
+#: A last path segment that is only an API version (``v1``, ``v1beta``) marks a
+#: bare base, which OMN-12815 forbids: nothing downstream appends a path.
+_BARE_VERSION_SEGMENT = re.compile(r"^v\d+(?:(?:alpha|beta)\d*)?$")
 
 EndpointProbe = Callable[[str, str, float], str | None]
 
@@ -202,6 +213,25 @@ def _index_base_backends(base: dict[str, object]) -> dict[str, dict[object, obje
 def _is_local_backend(backend: dict[object, object]) -> bool:
     """Whether the contract declares this backend as lab-served (its ``tier``)."""
     return backend.get("tier") == _LOCAL_TIER
+
+
+def _is_typed_decision_backend(backend: dict[object, object]) -> bool:
+    """Whether the contract declares this backend a typed-decision one (OMN-19432)."""
+    return backend.get("tier") == _TYPED_DECISION_TIER
+
+
+def _typed_decision_endpoint_is_complete(endpoint_url: str) -> bool:
+    """A typed-decision endpoint is complete when it is an absolute https URL
+    whose last path segment names the operation, never a bare version base.
+
+    It is posted verbatim, exactly as a chat endpoint is (OMN-12815); only the
+    operation it names differs.
+    """
+    parsed = urlsplit(endpoint_url.strip())
+    if parsed.scheme != "https" or not parsed.hostname:
+        return False
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    return bool(segments) and not _BARE_VERSION_SEGMENT.match(segments[-1])
 
 
 def _routed_local_backend_ids(
@@ -423,6 +453,19 @@ def _validate_rendered_contract(
                 "Rendered Bifrost contract must not contain endpoint_url_env"
             )
         endpoint_url = backend.get("endpoint_url")
+        if (
+            isinstance(endpoint_url, str)
+            and endpoint_url.strip()
+            and _is_typed_decision_backend(backend)
+        ):
+            # OMN-19432: not a delegation rung, so it neither needs the chat
+            # path nor counts toward the contract's active endpoints.
+            if not _typed_decision_endpoint_is_complete(endpoint_url):
+                raise ProtocolConfigurationError(
+                    "Rendered Bifrost typed-decision endpoint must be a complete "
+                    f"https URL naming its operation: {endpoint_url!r}"
+                )
+            continue
         if isinstance(endpoint_url, str) and endpoint_url.strip():
             if not endpoint_url.rstrip("/").endswith(_CHAT_COMPLETIONS_PATH_SUFFIX):
                 raise ProtocolConfigurationError(
