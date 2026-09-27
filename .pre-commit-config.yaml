@@ -2050,7 +2050,7 @@ repos:
         stages:
           - pre-commit
         additional_dependencies:
-          - omnibase-core==0.47.23 # Match uv.lock; includes the 0.47.18 baseline fix.
+          - omnibase-core==0.47.24 # Match uv.lock; includes the 0.47.18 baseline fix.
           # Configuration
           # OMN-14667 (DRIFT-2a fix): every stage a hook uses MUST be installed by
           # `pre-commit install`. Previously [pre-commit, pre-push] only, so the

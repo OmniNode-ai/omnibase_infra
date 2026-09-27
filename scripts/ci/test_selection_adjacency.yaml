@@ -138,6 +138,10 @@ adjacency:
   deep_dive: {reverse_deps: []}
   cli: {reverse_deps: []}
   clients: {reverse_deps: []}
+  # config_overlay: the runtime kernel, lane identity and auto-wiring ownership
+  # filter (part of `runtime`) resolve the runtime.lane overlay through it
+  # (OMN-19747); changing it must also re-run runtime tests.
+  config_overlay: {reverse_deps: [runtime]}
   configs: {reverse_deps: []}
   contracts: {reverse_deps: []}
   decorators: {reverse_deps: []}
