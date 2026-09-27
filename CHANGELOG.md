@@ -1,3 +1,25 @@
+## v0.38.59 (2026-09-27)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.59 by the scheduled release train.
+- 13 release-relevant commit(s) merged since v0.38.58.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.58
+- fix: the dispatch protocol declares no_escalation and the kwarg-parity reader resolves the consumer's TypedDict-typed splat (#4192)
+- fix: the runtime error triage effect returns an empty effect output, and the log bridge does not feed a runtime-error consumer's own errors back to its topic (#4176)
+- feat: vendor the topic-activity projection migrations and grants (#4165)
+- fix: the discovery sweep reuses an unchanged manifest instead of re-parsing 519 contracts (#4172)
+- fix: the runtime log bridge authenticates to the lab broker and is enabled on the dev lane (#4160)
+- feat: declare the three savings signal tables in omninode_internal (AC2 step 1) (#4129)
+- feat: lab proof profile registry and the foundation_override proof nodes (#4133)
+- fix: scope infra hooks to staged files (#4140)
+- fix: the evaluator admits a short prompt by its opening imperative (#4027)
+- fix: onex delegate refuses a replacing criteria set that can never accept, before dispatch (#4144)
+- feat: dogfood fault-pin admission and typed terminal-evidence capture (K1 infra, salvaged from #3951) (#4088)
+- feat: publish a compatible omnibase-core range, keep the exact pin only in the uv override (#4148)
+- feat: log the gateway session lifecycle so AC3's zero is falsifiable (#4139)
+
 ## v0.38.58 (2026-09-25)
 
 ### Release
