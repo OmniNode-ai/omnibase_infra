@@ -2757,7 +2757,7 @@ def probe_compose_dev(
     budget: ModelSettleBudget | None = None,
     expected_generation: ModelLaneGeneration | None = None,
     generation_container: str | None = None,
-    node_inventory_probe: ModelNodeInventoryProbe | None = None,
+    read_node_inventory: Callable[[], ModelNodeInventoryProbe] | None = None,
     health_observe_budget_seconds: float | None = None,
     declared_migrations: Sequence[str] | None = None,
     migration_ledger: ModelMigrationLedger | None = None,
@@ -2783,11 +2783,18 @@ def probe_compose_dev(
     ``expected_generation=None`` is the job saying convergence produced no
     record, which is a failure and not an absence.
 
-    ``node_inventory_probe`` follows the same rule (OMN-18708): it is passed in
-    already read, rather than read here, so the check and the triples the
-    receipt carries come from ONE read of the manifest. A caller that did not
-    probe the manifest passes nothing and makes no claim about the lane's
-    inventory -- it does not emit an empty one.
+    ``read_node_inventory`` follows the same rule (OMN-18708): a caller that did
+    not name a manifest passes nothing and makes no claim about the lane's
+    inventory -- it does not emit an empty one. It is a READER, called once and
+    only after the readiness wait returns (OMN-19802), and the caller keeps the
+    probe it returns, so the check here and the triples the receipt carries
+    still come from ONE read of the manifest. It used to be passed in already
+    read, which meant the manifest was fetched BEFORE the wait: on a lane the
+    deploy agent had just recreated that GET hit a closed port, and the
+    receipt then stamped the refusal with the settle phrase as if it had been
+    read after the lane came up (omnimarket compose-dev receipt artifact
+    10909257483, 2026-09-26: ``node_inventory`` ``Errno 111`` beside a 200 from
+    ``ready_main`` on the same port).
     """
     # BOTH readiness endpoints, not just main. Measured on the .201 lane
     # 2026-09-10: at 12:36:29Z omninode-runtime read "Up 3 minutes (health:
@@ -2842,10 +2849,10 @@ def probe_compose_dev(
         )
         for check in checks
     ]
-    if node_inventory_probe is not None:
-        # Annotated with the same settle phrase as the four HTTP checks above:
-        # an inventory read before the lane reported itself up is a different
-        # fact from one read after, and the receipt should not hide that.
+    if read_node_inventory is not None:
+        # Read HERE, after the wait, and annotated with the same settle phrase
+        # as the four HTTP checks above, which is now true of it (OMN-19802).
+        node_inventory_probe = read_node_inventory()
         annotated.append(
             ModelLabPassCheck(
                 name=node_inventory_probe.check.name,
@@ -5534,12 +5541,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                     file=sys.stderr,
                 )
 
-        inventory_probe: ModelNodeInventoryProbe | None = None
+        # OMN-19802. The manifest is read by probe_compose_dev AFTER its
+        # readiness wait, never here: read here it was fetched from a lane
+        # still being recreated. The reader keeps the one probe it produced so
+        # the triples written below are the same read the check reports.
+        inventory_reads: list[ModelNodeInventoryProbe] = []
+        read_node_inventory: Callable[[], ModelNodeInventoryProbe] | None = None
         if args.manifest_url.strip():
-            inventory_probe = check_node_inventory(
-                f"{args.manifest_url.rstrip('/')}{INTROSPECTION_MANIFEST_PATH}",
-                args.timeout_seconds,
+            manifest_url = (
+                f"{args.manifest_url.rstrip('/')}{INTROSPECTION_MANIFEST_PATH}"
             )
+            probe_timeout = args.timeout_seconds
+
+            def _read_and_keep() -> ModelNodeInventoryProbe:
+                probe = check_node_inventory(manifest_url, probe_timeout)
+                inventory_reads.append(probe)
+                return probe
+
+            read_node_inventory = _read_and_keep
 
         # OMN-18866. Each subject is assembled only when the caller named it,
         # and a caller that names it PARTLY is refused rather than quietly
@@ -5599,7 +5618,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             budget=budget,
             expected_generation=expected_generation,
             generation_container=args.generation_container,
-            node_inventory_probe=inventory_probe,
+            read_node_inventory=read_node_inventory,
             health_observe_budget_seconds=args.health_observe_budget_seconds,
             declared_migrations=declared_migrations,
             migration_ledger=migration_ledger,
@@ -5610,6 +5629,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             first_lag_sample=first_lag_sample,
             chain_canary_receipt=args.chain_canary_receipt,
         )
+        inventory_probe = inventory_reads[-1] if inventory_reads else None
         if args.node_inventory_out is not None:
             # Written even when the probe found nothing usable, as an empty
             # array: a downstream `emit` that pointed here must get a file, so

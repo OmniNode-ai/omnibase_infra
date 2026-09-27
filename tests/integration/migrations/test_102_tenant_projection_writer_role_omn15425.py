@@ -567,6 +567,35 @@ def _seed_fixture_cluster(pg: EphemeralPostgres, *, legacy: bool) -> None:
         assert result.returncode == 0, result.stderr
 
 
+#: Wall-clock budget for one full pass of the forward migration set.
+#:
+#: 180s was tuned against the native backend, where the cluster answers on a
+#: unix socket in the same kernel. It is not a property of the migrations: the
+#: container backend publishes TCP on loopback instead, and the runner pays that
+#: extra round trip once per psql invocation across the whole forward set, which
+#: overruns 180s on an otherwise healthy host. A budget that encodes one
+#: transport's cost silently reclassifies a slower transport as a failure, so
+#: the number is named here, allowed to differ per backend, and overridable for
+#: a host slower than both.
+_FORWARD_RUNNER_TIMEOUT_ENV = "ONEX_FORWARD_RUNNER_TIMEOUT_SECONDS"
+_FORWARD_RUNNER_TIMEOUT_NATIVE = 180
+_FORWARD_RUNNER_TIMEOUT_TCP = 600
+
+
+def _forward_runner_timeout(pg: EphemeralPostgres) -> int:
+    override = os.environ.get(_FORWARD_RUNNER_TIMEOUT_ENV, "")
+    if override:
+        return int(override)
+    # The native backend passes a socket DIRECTORY as the host; the container
+    # backend passes a loopback address. That distinction is exactly the cost
+    # difference the budget has to absorb.
+    return (
+        _FORWARD_RUNNER_TIMEOUT_NATIVE
+        if Path(pg.socket_dir).is_dir()
+        else _FORWARD_RUNNER_TIMEOUT_TCP
+    )
+
+
 def _run_forward_migrations(pg: EphemeralPostgres) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["sh", str(RUNNER)],
@@ -583,7 +612,7 @@ def _run_forward_migrations(pg: EphemeralPostgres) -> subprocess.CompletedProces
         },
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=_forward_runner_timeout(pg),
         check=False,
     )
 

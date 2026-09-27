@@ -532,7 +532,10 @@ now_epoch=$(date -u +%s)
 offline_first_seen_lines=""
 prev_offline_first_seen_json="{}"
 if [[ -f "${STATE_FILE}" ]]; then
-    prev_offline_first_seen_json=$(jq -c '.offline_first_seen // {}' "${STATE_FILE}" 2>/dev/null || echo "{}")
+    prev_offline_first_seen_json=$(jq -c '.offline_first_seen // {}' "${STATE_FILE}" 2>/dev/null || true)
+    if [[ -z "${prev_offline_first_seen_json}" ]] || ! jq -e 'type == "object"' <<< "${prev_offline_first_seen_json}" >/dev/null 2>&1; then
+        prev_offline_first_seen_json="{}"
+    fi
 fi
 
 while IFS=$'\t' read -r name status; do
@@ -1111,12 +1114,22 @@ announced_alert_count=0
 pending_alert_count=0
 pending_alert_streak=0
 if [[ -f "$STATE_FILE" ]]; then
-    prev_unhealthy_count=$(jq -r '.unhealthy_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
-    prev_alert_count=$(jq -r '.alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
-    announced_alert_count=$(jq -r '.announced_alert_count // .alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
-    pending_alert_count=$(jq -r '.pending_alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
-    pending_alert_streak=$(jq -r '.pending_alert_streak // 0' "$STATE_FILE" 2>/dev/null || echo 0)
+    prev_unhealthy_count=$(jq -r '.unhealthy_count // 0' "$STATE_FILE" 2>/dev/null || true)
+    prev_alert_count=$(jq -r '.alert_count // 0' "$STATE_FILE" 2>/dev/null || true)
+    announced_alert_count=$(jq -r '.announced_alert_count // .alert_count // 0' "$STATE_FILE" 2>/dev/null || true)
+    pending_alert_count=$(jq -r '.pending_alert_count // 0' "$STATE_FILE" 2>/dev/null || true)
+    pending_alert_streak=$(jq -r '.pending_alert_streak // 0' "$STATE_FILE" 2>/dev/null || true)
 fi
+for state_count_var in \
+    prev_unhealthy_count \
+    prev_alert_count \
+    announced_alert_count \
+    pending_alert_count \
+    pending_alert_streak; do
+    if [[ ! "${!state_count_var}" =~ ^[0-9]+$ ]]; then
+        printf -v "${state_count_var}" '%s' 0
+    fi
+done
 
 current_unhealthy_count=${#unhealthy_list[@]}
 wedge_count=${#wedge_list[@]}
@@ -1221,8 +1234,10 @@ fi
 # the next cycle -- and the second cron invocation reads the same value.
 prev_alert_count="${previously_announced_alert_count}"
 
-# Write current state
-jq -n \
+# Write current state atomically. A failed serialization must preserve the last
+# good observation and must never prevent the fleet emit below from running.
+state_tmp="${STATE_FILE}.tmp.$$"
+if jq -n \
     --argjson healthy "$healthy" \
     --argjson unhealthy_count "$current_unhealthy_count" \
     --argjson alert_count "$current_alert_count" \
@@ -1288,7 +1303,15 @@ jq -n \
         offline_idle_bounce_names: $offline_idle_bounce_names,
         offline_idle_recreate_names: $offline_idle_recreate_names,
         offline_first_seen: $offline_first_seen
-    }' > "$STATE_FILE"
+    }' > "${state_tmp}"; then
+    if ! mv -f "${state_tmp}" "${STATE_FILE}"; then
+        log "state write FAILED to replace ${STATE_FILE} — previous state preserved; continuing"
+        rm -f "${state_tmp}" || true
+    fi
+else
+    log "state write FAILED to serialize ${STATE_FILE} — previous state preserved; continuing"
+    rm -f "${state_tmp}" || true
+fi
 
 # ---------------------------------------------------------------------------
 # Fleet-observation bus emit (OMN-18768, closing OMN-16943)
