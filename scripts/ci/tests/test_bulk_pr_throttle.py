@@ -1138,7 +1138,14 @@ class TestGhIntegration:
     def test_gh_apply_pr_operation_arm_automerge(self, monkeypatch):
         import bulk_pr_throttle
 
+        seen = []
+
         def fake_run_gh(args):
+            seen.append(args)
+            if args[:2] == ["api", "repos/OmniNode-ai/omnibase_infra"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout="true\n", stderr=""
+                )
             return subprocess.CompletedProcess(
                 args=args, returncode=0, stdout="", stderr=""
             )
@@ -1148,6 +1155,155 @@ class TestGhIntegration:
             "OmniNode-ai", "omnibase_infra", 2805, "arm-automerge"
         )
         assert outcome.success is True
+        assert seen[0] == [
+            "api",
+            "repos/OmniNode-ai/omnibase_infra",
+            "--jq",
+            ".allow_auto_merge",
+        ]
+        assert seen[1][:3] == ["pr", "merge", "2805"]
+
+    def test_gh_apply_pr_operation_arm_automerge_refuses_when_auto_merge_disabled(
+        self, monkeypatch
+    ):
+        """OMN-17427: arm-automerge must never fall back to a direct merge.
+
+        This is the regression test for the 2026-09-25 incident: a repo with
+        ``allow_auto_merge: false`` must be refused with a clear per-PR
+        outcome, and ``gh pr merge`` must never be invoked at all.
+        """
+        import bulk_pr_throttle
+
+        seen = []
+
+        def fake_run_gh(args):
+            seen.append(args)
+            if args[:2] == ["api", "repos/OmniNode-ai/knowledge-base"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout="false\n", stderr=""
+                )
+            raise AssertionError(
+                f"gh pr merge must never be invoked when allow_auto_merge is "
+                f"false, but got: {args}"
+            )
+
+        monkeypatch.setattr(bulk_pr_throttle, "_run_gh", fake_run_gh)
+        outcome = bulk_pr_throttle.gh_apply_pr_operation(
+            "OmniNode-ai", "knowledge-base", 88, "arm-automerge"
+        )
+        assert outcome.success is False
+        assert bulk_pr_throttle.REFUSED_AUTOMERGE_DISABLED in outcome.detail
+        assert outcome.pr_number == 88
+        # exactly one gh call: the settings probe. No merge attempt.
+        assert len(seen) == 1
+        assert seen[0] == [
+            "api",
+            "repos/OmniNode-ai/knowledge-base",
+            "--jq",
+            ".allow_auto_merge",
+        ]
+
+    def test_gh_apply_pr_operation_arm_automerge_probe_failure_refuses(
+        self, monkeypatch
+    ):
+        """A probe that cannot confirm the setting fails closed, never merges."""
+        import bulk_pr_throttle
+
+        def fake_run_gh(args):
+            if args[:2] == ["api", "repos/OmniNode-ai/knowledge-base"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=1, stdout="", stderr="HTTP 503"
+                )
+            raise AssertionError(f"gh pr merge must never be invoked: {args}")
+
+        monkeypatch.setattr(bulk_pr_throttle, "_run_gh", fake_run_gh)
+        outcome = bulk_pr_throttle.gh_apply_pr_operation(
+            "OmniNode-ai", "knowledge-base", 88, "arm-automerge"
+        )
+        assert outcome.success is False
+        assert "could not verify allow_auto_merge" in outcome.detail
+
+    def test_run_bulk_operation_arm_automerge_refuses_one_pr_others_unaffected(self):
+        """The wave-level flow: a refused PR yields success=False without an
+        exception, so the run completes and the CLI exit code (checked at
+        the ``main`` layer) reflects the refusal via ``outcome.success``.
+        """
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        def apply_pr_operation(owner, repo, pr, operation):
+            if pr == 2:
+                return PrOutcome(
+                    pr_number=pr,
+                    success=False,
+                    detail="REFUSED_AUTOMERGE_DISABLED: repo does not allow auto-merge",
+                )
+            return PrOutcome(pr_number=pr, success=True, detail="armed")
+
+        report = run_bulk_operation(
+            owner="OmniNode-ai",
+            repo="knowledge-base",
+            pr_numbers=[1, 2, 3],
+            operation="arm-automerge",
+            wave_size=5,
+            dry_run=False,
+            get_queue_depth=lambda: 0,
+            apply_pr_operation=apply_pr_operation,
+            max_wait_seconds=0.0,
+        )
+        outcomes = report.waves[0].outcomes
+        assert [o.success for o in outcomes] == [True, False, True]
+        failures = [o for wave in report.waves for o in wave.outcomes if not o.success]
+        assert len(failures) == 1
+
+    def test_gh_repo_allows_auto_merge_true(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "_run_gh",
+            lambda args: subprocess.CompletedProcess(args, 0, "true\n", ""),
+        )
+        assert (
+            bulk_pr_throttle.gh_repo_allows_auto_merge("OmniNode-ai", "omnibase_infra")
+            is True
+        )
+
+    def test_gh_repo_allows_auto_merge_false(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "_run_gh",
+            lambda args: subprocess.CompletedProcess(args, 0, "false\n", ""),
+        )
+        assert (
+            bulk_pr_throttle.gh_repo_allows_auto_merge("OmniNode-ai", "knowledge-base")
+            is False
+        )
+
+    def test_gh_repo_allows_auto_merge_nonzero_exit_raises(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "_run_gh",
+            lambda args: subprocess.CompletedProcess(args, 1, "", "HTTP 404"),
+        )
+        with pytest.raises(
+            bulk_pr_throttle.BulkPrThrottleError, match="repo settings probe failed"
+        ):
+            bulk_pr_throttle.gh_repo_allows_auto_merge("OmniNode-ai", "ghost-repo")
+
+    def test_gh_repo_allows_auto_merge_malformed_output_raises(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "_run_gh",
+            lambda args: subprocess.CompletedProcess(args, 0, "null\n", ""),
+        )
+        with pytest.raises(bulk_pr_throttle.BulkPrThrottleError, match="invalid"):
+            bulk_pr_throttle.gh_repo_allows_auto_merge("OmniNode-ai", "omnibase_infra")
 
     def test_gh_rerun_failed_no_failed_runs(self, monkeypatch):
         import bulk_pr_throttle
@@ -1432,6 +1588,47 @@ class TestMainCli:
         assert receipt.exists()
         data = json.loads(receipt.read_text())
         assert data["dry_run"] is True
+
+    def test_arm_automerge_dry_run_never_touches_gh_and_reports_no_outcomes(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        """OMN-17427: dry-run must report the same 'nothing was merged' fact
+        as the live refusal path — a repo with allow_auto_merge=false armed
+        via --dry-run must not merge either. Dry-run never calls
+        ``apply_pr_operation`` at all, so it structurally cannot invoke
+        ``gh pr merge``; this locks that invariant down for arm-automerge
+        specifically, with ``_run_gh`` patched to explode if ever called.
+        """
+        import bulk_pr_throttle
+        from bulk_pr_throttle import main
+
+        def fake_run_gh(args):
+            raise AssertionError(f"dry-run must never call gh, got: {args}")
+
+        monkeypatch.setattr(bulk_pr_throttle, "_run_gh", fake_run_gh)
+
+        receipt = tmp_path / "receipt.json"
+        result = main(
+            [
+                "--owner",
+                "OmniNode-ai",
+                "--repo",
+                "knowledge-base",
+                "--prs",
+                "88",
+                "--operation",
+                "arm-automerge",
+                "--dry-run",
+                "--receipt",
+                str(receipt),
+            ]
+        )
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "DRY-RUN plan" in out
+        data = json.loads(receipt.read_text())
+        assert data["dry_run"] is True
+        assert data["waves"][0]["outcomes"] == []
 
     def test_missing_owner_is_a_hard_argparse_error(self):
         from bulk_pr_throttle import main
@@ -1794,3 +1991,299 @@ class TestFleetStatusTokenResolution:
         # dispatches jobs onto the fleet, so skipping its probe would reinstate
         # the saturation the throttle exists to prevent (OMN-16284).
         assert queue_depth_gate_for_operation("rerun-failed") is True
+
+
+# ---------------------------------------------------------------------------
+# OMN-18855 — the create operation
+#
+# The ticket's point is that a convention the next lane does not know about is
+# not an answer, so these assert the pacing is a property of the TOOL. The
+# AC3 tests below pass no pacing arguments at all: if pacing ever becomes
+# opt-in, they go red.
+# ---------------------------------------------------------------------------
+
+
+def make_specs(count: int):
+    from bulk_pr_throttle import CreateSpec
+
+    return [
+        CreateSpec(head=f"lane/branch-{i}", base="dev", title=f"chore: item {i}")
+        for i in range(1, count + 1)
+    ]
+
+
+class TestCreateOperationIsLoadCreating:
+    def test_create_is_in_the_operation_policy(self):
+        from bulk_pr_throttle import VALID_OPERATIONS
+
+        assert "create" in VALID_OPERATIONS
+
+    def test_create_takes_the_capacity_gate(self):
+        """AC1. Keyed to the operation, which is what makes AC3 possible."""
+        from bulk_pr_throttle import queue_depth_gate_for_operation
+
+        assert queue_depth_gate_for_operation("create") is True
+
+
+class TestCreatePacesAgainstTheLiveSignal:
+    def test_ac1_probes_the_fleet_once_per_wave(self):
+        """AC1: bounded batches with the signal read BETWEEN them."""
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        probes: list[int] = []
+
+        def fleet():
+            probes.append(1)
+            return idle_fleet()
+
+        created: list[str] = []
+
+        def apply(owner, repo, item, operation):
+            created.append(item.head)
+            return PrOutcome(pr_number=100 + len(created), success=True, detail="ok")
+
+        report = run_bulk_operation(
+            owner="OmniNode-ai",
+            repo="omnibase_infra",
+            create_specs=make_specs(12),
+            operation="create",
+            wave_size=5,
+            get_runner_fleet=fleet,
+            get_queue_depth=lambda: 3,
+            apply_pr_operation=apply,
+        )
+        assert len(report.waves) == 3  # 5 + 5 + 2, bounded
+        assert len(probes) == 3  # signal read before each wave
+        assert len(created) == 12
+
+    def test_ac1_receipt_records_heads_and_resulting_numbers(self):
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        def apply(owner, repo, item, operation):
+            return PrOutcome(pr_number=4242, success=True, detail="ok")
+
+        report = run_bulk_operation(
+            owner="o",
+            repo="r",
+            create_specs=make_specs(1),
+            operation="create",
+            get_runner_fleet=idle_fleet,
+            get_queue_depth=lambda: 1,
+            apply_pr_operation=apply,
+        )
+        wave = report.waves[0]
+        # No PR numbers existed at wave start; the heads identify the items.
+        assert wave.pr_numbers == ()
+        assert wave.wave_heads == ("lane/branch-1",)
+        assert wave.outcomes[0].pr_number == 4242
+
+
+class TestCreateFailsClosed:
+    def test_ac2_refuses_when_the_probe_cannot_be_read(self):
+        """AC2: unreadable signal refuses; it does not warn and proceed."""
+        from bulk_pr_throttle import RunnerFleetProbeError, run_bulk_operation
+
+        created: list[str] = []
+
+        def boom():
+            raise RuntimeError("fleet endpoint unreachable")
+
+        with pytest.raises(RunnerFleetProbeError):
+            run_bulk_operation(
+                owner="o",
+                repo="r",
+                create_specs=make_specs(4),
+                operation="create",
+                get_runner_fleet=boom,
+                get_queue_depth=lambda: 1,
+                apply_pr_operation=lambda *a: created.append(a) or None,
+            )
+        assert created == []  # zero PRs opened, which is the point
+
+    def test_ac2_refuses_when_the_fleet_is_starved(self):
+        """AC2: over-threshold signal refuses after the bounded wait."""
+        from bulk_pr_throttle import (
+            RunnerFleetStarvationTimeoutError,
+            run_bulk_operation,
+        )
+
+        created: list[str] = []
+
+        with pytest.raises(RunnerFleetStarvationTimeoutError):
+            run_bulk_operation(
+                owner="o",
+                repo="r",
+                create_specs=make_specs(4),
+                operation="create",
+                get_runner_fleet=starved_fleet,
+                get_queue_depth=lambda: 1,
+                apply_pr_operation=lambda *a: created.append(a) or None,
+                poll_seconds=1.0,
+                max_wait_seconds=0.0,
+                sleep_fn=lambda _s: None,
+            )
+        assert created == []
+
+    def test_ac2_positive_control_healthy_fleet_does_proceed(self):
+        """The control: these refusals are conditional, not unconditional."""
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        created: list[str] = []
+
+        def apply(owner, repo, item, operation):
+            created.append(item.head)
+            return PrOutcome(pr_number=1, success=True, detail="ok")
+
+        run_bulk_operation(
+            owner="o",
+            repo="r",
+            create_specs=make_specs(4),
+            operation="create",
+            get_runner_fleet=idle_fleet,
+            get_queue_depth=lambda: 1,
+            apply_pr_operation=apply,
+        )
+        assert len(created) == 4
+
+
+class TestCreateIsPacedWithoutOptIn:
+    def test_ac3_no_pacing_arguments_still_paces(self):
+        """AC3: the caller passes NO wave size and NO threshold."""
+        from bulk_pr_throttle import DEFAULT_WAVE_SIZE, PrOutcome, run_bulk_operation
+
+        probes: list[int] = []
+
+        def fleet():
+            probes.append(1)
+            return idle_fleet()
+
+        report = run_bulk_operation(
+            owner="o",
+            repo="r",
+            create_specs=make_specs(DEFAULT_WAVE_SIZE * 2),
+            operation="create",
+            get_runner_fleet=fleet,
+            get_queue_depth=lambda: 1,
+            apply_pr_operation=lambda o, r, i, op: PrOutcome(
+                pr_number=1, success=True, detail="ok"
+            ),
+        )
+        assert len(report.waves) == 2
+        assert all(len(w.wave_heads) <= DEFAULT_WAVE_SIZE for w in report.waves)
+        assert len(probes) == 2
+        assert report.queue_depth_gate_applied is True
+
+    def test_ac3_the_cap_applies_to_creates_too(self):
+        from bulk_pr_throttle import (
+            DEFAULT_MAX_TOTAL_PRS,
+            TotalPrLimitExceededError,
+            run_bulk_operation,
+        )
+
+        with pytest.raises(TotalPrLimitExceededError):
+            run_bulk_operation(
+                owner="o",
+                repo="r",
+                create_specs=make_specs(DEFAULT_MAX_TOTAL_PRS + 1),
+                operation="create",
+                get_runner_fleet=idle_fleet,
+                get_queue_depth=lambda: 1,
+                apply_pr_operation=lambda *a: None,
+            )
+
+
+class TestCreateInputRefusals:
+    def test_create_rejects_pr_numbers(self):
+        from bulk_pr_throttle import BulkPrThrottleError, run_bulk_operation
+
+        with pytest.raises(BulkPrThrottleError, match="not PR numbers"):
+            run_bulk_operation(
+                owner="o", repo="r", pr_numbers=[1, 2], operation="create"
+            )
+
+    def test_non_create_rejects_specs(self):
+        from bulk_pr_throttle import BulkPrThrottleError, run_bulk_operation
+
+        with pytest.raises(BulkPrThrottleError, match="only valid for operation"):
+            run_bulk_operation(
+                owner="o",
+                repo="r",
+                create_specs=make_specs(1),
+                operation="update-branch",
+            )
+
+    def test_create_requires_specs(self):
+        from bulk_pr_throttle import BulkPrThrottleError, run_bulk_operation
+
+        with pytest.raises(BulkPrThrottleError, match="create_specs must be non-empty"):
+            run_bulk_operation(owner="o", repo="r", operation="create")
+
+    def test_spec_with_blank_field_is_refused(self):
+        from bulk_pr_throttle import BulkPrThrottleError, CreateSpec
+
+        with pytest.raises(BulkPrThrottleError, match="missing 'head'"):
+            CreateSpec(head="  ", base="dev", title="t")
+
+    def test_parse_specs_rejects_unknown_fields(self):
+        from bulk_pr_throttle import BulkPrThrottleError, parse_create_specs
+
+        payload = json.dumps(
+            [{"head": "h", "base": "dev", "title": "t", "reviewers": ["x"]}]
+        )
+        with pytest.raises(BulkPrThrottleError, match="unknown field"):
+            parse_create_specs(payload)
+
+    def test_parse_specs_round_trips_a_valid_payload(self):
+        from bulk_pr_throttle import parse_create_specs
+
+        payload = json.dumps([{"head": "h", "base": "dev", "title": "t", "body": "b"}])
+        specs = parse_create_specs(payload)
+        assert len(specs) == 1
+        assert (specs[0].head, specs[0].base, specs[0].title, specs[0].body) == (
+            "h",
+            "dev",
+            "t",
+            "b",
+        )
+
+
+class TestCreateCliRefusals:
+    def test_cli_create_without_specs_exits_non_zero(self):
+        from bulk_pr_throttle import main
+
+        rc = main(["--owner", "o", "--repo", "r", "--operation", "create"])
+        assert rc == 1
+
+    def test_cli_create_with_prs_exits_non_zero(self):
+        from bulk_pr_throttle import main
+
+        rc = main(
+            [
+                "--owner",
+                "o",
+                "--repo",
+                "r",
+                "--operation",
+                "create",
+                "--prs",
+                "1,2",
+            ]
+        )
+        assert rc == 1
+
+    def test_cli_non_create_with_specs_exits_non_zero(self):
+        from bulk_pr_throttle import main
+
+        rc = main(
+            [
+                "--owner",
+                "o",
+                "--repo",
+                "r",
+                "--operation",
+                "update-branch",
+                "--create-specs",
+                "[]",
+            ]
+        )
+        assert rc == 1

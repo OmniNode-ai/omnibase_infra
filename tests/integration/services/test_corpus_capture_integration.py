@@ -163,8 +163,13 @@ class TestManifestGeneratorIntegration:
         # Verify all callbacks were invoked in order
         assert call_order == ["a", "b", "c"]
 
-    def test_callback_exception_does_not_prevent_build(self) -> None:
-        """Exception in callback should not prevent manifest build or other callbacks."""
+    def test_callback_exception_propagates_and_stops_later_callbacks(self) -> None:
+        """A failing callback raises to the caller and later callbacks do not run.
+
+        omnibase_core 0.47.22 (OMN-18996, core #1730) removed the warn-and-continue
+        wrapper around ``on_manifest_built`` callbacks, so a required observer can
+        no longer lose a manifest without a caller-visible failure.
+        """
         call_order: list[str] = []
 
         def failing_callback(manifest: ModelExecutionManifest) -> None:
@@ -184,16 +189,11 @@ class TestManifestGeneratorIntegration:
             on_manifest_built=[failing_callback, success_callback],
         )
 
-        # Build should complete and return manifest despite callback failure
-        with pytest.warns(UserWarning, match="on_manifest_built callback failed"):
-            manifest = generator.build()
+        with pytest.raises(RuntimeError, match="Intentional test failure"):
+            generator.build()
 
-        # Verify manifest was built
-        assert manifest is not None
-        assert manifest.node_identity.node_id == "exception-test-node"
-
-        # Verify both callbacks were attempted
-        assert call_order == ["failing", "success"]
+        # The failing callback ran; the one registered after it did not.
+        assert call_order == ["failing"]
 
 
 class TestEndToEndCaptureWorkflow:

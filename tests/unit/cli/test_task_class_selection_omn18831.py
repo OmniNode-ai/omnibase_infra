@@ -77,7 +77,7 @@ _MIRROR = (
 #: is the fix. A digest matching on both sides is what makes the falsifier
 #: table below a statement about production rather than about a fixture.
 PRODUCTION_SELECTION_DIGEST = (
-    "6d43ffef9e8aef89eba02b61da356adec3e74ef53e439a6a819cfa14aaa85819"
+    "6d60b389ebe4af899d6a115bb4a5e097746c7770a3637f68521ac79530e5d99a"
 )
 
 #: The opening sentence is quoted verbatim from the run's own stderr. The
@@ -290,6 +290,7 @@ def _canonical_projection(contract_path: Path) -> str:
             continue
         selection = entry["selection"]
         qualified = selection.get("qualified_phrases")
+        short = selection.get("short_prompt")
         projection[str(name)] = {
             "priority": int(selection["priority"]),
             "min_words": selection.get("min_words"),
@@ -301,6 +302,22 @@ def _canonical_projection(contract_path: Path) -> str:
                 "within_words": int(qualified["within_words"]),
                 "phrases": sorted(str(item) for item in qualified["phrases"]),
                 "qualifiers": sorted(str(item) for item in qualified["qualifiers"]),
+            },
+            # OMN-18831 residual: the prose-output veto. Part of the projection
+            # because it changes which class a prompt resolves to.
+            "vetoed_by": sorted(
+                str(item) for item in (selection.get("vetoed_by") or ())
+            ),
+            # OMN-19140: a short-prompt block changes routing, so it is part of
+            # the projection; without it a contract edit here is invisible to
+            # the seam, which is the silence the digest exists to prevent.
+            "short_prompt": None
+            if short is None
+            else {
+                "min_words": int(short["min_words"]),
+                "opening_phrases": sorted(
+                    str(item) for item in short["opening_phrases"]
+                ),
             },
         }
     return json.dumps(projection, sort_keys=True, separators=(",", ":"))

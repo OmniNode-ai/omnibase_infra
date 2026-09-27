@@ -88,11 +88,12 @@ def _run_gate(
     *,
     bash: str = "bash",
     env: dict[str, str] | None = None,
+    paths: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     script_path = _install_script(tmp_path)
 
     return subprocess.run(
-        [bash, str(script_path)],
+        [bash, str(script_path), *(paths or [])],
         cwd=tmp_path,
         text=True,
         capture_output=True,
@@ -157,6 +158,21 @@ def test_gate_allows_allowlisted_adapter_import(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert "OK: no disallowed imports" in result.stdout
+
+
+def test_gate_scans_only_explicit_staged_file(tmp_path: Path) -> None:
+    clean = tmp_path / "src" / "omnibase_infra" / "clean.py"
+    clean.parent.mkdir(parents=True)
+    clean.write_text("VALUE = 1\n", encoding="utf-8")
+    violation = clean.parent / "violation.py"
+    violation.write_text(
+        "from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory\n",
+        encoding="utf-8",
+    )
+
+    result = _run_gate(tmp_path, paths=[str(clean.relative_to(tmp_path))])
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 # --------------------------------------------------------------------------

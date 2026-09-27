@@ -72,14 +72,16 @@ PHYSICAL schema, applied by ``physical_grant_schema_for_table``. Measured on
 so a gate keyed on the topology's ``schema`` would have missed the exact pair
 OMN-18774 was filed for.
 
-The inverse map is checked in: the two
-``*_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359`` frozensets in
-``topology/physical_schema_mapping.py``. Resolution is therefore:
+The inverse map is checked in: the
+``INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359`` frozenset in
+``topology/physical_schema_mapping.py``. Since OMN-17887 the TENANT domain's
+schema is ``public`` itself -- each database's ``schemas`` block in the topology
+states the domain of every schema it declares -- so no tenant bridge exists.
+Resolution is therefore, per database:
 
   topology schema ``omninode_internal`` / ``platform_catalog``  -> that domain
-  topology schema ``tenant``                                    -> tenant
-  topology schema ``public`` and in the INTERNAL bridge         -> internal
-  topology schema ``public`` and in the TENANT bridge           -> tenant
+  topology schema in the INTERNAL bridge                        -> internal
+  topology schema whose declared domain is TENANT               -> tenant
   anything else                                                 -> UNRESOLVED
 
 The frozensets are read with ``ast``, not imported: every script in
@@ -139,7 +141,6 @@ _CORPUS_ROOT = Path("docker/migrations/forward")
 _TOPOLOGY_ROOT = Path("src/omnibase_infra/topology/instances")
 _PHYSICAL_MAP = Path("src/omnibase_infra/topology/physical_schema_mapping.py")
 
-_TENANT_BRIDGE = "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359"
 _INTERNAL_BRIDGE = "INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359"
 
 # Domains whose operation class never issues ``set_config('app.tenant_id', ...)``.
@@ -373,23 +374,53 @@ def _walk_table_blocks(node: object) -> Iterable[tuple[str, str]]:
             yield from _walk_table_blocks(value)
 
 
+def _walk_database_table_blocks(
+    document: object,
+) -> Iterable[tuple[dict[str, str], str, str]]:
+    """Yield (that database's schema -> domain map, schema, relation) for every
+    ``object_type: TABLE`` grant block, database by database.
+
+    The domain map is what the topology itself declares under each database's
+    ``schemas`` block, so ``public`` resolves to TENANT only where the topology
+    says it is (the ``application`` database) and not in a service-owned
+    database whose ``public`` is internal.
+    """
+    databases = document.get("databases") if isinstance(document, dict) else None
+    if not isinstance(databases, dict):
+        return
+    for database in databases.values():
+        if not isinstance(database, dict):
+            continue
+        schemas = database.get("schemas")
+        schema_domains = (
+            {
+                str(name).lower(): str((spec or {}).get("domain", "")).upper()
+                for name, spec in schemas.items()
+                if isinstance(spec, dict) or spec is None
+            }
+            if isinstance(schemas, dict)
+            else {}
+        )
+        for schema, relation in _walk_table_blocks(database):
+            yield schema_domains, schema, relation
+
+
 def logical_domains(repo_root: Path) -> dict[str, str]:
     """Relation -> logical domain, or ``unresolved`` when nothing states it."""
     topology_root = repo_root / _TOPOLOGY_ROOT
     if not topology_root.is_dir():
         raise FileNotFoundError(f"topology root {topology_root} does not exist")
-    tenant_bridge = _bridge(repo_root / _PHYSICAL_MAP, _TENANT_BRIDGE)
     internal_bridge = _bridge(repo_root / _PHYSICAL_MAP, _INTERNAL_BRIDGE)
 
     seen: dict[str, set[str]] = {}
     for path in sorted(topology_root.glob("*.yaml")):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        for schema, relation in _walk_table_blocks(document):
-            if schema in _NO_GUC_DOMAINS or schema == "tenant":
+        for schema_domains, schema, relation in _walk_database_table_blocks(document):
+            if schema in _NO_GUC_DOMAINS:
                 resolved = schema
             elif relation in internal_bridge:
                 resolved = "omninode_internal"
-            elif relation in tenant_bridge:
+            elif schema_domains.get(schema) == "TENANT":
                 resolved = "tenant"
             else:
                 resolved = "unresolved"

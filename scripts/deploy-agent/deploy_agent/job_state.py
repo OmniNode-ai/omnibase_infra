@@ -17,7 +17,9 @@ from pydantic import BaseModel, Field, model_validator
 
 from deploy_agent.events import (
     DEPLOY_PHASE_ORDER,
+    ModelLineageDecision,
     ModelOnexApiDelivery,
+    ModelVerifyRecreate,
     Phase,
     PhaseStatus,
 )
@@ -114,6 +116,26 @@ class JobState(BaseModel):
     #: survives a restart -- loads as "no delivery recorded" rather than
     #: failing validation.
     onex_api_delivery: ModelOnexApiDelivery | None = None
+    #: OMN-19270. Set on a ``superseded`` record whose replacement is the build
+    #: the lane already runs rather than a queued command. Such a record names
+    #: the running infra sha in ``superseded_by_sha`` and no correlation id,
+    #: because the running build need not have come from a command this agent
+    #: recorded.
+    superseded_by_running_build: bool = False
+    #: OMN-19270. The lineage fence's decision for this command: the ref it
+    #: asked for, what a symbolic ref resolved to at accept time, the running
+    #: build it was compared with, and the ref it built. ``None`` on a record
+    #: written without the fence, or by an older agent.
+    lineage: ModelLineageDecision | None = None
+    #: OMN-19374. The runtime containers post-deploy verification recreated
+    #: INSIDE this job, and how each recreate ended. Durable here as well as on
+    #: the terminal event because the post-merge lab guard reads this record
+    #: (``/job/{correlation_id}``), not the bus: a compose-dev receipt whose
+    #: container generation moved during the job can then name the job's own
+    #: recreate as the reason, instead of leaving a lane to re-derive from the
+    #: host journal whether it was that or a different command displacing the
+    #: lane (OMN-18990). Empty on a record written by an older agent.
+    verify_recreate: list[ModelVerifyRecreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _supersession_fields_are_paired(self) -> JobState:
@@ -125,7 +147,20 @@ class JobState(BaseModel):
         superseded asserts a fact about a job that ran.
         """
         named = self.superseded_by_sha is not None
-        if named != (self.superseded_by_correlation_id is not None):
+        if self.superseded_by_running_build:
+            if (
+                self.status != "superseded"
+                or not named
+                or self.superseded_by_correlation_id is not None
+            ):
+                msg = (
+                    "a record superseded by the running build is status "
+                    "superseded, names the running sha and no correlation id; got "
+                    f"status={self.status!r} sha={self.superseded_by_sha!r} "
+                    f"correlation_id={self.superseded_by_correlation_id!r}"
+                )
+                raise ValueError(msg)
+        elif named != (self.superseded_by_correlation_id is not None):
             msg = (
                 "superseded_by_sha and superseded_by_correlation_id stand or "
                 f"fall together; got sha={self.superseded_by_sha!r}, "
@@ -268,6 +303,7 @@ class JobStore:
         correlation_id: UUID,
         command: dict[str, Any],
         superseded_correlation_ids: list[UUID] | None = None,
+        lineage: ModelLineageDecision | None = None,
     ) -> JobState:
         """Write the accepted record, naming any commands it replaced.
 
@@ -283,6 +319,44 @@ class JobStore:
             command=command,
             superseded_count=len(ids),
             superseded_correlation_ids=ids,
+            lineage=lineage,
+        )
+        self._save(job)
+        return job
+
+    def record_superseded_by_running_build(
+        self,
+        correlation_id: UUID,
+        command: dict[str, Any],
+        *,
+        lineage: ModelLineageDecision,
+    ) -> JobState:
+        """Write the terminal record of a command the running build already carries.
+
+        OMN-19270. Born terminal in one atomic write, for the reason
+        ``record_superseded`` gives. The event owed for it is published by the
+        consumer's rejection hook at once, and ``result_publish_pending`` keeps
+        the agent's retry loop paying that debt if the broker was away.
+        """
+        if lineage.running_ref is None:
+            msg = "a supersession by the running build must name the running ref"
+            raise ValueError(msg)
+        now = datetime.now(UTC)
+        job = JobState(
+            correlation_id=correlation_id,
+            command=command,
+            accepted_at=now,
+            completed_at=now,
+            status="superseded",
+            superseded_by_sha=lineage.running_ref,
+            superseded_by_running_build=True,
+            phase_results=reconcile_terminal_phase_results({}),
+            result_publish_pending=True,
+            lineage=lineage,
+            errors=[
+                f"superseded by the running build at {lineage.running_ref}: "
+                f"{lineage.detail}"
+            ],
         )
         self._save(job)
         return job
@@ -345,6 +419,20 @@ class JobStore:
                 continue
         return False
 
+    def last_completed_at(self) -> datetime | None:
+        """When the most recent job ended, or ``None`` when none has (OMN-19509)."""
+        latest: datetime | None = None
+        for path in self.state_dir.glob("*.json"):
+            try:
+                job = JobState.model_validate_json(path.read_text())
+            except Exception:  # noqa: BLE001
+                continue
+            if job.completed_at is not None and (
+                latest is None or job.completed_at > latest
+            ):
+                latest = job.completed_at
+        return latest
+
     def load(self, correlation_id: UUID) -> JobState | None:
         path = self._job_path(correlation_id)
         if not path.exists():
@@ -360,6 +448,30 @@ class JobStore:
             except Exception:  # noqa: BLE001
                 continue
         return None
+
+    def job_covering(self, moment: datetime) -> JobState | None:
+        """The one job that was running at ``moment``, or ``None``.
+
+        OMN-19270. The lineage fence passes the running image's ``build_time``
+        here, to find the job that produced that image: the one whose
+        accept-to-complete window contains the moment the image was built.
+        Jobs run one at a time, so a match is unique. Zero matches (an image
+        built outside this agent) or several (a record this scan cannot trust)
+        are ``None``, and the fence then treats the running build's origin as
+        unknown. A superseded record never ran, so it never matches.
+        """
+        matches: list[JobState] = []
+        for path in self.state_dir.glob("*.json"):
+            try:
+                job = JobState.model_validate_json(path.read_text())
+            except Exception:  # noqa: BLE001
+                continue
+            if job.status == "superseded" or job.accepted_at > moment:
+                continue
+            if job.completed_at is not None and job.completed_at < moment:
+                continue
+            matches.append(job)
+        return matches[0] if len(matches) == 1 else None
 
     def update_phase(
         self, correlation_id: UUID, phase: Phase, phase_status: PhaseStatus
@@ -380,6 +492,7 @@ class JobStore:
         status: Literal["success", "failed"],
         errors: list[str] | None = None,
         settling_stage: EnumJobSettlingStage | None = None,
+        verify_recreate: list[ModelVerifyRecreate] | None = None,
     ) -> JobState:
         """Write the job's terminal verdict, and what it is still doing.
 
@@ -389,6 +502,10 @@ class JobStore:
         exactly as it did on 2026-09-17: terminal, with nothing saying that the
         agent is still executing that job's post-terminal work. A window is what
         the 19:56:03Z reader fell into, so there is not one.
+
+        ``verify_recreate`` rides the same write for the same reason
+        (OMN-19374): a reader that sees the terminal status must also see
+        whether the job recreated a runtime container on its way there.
         """
         job = self.load(correlation_id)
         if job is None:
@@ -397,6 +514,8 @@ class JobStore:
         job.completed_at = datetime.now(UTC)
         job.phase_results = reconcile_terminal_phase_results(job.phase_results)
         job.settling_stage = settling_stage
+        if verify_recreate:
+            job.verify_recreate = list(verify_recreate)
         if errors:
             job.errors.extend(errors)
         self._save(job)

@@ -160,7 +160,7 @@ def _projection_table() -> ModelDbTableDeclaration:
     return ModelDbTableDeclaration(
         name="delegation_routing_tenant_overlay",
         database_ref="application",
-        schema="tenant",
+        schema="public",
         migration="0001_create_delegation_routing_tenant_overlay.sql",
         access="read_write",
         role="tenant_routing_overlay",

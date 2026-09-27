@@ -268,6 +268,12 @@ async def _job_handler(request: web.Request) -> web.Response:
             "superseded_correlation_ids": [
                 str(cid) for cid in job.superseded_correlation_ids
             ],
+            # OMN-19374. Served where the post-merge lab guard reads, so a
+            # receipt can say the container generation moved because THIS job
+            # recreated a runtime during its own verification.
+            "verify_recreate": [
+                record.model_dump(mode="json") for record in job.verify_recreate
+            ],
         }
     )
 

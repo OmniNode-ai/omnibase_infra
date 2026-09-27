@@ -26,6 +26,7 @@ Exports:
     PolicyRegistryError: Policy registry operation errors
     ComputeRegistryError: Compute registry operation errors
     EventBusRegistryError: Event bus registry operation errors
+    DispatchDeadlineExceededError: A consumed record's handler outlived its per-dispatch deadline
     DlqDependencyLifecycleTimeoutError: A DLQ replay dependency start() exceeded its bound
     DlqTopicFixedPointError: A DLQ topic was offered as an ORIGINAL topic
     LaneMirrorRecordRefusedError: Lane-mirror record carries no usable identity
@@ -137,6 +138,9 @@ from omnibase_infra.errors.error_db_ownership import (
     DbOwnershipMismatchError,
     DbOwnershipMissingError,
 )
+from omnibase_infra.errors.error_dispatch_deadline import (
+    DispatchDeadlineExceededError,
+)
 from omnibase_infra.errors.error_dlq_dependency_lifecycle import (
     DlqDependencyLifecycleTimeoutError,
 )
@@ -222,6 +226,8 @@ __all__: list[str] = [
     # DB ownership errors
     "DbOwnershipMismatchError",
     "DbOwnershipMissingError",
+    # Per-dispatch deadline refusal (OMN-19355)
+    "DispatchDeadlineExceededError",
     # DLQ topic resolution refusal (OMN-18084)
     "DlqDependencyLifecycleTimeoutError",
     "DlqTopicFixedPointError",

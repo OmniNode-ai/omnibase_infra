@@ -192,20 +192,18 @@ have fired.
 
 Same ratchet discipline as both arms above: the count may go DOWN in any change
 and may never go UP, and a reading below the bound fails too so the bound is
-tightened in the change that earns it. The residual of 4 is NOT an allowlist --
-every pair is printed on every run:
+tightened in the change that earns it. The residual is 0 and the bound is 0.
+The four pairs it once held are recorded here so their history stays readable:
 
   * ``omninode_runtime`` on ``savings_injection_signals``,
     ``savings_correlation_finalizations`` and ``savings_validator_catch_signals``.
-    A different class, not this one: ``node_savings_estimation_compute`` lives
-    in omnibase_infra and declares NO ``db_io`` block at all, so no contract
-    anywhere declares these relations and the contract-driven derivation has
-    nothing to derive from. They cannot crash the runtime the way
-    ``runner_fleet_liveness`` did -- nothing resolves a projection binding for
-    them -- but the corpus granting a relation no contract declares is real
-    drift and is left visible rather than filtered away.
+    ``node_savings_estimation_compute`` lives in omnibase_infra and declares no
+    ``db_io`` block, so no contract derives them. OMN-17886 AC2 step 1 declared
+    them as checked-in supplemental entries in ``table_grant_derivation.py``
+    (steady state, not an interim bridge), which took the residual 3 -> 0.
   * ``tenant_projection_writer`` on ``public.projection_delegation_savings``,
-    granted by ``089_savings_aggregate_views_per_tenant.sql``.
+    granted by ``089_savings_aggregate_views_per_tenant.sql``; declared by
+    OMN-18862 (4 -> 3).
 """
 
 from __future__ import annotations
@@ -246,12 +244,10 @@ MAX_UNDELIVERED_SEQUENCES = 0
 
 # OMN-18768: the REVERSE arm -- relations this corpus grants that the topology
 # does not declare. OMN-18862 lowered it 4 -> 3 by declaring
-# `projection_delegation_savings`, the second of the two views migration 089
-# grants on adjacent lines. Measured on 2026-09-19 after this change declared
-# `runner_fleet_liveness`. Same ratchet discipline as both arms above; see THE
-# REVERSE ARM in the module docstring for what the 4 are and why each is a
-# different class from the crash this arm exists to prevent.
-MAX_UNDECLARED = 3
+# `projection_delegation_savings`; OMN-17886 AC2 step 1 lowered it 3 -> 0 by
+# declaring the three savings_* signal tables. Same ratchet discipline as both
+# arms above; see THE REVERSE ARM in the module docstring for the history.
+MAX_UNDECLARED = 0
 
 TOPOLOGY_RELPATH = "src/omnibase_infra/topology/instances/local.yaml"
 CORPUS_RELPATH = "docker/migrations/forward"

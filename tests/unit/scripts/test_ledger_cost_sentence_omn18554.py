@@ -771,25 +771,6 @@ def test_a_priced_pipe_lead_row_is_accepted_on_both_sides_of_the_cutover(
         assert rejection is None, moment
 
 
-def test_an_unpriced_pipe_lead_row_lands_through_main_today(
-    ledger: Path,
-    stale_goal: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """End-to-end on the REAL clock, which is what every lane hits today: the
-    dominant shape is now inspected, reported, and still lands."""
-    monkeypatch.setenv(ll.GOAL_PATH_ENV, str(stale_goal))
-    assert datetime.now(UTC) < ll.RULE4_PIPE_LEAD_CUTOVER_UTC, (
-        "this test is only meaningful before the cutover; after it, the companion "
-        "test_at_the_cutover_the_same_row_is_refused is the live one"
-    )
-    row = _pipe_row(datetime.now(UTC), priced=False)
-    assert ll.main([str(ledger), "--append", row]) == 0
-    assert "RULE-4 UNPRICED CLAIM" in capsys.readouterr().err
-    assert "| CLAIM |" in ledger.read_text(encoding="utf-8")
-
-
 def test_the_claim_token_notion_is_a_separate_predicate() -> None:
     """is_claim_row here answers "should this row mint a claim token" and is
     deliberately broad; is_rule4_claim_row answers "does this row owe a price"

@@ -13,12 +13,15 @@ Tests:
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.services.observability.infra_routing_decisions import (
+    consumer as consumer_module,
+)
 from omnibase_infra.services.observability.infra_routing_decisions.config import (
     ConfigInfraRoutingDecisionsConsumer,
 )
@@ -326,5 +329,106 @@ class TestInfraRoutingDecisionsConsumerHealthCheck:
         consumer.metrics.last_poll_at = None
 
         response, http_code = consumer._build_health_response()
+        assert response["status"] == str(EnumHealthStatus.DEGRADED)
+        assert http_code == 503
+
+
+# =============================================================================
+# Health after traffic goes quiet (OMN-19356)
+# =============================================================================
+
+
+class _SettableClock(datetime):
+    """A ``datetime`` whose ``now`` returns an instant the test sets (OMN-19356)."""
+
+    instant: datetime = datetime(2026, 9, 23, 21, 9, 14, tzinfo=UTC)
+
+    @classmethod
+    def now(cls, tz: object = None) -> _SettableClock:
+        return cls.instant  # type: ignore[return-value]
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> type[_SettableClock]:
+    """Drive every ``datetime.now`` the consumer module reads from one clock."""
+    monkeypatch.setattr(consumer_module, "datetime", _SettableClock)
+    _SettableClock.instant = datetime(2026, 9, 23, 21, 9, 14, tzinfo=UTC)
+    return _SettableClock
+
+
+def _at(clock: type[_SettableClock], seconds_after_start: float) -> None:
+    clock.instant = datetime(2026, 9, 23, 21, 9, 14, tzinfo=UTC) + timedelta(
+        seconds=seconds_after_start
+    )
+
+
+@pytest.mark.unit
+class TestInfraRoutingDecisionsHealthAfterTrafficGoesQuiet:
+    """OMN-19356: a quiet topic after handled traffic is not a stalled writer.
+
+    On the .201 dev lane on 2026-09-23 the cumulative ``messages_received > 0``
+    rule turned /health 503 300s after the last write on a quiet topic, and
+    autoheal restart-cycled the container.
+    """
+
+    async def test_healthy_quiet_after_written_batch(
+        self, consumer: InfraRoutingDecisionsConsumer, clock: type[_SettableClock]
+    ) -> None:
+        consumer._running = True
+        await consumer.metrics.record_received(count=2)
+        await consumer.metrics.record_processed(count=2)
+
+        _at(clock, 416)
+        await consumer.metrics.record_polled()
+        response, http_code = consumer._build_health_response()
+
+        assert response["status"] == str(EnumHealthStatus.HEALTHY)
+        assert http_code == 200
+
+    async def test_healthy_quiet_after_parse_skipped_batch(
+        self, consumer: InfraRoutingDecisionsConsumer, clock: type[_SettableClock]
+    ) -> None:
+        consumer._running = True
+        await consumer.metrics.record_processed(count=1)
+        _at(clock, 60)
+        await consumer.metrics.record_received(count=2)
+        await consumer.metrics.record_skipped(count=2)
+
+        _at(clock, 460)
+        await consumer.metrics.record_polled()
+        response, http_code = consumer._build_health_response()
+
+        assert response["status"] == str(EnumHealthStatus.HEALTHY)
+        assert http_code == 200
+
+    async def test_degraded_unhandled_traffic_after_failed_write(
+        self, consumer: InfraRoutingDecisionsConsumer, clock: type[_SettableClock]
+    ) -> None:
+        consumer._running = True
+        await consumer.metrics.record_processed(count=1)
+        _at(clock, 60)
+        await consumer.metrics.record_received(count=1)
+        await consumer.metrics.record_failed(count=1)
+
+        _at(clock, 400)
+        await consumer.metrics.record_polled()
+        response, http_code = consumer._build_health_response()
+
+        assert response["status"] == str(EnumHealthStatus.DEGRADED)
+        assert http_code == 503
+
+    async def test_degraded_unhandled_traffic_keeps_arriving(
+        self, consumer: InfraRoutingDecisionsConsumer, clock: type[_SettableClock]
+    ) -> None:
+        consumer._running = True
+        await consumer.metrics.record_processed(count=1)
+        for seconds in (100, 200, 350):
+            _at(clock, seconds)
+            await consumer.metrics.record_received(count=1)
+
+        _at(clock, 400)
+        await consumer.metrics.record_polled()
+        response, http_code = consumer._build_health_response()
+
         assert response["status"] == str(EnumHealthStatus.DEGRADED)
         assert http_code == 503

@@ -15,6 +15,8 @@ These tests prevent:
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -338,3 +340,75 @@ class TestRuntimeServiceKafkaInstanceIds:
             assert observed[service_name] == expected_instance_id
 
         assert len(set(observed.values())) == len(observed)
+
+
+class TestResolverEnvRefsReachTheAnchor:
+    """Every env-sourced secret ref the dev-lane resolver maps is in the anchor (OMN-17398).
+
+    ``docker/runtime-policy.env`` (rendered from the runtime policy contract)
+    maps each logical secret name to a ``source_type: env`` variable. The
+    resolver reads that variable INSIDE the container, and a variable reaches a
+    runtime container only through ``x-runtime-env``. A mapping whose variable
+    is not in the anchor can never resolve, whatever the host ``.env`` or the
+    secret store holds: on 2026-09-24 ``llm.openrouter.api_key`` mapped to
+    ``OPENROUTER_API_KEY``, the key was present in the store
+    (``/lab-provider-keys``) and in the lane host's ``.env``, and all three
+    dev-lane runtime containers read it as length 0, so the free OpenRouter
+    rung of the delegation ladder was dead on the lab.
+    """
+
+    POLICY_ENV_PATH = COMPOSE_PATH.parent / "runtime-policy.env"
+    RESOLVER_JSON_KEY = re.compile(
+        r"^(DEV_RUNTIME_[A-Z_]+_SECRET_RESOLVER_CONFIG_JSON)='(.*)'$"
+    )
+
+    def _env_refs_by_policy_key(self) -> dict[str, set[tuple[str, str]]]:
+        refs: dict[str, set[tuple[str, str]]] = {}
+        for line in self.POLICY_ENV_PATH.read_text().splitlines():
+            match = self.RESOLVER_JSON_KEY.match(line.strip())
+            if match is None:
+                continue
+            config = json.loads(match.group(2))
+            refs[match.group(1)] = {
+                (mapping["logical_name"], mapping["source"]["source_path"])
+                for mapping in config["mappings"]
+                if mapping["source"].get("source_type", "env") == "env"
+            }
+        return refs
+
+    @pytest.mark.unit
+    def test_policy_env_declares_dev_runtime_resolver_configs(self) -> None:
+        """Positive control: the parser finds the four dev-lane resolver configs."""
+        refs = self._env_refs_by_policy_key()
+        assert len(refs) >= 4, sorted(refs)
+        assert all(refs.values()), refs
+
+    @pytest.mark.unit
+    def test_every_env_secret_ref_is_in_the_anchor(self) -> None:
+        anchor = _get_runtime_env_keys(_load_compose())
+        unreachable = {
+            policy_key: sorted(
+                (logical, variable)
+                for logical, variable in refs
+                if variable not in anchor
+            )
+            for policy_key, refs in self._env_refs_by_policy_key().items()
+        }
+        unreachable = {k: v for k, v in unreachable.items() if v}
+        assert not unreachable, (
+            "Resolver mappings name env variables that x-runtime-env never "
+            f"passes to the container, so they cannot resolve: {unreachable}. "
+            "Add each as `NAME: ${NAME:-}` to x-runtime-env in "
+            "docker/docker-compose.infra.yml."
+        )
+
+    @pytest.mark.unit
+    def test_openrouter_key_is_optional_not_fail_closed(self) -> None:
+        """The OpenRouter key must not become a required env var.
+
+        The lane host's ``.env`` carries it on .201; every other lane must
+        still render. Empty is not a silent disable: the routing report shows
+        the rung's ``secret_ref`` as unresolved, and the effect boundary raises.
+        """
+        declaration = "OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}"
+        assert declaration in COMPOSE_PATH.read_text(), declaration

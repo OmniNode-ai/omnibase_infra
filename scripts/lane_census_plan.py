@@ -38,6 +38,24 @@ Drift kinds (named exactly so the auto-ticket says precisely what is wrong):
                          `profile_gated`) is nevertheless running. The inverse
                          of container_absent: for this kind ABSENT is correct
                          and PRESENT is the drift (OMN-16803)
+  lane_on_undeclared_host — a lane is running on a host its `hosts:` list does
+                         not name (OMN-19088). Matched by declared container
+                         name, compose project label or lane label, running
+                         containers only
+
+Every kind, with its one severity, is declared in ``CENSUS_FINDING_KINDS``; the
+eleven lab-sync kinds that compare the inventory with the generated desired
+state are declared in ``LAB_SYNC_FINDING_KINDS`` (OMN-19411) and are not yet
+evaluated here (OMN-19414, OMN-19416).
+
+Host scoping (OMN-19088): every lane declares the host(s) it runs on
+(`hosts:`, naming entries of the top-level `hosts:` registry). The census
+evaluates only the lanes declared for the host it runs on and reports the rest
+in `lanes_not_applicable`, rather than filing every service of every other
+host's lanes as absent. The host is resolved from the envelope's `host` (the
+driver passes `LANE_CENSUS_HOST`, default `hostname`) through the registry's
+aliases. A host the registry does not declare is REFUSED: evaluating every lane
+there is the defect this closes, and evaluating none would be a silent clean.
 
 Fail-fast policy: any drift on a non-optional lane is a hard signal. There is no
 warn-only mode (gates-block policy). The driver exits non-zero on drift.
@@ -45,6 +63,7 @@ warn-only mode (gates-block policy). The driver exits non-zero on drift.
 Input envelope (stdin JSON):
   {
     "lane": "<lane name>" | null,   # null => reconcile all non-optional lanes
+    "host": "<hostname or host id>", # required; resolved via the hosts registry
     "containers": [                 # `docker ps -a --format '{{json .}}'` rows,
       {"Names": "...", "State": "running"|"exited"|...,
        "Image": "repo:tag", "Labels": "k=v,k2=v2",
@@ -57,12 +76,18 @@ Input envelope (stdin JSON):
 
 Output (stdout JSON):
   {
-    "schema_version": "1.0.0",
-    "lanes_checked": ["prod", ...],
+    "schema_version": "1.1.0",
+    "host": "lab-201",                 # the resolved host id
+    "lanes_checked": ["prod", ...],    # lanes declared for this host
+    "lanes_not_applicable": ["dogfood", ...],  # lanes declared elsewhere
     "lanes_skipped_optional_down": ["prepr-1", ...],  # optional + entirely down
     "findings": [ {lane, kind, container, detail, severity}, ... ],
     "has_drift": true|false
   }
+
+``lanes_checked`` and ``lanes_not_applicable`` partition the requested lanes.
+A not-applicable lane produces no finding unless it is running here, which is
+``lane_on_undeclared_host``.
 
 ``lanes_skipped_optional_down`` is a subset of ``lanes_checked``: those lanes
 were looked at, found to be optional and entirely absent, and deliberately
@@ -75,18 +100,149 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+
+# Names that identify no single host and so may never be a host alias. Every
+# Docker Desktop host reports the daemon name `docker-desktop` (measured on the
+# .101, .105 and .200 hosts, 2026-09-23), so a census attributed by daemon name
+# would read one host's inventory as another's.
+_AMBIGUOUS_HOST_NAMES = frozenset({"docker-desktop", "localhost"})
+
+
+#: Exit status of ``main`` when the host is undeclared or the host declarations
+#: are malformed. Distinct from the driver's drift code 30 and its
+#: unobservable-inventory code 4: an unattributable census is neither.
+EXIT_HOST_UNDECLARED = 5
+
+
+class HostDeclarationError(ValueError):
+    """The manifest's host declarations are malformed, or this host is undeclared."""
+
 
 # Drift severities. critical => a required service is down / network gone (the
-# 2026-06-11 class of outage). warning => degraded but not lane-down.
+# 2026-06-11 class of outage), or the lane's proof is about something other than
+# what it was meant to run. warning => degraded but not lane-down. Severity only
+# ranks the alert: every finding of every kind is drift, and drift blocks.
 _SEVERITY_CRITICAL = "critical"
 _SEVERITY_WARNING = "warning"
+
+
+class FindingKindSpec(NamedTuple):
+    """One finding kind the planner may emit, and what grading it needs.
+
+    A ``NamedTuple`` rather than a dataclass: the census scripts are loaded by
+    path, without a ``sys.modules`` entry, which a dataclass cannot survive.
+
+    ``subject`` names what a finding of this kind is about, which is what its
+    ``container`` field holds: a ``container`` name, a ``broker`` container name,
+    a ``runner`` name, or the literal ``desired_state``.
+
+    ``envelope_fields`` is the collector side of the seam (L0.2): the envelope
+    keys, per container row or top level, that must be present for the kind to
+    be graded. A kind whose fields are absent cannot be graded, and T1.2
+    (OMN-19414) reports that as a finding, never as clean.
+    """
+
+    kind: str
+    severity: str
+    subject: str
+    envelope_fields: tuple[str, ...]
+
+
+#: The kinds the planner emits today (OMN-13011, OMN-16803, OMN-19088), with the
+#: severity each has always carried. ``_finding`` resolves severity from this
+#: table, so an undeclared kind raises instead of publishing.
+CENSUS_FINDING_KINDS: tuple[FindingKindSpec, ...] = (
+    FindingKindSpec("container_absent", _SEVERITY_CRITICAL, "container", ()),
+    FindingKindSpec("replicas_zero", _SEVERITY_CRITICAL, "container", ()),
+    FindingKindSpec("network_detached", _SEVERITY_CRITICAL, "network", ()),
+    FindingKindSpec("oneshot_failed", _SEVERITY_CRITICAL, "container", ()),
+    FindingKindSpec("oneshot_stuck", _SEVERITY_WARNING, "container", ()),
+    FindingKindSpec("image_tag_mismatch", _SEVERITY_WARNING, "container", ()),
+    FindingKindSpec("unexpected_container", _SEVERITY_WARNING, "container", ()),
+    FindingKindSpec("profile_gated_present", _SEVERITY_WARNING, "container", ()),
+    FindingKindSpec("lane_on_undeclared_host", _SEVERITY_CRITICAL, "container", ()),
+)
+
+#: OMN-19411 (lab release sync plan, T0.2, section 4 B): the eleven kinds that
+#: compare the inventory with the generated desired state (``lab-desired-state.v1``,
+#: OMN-19410). DECLARED ONLY: nothing in this module evaluates them yet. T1.2
+#: (OMN-19414) and T1.3 (OMN-19416) add the evaluation, against the fixtures in
+#: ``tests/fixtures/lab_sync/``, one per kind.
+#:
+#: Container-row fields beyond ``docker ps``: ``Health`` (``{"Status",
+#: "FailingStreak"}`` from ``State.Health``), ``HealthcheckIntervalSeconds``
+#: (``Config.Healthcheck.Interval``), ``RestartCount`` and ``Packages``
+#: (``{distribution: version}`` installed in the container). Top-level fields:
+#: ``broker_config`` (``{broker container: {key: value}}`` from
+#: ``rpk cluster config get``), ``github_runners`` (``[{"name", "status",
+#: "labels"}]`` from the org runner registration) and ``desired_state`` (the
+#: ``lab-desired-state.v1`` document, or null when it could not be read).
+LAB_SYNC_FINDING_KINDS: tuple[FindingKindSpec, ...] = (
+    # A declared container runs an image built from another commit than the
+    # desired ref (org.opencontainers.image.revision).
+    FindingKindSpec("revision_mismatch", _SEVERITY_CRITICAL, "container", ("Labels",)),
+    # com.docker.compose.config-hash differs from `docker compose config --hash`
+    # at the desired ref: image, env, mounts or command drifted.
+    FindingKindSpec(
+        "config_hash_mismatch", _SEVERITY_CRITICAL, "container", ("Labels",)
+    ),
+    # An installed distribution's version differs from the desired ref's lock.
+    FindingKindSpec(
+        "package_version_mismatch", _SEVERITY_CRITICAL, "container", ("Packages",)
+    ),
+    # Docker-unhealthy for FailingStreak x interval >= the bound (default
+    # 1800 s, plan section 4 D).
+    FindingKindSpec(
+        "container_unhealthy",
+        _SEVERITY_CRITICAL,
+        "container",
+        ("Health", "HealthcheckIntervalSeconds"),
+    ),
+    # RestartCount above the container's restart bound.
+    FindingKindSpec(
+        "container_restart_loop", _SEVERITY_CRITICAL, "container", ("RestartCount",)
+    ),
+    # A container on the host that no lane or surface declares and that is not
+    # listed in the desired state's allowed_undeclared with an owner.
+    FindingKindSpec(
+        "undeclared_container", _SEVERITY_WARNING, "container", ("Labels",)
+    ),
+    # A declared broker key reads another value than the lane's broker profile.
+    FindingKindSpec(
+        "broker_config_mismatch", _SEVERITY_CRITICAL, "broker", ("broker_config",)
+    ),
+    # Fewer or more runner containers of a class on a host than expected_count.
+    FindingKindSpec("runner_count_mismatch", _SEVERITY_WARNING, "runner", ("Labels",)),
+    # A runner's com.docker.compose.project.working_dir is not the fleet path.
+    FindingKindSpec(
+        "runner_workdir_mismatch", _SEVERITY_CRITICAL, "runner", ("Labels",)
+    ),
+    # A declared runner is not registered online with GitHub.
+    FindingKindSpec("runner_offline", _SEVERITY_WARNING, "runner", ("github_runners",)),
+    # The desired state is missing or does not validate. Fails closed: the
+    # census never reads clean without a desired state to compare against.
+    FindingKindSpec(
+        "desired_state_unreadable",
+        _SEVERITY_CRITICAL,
+        "desired_state",
+        ("desired_state",),
+    ),
+)
+
+#: Every kind the census event may carry, with its one severity. The event
+#: validator (``lane_census_event.validate_event``) reads this mapping.
+FINDING_KIND_SEVERITY: dict[str, str] = {
+    spec.kind: spec.severity
+    for spec in (*CENSUS_FINDING_KINDS, *LAB_SYNC_FINDING_KINDS)
+}
 
 _DEFAULT_MANIFEST = (
     Path(__file__).resolve().parent.parent
@@ -104,6 +260,120 @@ def load_manifest(path: Path | None = None) -> dict[str, Any]:
     if not isinstance(data, dict) or "lanes" not in data:
         raise ValueError(f"lane manifest missing 'lanes': {manifest_path}")
     return data
+
+
+def _normalize_host(name: str) -> str:
+    """Lowercase short name: ``Stickybeatz.local`` and ``x.tailnet.ts.net`` -> first label."""
+    return name.strip().lower().rstrip(".").split(".", 1)[0]
+
+
+def validate_hosts(manifest: dict[str, Any]) -> None:
+    """Refuse a manifest whose host declarations cannot attribute a census.
+
+    Every lane must name at least one registered host, every alias must be
+    claimed by exactly one host, and no alias may be a name that identifies no
+    single host. A lane with no host would be evaluated nowhere, which is a
+    silent clean; an alias claimed twice would evaluate one host's lanes on
+    another.
+    """
+    registry = manifest.get("hosts")
+    if not isinstance(registry, dict) or not registry:
+        raise HostDeclarationError("lane manifest declares no 'hosts' registry")
+
+    claimed: dict[str, str] = {}
+    for host_id, spec in registry.items():
+        aliases = (spec or {}).get("aliases") or []
+        if not isinstance(aliases, list):
+            raise HostDeclarationError(f"host {host_id!r}: 'aliases' must be a list")
+        for name in [host_id, *aliases]:
+            key = _normalize_host(str(name))
+            if not key:
+                raise HostDeclarationError(f"host {host_id!r} declares an empty name")
+            if key in _AMBIGUOUS_HOST_NAMES:
+                raise HostDeclarationError(
+                    f"host {host_id!r} declares {name!r}, which identifies no single "
+                    "host (every Docker Desktop daemon reports 'docker-desktop')"
+                )
+            owner = claimed.get(key)
+            if owner is not None and owner != host_id:
+                raise HostDeclarationError(
+                    f"name {name!r} is claimed by both host {owner!r} and host "
+                    f"{host_id!r}; a census there cannot be attributed"
+                )
+            claimed[key] = host_id
+
+    for lane_name, lane_spec in manifest["lanes"].items():
+        hosts = lane_spec.get("hosts")
+        if not isinstance(hosts, list) or not hosts:
+            raise HostDeclarationError(
+                f"lane {lane_name!r} declares no 'hosts'; every lane must name the "
+                "host(s) it runs on"
+            )
+        for host_id in hosts:
+            if host_id not in registry:
+                raise HostDeclarationError(
+                    f"lane {lane_name!r} names host {host_id!r}, which the 'hosts' "
+                    "registry does not declare"
+                )
+
+
+def resolve_host(raw: str, manifest: dict[str, Any]) -> str:
+    """Resolve a hostname, daemon name or host id to exactly one host id."""
+    validate_hosts(manifest)
+    key = _normalize_host(raw or "")
+    if not key:
+        raise HostDeclarationError(
+            "no host given: the census must be told which host it runs on "
+            "(LANE_CENSUS_HOST, default `hostname`)"
+        )
+    for host_id, spec in manifest["hosts"].items():
+        names = [host_id, *((spec or {}).get("aliases") or [])]
+        if key in {_normalize_host(str(n)) for n in names}:
+            return str(host_id)
+    raise HostDeclarationError(
+        f"host {raw!r} is declared by no entry of the lane manifest's 'hosts' "
+        "registry. Declare it (with the lanes it runs) before running the census "
+        "there; evaluating every lane on an undeclared host is the OMN-19088 defect"
+    )
+
+
+def _undeclared_presence(
+    lane_name: str,
+    lane_spec: dict[str, Any],
+    host_id: str,
+    containers: list[tuple[str, dict[str, Any], dict[str, str]]],
+) -> list[dict[str, str]]:
+    """AC-2: a lane RUNNING on a host its declaration does not name is a finding.
+
+    Matched by declared container name, compose project label or lane label,
+    so a renamed container is still recognised by the project that started it.
+    Exited leftovers do not count: a lane is on a host when it runs there.
+    """
+    declared_names = {svc["name"] for svc in lane_spec.get("services", [])}
+    project = lane_spec.get("compose_project")
+    running_here = sorted(
+        name
+        for name, row, labels in containers
+        if _running(row.get("State", ""), row.get("Status", ""))
+        and (
+            name in declared_names
+            or (project and labels.get("com.docker.compose.project") == project)
+            or labels.get("com.omninode.lane") == lane_name
+        )
+    )
+    if not running_here:
+        return []
+    return [
+        _finding(
+            lane_name,
+            "lane_on_undeclared_host",
+            running_here[0],
+            f"lane {lane_name!r} is declared for host(s) "
+            f"{', '.join(lane_spec.get('hosts', []))} but is running on "
+            f"{host_id!r}: {', '.join(running_here)}. Stop it here, or declare "
+            f"{host_id!r} in the lane's 'hosts' in the same change",
+        )
+    ]
 
 
 def _running(state: str, status: str) -> bool:
@@ -128,15 +398,18 @@ def _tag_of(image: str) -> str:
     return "latest"
 
 
-def _finding(
-    lane: str, kind: str, container: str, detail: str, severity: str
-) -> dict[str, str]:
+def _finding(lane: str, kind: str, container: str, detail: str) -> dict[str, str]:
+    """One finding. Its severity is the kind's, from ``FINDING_KIND_SEVERITY``.
+
+    A kind the table does not declare raises ``KeyError`` here, so a typo or an
+    undeclared kind can never reach the event (OMN-19411).
+    """
     return {
         "lane": lane,
         "kind": kind,
         "container": container,
         "detail": detail,
-        "severity": severity,
+        "severity": FINDING_KIND_SEVERITY[kind],
     }
 
 
@@ -200,7 +473,6 @@ def reconcile_lane(
                 declared_network,
                 f"lane network {declared_network!r} is not present in "
                 f"`docker network ls` — containers cannot reach the broker",
-                _SEVERITY_CRITICAL,
             )
         )
 
@@ -240,7 +512,6 @@ def reconcile_lane(
                     f"disables it via a compose profile override "
                     f"(kind=profile_gated, expected absent) — something started "
                     f"it outside the lane's active profile",
-                    _SEVERITY_WARNING,
                 )
             )
             continue
@@ -263,7 +534,6 @@ def reconcile_lane(
                         name,
                         f"migration/init container {name!r} is still Running "
                         f"(expected run-to-completion): {status}",
-                        _SEVERITY_WARNING,
                     )
                 )
                 continue
@@ -276,7 +546,6 @@ def reconcile_lane(
                         name,
                         f"migration/init container {name!r} Exited non-zero "
                         f"(code {code}): {status}",
-                        _SEVERITY_CRITICAL,
                     )
                 )
             continue
@@ -299,7 +568,6 @@ def reconcile_lane(
                     f"required service container {name!r} is not running "
                     f"(desired replicas={required_replicas}); lane "
                     f"{lane_name!r} is degraded",
-                    _SEVERITY_CRITICAL,
                 )
             )
             continue
@@ -314,7 +582,6 @@ def reconcile_lane(
                     name,
                     f"container {name!r} runs image tag {tag!r} which does not "
                     f"match lane pattern {tag_pattern!r}",
-                    _SEVERITY_WARNING,
                 )
             )
 
@@ -328,7 +595,6 @@ def reconcile_lane(
                     actual_name,
                     f"container {actual_name!r} carries com.omninode.lane="
                     f"{lane_name!r} but is not declared in the lane manifest",
-                    _SEVERITY_WARNING,
                 )
             )
 
@@ -364,15 +630,18 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
     networks = set(envelope.get("networks", []))
     runtime_tag = envelope.get("runtime_tag")
     default_pattern = manifest.get("default_image_tag_pattern", ".+")
+    host_id = resolve_host(str(envelope.get("host") or ""), manifest)
 
     actual_by_name: dict[str, dict[str, Any]] = {}
     lane_labels: dict[str, set[str]] = {}
+    labelled_rows: list[tuple[str, dict[str, Any], dict[str, str]]] = []
     for row in containers:
         name = (row.get("Names") or row.get("Name") or "").lstrip("/").strip()
         if not name:
             continue
         actual_by_name[name] = row
         labels = _labels_to_dict(row.get("Labels", ""))
+        labelled_rows.append((name, row, labels))
         lane_label = labels.get("com.omninode.lane")
         if lane_label:
             lane_labels.setdefault(lane_label, set()).add(name)
@@ -387,8 +656,15 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
 
     findings: list[dict[str, str]] = []
     checked: list[str] = []
+    not_applicable: list[str] = []
     skipped_optional_down: list[str] = []
     for lane_name, lane_spec in target_lanes.items():
+        if host_id not in lane_spec["hosts"]:
+            not_applicable.append(lane_name)
+            findings.extend(
+                _undeclared_presence(lane_name, lane_spec, host_id, labelled_rows)
+            )
+            continue
         checked.append(lane_name)
         if _is_optional_and_entirely_down(lane_spec, actual_by_name):
             skipped_optional_down.append(lane_name)
@@ -406,7 +682,9 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
 
     return {
         "schema_version": SCHEMA_VERSION,
+        "host": host_id,
         "lanes_checked": checked,
+        "lanes_not_applicable": not_applicable,
         "lanes_skipped_optional_down": skipped_optional_down,
         "findings": findings,
         "has_drift": len(findings) > 0,
@@ -417,11 +695,23 @@ def main() -> int:
     manifest_path = os.environ.get("LANE_MANIFEST")
     manifest = load_manifest(Path(manifest_path) if manifest_path else None)
     envelope = json.load(sys.stdin)
-    plan = build_plan(envelope, manifest)
+    # OMN-19088: the same host resolution as the driver — LANE_CENSUS_HOST, else
+    # this machine's hostname. An envelope that already carries a host (a
+    # replayed fixture) keeps its own.
+    envelope.setdefault(
+        "host", os.environ.get("LANE_CENSUS_HOST") or socket.gethostname()
+    )
+    try:
+        plan = build_plan(envelope, manifest)
+    except HostDeclarationError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return EXIT_HOST_UNDECLARED
     json.dump(plan, sys.stdout)
     sys.stdout.write("\n")
-    # Exit 0 always — the planner reports; the shell driver decides exit policy
-    # so the JSON plan is always emittable for dry-run/inspection.
+    # Exit 0 on any plan — the planner reports; the shell driver decides exit
+    # policy so the JSON plan is always emittable for dry-run/inspection. The
+    # one non-zero exit is an unattributable host (EXIT_HOST_UNDECLARED), for
+    # which no plan exists to emit.
     return 0
 
 

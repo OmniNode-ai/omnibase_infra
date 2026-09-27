@@ -283,7 +283,9 @@ def test_up_to_date_at_poll_does_not_reexec_and_accepts_normally(
         cmd, reason = consumer._process_message(_message(_payload(str(uuid.uuid4()))))
 
     execv.assert_not_called()
-    consumer.consumer.seek.assert_not_called()
+    # No rewind onto the command itself. The one seek is the commit returning
+    # the fetch position to just past the processed record (OMN-19259).
+    assert [call.args[1] for call in consumer.consumer.seek.call_args_list] == [8]
     assert reason is None
     assert cmd is not None
     consumer.consumer.commit.assert_called_once()

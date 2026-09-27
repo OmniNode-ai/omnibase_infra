@@ -75,6 +75,16 @@ def _stub_groups(
         return groups
 
     monkeypatch.setattr(delegate_locus, "live_consumer_groups", _fake)
+    # OMN-18843: an empty answer is re-probed for a bounded rebind window
+    # before the refusal. Drive that window with a clock that moves only on
+    # sleep, so a test reaching the refusal does not wait in real time.
+    clock = [0.0]
+    monkeypatch.setattr(delegate_locus, "_monotonic", lambda: clock[0])
+
+    def _advance(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr(delegate_locus, "_sleep", _advance)
     return asked
 
 

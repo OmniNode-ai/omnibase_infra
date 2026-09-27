@@ -56,6 +56,8 @@ EXPECTED_RENDERED_SERVICES = {
     "omninode-runtime",
     "runtime-effects",
     "projection-api",
+    "dogfood-delegation-fault-429",
+    "dogfood-delegation-fault-503",
 }
 #: Services that must never appear on this lane. ``keycloak`` and ``infisical``
 #: are the OMN-13581 cross-lane displacement risk (they carry no profile in the
@@ -85,6 +87,8 @@ EXPECTED_PUBLISHED_PORTS = {
     "omninode-runtime": {"49085"},
     "runtime-effects": {"49086"},
     "projection-api": {"49302"},
+    "dogfood-delegation-fault-429": set(),
+    "dogfood-delegation-fault-503": set(),
 }
 
 #: Ports belonging to the four lanes that predate this one. Publishing any of

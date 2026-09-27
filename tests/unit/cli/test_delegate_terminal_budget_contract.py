@@ -182,3 +182,20 @@ def test_completed_declared_contract_without_contract_evidence_is_refused() -> N
             require_budget_evidence=True,
             require_contract_evidence=True,
         )
+
+
+@pytest.mark.unit
+def test_construction_failure_cannot_satisfy_completed_receipt_evidence() -> None:
+    terminal = _terminal(
+        operational_outcome="terminal_construction_failed",
+        content_verdict="undetermined",
+    ).model_copy(update={"status": "completed", "quality_gate_passed": True})
+
+    with pytest.raises(
+        DelegateTerminalUnresolvedError, match="terminal_construction_failed"
+    ):
+        _require_completed_terminal_evidence(
+            terminal,
+            require_budget_evidence=False,
+            require_contract_evidence=False,
+        )

@@ -246,6 +246,72 @@ class TestTheRuleTable:
             plan_coalesce([], contains=_always_contained)
 
 
+class TestADuplicateCopyInTheBatch:
+    """OMN-19521: a redelivered copy of a command already in the group.
+
+    On 2026-09-25 from 01:23:19Z the .201 dev agent crash-looped on a batch
+    holding two copies of command ``fd57387d``. The ancestry of a sha against
+    itself is True, so the copy joined the group, became the runner, and the
+    first copy was recorded as superseded by its own correlation id. The
+    supersession model refuses that, the raise came before the offset commit,
+    and every restart re-read the same pair. A copy is not newer work. It ends
+    the group and stays queued, where the head path's own duplicate handling
+    owns it.
+    """
+
+    def test_a_duplicate_copy_directly_behind_the_head_ends_the_group(self) -> None:
+        head = _cmd(SHA_A)
+        plan = plan_coalesce(
+            [_queued(head, 10), _queued(head, 11)], contains=_always_contained
+        )
+        assert plan.runner.command.correlation_id == head.correlation_id
+        assert plan.runner.offset == 10, "the first copy runs, never the redelivery"
+        assert plan.superseded == ()
+        assert plan.stop_reason is EnumCoalesceRefusal.DUPLICATE_COMMAND
+        assert plan.examined == 1
+
+    def test_a_duplicate_copy_behind_a_folded_member_ends_the_group(self) -> None:
+        a, b = _cmd(SHA_A), _cmd(SHA_B)
+        plan = plan_coalesce(
+            [_queued(a, 10), _queued(b, 11), _queued(b, 12), _queued(_cmd(SHA_C), 13)],
+            contains=_always_contained,
+        )
+        assert plan.runner.command.correlation_id == b.correlation_id
+        assert plan.runner.offset == 11
+        assert [s.superseded.command.correlation_id for s in plan.superseded] == [
+            a.correlation_id
+        ]
+        assert plan.stop_reason is EnumCoalesceRefusal.DUPLICATE_COMMAND, (
+            "the group is a prefix: nothing behind the copy may be folded past it"
+        )
+
+    def test_a_duplicate_copy_of_the_head_behind_a_folded_member_ends_the_group(
+        self,
+    ) -> None:
+        a, b = _cmd(SHA_A), _cmd(SHA_B)
+        plan = plan_coalesce(
+            [_queued(a, 10), _queued(b, 11), _queued(a, 12)],
+            contains=_always_contained,
+        )
+        assert plan.runner.command.correlation_id == b.correlation_id
+        assert [s.superseded.command.correlation_id for s in plan.superseded] == [
+            a.correlation_id
+        ]
+        assert plan.stop_reason is EnumCoalesceRefusal.DUPLICATE_COMMAND
+
+    def test_the_duplicate_check_runs_before_any_ancestry_question(self) -> None:
+        """A copy needs no clone to recognise, so it costs no git call."""
+        head = _cmd(SHA_A)
+        asked: list[tuple[str, str]] = []
+
+        def _recording(earlier: str, later: str) -> bool | None:
+            asked.append((earlier, later))
+            return True
+
+        plan_coalesce([_queued(head, 10), _queued(head, 11)], contains=_recording)
+        assert asked == []
+
+
 class TestSupersessionModel:
     def test_a_supersession_names_an_exact_sha(self) -> None:
         with pytest.raises(ValueError, match="40-character lowercase"):
@@ -790,6 +856,75 @@ class TestTheConsumerFoldsTheBatch:
         assert accepted is None
         assert reason == "duplicate"
         assert announced == []
+
+
+class TestARedeliveredCopyAtTheConsumer:
+    """OMN-19521 at the consumer: the exact batch shape that crash-looped .201."""
+
+    def test_a_redelivered_copy_of_the_head_runs_the_head_once(
+        self, tmp_path: Any
+    ) -> None:
+        store = JobStore(state_dir=tmp_path / "jobs")
+        announced: list[ModelSupersession] = []
+        head = _cmd(SHA_A)
+        consumer = _consumer(
+            store,
+            ancestry_resolver=_always_contained,
+            on_superseded=announced.append,
+        )
+        consumer.consumer.poll.return_value = {
+            TopicPartition(TOPIC, 0): [_message(head, 290), _message(head, 291)]
+        }
+
+        with patch("deploy_agent.consumer.verify_command", return_value=True):
+            accepted, reason = consumer.poll_and_accept()
+
+        assert reason is None
+        assert accepted is not None
+        assert accepted.correlation_id == head.correlation_id
+        record = store.load(head.correlation_id)
+        assert record is not None
+        assert record.status == "accepted"
+        assert record.superseded_count == 0
+        assert announced == []
+        assert _committed(consumer) == [291], (
+            "commit through the head only; the copy stays queued for the head "
+            "path's duplicate handling"
+        )
+
+    def test_a_redelivered_copy_of_a_folded_runner_runs_it_once(
+        self, tmp_path: Any
+    ) -> None:
+        store = JobStore(state_dir=tmp_path / "jobs")
+        announced: list[ModelSupersession] = []
+        a, b = _cmd(SHA_A), _cmd(SHA_B)
+        consumer = _consumer(
+            store,
+            ancestry_resolver=_always_contained,
+            on_superseded=announced.append,
+        )
+        consumer.consumer.poll.return_value = {
+            TopicPartition(TOPIC, 0): [
+                _message(a, 290),
+                _message(b, 291),
+                _message(b, 292),
+            ]
+        }
+
+        with patch("deploy_agent.consumer.verify_command", return_value=True):
+            accepted, reason = consumer.poll_and_accept()
+
+        assert reason is None
+        assert accepted is not None
+        assert accepted.correlation_id == b.correlation_id
+        superseded = store.load(a.correlation_id)
+        assert superseded is not None
+        assert superseded.status == "superseded"
+        assert superseded.superseded_by_correlation_id == b.correlation_id
+        assert [s.superseded.command.correlation_id for s in announced] == [
+            a.correlation_id
+        ]
+        assert _committed(consumer) == [292]
 
 
 class TestTheJobEndpointServesTheSupersession:

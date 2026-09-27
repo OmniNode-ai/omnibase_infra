@@ -64,6 +64,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -72,6 +73,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 # Reuse the sanctioned fleet probe in both supported execution modes: package
 # import under pytest/tooling and direct ``python scripts/ci/...`` invocation.
@@ -102,6 +104,16 @@ DEFAULT_MAX_BLOCK_SECONDS = 1800.0
 DEFAULT_GH_TIMEOUT_SECONDS = 120.0
 RUNNER_GROUP = "omnibase-ci"
 DEFAULT_GITHUB_API_URL = "https://api.github.com"  # url-authority-ok: canonical public GitHub REST base; probe_fleet scheme-pins it to https before any request
+
+#: Per-PR outcome detail prefix when ``arm-automerge`` refuses rather than
+#: merging directly (OMN-17427). An operation named *arm* must never merge:
+#: on 2026-09-25 this operation fell back to ``gh pr merge --squash --auto``
+#: actually performing a direct squash merge on a repo whose
+#: ``allow_auto_merge`` is ``false``, because GitHub CLI silently merges
+#: immediately instead of refusing when auto-merge cannot be armed. The fix
+#: reads the repo's live ``allow_auto_merge`` setting first and refuses with
+#: this outcome instead of ever invoking ``gh pr merge`` on such a repo.
+REFUSED_AUTOMERGE_DISABLED = "REFUSED_AUTOMERGE_DISABLED"
 
 # Ordered sources the fleet-status token is resolved from (OMN-18655). The two
 # environment variables come first so CI behaviour is byte-for-byte unchanged.
@@ -148,6 +160,12 @@ OPERATION_QUEUE_DEPTH_POLICY: Mapping[str, bool] = MappingProxyType(
         "arm-automerge": False,
         "rerun-failed": True,
         "noop-dry-run": False,
+        # OMN-18855. Creating a PR dispatches a full fresh check-suite, the
+        # same load update-branch creates, so it takes the runner-capacity
+        # gate. Keying this to the operation rather than to a flag is what
+        # makes AC3 hold: a caller who passes no pacing arguments is still
+        # paced, because there is no argument that turns this off.
+        "create": True,
     }
 )
 VALID_OPERATIONS = tuple(OPERATION_QUEUE_DEPTH_POLICY)
@@ -191,6 +209,30 @@ class PrOutcome:
 
 
 @dataclass(frozen=True)
+class CreateSpec:
+    """One pull request this tool has been asked to open (OMN-18855).
+
+    A create is the one bulk operation whose items are not PR numbers: the
+    number does not exist until after the call. The spec is what identifies
+    the item beforehand, and ``head`` is what the wave receipt records so a
+    reader can tell which creates were admitted in which wave.
+    """
+
+    head: str
+    base: str
+    title: str
+    body: str = ""
+
+    def __post_init__(self) -> None:
+        for field_name in ("head", "base", "title"):
+            if not str(getattr(self, field_name)).strip():
+                raise BulkPrThrottleError(
+                    f"create spec is missing {field_name!r}; refusing rather "
+                    "than opening a pull request with an empty field"
+                )
+
+
+@dataclass(frozen=True)
 class WaveReceipt:
     wave_index: int
     pr_numbers: tuple[int, ...]
@@ -201,6 +243,11 @@ class WaveReceipt:
     started_at: str
     completed_at: str
     outcomes: tuple[PrOutcome, ...]
+    # OMN-18855. For a create wave there are no PR numbers at wave start, so
+    # ``pr_numbers`` is empty and this carries the head refs instead. The
+    # numbers that resulted are in ``outcomes``. Defaulted and last, so the
+    # legacy positional constructor is unchanged.
+    wave_heads: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -451,7 +498,8 @@ def run_bulk_operation(
     *,
     owner: str,
     repo: str,
-    pr_numbers: Sequence[int],
+    pr_numbers: Sequence[int] = (),
+    create_specs: Sequence[CreateSpec] | None = None,
     operation: str,
     wave_size: int = DEFAULT_WAVE_SIZE,
     queue_depth_threshold: int = DEFAULT_QUEUE_DEPTH_THRESHOLD,
@@ -460,7 +508,9 @@ def run_bulk_operation(
     dry_run: bool = False,
     get_queue_depth: Callable[[], int] | None = None,
     get_runner_fleet: Callable[[], Mapping[str, object]] | None = None,
-    apply_pr_operation: Callable[[str, str, int, str], PrOutcome] | None = None,
+    # OMN-18855 widened the item type from ``int`` to the wave item, because a
+    # create's item is a CreateSpec and its PR number does not exist yet.
+    apply_pr_operation: Callable[[str, str, Any, str], PrOutcome] | None = None,
     poll_seconds: float = DEFAULT_BLOCK_POLL_SECONDS,
     max_wait_seconds: float = DEFAULT_MAX_BLOCK_SECONDS,
     sleep_fn: Callable[[float], None] = time.sleep,
@@ -481,15 +531,41 @@ def run_bulk_operation(
             f"unknown operation {operation!r}; must be one of {VALID_OPERATIONS}"
         )
     queue_depth_gate_applied = queue_depth_gate_for_operation(operation)
-    if not pr_numbers:
-        raise BulkPrThrottleError("pr_numbers must be non-empty")
+
+    # OMN-18855. A create is identified by its spec, every other operation by
+    # an existing PR number. Mixing them is refused rather than resolved by
+    # precedence, so a caller cannot half-specify a run and get the other half.
+    is_create = operation == "create"
+    if is_create:
+        if pr_numbers:
+            raise BulkPrThrottleError(
+                "operation 'create' takes create specs, not PR numbers: the "
+                "numbers do not exist until the pull requests are opened"
+            )
+        if not create_specs:
+            raise BulkPrThrottleError("create_specs must be non-empty")
+        items: Sequence[Any] = list(create_specs)
+    else:
+        if create_specs:
+            raise BulkPrThrottleError(
+                f"create_specs is only valid for operation 'create', not {operation!r}"
+            )
+        if not pr_numbers:
+            raise BulkPrThrottleError("pr_numbers must be non-empty")
+        items = list(pr_numbers)
 
     validate_total_prs(
-        pr_numbers,
+        items,
         max_total_prs=max_total_prs,
         explicit_max_total_prs=explicit_max_total_prs,
     )
-    waves = partition_into_waves(list(pr_numbers), wave_size)
+    waves = partition_into_waves(items, wave_size)
+
+    def receipt_ids(wave: tuple[Any, ...]) -> tuple[tuple[int, ...], tuple[str, ...]]:
+        """Split a wave into (pr_numbers, wave_heads) for its receipt."""
+        if is_create:
+            return (), tuple(spec.head for spec in wave)
+        return tuple(wave), ()
 
     if dry_run:
         log(
@@ -499,7 +575,8 @@ def run_bulk_operation(
             f"queue_depth_gate_applied={queue_depth_gate_applied}"
         )
         for idx, wave in enumerate(waves, start=1):
-            log(f"[bulk-pr-throttle]   wave {idx}: {list(wave)}")
+            shown = [spec.head for spec in wave] if is_create else list(wave)
+            log(f"[bulk-pr-throttle]   wave {idx}: {shown}")
         ts = now_fn().isoformat()
         return BulkRunReport(
             owner=owner,
@@ -511,7 +588,8 @@ def run_bulk_operation(
             waves=tuple(
                 WaveReceipt(
                     wave_index=idx,
-                    pr_numbers=wave,
+                    pr_numbers=receipt_ids(wave)[0],
+                    wave_heads=receipt_ids(wave)[1],
                     operation=operation,
                     dry_run=True,
                     # Preserve the legacy dry-run sentinel on the wire. None
@@ -594,11 +672,15 @@ def run_bulk_operation(
             if wave_receipts:
                 raise PartialBulkRunError(str(exc), partial_report()) from exc
             raise
+        wave_prs, wave_heads = receipt_ids(wave)
+        shown = list(wave_heads) if is_create else list(wave_prs)
         log(
             f"[bulk-pr-throttle] wave {idx}/{len(waves)}: depth_before={depth_before} "
-            f"count={len(wave)} prs={list(wave)} operation={operation}"
+            f"count={len(wave)} prs={shown} operation={operation}"
         )
-        outcomes = tuple(apply_pr_operation(owner, repo, pr, operation) for pr in wave)
+        outcomes = tuple(
+            apply_pr_operation(owner, repo, item, operation) for item in wave
+        )
         for outcome in outcomes:
             log(
                 f"[bulk-pr-throttle]   pr={outcome.pr_number} "
@@ -617,7 +699,8 @@ def run_bulk_operation(
         wave_receipts.append(
             WaveReceipt(
                 wave_index=idx,
-                pr_numbers=wave,
+                pr_numbers=wave_prs,
+                wave_heads=wave_heads,
                 operation=operation,
                 dry_run=False,
                 queue_depth_before=depth_before,
@@ -720,6 +803,38 @@ def gh_queue_depth(owner: str, repo: str) -> int:
         ) from exc
 
 
+def gh_repo_allows_auto_merge(owner: str, repo: str) -> bool:
+    """Live ``allow_auto_merge`` repo setting via the gh CLI (OMN-17427).
+
+    ``arm-automerge`` must never merge a PR directly: it may only arm
+    auto-merge on a repo that supports it. This is the one live check that
+    decides whether it is safe to invoke ``gh pr merge --squash --auto`` at
+    all. A probe failure raises rather than defaulting to ``True`` — an
+    operation named *arm* fails closed on an unreadable repo setting, the
+    same posture ``wait_for_runner_capacity`` and ``gh_queue_depth`` take.
+    """
+    result = _run_gh(
+        [
+            "api",
+            f"repos/{owner}/{repo}",
+            "--jq",
+            ".allow_auto_merge",
+        ]
+    )
+    if result.returncode != 0:
+        raise BulkPrThrottleError(
+            f"gh api repo settings probe failed: {result.stderr.strip()}"
+        )
+    value = result.stdout.strip()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise BulkPrThrottleError(
+        f"gh api repo settings probe returned invalid allow_auto_merge output: {value!r}"
+    )
+
+
 def _gh_auth_token() -> str | None:
     """Return the stored gh CLI credential, or ``None`` if there is not one.
 
@@ -765,10 +880,62 @@ def gh_runner_fleet() -> dict[str, object]:
     return probe_fleet(token, RUNNER_GROUP, api_url)
 
 
+def gh_create_pr(owner: str, repo: str, spec: CreateSpec) -> PrOutcome:
+    """Open one pull request and report the number it was given (OMN-18855).
+
+    ``gh pr create`` prints the new PR's URL on success. The number is parsed
+    from it rather than guessed, and a URL this cannot parse is reported as a
+    FAILURE with the raw output, because a create whose number is unknown is
+    not a create this tool can put in a receipt.
+    """
+    result = _run_gh(
+        [
+            "pr",
+            "create",
+            "--repo",
+            f"{owner}/{repo}",
+            "--head",
+            spec.head,
+            "--base",
+            spec.base,
+            "--title",
+            spec.title,
+            "--body",
+            spec.body,
+        ]
+    )
+    detail = (result.stdout or result.stderr).strip()
+    if result.returncode != 0:
+        return PrOutcome(pr_number=0, success=False, detail=detail)
+    match = re.search(r"/pull/(\d+)\s*$", detail)
+    if match is None:
+        return PrOutcome(
+            pr_number=0,
+            success=False,
+            detail=f"created, but no PR number could be parsed from: {detail!r}",
+        )
+    return PrOutcome(pr_number=int(match.group(1)), success=True, detail=detail)
+
+
 def gh_apply_pr_operation(
-    owner: str, repo: str, pr_number: int, operation: str
+    owner: str, repo: str, item: Any, operation: str
 ) -> PrOutcome:
-    """Dispatch one PR-scoped operation via the gh CLI."""
+    """Dispatch one operation via the gh CLI.
+
+    ``item`` is a PR number for every operation except ``create``, whose item
+    is a :class:`CreateSpec` (OMN-18855).
+    """
+    if operation == "create":
+        if not isinstance(item, CreateSpec):
+            raise BulkPrThrottleError(
+                f"operation 'create' requires a CreateSpec item, got {type(item).__name__}"
+            )
+        return gh_create_pr(owner, repo, item)
+    if not isinstance(item, int):
+        raise BulkPrThrottleError(
+            f"operation {operation!r} requires a PR number, got {type(item).__name__}"
+        )
+    pr_number = item
     if operation == "update-branch":
         result = _run_gh(
             [
@@ -784,6 +951,30 @@ def gh_apply_pr_operation(
             detail=(result.stdout or result.stderr).strip(),
         )
     if operation == "arm-automerge":
+        # OMN-17427: an operation named *arm* must never merge. GitHub CLI's
+        # own ``--auto`` flag silently performs a direct squash merge instead
+        # of refusing when the repo's ``allow_auto_merge`` is disabled, so
+        # this checks the live repo setting itself and never reaches
+        # ``gh pr merge`` at all on such a repo — there is no merge path left
+        # inside this branch for that case.
+        try:
+            auto_merge_allowed = gh_repo_allows_auto_merge(owner, repo)
+        except BulkPrThrottleError as exc:
+            return PrOutcome(
+                pr_number=pr_number,
+                success=False,
+                detail=f"could not verify allow_auto_merge before arming: {exc}",
+            )
+        if not auto_merge_allowed:
+            return PrOutcome(
+                pr_number=pr_number,
+                success=False,
+                detail=(
+                    f"{REFUSED_AUTOMERGE_DISABLED}: repo {owner}/{repo} has "
+                    "allow_auto_merge=false; refusing to arm rather than "
+                    "falling back to a direct merge"
+                ),
+            )
         result = _run_gh(
             [
                 "pr",
@@ -805,6 +996,48 @@ def gh_apply_pr_operation(
     if operation == "noop-dry-run":
         return PrOutcome(pr_number=pr_number, success=True, detail="noop")
     raise BulkPrThrottleError(f"unknown operation {operation!r}")
+
+
+def parse_create_specs(raw: str) -> list[CreateSpec]:
+    """Parse the ``--create-specs`` JSON payload into specs (OMN-18855).
+
+    A list of objects, each with ``head``, ``base``, ``title`` and an optional
+    ``body``. Anything else is refused rather than coerced.
+    """
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise BulkPrThrottleError(f"--create-specs is not valid JSON: {exc}") from exc
+    if not isinstance(loaded, list) or not loaded:
+        raise BulkPrThrottleError(
+            "--create-specs must be a non-empty JSON list of create specs"
+        )
+    specs: list[CreateSpec] = []
+    for index, entry in enumerate(loaded):
+        if not isinstance(entry, dict):
+            raise BulkPrThrottleError(
+                f"--create-specs entry {index} is not an object: {entry!r}"
+            )
+        unknown = set(entry) - {"head", "base", "title", "body"}
+        if unknown:
+            raise BulkPrThrottleError(
+                f"--create-specs entry {index} has unknown field(s) "
+                f"{sorted(unknown)}; refusing rather than ignoring them"
+            )
+        try:
+            specs.append(
+                CreateSpec(
+                    head=str(entry["head"]),
+                    base=str(entry["base"]),
+                    title=str(entry["title"]),
+                    body=str(entry.get("body", "")),
+                )
+            )
+        except KeyError as exc:
+            raise BulkPrThrottleError(
+                f"--create-specs entry {index} is missing {exc.args[0]!r}"
+            ) from exc
+    return specs
 
 
 def _gh_rerun_failed(owner: str, repo: str, pr_number: int) -> PrOutcome:
@@ -949,7 +1182,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--repo", required=True, help="GitHub repo name. No default — fail-fast."
     )
-    parser.add_argument("--prs", required=True, help="Comma-separated PR numbers.")
+    # OMN-18855: no longer unconditionally required, because a create has no
+    # PR numbers to pass. Exactly one of --prs / --create-specs is required,
+    # enforced after parsing so the refusal can name the operation.
+    parser.add_argument(
+        "--prs",
+        default=None,
+        help="Comma-separated PR numbers. Required for every operation except 'create'.",
+    )
+    parser.add_argument(
+        "--create-specs",
+        default=None,
+        help=(
+            "JSON list of {head, base, title, body?} objects, or @<path> to "
+            "read that JSON from a file. Required for operation 'create', and "
+            "rejected for every other operation."
+        ),
+    )
     parser.add_argument("--operation", required=True, choices=VALID_OPERATIONS)
     parser.add_argument("--wave-size", type=int, default=DEFAULT_WAVE_SIZE)
     parser.add_argument(
@@ -980,9 +1229,33 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    pr_numbers: list[int] = []
+    create_specs: list[CreateSpec] | None = None
     try:
-        pr_numbers = _parse_pr_numbers(args.prs)
-    except BulkPrThrottleError as exc:
+        if args.operation == "create":
+            if args.prs:
+                raise BulkPrThrottleError(
+                    "operation 'create' takes --create-specs, not --prs: the "
+                    "PR numbers do not exist until the pull requests are opened"
+                )
+            if not args.create_specs:
+                raise BulkPrThrottleError("operation 'create' requires --create-specs")
+            raw = args.create_specs
+            if raw.startswith("@"):
+                raw = Path(raw[1:]).read_text(encoding="utf-8")
+            create_specs = parse_create_specs(raw)
+        else:
+            if args.create_specs:
+                raise BulkPrThrottleError(
+                    "--create-specs is only valid for operation 'create', "
+                    f"not {args.operation!r}"
+                )
+            if not args.prs:
+                raise BulkPrThrottleError(
+                    f"operation {args.operation!r} requires --prs"
+                )
+            pr_numbers = _parse_pr_numbers(args.prs)
+    except (BulkPrThrottleError, OSError) as exc:
         print(f"[bulk-pr-throttle] REFUSED: {exc}", file=sys.stderr)
         return 1
 
@@ -1004,6 +1277,7 @@ def main(argv: list[str] | None = None) -> int:
             owner=args.owner,
             repo=args.repo,
             pr_numbers=pr_numbers,
+            create_specs=create_specs,
             operation=args.operation,
             wave_size=args.wave_size,
             queue_depth_threshold=args.queue_depth_threshold,

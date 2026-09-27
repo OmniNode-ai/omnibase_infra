@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19543: Typed Bifrost delegation overlay for the dev-200 lane, the third
+# deployed dev lane, on the .200 host (dev-202 template, OMN-19505).
+#
+# ZERO LOCAL BACKENDS, BY DESIGN, for the dev-202 overlay's reason: the lane's
+# only tie to .201 is the deploy agent's read of the dev control topic, and the
+# dev lane this stack is layered on binds its local rungs to the .201 model
+# server. It also binds nothing on .200's own gpt-oss planner (:8130), which
+# serves the orchestrating sessions on that host.
+#
+# `locale: cloud` states "no lab backend is reachable from this lane"
+# (OMN-17502): the renderer disables every local backend and refuses a render
+# that still binds one. No cloud credential is supplied to this lane, so a
+# delegation attempted through it fails rather than reaching any model.
+schema_version: "bifrost_lane_overlay.v3"
+lane: dev-200
+locale: cloud
+backends: []

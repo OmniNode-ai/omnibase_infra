@@ -8,6 +8,13 @@
 # Usage:
 #   OMNI_HOME=/data/omninode/omni_home \
 #     bash docker/runtime_build/stage_workspace.sh
+#   Or pin each staged sibling independently using owned, clean disposable clones:
+#   OMNI_HOME=<disposable-clone-root> bash scripts/runtime_build/stage_workspace.sh \
+#     --repo-ref omnibase_core=<40-character-SHA> \
+#     --repo-ref omnibase_compat=<40-character-SHA> \
+#     --repo-ref omnimarket=<40-character-SHA>
+#   This mode requires every staged sibling and forbids global-ref/hotpatch/
+#   unpinned selectors. It resolves all pins before any non-forcing checkout.
 #
 # On success, creates:
 #   workspace/sibling-repos/<repo-name>/  (staged working tree copy)
@@ -69,6 +76,19 @@
 #   5  DEPLOY_REF unset and no explicit opt-in -- refusing an unasserted build
 set -euo pipefail
 
+if [[ -z "${OMNI_HOME:-}" ]]; then
+    echo "ERROR: OMNI_HOME must be set for workspace-mode build" >&2
+    exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The sibling sets come from sibling_clone_manifest.sh, the single place they
+# are spelled (OMN-15137, OMN-19072): SIBLING_VENDORED_REPOS below, and
+# SIBLING_CLONE_MANIFEST for the pin preflight further down.
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+
 # OMN-13405: omnibase_core is staged FIRST so the Dockerfile workspace branch can
 # install the dev-HEAD core (which carries enum modules not yet in the released
 # 0.45.0 wheel pinned by omnibase_infra/uv.lock, e.g. enum_correction_failure_axis
@@ -76,18 +96,33 @@ set -euo pipefail
 # enum-LESS core wheel and omnimarket (installed --no-deps) imports a missing enum,
 # crash-looping projection-api + the runtime kernel. Order matters: core must be
 # staged/installed before compat/omnimarket so it is the resolved core for all.
-SIBLING_REPOS=(
-    "omnibase_core"
-    "omnibase_compat"
-    "omnimarket"
-)
+# SIBLING_VENDORED_REPOS carries that order; the parity test pins core first.
+SIBLING_REPOS=("${SIBLING_VENDORED_REPOS[@]}")
 
-if [[ -z "${OMNI_HOME:-}" ]]; then
-    echo "ERROR: OMNI_HOME must be set for workspace-mode build" >&2
-    exit 1
+# Keep selectors as separate argv entries; never evaluate or word-split pins.
+REPO_REF_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --repo-ref)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --repo-ref requires NAME=<40-character-SHA>" >&2
+                exit 2
+            fi
+            REPO_REF_ARGS+=(--repo-ref "$2")
+            shift 2
+            ;;
+        *)
+            echo "ERROR: unknown staging argument: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+if [[ ${#REPO_REF_ARGS[@]} -gt 0 ]]; then
+    if [[ -n "${DEPLOY_REF:-}" || "${DEPLOY_HOTPATCH:-0}" == "1" || "${ALLOW_UNPINNED_DEPLOY_SOURCE:-0}" == "1" ]]; then
+        echo "ERROR: per-repo pins cannot be combined with DEPLOY_REF, DEPLOY_HOTPATCH=1, or ALLOW_UNPINNED_DEPLOY_SOURCE=1" >&2
+        exit 2
+    fi
 fi
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---------------------------------------------------------------------------
 # RT-1 (OMN-14438): clean-ref checkout of every sibling BEFORE staging.
@@ -157,7 +192,7 @@ DEPLOY_HOTPATCH="${DEPLOY_HOTPATCH:-0}"
 # never fires on a stale expected-refs manifest left by a prior pinned run.
 RT1_ENGAGED=false
 
-if [[ -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
+if [[ ${#REPO_REF_ARGS[@]} -gt 0 || -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
     RT1_ENGAGED=true
     EXPECTED_REFS_OUT="$(resolve_expected_refs_out)"
     echo "RT-1: expected-refs manifest -> ${EXPECTED_REFS_OUT} (outside the build context, OMN-16442)" >&2
@@ -166,6 +201,9 @@ if [[ -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
     for repo in "${SIBLING_REPOS[@]}"; do
         checkout_args+=(--repo "${repo}=${OMNI_HOME}/${repo}")
     done
+    if [[ ${#REPO_REF_ARGS[@]} -gt 0 ]]; then
+        checkout_args+=(--require-immutable-refs "${REPO_REF_ARGS[@]}")
+    fi
     if [[ -n "${DEPLOY_REF}" ]]; then
         checkout_args+=(--ref "${DEPLOY_REF}")
         # OMN-17135: DEPLOY_REF is a pin on ONE repository, and the CI rebuild
@@ -183,7 +221,11 @@ if [[ -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" == "1" ]]; then
     if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
         checkout_args+=(--hotpatch)
     fi
-    echo "RT-1: clean-checkout siblings to ref '${DEPLOY_REF:-<hotpatch:HEAD>}' before staging (OMN-14438)" >&2
+    if [[ ${#REPO_REF_ARGS[@]} -gt 0 ]]; then
+        echo "RT-1: resolve all immutable per-repo pins before non-forcing checkout" >&2
+    else
+        echo "RT-1: clean-checkout siblings to ref '${DEPLOY_REF:-<hotpatch:HEAD>}' before staging (OMN-14438)" >&2
+    fi
     if ! python3 "${DEPLOY_SOURCE_REF_SCRIPT}" "${checkout_args[@]}"; then
         echo "ERROR: RT-1 clean-ref checkout failed; refusing to build from an unpinned tree (OMN-14438)" >&2
         exit 4
@@ -216,9 +258,8 @@ PIN_COMPARISON_OUT="workspace/sibling-pin-comparison.json"
 # of a second independently hardcoded list, so the two can never drift apart
 # again (the omnibase_spi gap this ticket fixes was exactly that drift: this
 # list already named omnibase-spi, but ensure_runner_clones.sh never
-# provisioned OMNI_HOME/omnibase_spi for it to find).
-# shellcheck source=./sibling_clone_manifest.sh
-source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+# provisioned OMNI_HOME/omnibase_spi for it to find). The manifest was sourced
+# at the top of this script.
 PREFLIGHT_REPO_ARGS=()
 for i in "${!SIBLING_CLONE_MANIFEST[@]}"; do
     PREFLIGHT_REPO_ARGS+=(

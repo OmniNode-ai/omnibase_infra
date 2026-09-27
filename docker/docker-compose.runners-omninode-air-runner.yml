@@ -93,6 +93,12 @@ services:
       - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      # OMN-19070: the disk-admission self-pause marker directory, the same
+      # mount every primary-host runner carries (OMN-16363). Without it the
+      # job-started hook logs `self-pause skipped ... not mounted` and a runner
+      # under its disk floor keeps taking and failing jobs instead of stopping.
+      # Relative to this file on the host, like the ./runners scripts above.
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - omninode-air-runner-1-creds:/home/runner/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"

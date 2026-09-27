@@ -48,10 +48,16 @@ _LOCAL_201_BACKENDS = ("local-coder", "local-heavy-reasoning")
 #: The env hint each backend carries in the base contract. The renderer strips
 #: these — the overlay owns the real endpoint — but the base contract is
 #: rejected without them.
+#:
+#: local-embedding (OMN-17099) is declared here, matching the real base
+#: contract (omnimarket's bifrost_delegation.yaml), so the synthetic base this
+#: module writes agrees with the committed dev overlay's added binding. It is
+#: NOT in ``_LOCAL_201_BACKENDS`` above: only the dev overlay binds it (judge
+#: and lakshman do not), so it has no per-lane value here to assert on.
 _ENDPOINT_URL_ENV = {
     "local-coder": "LLM_CODER_URL",
     "local-heavy-reasoning": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
-    "local-ds-v4-flash": "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
+    "local-embedding": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
 }
 
 

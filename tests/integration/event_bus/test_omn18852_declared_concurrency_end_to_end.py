@@ -229,6 +229,8 @@ async def _run_declared(
         _correlation_id: Any,
         *,
         record_coordinate: Any = None,
+        # OMN-19355: the serial loop's slow-dispatch hook; unused here.
+        on_slow_dispatch: Any = None,
     ) -> bool:
         assert record_coordinate is not None, (
             "the loop must pass the record coordinate through to dispatch"

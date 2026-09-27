@@ -1,0 +1,32 @@
+{
+  "allowed_undeclared": [
+    {
+      "match": {
+        "label": "com.github.actions.job=true",
+        "max_age_seconds": 7200
+      },
+      "name": "ci-job-containers",
+      "owner": "runner-fleet",
+      "reason": "synthetic fixture: short-lived containers a CI job starts and removes"
+    }
+  ],
+  "broker": null,
+  "containers": [],
+  "desired_state_sha256": "3cf7636ad0d1c7e506c057dd858ad414e69f19fd67562c46d0300f18032c350e",
+  "runners": null,
+  "schema_version": "lab-desired-state.v1",
+  "surface": {
+    "compose_project": null,
+    "host": "lab-201",
+    "id": "lab-201/host",
+    "kind": "host",
+    "mode": "reconcile"
+  },
+  "target_ref": {
+    "commit": "5440fbc283019b73cb0828623a8d4e5a6325dde1",
+    "composition": [],
+    "kind": "merge",
+    "ref": "dev",
+    "repo": "OmniNode-ai/omnibase_infra"
+  }
+}

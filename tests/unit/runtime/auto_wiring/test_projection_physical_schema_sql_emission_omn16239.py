@@ -28,6 +28,12 @@ each family, its table leaves the bridge set,
 ``physical_grant_schema_for_table`` returns identity, and this fix becomes
 invisible. ``live_events`` is already in that post-migration state and is
 asserted here as the live control.
+
+OMN-17887 (operator ruling 2026-09-24): the ``tenant`` schema is RETIRED and
+the TENANT domain's schema is ``public`` for good. Tenant-domain relations are
+therefore declared ``schema: public`` directly and need no bridge; the
+tenant->public half of the mapping was deleted, and a ``tenant`` declaration is
+now refused as an unknown schema. Only the ``omninode_internal`` bridge remains.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_core.enums.enum_database_schema_domain import EnumDatabaseSchemaDomain
 from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
     ModelDbTableDeclaration,
 )
@@ -46,9 +53,9 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _build_projection_db_adapter,
     _resolve_projection_database_target,
 )
+from omnibase_infra.topology import physical_schema_mapping
 from omnibase_infra.topology.physical_schema_mapping import (
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
-    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     physical_grant_schema_for_table,
 )
 from tests.helpers.application_db_topology import (
@@ -125,31 +132,52 @@ def _declaration(
     )
 
 
-def test_bridged_tenant_table_is_still_declared_bridged() -> None:
-    """Guard the premise: these fixtures must actually be under the bridge.
+def test_tenant_domain_is_public_and_only_the_internal_bridge_remains() -> None:
+    """Guard the premise of every fixture below.
 
-    If OMN-15359 relocates these families the mapping returns identity and the
-    SQL assertions below would pass vacuously against the declared schema.
-    Fail loudly here instead, so the tests get re-pointed rather than silently
-    stopping to prove anything.
+    OMN-17887: the tenant->public bridge is gone. A tenant-domain relation is
+    declared ``public``, maps to ``public`` by identity, and a ``tenant``
+    declaration is no longer bridged (identity) and is refused outright by the
+    real topology as an unknown schema -- so no test here can pass by
+    re-introducing the retired schema.
+
+    The internal fixture must still be under its bridge: if OMN-15359 relocates
+    that family the mapping returns identity and the internal SQL assertions
+    below would pass vacuously against the declared schema. Fail loudly here
+    instead, so the tests get re-pointed rather than silently stopping to prove
+    anything.
     """
-    assert "delegation_events" in TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    assert not hasattr(
+        physical_schema_mapping, "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359"
+    )
+    assert physical_grant_schema_for_table("public", "delegation_events") == "public"
+    assert physical_grant_schema_for_table("tenant", "delegation_events") == "tenant"
+    with pytest.raises(
+        ValueError, match="Unknown schema 'tenant' for database_ref 'application'"
+    ):
+        projection_database_target("delegation_events", schema="tenant")
+
+    target = projection_database_target("delegation_events", schema="public")
+    assert target.domains == (EnumDatabaseSchemaDomain.TENANT,)
+    assert [binding.binding_ref for binding in target.bindings] == ["tenant_projection"]
+
     assert "generation_events" in INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
-    assert physical_grant_schema_for_table("tenant", "delegation_events") == "public"
     assert (
         physical_grant_schema_for_table("omninode_internal", "generation_events")
         == "public"
     )
 
 
-def test_upsert_sql_names_the_physical_schema_for_a_bridged_tenant_table() -> None:
+def test_upsert_sql_names_the_physical_schema_for_a_tenant_domain_table() -> None:
     """The INSERT must target ``public``, the schema that physically holds it.
 
-    Pre-fix this emitted ``INSERT INTO "tenant"."delegation_events"`` against a
-    database with no ``tenant`` schema whatsoever.
+    Pre-OMN-16239 this emitted ``INSERT INTO "tenant"."delegation_events"``
+    against a database with no ``tenant`` schema whatsoever. Post-OMN-17887 the
+    relation is declared ``public`` (the TENANT domain) and must still never
+    name the retired ``tenant`` schema.
     """
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -202,7 +230,7 @@ def test_grant_check_and_emitted_sql_resolve_to_one_schema() -> None:
     impossible, rather than two call sites that merely happen to agree today.
     """
     for schema, name in (
-        ("tenant", "delegation_events"),
+        ("public", "delegation_events"),
         ("omninode_internal", "generation_events"),
     ):
         target = projection_database_target(name, schema=schema)

@@ -1,0 +1,133 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# provider-rung-canary.yml — OMN-16987
+#
+# WHAT THIS IS
+#   A scheduled liveness canary for every credentialed cloud rung of the dev
+#   lane's deployed delegation contract. Each declared backend with an endpoint
+#   and a key reference gets ONE authenticated minimal chat completion, sent
+#   from inside the runtime with the runtime's own contract, resolver and
+#   transport, and a typed per-rung verdict (LIVE, AUTH_DEAD, QUOTA_DEAD,
+#   UNREACHABLE, UNRESOLVED, PROTOCOL_ERROR, HTTP_ERROR). A backend whose key
+#   does not resolve reads UNRESOLVED and sends nothing; it is never a pass.
+#   This job's EXIT CODE is the verdict, the shape the C11, C12 and C15
+#   producers already use.
+#
+#   Resolvability is not liveness. Until this existed the platform only ever
+#   asked whether a key NAME resolved, then routed real traffic on it; an
+#   unfunded, expired, wrong-product or quota-capped key passed that bar.
+#
+# HOW IT READS THE SUBJECT
+#   scripts/ci/provider_rung_canary_observe.py is piped to
+#   `docker exec -i -u omniinfra omninode-runtime-effects python - <contract>`
+#   through this runner's docker socket, so it runs in the DEPLOYED runtime
+#   interpreter, as the runtime's own user, against the contract the runtime
+#   binds as BIFROST_CONTRACT_PATH, and resolves each key through the runtime's
+#   own lane secret mapping. The key never leaves that process: the observer
+#   prints raw facts only, scrubbed of every resolved value. The grading runs
+#   here, in scripts/ci/provider_rung_canary_probe.py, and is tested offline in
+#   tests/ci/test_provider_rung_canary_probe_omn16987.py.
+#
+#   Every run also sends one request per distinct endpoint carrying a
+#   deliberately invalid key, and that request must be refused as an auth
+#   failure. A probe that reads 200 whatever key it sends is not measuring the
+#   key; the control catches it in the same run.
+#
+# IT CHANGES NOTHING ON THE LANE
+#   No deploy, restart, rebuild or file write on any .201 lane. The one
+#   `docker exec` reads a contract and resolves keys in memory; the only
+#   outbound effect is the minimal completions to the providers themselves.
+#
+# WHY 4x/DAY AND NOT EVERY 30 MINUTES
+#   The Gemini free tier this lane routes to was measured capped at tens of
+#   requests a day. A 30-minute liveness probe would itself spend
+#   the quota it is meant to watch. Backends that share an endpoint, a model
+#   and a key are probed once, so a run costs one completion per distinct rung.
+#
+# WHY THIS RUNNER
+#   The subject is a container on the lab host; reaching it needs that host's
+#   docker socket, which the `omnibase-verify` runner on host-201 already
+#   carries (the C12 producer reads onex-api the same way). `host-201` is
+#   required, not decoration: a verify-class runner on another lab host has no
+#   such container. The pair fails SAFE — if the runner is down the job queues.
+#
+# WHY THERE IS NO pull_request TRIGGER
+#   A path-scoped pull-request job sits in neither required_status_checks nor
+#   EXPECTED_EXTERNAL_CONTEXTS, and the advisory-job gate refuses
+#   it. The grading is pinned offline by the pre-commit hook and the unit
+#   tests; workflow_dispatch re-runs the live canary on demand.
+#
+# EXIT 2 IS "COULD NOT LOOK", NOT A VERDICT
+#   No container, a stopped container, docker refusing, or the observer failing
+#   to load the contract exit 2. Both 1 and 2 fail the job.
+#
+# NO uv sync, DELIBERATELY
+#   The grader imports the standard library only; the observer imports only the
+#   deployed subject, inside the container.
+
+name: Provider-rung liveness canary
+
+on:
+  schedule:
+    # 4x/day at :47, offset from the C11 producer (:17), C12 (:27),
+    # chain-canary (:41 odd hours) and dev-lane-liveness (:07/:22/:37/:52).
+    - cron: '47 2,8,14,20 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: provider-rung-canary-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  provider-rung-canary:
+    name: Provider-rung liveness canary (dev lane)
+    runs-on: [self-hosted, omnibase-verify, host-201]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Probe every credentialed cloud rung and grade it
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: a non-zero probe is the verdict and must still write
+          # its record before the job ends.
+          python3 scripts/ci/provider_rung_canary_probe.py \
+            --container omninode-runtime-effects \
+            --user omniinfra \
+            --contract-path /app/data/delegation/bifrost_delegation.yaml \
+            --record provider-rung-canary.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+          status=$?
+          echo "probe exit status: ${status}"
+          exit "${status}"
+
+      - name: Assert the provider-rung record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact provider-rung-canary \
+            --require provider-rung-canary.json
+
+      - name: Upload the provider-rung record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-rung-canary
+          path: provider-rung-canary.json
+          if-no-files-found: error
+          retention-days: 30

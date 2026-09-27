@@ -57,7 +57,7 @@ databases:
             privileges: [CONNECT]
           - object_type: SCHEMA
             privileges: [USAGE]
-            schema: tenant
+            schema: public
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: platform_catalog
@@ -83,10 +83,16 @@ databases:
               - live_events
               - log_entries
               - open_obligations
+              - pr_landing_state
+              - pr_landing_transitions
               - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness
               - runtime_error_fingerprints
+              - savings_correlation_finalizations
+              - savings_injection_signals
+              - savings_validator_catch_signals
+              - topic_activity
               - topic_produce_windows
               - work_events
             privileges: [INSERT, SELECT, UPDATE]
@@ -148,7 +154,7 @@ databases:
             privileges: [CONNECT]
           - object_type: SCHEMA
             privileges: [USAGE]
-            schema: tenant
+            schema: public
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: platform_catalog
@@ -158,9 +164,6 @@ databases:
         grants:
           - object_type: DATABASE
             privileges: [CONNECT]
-          - object_type: SCHEMA
-            privileges: [USAGE]
-            schema: tenant
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: public
@@ -210,9 +213,6 @@ databases:
           - object_type: SCHEMA
             privileges: [USAGE]
             schema: public
-          - object_type: SCHEMA
-            privileges: [USAGE]
-            schema: tenant
         login: true
     schemas:
       action_authorization_claim:
@@ -225,9 +225,6 @@ databases:
         domain: PLATFORM_CATALOG
         owner: owner_platform_catalog
       public:
-        domain: TENANT
-        owner: owner_onex_tenant
-      tenant:
         domain: TENANT
         owner: owner_onex_tenant
   omnibase_infra:

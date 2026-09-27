@@ -522,21 +522,21 @@ def test_tenant_identity_and_function_audit_are_checked_manifest_authority() -> 
         evidence
         for evidence in manifest.relation_evidence
         if evidence.database_ref == "application"
-        and evidence.schema == "tenant"
+        and evidence.schema == "public"
         and evidence.name == "tenants"
     )
     tenant = tuple(
         evidence
         for evidence in manifest.relation_evidence
         if evidence.database_ref == "application"
-        and evidence.schema == "tenant"
+        and evidence.schema == "public"
         and evidence.name == "events"
     )
     function = tuple(
         database_object
         for database_object in manifest.database_objects
         if database_object.database_ref == "application"
-        and database_object.schema == "tenant"
+        and database_object.schema == "public"
         and database_object.name == "safe_report"
     )
 
@@ -551,10 +551,14 @@ def test_tenant_identity_and_function_audit_are_checked_manifest_authority() -> 
     assert tenant[0].identity_root_contract is None
     assert tenant[0].canonical_policy_name == "tenant_isolation"
     assert len(function) == 1
-    expected_hash = "58b47971e3234c0117f153a4d3d7c7d0efdfb611804ba729153dfac19e503cfe"
+    # OMN-17887: the proof function lives in `public` (the TENANT domain's
+    # schema), so its schema, search_path and body all changed and the
+    # fingerprint was re-derived with application_database_function_definition_sha256
+    # (the retired tenant.safe_report inputs still reproduce the old pin 58b47971...).
+    expected_hash = "0d04ab584434cb569795cbcaf50d4b91c907c93500199dd6de1148d7ab033ea6"
     assert function[0].function_signature == "()"
     assert function[0].definition_sha256 == expected_hash
-    assert function[0].audit_id == f"OMN-15361:tenant.safe_report:{expected_hash}"
+    assert function[0].audit_id == f"OMN-17887:public.safe_report:{expected_hash}"
 
 
 def test_owner_manifest_can_express_every_observed_application_object_kind() -> None:

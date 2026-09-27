@@ -92,6 +92,20 @@ def _run(result: dict[str, object], state_root: Path) -> dict[str, object]:
     return receipt
 
 
+def test_receipt_carries_terminal_construction_stable_reason(tmp_path: Path) -> None:
+    receipt = _run(
+        {
+            "attempts": [],
+            "operational_outcome": "terminal_construction_failed",
+            "content_verdict": "undetermined",
+            "terminal_failure_reason": "terminal_construction_failed",
+        },
+        tmp_path,
+    )
+
+    assert receipt["terminal_failure_reason"] == "terminal_construction_failed"
+
+
 REACHED_TWO_BACKENDS: dict[str, object] = {
     "response": "",
     "error_message": "TASK_MISMATCH: failed covers_dependencies",

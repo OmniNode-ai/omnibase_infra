@@ -251,7 +251,13 @@ readonly REFRESH_BUILD_SERVICES=(
     # drift, and never running on either lab lane.
     tenant-projection-writer
 )
-readonly ALL_TRACKED_REPOS=(omnibase_infra omnibase_core omnibase_compat onex_change_control omnimarket)
+# The clones this refresh records prior HEADs for and moves to the deployed
+# ref: SIBLING_LANE_REFRESH_REPOS from sibling_clone_manifest.sh, the single
+# place a sibling set is spelled (OMN-19072). Same membership as the literal
+# list it replaced; omnibase_spi is excluded there, by name, with its reason.
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+readonly ALL_TRACKED_REPOS=("${SIBLING_LANE_REFRESH_REPOS[@]}")
 
 # OMN-14958: probe host parameterized -- localhost is only correct ON the lane
 # host; inside the containerized deploy runner it is the runner container and

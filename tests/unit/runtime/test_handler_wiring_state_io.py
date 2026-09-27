@@ -84,7 +84,7 @@ def _write_contract(
             "  db_tables:\n"
             "    - name: delegation_events\n"
             "      database_ref: application\n"
-            "      schema: tenant\n"
+            "      schema: public\n"
             "      migration: tests/delegation_events.sql\n"
             "      access: read_write\n"
             "      role: fixture_projection\n"

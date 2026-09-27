@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19659 -- the canary leg of a runner image roll: prove ONE runner recreated
+# onto a new image launches Playwright's Chromium with nothing installed at job
+# time, before the rest of the fleet is rolled.
+#
+# HOW THE CANARY IS TARGETED. Every general-pool runner carries the same label
+# set, so no committed label can name one runner. The operator rolling the image
+# adds a temporary label to the recreated runner's registration
+# (POST orgs/<org>/actions/runners/<id>/labels), dispatches this workflow with
+# that label as `runner_label`, reads the result, and removes the label. The
+# default is a label every pool runner carries, so a dispatch without the input
+# is a launch smoke on whichever pool runner is idle. The procedure is in
+# knowledge-base-internal runbooks/ci-runner-fleet.md, "Rolling a new runner
+# image".
+#
+# Why a pull_request trigger scoped to this file and the script: a workflow is
+# dispatchable only once GitHub has registered it, and the PR that changes it is
+# where a broken script should first go red. No other PR triggers it, so no
+# unrelated change waits on the fleet.
+#
+# Not a required check: its subject is one runner's image, not the change under
+# review.
+name: Runner Playwright Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: "Label carried only by the canary runner (added by the operator for the roll)"
+        required: false
+        default: "arch-amd64"
+        type: string
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - ".github/workflows/runner-playwright-canary.yml"
+      - "docker/runners/playwright-smoke.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-playwright-canary-${{ github.event.pull_request.number || inputs.runner_label || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  playwright-launch:
+    name: playwright-launch
+    # A fork pull request must never land on the lab fleet.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    # A fleet literal, not the routing seam: the subject of this job is a fleet
+    # runner's image, so it can only ever run on the fleet. The third label
+    # narrows it to the canary during a roll.
+    runs-on:
+      - self-hosted
+      - omnibase-ci
+      - ${{ inputs.runner_label || 'arch-amd64' }}
+    timeout-minutes: 20
+    steps:
+      # node24 action on the recreated runner: the runbook's second pre-roll
+      # check (OMN-12585), taken by the same job.
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Launch Playwright Chromium with no install-deps
+        run: bash docker/runners/playwright-smoke.sh

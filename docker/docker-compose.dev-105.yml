@@ -1,0 +1,317 @@
+# OMN-19544 dev-105 lane: a time-shared deployed dev lane on the .105 host.
+#
+# WHAT THIS IS. The .105 row of the lab deploy lanes plan (epic OMN-19500,
+# ledger RULING 2026-09-25T10:22:22Z as amended by the CORRECTION 10:22:36Z:
+# one deploy slot and one prover per lab host, "well for parllelism anyway").
+# It is the dev-202 lane (docker/docker-compose.dev-202.yml, OMN-19505) moved to
+# another host: the same overlay on the .201 dev composition, rendered as the
+# triple the deploy agent renders:
+#
+#   docker compose -p omnibase-infra-dev-105 \
+#     --env-file docker/runtime-policy.env --env-file <dev-105 env file> \
+#     -f docker/docker-compose.infra.yml -f docker/docker-compose.dev-lane.yml \
+#     -f docker/docker-compose.dev-105.yml --profile runtime up -d
+#
+# The service graph, the runtime policy and the broker disk dials (OMN-19082,
+# the dev-lane.yml override of redpanda-partition-cap) are the dev lane's,
+# unchanged. This overlay replaces what identifies a lane on a host: the
+# project, every container_name, the network, every volume, every published
+# port and the com.omninode.lane label, so the census on .105 reads these
+# containers as dev-105 and never as the .201 dev lane.
+#
+# TIME-SHARED, NOT STANDING BESIDE A PROVER. .105 (omnibook, a laptop) runs
+# Docker Desktop with a 15.6 GiB VM; the dogfood stack holds about 4.1 GiB of it
+# and the prove-105 proof stack about 5 GiB. The dev-202 stack idles at about
+# 7.3 GiB (docker stats on .202, 2026-09-25). So this lane and a prover stack do
+# not fit at once, and the lane is only one tenant of a host slot that a prover
+# also takes (OMN-19544 AC1). Growing the VM restarts Docker Desktop and with it
+# the CI runner container, which is out of scope.
+#
+# ISOLATION. Its own Postgres, Redpanda and Valkey, never the .201 shared
+# broker and never the dogfood broker on this host. The only tie to .201 is the
+# deploy agent's read of the dev control topic, which is the agent's connection,
+# not this stack's. So:
+#   * every port binds the loopback address only. On Docker Desktop a runner
+#     container reaches a loopback publish through host.docker.internal, which
+#     is why the 172.17.0.1 gateway binds of the dev-202 overlay (a Linux
+#     docker bridge address, infra#4109) are absent here. Measured on .105 on
+#     2026-09-25 with throwaway containers (ledger RELEASE 10:34:52Z, lane
+#     dev-105-lane): a client with the runner's host.docker.internal:host-gateway
+#     alias reached a 127.0.0.1 publish, an unbound port through the same alias
+#     was refused, and the LAN address answered nothing;
+#   * runtime-effects leaves the external omnimemory-network, which does not
+#     exist on .105;
+#   * the four runtime-kernel services mount this lane's own Bifrost overlay
+#     (docker/lane-overlays/dev-105.bifrost.yaml: cloud locale, no local model
+#     rung), never the dev lane's, which binds the .201 model server;
+#   * host credential mounts (Vertex token, Codex and Claude logins) are pinned
+#     to /dev/null; this lane carries no operator login.
+#
+# NOT RUN HERE. Keycloak and Infisical are disabled by a profile override and
+# declared nowhere. onex-api and its two cloud-migration one-shots are disabled
+# too: their image is the omninode_infra cloud build that only the .201
+# lab-overlay pin delivers. They keep dev-105 names and are declared
+# `profile_gated`, so the lane still states every service the .201 dev lane
+# declares.
+#
+# A PREMISE FOR NOTHING BEYOND ITS RECEIPT. Not in GOVERNED_LANES or
+# GRANT_INTERLOCK_LANES (scripts/preflight_lane_deploy_attribution.py); no
+# `stability-proven` digest is ever sourced from it. What it proves is the
+# `compose-dev-105` receipt, which counts for omnimarket changes only, as
+# dev-202's does (operator ruling 2026-09-25T00:56:45Z; omnibase_infra stays
+# on .201).
+#
+# PORT BLOCK (claimed in ledger STATUS 2026-09-25T10:33:32Z, lane dev-105-lane;
+# read free on .105 by lsof, recorded in the lane manifest's verified: line).
+# 43000-43999 sits below macOS's ephemeral range (49152-65535, sysctl
+# net.inet.ip.portrange), below the dogfood block (47xxx and 49xxx) and apart
+# from dev-200's 42xxx and dev-202's 61xxx. It keeps dev-202's last three
+# digits, so a port maps one to one, except the projection API: 43002 is the
+# judge lane's projection API default (docker-compose.judge.yml), so dev-105's
+# is 43302 and no port literal of this block appears in another compose file.
+# No governed lane's port literal (18085,
+# 18086, 28085, 28086) is a substring of any of them, and no governed compose
+# project name is a substring of omnibase-infra-dev-105.
+#
+#   runtime main 43085      runtime effects 43086     projection API 43302
+#   agent actions 43087     contract resolver 43091   skill lifecycle 43092
+#   context audit 43093     intelligence API 43053    phoenix 43006
+#   Postgres 43436          Valkey 43379              Redpanda Kafka 43192
+#   Redpanda proxy 43182    schema registry 43181     Redpanda admin 43644
+#   onex-api 43090 (reserved, unbound: the service is disabled here)
+name: omnibase-infra-dev-105
+x-omninode-contract-overlay:
+  dev-105-redpanda:
+    advertised_kafka_addr: &dev_105_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://127.0.0.1:43192"
+    advertised_pandaproxy_addr: &dev_105_redpanda_advertised_pandaproxy_addr "internal://redpanda:8082,external://127.0.0.1:43182"
+services:
+  postgres:
+    container_name: omnibase-infra-dev-105-postgres
+    ports: !override
+      - "127.0.0.1:43436:5432"
+  redpanda:
+    container_name: omnibase-infra-dev-105-redpanda
+    command: !override
+      - redpanda
+      - start
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - *dev_105_redpanda_advertised_kafka_addr
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr
+      - *dev_105_redpanda_advertised_pandaproxy_addr
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      # Its own dial. The .105 Docker Desktop VM is 15.6 GiB and the dogfood
+      # stack already holds about 4.1 GiB of it (its own broker about 2 GiB),
+      # so this broker takes 2G, not dev-202's 4G or .201's 12G. dev-202's
+      # broker idled at 1.12 GiB under its 4G (docker stats on .202,
+      # 2026-09-25, OMN-19544).
+      - ${DEV_105_REDPANDA_MEMORY:-2G}
+      - --default-log-level=warn
+      - --set
+      - topic_partitions_per_shard=7000
+    ports: !override
+      - "127.0.0.1:43192:19092"
+      - "127.0.0.1:43182:18082"
+      - "127.0.0.1:43181:18081"
+      - "127.0.0.1:43644:9644"
+  redpanda-scram-user:
+    container_name: omnibase-infra-dev-105-redpanda-scram-user
+  redpanda-sasl-enable:
+    container_name: omnibase-infra-dev-105-redpanda-sasl-enable
+  redpanda-partition-cap:
+    container_name: omnibase-infra-dev-105-redpanda-partition-cap
+  valkey:
+    container_name: omnibase-infra-dev-105-valkey
+    ports: !override
+      - "127.0.0.1:43379:6379"
+  # Not run on .105 (no identity or secret store on a lab laptop, and no VM
+  # room): never started, never declared.
+  keycloak:
+    profiles: !override ["dev-105-disabled"]
+  infisical:
+    profiles: !override ["dev-105-disabled"]
+  forward-migration:
+    container_name: omnibase-infra-dev-105-forward-migration
+    labels:
+      com.omninode.lane: dev-105
+  migration-gate:
+    container_name: omnibase-infra-dev-105-migration-gate
+  intelligence-migration:
+    container_name: omnibase-infra-dev-105-intelligence-migration
+  cloud-migration-files:
+    container_name: omnibase-infra-dev-105-cloud-migration-files
+    profiles: !override ["dev-105-disabled"]
+    labels:
+      com.omninode.lane: dev-105
+  cloud-migration:
+    container_name: omnibase-infra-dev-105-cloud-migration
+    profiles: !override ["dev-105-disabled"]
+    labels:
+      com.omninode.lane: dev-105
+  onex-api:
+    container_name: onex-api-dev-105
+    profiles: !override ["dev-105-disabled"]
+    ports: !override
+      - "127.0.0.1:43090:8000"
+    labels:
+      com.omninode.lane: dev-105
+  autoheal:
+    container_name: omnibase-infra-dev-105-autoheal
+  phoenix:
+    container_name: omnibase-infra-dev-105-phoenix
+    ports: !override
+      - "127.0.0.1:43006:6006"
+  omninode-runtime:
+    container_name: omninode-dev-105-runtime
+    environment:
+      ONEX_RUNTIME_LANE: "compose-dev-105"
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
+    ports: !override
+      - "127.0.0.1:43085:8085"
+    volumes: !override
+      - runtime_logs:/app/logs
+      - runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev-105.bifrost.yaml:/app/config/delegation/dev-105.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - /dev/null:/run/secrets/vertex_access_token:ro
+  runtime-effects:
+    container_name: omninode-dev-105-runtime-effects
+    environment:
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
+    ports: !override
+      - "127.0.0.1:43086:8085"
+    networks: !override
+      - omnibase-infra-network
+    volumes: !override
+      - effects_logs:/app/logs
+      - effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev-105.bifrost.yaml:/app/config/delegation/dev-105.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - /dev/null:/run/secrets/vertex_access_token:ro
+  runtime-worker:
+    container_name: omninode-dev-105-runtime-worker
+    environment:
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
+    volumes: !override
+      - worker_logs:/app/logs
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev-105.bifrost.yaml:/app/config/delegation/dev-105.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+  tenant-projection-writer:
+    container_name: omnimarket-dev-105-tenant-projection-writer
+    environment:
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
+    labels:
+      com.omninode.lane: dev-105
+    volumes: !override
+      - tenant_projection_logs:/app/logs
+      - tenant_projection_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dev-105.bifrost.yaml:/app/config/delegation/dev-105.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+  projection-api:
+    container_name: omnimarket-dev-105-projection-api
+    ports: !override
+      - "127.0.0.1:43302:3002"
+  agent-actions-consumer:
+    container_name: omninode-dev-105-agent-actions-consumer
+    ports: !override
+      - "127.0.0.1:43087:8087"
+  skill-lifecycle-consumer:
+    container_name: omninode-dev-105-skill-lifecycle-consumer
+    ports: !override
+      - "127.0.0.1:43092:8092"
+  context-audit-consumer:
+    container_name: omninode-dev-105-context-audit-consumer
+    ports: !override
+      - "127.0.0.1:43093:8093"
+  intelligence-api:
+    container_name: omnibase-dev-105-intelligence-api
+    ports: !override
+      - "127.0.0.1:43053:8053"
+  omninode-contract-resolver:
+    container_name: omninode-dev-105-contract-resolver
+    ports: !override
+      - "127.0.0.1:43091:8091"
+  infra-routing-decisions-consumer:
+    container_name: omninode-dev-105-infra-routing-decisions-consumer
+    labels:
+      com.omninode.lane: dev-105
+  projection-tenant-registry-writer:
+    container_name: omnimarket-dev-105-projection-tenant-registry-writer
+    labels:
+      com.omninode.lane: dev-105
+  projection-delegation-writer:
+    container_name: omnimarket-dev-105-projection-delegation-writer
+    labels:
+      com.omninode.lane: dev-105
+  projection-registration-writer:
+    container_name: omnimarket-dev-105-projection-registration-writer
+    labels:
+      com.omninode.lane: dev-105
+  projection-savings-writer:
+    container_name: omnimarket-dev-105-projection-savings-writer
+    labels:
+      com.omninode.lane: dev-105
+  projection-tenant-credentials-writer:
+    container_name: omnimarket-dev-105-projection-tenant-credentials-writer
+    labels:
+      com.omninode.lane: dev-105
+  projection-live-events-writer:
+    container_name: omnimarket-dev-105-projection-live-events-writer
+    labels:
+      com.omninode.lane: dev-105
+networks:
+  omnibase-infra-network:
+    name: omnibase-infra-dev-105-network
+    driver: bridge
+volumes:
+  postgres_data:
+    name: omnibase-infra-dev-105-postgres-data
+  redpanda_data:
+    name: omnibase-infra-dev-105-redpanda-data
+  valkey_data:
+    name: omnibase-infra-dev-105-valkey-data
+  keycloak_data:
+    name: omnibase-infra-dev-105-keycloak-data
+  phoenix_data:
+    name: omnibase-infra-dev-105-phoenix-data
+  cloud_migrations:
+    name: omnibase-infra-dev-105-cloud-migrations
+  runtime_logs:
+    name: omninode-dev-105-runtime-logs
+  runtime_data:
+    name: omninode-dev-105-runtime-data
+  effects_logs:
+    name: omninode-dev-105-effects-logs
+  effects_data:
+    name: omninode-dev-105-effects-data
+  worker_logs:
+    name: omninode-dev-105-worker-logs
+  agent_actions_logs:
+    name: omninode-dev-105-agent-actions-logs
+  skill_lifecycle_logs:
+    name: omninode-dev-105-skill-lifecycle-logs
+  context_audit_logs:
+    name: omninode-dev-105-context-audit-logs
+  contract_resolver_logs:
+    name: omninode-dev-105-contract-resolver-logs
+  tenant_projection_logs:
+    name: omnimarket-dev-105-tenant-projection-logs
+  tenant_projection_data:
+    name: omnimarket-dev-105-tenant-projection-data

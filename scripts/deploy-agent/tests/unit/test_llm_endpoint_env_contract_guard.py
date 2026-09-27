@@ -46,6 +46,8 @@ def test_validate_llm_endpoint_env_contract_checks_process_and_env_files(
     )
     monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
     monkeypatch.setenv("HOME", str(home))
+    # No store declared on the unit: the historical ~/.omnibase/.env fallback.
+    monkeypatch.delenv("DEPLOY_AGENT_ENV_FILE", raising=False)
 
     captured: list[list[str]] = []
 
@@ -69,6 +71,56 @@ def test_validate_llm_endpoint_env_contract_checks_process_and_env_files(
         if "--env-file" in command
     ]
     assert env_files == [str(home / ".omnibase" / ".env"), str(repo / ".env")]
+
+
+@pytest.mark.unit
+def test_validate_llm_endpoint_env_contract_reads_the_agents_own_env_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-19507: an instance agent checks the store its lane runs from.
+
+    On a lab host that is not .201 the unit declares its own store
+    (``DEPLOY_AGENT_ENV_FILE``, e.g. ~/.omnibase/dev-200.env) and the lane's
+    compose reads that file. ``~/.omnibase/.env`` there is the operator's
+    workstation file, which the lane never reads; on 2026-09-25 its stale
+    ``LLM_EMBEDDING_URL`` (port 8100) failed the first real dev-200 job at
+    preflight while the lane's own store carried the canonical 8002. On .201
+    the unit declares ``~/.omnibase/.env`` itself, so nothing there changes.
+    """
+    repo = tmp_path / "repo"
+    home = tmp_path / "home"
+    repo.mkdir()
+    (home / ".omnibase").mkdir(parents=True)
+    workstation = home / ".omnibase" / ".env"
+    workstation.write_text("LLM_EMBEDDING_URL=http://192.168.86.201:8100\n")
+    lane_store = home / ".omnibase" / "dev-200.env"
+    lane_store.write_text("LLM_EMBEDDING_URL=http://192.168.86.201:8002\n")
+    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("OMNIBASE_ENV_FILE", raising=False)
+    monkeypatch.setenv("DEPLOY_AGENT_ENV_FILE", str(lane_store))
+
+    captured: list[list[str]] = []
+
+    def fake_run(
+        cmd: list[str],
+        timeout: int,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        captured.append(cmd)
+        return _completed()
+
+    monkeypatch.setattr(executor_mod, "_run", fake_run)
+
+    DeployExecutor().validate_llm_endpoint_env_contract()
+
+    env_files = [
+        command[command.index("--env-file") + 1]
+        for command in captured
+        if "--env-file" in command
+    ]
+    assert env_files == [str(lane_store)]
 
 
 @pytest.mark.unit

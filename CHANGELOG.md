@@ -1,3 +1,63 @@
+## v0.38.59 (2026-09-27)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.59 by the scheduled release train.
+- 15 release-relevant commit(s) merged since v0.38.58.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.58
+- chore: advance omnimarket contract pin to 2e7cec7d45ed (#4199)
+- feat: resolve a standalone projection writer's bindings, one per domain (#4157)
+- fix: the dispatch protocol declares no_escalation and the kwarg-parity reader resolves the consumer's TypedDict-typed splat (#4192)
+- fix: the runtime error triage effect returns an empty effect output, and the log bridge does not feed a runtime-error consumer's own errors back to its topic (#4176)
+- feat: vendor the topic-activity projection migrations and grants (#4165)
+- fix: the discovery sweep reuses an unchanged manifest instead of re-parsing 519 contracts (#4172)
+- fix: the runtime log bridge authenticates to the lab broker and is enabled on the dev lane (#4160)
+- feat: declare the three savings signal tables in omninode_internal (AC2 step 1) (#4129)
+- feat: lab proof profile registry and the foundation_override proof nodes (#4133)
+- fix: scope infra hooks to staged files (#4140)
+- fix: the evaluator admits a short prompt by its opening imperative (#4027)
+- fix: onex delegate refuses a replacing criteria set that can never accept, before dispatch (#4144)
+- feat: dogfood fault-pin admission and typed terminal-evidence capture (K1 infra, salvaged from #3951) (#4088)
+- feat: publish a compatible omnibase-core range, keep the exact pin only in the uv override (#4148)
+- feat: log the gateway session lifecycle so AC3's zero is falsifiable (#4139)
+
+## v0.38.58 (2026-09-25)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.58 by the scheduled release train.
+- 13 release-relevant commit(s) merged since v0.38.57.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.57
+- feat: live omninode_internal ACL check, gated on a from-empty build (#4093)
+- fix: retire the tenant schema; public is the TENANT domain's schema (#4079)
+- feat: laptop profile, the ONEX stack plus your own runtime from one catalog bundle (#4089)
+- fix: task-class selection reads the request, not the material it carries (#4107)
+- feat: attach a lane-scoped node only on the runtime lanes its contract declares (#4077)
+- feat: onex skill publishes the dod_verify verdict to the dev lane after its in-memory dispatch, fail-soft (#4100)
+- feat: onex delegate --ticket carries the ticket in the request metadata (#4103)
+- feat: delegation runs compare only inside one complete cohort key (#4054)
+- feat: the forwarder mirrors delegate-skill terminals, metadata only (#4083)
+- feat: refuse a delegation before dispatch unless its bounded lane row agrees (#4056)
+- feat: phase 3 - option B, the mirror-only forwarder (#3798)
+- fix: report a delegation that failed before publish as itself (#4026)
+- fix: a pre-PR slot reaches a ready runtime: slot principal grants, slot intelligence migration, slot topics (#4070)
+
+## v0.38.57 (2026-09-24)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.57 by the scheduled release train.
+- 5 release-relevant commit(s) merged since v0.38.56.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.56
+- fix(OMN-19356): observability consumers stay healthy on a quiet topic after handled traffic (#4031)
+- feat(OMN-17423): re-home credential log redaction into the shared runtime path (#4016)
+- fix(OMN-19241): lease the shared DLQ replay producers and bound a record that keeps failing (#4002)
+- chore(OMN-17292): advance omnimarket contract pin to fcc374d5908f (#3994)
+- fix(OMN-16852): the catalog render stops handing the runtime build an empty OMNI_HOME (#3996)
+
 ## v0.38.56 (2026-09-23)
 
 ### Release

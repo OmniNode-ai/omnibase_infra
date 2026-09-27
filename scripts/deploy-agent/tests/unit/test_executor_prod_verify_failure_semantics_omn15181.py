@@ -271,10 +271,20 @@ def test_no_rollback_code_path_exists_in_deploy_agent_package() -> None:
     callable_pattern = re.compile(r"(?:def|class)\s+\w*rollback\w*", re.IGNORECASE)
     call_pattern = re.compile(r"\brollback\w*\s*\(", re.IGNORECASE)
 
+    # OMN-19270, the deliberate update this docstring asks for. A signed
+    # rollback DECLARATION on an operator's rebuild command exempts that one
+    # command from the lineage fence; the operator asks for the rollback and
+    # the agent runs it as an ordinary deploy. It is not a recovery path the
+    # agent takes by itself after a failure, which is what claim (1) guards, so
+    # its two names are allowed and nothing else is.
+    operator_declared_rollback = re.compile(
+        r"\b(?:ModelRollbackDeclaration|_resolve_rollback)\b"
+    )
+
     pkg_dir = Path(deploy_agent.__file__).parent
     hits: list[str] = []
     for py_file in pkg_dir.glob("*.py"):
-        text = py_file.read_text(encoding="utf-8")
+        text = operator_declared_rollback.sub("", py_file.read_text(encoding="utf-8"))
         if callable_pattern.search(text) or call_pattern.search(text):
             hits.append(py_file.name)
     assert hits == [], (

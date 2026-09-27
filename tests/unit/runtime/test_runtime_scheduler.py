@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Awaitable, Coroutine
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
@@ -42,6 +43,7 @@ from pydantic import ValidationError
 
 from omnibase_infra.errors import InfraUnavailableError, ProtocolConfigurationError
 from omnibase_infra.protocols import ProtocolEventBusLike
+from omnibase_infra.runtime import runtime_scheduler as runtime_scheduler_module
 from omnibase_infra.runtime.enums import EnumSchedulerStatus
 from omnibase_infra.runtime.models import (
     ModelRuntimeSchedulerConfig,
@@ -50,6 +52,68 @@ from omnibase_infra.runtime.models import (
 )
 from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
 from omnibase_infra.topics import SUFFIX_RUNTIME_TICK
+
+# Upper bound for waiting on the running tick loop. Ticks are expected every
+# tick_interval_ms (100 ms in these tests); the bound only has to outlast an
+# event loop starved by a busy CI runner, never the normal case (OMN-19382).
+_TICK_WAIT_TIMEOUT_SECONDS = 10.0
+
+
+async def _wait_for_ticks(
+    scheduler: RuntimeScheduler,
+    minimum: int,
+    timeout: float = _TICK_WAIT_TIMEOUT_SECONDS,
+) -> ModelRuntimeSchedulerMetrics:
+    """Wait until the scheduler's own tick loop has emitted ``minimum`` ticks.
+
+    This is a condition wait with a bounded timeout, not a fixed sleep: a fixed
+    sleep followed by a count assertion measures how much CPU the runner gave
+    the event loop, not whether the scheduler ticks (OMN-19382). Fails the test
+    if the condition is not met within ``timeout`` seconds.
+    """
+
+    async def _until_emitted() -> ModelRuntimeSchedulerMetrics:
+        while True:
+            metrics = await scheduler.get_metrics()
+            if metrics.ticks_emitted >= minimum:
+                return metrics
+            await asyncio.sleep(0.01)
+
+    try:
+        return await asyncio.wait_for(_until_emitted(), timeout=timeout)
+    except TimeoutError:
+        emitted = (await scheduler.get_metrics()).ticks_emitted
+        pytest.fail(
+            f"tick loop emitted {emitted} tick(s); expected at least {minimum} "
+            f"within {timeout}s"
+        )
+
+
+class _RecordingAsyncio:
+    """Stand-in for the scheduler module's ``asyncio`` that records waits.
+
+    Every attribute delegates to the real ``asyncio`` module. ``wait_for`` also
+    records the awaited coroutine's qualified name and the timeout it was given,
+    so a test can read the interval the tick loop waited without reading the
+    wall clock.
+    """
+
+    def __init__(self) -> None:
+        self.wait_for_calls: list[tuple[str, float | None]] = []
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(asyncio, name)
+
+    def wait_for[T](
+        self, fut: Awaitable[T], timeout: float | None
+    ) -> Coroutine[object, object, T]:
+        self.wait_for_calls.append((getattr(fut, "__qualname__", ""), timeout))
+        return asyncio.wait_for(fut, timeout)
+
+    def tick_loop_waits(self) -> list[float | None]:
+        """Timeouts of the tick loop's interval waits on the shutdown event."""
+        return [t for name, t in self.wait_for_calls if name == "Event.wait"]
+
 
 # ============================================================================
 # Fixtures
@@ -702,18 +766,39 @@ class TestRuntimeSchedulerTickEmission:
         assert tick1["correlation_id"] != tick2["correlation_id"]
 
     async def test_tick_loop_emits_at_interval(
-        self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock
+        self,
+        scheduler: RuntimeScheduler,
+        scheduler_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
     ) -> None:
-        """Test that tick loop emits at configured interval."""
-        await scheduler.start()
+        """Test that tick loop emits at configured interval.
 
-        # Wait for approximately 3 intervals (100ms each = 300ms)
-        await asyncio.sleep(0.35)
+        The interval is read from the waits the loop itself requested, not from
+        the wall clock, so a starved CI runner cannot change the verdict
+        (OMN-19382).
+        """
+        recorder = _RecordingAsyncio()
+        with patch.object(runtime_scheduler_module, "asyncio", recorder):
+            await scheduler.start()
+            await _wait_for_ticks(scheduler, minimum=2)
+            await scheduler.stop()
 
-        await scheduler.stop()
+        published = mock_event_bus.publish.call_count
+        assert published >= 2
 
-        # Should have emitted at least 2-3 ticks
-        assert mock_event_bus.publish.call_count >= 2
+        # Every published tick was preceded by one interval wait, and every
+        # interval wait used the configured tick interval (jitter is 0).
+        loop_waits = recorder.tick_loop_waits()
+        assert len(loop_waits) >= published
+        assert set(loop_waits) == {scheduler_config.tick_interval_ms / 1000.0}
+
+    async def test_wait_for_ticks_fails_within_bound_when_loop_never_emits(
+        self, scheduler: RuntimeScheduler
+    ) -> None:
+        """The bounded tick wait fails, rather than passing vacuously, when no
+        tick loop is running."""
+        with pytest.raises(pytest.fail.Exception, match="emitted 0 tick"):
+            await _wait_for_ticks(scheduler, minimum=1, timeout=0.2)
 
 
 # ============================================================================
@@ -1246,11 +1331,11 @@ class TestRuntimeSchedulerIntegration:
         assert metrics.status == EnumSchedulerStatus.RUNNING
         assert metrics.started_at is not None
 
-        # Let it emit some ticks (100ms interval, wait for 2+ ticks)
-        await asyncio.sleep(0.35)
+        # Wait (bounded) for the running tick loop itself to emit 2+ ticks.
+        # A fixed sleep here measured runner load, not the scheduler (OMN-19382).
+        metrics = await _wait_for_ticks(scheduler, minimum=2)
 
         # Verify ticks were emitted
-        metrics = await scheduler.get_metrics()
         assert metrics.ticks_emitted >= 2
         assert metrics.current_sequence_number >= 2
 

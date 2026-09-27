@@ -128,8 +128,18 @@ def _error_result(
     frozen=True, slots=True
 )  # internal-dataclass-ok: module-internal broker payload helper
 class TerminalPayload:
+    """A correlated terminal plus its original consumed envelope bytes.
+
+    ``payload`` remains the decoded carrier the broker uses for its existing
+    response model.  Raw bytes are retained separately so an opt-in evidence
+    observer cannot mistake a normalized caller response for the wire event.
+    """
+
     payload: object
     topic: str
+    raw_envelope: bytes
+    partition: int | None = None
+    offset: str | None = None
 
 
 @dataclass(
@@ -455,7 +465,7 @@ async def _poll_terminal_without_close(
     terminal_topic: str,
     correlation_id: str,
     timeout_seconds: float,
-) -> dict[str, object] | None:
+) -> TerminalPayload | None:
     """Poll one positioned consumer for the correlated terminal, WITHOUT closing.
 
     ``poll_direct_terminal_consumer`` stops its consumer in a ``finally`` because
@@ -495,7 +505,15 @@ async def _poll_terminal_without_close(
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
         if _extract_direct_terminal_correlation_id(body) == correlation_id:
-            return body
+            partition = getattr(message, "partition", None)
+            offset = getattr(message, "offset", None)
+            return TerminalPayload(
+                payload=body.get("payload", body),
+                topic=terminal_topic,
+                raw_envelope=message.value,
+                partition=partition if isinstance(partition, int) else None,
+                offset=str(offset) if offset is not None else None,
+            )
 
 
 async def close_direct_terminal_consumer(
@@ -581,6 +599,8 @@ class RuntimePatternBBroker:
     async def dispatch_request(
         self,
         command: ModelDispatchBusCommand,
+        *,
+        terminal_observer: Callable[[TerminalPayload], Awaitable[None]] | None = None,
     ) -> tuple[ModelRuntimeLocalIngressRoute | None, ModelDispatchBusTerminalResult]:
         correlation_id = command.correlation_id
         route = self._routes.get(command.command_name)
@@ -623,6 +643,9 @@ class RuntimePatternBBroker:
                 error_message=sanitize_error_message(exc),
             )
 
+        if terminal_observer is not None:
+            await terminal_observer(terminal)
+
         status = _status_for_terminal_topic(route, terminal.topic, terminal.payload)
         return route, ModelDispatchBusTerminalResult(
             correlation_id=correlation_id,
@@ -655,7 +678,13 @@ class RuntimePatternBBroker:
                 return
             if terminal_queue.empty():
                 await terminal_queue.put(
-                    TerminalPayload(payload=terminal_envelope.payload, topic=topic)
+                    TerminalPayload(
+                        payload=terminal_envelope.payload,
+                        topic=topic,
+                        raw_envelope=message.value,
+                        partition=message.partition,
+                        offset=message.offset,
+                    )
                 )
 
         def terminal_callback(
@@ -771,7 +800,7 @@ class RuntimePatternBBroker:
         losing tasks are cancelled on the way out so the winner returns
         immediately without joining a full-timeout sleep on the partition-less leg.
         """
-        tasks: dict[asyncio.Task[dict[str, object] | None], str] = {}
+        tasks: dict[asyncio.Task[TerminalPayload | None], str] = {}
         for terminal_topic, handle in handles.items():
             task = asyncio.ensure_future(
                 _poll_terminal_without_close(
@@ -790,13 +819,10 @@ class RuntimePatternBBroker:
                     pending, return_when=asyncio.FIRST_COMPLETED
                 )
                 for task in done:
-                    body = task.result()
-                    if body is None:
+                    terminal = task.result()
+                    if terminal is None:
                         continue
-                    return TerminalPayload(
-                        payload=body.get("payload", body),
-                        topic=tasks[task],
-                    )
+                    return terminal
             raise TimeoutError
         finally:
             for task in tasks:

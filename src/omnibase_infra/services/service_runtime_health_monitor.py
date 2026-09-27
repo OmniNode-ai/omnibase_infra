@@ -54,6 +54,9 @@ from omnibase_infra.protocols.protocol_auto_wiring_manifest_like import (
 from omnibase_infra.protocols.protocol_consumer_sync_source import (
     ProtocolConsumerSyncSource,
 )
+from omnibase_infra.protocols.protocol_dispatch_deadline_source import (
+    ProtocolDispatchDeadlineSource,
+)
 from omnibase_infra.runtime.health.projection_apply_flow import (
     FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS,
     describe_projection_apply_divergence,
@@ -158,6 +161,18 @@ def _filter_manifest_for_runtime_profile(
             len(ownership_result.skipped_contracts),
         )
     return ownership_result.manifest
+
+
+def _discover_contracts_for_runtime_profile() -> ProtocolAutoWiringManifestLike:
+    """Discover and profile-filter, as one synchronous unit to hand to a thread.
+
+    BOTH NAMES ARE RESOLVED THROUGH THIS MODULE'S GLOBALS at call time, which
+    is what keeps the two existing patch points working: every test of this
+    monitor patches ``_discover_contracts`` and most patch
+    ``_filter_manifest_for_runtime_profile`` as well, and a version of this
+    that closed over either one would silently run the real scan under them.
+    """
+    return _filter_manifest_for_runtime_profile(_discover_contracts())
 
 
 class ConsumerGroupSnapshot(NamedTuple):
@@ -502,6 +517,59 @@ def evaluate_consumer_sync(
     return "HEALTHY", detail
 
 
+# --- dispatch_deadline dimension (OMN-19355) ---------------------------------
+
+#: What the dimension reports on a transport with no consume loop to abandon a
+#: dispatch from. Stated rather than omitted, as for consumer_sync.
+DISPATCH_DEADLINE_UNAVAILABLE = (
+    "per-dispatch deadline reporting is not available on this transport"
+)
+
+#: Abandoned dispatches named in the detail before it is capped.
+_MAX_NAMED_ORPHANS = 3
+
+
+def evaluate_dispatch_deadline(
+    event_bus: object | None,
+) -> tuple[_HealthStatus, str]:
+    """Grade the abandoned-dispatch dimension from whatever bus the kernel wired.
+
+    DEGRADED from the first abandoned dispatch: the consumer kept polling and
+    the record is quarantined, but a handler is parked somewhere in the process
+    holding what it held, and nothing in Python can stop it. CRITICAL at the
+    bus's declared orphan limit, because CRITICAL is the grade that fails the
+    container healthcheck irrespective of the lane's ``--degraded-policy``, and
+    past the limit the parked threads start to starve the projection gate every
+    other projection waits on. Only a new process frees them.
+    """
+    if not isinstance(event_bus, ProtocolDispatchDeadlineSource):
+        return "HEALTHY", DISPATCH_DEADLINE_UNAVAILABLE
+    try:
+        status = event_bus.dispatch_deadline_status()
+    except Exception as read_error:  # noqa: BLE001 — boundary: a health service must not die reporting on something else
+        logger.warning(
+            "dispatch_deadline dimension could not read the event bus: %s",
+            read_error,
+            exc_info=True,
+        )
+        return "DEGRADED", f"abandoned dispatches could not be read: {read_error}"
+    detail = (
+        f"{status.orphaned_dispatches} abandoned dispatch(es) still running "
+        f"(limit {status.orphan_limit}, deadline {status.deadline_seconds:.0f}s, "
+        f"{status.deadline_expiries_total} expired since start)"
+    )
+    if status.orphans:
+        named = list(status.orphans[:_MAX_NAMED_ORPHANS])
+        if len(status.orphans) > len(named):
+            named.append(f"+{len(status.orphans) - len(named)} more")
+        detail += ": " + "; ".join(named)
+    if status.status == "unhealthy":
+        return "CRITICAL", detail
+    if status.status == "degraded":
+        return "DEGRADED", detail
+    return "HEALTHY", detail
+
+
 class ServiceRuntimeHealthMonitor:
     """Periodic runtime health monitor.
 
@@ -668,7 +736,34 @@ class ServiceRuntimeHealthMonitor:
         # conservative value: nothing excluded, so nothing is silenced.
         nonprojection_group_infixes: dict[str, str] = {}
         try:
-            manifest = _filter_manifest_for_runtime_profile(_discover_contracts())
+            # OFF THE EVENT LOOP (OMN-19373). Contract discovery is a fully
+            # synchronous scan: it walks every ``onex.nodes`` entry point,
+            # reads and parses the ``contract.yaml`` beside each one, and logs
+            # a line per contract. On the .201 runtime that is ~1,000
+            # contracts and it takes ABOUT ELEVEN SECONDS. Awaited inline it
+            # did not merely make this check slow -- it froze the whole
+            # process, because a synchronous call in a coroutine holds the
+            # loop until it returns, and this loop is also the one answering
+            # the gateway.
+            #
+            # What that cost, measured on 2026-09-24 against the ``onex-dev``
+            # namespace on the staging node (the instance id is denylisted
+            # here; it is on OMN-19373 with the rest of the capture):
+            # ``onex-api`` publishes a heartbeat command and waits 10.0s for
+            # ``gateway-session.v1``. Any heartbeat that
+            # arrived inside a sweep could not be answered before the budget
+            # expired, so the customer got a 503 while the work was merely
+            # late -- in both captured cases runtime-effects published the
+            # answer in the very second the sweep ended, after the caller had
+            # already abandoned it. 2 of 14 heartbeats over one 3m42s run at
+            # the designed 15s cadence; ~1s is the healthy round trip.
+            #
+            # This check runs every ``check_interval_seconds`` (300s), so the
+            # refusal recurred about every five minutes and no client cadence
+            # could avoid it. ``asyncio.to_thread`` is the same primitive this
+            # very method already uses for the Kafka admin call below; this
+            # line was the one blocking call in it that never got it.
+            manifest = await asyncio.to_thread(_discover_contracts_for_runtime_profile)
             contract_count = manifest.total_discovered
             discovery_error_count = manifest.total_errors
             subscribe_topics = set(manifest.all_subscribe_topics())
@@ -976,6 +1071,24 @@ class ServiceRuntimeHealthMonitor:
                 name="consumer_sync",
                 status=consumer_sync_status,
                 detail=consumer_sync_detail,
+            )
+        )
+
+        # --- Dimension 7b: Abandoned dispatches (OMN-19355) -----------------
+        # consumer_sync reads whether a group is still fetching. A handler that
+        # never returns used to stop its group from fetching, and that is how
+        # the 2026-09-23 lab_lane_health hang was seen: 32 minutes later, at
+        # eviction. The consume loop now abandons such a dispatch at its
+        # deadline and keeps polling, so consumer_sync stays green -- and the
+        # parked handler would be invisible without this dimension.
+        dispatch_deadline_status, dispatch_deadline_detail = evaluate_dispatch_deadline(
+            self._event_bus
+        )
+        dimensions.append(
+            ModelRuntimeHealthDimension(
+                name="dispatch_deadline",
+                status=dispatch_deadline_status,
+                detail=dispatch_deadline_detail,
             )
         )
 

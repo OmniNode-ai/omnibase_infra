@@ -237,6 +237,8 @@ async def _drive_consume_loop(
             _correlation_id: Any,
             *,
             record_coordinate: Any = None,
+            # OMN-19355: the serial loop's slow-dispatch hook; unused here.
+            on_slow_dispatch: Any = None,
         ) -> bool:
             # ``_record_coordinate`` yields a ``(partition, offset)`` tuple.
             assert record_coordinate is not None, (

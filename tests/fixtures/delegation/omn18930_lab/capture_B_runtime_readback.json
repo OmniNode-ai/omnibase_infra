@@ -1,0 +1,40 @@
+{
+  "build_identity": {
+    "build_provenance_sha256": "745dc1ee207daaf5564894a1ffc0219b5d4c19015ae98583109830a27aa56de1",
+    "image_digest": "sha256:e038efa5647d73e1fc5a6b81dc3e70611c55f347e68e4ce759aadc4e0e9125fc",
+    "source_revision": "a7ea811c54a489ff94deaa770b0fcd03743fddb1"
+  },
+  "captured_at": "2026-09-24T10:31:23+00:00",
+  "consumer_identity": {
+    "env": "local",
+    "node_name": "node_delegate_skill_orchestrator",
+    "service": "omnimarket",
+    "version": "1.3.0"
+  },
+  "correlation_id": "06b6a8db-087c-4495-98d0-4f0c106176f8",
+  "first_hop_provider": null,
+  "lane": "dev",
+  "provider_policy": {
+    "backend_config_sha256": "d490daf0cefac7b9dc4e144a5200e20be359258001dbce820e6b2ce129a22db7",
+    "overlay_sha256": null,
+    "routing_tiers_sha256": "f794683102948b9315ab860f30b336bf572c128aef6dac9da66964ba7d003a1d",
+    "task_class_contracts_sha256": "00764cbb4a8d4021d7336b35b530079221dc7ea9d2f79d9404a69f2e8ce790b5"
+  },
+  "retry_bounds": {
+    "max_escalations": 2,
+    "per_tier": [
+      {
+        "max_retries": 2,
+        "tier": "local"
+      },
+      {
+        "max_retries": 1,
+        "tier": "cheap_frontier"
+      },
+      {
+        "max_retries": 1,
+        "tier": "cheap_cloud"
+      }
+    ]
+  }
+}

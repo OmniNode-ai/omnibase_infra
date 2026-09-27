@@ -20,6 +20,7 @@
 #   POSTGRES_PORT     (default: 5432)
 #   MIGRATIONS_DIR    (default: /migrations/intelligence)
 #   PG_WAIT_RETRIES   (default: 30 — see section 0)
+#   ONEX_DB_SLOT      (optional — a pre-PR verify slot token; see below)
 
 set -e
 
@@ -30,6 +31,34 @@ MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations/intelligence}"
 PG_WAIT_RETRIES="${PG_WAIT_RETRIES:-30}"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+# ---- BEGIN pre-PR verify slot (OMN-19404) ----
+# A pre-PR verify slot (epic OMN-18888) reuses the dev lane's Postgres SERVER
+# and owns only suffixed databases. With ONEX_DB_SLOT set this runner migrates
+# omniintelligence_<slot> and nothing else. It never CREATES that database:
+# scripts/provision_db_slot.sh creates it, closes it to PUBLIC and grants the
+# slot's own role_omniintelligence_<slot> on it, and a database this runner
+# made would have none of that. So an absent slot database is a refusal, not a
+# create.
+#
+# Without this the slot overlay had to fence the one-shot out entirely, and the
+# fourth slot boot (2026-09-24) failed stamping on a missing public.db_metadata
+# in omniintelligence_prepr1, because no migration had ever run there.
+#
+# UNSET IS BYTE-IDENTICAL: every declared lane sets nothing and migrates
+# omniintelligence exactly as before.
+ONEX_DB_SLOT="${ONEX_DB_SLOT:-}"
+INTEL_DB="omniintelligence"
+if [ -n "$ONEX_DB_SLOT" ]; then
+  # Same grammar as provision_db_slot.sh and run-forward-migrations.sh.
+  if ! printf '%s' "$ONEX_DB_SLOT" | grep -Eq '^[a-z][a-z0-9]{0,11}$'; then
+    echo "[intelligence-migration] slot_fence_refusal: ONEX_DB_SLOT '${ONEX_DB_SLOT}' is malformed (expected ^[a-z][a-z0-9]{0,11}\$)" >&2
+    exit 3
+  fi
+  INTEL_DB="omniintelligence_${ONEX_DB_SLOT}"
+  echo "[intelligence-migration] pre-PR verify slot '${ONEX_DB_SLOT}' active: targeting ${INTEL_DB}"
+fi
+# ---- END pre-PR verify slot (OMN-19404) ----
 
 # ---------------------------------------------------------------------------
 # 0. Wait for Postgres to accept connections (first-boot initdb race guard)
@@ -79,18 +108,21 @@ echo "[intelligence-migration] Postgres is ready."
 # ---------------------------------------------------------------------------
 # 1. Create the omniintelligence database if it does not exist
 # ---------------------------------------------------------------------------
-echo "[intelligence-migration] Ensuring omniintelligence database exists..."
+echo "[intelligence-migration] Ensuring ${INTEL_DB} database exists..."
 
 DB_EXISTS=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres \
-  -tAc "SELECT 1 FROM pg_database WHERE datname = 'omniintelligence'" 2>/dev/null || true)
+  -tAc "SELECT 1 FROM pg_database WHERE datname = '${INTEL_DB}'" 2>/dev/null || true)
 
-if [ "$DB_EXISTS" != "1" ]; then
-  echo "[intelligence-migration] Creating database omniintelligence..."
+if [ "$DB_EXISTS" != "1" ] && [ -n "$ONEX_DB_SLOT" ]; then
+  echo "[intelligence-migration] slot_fence_refusal: ${INTEL_DB} does not exist. A slot's databases are created by scripts/provision_db_slot.sh, never by this runner; provision the slot first." >&2
+  exit 4
+elif [ "$DB_EXISTS" != "1" ]; then
+  echo "[intelligence-migration] Creating database ${INTEL_DB}..."
   psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres \
-    -c "CREATE DATABASE omniintelligence OWNER \"${PGUSER}\";"
+    -c "CREATE DATABASE ${INTEL_DB} OWNER \"${PGUSER}\";"
   echo "[intelligence-migration] Database created."
 else
-  echo "[intelligence-migration] Database omniintelligence already exists."
+  echo "[intelligence-migration] Database ${INTEL_DB} already exists."
 fi
 
 # ---------------------------------------------------------------------------
@@ -98,7 +130,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "[intelligence-migration] Ensuring schema_migrations table exists..."
 
-psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d omniintelligence -c "
+psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$INTEL_DB" -c "
 CREATE TABLE IF NOT EXISTS schema_migrations (
     id              SERIAL PRIMARY KEY,
     migration_name  VARCHAR(255) NOT NULL UNIQUE,
@@ -119,7 +151,7 @@ for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
   migration_name=$(basename "$migration_file" .sql)
 
   # Check if already applied
-  already_applied=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d omniintelligence \
+  already_applied=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$INTEL_DB" \
     -tAc "SELECT 1 FROM schema_migrations WHERE migration_name = '${migration_name}'" 2>/dev/null || true)
 
   if [ "$already_applied" = "1" ]; then
@@ -131,10 +163,10 @@ for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
   echo "[intelligence-migration]   apply ${migration_name}..."
 
   # Apply migration then record in tracking table (psql exits non-zero on error)
-  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d omniintelligence \
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$INTEL_DB" \
     -v ON_ERROR_STOP=1 -f "$migration_file"
 
-  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d omniintelligence \
+  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$INTEL_DB" \
     -c "INSERT INTO schema_migrations (migration_name) VALUES ('${migration_name}') ON CONFLICT DO NOTHING;"
 
   echo "[intelligence-migration]   done  ${migration_name}"
@@ -150,7 +182,7 @@ done
 # during startup and immediately invalidates the stamped fingerprint.
 echo "[intelligence-migration] Ensuring cross-repo idempotency table exists..."
 
-psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d omniintelligence -v ON_ERROR_STOP=1 <<'EOSQL'
+psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$INTEL_DB" -v ON_ERROR_STOP=1 <<'EOSQL'
 CREATE TABLE IF NOT EXISTS idempotency_records (
     id UUID PRIMARY KEY,
     domain VARCHAR(255),

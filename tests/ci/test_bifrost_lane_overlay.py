@@ -83,7 +83,7 @@ def test_dev_overlay_carries_every_parity_fixture_binding_unchanged() -> None:
     # OMN-16833: the lane serves more than one local rung, so these are pinned
     # per-backend rather than as single-valued sets.
     by_id = {binding.backend_key: binding for binding in overlay.backends}
-    assert set(by_id) >= {"local-coder", "local-heavy-reasoning", "local-ds-v4-flash"}
+    assert set(by_id) >= {"local-coder", "local-heavy-reasoning"}
 
     # OMN-18626: the served id is read from the RECORDED PROBE, not restated.
     # A literal here is a second copy of a value that already lives in the
@@ -113,12 +113,6 @@ def test_dev_overlay_carries_every_parity_fixture_binding_unchanged() -> None:
         # 27B, agreeing with an overlay that was also wrong; the served id is
         # its referent, checked by test_bifrost_parameter_count_matches_served_id.
         assert binding.context_window == 131_072
-
-    ds_v4 = by_id["local-ds-v4-flash"]
-    assert ds_v4.endpoint_url == "http://192.168.86.200:8101/v1/chat/completions"
-    assert ds_v4.advertised_model == "deepseek-v4-flash"
-    assert ds_v4.parameter_count == "284B"
-    assert ds_v4.context_window == 131_072
 
 
 def test_bifrost_lane_has_no_dotenv_sidecar_or_renderer() -> None:
@@ -180,6 +174,9 @@ _DEV_OVERLAY_PIN = "/app/config/delegation/dev.bifrost.yaml"
 _STANDALONE_RENDERING_LANE_FILES = {
     "judge": ROOT / "docker" / "docker-compose.judge.yml",
     "lakshman": ROOT / "docker" / "docker-compose.lakshman.yml",
+    # OMN-19339: an overlay on the dogfood file that replaces the runtime
+    # services' volumes wholesale, so it pins and mounts its own file.
+    "sim-202": ROOT / "docker" / "docker-compose.sim-202.yml",
 }
 
 

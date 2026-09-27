@@ -961,6 +961,30 @@ route:
       - omninode_infra
       - omniweb
       - onex_change_control
+    # WHICH CALLER EVALUATES EACH FLEET REPOSITORY'S SCHEDULED RUNS (OMN-18942).
+    #
+    # The scheduled sweep has two callers, and every fleet repository belongs to
+    # exactly one of them, so no scheduled run is evaluated or posted twice:
+    #
+    #   * the repositories listed here: the `nonrequired-check-failure-rate`
+    #     job in `.github/workflows/pr-ci-zombie-detector.yml`, passed as
+    #     `--scheduled-repo`, under the onexbot App token (installation
+    #     repository_selection `all`);
+    #   * every other entry of `fleet_repos`: the `.201` system reporter, whose
+    #     `--repos-from-policy` selection is fleet_repos minus this list.
+    #
+    # WHY omni_home IS HERE. Measured 2026-09-23T17:45Z: the `.201` host token
+    # returns HTTP 404 on omni_home, so the reporter rendered it as
+    # `sched/omni_home/source-unreadable` and evaluated nothing, and the Actions
+    # job ran `--no-scheduled`. The registry repository, the one this ticket
+    # names, was watched by nobody. Under a token that reads it, two of its three
+    # scheduled workflows were red on 8 of 8 runs. Moving it here needs no new
+    # credential and no widened one: the App installation already reads it.
+    #
+    # A repository moves back to the host by deleting it here and removing its
+    # `--scheduled-repo` line; the tests refuse a mismatch between the two.
+    scheduled_actions_repos:
+      - omni_home
     # ALERT DEDUP WINDOW (OMN-18942), in hours.
     #
     # Measured 2026-09-23: with the channel secrets set at 10:43Z, every
@@ -1050,6 +1074,11 @@ route:
         - Integration Test Removal Gate
         - Kafka Schema Handshake (OMN-3411)
         - kb-doc-gate / kb-doc-gate
+        # OMN-19412: the lab-release-sync probe-window drift check, registered
+        # STRICT in ci.yml's STRICT_GATE_JOBS and enforced by the CI Summary
+        # poller; absent from branch protection, which is exactly the shape
+        # this list records.
+        - Lab Probe Windows (OMN-19412)
         - Lint
         - Lockfile CVE Scan (OMN-16228)
         - Lockfile Registry Allowlist (OMN-16516)
@@ -1059,6 +1088,9 @@ route:
         - Migration Integration Test
         - no-noncanonical-lifecycle-classes
         - Node Migration Declaration Check
+        # OMN-19677: the five shared shrink-only callers are strict CI Summary
+        # gates and therefore belong in this umbrella-enforced snapshot.
+        - Noncanonical Class Allowlist One-way (OMN-19677) / anti-growth-baseline
         - non-dev-base-guard
         - OCC Companion Merged Gate (OMN-15214)
         - occ-preflight / eligibility
@@ -1066,22 +1098,30 @@ route:
         - ONEX Validators
         - Pin Reachability (OMN-15538)
         - pr-title / check-title
+        # OMN-19655: the pre-merge PyPI pin-resolvability gate. Enforced by the
+        # CI Summary poller via EXPECTED_EXTERNAL_CONTEXTS and absent from
+        # branch protection, which is exactly the shape this list records.
+        - pypi-pin-resolvability
         - receipt-honesty
         - required-check-skip-guard / check-skip-vectors
         - Runner Route (OMN-18031) / route
+        - Runtime Profiles Allowlist One-way (OMN-19677) / anti-growth-baseline
         # OMN-18926: the from-empty migration proof, now called from ci.yml and
         # registered STRICT. Enforced by the CI Summary poller and absent from
         # branch protection, which is exactly the shape this list records.
         - Sanitized Legacy RDS Fixture Proof / PostgreSQL 16 Fresh + Legacy Fixture
+        - Skip Count Baseline One-way (OMN-19677) / anti-growth-baseline
         - Skip Count Ratchet (OMN-18776)
         - Stale TODO Gate
         - Subscribe Wiring Health
         - Topic Drift Check
         - Topic Enum Drift Check
+        - Topic Naming Baseline One-way (OMN-19677) / anti-growth-baseline
         - Topic Naming Lint
         - Trivyignore Expiry Check (OMN-16229)
         - Type Safety Validation
         - URL Authority Gate
+        - Validator Requirements Baseline One-way (OMN-19677) / anti-growth-baseline
         - verify / verify
         - wheel-content-parity
         - Writer-Migration Coupling Check

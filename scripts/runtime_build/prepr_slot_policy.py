@@ -64,6 +64,9 @@ EXIT_PROVISION_FAILED: Final[int] = 9
 EXIT_BUILD_FAILED: Final[int] = 10
 EXIT_BOOT_FAILED: Final[int] = 11
 EXIT_PROVENANCE_MISMATCH: Final[int] = 12
+#: ``prepr_teardown_slot.sh`` (OMN-18896): a step failed, or the readback found
+#: slot residue, or a zero had no positive control behind it.
+EXIT_TEARDOWN_INCOMPLETE: Final[int] = 13
 
 #: Every compose project this entrypoint refuses BY NAME, with the reason it
 #: refuses it. Rule 24(e): the new entrypoint "refuses every declared lane by

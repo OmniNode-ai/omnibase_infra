@@ -773,3 +773,364 @@ def test_the_provisioner_never_puts_the_password_on_a_command_line() -> None:
     text = PROVISIONER.read_text(encoding="utf-8")
     assert "-e PGPASSWORD " in text or '-e PGPASSWORD "' in text
     assert "PGPASSWORD=$" not in text.replace('PGPASSWORD="$POSTGRES_PASSWORD"', "")
+
+
+# ---------------------------------------------------------------------------
+# Pinned-sha staging, and no rendered configuration on disk
+# ---------------------------------------------------------------------------
+
+CUT_LAB_REF = REPO_ROOT / "scripts" / "runtime_build" / "cut-lab-ref.sh"
+
+
+def _entrypoint_code() -> str:
+    """The entrypoint with comment lines stripped.
+
+    Every assertion below is about what the script DOES. The comments
+    describe the defects at length and name the very constructs being
+    forbidden, so matching against the raw text would pass or fail on prose.
+    """
+    return "\n".join(
+        line
+        for line in ENTRYPOINT.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def test_the_snapshot_comes_from_the_object_store_not_a_working_tree() -> None:
+    """A copy of a working directory is only the commit when it happens to be clean.
+
+    OMN-19086 measured that failure staying silent: a git directory advanced
+    to a new commit over an old working tree, 8,084 files differing, no error
+    anywhere. ``git archive`` cannot express that state, because it
+    serialises a commit's tree and nothing else.
+    """
+    body = _entrypoint_code()
+    assert "archive --format=tar" in body, (
+        "the entrypoint no longer stages from a resolved sha. A working-tree "
+        "copy can contain content belonging to no commit, and the receipt "
+        "would still name one."
+    )
+    assert "rsync" not in body, (
+        "the entrypoint still rsyncs a source tree into the snapshot. That is "
+        "the staging shape the pinned-sha rule refuses."
+    )
+
+
+def test_the_entrypoint_never_writes_a_rendered_configuration() -> None:
+    """A rendered config expands every interpolation, credentials included.
+
+    With the operator environment loaded it carries the broker, database and
+    Keycloak values in clear, so it is piped into the verifier and never
+    persisted. The verifier reads ``-`` for standard input.
+    """
+    body = _entrypoint_code()
+    assert "--rendered -" in body, (
+        "the entrypoint does not pipe the render into the verifier."
+    )
+    # A FILE redirect, not the stderr suppression that legitimately follows
+    # the render. `2>/dev/null` discards compose's own diagnostics and
+    # persists nothing; `> path` would write the document, credentials and
+    # all. Matching a bare ">" would flag the safe form and make this test
+    # unpassable, which is how a real gate gets deleted.
+    offenders = [
+        line.strip()
+        for line in body.splitlines()
+        if "config --format json" in line
+        and re.search(r"(?<![0-9])>\s*\S", line.split("config --format json")[1])
+    ]
+    assert not offenders, (
+        "the entrypoint redirects a rendered configuration to a file:\n  "
+        + "\n  ".join(offenders)
+        + "\nA render holds every expanded secret; it must not reach disk."
+    )
+    assert "rendered.json" not in body, (
+        "the entrypoint still names a rendered.json path."
+    )
+
+
+def test_a_dirty_sibling_is_refused_rather_than_recorded() -> None:
+    """Recording a discrepancy does not make an artifact reproducible."""
+    body = _entrypoint_code()
+    assert "EXIT_REFUSED_DIRTY_WORKTREE" in body
+    assert body.count("EXIT_REFUSED_DIRTY_WORKTREE") >= 2, (
+        "only one dirty-tree refusal exists. Both the target and each sibling "
+        "must be refused when dirty: a dirty sibling puts content belonging "
+        "to no commit into an image whose receipt names one."
+    )
+
+
+@pytest.mark.parametrize("slot", sorted(policy.SLOTS))
+def test_cut_lab_ref_refuses_a_pool_lane_by_name(slot: int) -> None:
+    """The fast-lane deploy driver must refuse a pool slot, not drive one.
+
+    A pool arm there would be a SECOND path to build a slot, reachable with
+    one argument, bypassing the entrypoint's declared-lane refusals, its
+    attribution requirement, its build lock, its pinned-sha snapshot and its
+    rendered-config gate. Rule 24(e)'s sanction is worth exactly as much as
+    the entrypoint being the only way in.
+
+    The refusal is BY NAME rather than falling through to "unknown lane",
+    because a pool lane is not unknown: it is declared in the lane manifest
+    and deliberately not driven from here. A caller needs to be told where it
+    IS driven from, or they go looking for the arm to add.
+    """
+    lane = f"prepr-{slot}"
+    result = subprocess.run(
+        ["bash", str(CUT_LAB_REF), "--lane", lane],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "OMNI_HOME": str(REPO_ROOT)},
+    )
+    assert result.returncode == 2, (
+        f"cut-lab-ref.sh did not refuse lane {lane} (exit {result.returncode}). "
+        f"A second build path for a pool slot reopens what rule 24(e) closes."
+    )
+    assert "prepr_verify_lane.sh" in result.stderr, (
+        f"the refusal for {lane} does not name the entrypoint that DOES build "
+        f"a slot, so a caller is left looking for the arm to add here."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provider and forge credentials must not ride in from the invoking shell
+# ---------------------------------------------------------------------------
+
+LAYERED_COMPOSE = (
+    REPO_ROOT / "docker" / "docker-compose.infra.yml",
+    REPO_ROOT / "docker" / "docker-compose.dev-lane.yml",
+    REPO_ROOT / "docker" / "docker-compose.prepr.yml",
+)
+
+
+def _interpolation_count(name: str) -> int:
+    """How many times the layered compose files interpolate ``name``."""
+    needle = "${" + name
+    return sum(f.read_text(encoding="utf-8").count(needle) for f in LAYERED_COMPOSE)
+
+
+def test_the_interpolation_detector_works_before_any_zero_is_believed() -> None:
+    """Positive and negative control on the counter the next test relies on.
+
+    This control exists because the first two readings of the credential
+    question returned zero for every name and both were WRONG: one from a
+    shell that does not word-split an unquoted variable, one from a bracket
+    expression that silently matched nothing. A zero from an unproven matcher
+    reads exactly like a clean bill of health, which is the whole reason a
+    positive control is mandatory before reporting one.
+    """
+    assert _interpolation_count("POSTGRES_PASSWORD") > 0, (
+        "the detector finds no POSTGRES_PASSWORD interpolation, so it is "
+        "broken and every zero it reports below is meaningless."
+    )
+    assert _interpolation_count("NO_SUCH_VARIABLE_XYZ") == 0
+
+
+def _scrub_list() -> list[str]:
+    text = ENTRYPOINT.read_text(encoding="utf-8")
+    match = re.search(r"PREPR_SCRUBBED_CREDENTIAL_VARS=\((.*?)\)", text, re.S)
+    assert match, "the entrypoint declares no credential scrub list at all."
+    return [n for n in match.group(1).split() if n and not n.startswith("#")]
+
+
+def test_the_entrypoint_scrubs_credentials_before_reading_the_operator_env() -> None:
+    """The unset must precede the source, and the reason is not the obvious one.
+
+    Measured, because the first version of this docstring asserted a mechanism
+    that turned out to be wrong. Four arms, a shell exporting a value and a
+    file setting one:
+
+    * unset BEFORE the source -> the file's value. Correct.
+    * unset AFTER the source  -> UNSET. It strips the file's value too, not
+      merely the shell's, so the wrong order breaks the slot by removing
+      configuration it legitimately needs. It does NOT leave the shell's
+      value behind, which is what this test previously claimed.
+    * no unset, file sets the name -> the file's value. ``set -a; source``
+      ASSIGNS, so it overwrites what the shell exported and there is no leak
+      here at all.
+    * no unset, file does NOT set the name -> the SHELL's value. This is the
+      only leak shape, and it is the one the scrub exists for.
+
+    So the scrub matters for names the operator env does not itself set, and
+    the ordering matters because the wrong order strips the ones it does. Note
+    this is a different mechanism from compose's own ``--env-file``, which is
+    read by compose rather than assigned into the environment and therefore
+    genuinely loses to an ambient value; conflating the two is what produced
+    the wrong claim.
+    """
+    body = _entrypoint_code()
+    assert "PREPR_SCRUBBED_CREDENTIAL_VARS" in body
+    scrub_at = body.index("PREPR_SCRUBBED_CREDENTIAL_VARS")
+    source_at = body.index('source "${OMNIBASE_OPERATOR_ENV_FILE}"')
+    assert scrub_at < source_at, (
+        "the credential scrub runs AFTER the operator env is sourced. In that "
+        "order it strips the operator env's OWN values as well, leaving the "
+        "slot without configuration it legitimately needs. Measured, not "
+        "reasoned: an unset after the source resolves to nothing at all."
+    )
+
+
+def test_every_scrubbed_name_is_one_the_slot_would_actually_inherit() -> None:
+    """The list must not rot into naming variables nothing interpolates.
+
+    A scrub list that names only dead variables passes every test about
+    scrubbing while protecting nothing. Two names are carried deliberately
+    despite a zero count and are excused by name rather than silently: one
+    credential feeds both GitHub spellings, and the other provider is
+    reachable through the same resolver family.
+    """
+    excused = {"GH_TOKEN", "OPENROUTER_API_KEY"}
+    live = [n for n in _scrub_list() if n not in excused]
+    dead = [n for n in live if _interpolation_count(n) == 0]
+    assert not dead, (
+        f"these scrubbed names are interpolated nowhere in the layered compose "
+        f"files: {dead}. Either they are stale and should go, or the files "
+        f"moved and the scrub no longer covers what it was written for."
+    )
+    assert len(live) >= 5, (
+        "the scrub list has shrunk below the set measured for OMN-19076."
+    )
+
+
+# ---------------------------------------------------------------------------
+# A branch name is not a pin
+# ---------------------------------------------------------------------------
+
+
+def _stage_fn() -> str:
+    """The body of the staging helper, comments stripped."""
+    text = ENTRYPOINT.read_text(encoding="utf-8")
+    start = text.index("stage_commit_tree() {")
+    end = text.index("\n}", start)
+    return "\n".join(
+        line
+        for line in text[start:end].splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def test_the_staging_helper_refuses_a_ref_that_is_not_a_literal_sha() -> None:
+    """A movable ref would be re-resolved by git at extraction time.
+
+    The readback verifies a tree; the archive then has to extract THAT tree.
+    If the archive is handed a branch, git resolves it again at extraction
+    time and the two can differ. Another lane measured it: two siblings moved
+    between builds while its readback still passed.
+
+    Every caller today passes a value resolved once with ``rev-parse HEAD``,
+    so the guard never fires in practice. It is asserted anyway because "by
+    construction" is a property of the current call sites, not of the
+    function, and the failure it prevents is silent.
+    """
+    body = _stage_fn()
+    assert "[0-9a-f]{40}" in body, (
+        "the staging helper does not check that its pin is a literal 40-hex "
+        "commit. Handed a branch it would archive whatever that branch points "
+        "at when the archive runs, which is not what the readback verified."
+    )
+
+
+def test_the_archive_is_given_the_recorded_pin_and_never_a_ref_expression() -> None:
+    """The archive's ref argument must be the recorded variable, nothing else."""
+    body = _stage_fn()
+    archive_lines = [ln.strip() for ln in body.splitlines() if "archive" in ln]
+    assert archive_lines, "the staging helper no longer archives anything."
+    for line in archive_lines:
+        assert '"${commit}"' in line, (
+            f"the archive command does not take the recorded pin: {line!r}. "
+            f"Anything else here is resolved at extraction time."
+        )
+        for movable in ("HEAD", "origin/", "FETCH_HEAD", "@{"):
+            assert movable not in line, (
+                f"the archive command names the movable ref {movable!r}: {line!r}."
+            )
+
+
+def test_every_pin_this_run_records_is_resolved_from_head_exactly_once() -> None:
+    """Resolved once, before staging, and reused; never re-resolved per repo."""
+    body = _entrypoint_code()
+    resolutions = [
+        ln.strip() for ln in body.splitlines() if "rev-parse HEAD" in ln and "=" in ln
+    ]
+    # One for the target, one for each sibling in the resolution loop, and one
+    # inside the staging helper, which is the readback rather than a new pin.
+    assert len(resolutions) <= 3, (
+        f"there are {len(resolutions)} places resolving HEAD into a variable:\n  "
+        + "\n  ".join(resolutions)
+        + "\nMore than the target, the sibling loop and the staging readback "
+        "means a pin is being resolved more than once, and two resolutions of "
+        "the same ref can disagree."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Two defects the first slot boot found (2026-09-24, omnibase_infra#3944)
+# ---------------------------------------------------------------------------
+
+_BARE_EXEC_WITH_STDERR = re.compile(r"^\s*exec\s+\d*[<>]&-\s+2>")
+
+
+def _stderr_survives(fd_close: str) -> bool:
+    """Run ``fd_close`` in bash, then report whether a later stderr line arrives."""
+    proc = subprocess.run(
+        ["bash", "-c", f"exec 8>/dev/null; {fd_close}; echo marker >&2"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return "marker" in proc.stderr
+
+
+def test_the_stderr_detector_is_proven_against_the_real_behaviour() -> None:
+    """Positive control for the pin below, measured rather than assumed.
+
+    The bare form really does send stderr to /dev/null for the rest of the
+    shell, and the grouped form really does not. Without this, the regex below
+    could forbid a harmless spelling and permit the harmful one.
+    """
+    harmful = "exec 8>&- 2>/dev/null || true"
+    safe = "{ exec 8>&-; } 2>/dev/null || true"
+    assert not _stderr_survives(harmful)
+    assert _stderr_survives(safe)
+    assert _BARE_EXEC_WITH_STDERR.match(harmful)
+    assert not _BARE_EXEC_WITH_STDERR.match(safe)
+
+
+def test_closing_a_lock_descriptor_never_silences_the_rest_of_the_run() -> None:
+    """`exec N>&- 2>/dev/null` sends every later log line and refusal to /dev/null.
+
+    On the first boot it hid the render verdict and the "did not start"
+    refusal, and the run exited non-zero with nothing on its log.
+    """
+    offenders = [
+        ln.strip()
+        for ln in _entrypoint_code().splitlines()
+        if _BARE_EXEC_WITH_STDERR.match(ln)
+    ]
+    assert not offenders, (
+        "an exec with no command applies its redirections to the shell "
+        f"permanently; group it as `{{ exec N>&-; }} 2>/dev/null`: {offenders}"
+    )
+
+
+def test_every_slot_service_is_built_with_the_workspace_args_and_up_never_builds() -> (
+    None
+):
+    """Building only omninode-runtime left ten services with no image.
+
+    `up` then built them itself with none of the workspace build args and died
+    on `BUILD_SOURCE=workspace requires OMNI_HOME`.
+    """
+    body = _entrypoint_code()
+    build_lines = [ln for ln in body.splitlines() if "build --progress=plain" in ln]
+    assert len(build_lines) == 1, build_lines
+    assert '"${SLOT_BUILD_SERVICES[@]}"' in build_lines[0]
+    assert 'SLOT_BUILD_SERVICES=("${SLOT_SERVICES[@]}")' in body
+    # onex-api is image-referenced and must be appended AFTER the build list is
+    # taken, or the build would try to build an image it only references.
+    assert body.index('SLOT_BUILD_SERVICES=("${SLOT_SERVICES[@]}")') < body.index(
+        "SLOT_SERVICES+=(onex-api)"
+    )
+    up_lines = [ln for ln in body.splitlines() if " up -d " in ln]
+    assert up_lines, "no `up -d` found; the pin would pass vacuously"
+    assert all("--no-build" in ln for ln in up_lines), up_lines

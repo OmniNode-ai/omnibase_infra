@@ -5,6 +5,7 @@
 from .model_gateway_canary_config import ModelGatewayCanaryConfig
 from .model_gateway_cloud_bus_config import ModelGatewayCloudBusConfig
 from .model_gateway_egress_health import ModelGatewayEgressHealth
+from .model_gateway_egress_metadata_scrub import ModelGatewayEgressMetadataScrub
 from .model_gateway_egress_redaction import ModelGatewayEgressRedaction
 from .model_gateway_envelope import ModelGatewayEnvelope
 from .model_gateway_forwarder_config import ModelGatewayForwarderConfig
@@ -21,6 +22,7 @@ __all__ = [
     "ModelGatewayCanaryConfig",
     "ModelGatewayCloudBusConfig",
     "ModelGatewayEgressHealth",
+    "ModelGatewayEgressMetadataScrub",
     "ModelGatewayEgressRedaction",
     "ModelGatewayEnvelope",
     "ModelGatewayForwarderConfig",

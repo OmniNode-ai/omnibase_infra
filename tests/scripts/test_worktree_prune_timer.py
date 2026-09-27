@@ -440,6 +440,7 @@ def test_a_forced_removal_records_the_exit_code_and_the_stderr(
 
     monkeypatch.setattr(timer, "_run", fake_run)
     monkeypatch.setattr(timer, "_branch_pr_is_merged", lambda *a, **k: True)
+    monkeypatch.setattr(timer, "save_before_removal", lambda wt: "/snapshots/wt")
     report = timer.ModelRunReport(started_at="t", executed=True, consent_citation="c")
 
     assert timer.force_remove_debris(worktree, canonical, "br", report) is False
@@ -464,6 +465,7 @@ def test_exactly_one_retry_is_taken_never_a_loop(
 
     monkeypatch.setattr(timer, "_run", fake_run)
     monkeypatch.setattr(timer, "_branch_pr_is_merged", lambda *a, **k: True)
+    monkeypatch.setattr(timer, "save_before_removal", lambda wt: "/snapshots/wt")
     report = timer.ModelRunReport(started_at="t", executed=True, consent_citation="c")
 
     timer.force_remove_debris(worktree, canonical, "br", report)
@@ -510,6 +512,7 @@ def test_control_a_proven_debris_tree_is_actually_forced(
 
     monkeypatch.setattr(timer, "_run", fake_run)
     monkeypatch.setattr(timer, "_branch_pr_is_merged", lambda *a, **k: True)
+    monkeypatch.setattr(timer, "save_before_removal", lambda wt: "/snapshots/wt")
     report = timer.ModelRunReport(started_at="t", executed=True, consent_citation="c")
 
     assert timer.force_remove_debris(worktree, canonical, "br", report) is True
@@ -533,12 +536,115 @@ def test_the_budget_passed_to_git_scales_with_the_file_count(
 
     monkeypatch.setattr(timer, "_run", fake_run)
     monkeypatch.setattr(timer, "_branch_pr_is_merged", lambda *a, **k: True)
+    monkeypatch.setattr(timer, "save_before_removal", lambda wt: "/snapshots/wt")
     report = timer.ModelRunReport(started_at="t", executed=True, consent_citation="c")
 
     timer.force_remove_debris(worktree, canonical, "br", report)
 
     assert seen == [timer.removal_budget_seconds(5_000)]
     assert seen[0] is not None and seen[0] > timer.BUDGET_FLOOR_SECONDS
+
+
+# ---------------------------------------------------------------------------
+# OMN-19539: nothing is force-removed unsaved
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_save_issues_no_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import worktree_prune_timer as timer
+
+    worktree, canonical = _fake_worktree(tmp_path, " D a.py\n")
+    removes: list[list[str]] = []
+
+    def fake_run(args, **kwargs):  # type: ignore[no-untyped-def]
+        if "status" in args:
+            return subprocess.CompletedProcess(args, 0, " D a.py\n D b.py\n", "")
+        removes.append(list(args))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def refuse(wt: Path) -> str:
+        raise timer.RefusedError("pre-removal snapshot helper missing")
+
+    monkeypatch.setattr(timer, "_run", fake_run)
+    monkeypatch.setattr(timer, "_branch_pr_is_merged", lambda *a, **k: True)
+    monkeypatch.setattr(timer, "save_before_removal", refuse)
+    report = timer.ModelRunReport(started_at="t", executed=True, consent_citation="c")
+
+    assert timer.force_remove_debris(worktree, canonical, "br", report) is False
+    assert removes == [], "no removal command was issued at all"
+    assert "snapshot" in str(report.removal_failures[0]["detail"])
+
+
+def test_control_the_save_comes_before_the_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import worktree_prune_timer as timer
+
+    worktree, canonical = _fake_worktree(tmp_path, " D a.py\n")
+    order: list[str] = []
+
+    def fake_run(args, **kwargs):  # type: ignore[no-untyped-def]
+        if "status" in args:
+            return subprocess.CompletedProcess(args, 0, " D a.py\n D b.py\n", "")
+        order.append("remove")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def save(wt: Path) -> str:
+        order.append("save")
+        return "/snapshots/wt"
+
+    monkeypatch.setattr(timer, "_run", fake_run)
+    monkeypatch.setattr(timer, "_branch_pr_is_merged", lambda *a, **k: True)
+    monkeypatch.setattr(timer, "save_before_removal", save)
+    report = timer.ModelRunReport(started_at="t", executed=True, consent_citation="c")
+
+    assert timer.force_remove_debris(worktree, canonical, "br", report) is True
+    assert order == ["save", "remove"]
+    assert "saved first to /snapshots/wt" in report.notes[-1]
+
+
+_FAKE_HELPER = """import json, os, sys
+if os.environ.get("FAKE_SNAPSHOT_FAIL"):
+    print(json.dumps({"ok": False})); sys.exit(3)
+d = os.path.join(os.environ["OMNI_HOME"], ".onex_state", "worktree-removal-snapshots", "x")
+os.makedirs(d)
+open(os.path.join(d, "argv.json"), "w").write(json.dumps(sys.argv[1:]))
+print(json.dumps({"ok": True, "directory": d}))
+"""
+
+
+def test_save_before_removal_runs_the_shared_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The helper's own behaviour is tested in omniclaude; this pins the call."""
+    import worktree_prune_timer as timer
+
+    registry = tmp_path / "registry"
+    helper = registry / timer.SNAPSHOT_HELPER_REL
+    helper.parent.mkdir(parents=True)
+    helper.write_text(_FAKE_HELPER, encoding="utf-8")
+    monkeypatch.setenv("OMNI_HOME", str(registry))
+    monkeypatch.delenv("FAKE_SNAPSHOT_FAIL", raising=False)
+
+    directory = Path(timer.save_before_removal(tmp_path / "wt"))
+
+    argv = json.loads((directory / "argv.json").read_text(encoding="utf-8"))
+    assert argv[0] == str(tmp_path / "wt")
+    assert "--allow-non-git" in argv
+
+    monkeypatch.setenv("FAKE_SNAPSHOT_FAIL", "1")
+    with pytest.raises(timer.RefusedError, match="exit 3"):
+        timer.save_before_removal(tmp_path / "wt")
+
+    helper.unlink()
+    with pytest.raises(timer.RefusedError, match="helper missing"):
+        timer.save_before_removal(tmp_path / "wt")
+
+    monkeypatch.delenv("OMNI_HOME")
+    with pytest.raises(timer.RefusedError, match="OMNI_HOME"):
+        timer.save_before_removal(tmp_path / "wt")
 
 
 # ---------------------------------------------------------------------------

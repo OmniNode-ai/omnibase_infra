@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.resources
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -33,6 +34,9 @@ from omnibase_infra.runtime.config_provenance import (
     build_config_provenance,
     write_provenance_sidecar,
 )
+from omnibase_infra.runtime.dogfood_delegation_fault_routes import (
+    load_dogfood_delegation_fault_routes,
+)
 from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
@@ -47,9 +51,25 @@ from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
 _LANE_OVERLAY_PATH_ENV = "BIFROST_LANE_OVERLAY_PATH"
 _CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
+#: OMN-17099: the embedding backend's real endpoint is OpenAI-embeddings-shaped,
+#: not chat-completions-shaped (live probe 2026-09-27: .201:8002/v1/chat/completions
+#: 404s; .201:8002/v1/embeddings returns real vectors). ``ModelBifrostLaneBackendBinding``
+#: accepts the same two suffixes; this module's own completeness gate must agree.
+_EMBEDDINGS_PATH_SUFFIX = "/embeddings"
+_COMPLETE_ENDPOINT_SUFFIXES = (_CHAT_COMPLETIONS_PATH_SUFFIX, _EMBEDDINGS_PATH_SUFFIX)
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
 #: The base contract's own declaration that a backend is served from the lab.
 _LOCAL_TIER = "local"
+#: OMN-19432: the base contract's own declaration that a backend answers TYPED
+#: DECISIONS on its provider's own schema (TypeSafe Jev's System One API)
+#: rather than OpenAI chat completions. Such a backend is never a rung: no
+#: routing rule or tier ladder names it, so it is not an "active endpoint" for
+#: delegation, and its complete URL names its own operation instead of ending
+#: in the chat path.
+_TYPED_DECISION_TIER = "typed_decision"
+#: A last path segment that is only an API version (``v1``, ``v1beta``) marks a
+#: bare base, which OMN-12815 forbids: nothing downstream appends a path.
+_BARE_VERSION_SEGMENT = re.compile(r"^v\d+(?:(?:alpha|beta)\d*)?$")
 
 EndpointProbe = Callable[[str, str, float], str | None]
 
@@ -150,9 +170,13 @@ def _probe_openai_model_endpoint(
 ) -> str | None:
     parsed = urlsplit(endpoint_url)
     path = parsed.path.rstrip("/")
+    matched_suffix = next(
+        (suffix for suffix in _COMPLETE_ENDPOINT_SUFFIXES if path.endswith(suffix)),
+        None,
+    )
     models_path = (
-        f"{path[: -len(_CHAT_COMPLETIONS_PATH_SUFFIX)]}/models"
-        if path.endswith(_CHAT_COMPLETIONS_PATH_SUFFIX)
+        f"{path[: -len(matched_suffix)]}/models"
+        if matched_suffix is not None
         else f"{path}/v1/models"
     )
     endpoint = urlunsplit((parsed.scheme, parsed.netloc, models_path, "", ""))
@@ -201,6 +225,25 @@ def _is_local_backend(backend: dict[object, object]) -> bool:
     return backend.get("tier") == _LOCAL_TIER
 
 
+def _is_typed_decision_backend(backend: dict[object, object]) -> bool:
+    """Whether the contract declares this backend a typed-decision one (OMN-19432)."""
+    return backend.get("tier") == _TYPED_DECISION_TIER
+
+
+def _typed_decision_endpoint_is_complete(endpoint_url: str) -> bool:
+    """A typed-decision endpoint is complete when it is an absolute https URL
+    whose last path segment names the operation, never a bare version base.
+
+    It is posted verbatim, exactly as a chat endpoint is (OMN-12815); only the
+    operation it names differs.
+    """
+    parsed = urlsplit(endpoint_url.strip())
+    if parsed.scheme != "https" or not parsed.hostname:
+        return False
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    return bool(segments) and not _BARE_VERSION_SEGMENT.match(segments[-1])
+
+
 def _routed_local_backend_ids(
     base: dict[str, object], by_id: dict[str, dict[object, object]]
 ) -> set[str]:
@@ -225,6 +268,41 @@ def _routed_local_backend_ids(
         for backend_id in routed
         if backend_id in by_id and _is_local_backend(by_id[backend_id])
     }
+
+
+def _append_dogfood_fault_backends(
+    base: dict[str, object], *, overlay: ModelBifrostLaneOverlay
+) -> None:
+    """Materialize dogfood fault routes from their single packaged authority.
+
+    The ci bus-lane resource owns fault endpoint, status, and one-hop policy.
+    The dogfood Bifrost overlay chooses the lane; it never repeats those values.
+    These backends exist only in the rendered dogfood artifact, not the shipped
+    normal/prod Bifrost contract.
+    """
+    if overlay.lane != "dogfood":
+        return
+    backends = base.get("backends")
+    if not isinstance(backends, list):
+        raise ProtocolConfigurationError("Bifrost base contract must declare backends")
+    existing = _index_base_backends(base)
+    for route in load_dogfood_delegation_fault_routes():
+        if route.backend_key in existing:
+            raise ProtocolConfigurationError(
+                f"dogfood fault route {route.backend_key!r} collides with a base backend"
+            )
+        backends.append(
+            {
+                "backend_id": route.backend_key,
+                "provider": "dogfood_fault",
+                "endpoint_url": route.endpoint_url,
+                "model_name": route.backend_key,
+                "tier": "dogfood_fault",
+                "timeout_ms": route.requested_timeout_seconds * 1000,
+                "max_tokens": 1,
+                "capabilities": [],
+            }
+        )
 
 
 def _disable_local_backends(by_id: dict[str, dict[object, object]]) -> None:
@@ -278,6 +356,7 @@ def _merge_lane_overlay(
     verify: bool,
     endpoint_probe: EndpointProbe,
 ) -> dict[str, object]:
+    _append_dogfood_fault_backends(base, overlay=overlay)
     by_id = _index_base_backends(base)
 
     if overlay.locale is EnumBifrostLaneLocale.CLOUD:
@@ -390,8 +469,21 @@ def _validate_rendered_contract(
                 "Rendered Bifrost contract must not contain endpoint_url_env"
             )
         endpoint_url = backend.get("endpoint_url")
+        if (
+            isinstance(endpoint_url, str)
+            and endpoint_url.strip()
+            and _is_typed_decision_backend(backend)
+        ):
+            # OMN-19432: not a delegation rung, so it neither needs the chat
+            # path nor counts toward the contract's active endpoints.
+            if not _typed_decision_endpoint_is_complete(endpoint_url):
+                raise ProtocolConfigurationError(
+                    "Rendered Bifrost typed-decision endpoint must be a complete "
+                    f"https URL naming its operation: {endpoint_url!r}"
+                )
+            continue
         if isinstance(endpoint_url, str) and endpoint_url.strip():
-            if not endpoint_url.rstrip("/").endswith(_CHAT_COMPLETIONS_PATH_SUFFIX):
+            if not endpoint_url.rstrip("/").endswith(_COMPLETE_ENDPOINT_SUFFIXES):
                 raise ProtocolConfigurationError(
                     f"Rendered Bifrost endpoint must be complete: {endpoint_url!r}"
                 )

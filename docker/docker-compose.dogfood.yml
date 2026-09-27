@@ -293,6 +293,16 @@ services:
         set -eu
         /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
         /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+        # OMN-19070 disk dials. On .105 this broker shares one Docker Desktop VM
+        # disk with the arm64 CI runner, which refuses every job under 5 GB free.
+        # An idle partition held a full 32 MiB preallocated segment for up to
+        # 14 days. 1 MiB steps plus a daily roll bound it; segments opened before
+        # these values were set keep 32 MiB until the broker next restarts.
+        # retention_bytes caps the few partitions carrying real data at 1 GiB.
+        # Basis and measurements: tests/unit/infra/test_dogfood_redpanda_disk_dials_omn19070.py
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set segment_fallocation_step 1048576
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set log_segment_ms 86400000
+        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set retention_bytes 1073741824
     depends_on:
       redpanda:
         condition: service_healthy
@@ -396,6 +406,44 @@ services:
     networks: !override
       - omnibase-infra-dogfood-network
     restart: "no"
+    logging: *logging-defaults
+  dogfood-delegation-fault-429:
+    image: python:3.13-alpine
+    container_name: omnibase-infra-dogfood-delegation-fault-429
+    profiles: ["dogfood"]
+    command: ["python", "/app/dogfood_delegation_fault_provider.py", "--status", "429"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./fault-providers/dogfood_delegation_fault_provider.py:/app/dogfood_delegation_fault_provider.py:ro
+    networks: !override
+      - omnibase-infra-dogfood-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8080/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+    logging: *logging-defaults
+  dogfood-delegation-fault-503:
+    image: python:3.13-alpine
+    container_name: omnibase-infra-dogfood-delegation-fault-503
+    profiles: ["dogfood"]
+    command: ["python", "/app/dogfood_delegation_fault_provider.py", "--status", "503"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./fault-providers/dogfood_delegation_fault_provider.py:/app/dogfood_delegation_fault_provider.py:ro
+    networks: !override
+      - omnibase-infra-dogfood-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8080/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
     logging: *logging-defaults
   omninode-runtime:
     !!merge <<: *runtime-base

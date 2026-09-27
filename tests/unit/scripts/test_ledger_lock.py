@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for scripts/ledger_lock.py.
 
-Covers the locking/append/exit-75-retry contract: atomic lock acquire/
-release, same-host dead-pid and age-based stale-lock breaking, durable
-append, dedup-window idempotent retry, and the CLI's exit codes (0 success,
+Covers the locking/append/exit-75-retry contract: the fcntl lock on one
+lock file per resolved ledger path (OMN-19262; the single-holder races live in
+test_ledger_lock_single_holder.py), durable append, dedup-window idempotent
+retry, and the CLI's exit codes (0 success,
 75 lock timeout, 127 bad -- COMMAND, argparse usage errors, and the -- COMMAND
 verb's own passthrough exit code).
 """
@@ -25,6 +26,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -127,23 +132,34 @@ def test_lock_path_for_is_stable_and_unique_per_ledger(tmp_path: Path) -> None:
     assert lock_a_first != lock_b
 
 
-def test_lock_root_defaults_beside_the_ledger(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv(MOD.LOCK_ROOT_ENV, raising=False)
+def test_lock_file_sits_beside_the_resolved_ledger(tmp_path: Path) -> None:
     ledger = tmp_path / "sub" / "ledger.md"
     lock = MOD.lock_path_for(ledger)
-    assert lock.parent == ledger.parent / MOD.DEFAULT_LOCK_DIRNAME
+    assert lock.parent == ledger.resolve().parent / MOD.DEFAULT_LOCK_DIRNAME
+    assert lock.name.startswith("ledger.md.")
+    assert lock.name.endswith(MOD.LOCK_FILE_SUFFIX)
 
 
-def test_lock_root_env_override(
+def test_lock_path_ignores_ledger_lock_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    override = tmp_path / "shared-locks"
-    monkeypatch.setenv(MOD.LOCK_ROOT_ENV, str(override))
+    """OMN-19262: the roll exported LEDGER_LOCK_ROOT and lane appends did not,
+    so the two held different locks on one ledger. Nothing moves it now."""
     ledger = tmp_path / "ledger.md"
-    lock = MOD.lock_path_for(ledger)
-    assert lock.parent == override
+    monkeypatch.delenv("LEDGER_LOCK_ROOT", raising=False)
+    unset = MOD.lock_path_for(ledger)
+    monkeypatch.setenv("LEDGER_LOCK_ROOT", str(tmp_path / "shared-locks"))
+    assert MOD.lock_path_for(ledger) == unset
+
+
+def test_lock_path_is_the_same_through_a_symlinked_directory(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    assert MOD.lock_path_for(alias / "ledger.md") == MOD.lock_path_for(
+        real / "ledger.md"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -178,80 +194,104 @@ def test_dedup_payload_longer_than_tail_window_is_not_a_duplicate() -> None:
 
 
 # --------------------------------------------------------------------------
-# stale lock breaking
-# --------------------------------------------------------------------------
-
-
-def _write_lock_metadata(lock_dir: Path, *, host: str, pid: int) -> None:
-    lock_dir.mkdir(parents=True)
-    (lock_dir / "metadata.json").write_text(
-        json.dumps({"host": host, "pid": pid, "acquired_at": "x"}),
-        encoding="utf-8",
-    )
-
-
-def test_maybe_break_stale_lock_removes_dead_same_host_lock(tmp_path: Path) -> None:
-    lock_dir = tmp_path / "lock"
-    # A pid that (almost certainly) does not exist.
-    _write_lock_metadata(lock_dir, host=socket.gethostname(), pid=999_999_999)
-    message = MOD.maybe_break_stale_lock(lock_dir, stale_after=None)
-    assert message is not None
-    assert "dead same-host lock" in message
-    assert not lock_dir.exists()
-
-
-def test_maybe_break_stale_lock_keeps_live_same_host_lock(tmp_path: Path) -> None:
-    lock_dir = tmp_path / "lock"
-    _write_lock_metadata(lock_dir, host=socket.gethostname(), pid=os.getpid())
-    message = MOD.maybe_break_stale_lock(lock_dir, stale_after=None)
-    assert message is None
-    assert lock_dir.exists()
-
-
-def test_maybe_break_stale_lock_keeps_other_host_lock_without_stale_after(
-    tmp_path: Path,
-) -> None:
-    lock_dir = tmp_path / "lock"
-    _write_lock_metadata(lock_dir, host="some-other-host", pid=123)
-    message = MOD.maybe_break_stale_lock(lock_dir, stale_after=None)
-    assert message is None
-    assert lock_dir.exists()
-
-
-def test_maybe_break_stale_lock_breaks_other_host_lock_by_age(tmp_path: Path) -> None:
-    lock_dir = tmp_path / "lock"
-    _write_lock_metadata(lock_dir, host="some-other-host", pid=123)
-    message = MOD.maybe_break_stale_lock(lock_dir, stale_after=0.0)
-    assert message is not None
-    assert "stale lock age=" in message
-    assert not lock_dir.exists()
-
-
-# --------------------------------------------------------------------------
 # LedgerLock acquire/release + append_text
 # --------------------------------------------------------------------------
 
 
 def test_ledger_lock_acquire_release_roundtrip(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.md"
-    lock = MOD.LedgerLock(ledger, timeout=1.0, stale_after=None, command=None)
+    lock = MOD.LedgerLock(ledger, timeout=1.0)
     with lock:
         assert lock.acquired is True
-        assert lock.lock_dir.exists()
+        assert lock.lock_file.is_file()
     assert lock.acquired is False
-    assert not lock.lock_dir.exists()
+    # The file outlives the holder: deleting it on release would let a waiter
+    # holding the old inode and a writer creating a new one both hold.
+    assert lock.lock_file.is_file()
+    again = MOD.LedgerLock(ledger, timeout=0.0)
+    with again:
+        assert again.acquired is True
 
 
 def test_ledger_lock_times_out_when_already_held(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.md"
-    holder = MOD.LedgerLock(ledger, timeout=1.0, stale_after=None, command=None)
+    holder = MOD.LedgerLock(ledger, timeout=1.0)
     holder.acquire()
     try:
-        waiter = MOD.LedgerLock(ledger, timeout=0.0, stale_after=None, command=None)
+        waiter = MOD.LedgerLock(ledger, timeout=0.0)
         with pytest.raises(TimeoutError):
             waiter.acquire()
     finally:
         holder.release()
+
+
+def test_release_twice_and_release_unheld_are_no_ops(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.md"
+    never_held = MOD.LedgerLock(ledger, timeout=0.0)
+    never_held.release()
+    lock = MOD.LedgerLock(ledger, timeout=0.0)
+    lock.acquire()
+    lock.release()
+    lock.release()
+    assert lock.acquired is False
+
+
+def test_lock_directory_ignores_its_own_contents(tmp_path: Path) -> None:
+    """The lock file is permanent, so it must never read as untracked in the
+    repository that carries the ledger."""
+    repo = tmp_path / "repo"
+    ledger = repo / "docs" / "ledger.md"
+    ledger.parent.mkdir(parents=True)
+    subprocess.run(
+        ["git", "init", "-q", str(repo)],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    with MOD.LedgerLock(ledger, timeout=0.0):
+        pass
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    assert status.stdout == "", status.stdout
+    # Positive control: an ordinary file beside the ledger does show up.
+    (ledger.parent / "other.md").write_text("x\n", encoding="utf-8")
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    assert "docs/other.md" in status.stdout
+
+
+def test_a_lock_file_replaced_before_the_flock_is_not_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A writer that locked an unlinked file would exclude no one, so the
+    identity check sends it back to open the path again."""
+    ledger = tmp_path / "ledger.md"
+    lock = MOD.LedgerLock(ledger, timeout=1.0)
+    real_flock = MOD.fcntl.flock
+    swapped: list[bool] = []
+
+    def flock_after_swap(fd: int, operation: int) -> None:
+        if not swapped and operation & MOD.fcntl.LOCK_EX:
+            swapped.append(True)
+            lock.lock_file.unlink()
+            lock.lock_file.write_text("", encoding="utf-8")
+        real_flock(fd, operation)
+
+    monkeypatch.setattr(MOD.fcntl, "flock", flock_after_swap)
+    with lock:
+        held = os.fstat(lock._fd)
+        on_disk = lock.lock_file.stat()
+        assert (held.st_dev, held.st_ino) == (on_disk.st_dev, on_disk.st_ino)
+    assert swapped == [True]
 
 
 def test_append_text_is_durable_and_newline_terminated(tmp_path: Path) -> None:
@@ -303,44 +343,27 @@ def test_cli_append_retry_is_deduped(tmp_path: Path) -> None:
 
 def test_cli_exit_75_on_lock_timeout(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.md"
-    lock_dir = MOD.lock_path_for(ledger.resolve())
-    lock_dir.mkdir(parents=True)
-    (lock_dir / "metadata.json").write_text(
-        json.dumps({"host": "some-other-host", "pid": 123, "acquired_at": "x"}),
-        encoding="utf-8",
-    )
+    holder = MOD.LedgerLock(ledger.resolve(), timeout=0.0)
+    holder.acquire()
     try:
         result = _run_cli(
             [str(ledger), "--timeout", "1s", "--append", "should not land"]
         )
         assert result.returncode == 75
         assert "timed out" in result.stderr
+        # The timeout names the holder to chase.
+        assert f"pid={os.getpid()}" in result.stderr
         assert not ledger.exists()
     finally:
-        import shutil
-
-        shutil.rmtree(lock_dir, ignore_errors=True)
+        holder.release()
 
 
-def test_cli_stale_same_host_lock_is_broken_automatically(tmp_path: Path) -> None:
+def test_cli_no_longer_accepts_the_stale_break_flags(tmp_path: Path) -> None:
+    """There is no stale lock to break: a dead holder's flock is gone."""
     ledger = tmp_path / "ledger.md"
-    lock_dir = MOD.lock_path_for(ledger.resolve())
-    lock_dir.mkdir(parents=True)
-    (lock_dir / "metadata.json").write_text(
-        json.dumps(
-            {"host": socket.gethostname(), "pid": 999_999_999, "acquired_at": "x"}
-        ),
-        encoding="utf-8",
-    )
-    # Row-shaped since OMN-18801: the shape guard now runs on every append to
-    # a markdown ledger, not only when a --section-heading is passed. This
-    # test is about breaking a stale lock, so its payload must not also be
-    # asserting the old unguarded shape.
-    row = "- 2026-09-19 after stale break"
-    result = _run_cli([str(ledger), "--timeout", "3s", "--append", row])
-    assert result.returncode == 0, result.stderr
-    assert "removed dead same-host lock" in result.stderr
-    assert ledger.read_text(encoding="utf-8") == f"{row}\n"
+    for flag in ("--stale-after", "--anonymous-stale-after"):
+        result = _run_cli([str(ledger), flag, "1s", "--", "true"])
+        assert result.returncode == 2, (flag, result.stderr)
 
 
 def test_cli_command_verb_passes_through_exit_code(tmp_path: Path) -> None:
@@ -664,120 +687,43 @@ def test_claim_tokens_order_by_lock_protected_offset(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# OMN-16729 -- an acquired lock always carries its holder's metadata
+# The holder record (OMN-16729's naming requirement, kept by OMN-19262)
 # --------------------------------------------------------------------------
 #
-# The lock was published in two steps: ``mkdir`` made it visible to every
-# other acquirer, and ``write_metadata`` named its holder afterwards. A holder
-# that died in between -- a SIGKILL, a lost terminal, an OSError on the write
-# -- left a directory with no metadata.json, and that lock was unbreakable by
-# construction:
-#
-#   * the dead-same-host rule reads ``metadata["host"]`` and ``["pid"]``, and
-#     an absent file yields ``{}``, so neither matches and the rule never
-#     fires;
-#   * the age rule is skipped entirely when ``--stale-after`` is not passed,
-#     which is the documented default every lane uses.
-#
-# So the lock stranded until a human noticed, and the timeout it produced said
-# ``held by pid=unknown host=unknown-host since unknown-time`` -- naming no one
-# to chase. Twice on 2026-09-21: 26 minutes (commented on OMN-16729 at 11:44Z)
-# and 20 minutes (reclaimed 15:31:55Z, lock age 1226s).
-#
-# Two independent repairs, tested separately here, because each has to hold on
-# its own:
-#
-#   1. acquisition is atomic -- the metadata is written into a private staging
-#      directory that is then renamed onto the lock path, so the lock either
-#      has metadata or does not exist, and the death window is gone;
-#   2. an anonymous lock is bounded -- a lock with no metadata that is older
-#      than ANONYMOUS_STALE_SECONDS is reclaimable by definition, because a
-#      live holder under (1) would have had metadata from its first instant.
-#      This is what clears locks left by holders running the OLD code.
-#
-# A NAMED holder's behaviour is deliberately unchanged: age alone still never
-# breaks it without an explicit --stale-after.
+# OMN-16729 required that a timeout name someone to chase. Under the fcntl
+# lock the holder writes its record into the lock file once it holds the lock.
+# The record is a courtesy only: whether the lock is held is the kernel's
+# answer, so a record left by a dead holder blocks nobody.
 
 
-def _anonymous_lock(lock_dir: Path, *, age_seconds: float) -> None:
-    """Exactly what a holder that died between mkdir and the sidecar leaves:
-    a lock directory, no metadata.json, aged by ``age_seconds``."""
-    lock_dir.mkdir(parents=True)
-    stamp = time.time() - age_seconds
-    os.utime(lock_dir, (stamp, stamp))
-
-
-def test_death_between_mkdir_and_metadata_strands_old_shape_and_is_reclaimed(
-    tmp_path: Path,
-) -> None:
+def test_live_holder_is_named_in_the_timeout(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.md"
-    lock_dir = MOD.lock_path_for(ledger)
-    _anonymous_lock(lock_dir, age_seconds=MOD.ANONYMOUS_STALE_SECONDS + 60)
-
-    # The OLD behaviour, reproduced by switching the bound off: nothing breaks
-    # this lock, at any age, for as long as the process lives.
-    assert (
-        MOD.maybe_break_stale_lock(
-            lock_dir, stale_after=None, anonymous_stale_after=None
-        )
-        is None
-    )
-    assert lock_dir.exists(), "old behaviour: the anonymous lock strands"
-
-    # The NEW behaviour, with the default bound: reclaimed, and said so.
-    message = MOD.maybe_break_stale_lock(lock_dir, stale_after=None)
-    assert message is not None
-    assert "anonymous" in message
-    assert not lock_dir.exists()
-
-    # End to end: a waiter carrying only the defaults now acquires, where
-    # before it would have spun to its timeout.
-    _anonymous_lock(lock_dir, age_seconds=MOD.ANONYMOUS_STALE_SECONDS + 60)
-    lock = MOD.LedgerLock(ledger, timeout=5.0, stale_after=None, command=None)
-    with lock:
-        assert lock.acquired is True
-        assert (
-            json.loads((lock.lock_dir / "metadata.json").read_text("utf-8"))["pid"]
-            == os.getpid()
-        )
-
-
-def test_anonymous_lock_within_the_bound_is_left_alone(tmp_path: Path) -> None:
-    """The bound is a bound, not an unconditional sweep: a just-created
-    anonymous lock may still belong to a holder mid-acquire on the old code,
-    so it is waited on, not broken."""
-    lock_dir = tmp_path / "lock"
-    _anonymous_lock(lock_dir, age_seconds=1.0)
-    assert MOD.maybe_break_stale_lock(lock_dir, stale_after=None) is None
-    assert lock_dir.exists()
-
-
-def test_live_named_holder_is_never_broken_by_default_reclaim(tmp_path: Path) -> None:
-    ledger = tmp_path / "ledger.md"
-    holder = MOD.LedgerLock(ledger, timeout=1.0, stale_after=None, command=None)
+    holder = MOD.LedgerLock(ledger, timeout=1.0)
     holder.acquire()
     try:
-        metadata = json.loads((holder.lock_dir / "metadata.json").read_text("utf-8"))
-        assert metadata["pid"] == os.getpid()
-        assert metadata["host"] == socket.gethostname()
-        assert metadata["acquired_at"]
+        record = json.loads(holder.lock_file.read_text("utf-8"))
+        assert record["pid"] == os.getpid()
+        assert record["host"] == socket.gethostname()
+        assert record["acquired_at"]
 
-        # Age it far past the anonymous bound. A NAMED holder that is alive is
-        # still not reclaimable: the bound applies to anonymity, not to age.
-        stamp = time.time() - (MOD.ANONYMOUS_STALE_SECONDS * 10)
-        os.utime(holder.lock_dir, (stamp, stamp))
-
-        assert MOD.maybe_break_stale_lock(holder.lock_dir, stale_after=None) is None
-        assert holder.lock_dir.exists()
-
-        waiter = MOD.LedgerLock(ledger, timeout=0.0, stale_after=None, command=None)
+        waiter = MOD.LedgerLock(ledger, timeout=0.0)
         with pytest.raises(TimeoutError) as raised:
             waiter.acquire()
-        # The timeout now names someone to chase.
         assert f"pid={os.getpid()}" in str(raised.value)
-        assert holder.lock_dir.exists()
     finally:
         holder.release()
+
+
+def test_a_record_left_by_a_dead_holder_blocks_nobody(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.md"
+    lock_file = MOD.lock_path_for(ledger)
+    lock_file.parent.mkdir(parents=True)
+    lock_file.write_text(
+        json.dumps({"host": socket.gethostname(), "pid": 999_999_999}),
+        encoding="utf-8",
+    )
+    with MOD.LedgerLock(ledger, timeout=0.0) as lock:
+        assert json.loads(lock.lock_file.read_text("utf-8"))["pid"] == os.getpid()
 
 
 def test_two_concurrent_acquirers_get_exactly_one_lock(tmp_path: Path) -> None:
@@ -789,7 +735,7 @@ def test_two_concurrent_acquirers_get_exactly_one_lock(tmp_path: Path) -> None:
     losers: list[int] = []
 
     def contend() -> None:
-        lock = MOD.LedgerLock(ledger, timeout=0.0, stale_after=None, command=None)
+        lock = MOD.LedgerLock(ledger, timeout=0.0)
         barrier.wait()
         try:
             lock.acquire()
@@ -810,32 +756,30 @@ def test_two_concurrent_acquirers_get_exactly_one_lock(tmp_path: Path) -> None:
     assert len(losers) == workers - 1
 
     held = winners[0]
-    assert held.lock_dir.exists()
-    # The losers left no staging directories behind: the lock root holds the
-    # one lock and nothing else.
-    assert sorted(p.name for p in MOD.lock_root_for(ledger).iterdir()) == [
-        held.lock_dir.name
-    ]
+    assert held.acquired is True
+    # The lock directory holds the one lock file and its ignore file.
+    assert sorted(p.name for p in held.lock_file.parent.iterdir()) == sorted(
+        [held.lock_file.name, ".gitignore"]
+    )
     held.release()
-    assert not held.lock_dir.exists()
+    with MOD.LedgerLock(ledger, timeout=0.0) as after:
+        assert after.acquired is True
 
 
-def test_acquire_leaves_no_anonymous_lock_when_metadata_write_fails(
+def test_acquire_releases_the_lock_when_the_holder_record_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The death window, forced. Under the old two-step publish this left a
-    visible, metadata-less lock; under an atomic publish the failure happens
-    in staging and the lock path is never created."""
+    """A failed acquire holds nothing, so the next writer gets straight in."""
     ledger = tmp_path / "ledger.md"
 
     def explode(*_args: object, **_kwargs: object) -> None:
         raise OSError("no space left on device")
 
-    monkeypatch.setattr(MOD, "write_metadata", explode)
-    lock = MOD.LedgerLock(ledger, timeout=0.0, stale_after=None, command=None)
-    with pytest.raises(OSError):
+    monkeypatch.setattr(MOD, "holder_record", explode)
+    lock = MOD.LedgerLock(ledger, timeout=0.0)
+    with pytest.raises(OSError, match="no space left"):
         lock.acquire()
-
     assert lock.acquired is False
-    assert not lock.lock_dir.exists(), "a failed acquire published an anonymous lock"
-    assert list(MOD.lock_root_for(ledger).iterdir()) == []
+    monkeypatch.undo()
+    with MOD.LedgerLock(ledger, timeout=0.0) as after:
+        assert after.acquired is True

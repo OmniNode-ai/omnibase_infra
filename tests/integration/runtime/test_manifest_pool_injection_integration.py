@@ -389,6 +389,7 @@ async def test_kernel_runtime_dependencies_cover_dlq_replay_handler() -> None:
             consumers: object,  # OMN-18119: one per declared subscribe topic
             producer: object,
             quarantine_producer: object,
+            backlog_probe: object | None = None,  # OMN-19085
         ) -> None:
             self.consumers = consumers
             self.producer = producer

@@ -893,6 +893,7 @@ def _make_dispatch_callback(
     event_model: ModelHandlerRef | None = None,
     handler_node_kind: EnumNodeKind | None = None,
     published_event_names: frozenset[str] | None = None,
+    pre_dispatch_guard: Callable[[object], None] | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback wrapping a handler instance.
 
@@ -1085,6 +1086,8 @@ def _make_dispatch_callback(
             if failure_result is not None:
                 return failure_result
             raise
+        if pre_dispatch_guard is not None:
+            pre_dispatch_guard(typed_payload)
         if handler_takes_envelope:
             handler_envelope = _materialize_typed_event_envelope(
                 envelope,
@@ -5481,6 +5484,7 @@ def _make_stateful_dispatch_callback(
     event_bus: object | None = None,
     output_topic_map: dict[str, str] | None = None,
     completion_bound: ModelCompletionBound | None = None,
+    pre_dispatch_guard: Callable[[object], None] | None = None,
 ) -> DispatcherFunc:
     """Create a dispatch callback for contracts that declare ``state_io``.
 
@@ -5550,7 +5554,11 @@ def _make_stateful_dispatch_callback(
     persist``) therefore self-heals a stuck row INLINE rather than depending
     on this exception to trigger redelivery.
     """
-    inner_callback = _make_dispatch_callback(handler_instance, event_model)
+    inner_callback = _make_dispatch_callback(
+        handler_instance,
+        event_model,
+        pre_dispatch_guard=pre_dispatch_guard,
+    )
 
     # OMN-16924: the durable binding is overlay-configurable. ``database`` and
     # ``table`` go through the sanctioned ``${env.VAR:default}`` contract-overlay
@@ -7182,6 +7190,7 @@ def _make_event_bus_callback(
     propagate_publish_failures: bool = False,
     allowed_dispatcher_ids: Collection[str] | None = None,
     consumer_group: str | None = None,
+    declares_output: bool | None = None,
     failure_terminal_topics: Sequence[str] = (),
     terminal_answer_topic: str | None = None,
 ) -> Callable[..., Awaitable[None]]:
@@ -7218,6 +7227,12 @@ def _make_event_bus_callback(
     ``None`` (the default) disables counting for callers/tests that do not wire
     a group -- it never fabricates one, because a fabricated group id would
     produce flow rows attributed to a consumer that does not exist.
+
+    ``declares_output`` (OMN-19733) is the subscription contract's bus-output
+    capability. The caller derives it from the typed ``event_bus.publish_topics``
+    allowlist, the same source used to decide whether a dispatch result applier
+    can publish. ``None`` preserves compatibility for direct callback callers
+    without a contract.
 
     ``failure_terminal_topics`` (OMN-16812): the FAILURE terminal topics this
     contract declares, read through ``_declared_failure_terminal_topics`` -- the
@@ -7256,7 +7271,11 @@ def _make_event_bus_callback(
         # Register before any traffic so a subscription that takes NOTHING still
         # emits a zero row every window. Absent rows and zero rows mean
         # different things (unknown vs observed-idle) and must not be conflated.
-        flow_counters.register(consumer_group, topic)
+        flow_counters.register(
+            consumer_group,
+            topic,
+            declares_output=declares_output,
+        )
 
     dispatcher_scope = _require_contract_dispatcher_scope(
         allowed_dispatcher_ids,
@@ -8023,6 +8042,7 @@ def _make_raw_event_projection_callback(
     *,
     allowed_dispatcher_ids: Collection[str] | None = None,
     consumer_group: str | None = None,
+    declares_output: bool | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a callback for raw Kafka `ModelEventMessage` projection contracts.
 
@@ -8053,7 +8073,11 @@ def _make_raw_event_projection_callback(
         # emits a zero row every window. Same seam, same ordering and the same
         # reason as the sibling branch -- absent rows and zero rows mean
         # different things and must not be conflated.
-        flow_counters.register(consumer_group, topic)
+        flow_counters.register(
+            consumer_group,
+            topic,
+            declares_output=declares_output,
+        )
 
     dispatcher_scope = _require_contract_dispatcher_scope(
         allowed_dispatcher_ids,
@@ -11047,6 +11071,10 @@ async def _subscribe_contract_topics(
     )
     effective_result_applier = result_applier
     output_topic = _select_dispatch_result_output_topic(contract)
+    # This is the authoritative output-capability source: the same typed
+    # publish allowlist that gates result-applier construction below. A terminal
+    # event can only be selected when it is present in this allowlist.
+    declares_output = bool(contract.event_bus.publish_topics)
     # OMN-16798: ``db_io`` used to suppress this applier entirely. That is the
     # same conflation OMN-16767 removed from arm selection, one hop later:
     # ``db_io`` declares GOVERNED DB ACCESS (which tables, under which role) and
@@ -11174,6 +11202,7 @@ async def _subscribe_contract_topics(
                 # audit/projection subscription kinds registered no flow counter
                 # and emitted no row at all.
                 consumer_group=consumer_group,
+                declares_output=declares_output,
             )
         else:
             callback = _make_event_bus_callback(
@@ -11195,6 +11224,7 @@ async def _subscribe_contract_topics(
                 # and the topic while a message is in flight, so it is where
                 # per-(consumer_group, topic) throughput is counted.
                 consumer_group=consumer_group,
+                declares_output=declares_output,
                 # OMN-16812: the SAME declared failure terminals the applier's
                 # OMN-15468 guard re-routes a failure-verdict RETURN value to.
                 # A handler that RAISES produces no return value to re-route,
@@ -11477,6 +11507,33 @@ async def _wire_single_contract(
         event_bus,
         dynamic_materialization_authorized=dynamic_materialization_authorized,
     )
+
+
+def _delegation_fault_pre_dispatch_guard(
+    *,
+    contract: ModelDiscoveredContract,
+    entry: ModelHandlerRoutingEntry,
+    event_bus: object | None,
+) -> Callable[[object], None] | None:
+    """Return the consumer-bound fault-pin guard for the one typed request leg."""
+
+    if (
+        contract.name != "node_delegation_orchestrator"
+        or entry.event_model is None
+        or entry.event_model.name != "ModelDelegationRequest"
+    ):
+        return None
+    from omnibase_infra.runtime.dogfood_delegation_fault_routes import (
+        validate_dogfood_delegation_fault_request,
+    )
+
+    def _guard(payload: object) -> None:
+        validate_dogfood_delegation_fault_request(
+            request=payload,
+            event_bus=event_bus,
+        )
+
+    return _guard
 
 
 def _prepare_handler_wiring(
@@ -11888,6 +11945,11 @@ def _prepare_handler_wiring(
             event_bus=event_bus,
             output_topic_map=_outbox_topic_map,
             completion_bound=_read_completion_bound(contract.contract_path),
+            pre_dispatch_guard=_delegation_fault_pre_dispatch_guard(
+                contract=contract,
+                entry=entry,
+                event_bus=event_bus,
+            ),
         )
         logger.info(
             "Auto-wired stateful handler with state_io in-row outbox "

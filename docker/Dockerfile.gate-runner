@@ -20,7 +20,8 @@
 #
 # Build:
 #   docker build -f docker/Dockerfile.gate-runner -t omninode-gate-runner:latest .
-FROM python:3.13-slim-bookworm
+ARG BASE_IMAGE=python:3.13-slim-bookworm
+FROM ${BASE_IMAGE}
 
 # Minimal toolchain: git (worktree ops), curl (uv installer), build-essential
 # (a handful of transitive deps still build from sdist), ca-certificates,

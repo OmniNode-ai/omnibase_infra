@@ -38,10 +38,10 @@ in flight (store) and two unconsumed (lag).
 
 WHY LAG IS MEASURED FROM THE COMMITTED OFFSET, NOT THE FETCH POSITION
 ----------------------------------------------------------------------
-``poll_and_accept`` processes the FIRST record of a batch and returns, leaving
-the rest buffered, so the consumer's fetch ``position`` is already past records
-the agent has not looked at. Measuring against it would report a lag of zero
-while two commands waited — the same off-by-a-batch that OMN-18613 found in
+``poll_and_accept`` processes the FIRST record of a batch, and until that
+record is committed and the fetch position moved back behind it (OMN-19259) the
+consumer's ``position`` is past records the agent has not looked at. Measuring
+against it would report a lag of zero while two commands waited — the same off-by-a-batch that OMN-18613 found in
 ``_commit_through``, seen from the other side. The committed offset advances
 only past a record this agent has processed or deliberately refused, so it is
 the one that answers "what has this agent not dealt with yet".

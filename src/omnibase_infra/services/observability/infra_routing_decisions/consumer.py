@@ -130,6 +130,11 @@ class ConsumerMetrics:
         self.batches_processed: int = 0
         self.last_poll_at: datetime | None = None
         self.last_successful_write_at: datetime | None = None
+        # OMN-19356: when traffic last arrived and when it was last skipped.
+        # Health compares these with the last write instead of reading the
+        # cumulative messages_received count.
+        self.last_received_at: datetime | None = None
+        self.last_skipped_at: datetime | None = None
         self.started_at: datetime = datetime.now(UTC)
         self._lock = asyncio.Lock()
         self.per_topic_received: dict[str, int] = {}
@@ -141,6 +146,7 @@ class ConsumerMetrics:
         async with self._lock:
             self.messages_received += count
             self.last_poll_at = datetime.now(UTC)
+            self.last_received_at = self.last_poll_at
             if topic is not None:
                 self.per_topic_received[topic] = (
                     self.per_topic_received.get(topic, 0) + count
@@ -166,6 +172,7 @@ class ConsumerMetrics:
     async def record_skipped(self, count: int = 1) -> None:
         async with self._lock:
             self.messages_skipped += count
+            self.last_skipped_at = datetime.now(UTC)
 
     async def record_sent_to_dlq(self, count: int = 1) -> None:
         async with self._lock:
@@ -535,6 +542,21 @@ class InfraRoutingDecisionsConsumer:
         last_poll = self.metrics.last_poll_at
 
         write_age = (now - last_write).total_seconds() if last_write else None
+
+        # OMN-19356: staleness counts only traffic that arrived AFTER the last
+        # write or skip. Reading the cumulative messages_received count made
+        # every quiet gap longer than the staleness window look like a stalled
+        # writer once a single event had arrived, so autoheal restart-cycled
+        # the container on quiet topics.
+        last_progress = max(
+            (t for t in (last_write, self.metrics.last_skipped_at) if t is not None),
+            default=None,
+        )
+        last_received = self.metrics.last_received_at
+        unhandled_traffic = last_received is not None and (
+            last_progress is None or last_received > last_progress
+        )
+        progress_age = (now - last_progress).total_seconds() if last_progress else None
         poll_age = (now - last_poll).total_seconds() if last_poll else None
 
         idle = self._running and self.metrics.messages_received == 0
@@ -545,9 +567,9 @@ class InfraRoutingDecisionsConsumer:
             poll_age is None
             or poll_age > self.config.health_check_poll_staleness_seconds
         ) or (
-            write_age is not None
-            and write_age > self.config.health_check_staleness_seconds
-            and self.metrics.messages_received > 0
+            progress_age is not None
+            and progress_age > self.config.health_check_staleness_seconds
+            and unhandled_traffic
         ):
             status = EnumHealthStatus.DEGRADED
         else:

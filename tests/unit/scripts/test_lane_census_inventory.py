@@ -186,7 +186,14 @@ def test_empty_inventory_is_the_total_outage_signal(planner: Any) -> None:
     """
     manifest = planner.load_manifest()
     plan = planner.build_plan(
-        {"lane": None, "containers": [], "networks": [], "runtime_tag": None},
+        {
+            "lane": None,
+            # OMN-19088: the planner scopes to the lanes declared for this host.
+            "host": "omninode-pc",
+            "containers": [],
+            "networks": [],
+            "runtime_tag": None,
+        },
         manifest,
     )
     assert plan["has_drift"] is True
@@ -271,7 +278,10 @@ def test_recorded_api_envelope_drives_the_planner(inventory: Any, planner: Any) 
         networks=["omnibase-infra-stability-test-network"],
         source="engine_api",
     )
-    plan = planner.build_plan(envelope, planner.load_manifest())
+    # OMN-19088: the collector does not name the host; the driver does.
+    plan = planner.build_plan(
+        {**envelope, "host": "omninode-pc"}, planner.load_manifest()
+    )
     assert plan["schema_version"]
     # The lane label on the recorded rows must be read through the mapping form.
     labeled = [

@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
@@ -636,6 +636,123 @@ class ModelVerifyRecreate(BaseModel):
         return line
 
 
+#: The build-context repository. ``git_ref`` is always a commit of this one.
+INFRA_REPOSITORY: Final = "omnibase_infra"
+
+
+class EnumLineageVerdict(StrEnum):
+    """Where a command's refs sit relative to the build the lane runs (OMN-19270)."""
+
+    #: The running build already carries what this CI command was sent to
+    #: deliver: its infra ref is in the running build, and either it is an
+    #: infra merge or the running workspace build started after the command
+    #: was requested. Acknowledged as superseded and never built.
+    CONTAINED = "contained"
+    #: The infra ref descends from the running build: the normal forward deploy.
+    DESCENDANT = "descendant"
+    #: The infra ref is the running build's, and the command is not shown to
+    #: be already delivered, so it builds.
+    EQUAL = "equal"
+    #: The infra ref is a strict ancestor of the running build. It is raised to
+    #: the running ref, so the lane never builds backwards.
+    RAISED = "raised"
+    #: The infra ref has diverged from the running build and is on the lane's
+    #: tracking branch: a lane coming back to its lineage from an off-branch build.
+    RETURNS_TO_TRACKING = "returns_to_tracking"
+    #: A signed rollback declaration: the one way backwards, built as asked.
+    ROLLBACK_DECLARED = "rollback_declared"
+    #: A pinned image, which is a promotion and not a rebuild from a ref.
+    NOT_APPLICABLE = "not_applicable"
+    #: A comparison the host could not make. Built as requested: never block
+    #: recovery on a missing fact.
+    UNPROVEN = "unproven"
+    #: Diverged from the running build and not on the tracking branch. Refused.
+    DIVERGENT = "divergent"
+
+    @property
+    def refuses(self) -> bool:
+        return self is EnumLineageVerdict.DIVERGENT
+
+    @property
+    def supersedes(self) -> bool:
+        return self is EnumLineageVerdict.CONTAINED
+
+    @property
+    def permits_coalescing(self) -> bool:
+        """Whether the batch behind this command may fold into it.
+
+        Folding picks a NEWER command in the head's place, and that is only
+        known to be forward of the running build when the head itself was
+        compared and found at or ahead of it (or the comparison was never the
+        fence's to make). A raised or off-branch head builds alone.
+        """
+        return self in (
+            EnumLineageVerdict.DESCENDANT,
+            EnumLineageVerdict.EQUAL,
+            EnumLineageVerdict.NOT_APPLICABLE,
+            EnumLineageVerdict.UNPROVEN,
+        )
+
+
+class ModelLineageDecision(BaseModel):
+    """One command's lineage verdict, the refs it was reached from, and what builds.
+
+    Durable on the job record (``JobState.lineage``) as well as in the journal,
+    because the question it answers is asked afterwards: which commit did this
+    job build, and why that one. ``resolved_ref`` is set when the command named
+    a symbolic ref, which is resolved at accept time and built at that exact
+    sha, so the record and the build cannot disagree.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    verdict: EnumLineageVerdict
+    requested_ref: str
+    resolved_ref: str | None = None
+    running_ref: str | None = None
+    build_ref: str
+    detail: str
+
+    def journal_line(self) -> str:
+        resolved = f" resolved={self.resolved_ref}" if self.resolved_ref else ""
+        return (
+            f"lineage: {self.verdict.value} (requested={self.requested_ref}"
+            f"{resolved} running={self.running_ref or 'unread'} "
+            f"build={self.build_ref}): {self.detail}"
+        )
+
+
+class ModelRollbackDeclaration(BaseModel):
+    """A signed declaration that a command deliberately moves a lane off its lineage.
+
+    OMN-19270. The agent refuses a command whose ``git_ref`` is a strict
+    ancestor of the build the lane already runs, or has diverged from it, so a
+    stale or replayed command can no longer roll the lane backwards. That
+    fence must not also remove the way to recover from a bad build: a command
+    carrying this declaration is exempt from it and built as asked.
+
+    Both fields are required and must say something. A rollback nobody can
+    attribute is indistinguishable from the replay the fence exists to refuse,
+    so ``actor`` names the person or lane that asked, and ``reason`` is what a
+    later reader of the journal needs in order to know why the lane went
+    backwards. The declaration travels inside the signed command body, so it
+    cannot be added to a command in transit.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    actor: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _fields_are_not_blank(self) -> ModelRollbackDeclaration:
+        for name in ("actor", "reason"):
+            if not getattr(self, name).strip():
+                msg = f"rollback {name} is blank; a rollback must name its {name}"
+                raise ValueError(msg)
+        return self
+
+
 class ModelRebuildRequested(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID
@@ -657,6 +774,29 @@ class ModelRebuildRequested(BaseModel):
     # pin the stability-proven digest (enforced below).
     image_ref: str | None = None
     image_digest: str | None = None
+    # OMN-19270: present only on a deliberate rollback. Without it the lineage
+    # fence never builds a ref behind the running build, and refuses one off it.
+    rollback: ModelRollbackDeclaration | None = None
+    # OMN-19270: when the command was first requested -- the moment its
+    # trigger published it, carried through every hop that forwards it. The
+    # lineage fence supersedes a sibling-triggered command only when the
+    # workspace build the lane runs STARTED after this moment: that build
+    # staged each sibling from its dev branch, which already held the merge
+    # the command was sent to deliver. Absent, the fence falls back to the
+    # record's broker timestamp, which is the forwarding hop's and so never
+    # earlier than the build it is compared with; a command without a
+    # producer-stamped time therefore builds, as it did before.
+    requested_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_requested_at_is_aware(self) -> ModelRebuildRequested:
+        if self.requested_at is not None and self.requested_at.utcoffset() is None:
+            msg = (
+                f"requested_at={self.requested_at.isoformat()} carries no UTC "
+                "offset; a publish time compared across hosts must be aware"
+            )
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def validate_services_subset(self) -> ModelRebuildRequested:
@@ -691,6 +831,18 @@ class EnumRejectionReason(StrEnum):
 
     ``SUPERSEDED`` is the only one that is not a refusal of the command: the
     work it asked for IS being done, by the newer command named alongside it.
+
+    ``SUPERSEDED_BY_RUNNING_BUILD`` and ``DIVERGENT_REF`` are the lineage fence
+    (OMN-19270). The first acknowledges a CI-triggered command whose work the
+    build the lane runs already carries: its infra ``git_ref`` is in that build,
+    and either it is an infra merge or that workspace build started after the
+    command was requested. The command is recorded ``superseded`` and never
+    built. It is a token of its own rather
+    than ``SUPERSEDED`` because no newer COMMAND replaced it. The replacement
+    is the running build, which need not have come from a command this agent
+    recorded, so there is no correlation id to name. The second refuses a ref
+    that is neither an ancestor nor a descendant of the running build and is
+    not on the lane's tracking branch.
     """
 
     BUSY = "busy"
@@ -701,6 +853,8 @@ class EnumRejectionReason(StrEnum):
     LANE_NOT_ALLOWED = "lane_not_allowed"
     UNDECODABLE_PAYLOAD = "undecodable_payload"
     SUPERSEDED = "superseded"
+    SUPERSEDED_BY_RUNNING_BUILD = "superseded_by_running_build"
+    DIVERGENT_REF = "divergent_ref"
 
 
 class ModelRejectionNotice(BaseModel):

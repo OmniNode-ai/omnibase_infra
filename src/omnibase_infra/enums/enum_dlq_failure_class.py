@@ -48,6 +48,9 @@ class EnumDlqFailureClass(str, Enum):
         PROJECTION_WEDGE_EXHAUSTED: A projection refused the same record the
             same way past its declared withhold bound, so the record was
             quarantined to release the partition (OMN-17379).
+        DISPATCH_DEADLINE_EXCEEDED: A subscriber's handler did not return
+            within the consumer's per-dispatch deadline, so the record was
+            quarantined and the consume loop moved on (OMN-19355).
     """
 
     PUBLISHER_MALFORMED = "publisher_malformed"
@@ -73,6 +76,17 @@ class EnumDlqFailureClass(str, Enum):
     the dead-letter that ENDS such a stall, and it is deliberately distinct
     from ``CONSUMER_ERROR``: a census that cannot separate "one handler raised"
     from "a partition was wedged and then released" cannot see the outage.
+    """
+
+    DISPATCH_DEADLINE_EXCEEDED = "dispatch_deadline_exceeded"
+    """A handler did not return within the per-dispatch deadline (OMN-19355).
+
+    The serial consume loop awaits each handler before it polls again, so a
+    handler that never returns stops the whole group: aiokafka evicts the
+    member at ``max_poll_interval_ms`` and it never rejoins, because the rejoin
+    happens inside the next poll. This class marks the quarantine that ends
+    such a dispatch. It is distinct from ``CONSUMER_ERROR`` because nothing
+    raised: the handler is still running, abandoned, somewhere in the process.
     """
 
     def __str__(self) -> str:

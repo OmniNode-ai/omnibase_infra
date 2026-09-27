@@ -1,0 +1,34 @@
+{
+  "source": "Codex capture root omnibase_infra#3951 tests/fixtures/delegation/offset489_incomplete_cohort_key.json (evidence block copied unchanged); runtime identity read live from the .201 dev lane container omninode-runtime on 2026-09-24",
+  "evidence": {
+    "correlation_id": "ab36c9c7-3246-48e2-8a9c-4081d8caf53d",
+    "partition": 0,
+    "run_id": "f53300cb-bc3a-4666-acc5-b5289ee10729",
+    "terminal_envelope_sha256": "e9cf02241b4cdc303ae66cf661835409cd8b17c5a7dc2cfe39a0f66b8645f9c4",
+    "topic_offset": 489
+  },
+  "caller_lane_label": "dev",
+  "runtime_identity": {
+    "container": "omninode-runtime",
+    "compose_project": "omnibase-infra",
+    "onex_environment": "local",
+    "kafka_environment": null,
+    "bus_environment": "local",
+    "kafka_bootstrap_servers": "redpanda:9092"
+  },
+  "selected_route": {
+    "package_name": "omnimarket",
+    "contract_name": "node_delegation_orchestrator",
+    "command_topic": "onex.cmd.omnibase-infra.delegation-request.v1",
+    "terminal_events": [
+      "onex.evt.omnibase-infra.delegation-completed.v1",
+      "onex.evt.omnibase-infra.delegation-failed.v1"
+    ]
+  },
+  "expected_row": {
+    "lane": "dev",
+    "consumer": "omnimarket.nodes.node_delegation_orchestrator",
+    "terminal_route": "terminal_events",
+    "repository_owner": "omnimarket"
+  }
+}

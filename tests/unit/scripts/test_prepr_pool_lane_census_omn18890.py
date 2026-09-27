@@ -125,6 +125,8 @@ def _envelope(containers: list[dict[str, str]]) -> dict[str, Any]:
     }
     return {
         "lane": None,
+        # OMN-19088: the pool is declared for the lab host.
+        "host": "omninode-pc",
         "containers": [decoy, *containers],
         "networks": ["omnibase-infra-network", "omnibase-infra_default"],
         "runtime_tag": None,

@@ -201,7 +201,8 @@ class TestReadingTheSupersession:
                 staleness.ModelSupersessionProbe(
                     superseded_by_sha=RUNNER_SHA,
                     superseded_by_correlation_id=RUNNER_CORRELATION,
-                )
+                ),
+                SHA,
             )
             == "fail"
         )
@@ -212,12 +213,14 @@ class TestReadingTheSupersession:
         """A FAIL is a statement about the sha; an INDETERMINATE is about the hop."""
         assert (
             staleness.supersession_check_outcome(
-                staleness.ModelSupersessionProbe(reason="agent unreachable")
+                staleness.ModelSupersessionProbe(reason="agent unreachable"), SHA
             )
             == "indeterminate"
         )
         assert (
-            staleness.supersession_check_outcome(staleness.ModelSupersessionProbe())
+            staleness.supersession_check_outcome(
+                staleness.ModelSupersessionProbe(), SHA
+            )
             == "ok"
         )
 
@@ -238,6 +241,61 @@ class TestReadingTheSupersession:
             assert evidence
             assert "\n" not in evidence
             assert "`" not in evidence
+
+
+class TestASameRefCoalesceOMN19499:
+    """A fold into the receipt's OWN commit is not a supersession (OMN-19499).
+
+    Since the OMN-19270 lineage fence, the agent records a command as
+    superseded by the RUNNING build when that build already carries the ref,
+    naming the running infra sha and no correlation id. When that running sha
+    IS the receipt sha, the lane runs exactly this commit's tree -- the claim
+    ``superseded_by_newer_rebuild`` exists to protect is true, so the check
+    reads ``ok``. Live case: c74a2fb01, run 36050688911 attempt 3, job
+    107863057541, agent command 5edc3798, FAIL on this check alone.
+    """
+
+    def test_a_same_ref_coalesce_reads_ok(self, staleness: Any) -> None:
+        probe = staleness.ModelSupersessionProbe(superseded_by_sha=SHA)
+        assert staleness.supersession_check_outcome(probe, SHA) == "ok"
+
+    def test_a_same_ref_coalesce_is_compared_case_insensitively(
+        self, staleness: Any
+    ) -> None:
+        probe = staleness.ModelSupersessionProbe(superseded_by_sha=SHA)
+        assert staleness.supersession_check_outcome(probe, SHA.upper()) == "ok"
+
+    def test_the_same_ref_evidence_says_this_commit_ran(self, staleness: Any) -> None:
+        evidence = staleness.supersession_evidence(
+            staleness.ModelSupersessionProbe(superseded_by_sha=SHA), SHA
+        )
+        assert "same commit" in evidence
+        assert "did not build" not in evidence
+
+    def test_a_fold_into_a_different_commit_still_fails(self, staleness: Any) -> None:
+        """Positive control: the fix must not pass every supersession."""
+        probe = staleness.ModelSupersessionProbe(
+            superseded_by_sha=RUNNER_SHA,
+            superseded_by_correlation_id=RUNNER_CORRELATION,
+        )
+        assert staleness.supersession_check_outcome(probe, SHA) == "fail"
+        assert "did not build" in staleness.supersession_evidence(probe, SHA)
+
+    def test_an_abbreviated_receipt_sha_is_not_a_same_ref_match(
+        self, staleness: Any
+    ) -> None:
+        """Rule 24(b) gates on the exact sha, so a prefix proves nothing here."""
+        probe = staleness.ModelSupersessionProbe(superseded_by_sha=SHA)
+        assert staleness.supersession_check_outcome(probe, SHA[:12]) == "fail"
+
+    def test_the_verdict_is_keyed_on_the_receipt_sha(self) -> None:
+        """The guard must hand the receipt sha to the verdict, or a caller
+        that forgets it silently reverts to the one-argument FAIL."""
+        source = (
+            Path(__file__).resolve().parents[2]
+            / "scripts/ci/check_dev_lane_staleness.py"
+        ).read_text()
+        assert "supersession_check_outcome(supersession, expected)" in source
 
 
 class TestTheEmittedCheck:

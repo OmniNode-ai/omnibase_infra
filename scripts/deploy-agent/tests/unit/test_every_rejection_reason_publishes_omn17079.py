@@ -137,6 +137,9 @@ def _notice(
         EnumRejectionReason.INVALID_SIGNATURE,
         EnumRejectionReason.INVALID_PAYLOAD,
         EnumRejectionReason.UNDECODABLE_PAYLOAD,
+        # OMN-19270: the lineage fence's two refusals route the same way.
+        EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD,
+        EnumRejectionReason.DIVERGENT_REF,
     ],
 )
 def test_a_fully_identified_rejection_publishes_for_every_reason(
@@ -291,6 +294,8 @@ def test_every_reason_the_consumer_resolves_reaches_the_hook() -> None:
         "LANE_NOT_ALLOWED",
         "BUSY",
         "DUPLICATE",
+        "SUPERSEDED_BY_RUNNING_BUILD",
+        "DIVERGENT_REF",
     }
     assert routed == expected, (
         f"_process_message routes {sorted(routed)} through the rejection hook; "

@@ -798,7 +798,43 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     #
     # Vendored into omnibase_infra FIRST per the node-migration
     # vendor-parity ordering, ahead of omnimarket#2730.
-    assert len(result.declarations) == 211
+    #
+    # 211 -> 212 for OMN-19013: the append-only delegation quality-reader
+    # correction must be a first-class vendored application migration. Its
+    # exact source bytes and manifest binding are pinned separately by
+    # test_omn19013_terminal_construction_vendor.py.
+    #
+    # 212 -> 213 for OMN-18930: node_projection_delegation/0046 adds the three
+    # nullable delegation_events cohort-key columns (additive, expand-only).
+    # Vendored FIRST, ahead of the omnimarket source, per the vendor-parity
+    # ordering.
+    # 213 -> 214 for OMN-19438: one node-owned migration,
+    # nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql,
+    # vendored here FIRST per the node-migration vendor-parity ordering. It moves
+    # savings_estimates rows stored under the house slug to the house tenant's
+    # UUID and makes the UUID the column default, after the writer fix is live.
+    # 214 -> 216 for OMN-19514: node_projection_delegation/0047 adds the
+    # nullable delegation_events.ticket_id column, and
+    # node_projection_dod_verdict/0002 adds the nullable
+    # dod_verify_runs.delegation_correlation_id column, so a delegation run
+    # joins to its ticket and to the DoD verdict that judged it. Both additive
+    # (expand-only), vendored FIRST per the vendor-parity ordering.
+    # 216 -> 217 for OMN-19721: node_projection_runtime_error_fingerprints/0002
+    # adds the nullable runtime_error_fingerprints.last_applied_event_id column,
+    # so a broker redelivery of one runtime-error event is counted once.
+    # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
+    # 217 -> 219 for OMN-19716: node_projection_topic_activity/0000 creates the
+    # topic_activity table and 0001 grants the runtime role SELECT, INSERT and
+    # UPDATE on it. Vendored FIRST per the vendor-parity ordering.
+    # 219 -> 220 for OMN-19860: node_projection_delegation/0048 adds the
+    # nullable delegation_events.caller_lane column, so a delegation row names
+    # the ledger lane that issued it. Additive (expand-only), vendored FIRST
+    # per the vendor-parity ordering.
+    # 220 -> 222 for OMN-19833: node_projection_pr_landing/0000 creates the
+    # pr_landing_state and pr_landing_transitions read models and 0001 grants
+    # the runtime role on both. Vendored FIRST per the vendor-parity ordering,
+    # ahead of omnimarket#3000.
+    assert len(result.declarations) == 222
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

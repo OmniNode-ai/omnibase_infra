@@ -260,6 +260,15 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         # ever runs node_slack_publish_effect, these move to SECRET_KEYS.
         "SLACK_BOT_TOKEN",
         "SLACK_CHANNEL_ID",
+        # OMN-17398: the lab's free OpenRouter rung key. LOCAL_ONLY_KEYS, not
+        # SECRET_KEYS: the onex-dev cluster deliberately carries NO house
+        # provider credential (OMN-17372 removed OPEN_ROUTER_API_KEY from all
+        # three runtime Deployments, and omninode_infra
+        # tests/k8s/test_no_house_inference_credentials.py fails the build if it
+        # returns); a cloud customer reaches OpenRouter on their own key from
+        # the per-tenant store. The house key serves the lab delegation ladder
+        # only, from the store's /lab-provider-keys via the lane host's .env.
+        "OPENROUTER_API_KEY",
     }
 )
 

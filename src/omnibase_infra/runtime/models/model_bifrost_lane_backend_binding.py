@@ -44,6 +44,13 @@ from omnibase_infra.runtime.models.model_bifrost_lane_backend_placement import (
 )
 
 _CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+#: OMN-17099: the embedding backend's real endpoint is OpenAI-embeddings-shaped,
+#: not chat-completions-shaped (live probe 2026-09-27: .201:8002/v1/chat/completions
+#: 404s; .201:8002/v1/embeddings returns real vectors). These are the only two
+#: complete endpoint shapes Bifrost backends are known to serve; a binding's path
+#: must be exactly one of them.
+_EMBEDDINGS_PATH = "/v1/embeddings"
+_COMPLETE_ENDPOINT_PATHS = frozenset({_CHAT_COMPLETIONS_PATH, _EMBEDDINGS_PATH})
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 #: The fields an ADDED backend declares and a base-declared backend inherits
@@ -146,7 +153,7 @@ class ModelBifrostLaneBackendBinding(BaseModel):
         if (
             parsed.scheme not in _ALLOWED_SCHEMES
             or not parsed.hostname
-            or parsed.path != _CHAT_COMPLETIONS_PATH
+            or parsed.path not in _COMPLETE_ENDPOINT_PATHS
             or parsed.username is not None
             or parsed.password is not None
             or parsed.query
@@ -154,8 +161,8 @@ class ModelBifrostLaneBackendBinding(BaseModel):
         ):
             raise ValueError(
                 f"endpoint_url for {self.backend_key!r} must be a complete "
-                f"http(s) endpoint ending in {_CHAT_COMPLETIONS_PATH} with a "
-                "host; userinfo, query, and fragment are forbidden, got "
+                f"http(s) endpoint ending in one of {sorted(_COMPLETE_ENDPOINT_PATHS)} "
+                "with a host; userinfo, query, and fragment are forbidden, got "
                 f"{self.endpoint_url!r}"
             )
         if (

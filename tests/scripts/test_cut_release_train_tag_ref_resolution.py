@@ -16,11 +16,12 @@ The fix resolves --ref in the ANCHOR clone only (named error if even that
 fails); siblings use their own resolution of --ref when it resolves there
 (branch/tag names) and otherwise fall back, loudly, to their own origin/dev.
 
-These tests drive the REAL script against local file:// git fixtures for all
-5 repos, with a recording ``gh`` shim on PATH -- no network, no GitHub.
+These tests drive the REAL script against local file:// git fixtures for
+every repo in the tag set (six since OMN-19072), with a recording ``gh`` shim
+on PATH -- no network, no GitHub.
 
-Per reference_git_env_vars_override_c_and_cwd: strip GIT_DIR/GIT_INDEX_FILE/
-GIT_WORK_TREE from the subprocess env so an inherited pre-push hook export
+Per reference_git_env_vars_override_c_and_cwd: strip every inherited git
+location override from the subprocess env so an inherited pre-push hook export
 cannot redirect these git operations onto the real worktree.
 """
 
@@ -32,22 +33,49 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "cut_release_train_tag.sh"
 
+MANIFEST = REPO_ROOT / "scripts" / "runtime_build" / "sibling_clone_manifest.sh"
+
+
+def _manifest_array(name: str) -> tuple[str, ...]:
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail; source "$1"; printf "%s\\n" "${' + name + '[@]}"',
+            "_",
+            str(MANIFEST),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return tuple(result.stdout.split())
+
+
+# OMN-19072: the release-train tag covers the same set as cut-lab-ref.sh -- every
+# clone the pin preflight reads plus the declared tag-only extras -- resolved
+# from the manifest. All six are provisioned below, so the execute-mode
+# ensure_runner_clones.sh call finds every manifest clone and never reaches the
+# network for a missing one.
 TAG_REPOS = (
-    "omnibase_infra",
-    "omnibase_core",
-    "omnibase_compat",
-    "onex_change_control",
-    "omnimarket",
+    *_manifest_array("SIBLING_CLONE_MANIFEST"),
+    *_manifest_array("SIBLING_EXTRA_TRACKED_REPOS"),
 )
 ANCHOR = "omnibase_infra"
 
+# Every inherited git location override (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE,
+# GIT_COMMON_DIR, the object-directory pair) is scrubbed, not just three of
+# them: a hook environment exports all of them and each overrides cwd= and -C
+# (OMN-14891). GITHUB_OUTPUT is dropped so a CI runner's file is never written.
 _HERMETIC_ENV = {
-    k: v
-    for k, v in os.environ.items()
-    if k not in {"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GITHUB_OUTPUT"}
+    k: v for k, v in scrub_git_location_env(os.environ).items() if k != "GITHUB_OUTPUT"
 }
 
 GH_SHIM = """#!/usr/bin/env bash
@@ -60,7 +88,7 @@ def _git(args: list[str], cwd: Path) -> str:
     result = subprocess.run(
         ["git", *args],
         cwd=cwd,
-        env=_HERMETIC_ENV,
+        env=scrub_git_location_env(_HERMETIC_ENV),
         capture_output=True,
         text=True,
         check=True,
@@ -69,7 +97,7 @@ def _git(args: list[str], cwd: Path) -> str:
 
 
 def _build_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
-    """5 repos, each: seed commit -> bare origin -> working clone under
+    """Every tag-set repo, each: seed commit -> bare origin -> working clone under
     OMNI_HOME. Unique content per repo so every repo has a DIFFERENT dev SHA
     (the raw anchor SHA can never resolve in a sibling)."""
     omni_home = tmp_path / "omni_home"

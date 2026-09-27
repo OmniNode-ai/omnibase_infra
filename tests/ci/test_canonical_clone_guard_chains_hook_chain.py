@@ -43,6 +43,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GUARD_SCRIPT = REPO_ROOT / "scripts" / "git-hooks" / "canonical_clone_guard.sh"
 HOOKS_DIR = REPO_ROOT / "scripts" / "git-hooks" / "canonical-clone"
@@ -57,7 +61,7 @@ def _git(
     return subprocess.run(
         ["git", *args],
         cwd=cwd,
-        env=env,
+        env=scrub_git_location_env(env),
         capture_output=True,
         text=True,
         check=False,
@@ -76,6 +80,7 @@ def _base_env(registry: Path) -> dict[str, str]:
     env["GIT_COMMITTER_EMAIL"] = env["GIT_AUTHOR_EMAIL"]
     env["OMNI_HOME"] = str(registry)
     env.pop("ALLOW_CANONICAL_CLONE_COMMIT", None)
+    env.pop("ONEX_REGISTRY_ROOTS", None)
     # git EXPORTS repo-scoping variables into hook processes, and they OVERRIDE
     # both `-C` and the cwd for every descendant git call (memory
     # `reference_git_env_vars_override_c_and_cwd`). When this suite is run from

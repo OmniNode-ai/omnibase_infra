@@ -733,7 +733,7 @@ def test_the_promoted_digest_is_the_content_digest_not_the_docker_image_id(
     runner = FakeRunner()
     applier = _applier(tmp_path, overlay_source, runner)
 
-    digest = applier.promote_and_import(source="local:latest", target="onex-lab/x:t")
+    digest = applier.import_captured("onex-lab/x:t")
 
     assert digest == RUNTIME_DIGEST
     assert not runner.argv_containing("docker inspect"), (

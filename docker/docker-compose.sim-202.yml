@@ -1,0 +1,188 @@
+# OMN-19339 sim-202 lane: the isolated fault-injection stack on the .202 host.
+#
+# WHAT THIS IS. Row S2 of the unified verification plan (track SIM). A complete
+# OmniNode stack with its OWN Postgres, Redpanda and Valkey on the .202 host, so
+# fault injection never touches the .201 shared broker. No Keycloak, no
+# Infisical, no runtime-worker. It is `optional: true` in the lane manifest and
+# a premise for nothing: it promotes nothing, sources no `stability-proven`
+# digest, and is deliberately absent from GOVERNED_LANES and
+# GRANT_INTERLOCK_LANES in scripts/preflight_lane_deploy_attribution.py
+# (pinned by tests/ci/test_sim_202_lane_boundary_omn19339.py). Receipts it
+# produces are simulation or pre-PR evidence only.
+#
+# HOW IT IS BUILT. This file is an OVERLAY on docker/docker-compose.dogfood.yml,
+# the standalone isolated-lane definition (OMN-18693). The service graph, the
+# runtime policy (the DOGFOOD_* values in docker/runtime-policy.env) and the
+# database topology profile are the dogfood lane's, unchanged. What this overlay
+# replaces is everything that identifies a lane on a host: the compose project,
+# every container_name, the network name, every volume name, every published
+# port, and the com.omninode.lane label. Without those the census on .202 would
+# read these containers as the dogfood lane running on a host it is not
+# declared for. It also replaces the Bifrost lane overlay: the dogfood one binds
+# the .201 model server, so the runtime services mount
+# docker/lane-overlays/sim-202.bifrost.yaml instead (cloud locale, no local
+# model rung) and never mount the dogfood file at all.
+#
+# Render it only as the pair, never alone:
+#
+#   docker compose -p omnibase-infra-sim-202 \
+#     --env-file docker/runtime-policy.env --env-file <sim-202 env file> \
+#     -f docker/docker-compose.dogfood.yml -f docker/docker-compose.sim-202.yml \
+#     --profile dogfood up -d --no-build
+#
+# The env file supplies the dogfood.env.example inputs (the five passwords,
+# OMNICLAUDE_SKILLS_DIR, DOGFOOD_REDPANDA_ADVERTISED_HOST, which the base file
+# interpolates even though this overlay replaces the broker command) plus
+# SIM_202_RUNTIME_IMAGE, the pinned runtime image the three runtime services run.
+#
+# WHY `image:` IS REQUIRED HERE. Decision 19 (ruled 2026-09-23): no clone and no
+# `.git` on .202 while the C13, C14 and C29 clean-machine producers run there.
+# The base file's `build:` path needs a source tree, and its release mode
+# installs omnimarket from a git URL, which leaves a git checkout in the build
+# cache. So this lane never builds on the host: the runtime image is loaded
+# from a pinned digest and run with `--no-build`, and the source files the
+# compose file mounts (contracts, migrations, scripts) come from a `git archive`
+# of a pinned commit, which carries no `.git`.
+#
+# PORT BLOCK (plan row S2, read free on .202 at 2026-09-23T12:38Z and re-read at
+# bring-up). Every port binds the loopback address only: the stack is reached
+# from .202 itself, and no other host can open a connection to its plaintext
+# broker or its databases.
+#
+#   runtime main 62085   runtime effects 62086   projection API 62002
+#   Postgres 62436       Valkey 62379            Redpanda Kafka 62092
+#   Redpanda admin 62644                         gateway API 62090 (reserved;
+#                                                this lane runs no gateway)
+#
+# The block sits above .202's ephemeral range (32768-60999). No governed lane's
+# port literal (18085, 18086, 28085, 28086) is a substring of any of them, and
+# no governed compose project name is a substring of omnibase-infra-sim-202.
+name: omnibase-infra-sim-202
+x-sim-202-runtime-image: &sim-202-runtime-image "${SIM_202_RUNTIME_IMAGE:?SIM_202_RUNTIME_IMAGE must name the pinned runtime image (repo@sha256 digest or a local tag loaded from one); this lane never builds on its host}"
+services:
+  postgres:
+    container_name: omnibase-infra-sim-202-postgres
+    ports: !override
+      - "127.0.0.1:62436:5432"
+  redpanda:
+    container_name: omnibase-infra-sim-202-redpanda
+    command: !override
+      - redpanda
+      - start
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://127.0.0.1:62092
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      - ${DOGFOOD_REDPANDA_MEMORY:-2G}
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
+      - --default-log-level=warn
+      - --set
+      - topic_partitions_per_shard=7000
+    ports: !override
+      - "127.0.0.1:62092:19092"
+      - "127.0.0.1:62644:9644"
+  redpanda-partition-cap:
+    container_name: omnibase-infra-sim-202-redpanda-partition-cap
+  valkey:
+    container_name: omnibase-infra-sim-202-valkey
+    ports: !override
+      - "127.0.0.1:62379:6379"
+  forward-migration:
+    container_name: omnibase-infra-sim-202-forward-migration
+  migration-gate:
+    container_name: omnibase-infra-sim-202-migration-gate
+  intelligence-migration:
+    container_name: omnibase-infra-sim-202-intelligence-migration
+  omninode-runtime:
+    container_name: omninode-sim-202-runtime
+    image: *sim-202-runtime-image
+    environment:
+      ONEX_BOX_ID: omnipc2
+      ONEX_RUNTIME_ADDRESS: runtime://omnipc2/dogfood/main
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/sim-202.bifrost.yaml
+      OTEL_SERVICE_NAME: omninode-sim-202-runtime-main
+    ports: !override
+      - "127.0.0.1:62085:8085"
+    # Wholesale, so the dogfood overlay (which binds the .201 model server) is
+    # not mounted at all; see docker/lane-overlays/sim-202.bifrost.yaml.
+    volumes: !override
+      - dogfood_runtime_logs:/app/logs
+      - dogfood_runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/sim-202.bifrost.yaml:/app/config/delegation/sim-202.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    labels: !override
+      - "com.omninode.lane=sim-202"
+      - "com.omninode.ticket=OMN-19339"
+      - "com.omninode.lane.class=sim"
+      - "com.omninode.runtime.address=runtime://omnipc2/dogfood/main"
+      - "com.omninode.runtime.id=dogfood-main"
+  runtime-effects:
+    container_name: omninode-sim-202-runtime-effects
+    image: *sim-202-runtime-image
+    environment:
+      ONEX_BOX_ID: omnipc2
+      ONEX_RUNTIME_ADDRESS: runtime://omnipc2/dogfood/effects
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/sim-202.bifrost.yaml
+      OTEL_SERVICE_NAME: omninode-sim-202-runtime-effects
+    ports: !override
+      - "127.0.0.1:62086:8085"
+    # Wholesale, so the dogfood overlay (which binds the .201 model server) is
+    # not mounted at all; see docker/lane-overlays/sim-202.bifrost.yaml.
+    volumes: !override
+      - dogfood_effects_logs:/app/logs
+      - dogfood_effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/sim-202.bifrost.yaml:/app/config/delegation/sim-202.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    labels: !override
+      - "com.omninode.lane=sim-202"
+      - "com.omninode.ticket=OMN-19339"
+      - "com.omninode.lane.class=sim"
+      - "com.omninode.runtime.address=runtime://omnipc2/dogfood/effects"
+      - "com.omninode.runtime.id=dogfood-effects"
+  projection-api:
+    container_name: omnimarket-sim-202-projection-api
+    image: *sim-202-runtime-image
+    environment:
+      ONEX_BOX_ID: omnipc2
+      OTEL_SERVICE_NAME: omnimarket-sim-202-projection-api
+    ports: !override
+      - "127.0.0.1:62002:3002"
+    labels: !override
+      - "com.omninode.lane=sim-202"
+      - "com.omninode.ticket=OMN-19339"
+      - "com.omninode.lane.class=sim"
+      - "com.omninode.service=projection-api"
+networks:
+  omnibase-infra-dogfood-network:
+    name: omnibase-infra-sim-202-network
+volumes:
+  dogfood_postgres_data:
+    name: omnibase-infra-sim-202-postgres-data
+  dogfood_redpanda_data:
+    name: omnibase-infra-sim-202-redpanda-data
+  dogfood_valkey_data:
+    name: omnibase-infra-sim-202-valkey-data
+  dogfood_runtime_logs:
+    name: omninode-sim-202-runtime-logs
+  dogfood_runtime_data:
+    name: omninode-sim-202-runtime-data
+  dogfood_effects_logs:
+    name: omninode-sim-202-effects-logs
+  dogfood_effects_data:
+    name: omninode-sim-202-effects-data
