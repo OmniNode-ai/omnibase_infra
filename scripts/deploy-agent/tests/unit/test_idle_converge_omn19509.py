@@ -65,10 +65,16 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 HEAD = "b" * 40
 RUNNING = "a" * 40
 
-#: A C15 run in the committed window file: `41 1,3,...,23 * * *`, 25 minutes.
+#: A C15 run in the committed window file: `41 1,3,...,23 * * *`, 65 minutes
+#: (OMN-19811: 25 -> 65, config/lab_probe_windows.yaml).
 C15_START = datetime(2026, 9, 25, 5, 41, tzinfo=UTC)
-#: Far from every guarded probe (C15 odd hours :41, C16 3/9/15/21 :29).
-QUIET = datetime(2026, 9, 25, 4, 30, tzinfo=UTC)
+#: Far from every guarded probe. With C15's 65-minute duration and the 40-minute
+#: lead (CONVERGE_CEILING + PROBE_MARGIN), each C15 occurrence (every 2 hours at
+#: :41) excludes [start-40, start+65], a 105-minute span inside the 120-minute
+#: period -- only the 15 minutes between 04:46 and 05:01 stay clear of both the
+#: 03:41 and 05:41 occurrences, and C16 (3/9/15/21 :29, unchanged 15-minute
+#: duration) does not reach into that gap either.
+QUIET = datetime(2026, 9, 25, 4, 53, tzinfo=UTC)
 
 
 def _inputs(**overrides: Any) -> ModelIdleConvergeInputs:
@@ -185,7 +191,11 @@ class TestIdleConvergeRespectsProbeWindow:
         windows = self._windows()
         assert probe_blocking(C15_START + timedelta(minutes=5), windows) is not None
         assert probe_blocking(C15_START + timedelta(minutes=25), windows) is not None
-        assert probe_blocking(C15_START + timedelta(minutes=26), windows) is None
+        # Duration is 65 minutes (OMN-19811); the run is still excluded there.
+        assert probe_blocking(C15_START + timedelta(minutes=65), windows) is not None
+        # One minute past the exclusion end (start + 65) is clear, and the next
+        # C15 occurrence two hours later has not started its own lead yet.
+        assert probe_blocking(C15_START + timedelta(minutes=66), windows) is None
 
     def test_idle_converge_respects_probe_window_for_c16(self) -> None:
         c16 = datetime(2026, 9, 25, 9, 29, tzinfo=UTC)
