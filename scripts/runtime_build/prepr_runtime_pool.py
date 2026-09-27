@@ -633,7 +633,12 @@ def read_params(path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        params[key.strip()] = value.strip().strip('"').strip("'")
+        value = value.strip()
+        # remove ONE pair of surrounding quotes; a value like SQL may itself end
+        # in a quote character that belongs to it
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        params[key.strip()] = value
     return params
 
 

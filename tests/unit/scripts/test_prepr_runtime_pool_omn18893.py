@@ -568,3 +568,15 @@ def test_base_control_runs_on_the_same_lease_only_when_needed(tmp_path: Path) ->
         with_base_control=True,
     )
     assert not any(r.startswith("base:") for r in clean["lab-101"].ran)
+
+
+def test_params_keep_a_quote_that_belongs_to_the_value(tmp_path: Path) -> None:
+    # Found live (omnibase_infra#4154, 2026-09-27): stripping every trailing quote
+    # cut the closing quote off a SQL literal and every readback query errored.
+    p = tmp_path / "p.env"
+    p.write_text(
+        "SQL=\"select 1 where x<>'postgres'\"\nA='plain'\nB=bare\n", encoding="utf-8"
+    )
+    params = pool.read_params(p)
+    assert params["SQL"] == "select 1 where x<>'postgres'"
+    assert params["A"] == "plain" and params["B"] == "bare"

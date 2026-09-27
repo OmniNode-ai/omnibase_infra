@@ -152,6 +152,8 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
     # the contract names the non-strict wiring pass gave up on, so a run can be
     # compared with a base control at dev (a failure dev already has is not the PR's)
     echo "failed-contracts $c: $(echo "$L" | grep 'Auto-wiring failed for' | sed -E 's/.*enforce\): //' | awk -v RS='; ' -F': ' 'NF>1{print $1}' | sort -u | tr '\n' ' ')"
+    echo "$L" | grep 'Auto-wiring failed for' | sed -E 's/.*enforce\): //' | awk -v RS='; ' 'NF{sub(/^ +/, ""); print}' \
+      | sed -E "s/^([^:]+): .*failed: (.*)$/  failed-contract-reason $c \\1: \\2/" | cut -c1-260
     for n in ${LIVE_GREP:-}; do echo "  $c mentions $n: $(echo "$L" | grep -c "$n")"; done; done
   if [ -n "${SQL:-}" ]; then echo "== sql"; PG=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 postgres)
     for db in $(docker exec "$PG" psql -U postgres -Atc "select datname from pg_database where datname not in ('postgres','template0','template1')"); do
