@@ -62,6 +62,11 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     "onex.evt.omniclaude.notification-completed.v1": "Published by omniclaude emit-daemon hooks, not contract-declared | owner: jonah | expiry: 2026-12-01",
     # GitHub webhooks are external triggers
     "onex.evt.github.pr-webhook.v1": "Published by GitHub webhook relay, not a node | owner: jonah | expiry: 2026-12-01",
+    # OMN-19492: signed GitHub App webhook deliveries. The publisher is the
+    # onex-api door (omninode_infra docker/onex-api, POST /v1/github/webhook,
+    # OMN-19592) on the dev-system cluster, carried to the lab by the gateway
+    # forwarder's inbound leg (OMN-19593) -- a gateway route, not a node.
+    "onex.cmd.github.webhook-delivery.v1": "Published by the onex-api GitHub webhook door (omninode_infra, OMN-19592) via the gateway forwarder inbound leg, not a node | owner: jonah | expiry: 2026-12-31",
     # Runner usage events are produced by self-hosted runner telemetry outside
     # contract-declared node publishers.
     "onex.evt.omninode.runner-usage-recorded.v1": "Published by runner telemetry outside node contracts | owner: jonah | expiry: 2026-12-01",

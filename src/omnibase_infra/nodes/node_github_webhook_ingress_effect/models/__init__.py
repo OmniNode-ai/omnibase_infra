@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Models for the GitHub webhook ingress effect node (OMN-19492)."""
+
+from omnibase_infra.nodes.node_github_webhook_ingress_effect.models.model_github_pr_merged_observation import (
+    ModelGitHubPrMergedObservation,
+)
+from omnibase_infra.nodes.node_github_webhook_ingress_effect.models.model_github_pr_state_observation import (
+    ModelGitHubPrStateObservation,
+)
+from omnibase_infra.nodes.node_github_webhook_ingress_effect.models.model_github_webhook_delivery import (
+    ModelGitHubWebhookDelivery,
+)
+
+__all__: list[str] = [
+    "ModelGitHubPrMergedObservation",
+    "ModelGitHubPrStateObservation",
+    "ModelGitHubWebhookDelivery",
+]
