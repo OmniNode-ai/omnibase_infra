@@ -286,6 +286,8 @@ migrations:
   forward/nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql: expand-only
   forward/nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
+  forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table
+  forward/nodes/node_projection_topic_activity/0001_grant_omninode_runtime_topic_activity.sql: expand-only
   forward/nodes/node_projection_runtime_error_fingerprints/0000_create_runtime_error_fingerprints.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runtime_error_fingerprints/0001_grant_omninode_runtime_runtime_error_fingerprints.sql: expand-only
   forward/nodes/node_projection_runtime_error_fingerprints/0002_add_last_applied_event_id.sql: expand-only

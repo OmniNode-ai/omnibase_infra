@@ -252,6 +252,28 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="aggregate_token_usage",
         ),
     ),
+    # OMN-19716: topic_activity is vendored and shipped by this infra pull
+    # request before its producing contract is present in the pinned omnimarket
+    # checkout. Retire this bridge when omnimarket#2953 merges and the pin
+    # advances to a commit carrying that contract's read_write declaration.
+    ContractTableDeclaration(
+        node="legacy_migration:topic_activity",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_topic_activity/"
+            "0000_create_topic_activity.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="topic_activity",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_topic_activity/"
+                "0000_create_topic_activity.sql"
+            ),
+            access="read_write",
+            role="topic_activity",
+        ),
+    ),
     # OMN-18863: the runtime-error fingerprints entry that used to sit here was
     # DELETED when the pin advanced to ac35d56338b3, which is omnimarket#2664's
     # squash, because the contract declares the relation itself now. That is the
