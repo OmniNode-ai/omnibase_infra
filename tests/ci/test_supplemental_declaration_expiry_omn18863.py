@@ -107,7 +107,6 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
     "session_content": "omnimarket#2905",
-    "topic_activity": "omnimarket#2953",
 }
 
 _SKIP_REASON = (

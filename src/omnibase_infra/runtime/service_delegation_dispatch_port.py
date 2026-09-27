@@ -288,7 +288,11 @@ class RuntimeDelegationDispatchPort:
         temperature: float | None = None,
         response_format: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """Dispatch a delegation request and return the terminal result payload."""
+        """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
+
+        Dev run 8c2b5dfc-3907-475d-aab6-126fade5f707 exposed the blanket
+        fault-pin refusal on a routing pin.
+        """
 
         # OmniMarket's consumer-facing handler always supplies these optional
         # arguments. The deployed bus model does not expose the completion-shaping
@@ -335,35 +339,41 @@ class RuntimeDelegationDispatchPort:
                 },
             )
         if backend_id is not None:
-            # OMN-18931 (K1): a backend pin is admitted only as a declared
-            # dogfood fault route on the dogfood broker, with that route's exact
-            # no-escalation and timeout policy. The consumer re-checks the same
-            # declaration, so a raw broker record cannot bypass this producer gate.
-            bus_environment = getattr(self._event_bus, "environment", None)
-            bus_broker = getattr(self._event_bus, "bootstrap_servers", None)
-            if not isinstance(bus_environment, str) or not isinstance(bus_broker, str):
-                raise InfraUnavailableError(
-                    "a delegation backend pin requires a runtime bus that exposes "
-                    "its configured broker and environment identity"
-                )
+            # OMN-18931 (K1) guards fault pins only. OMN-19124 routing pins
+            # pass to Market; dev run 8c2b5dfc-3907-475d-aab6-126fade5f707
+            # exposed the former blanket refusal. The consumer re-checks faults.
             from omnibase_infra.runtime.dogfood_delegation_fault_routes import (
+                is_dogfood_fault_pin,
                 resolve_dogfood_delegation_fault_route,
             )
 
-            fault_route = resolve_dogfood_delegation_fault_route(
-                environment=bus_environment,
-                bootstrap_servers=bus_broker,
+            if is_dogfood_fault_pin(
                 backend_id=backend_id,
-            )
-            if no_escalation is not fault_route.no_escalation:
-                raise InfraUnavailableError(
-                    "declared dogfood fault backend pin requires no-escalation policy"
+                no_escalation=no_escalation,
+            ):
+                bus_environment = getattr(self._event_bus, "environment", None)
+                bus_broker = getattr(self._event_bus, "bootstrap_servers", None)
+                if not isinstance(bus_environment, str) or not isinstance(
+                    bus_broker, str
+                ):
+                    raise InfraUnavailableError(
+                        "a delegation backend pin requires a runtime bus that exposes "
+                        "its configured broker and environment identity"
+                    )
+                fault_route = resolve_dogfood_delegation_fault_route(
+                    environment=bus_environment,
+                    bootstrap_servers=bus_broker,
+                    backend_id=backend_id,
                 )
-            if execution_timeout_seconds != fault_route.requested_timeout_seconds:
-                raise InfraUnavailableError(
-                    "declared dogfood fault backend pin requires its exact timeout "
-                    "policy"
-                )
+                if no_escalation is not fault_route.no_escalation:
+                    raise InfraUnavailableError(
+                        "declared dogfood fault backend pin requires no-escalation policy"
+                    )
+                if execution_timeout_seconds != fault_route.requested_timeout_seconds:
+                    raise InfraUnavailableError(
+                        "declared dogfood fault backend pin requires its exact timeout "
+                        "policy"
+                    )
         request_payload: dict[str, object] = {
             "prompt": prompt,
             "task_type": task_type,
