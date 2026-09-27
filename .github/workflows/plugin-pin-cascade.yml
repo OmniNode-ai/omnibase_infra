@@ -189,20 +189,36 @@ jobs:
         # to fetch an older version, fail loudly rather than silently succeed with
         # stale data.
         #
+        # OMN-19866: OMN-18596 (update-plugin-pins.py's _replace_pin) rewrites a
+        # range-pinned package to a bounded range that keeps its ceiling and
+        # advances only its floor ("PKG>=FLOOR,<CEILING"), specifically so the
+        # Dockerfile plugin pin validator does not reject the result. This check
+        # still only looked for an exact "PKG==VERSION" pin, so ACTUAL was always
+        # empty for a range-pinned package and every cascade run failed here
+        # even though the pin update itself had succeeded. Accept either shape:
+        # the postcondition is an exact match for an exact pin, or the floor for
+        # a bounded range.
+        #
         # The dispatched version may carry a 'v' prefix (e.g. v0.15.0 from the
         # release tag) while the Dockerfile pin is bare (0.15.0). Strip the prefix
         # before comparing.
+        env:
+          PKG: ${{ steps.inputs.outputs.package }}
+          EXPECTED_VER: ${{ steps.inputs.outputs.version }}
         run: |
-          PKG="${{ steps.inputs.outputs.package }}"
-          EXPECTED_VER="${{ steps.inputs.outputs.version }}"
+          # >>> OMN-19866 plugin pin verify >>>
           # Strip leading 'v' prefix if present (e.g. v0.15.0 → 0.15.0)
           EXPECTED_VER="${EXPECTED_VER#v}"
           ACTUAL=$(grep -oP "(?<=${PKG}==)[0-9]+\.[0-9]+\.[0-9]+" docker/Dockerfile.runtime || true)
+          if [ -z "$ACTUAL" ]; then
+            ACTUAL=$(grep -oP "(?<=${PKG}>=)[0-9]+\.[0-9]+\.[0-9]+(?=,<)" docker/Dockerfile.runtime || true)
+          fi
           if [ "$ACTUAL" != "$EXPECTED_VER" ]; then
             echo "ERROR: Dockerfile pin for ${PKG} did not reach expected version ${EXPECTED_VER} (actual: ${ACTUAL}) — PyPI propagation lag. Re-run workflow after 60s." >&2
             exit 1
           fi
-          echo "Pin confirmed: ${PKG}==${ACTUAL}"
+          echo "Pin confirmed: ${PKG} at ${ACTUAL}"
+          # <<< OMN-19866 plugin pin verify <<<
 
       - name: Check for changes
         id: diff
