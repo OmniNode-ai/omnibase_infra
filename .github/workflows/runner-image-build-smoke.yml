@@ -198,6 +198,17 @@ jobs:
           '
           echo "Playwright chromium libraries PASSED: every soname resolves in the baked image."
 
+      # OMN-19659: a resolved soname is not a launch. Launch Chromium inside the
+      # NEW image as the unprivileged runner user, shape a downloaded web font,
+      # and (from image v10) require every Playwright font family by name and a
+      # headed launch on Xvfb. The script goes in on stdin: on a socket-mounted
+      # fleet runner a bind mount of the workspace names a path the docker
+      # host does not have.
+      - name: Launch Playwright Chromium inside the built image
+        run: |
+          set -euo pipefail
+          docker run --rm -i --user runner --entrypoint bash "${SMOKE_TAG}" -s < docker/runners/playwright-smoke.sh
+
       - name: Cleanup throwaway image
         if: always()
         run: |

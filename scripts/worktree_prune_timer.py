@@ -429,6 +429,56 @@ def _branch_pr_is_merged(canonical: Path, branch: str) -> bool:
     return any(head_contains_tip(canonical, tip, p.head_ref_oid) for p in pulls)
 
 
+SNAPSHOT_HELPER_REL = Path("omniclaude") / "scripts" / "worktree_removal_snapshot.py"
+SNAPSHOT_TIMEOUT_SECONDS = 1800
+
+
+def save_before_removal(worktree: Path) -> str:
+    """Save the tree's diff and untracked files, and return where (OMN-19539).
+
+    Operator ruling 2026-09-25: every worktree-removal path saves first, the
+    way converge-canonical-clone.sh does, through the shared helper
+    ``omniclaude/scripts/worktree_removal_snapshot.py`` under ``$OMNI_HOME``.
+    A forced removal deletes untracked and ignored files that no porcelain
+    check sees. Any failure raises :class:`RefusedError` and nothing is removed.
+    """
+    raw = os.environ.get("OMNI_HOME")
+    if not raw:
+        raise RefusedError("OMNI_HOME is not set, so there is nowhere to save the tree")
+    helper = Path(raw) / SNAPSHOT_HELPER_REL
+    if not helper.is_file():
+        raise RefusedError(f"pre-removal snapshot helper missing: {helper}")
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(helper),
+                str(worktree),
+                "--reason",
+                "worktree_prune_timer:debris",
+                "--allow-non-git",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=SNAPSHOT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RefusedError(f"pre-removal snapshot could not run: {exc}") from exc
+    if result.returncode != 0:
+        raise RefusedError(
+            f"pre-removal snapshot failed (exit {result.returncode}): "
+            f"{(result.stderr or result.stdout).strip()[:400]}"
+        )
+    try:
+        directory = str(json.loads(result.stdout)["directory"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise RefusedError(f"pre-removal snapshot output unreadable: {exc}") from exc
+    if not Path(directory).is_dir():
+        raise RefusedError(f"snapshot directory missing on disk: {directory}")
+    return directory
+
+
 def force_remove_debris(
     worktree: Path, canonical: Path, branch: str | None, report: ModelRunReport
 ) -> bool:
@@ -460,6 +510,19 @@ def force_remove_debris(
         report.refusal_items.append(f"{worktree} | keep | {verdict.reason}")
         return False
 
+    try:
+        snapshot = save_before_removal(worktree)
+    except RefusedError as exc:
+        report.removal_failures.append(
+            {
+                "path": str(worktree),
+                "exit_code": -1,
+                "stderr": str(exc),
+                "detail": "pre-removal snapshot failed; nothing removed (OMN-19539)",
+            }
+        )
+        return False
+
     file_count = len([ln for ln in status.stdout.splitlines() if ln.strip()])
     budget = removal_budget_seconds(file_count)
     argv = ["git", "-C", str(canonical), "worktree", "remove", "--force", str(worktree)]
@@ -484,7 +547,9 @@ def force_remove_debris(
             return False
         if result.returncode == 0:
             report.debris_forced += 1
-            report.notes.append(f"{worktree}: forced removal — {verdict.reason}")
+            report.notes.append(
+                f"{worktree}: forced removal — {verdict.reason}; saved first to {snapshot}"
+            )
             return True
         if attempt == 1:
             continue

@@ -123,21 +123,17 @@ LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
     "docker/docker-compose*.yml",
     "docker/docker-compose*.yaml",
     "docker/runtime-policy.env",
-    # The deploy agent's own source and launcher (OMN-18200). The process that
-    # builds, recreates and verifies the lane is lane state by the same argument
-    # the migration runner is. Without this, a fix to the agent cannot reach the
-    # agent: no command is published, so it takes no job, and self_update has
-    # only PRE_ACCEPT and POST_TERMINAL boundaries -- both job-driven, neither
-    # reached at startup. Measured on omnibase_infra#3520 (``ead1f59b``), the
-    # fix to the agent's own lab_overlay build: run 34815067432 declined, and
-    # the lab host's clone stayed at ``8fd25217``, behind that fix. Restarting
-    # the unit does not help, because it re-execs the same stale clone.
-    #
-    # Deliberately the package and the launcher, not ``scripts/deploy-agent/**``:
-    # the agent's own tests change no lane behaviour, and every match here costs
-    # a full dev-lane rebuild.
-    "scripts/deploy-agent/deploy_agent/**",
-    "scripts/deploy-agent/deploy/**",
+    # NOT the deploy agent's own source (OMN-19597). OMN-18200 first listed
+    # ``scripts/deploy-agent/deploy_agent/**`` and ``scripts/deploy-agent/deploy/**``
+    # here, because self_update then had only the job-driven PRE_ACCEPT and
+    # POST_TERMINAL boundaries and a fix to the agent could not reach it without
+    # a job (omnibase_infra#3520, run 34815067432). The same ticket's second
+    # half, omnibase_infra#3524, added the IDLE_HEARTBEAT boundary: an idle
+    # agent fetches its tracking branch and re-execs every
+    # DEPLOY_AGENT_SELF_UPDATE_IDLE_INTERVAL seconds (default 300), so that
+    # reason no longer holds. The agent is not a layer of the lane image, and
+    # the entries cost a full dev-lane rebuild for 12 of the last 100
+    # rebuild-triggering merges (replayed 2026-09-25, OMN-19597).
     # OMN-18572. The dev lane's `onex-api` service, in the OMNINODE_INFRA tree.
     #
     # This one matches a path that does not exist in this repository, and that
@@ -185,14 +181,10 @@ LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
     # dependencies in a root ``pyproject.toml`` with a root ``uv.lock``.
     # omninode_infra's ``docker/onex-api/requirements*.txt`` are already covered
     # by the ``docker/onex-api/**`` entry above.
-    # Deliberately NOT ``scripts/deploy-agent/pyproject.toml`` or its lock.
-    # OMN-18200 weighed the deploy agent's subtree and admitted two named
-    # directories rather than opening ``scripts/deploy-agent/**``, pinning the
-    # exclusion in tests/scripts/test_trigger_deploy_agent_source_omn18200.py.
-    # The agent is a systemd unit on the lab host, not a layer of the lane
-    # image, so its manifests are a different argument from the three
-    # repository roots above. Overturning that decision belongs to a ticket
-    # that makes it, not to this one -- stated as a residual rather than taken.
+    # Deliberately NOT ``scripts/deploy-agent/pyproject.toml`` or its lock: the
+    # agent is a systemd unit on the lab host, not a layer of the lane image,
+    # and since OMN-19597 none of its subtree is lane state (see the note
+    # above the onex-api entry).
     "pyproject.toml",
     "uv.lock",
     # OMN-19383: omnimarket's shared events package. Measured on
@@ -235,6 +227,141 @@ LANE_STATE_PATH_PATTERNS: tuple[str, ...] = (
     "src/omnimarket/**",
     "src/omnibase_infra/**",
 )
+
+#: OMN-19597: paths that never reach what a rebuilt lane runs, per repository,
+#: each with the fact that makes it so. Operator ruling 2026-09-25T13:17:25Z
+#: (roadmap decision 1): a merge that does not touch the deployed runtime never
+#: enters the rebuild train; it gets its pre-merge lab proof in a parallel slot.
+#:
+#: Applied AFTER the union, to BOTH halves, which is a deliberate change to the
+#: "the canonical result is never narrowed" rule above: the canonical list's
+#: ``docker/Dockerfile*``, ``docker/docker-compose*.yml`` and
+#: ``src/*/nodes/**/*.py`` are right for its own question (deploy EVIDENCE) and
+#: wrong for this one on exactly these paths.
+#:
+#: MEASURED 2026-09-25: of the last 100 rebuild-triggering merges to dev in
+#: omnibase_infra and omnimarket (2026-09-23T22:38Z to 2026-09-25T13:09Z,
+#: replayed with omniclaude main's validator, four of them read back from their
+#: run logs), 5 changed only entries of this table and 12 only the deploy agent
+#: (see the note in LANE_STATE_PATH_PATTERNS).
+#:
+#: The ``*`` entries apply to every repository. A repository's own entries apply
+#: when the caller names that repository, and when it names none (the release
+#: train walks one clone): every repository-scoped entry names a path only that
+#: repository has, which tests/scripts/test_trigger_non_runtime_paths_omn19597.py
+#: pins, so both answers agree on every real path.
+#:
+#: Only NAMED files are listed. A compose file or Dockerfile added later is
+#: runtime-affecting until someone lists it here with a reason, which is the
+#: direction that never ships an unrebuilt lane.
+NOT_RUNTIME_PATH_REASONS: dict[str, dict[str, str]] = {
+    "*": {
+        "**/*.md": (
+            "Markdown is never imported or executed by a runtime process; the "
+            "runtime handlers that read SKILL.md or CLAUDE.md read them from the "
+            "operator workspace, not from the installed package"
+        ),
+        "src/**/tests/**": (
+            "tests inside a package are collected by pytest only; no module "
+            "outside a tests/ directory imports from one (grep over both "
+            "src trees, 2026-09-25)"
+        ),
+    },
+    "omnibase_infra": {
+        "docker/docker-compose.runners.yml": (
+            "the GitHub runner pool on .201, a separate compose project the "
+            "deploy agent never runs"
+        ),
+        "docker/docker-compose.runners-*.yml": (
+            "per-host runner containers (.101, .105, .202); not a lane"
+        ),
+        "docker/docker-compose.sim-202.yml": (
+            "the sim-202 lane on .202, brought up by hand, never by a rebuild"
+        ),
+        "docker/docker-compose.dogfood.yml": (
+            "the dogfood lanes on .101, .105 and .200, brought up by their "
+            "owners, never by a rebuild"
+        ),
+        "docker/docker-compose.prepr.yml": (
+            "the ephemeral pre-PR verify slots (OMN-18890), built per branch "
+            "by their own entrypoint"
+        ),
+        "docker/docker-compose.judge.yml": (
+            "the read-only judge lane; no rebuild targets it"
+        ),
+        "docker/docker-compose.lakshman.yml": (
+            "a collaborator lane its owner deploys; no rebuild targets it"
+        ),
+        "docker/docker-compose.ci-bus.yml": (
+            "the CI broker project on .201; not a runtime lane"
+        ),
+        "docker/docker-compose.e2e.yml": "the end-to-end test harness stack",
+        "docker/docker-compose.gate-runner.yml": (
+            "the CI gate-runner image stack, run by CI jobs"
+        ),
+        "docker/docker-compose.gateway-attach-test-lane.yml": (
+            "a test lane for gateway attachment; no rebuild targets it"
+        ),
+        "docker/docker-compose.model-review-canary.yml": (
+            "a model-review canary stack; not a runtime lane"
+        ),
+        "docker/docker-compose.pypi-*.yml": (
+            "the package-index cache and its canary; not a runtime lane"
+        ),
+        "docker/docker-compose.dns-*.yml": (
+            "the DNS cache and its canary; not a runtime lane"
+        ),
+        "docker/docker-compose.infisical-stability.yml": (
+            "an Infisical stability stack; not a runtime lane"
+        ),
+        "docker/Dockerfile.gate-runner": (
+            "the CI gate-runner image; built only by "
+            "docker-compose.gate-runner.yml, which no lane runs"
+        ),
+        "docker/Dockerfile.dtl-env": (
+            "the delegated test loop's per-lockfile test image (OMN-19358), "
+            "built on a lab host by the focused-run effect"
+        ),
+    },
+}
+
+#: The patterns alone, per repository, for callers that need only the match.
+NOT_RUNTIME_PATH_PATTERNS: dict[str, tuple[str, ...]] = {
+    repo: tuple(entries) for repo, entries in NOT_RUNTIME_PATH_REASONS.items()
+}
+
+
+def _glob_segments(path_parts: list[str], pattern_parts: list[str]) -> bool:
+    """Segment-wise glob with ``**`` matching zero or more whole segments."""
+    if not pattern_parts:
+        return not path_parts
+    head, rest = pattern_parts[0], pattern_parts[1:]
+    if head == "**":
+        return any(
+            _glob_segments(path_parts[index:], rest)
+            for index in range(len(path_parts) + 1)
+        )
+    return (
+        bool(path_parts)
+        and fnmatch.fnmatchcase(path_parts[0], head)
+        and _glob_segments(path_parts[1:], rest)
+    )
+
+
+def is_not_runtime_path(path: str, source_repo: str | None = None) -> bool:
+    """True when ``path`` is listed in :data:`NOT_RUNTIME_PATH_PATTERNS`.
+
+    The ``*`` entries always apply; a repository's own entries apply when
+    ``source_repo`` names it or is ``None``.
+    """
+    parts = path.split("/")
+    for repo, patterns in NOT_RUNTIME_PATH_PATTERNS.items():
+        if repo not in ("*", source_repo) and source_repo is not None:
+            continue
+        if any(_glob_segments(parts, pattern.split("/")) for pattern in patterns):
+            return True
+    return False
+
 
 #: What a matched path is attributed to when no pattern in this module claims
 #: it -- i.e. the canonical deploy-gate classifier matched it. Re-deriving WHICH
@@ -521,6 +648,7 @@ def classify_runtime_paths(
     changed_files: list[str],
     classifier: RuntimePathClassifier,
     manifest_reader: ManifestReader | None = None,
+    source_repo: str | None = None,
 ) -> list[str]:
     """Run and validate the canonical classifier's output fail-closed.
 
@@ -531,7 +659,10 @@ def classify_runtime_paths(
 
     OMN-19375: with a ``manifest_reader``, a root manifest whose change is only
     a version-inert package's own version is left out of the supplement's half.
-    The canonical half is never narrowed. Without a reader nothing is exempt.
+    The canonical half is not narrowed by it. Without a reader nothing is exempt.
+
+    OMN-19597: every path :func:`is_not_runtime_path` lists for ``source_repo``
+    is then removed from the union, from either half.
     """
     runtime_paths = classifier(changed_files)
     if not isinstance(runtime_paths, list) or any(
@@ -547,4 +678,4 @@ def classify_runtime_paths(
     for path in find_lane_state_paths(changed_files):
         if path not in combined and path not in inert:
             combined.append(path)
-    return combined
+    return [path for path in combined if not is_not_runtime_path(path, source_repo)]

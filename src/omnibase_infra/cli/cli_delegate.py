@@ -132,6 +132,10 @@ from omnibase_infra.backends.auto_configure import (
     resolve_bus_type,
 )
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract
+from omnibase_infra.cli.delegate_caller import (
+    DELEGATE_CALLER_LANE_METADATA_KEY,
+    resolve_delegate_caller,
+)
 from omnibase_infra.cli.delegate_lane import (
     DelegateLaneSelectionError,
     resolve_lane_target,
@@ -158,6 +162,7 @@ from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
     resolve_delegate_terminal,
 )
+from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
 from omnibase_infra.cli.model_delegate_default_bus import ModelDelegateDefaultBus
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
@@ -597,6 +602,21 @@ def _backend_pin_defect(
     escalation spend. It makes that spend impossible to mistake for the pinned
     run. Refusing to escalate off a pin at all is a change to the routing port
     in ``omnimarket`` and is not in this layer's gift.
+
+    OMN-19765: on a machine with a locally registered BYOK key, the local
+    path's ``substitute_local_byok_route`` (``omnimarket/routing/
+    local_byok_route.py``) replaces a HOUSE rung this CLI's pin named (e.g.
+    ``cloud-glm``) with the declared customer-paid rung (``byok-glm``) BEFORE
+    dispatch — a routing decision, not an escalation, and the FIRST and only
+    attempt still answers. Comparing ``served`` to the raw pin string alone
+    made that indistinguishable from a real escalation off the pin (run
+    ``86538bdd-0a35-47c6-98e1-b4d13ad39e55``, first-attempt success, exited 1
+    anyway). The attempt's own ``substituted_from_backend_id`` — set by the
+    routing layer that performed the substitution, never inferred here — names
+    which backend, if any, was substituted TO produce ``served``; the pin is
+    honoured when that equals the requested id, and still refused when no
+    substitution occurred or it substituted a DIFFERENT backend, which is what
+    keeps a real escalation refused.
     """
     if requested_backend_id is None:
         return None
@@ -604,7 +624,12 @@ def _backend_pin_defect(
         return None
     accepted = result.accepted_attempt
     served = (accepted.backend_id or "").strip() if accepted is not None else ""
-    if served == requested_backend_id:
+    substituted_from = (
+        (accepted.substituted_from_backend_id or "").strip()
+        if accepted is not None
+        else ""
+    )
+    if served == requested_backend_id or substituted_from == requested_backend_id:
         return None
     return (
         f"delegation was pinned to backend {requested_backend_id!r} but the "
@@ -1469,6 +1494,49 @@ def load_supported_criteria() -> frozenset[str] | None:
     return frozenset(str(item) for item in supported)
 
 
+def load_acceptance_capable_criteria() -> frozenset[str] | None:
+    """Return the criterion slugs that can ACCEPT an answer alone, or ``None``.
+
+    OMN-13370 split the declared criteria into two kinds. Most are reject-only:
+    ``concise``, ``task_completed``, ``plain_text_only``, ``no_refusal`` and the
+    rest can fail an answer but never promote one to accepted. A few hold
+    adequacy authority. Under ``--criteria-mode replace-task-class`` the
+    caller's criteria are the whole bar, so a set holding no authority is
+    refused by the quality gate on every rung, whatever the answer
+    (OMN-19557).
+
+    The split is resolved HERE from the installed omnimarket's quality gate,
+    by asking the gate's own two functions about each declared slug in replace
+    mode (no task-class rules declared), so this CLI never carries a copy that
+    can drift from the gate. ``None`` means omnimarket or those functions are
+    unresolvable; the caller then refuses nothing, exactly as
+    :func:`load_supported_criteria` does, because this command cannot dispatch
+    without the co-install and its next guard reports the real cause.
+    """
+    supported = load_supported_criteria()
+    if supported is None:
+        return None
+    try:
+        gate = importlib.import_module(
+            "omnimarket.nodes.node_delegation_quality_gate_reducer.handlers."
+            "handler_quality_gate"
+        )
+        merge_rule_sets = gate._merge_rule_sets
+        has_adequacy_authority = gate._has_adequacy_authority
+    except (ImportError, AttributeError):
+        return None
+    capable: set[str] = set()
+    for slug in supported:
+        deterministic, heuristic = merge_rule_sets(
+            declared_deterministic=(),
+            declared_heuristic=(),
+            caller_criteria=(slug,),
+        )
+        if has_adequacy_authority(deterministic, heuristic):
+            capable.add(slug)
+    return frozenset(capable)
+
+
 def _validate_backend_pin(backend_id: str | None) -> str | None:
     """Normalise ``--backend-id`` and refuse an empty one (OMN-19124).
 
@@ -1560,6 +1628,44 @@ def _validate_criteria(criteria: tuple[str, ...]) -> tuple[str, ...]:
     return criteria
 
 
+def _validate_replace_mode_authority(
+    criteria: tuple[str, ...],
+    criteria_mode: str | None,
+    *,
+    response_contract: dict[str, object] | None,
+) -> None:
+    """Refuse a replacing criteria set that can never accept an answer (OMN-19557).
+
+    ``replace-task-class`` drops the task class's definition of done and with it
+    the class's acceptance authority (for prose classes, the judge). If none of
+    the caller's criteria holds authority of its own, the quality gate refuses
+    every answer ``TASK_MISMATCH: no deterministic acceptance or judge adequacy
+    authority``: measured on 2026-09-25, local rungs scoring 1.0 were refused and
+    the whole ladder, cloud rungs included, was climbed to a failed terminal.
+    The outcome is fixed before the first call, so it is refused before the
+    first call.
+
+    A declared ``--response-contract`` is its own authority (the gate validates
+    against it instead of the criteria), so it is never refused here.
+    """
+    if criteria_mode != "replace-task-class" or response_contract is not None:
+        return
+    capable = load_acceptance_capable_criteria()
+    if capable is None or set(criteria) & capable:
+        return
+    stated = ", ".join(criteria) if criteria else "none"
+    raise ValueError(
+        "--criteria-mode replace-task-class with these criteria can never be "
+        f"accepted (criteria: {stated}). Replacing drops the task class's own "
+        "acceptance authority, and each of these criteria is reject-only: it "
+        "can fail an answer but never accept one (OMN-13370). Every rung would "
+        "be refused however good its answer, and the whole ladder climbed "
+        "(OMN-19557). Do one of: drop --criteria-mode so your criteria are "
+        "ADDED to the task class's bar; add one criterion that can accept "
+        f"({', '.join(sorted(capable))}); or declare --response-contract."
+    )
+
+
 def _resolve_task_class_flag(
     task_type: str | None, task_class_alias: str | None
 ) -> str | None:
@@ -1628,6 +1734,7 @@ def _write_payload(
     requested_timeout_seconds: int | None = None,
     backend_id: str | None = None,
     ticket_id: str | None = None,
+    caller: ModelDelegateCaller | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -1697,8 +1804,19 @@ def _write_payload(
     # map, which every released request consumer already accepts. A declared
     # request field would be refused by the deployed consumer until a release
     # carried it. Omitted entirely when no ticket was named.
+    metadata: dict[str, str] = {}
     if ticket_id is not None:
-        payload["metadata"] = {DELEGATE_TICKET_METADATA_KEY: ticket_id}
+        metadata[DELEGATE_TICKET_METADATA_KEY] = ticket_id
+    # OMN-19860: who issued the run. The lane rides in the same metadata map,
+    # for the same reason as the ticket; the session rides in the request's
+    # declared ``session_id`` field, only ever as a UUID. Each is omitted
+    # entirely when unresolved, so an unattributed caller changes no shape.
+    if caller is not None and caller.lane is not None:
+        metadata[DELEGATE_CALLER_LANE_METADATA_KEY] = caller.lane
+    if metadata:
+        payload["metadata"] = metadata
+    if caller is not None and caller.session_id is not None:
+        payload["session_id"] = caller.session_id
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -1906,12 +2024,14 @@ def _timeout_receipt(
     type=str,
     multiple=True,
     help=(
-        "An acceptance criterion this answer must meet, repeatable. Stating "
-        "your own criteria is how you stop being graded against a rubric you "
-        "did not ask for: on 2026-09-15 a drafting prompt was refused on every "
-        "rung for missing source citations, because the task class it landed "
-        "on grades research. With --criteria-mode replace-task-class these "
-        "criteria BECOME the bar; by default they are added to it."
+        "A declared criterion slug this answer must meet, such as concise or "
+        "final_artifact_only; repeatable. It is not free text: an unknown value "
+        "is refused with the full list of slugs. Stating your own criteria is "
+        "how you stop being graded against a rubric you did not ask for: on "
+        "2026-09-15 a drafting prompt was refused on every rung for missing "
+        "source citations, because the task class it landed on grades "
+        "research. With --criteria-mode replace-task-class these criteria "
+        "BECOME the bar; by default they are added to it."
     ),
 )
 @click.option(
@@ -1923,7 +2043,10 @@ def _timeout_receipt(
         "Whether --criteria are added to the task class's own definition of "
         "done (the default) or REPLACE it. Only meaningful with --criteria. "
         "'replace-task-class' is the escape hatch from a shape floor that does "
-        "not apply to your task."
+        "not apply to your task. Most slugs are reject-only (they can fail an "
+        "answer, never accept one), so a replacing set must hold at least one "
+        "slug that can accept, or a --response-contract; otherwise it is "
+        "refused before dispatch, because no answer could pass it (OMN-19557)."
     ),
 )
 @click.option(
@@ -2081,6 +2204,21 @@ def _timeout_receipt(
     ),
 )
 @click.option(
+    "--caller-lane",
+    "caller_lane",
+    default=None,
+    help=(
+        "The ledger lane issuing this delegation (OMN-19860). It rides in the "
+        "request metadata onto the delegation's terminal and its "
+        "delegation_events row, beside the Claude Code session id, so per-lane "
+        "delegation use is queryable from the event stream. Omitted, it is read "
+        "from ONEX_LANE, ONEX_LANE_ID, ONEX_AGENT_NAME, CLAUDE_AGENT_NAME or "
+        "CLAUDE_SUBAGENT_NAME, then from the lane registered for the "
+        "omni_worktrees/<ticket>/<dir> worktree; otherwise none is recorded. A "
+        "malformed value is a usage error, never dropped."
+    ),
+)
+@click.option(
     "--omnibase-path",
     "omnibase_path",
     type=click.Path(path_type=Path),
@@ -2131,6 +2269,7 @@ def delegate_command(
     omnibase_path: Path | None,
     allow_omnimarket_drift: bool,
     ticket: str | None,
+    caller_lane: str | None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print exactly one typed result.
 
@@ -2155,13 +2294,21 @@ def delegate_command(
     """
     try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
+        caller = resolve_delegate_caller(
+            caller_lane, cwd=Path.cwd(), environ=os.environ
+        )
+        acceptance_criteria = _validate_criteria(tuple(criteria))
+        declared_contract = _load_response_contract(response_contract)
+        _validate_replace_mode_authority(
+            acceptance_criteria, criteria_mode, response_contract=declared_contract
+        )
         exit_code = run_delegate(
             prompt=prompt,
             task_type=_resolve_task_class_flag(task_type, task_class_alias),
             backend_id=_validate_backend_pin(backend_id),
-            acceptance_criteria=_validate_criteria(tuple(criteria)),
+            acceptance_criteria=acceptance_criteria,
             criteria_mode=criteria_mode,
-            response_contract=_load_response_contract(response_contract),
+            response_contract=declared_contract,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
             source=source,
@@ -2177,6 +2324,7 @@ def delegate_command(
             allow_drift=allow_omnimarket_drift,
             ticket_id=ticket_id,
             ticket_resolution=ticket_resolution,
+            caller=caller,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2206,6 +2354,7 @@ def run_delegate(
     allow_drift: bool = False,
     ticket_id: str | None = None,
     ticket_resolution: str = "none",
+    caller: ModelDelegateCaller | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -2442,10 +2591,13 @@ def run_delegate(
             run_id=run_id,
             correlation_id=correlation_id,
             ticket_id=ticket_id,
+            caller=caller,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.
         click.echo(f"ticket: {ticket_id or 'none'} ({ticket_resolution})", err=True)
+        # OMN-19860: and who issued it, the same way.
+        click.echo((caller or ModelDelegateCaller.unattributed()).describe(), err=True)
         contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
         # OMN-17295 / OMN-17304: decide WHERE the orchestrator runs, and — for a
         # dispatched run — prove a deployed one is actually consuming the command

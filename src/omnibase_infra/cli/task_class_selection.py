@@ -30,7 +30,7 @@ and already guards against a drifted omnimarket co-install, so resolving the
 packaged task-class contract the same way is the established seam, not a new
 dependency. The declaration is the contract's; the evaluation is the caller's.
 
-THE THREE RULES, each a contract field rather than an implementation detail:
+THE RULES, each a contract field rather than an implementation detail:
 
 * **Presence, never frequency.** A phrase occurs or it does not. Counting is
   what let the bulk of a document outvote its purpose.
@@ -53,6 +53,12 @@ THE THREE RULES, each a contract field rather than an implementation detail:
   summary of the change") is the caller saying what they do not want. None of
   them claims a prompt, and the shape gates count the request's words only.
   See ``request_instruction``.
+* **A short prompt is admitted by its opening** (OMN-19140). A class that
+  declares ``short_prompt`` is eligible below its ``min_words``, down to the
+  block's own floor, only for a prompt that opens with one of its
+  ``opening_phrases``. "Summarize in one sentence: ..." reaches
+  ``summarization``; a short prompt that merely mentions a summary does not.
+  See ``ModelShortPromptSelection``.
 
 Ties between eligible classes are broken by ``priority`` (higher wins) and then
 by class name, so resolution is total and deterministic.
@@ -70,6 +76,9 @@ from pydantic import ValidationError
 
 from omnibase_infra.cli.model_qualified_phrases import ModelQualifiedPhrases
 from omnibase_infra.cli.model_selectable_task_class import ModelSelectableTaskClass
+from omnibase_infra.cli.model_short_prompt_selection import (
+    ModelShortPromptSelection,
+)
 from omnibase_infra.cli.model_task_class_execution_budget import (
     ModelTaskClassExecutionBudget,
 )
@@ -84,6 +93,7 @@ __all__ = [
     "EnumTaskTypeResolution",
     "ModelQualifiedPhrases",
     "ModelSelectableTaskClass",
+    "ModelShortPromptSelection",
     "ModelTaskClassExecutionBudget",
     "ModelTaskTypeResolution",
     "TaskClassContractError",
@@ -211,6 +221,7 @@ def load_selectable_task_classes(
                     min_words=selection.get("min_words"),
                     max_words=selection.get("max_words"),
                     qualified_phrases=selection.get("qualified_phrases"),
+                    short_prompt=selection.get("short_prompt"),
                     vetoed_by=tuple(
                         str(phrase) for phrase in selection.get("vetoed_by") or ()
                     ),
@@ -386,7 +397,7 @@ def resolve_task_type(
     opening = opening_sentence(instruction)
     opening_word = opening.split()[0] if opening.split() else ""
     opens_with = any(opening_word in entry.opening_words() for entry in classes)
-    eligible: list[tuple[ModelSelectableTaskClass, str]] = []
+    eligible: list[tuple[ModelSelectableTaskClass, str, bool]] = []
     vetoed: list[str] = []
     if opens_with:
         eligible, vetoed = _eligible(classes, opening, lowered, word_count)
@@ -410,15 +421,24 @@ def resolve_task_type(
 
     # Highest priority wins; an exact tie is broken by class name so the
     # resolution is total and reproducible rather than map-order dependent.
-    winner, phrase = min(eligible, key=lambda pair: (-pair[0].priority, pair[0].name))
+    winner, phrase, opens = min(
+        eligible, key=lambda item: (-item[0].priority, item[0].name)
+    )
+    how = (
+        f"opening phrase {phrase!r} at the start of a {word_count}-word prompt"
+        if opens
+        else (
+            f"phrase {phrase!r} in "
+            f"{'the opening sentence of ' if read_opening else ''}"
+            f"a {word_count}-word request"
+        )
+    )
     return ModelTaskTypeResolution(
         task_type=winner.name,
         resolution=EnumTaskTypeResolution.CONTRACT,
         reason=(
             f"contract predicate for {winner.name!r} (priority {winner.priority}) "
-            f"matched the phrase {phrase!r} in "
-            f"{'the opening sentence of ' if read_opening else ''}"
-            f"a {word_count}-word request"
+            f"matched the {how}"
             f"{veto_note}"
         ),
     )
@@ -429,20 +449,30 @@ def _eligible(
     scope: str,
     instruction: str,
     word_count: int,
-) -> tuple[list[tuple[ModelSelectableTaskClass, str]], list[str]]:
+) -> tuple[list[tuple[ModelSelectableTaskClass, str, bool]], list[str]]:
     """Return the classes a phrase in ``scope`` claims, and the vetoes recorded.
 
     A class is eligible when its shape gate admits the request, one of its
     phrases claims ``scope``, and no veto phrase occurs anywhere in the
     ``instruction``: a prose output named later in the request still vetoes a
     class its opening sentence matched.
+
+    Below a class's ``min_words`` floor, a class that declares ``short_prompt``
+    is eligible only when the request OPENS with one of its opening phrases
+    (OMN-19140); the third element of each entry records that admission. The
+    veto applies to it as to any other match.
     """
-    eligible: list[tuple[ModelSelectableTaskClass, str]] = []
+    eligible: list[tuple[ModelSelectableTaskClass, str, bool]] = []
     vetoed: list[str] = []
     for entry in classes:
-        if not entry.shape_admits(word_count):
-            continue
-        phrase = entry.matching_phrase(scope)
+        if entry.shape_admits(word_count):
+            phrase = entry.matching_phrase(scope)
+            opens = False
+        else:
+            # OMN-19140: below a class's floor, only a declared opening phrase
+            # at the very start of the request can admit it.
+            phrase = entry.short_prompt_phrase(instruction, word_count)
+            opens = True
         if phrase is None:
             continue
         # OMN-18831: a class that matched is still refused when the prompt
@@ -455,5 +485,5 @@ def _eligible(
                 f"{entry.name!r} matched {phrase!r} but the prompt names {veto!r}"
             )
             continue
-        eligible.append((entry, phrase))
+        eligible.append((entry, phrase, opens))
     return eligible, vetoed

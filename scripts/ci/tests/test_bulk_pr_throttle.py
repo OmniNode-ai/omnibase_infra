@@ -1138,7 +1138,14 @@ class TestGhIntegration:
     def test_gh_apply_pr_operation_arm_automerge(self, monkeypatch):
         import bulk_pr_throttle
 
+        seen = []
+
         def fake_run_gh(args):
+            seen.append(args)
+            if args[:2] == ["api", "repos/OmniNode-ai/omnibase_infra"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout="true\n", stderr=""
+                )
             return subprocess.CompletedProcess(
                 args=args, returncode=0, stdout="", stderr=""
             )
@@ -1148,6 +1155,155 @@ class TestGhIntegration:
             "OmniNode-ai", "omnibase_infra", 2805, "arm-automerge"
         )
         assert outcome.success is True
+        assert seen[0] == [
+            "api",
+            "repos/OmniNode-ai/omnibase_infra",
+            "--jq",
+            ".allow_auto_merge",
+        ]
+        assert seen[1][:3] == ["pr", "merge", "2805"]
+
+    def test_gh_apply_pr_operation_arm_automerge_refuses_when_auto_merge_disabled(
+        self, monkeypatch
+    ):
+        """OMN-17427: arm-automerge must never fall back to a direct merge.
+
+        This is the regression test for the 2026-09-25 incident: a repo with
+        ``allow_auto_merge: false`` must be refused with a clear per-PR
+        outcome, and ``gh pr merge`` must never be invoked at all.
+        """
+        import bulk_pr_throttle
+
+        seen = []
+
+        def fake_run_gh(args):
+            seen.append(args)
+            if args[:2] == ["api", "repos/OmniNode-ai/knowledge-base"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout="false\n", stderr=""
+                )
+            raise AssertionError(
+                f"gh pr merge must never be invoked when allow_auto_merge is "
+                f"false, but got: {args}"
+            )
+
+        monkeypatch.setattr(bulk_pr_throttle, "_run_gh", fake_run_gh)
+        outcome = bulk_pr_throttle.gh_apply_pr_operation(
+            "OmniNode-ai", "knowledge-base", 88, "arm-automerge"
+        )
+        assert outcome.success is False
+        assert bulk_pr_throttle.REFUSED_AUTOMERGE_DISABLED in outcome.detail
+        assert outcome.pr_number == 88
+        # exactly one gh call: the settings probe. No merge attempt.
+        assert len(seen) == 1
+        assert seen[0] == [
+            "api",
+            "repos/OmniNode-ai/knowledge-base",
+            "--jq",
+            ".allow_auto_merge",
+        ]
+
+    def test_gh_apply_pr_operation_arm_automerge_probe_failure_refuses(
+        self, monkeypatch
+    ):
+        """A probe that cannot confirm the setting fails closed, never merges."""
+        import bulk_pr_throttle
+
+        def fake_run_gh(args):
+            if args[:2] == ["api", "repos/OmniNode-ai/knowledge-base"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=1, stdout="", stderr="HTTP 503"
+                )
+            raise AssertionError(f"gh pr merge must never be invoked: {args}")
+
+        monkeypatch.setattr(bulk_pr_throttle, "_run_gh", fake_run_gh)
+        outcome = bulk_pr_throttle.gh_apply_pr_operation(
+            "OmniNode-ai", "knowledge-base", 88, "arm-automerge"
+        )
+        assert outcome.success is False
+        assert "could not verify allow_auto_merge" in outcome.detail
+
+    def test_run_bulk_operation_arm_automerge_refuses_one_pr_others_unaffected(self):
+        """The wave-level flow: a refused PR yields success=False without an
+        exception, so the run completes and the CLI exit code (checked at
+        the ``main`` layer) reflects the refusal via ``outcome.success``.
+        """
+        from bulk_pr_throttle import PrOutcome, run_bulk_operation
+
+        def apply_pr_operation(owner, repo, pr, operation):
+            if pr == 2:
+                return PrOutcome(
+                    pr_number=pr,
+                    success=False,
+                    detail="REFUSED_AUTOMERGE_DISABLED: repo does not allow auto-merge",
+                )
+            return PrOutcome(pr_number=pr, success=True, detail="armed")
+
+        report = run_bulk_operation(
+            owner="OmniNode-ai",
+            repo="knowledge-base",
+            pr_numbers=[1, 2, 3],
+            operation="arm-automerge",
+            wave_size=5,
+            dry_run=False,
+            get_queue_depth=lambda: 0,
+            apply_pr_operation=apply_pr_operation,
+            max_wait_seconds=0.0,
+        )
+        outcomes = report.waves[0].outcomes
+        assert [o.success for o in outcomes] == [True, False, True]
+        failures = [o for wave in report.waves for o in wave.outcomes if not o.success]
+        assert len(failures) == 1
+
+    def test_gh_repo_allows_auto_merge_true(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "_run_gh",
+            lambda args: subprocess.CompletedProcess(args, 0, "true\n", ""),
+        )
+        assert (
+            bulk_pr_throttle.gh_repo_allows_auto_merge("OmniNode-ai", "omnibase_infra")
+            is True
+        )
+
+    def test_gh_repo_allows_auto_merge_false(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "_run_gh",
+            lambda args: subprocess.CompletedProcess(args, 0, "false\n", ""),
+        )
+        assert (
+            bulk_pr_throttle.gh_repo_allows_auto_merge("OmniNode-ai", "knowledge-base")
+            is False
+        )
+
+    def test_gh_repo_allows_auto_merge_nonzero_exit_raises(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "_run_gh",
+            lambda args: subprocess.CompletedProcess(args, 1, "", "HTTP 404"),
+        )
+        with pytest.raises(
+            bulk_pr_throttle.BulkPrThrottleError, match="repo settings probe failed"
+        ):
+            bulk_pr_throttle.gh_repo_allows_auto_merge("OmniNode-ai", "ghost-repo")
+
+    def test_gh_repo_allows_auto_merge_malformed_output_raises(self, monkeypatch):
+        import bulk_pr_throttle
+
+        monkeypatch.setattr(
+            bulk_pr_throttle,
+            "_run_gh",
+            lambda args: subprocess.CompletedProcess(args, 0, "null\n", ""),
+        )
+        with pytest.raises(bulk_pr_throttle.BulkPrThrottleError, match="invalid"):
+            bulk_pr_throttle.gh_repo_allows_auto_merge("OmniNode-ai", "omnibase_infra")
 
     def test_gh_rerun_failed_no_failed_runs(self, monkeypatch):
         import bulk_pr_throttle
@@ -1432,6 +1588,47 @@ class TestMainCli:
         assert receipt.exists()
         data = json.loads(receipt.read_text())
         assert data["dry_run"] is True
+
+    def test_arm_automerge_dry_run_never_touches_gh_and_reports_no_outcomes(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        """OMN-17427: dry-run must report the same 'nothing was merged' fact
+        as the live refusal path — a repo with allow_auto_merge=false armed
+        via --dry-run must not merge either. Dry-run never calls
+        ``apply_pr_operation`` at all, so it structurally cannot invoke
+        ``gh pr merge``; this locks that invariant down for arm-automerge
+        specifically, with ``_run_gh`` patched to explode if ever called.
+        """
+        import bulk_pr_throttle
+        from bulk_pr_throttle import main
+
+        def fake_run_gh(args):
+            raise AssertionError(f"dry-run must never call gh, got: {args}")
+
+        monkeypatch.setattr(bulk_pr_throttle, "_run_gh", fake_run_gh)
+
+        receipt = tmp_path / "receipt.json"
+        result = main(
+            [
+                "--owner",
+                "OmniNode-ai",
+                "--repo",
+                "knowledge-base",
+                "--prs",
+                "88",
+                "--operation",
+                "arm-automerge",
+                "--dry-run",
+                "--receipt",
+                str(receipt),
+            ]
+        )
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "DRY-RUN plan" in out
+        data = json.loads(receipt.read_text())
+        assert data["dry_run"] is True
+        assert data["waves"][0]["outcomes"] == []
 
     def test_missing_owner_is_a_hard_argparse_error(self):
         from bulk_pr_throttle import main

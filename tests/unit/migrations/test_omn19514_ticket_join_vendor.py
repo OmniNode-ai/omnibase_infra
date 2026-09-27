@@ -27,6 +27,21 @@ _FORWARD = _ROOT / "docker" / "migrations" / "forward"
 _MANIFEST = _FORWARD / "_ledger" / "application-migrations.tsv"
 _CLASSES = _ROOT / "config" / "migration_classes.yaml"
 
+# OMN-17887 retired the `tenant` schema and made `public` the TENANT domain's
+# schema. That silently killed the positive control below, which retargeted a
+# migration at `public.pg_class`: `public` became a KNOWN topology schema, so
+# the retarget stopped being a violation, the control returned clean, and the
+# test started failing on `assert () != ()`. That failure is the control doing
+# its job -- the alternative was a gate whose every zero meant nothing.
+#
+# The falsifier is an UNDECLARED SCHEMA, and the control asserts which rule
+# fired rather than merely that something did. An earlier pass here used an
+# unregistered bare relation, which trips the schema-qualification rule instead;
+# both are refused today, but naming the rule means a future narrowing of either
+# one cannot leave this control quietly passing on the other.
+_UNDECLARED_SCHEMA_TARGET = "undeclared_topology_schema.pg_class"
+_UNDECLARED_SCHEMA_RULE = "unknown topology schema"
+
 #: (node, file, domain, sha256, the one column it adds, its type, the table
 #: statement a broken copy retargets for the linter's positive control)
 _VENDORED = (
@@ -153,13 +168,27 @@ def test_the_linter_is_live_positive_control(
     column: tuple[str, str],
     table: str,
 ) -> None:
-    """A zero from the linter means something only if it can return non-zero."""
+    """A zero from the linter means something only if it can return non-zero.
+
+    Asserted on every profile the gate above clears, not just ``local``: a
+    control that is live on one profile and dead on three would leave the other
+    three zeros unfalsifiable, which is the failure this test exists to catch.
+    """
     from omnibase_infra.topology.application_database import load_topology_profile
     from omnibase_infra.validation.application_database_domain_enforcement import (
         lint_application_database_sql,
     )
 
     sql = _sql(node, filename)
-    broken = sql.replace(table, "ALTER TABLE public.pg_class")
-    assert broken != sql
-    assert lint_application_database_sql(broken, load_topology_profile("local")) != ()
+    broken = sql.replace(table, f"ALTER TABLE {_UNDECLARED_SCHEMA_TARGET}")
+    assert broken != sql, f"the {table!r} anchor is no longer present in {filename}"
+    for profile in ("local", "onex-dev", "onex-prod", "stability-test"):
+        violations = lint_application_database_sql(
+            broken, load_topology_profile(profile)
+        )
+        assert any(_UNDECLARED_SCHEMA_RULE in violation for violation in violations), (
+            f"{profile}: retargeting at {_UNDECLARED_SCHEMA_TARGET!r} did not raise "
+            f"{_UNDECLARED_SCHEMA_RULE!r}; got {violations}. The control is dead, so "
+            "the clean result asserted above proves nothing. Find a falsifier the "
+            "current rule set still refuses before trusting this gate."
+        )

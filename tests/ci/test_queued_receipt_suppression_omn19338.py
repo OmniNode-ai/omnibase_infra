@@ -155,15 +155,19 @@ def test_the_queued_path_records_its_outcome() -> None:
     )
 
 
-def test_reemit_job_gating_is_unchanged() -> None:
-    """AC3: the attempt-2 re-emission path is not touched by this change.
+def test_reemit_job_runs_for_every_completed_verify_with_candidates() -> None:
+    """OMN-19563: a source FAIL receipt must be copied as FAIL, never skipped.
 
-    It stays conditioned on the verify job having SUCCEEDED and on a non-empty
-    candidate list. What changes is that the queued path now REACHES that
-    success -- which is the fix -- while the conditions themselves stand.
+    The verify job is failed by a source receipt whose health probes failed,
+    but that artifact is still authoritative for every bounded re-emission
+    candidate. Skipped and cancelled jobs have no completed observation; a
+    non-empty candidate list from any other result must reach the re-emitter.
     """
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     condition = " ".join(str(workflow["jobs"]["reemit-queued-receipts"]["if"]).split())
-    assert "needs.verify-lane-converged.result == 'success'" in condition
+    assert "always()" in condition
+    assert "needs.verify-lane-converged.result != 'skipped'" in condition
+    assert "needs.verify-lane-converged.result != 'cancelled'" in condition
+    assert "needs.verify-lane-converged.result == 'success'" not in condition
     assert "reemit_candidates != ''" in condition
     assert "reemit_candidates != '[]'" in condition

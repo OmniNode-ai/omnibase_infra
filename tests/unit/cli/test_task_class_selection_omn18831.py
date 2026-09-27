@@ -77,7 +77,7 @@ _MIRROR = (
 #: is the fix. A digest matching on both sides is what makes the falsifier
 #: table below a statement about production rather than about a fixture.
 PRODUCTION_SELECTION_DIGEST = (
-    "405fa60a930a7c86b076f7ed6dc0d1e5afd55e31829da206261f2069feb3e530"
+    "6d60b389ebe4af899d6a115bb4a5e097746c7770a3637f68521ac79530e5d99a"
 )
 
 #: The opening sentence is quoted verbatim from the run's own stderr. The
@@ -290,6 +290,7 @@ def _canonical_projection(contract_path: Path) -> str:
             continue
         selection = entry["selection"]
         qualified = selection.get("qualified_phrases")
+        short = selection.get("short_prompt")
         projection[str(name)] = {
             "priority": int(selection["priority"]),
             "min_words": selection.get("min_words"),
@@ -307,6 +308,17 @@ def _canonical_projection(contract_path: Path) -> str:
             "vetoed_by": sorted(
                 str(item) for item in (selection.get("vetoed_by") or ())
             ),
+            # OMN-19140: a short-prompt block changes routing, so it is part of
+            # the projection; without it a contract edit here is invisible to
+            # the seam, which is the silence the digest exists to prevent.
+            "short_prompt": None
+            if short is None
+            else {
+                "min_words": int(short["min_words"]),
+                "opening_phrases": sorted(
+                    str(item) for item in short["opening_phrases"]
+                ),
+            },
         }
     return json.dumps(projection, sort_keys=True, separators=(",", ":"))
 

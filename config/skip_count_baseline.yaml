@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 584
+    max_skips: 587
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -98,6 +98,20 @@ suites:
             One positive control across a seam that has not landed, test_the_dev_202_route_labels_have_a_runner_to_land_on in tests/ci/test_omnipc2_verify_runner_omn19507.py. It asserts that the verify labels the deploy-lane routing table declares for the dev-202 instance are satisfiable by the new .202 verify runner. That table (config/deploy_lane_routing.yaml) is added by OMN-19506, and even with it the dev-202 instance declares no verify block until the dev-202 bring-up task adds one, so on this base the test skips with a named reason instead of passing without looking. The three other tests in the module assert the runner's compose labels, that it is the only runner labelled host-202, and its mounts, all from committed state, and run in every job. The skip ends in the same change that gives dev-202 a verify block: the test then runs, and that change removes this id from this baseline.
           node_ids:
             - tests.ci.test_omnipc2_verify_runner_omn19507::test_the_dev_202_route_labels_have_a_runner_to_land_on
+          measured_by: OMN-17886
+          delta: 2
+          reason: >-
+            Two Postgres proofs for the omninode_internal live-ACL check (OMN-17886). Both need a real server: the gate builds omnibase_infra and omnidash_analytics from empty with scripts/run-forward-migrations.sh, and the CLI test starts a throwaway cluster with initdb. The main splits have neither, so they collect both as skips. The gate is not unexecuted: the migration-integration job runs it against its own empty acl_gate_postgres service with OMN17886_REQUIRE_PG=1, so a missing server fails there instead of skipping. The CLI test is the one that only runs where initdb exists (a developer machine); the CI gate drives the same CLI and catalog queries end to end against a real catalog built from the corpus. Both passed locally on PostgreSQL 16 on 2026-09-25 (11 passed with the unit tests).
+          node_ids:
+            - tests.integration.migrations.test_omninode_internal_live_acl_gate_omn17886::test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist
+            - tests.integration.migrations.test_omninode_internal_live_acl_omn17886::test_live_catalog_green_red_and_default_rule
+        - measured_at: '2026-09-26'
+          measured_by: OMN-19543
+          delta: 1
+          reason: >-
+            One positive control across a seam that has not landed yet, the same shape as the OMN-19507 entry above for the .202 runner: test_the_dev_200_route_labels_have_a_runner_to_land_on in tests/ci/test_studio_verify_runner_omn19657.py. It asserts that the verify labels the deploy-lane routing table declares for the dev-200 instance are satisfiable by the new .200 (stickybeatz-studio) verify runner this PR adds. The dev-200 instance declares no verify block in config/deploy_lane_routing.yaml until a sibling PR lands one, so on this base the test skips with a named reason instead of passing without looking. The other tests in the module assert the runner's compose labels, that host-200 is its own exclusive label, the absence of forbidden mounts (lab kubeconfig, operator env, OMNI_HOME clone bind), and its CPU/memory caps, all from committed state, and run in every job. The skip ends in the same change that gives dev-200 a verify block: the test then runs, and that change removes this id from this baseline.
+          node_ids:
+            - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -381,6 +395,8 @@ suites:
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_0034_refuses_early_and_names_the_failing_predicate
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_0034_still_refuses_a_non_member_and_names_the_other_predicate
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_usage_and_set_are_independent_predicates
+      - tests.integration.migrations.test_omninode_internal_live_acl_gate_omn17886::test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist
+      - tests.integration.migrations.test_omninode_internal_live_acl_omn17886::test_live_catalog_green_red_and_default_rule
       - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_null_ticket_is_storable
       - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_zero_attempt_ordinal_is_refused
       - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_an_unknown_cause_code_is_refused
@@ -695,3 +711,4 @@ suites:
       - tests.unit.tools.test_python_source_topic_extraction::test_actual_topic_constants_extractable
       - tests.unit.topology.test_validator_ro_principal_omn17792::test_validator_ro_reaches_a_cluster_only_where_the_seam_is_invoked
       - tests.unit.validators.test_topology_validator::test_canonical_contract_file_is_valid
+      - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on

@@ -45,6 +45,7 @@ from omnibase_infra.cli.cli_delegate import (
     _delegation_result,
     delegate_command,
 )
+from omnibase_infra.cli.delegate_caller import CALLER_LANE_ENV_VARS
 from omnibase_infra.cli.delegate_pre_publish_failure import (
     DelegatePrePublishFailureError,
     describe_pre_publish_failure,
@@ -148,26 +149,39 @@ def stand_in_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return contract_path
 
 
+#: The caller attribution the command derives from its environment and working
+#: directory (OMN-19514's ticket, OMN-19860's lane and session). The stand-in
+#: request model above predates both, so a run started from a ticket worktree
+#: or a Claude Code session would be refused for them and the positive control
+#: would fail for a reason that is not the one under test. Cleared here, and
+#: the command runs from a directory that is not a ticket worktree.
+_CALLER_ENV_CLEARED: dict[str, str | None] = dict.fromkeys(
+    (*CALLER_LANE_ENV_VARS, "CLAUDE_CODE_SESSION_ID", "ONEX_LANE_REGISTRY_ROOT")
+)
+
+
 def _invoke(tmp_path: Path, *extra: str) -> tuple[Result, Path]:
     state_root = tmp_path / "state"
-    result = CliRunner().invoke(
-        delegate_command,
-        [
-            "Reply with exactly the word READY",
-            "--task-type",
-            "summarization",
-            "--bus",
-            "inmemory",
-            "--locus",
-            "in-process",
-            "--state-root",
-            str(state_root),
-            "--emit-socket",
-            str(tmp_path / "no-daemon.sock"),
-            *extra,
-        ],
-        catch_exceptions=False,
-    )
+    runner = CliRunner(env=_CALLER_ENV_CLEARED)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            delegate_command,
+            [
+                "Reply with exactly the word READY",
+                "--task-type",
+                "summarization",
+                "--bus",
+                "inmemory",
+                "--locus",
+                "in-process",
+                "--state-root",
+                str(state_root),
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+                *extra,
+            ],
+            catch_exceptions=False,
+        )
     return result, state_root
 
 

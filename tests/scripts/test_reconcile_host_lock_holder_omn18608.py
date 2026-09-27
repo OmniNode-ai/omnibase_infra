@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -84,8 +85,10 @@ def _seed_lock(
     if holder_text is not None:
         holder.write_text(holder_text, encoding="utf-8")
     elif pid is not None and host is not None:
+        started_at = datetime.now(UTC) - timedelta(seconds=age_seconds)
         holder.write_text(
-            f"pid={pid}\nhost={host}\nstarted_at=2026-09-17T15:23:00Z\n",
+            f"pid={pid}\nhost={host}\n"
+            f"started_at={started_at.strftime('%Y-%m-%dT%H:%M:%SZ')}\n",
             encoding="utf-8",
         )
     if age_seconds:
@@ -333,7 +336,7 @@ def test_the_refusal_names_the_holder_it_is_deferring_to(ws: Workspace) -> None:
         proc = _run(ws)
 
         assert str(live.pid) in proc.stderr
-        assert "2026-09-17T15:23:00Z" in proc.stderr
+        assert re.search(r"since \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", proc.stderr)
     finally:
         live.terminate()
         live.wait()

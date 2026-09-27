@@ -322,17 +322,27 @@ jobs:
             echo "PR #${PR} is already armed; not arming again (OMN-19216)."
             exit 0
           fi
-          # OMN-16300: all OmniNode dev merge queues (including this repo's) were
-          # disabled org-wide on 2026-07-10 (omni_home/CLAUDE.md "Merge Queue Policy").
-          # omnibase_infra is squash-only with no queue, so a bare `--auto` is rejected
-          # non-interactively ("--merge, --rebase, or --squash required") and this step
-          # failed on every single PR. Pass --squash explicitly, matching the repo's
-          # live merge policy. (Superseded OMN-13214 rationale: when dev WAS
-          # queue-controlled, an explicit --squash was rejected because the queue set
-          # the method — that no longer applies now that no queue exists.) Arming alone
-          # does not enqueue on a repo that DOES have a queue — the explicit enqueue +
-          # verify step below closes that gap for such repos. Do NOT exit here on success.
-          if output=$(gh pr merge "$PR" --repo "$GH_REPO" --squash --auto 2>&1); then
+          # OMN-16300 / OMN-19697: a branch without a queue requires an explicit
+          # merge method, while a queue-controlled branch rejects one because its
+          # ruleset owns the method. Decide from the live queue response.
+          owner="${GH_REPO%/*}"
+          name="${GH_REPO#*/}"
+          branch="$(gh pr view "$PR" --repo "$GH_REPO" --json baseRefName --jq .baseRefName)"
+          # shellcheck disable=SC2016 # GraphQL variables are interpreted by GitHub, not this shell.
+          if ! mq_json="$(gh api graphql \
+            -f query='query($owner:String!,$name:String!,$branch:String!){repository(owner:$owner,name:$name){mergeQueue(branch:$branch){id}}}' \
+            -f owner="$owner" \
+            -f name="$name" \
+            -f branch="$branch")"; then
+            echo "::error::Could not query merge queue presence for ${GH_REPO}:${branch} (OMN-19697)."
+            exit 1
+          fi
+          if ! ARM_ARGS="$(python3 scripts/ci/merge_queue_enqueue.py arm-args --merge-queue-json "$mq_json")"; then
+            echo "::error::Could not determine merge queue presence for ${GH_REPO}:${branch}; refusing to guess arming arguments (OMN-19697)."
+            exit 1
+          fi
+          # shellcheck disable=SC2086
+          if output=$(gh pr merge "$PR" --repo "$GH_REPO" $ARM_ARGS 2>&1); then
             echo "auto-merge enabled: $output"
           elif echo "$output" | grep -qiE "already enqueued|already queued|auto-merge already enabled"; then
             echo "auto-merge not newly enabled (expected): $output"
@@ -351,9 +361,9 @@ jobs:
           # update-branch` pushes a merge commit onto the PR head branch, and
           # `enqueuePullRequest` hands the eventual merge to a merge queue. Both
           # land commits attributed to this token, so it carries the same
-          # non-suppressing identity as the arming step above. (This repo has no
-          # merge queue on dev today, so the enqueue path exits early — the PAT
-          # here is for the update-branch push and for the day a queue returns.)
+          # non-suppressing identity as the arming step above. (The enqueue path
+          # is live when the dev queue ruleset is enabled (OMN-19697); the PAT
+          # also covers the update-branch push.)
           GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ steps.resolve.outputs.pr }}

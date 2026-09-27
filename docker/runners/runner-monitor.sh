@@ -231,6 +231,35 @@ config_field() {
     echo "${value}"
 }
 
+# config_host_prefixes — every declared `runner_name_prefix` under the
+# `hosts:` inventory (OMN-17477), deduped, comma-joined. OMN-19842: the fleet
+# emit's default name-prefix used to be a single hardcoded literal
+# ("omninode-") that happened to cover four of the five declared hosts and
+# silently dropped the fifth (.202's `omnipc2-verify-runner`) the moment it
+# was added to this config without a matching edit here — exactly the
+# duplication the config file's own header warns against ("Do not duplicate
+# these values in scripts."). Reading the set from the config instead of
+# guessing a common substring means a sixth host with an unrelated prefix
+# needs no edit to this script, only to the config it already must edit to
+# add the host at all.
+#
+# Prints nothing (not an error) when the config predates OMN-17477 and carries
+# no `hosts:` block at all, so the caller can fall back to the pre-existing
+# scalar-derived default unchanged.
+config_host_prefixes() {
+    [[ -f "${RUNNER_FLEET_CONFIG_PATH}" ]] || return 0
+    awk '
+        /^hosts:/ { in_hosts=1; next }
+        in_hosts && /^[A-Za-z_][A-Za-z0-9_]*:/ { in_hosts=0 }
+        in_hosts && /runner_name_prefix:[[:space:]]*/ {
+            line=$0
+            sub(/^.*runner_name_prefix:[[:space:]]*/, "", line)
+            gsub(/[[:space:]"]+$/, "", line)
+            if (line != "") print line
+        }
+    ' "${RUNNER_FLEET_CONFIG_PATH}" | sort -u | paste -sd, -
+}
+
 RUNNER_ORG="$(config_field github_org)"
 RUNNER_GROUP="$(config_field runner_group)"
 RUNNER_NAME_PREFIX="$(config_field runner_name_prefix)"
@@ -532,7 +561,10 @@ now_epoch=$(date -u +%s)
 offline_first_seen_lines=""
 prev_offline_first_seen_json="{}"
 if [[ -f "${STATE_FILE}" ]]; then
-    prev_offline_first_seen_json=$(jq -c '.offline_first_seen // {}' "${STATE_FILE}" 2>/dev/null || echo "{}")
+    prev_offline_first_seen_json=$(jq -c '.offline_first_seen // {}' "${STATE_FILE}" 2>/dev/null || true)
+    if [[ -z "${prev_offline_first_seen_json}" ]] || ! jq -e 'type == "object"' <<< "${prev_offline_first_seen_json}" >/dev/null 2>&1; then
+        prev_offline_first_seen_json="{}"
+    fi
 fi
 
 while IFS=$'\t' read -r name status; do
@@ -1111,12 +1143,22 @@ announced_alert_count=0
 pending_alert_count=0
 pending_alert_streak=0
 if [[ -f "$STATE_FILE" ]]; then
-    prev_unhealthy_count=$(jq -r '.unhealthy_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
-    prev_alert_count=$(jq -r '.alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
-    announced_alert_count=$(jq -r '.announced_alert_count // .alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
-    pending_alert_count=$(jq -r '.pending_alert_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
-    pending_alert_streak=$(jq -r '.pending_alert_streak // 0' "$STATE_FILE" 2>/dev/null || echo 0)
+    prev_unhealthy_count=$(jq -r '.unhealthy_count // 0' "$STATE_FILE" 2>/dev/null || true)
+    prev_alert_count=$(jq -r '.alert_count // 0' "$STATE_FILE" 2>/dev/null || true)
+    announced_alert_count=$(jq -r '.announced_alert_count // .alert_count // 0' "$STATE_FILE" 2>/dev/null || true)
+    pending_alert_count=$(jq -r '.pending_alert_count // 0' "$STATE_FILE" 2>/dev/null || true)
+    pending_alert_streak=$(jq -r '.pending_alert_streak // 0' "$STATE_FILE" 2>/dev/null || true)
 fi
+for state_count_var in \
+    prev_unhealthy_count \
+    prev_alert_count \
+    announced_alert_count \
+    pending_alert_count \
+    pending_alert_streak; do
+    if [[ ! "${!state_count_var}" =~ ^[0-9]+$ ]]; then
+        printf -v "${state_count_var}" '%s' 0
+    fi
+done
 
 current_unhealthy_count=${#unhealthy_list[@]}
 wedge_count=${#wedge_list[@]}
@@ -1221,8 +1263,10 @@ fi
 # the next cycle -- and the second cron invocation reads the same value.
 prev_alert_count="${previously_announced_alert_count}"
 
-# Write current state
-jq -n \
+# Write current state atomically. A failed serialization must preserve the last
+# good observation and must never prevent the fleet emit below from running.
+state_tmp="${STATE_FILE}.tmp.$$"
+if jq -n \
     --argjson healthy "$healthy" \
     --argjson unhealthy_count "$current_unhealthy_count" \
     --argjson alert_count "$current_alert_count" \
@@ -1288,7 +1332,15 @@ jq -n \
         offline_idle_bounce_names: $offline_idle_bounce_names,
         offline_idle_recreate_names: $offline_idle_recreate_names,
         offline_first_seen: $offline_first_seen
-    }' > "$STATE_FILE"
+    }' > "${state_tmp}"; then
+    if ! mv -f "${state_tmp}" "${STATE_FILE}"; then
+        log "state write FAILED to replace ${STATE_FILE} — previous state preserved; continuing"
+        rm -f "${state_tmp}" || true
+    fi
+else
+    log "state write FAILED to serialize ${STATE_FILE} — previous state preserved; continuing"
+    rm -f "${state_tmp}" || true
+fi
 
 # ---------------------------------------------------------------------------
 # Fleet-observation bus emit (OMN-18768, closing OMN-16943)
@@ -1320,7 +1372,27 @@ RUNNER_FLEET_TOPIC="${RUNNER_FLEET_TOPIC:-onex.evt.omnibase-infra.runner-fleet.v
 # a name the detection prefix does not match. Emitting on the narrow prefix
 # would have dropped the only runner that was down, which is precisely the
 # false-green AC4 exists to refuse.
-RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-omninode-}"
+#
+# OMN-19842: the default is now every `runner_name_prefix` declared under
+# `hosts:` in the fleet config, comma-joined, rather than the single literal
+# "omninode-" this used to hardcode. That literal covered four of the five
+# declared hosts by coincidence of a shared substring and silently excluded
+# the fifth (.202's `omnipc2-verify-runner`, added by OMN-19507 with no
+# matching edit here) forever. A config with no `hosts:` block (pre-OMN-17477)
+# makes config_host_prefixes print nothing, so the fallback below preserves
+# today's behavior unchanged.
+#
+# The declared set is ADDED to "omninode-", never substituted for it. The
+# role runners on .201 (omninode-verify-runner-N, omninode-deploy-runner,
+# omninode-prod-deploy-runner-N, omninode-customer-plane-runner-N) are not
+# declared under `hosts:`, so the declared set alone dropped seven observed
+# runners (measured on .201 against the live org runner list, 2026-09-27:
+# 69 -> 63). The union keeps every runner "omninode-" already covered and
+# adds each declared host whose prefix it does not reach (.202's
+# omnipc2-verify-runner), and still excludes a runner outside both, such as
+# the rootless-podman omnipc2-customer-N.
+RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG="$(config_host_prefixes)"
+RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-omninode-${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG:+,${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG}}}"
 RUNNER_FLEET_EMIT="${RUNNER_FLEET_EMIT:-true}"
 # The dev lane's broker container on this host, and the names of the env
 # vars INSIDE it that carry its SASL pair. Names, never values: the monitor

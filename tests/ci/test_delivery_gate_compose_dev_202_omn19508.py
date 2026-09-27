@@ -84,15 +84,16 @@ def _gate(
 
 
 def test_sibling_compose_dev_202_is_added_for_omnimarket_only() -> None:
+    """OMN-19543: the instance lanes come from the routing table, not a literal;
+    tests/scripts/ci/test_instance_receipt_lanes_omn19543.py pins that the table
+    gives omnimarket compose-dev-202 (and compose-dev-200) and nothing else."""
     code = _code_lines(_step_run(SIBLING_STEP))
-    assert "SIBLING_LANES=(--lane compose-dev)" in code
-    guarded = re.search(
-        r'if \[ "\$\{PINNED_REPO\}" = "omnimarket" \]; then\s+'
-        r"SIBLING_LANES\+=\(--lane compose-dev-202\)\s+fi",
-        code,
-    )
-    assert guarded, "compose-dev-202 is added only when the pinned repo is omnimarket"
-    assert code.count("compose-dev-202") == 1
+    assert (
+        'SIBLING_LANES=(--lane compose-dev --instance-lanes-for "${PINNED_REPO}")'
+        in code
+    ), "the gate reads the instance lanes that prove the pinned repo"
+    assert "--with pyyaml" in code, "the table reader needs PyYAML"
+    assert "compose-dev-202" not in code, "no instance lane is a literal any more"
     assert '"${SIBLING_LANES[@]}"' in code
 
 

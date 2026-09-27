@@ -12,17 +12,23 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def _declared_pins() -> dict[str, str]:
-    """Return {distribution: exact version} for every ``==`` project dependency.
+    """Return {distribution: exact version} the runtime resolves.
 
-    Parsed from the dependency table rather than matched as a substring of the
+    Parsed from the dependency tables rather than matched as a substring of the
     file: ``pyproject.toml`` carries explanatory comments that quote old pins
     verbatim, so a substring assertion is satisfied by prose and keeps passing
     after the pin it names has moved (OMN-18918).
+
+    ``[tool.uv] override-dependencies`` wins over ``[project.dependencies]``,
+    as it does for uv. Since OMN-19655 omnibase-core is published as a range
+    and pinned exactly only in the override, which is what ``uv.lock`` and the
+    runtime image carry.
     """
 
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    overrides = data.get("tool", {}).get("uv", {}).get("override-dependencies", [])
     pins: dict[str, str] = {}
-    for spec in data["project"]["dependencies"]:
+    for spec in [*data["project"]["dependencies"], *overrides]:
         if "==" not in spec:
             continue
         name, _, version = spec.partition("==")
@@ -54,6 +60,9 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     OMN-19408 refresh: advances the proven runtime to core 0.47.23
     (omnibase_infra#4077), the first published release carrying
     ``ModelRuntimeLaneScope``; spi stays 0.23.5.
+
+    OMN-19655: the published core requirement becomes ``>=0.47.23,<0.48.0``;
+    the proven runtime pin, read from the override, is unchanged at 0.47.23.
     """
 
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
