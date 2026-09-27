@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 588
+    max_skips: 587
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -112,13 +112,6 @@ suites:
             One positive control across a seam that has not landed yet, the same shape as the OMN-19507 entry above for the .202 runner: test_the_dev_200_route_labels_have_a_runner_to_land_on in tests/ci/test_studio_verify_runner_omn19657.py. It asserts that the verify labels the deploy-lane routing table declares for the dev-200 instance are satisfiable by the new .200 (stickybeatz-studio) verify runner this PR adds. The dev-200 instance declares no verify block in config/deploy_lane_routing.yaml until a sibling PR lands one, so on this base the test skips with a named reason instead of passing without looking. The other tests in the module assert the runner's compose labels, that host-200 is its own exclusive label, the absence of forbidden mounts (lab kubeconfig, operator env, OMNI_HOME clone bind), and its CPU/memory caps, all from committed state, and run in every job. The skip ends in the same change that gives dev-200 a verify block: the test then runs, and that change removes this id from this baseline.
           node_ids:
             - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on
-        - measured_at: '2026-09-27'
-          measured_by: OMN-19749
-          delta: 1
-          reason: >-
-            One timing-conditional id, test_the_real_contract_scan_does_not_hold_the_event_loop in tests/integration/test_runtime_health_discovery_off_loop_omn19373.py. That test self-skips by design (its own module docstring and MEANINGFUL_SCAN_SECONDS guard) whenever the real onex.nodes contract scan on the runner is faster than 0.05s to run: on a box with only a handful of installed contracts, comparing "was the loop held" against a near-instant scan would be theatre, so the test skips with the measured duration instead of asserting on a number too small to mean anything. This PR does not touch discovery, the health monitor or its contract count; the id surfaced here only because this is the first Tests-split run to collect this module since the OMN-18776 baseline was last measured. Same class as the OMN-19507 and OMN-19543 entries above (a positive control across a seam that does not always hold on this job): the id is recorded rather than left to grow the set silently, and the test resumes asserting for real the moment this runner's installed-contract count makes the scan meaningful again.
-          node_ids:
-            - tests.integration.test_runtime_health_discovery_off_loop_omn19373::test_the_real_contract_scan_does_not_hold_the_event_loop
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -719,4 +712,3 @@ suites:
       - tests.unit.topology.test_validator_ro_principal_omn17792::test_validator_ro_reaches_a_cluster_only_where_the_seam_is_invoked
       - tests.unit.validators.test_topology_validator::test_canonical_contract_file_is_valid
       - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on
-      - tests.integration.test_runtime_health_discovery_off_loop_omn19373::test_the_real_contract_scan_does_not_hold_the_event_loop
