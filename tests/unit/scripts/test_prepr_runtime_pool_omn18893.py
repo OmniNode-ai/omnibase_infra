@@ -931,3 +931,26 @@ def test_the_slot_publishes_the_port_its_effects_runtime_listens_on() -> None:
     main = re.search(r'"\$\{PREPR_RUNTIME_MAIN_PORT:[^}]*\}:(\d+)"', prepr)
     assert base and slot and main
     assert slot.group(1) == base.group(1) == main.group(1) == "8085"
+
+
+def test_one_holder_on_both_slots_gets_two_work_directories(tmp_path: Path) -> None:
+    works = []
+    for name in ("lab-201-prepr-1", "lab-201-prepr-2"):
+        hosts = {name: FakeHost(cores=32, load=4.0)}
+        hosts[name].phases = dict(SLOT_GOOD)
+        d = tmp_path / name
+        d.mkdir()
+        pool.run_proof(
+            CFG,
+            FakeTransport(hosts),
+            _params(d),
+            "me",
+            150,
+            name,
+            [],
+            now_fn=lambda: NOW,
+            log=lambda s: None,
+        )
+        env = next(d.glob("*.resolved.env")).read_text(encoding="utf-8")
+        works.append(next(x for x in env.splitlines() if x.startswith("W=")))
+    assert len(set(works)) == 2, works

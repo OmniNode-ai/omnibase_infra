@@ -960,7 +960,10 @@ def _run_stack(
     """One stack on the leased host: every phase, then ALWAYS teardown."""
     # A path on the REMOTE host, private to this run and removed at the end.
     remote_dir = f"/tmp/{tag}"  # noqa: S108
-    work = f"$HOME/{cfg.work_root_prefix}{holder}"
+    # keyed by member as well as holder: one lane may hold both .201 slots at
+    # once, and a shared work directory would let one run's teardown remove the
+    # other's tree
+    work = f"$HOME/{cfg.work_root_prefix}{holder}-{host.name}"
     env_lines = [
         f"{k}={shlex.quote(v)}" for k, v in params.items() if k not in RESERVED_PARAMS
     ]
