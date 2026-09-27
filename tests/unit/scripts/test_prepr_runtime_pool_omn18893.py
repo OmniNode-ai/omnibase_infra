@@ -917,3 +917,17 @@ def test_the_prove_script_refuses_a_project_it_did_not_derive(
     )
     assert proc.returncode == 2, proc.stdout + proc.stderr
     assert not (tmp_path / "w").exists()
+
+
+def test_the_slot_publishes_the_port_its_effects_runtime_listens_on() -> None:
+    # Found live (omnibase_infra#4180 on lab-201-prepr-1, 2026-09-27): the slot
+    # published 28086 onto container port 8086, where nothing listens, so its
+    # effects runtime was healthy inside and unreachable from the host.
+    docker = REPO_ROOT / "docker"
+    infra = (docker / "docker-compose.infra.yml").read_text(encoding="utf-8")
+    prepr = (docker / "docker-compose.prepr.yml").read_text(encoding="utf-8")
+    base = re.search(r'"\$\{DEV_RUNTIME_EFFECTS_PORT:[^}]*\}:(\d+)"', infra)
+    slot = re.search(r'"\$\{PREPR_RUNTIME_EFFECTS_PORT:[^}]*\}:(\d+)"', prepr)
+    main = re.search(r'"\$\{PREPR_RUNTIME_MAIN_PORT:[^}]*\}:(\d+)"', prepr)
+    assert base and slot and main
+    assert slot.group(1) == base.group(1) == main.group(1) == "8085"

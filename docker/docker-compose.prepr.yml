@@ -276,7 +276,10 @@ services:
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-effects"
     depends_on: !override []
     ports: !override
-      - "${PREPR_RUNTIME_EFFECTS_PORT:?PREPR_RUNTIME_EFFECTS_PORT must be set}:8086"
+      # the effects runtime listens on 8085 inside its container, as on every
+      # lane (infra: DEV_RUNTIME_EFFECTS_PORT:8085; dev-202: 61086:8085). Mapping
+      # to 8086 published a port nothing answered on (lab pool run, 2026-09-27).
+      - "${PREPR_RUNTIME_EFFECTS_PORT:?PREPR_RUNTIME_EFFECTS_PORT must be set}:8085"
     environment:
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
       ONEX_GROUP_ID: "prepr-${ONEX_PREPR_SLOT}-runtime-effects"
