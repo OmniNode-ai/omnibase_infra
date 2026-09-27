@@ -189,11 +189,21 @@ FLOOR_FILE="$OMNI_HOME/.onex-workspace-floor.json"
 # is exactly the failure this wrapper was written to end, and the warning stops
 # the moment the stale install is removed.
 _warn_on_shadowed_path_onex() {
-  local path_onex
+  local path_onex resolved_path_onex resolved_entrypoint resolved_wrapper
   path_onex="$(command -v onex 2>/dev/null || true)"
   [[ -n "$path_onex" ]] || return 0
   [[ "$path_onex" != "$ENTRYPOINT" ]] || return 0
   [[ "$path_onex" != "$SCRIPT_DIR/onex" ]] || return 0
+  # `command -v` returns the literal PATH entry, never a symlink's resolved
+  # target (OMN-19810). A symlink placed at that entry on purpose so `onex` is
+  # on PATH -- resolving to this wrapper or to $ENTRYPOINT -- string-compares
+  # unequal to both above and printed a false WARNING on every dispatch. Only
+  # a comparison of RESOLVED paths tells a real shadow from that setup.
+  resolved_path_onex="$(readlink -f "$path_onex" 2>/dev/null || echo "$path_onex")"
+  resolved_entrypoint="$(readlink -f "$ENTRYPOINT" 2>/dev/null || echo "$ENTRYPOINT")"
+  resolved_wrapper="$(readlink -f "$SCRIPT_DIR/onex" 2>/dev/null || echo "$SCRIPT_DIR/onex")"
+  [[ "$resolved_path_onex" != "$resolved_entrypoint" ]] || return 0
+  [[ "$resolved_path_onex" != "$resolved_wrapper" ]] || return 0
   _say "WARNING: a different 'onex' shadows the CLI venv on PATH:"
   _say "  PATH resolves : $path_onex"
   _say "  this wrapper  : $ENTRYPOINT"

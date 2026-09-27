@@ -833,14 +833,38 @@ gate_venv_purity_check
 # over. A fixed path is checked -- not a live `command -v onex`, which would
 # depend on the caller's own PATH -- so the verdict is deterministic
 # regardless of what shell state this process happens to inherit from.
+#
+# NOT every occupant of $shadow is drift (OMN-19810). A symlink placed there on
+# purpose so `onex` is on PATH, whose fully-resolved target IS the canonical
+# wrapper, is the sanctioned setup working as intended and must not fail the
+# run. What still fails: a regular file (the `uv tool install` shim shape this
+# surface was built to catch), and a symlink that resolves anywhere else. Both
+# of those keep outranking the wrapper for every non-interactive invocation,
+# same as before. `readlink -f` is used for resolution -- present as a plain
+# `-f` flag on both BSD/macOS `readlink` (verified: `man readlink` on this
+# host) and GNU coreutils, so no python/perl fallback is needed here.
 path_onex_shadow_check() {
-  local shadow wrapper
+  local shadow wrapper resolved_shadow resolved_wrapper found
   [[ -n "${HOME:-}" ]] || return 0
   shadow="${HOME}/.local/bin/onex"
   wrapper="$SCRIPT_DIR/onex"
-  [[ -e "$shadow" ]] || return 0
+  [[ -e "$shadow" || -L "$shadow" ]] || return 0
+
+  if [[ -L "$shadow" ]]; then
+    resolved_shadow="$(readlink -f "$shadow" 2>/dev/null || true)"
+    resolved_wrapper="$(readlink -f "$wrapper" 2>/dev/null || true)"
+    if [[ -n "$resolved_shadow" && -n "$resolved_wrapper" && "$resolved_shadow" == "$resolved_wrapper" ]]; then
+      record "onex-path-shadow" "ALREADY_AT_TARGET" \
+        "$shadow is a symlink to the canonical wrapper ($resolved_wrapper) — not a shadow"
+      return 0
+    fi
+    found="a symlink to ${resolved_shadow:-$(readlink "$shadow" 2>/dev/null || echo "an unresolvable target")}"
+  else
+    found="a regular file"
+  fi
+
   record "onex-path-shadow" "SHADOWED" \
-    "$shadow exists and outranks $wrapper for every non-interactive onex invocation (the interactive-shell alias never covers those) — fix: uv tool uninstall omnibase-core"
+    "$shadow exists ($found) and outranks $wrapper for every non-interactive onex invocation (the interactive-shell alias never covers those) — fix: uv tool uninstall omnibase-core"
 }
 path_onex_shadow_check
 
