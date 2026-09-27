@@ -84,6 +84,23 @@ def _write_base_contract_with_typed_decision_backend(
                         "tier": "local",
                     },
                     {
+                        # OMN-17099 added this id to the real dev.bifrost.yaml
+                        # overlay without declaring provider/tier/credential
+                        # itself either (same shape as local-heavy-reasoning
+                        # above), so the base contract must declare it too, or
+                        # this module's positive case fails on every dev-lane
+                        # render with "not declared by the base contract" and
+                        # the negative-control case fails on the SAME error
+                        # instead of the typed-decision refusal it asserts on
+                        # (matching the sibling precedent's declaration in
+                        # test_committed_lab_overlays_render_omn18570.py).
+                        "backend_id": "local-embedding",
+                        "model_name": "text-embedding-qwen3",
+                        "endpoint_url_env": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
+                        "endpoint_url": None,
+                        "tier": "local",
+                    },
+                    {
                         "backend_id": "cloud-gemini-pro",
                         "model_name": "gemini-2.5-flash",
                         "endpoint_url": _CLOUD_ENDPOINT,
