@@ -826,7 +826,11 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 217 -> 219 for OMN-19716: node_projection_topic_activity/0000 creates the
     # topic_activity table and 0001 grants the runtime role SELECT, INSERT and
     # UPDATE on it. Vendored FIRST per the vendor-parity ordering.
-    assert len(result.declarations) == 219
+    # 219 -> 220 for OMN-19860: node_projection_delegation/0048 adds the
+    # nullable delegation_events.caller_lane column, so a delegation row names
+    # the ledger lane that issued it. Additive (expand-only), vendored FIRST
+    # per the vendor-parity ordering.
+    assert len(result.declarations) == 220
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
