@@ -28,17 +28,19 @@ happens is not a gate.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
 import yaml
 
-from omnibase_infra.runtime.health import runtime_lane_identity
-from omnibase_infra.runtime.health.runtime_lane_identity import (
-    ENV_RUNTIME_LANE,
-    KNOWN_LANES,
+from omnibase_core.enums.enum_config_overlay_source import EnumConfigOverlaySource
+from omnibase_core.models.config_overlay import (
+    ModelConfigOverlayScope,
+    ModelRuntimeLaneDeclaration,
 )
+from omnibase_infra.config_overlay.models import ModelRuntimeLaneResolution
+from omnibase_infra.runtime.health import runtime_lane_identity
+from omnibase_infra.runtime.health.runtime_lane_identity import ENV_RUNTIME_LANE
 from omnibase_infra.services.service_runtime_health_monitor import (
     ServiceRuntimeHealthMonitor,
 )
@@ -94,20 +96,38 @@ def _monitor() -> ServiceRuntimeHealthMonitor:
     )
 
 
+def _establish(lane: str, *roles: str) -> None:
+    """Hold a lane the way the kernel does after reading the overlay (OMN-19747)."""
+    runtime_lane_identity.establish_runtime_lane(
+        ModelRuntimeLaneResolution(
+            declaration=ModelRuntimeLaneDeclaration.model_validate(
+                {
+                    "schema_version": "runtime_lane.v1",
+                    "lane_id": lane,
+                    "roles": list(roles),
+                    "description": "the dev lane",
+                }
+            ),
+            scope=ModelConfigOverlayScope(environment="local", lane=lane),
+            source=EnumConfigOverlaySource.LOCAL_HOME,
+            location=f"/root/.omninode/config/local/{lane}/runtime.lane.json",
+            sha256="0" * 64,
+        )
+    )
+
+
 @pytest.mark.asyncio
 async def test_the_declared_lane_reaches_the_serialised_health_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Deployment -> environment -> monitor -> wire, with nothing stubbed."""
+    """Deployment -> overlay -> established lane -> monitor -> wire."""
     lane = _declared_lane()
-    assert lane in KNOWN_LANES, (
-        f"the overlay declares {ENV_RUNTIME_LANE}={lane!r}, which the resolver "
-        f"refuses: it is not in {sorted(KNOWN_LANES)}. A refused value reaches "
-        "the consumer as no value at all."
-    )
-    monkeypatch.setenv(ENV_RUNTIME_LANE, lane)
-
-    event = await _monitor().run_once()
+    monkeypatch.delenv("RUNTIME_PROFILE", raising=False)
+    _establish(lane, "lab")
+    try:
+        event = await _monitor().run_once()
+    finally:
+        runtime_lane_identity.clear_established_runtime_lane()
 
     assert event.lane == lane, (
         f"the monitor emitted lane={event.lane!r} while the deployment declared "
@@ -123,47 +143,13 @@ async def test_the_declared_lane_reaches_the_serialised_health_payload(
 
 
 @pytest.mark.asyncio
-async def test_without_the_declaration_the_payload_carries_no_lane(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """The pre-fix state, pinned as the negative control.
-
-    This is the whole defect reproduced through the real emitter: with nothing
-    declared, the event is valid, the cycle succeeds, the payload is complete
-    in every other respect -- and the one key a lane-keyed consumer needs is
-    null. Nothing raises. Pinning it here means the assertion above has a
-    referent: it distinguishes "the lane made it through" from "this test would
-    pass either way".
-
-    It also holds the emitter's side of the honesty repair: the process that
-    cannot name its lane says so, once, rather than emitting in silence.
-    """
-    monkeypatch.delenv(ENV_RUNTIME_LANE, raising=False)
-    runtime_lane_identity._warn_absent_lane.cache_clear()
-
+async def test_a_lane_without_the_lab_role_puts_no_lane_on_the_payload() -> None:
+    """The negative control: the same lane, declared without the lab role."""
+    _establish(_declared_lane())
     try:
-        with caplog.at_level(logging.WARNING):
-            event = await _monitor().run_once()
+        event = await _monitor().run_once()
     finally:
-        runtime_lane_identity._warn_absent_lane.cache_clear()
+        runtime_lane_identity.clear_established_runtime_lane()
 
-    assert event.lane is None, (
-        "an undeclared lane produced a lane on the event -- something is "
-        "guessing, and a guessed lane puts one deployment's verdict on "
-        "another lane's row"
-    )
+    assert event.lane is None
     assert event.model_dump(mode="json").get("lane") is None
-
-    announced = [
-        record
-        for record in caplog.records
-        if record.levelno >= logging.WARNING and ENV_RUNTIME_LANE in record.getMessage()
-    ]
-    assert announced, (
-        "the monitor emitted a lane-less health event and nothing in the "
-        f"process mentioned {ENV_RUNTIME_LANE}. That silence is what let this "
-        "run undetected: the consumer drops the event and cannot tell a "
-        "lane-less emitter from a lane it does not hold, and the emitter is "
-        "the only thing in a position to say which it was."
-    )

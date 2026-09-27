@@ -1593,6 +1593,21 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
+        # 1c'. Resolve this runtime's lane from the deployment's overlay
+        # (OMN-19747, RULING 2026-09-26T14:31:29Z lane=orchestrator-83). The
+        # lane and its roles come from the runtime.lane document whoever runs
+        # this process supplies, read at (ONEX_ENVIRONMENT, ONEX_RUNTIME_LANE)
+        # from the one overlay source this deployment selects. No overlay, no
+        # lane, or a lane the overlay does not declare raises here, before any
+        # contract is discovered: the process refuses to start rather than
+        # running DEGRADED with lane-scoped contracts dropped (OMN-19408).
+        from omnibase_infra.runtime.health.runtime_lane_identity import (
+            establish_runtime_lane,
+            resolve_runtime_lane_declaration,
+        )
+
+        establish_runtime_lane(resolve_runtime_lane_declaration())
+
         # 1d. Load overlay config for feature gating (OMN-12634).
         # Resolves the operator's overlay YAML into a flat key-value dict that is
         # passed to domain plugins via ModelDomainPluginConfig.overlay_config.

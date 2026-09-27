@@ -131,6 +131,13 @@ def _discover_contracts() -> ProtocolAutoWiringManifestLike:
     return ownership_result.manifest  # type: ignore[return-value]
 
 
+def _runtime_profile_name() -> str:
+    """The validated runtime profile of this process (OMN-17985)."""
+    from omnibase_infra.runtime.runtime_profile import resolve_runtime_profile_name
+
+    return resolve_runtime_profile_name()
+
+
 def _filter_manifest_for_runtime_profile(
     manifest: ProtocolAutoWiringManifestLike,
 ) -> ProtocolAutoWiringManifestLike:
@@ -1180,7 +1187,7 @@ class ServiceRuntimeHealthMonitor:
             # OMN-18769: the lane this verdict is ABOUT. Absent when the
             # deployment does not name one -- see the field's own note on
             # why that is nullable rather than defaulted.
-            lane=resolve_runtime_lane(),
+            lane=resolve_runtime_lane(runtime_profile=_runtime_profile_name()),
         )
 
         logger.info(
