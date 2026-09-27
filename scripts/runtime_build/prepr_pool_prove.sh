@@ -17,7 +17,8 @@
 # dogfood lane, a runner) is read for a positive control and never written.
 #
 # Params (sourced): TAG W [INFRA_PR INFRA_HEAD] [MARKET_PR MARKET_HEAD]
-#   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS CORE_REF SPI_REF COMPAT_REF]
+#   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS CORE_REF SPI_REF COMPAT_REF
+#   DOCKER_CONFIG_MODE]
 #
 # The id and file lists below ($C $V $N $IMGS $FILES and the like) are word-split
 # ON PURPOSE, and the macOS hosts run bash 3.2, which has no mapfile; hence:
@@ -101,17 +102,40 @@ build)
   grep -n 'model_endpoint "' "$W/local.bifrost.yaml"
   uv run -q python -m omnibase_infra.docker.catalog.cli generate local --env-file "$W/local.env" 2>&1 | tail -2
   RV=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"(.*)".*/\1/')
+  if [ "${DOCKER_CONFIG_MODE:-host}" = isolated ]; then
+    # A macOS host whose docker credsStore lives in the login keychain cannot
+    # build from a non-interactive ssh session (the keychain will not unlock:
+    # drain-runtime-token-83 on .200, 2026-09-27). Build with a private config
+    # that has no credential store, keeping the plugin, context and buildx dirs.
+    DC="$W/docker-config"; mkdir -p "$DC"
+    python3 -c 'import json,os,sys
+src=os.path.expanduser("~/.docker/config.json")
+try:
+    cfg=json.load(open(src))
+except (OSError, ValueError):
+    cfg={}
+for k in ("credsStore","credHelpers","auths"):
+    cfg.pop(k, None)
+json.dump(cfg, open(sys.argv[1],"w"))' "$DC/config.json"
+    for d in cli-plugins contexts buildx; do [ -e "$HOME/.docker/$d" ] && ln -s "$HOME/.docker/$d" "$DC/$d"; done
+    export DOCKER_CONFIG="$DC"; echo "docker config isolated at $DC (no credential store)"
+  fi
   echo "build start $(ts) RUNTIME_VERSION=$RV GIT_SHA=$(git rev-parse HEAD)"
   docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build \
     --build-arg BUILD_SOURCE=workspace --build-arg EXPECTED_BUILD_SOURCE=workspace \
     --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true \
     --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" \
     --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1
-  echo "build rc=$? $(ts)"; tail -4 "$W/build.log"
+  brc=$?; echo "build rc=$brc $(ts)"; tail -4 "$W/build.log"
+  if [ "$brc" != 0 ]; then
+    grep -qi keychain "$W/build.log" && echo "build failed on the docker credential keychain: set docker_config: isolated for this host"
+    exit 1
+  fi
   docker images --filter reference="$P*" --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}'
   echo "up start $(ts)"
   uv run -q python -m omnibase_infra.docker.catalog.cli up local --env-file "$W/local.env" > "$W/up.log" 2>&1
-  echo "up rc=$? $(ts)"; tail -6 "$W/up.log"
+  urc=$?; echo "up rc=$urc $(ts)"; tail -6 "$W/up.log"
+  [ "$urc" = 0 ] || exit 1
   ;;
 probe)
   echo "probe $(ts)"

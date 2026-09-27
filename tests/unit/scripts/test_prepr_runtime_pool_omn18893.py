@@ -631,3 +631,52 @@ def test_a_new_contract_failing_for_a_different_reason_is_the_prs() -> None:
         "projection_session_content" in n and "base does not have" in n
         for n in rb.notes
     )
+
+
+def test_an_inconclusive_run_is_released_as_aborted(tmp_path: Path) -> None:
+    # The ledger grammar takes PASS, FAIL or ABORTED on a surface RELEASE
+    # (MSG 2026-09-27T16:25:02Z-drain-runtime-token-83).
+    hosts = {"lab-101": FakeHost()}
+    hosts["lab-101"].phases["build"] = "build rc=1"
+    code, text = pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _params(tmp_path),
+        "me",
+        60,
+        "lab-101",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_INCONCLUSIVE
+    assert "LAB PROOF INCONCLUSIVE" in text
+    assert "result=ABORTED" in text and "result=INCONCLUSIVE" not in text
+
+
+def test_a_failed_build_exits_the_phase_non_zero() -> None:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    build = text[text.index("build)") : text.index("probe)")]
+    assert 'if [ "$brc" != 0 ]' in build and "exit 1" in build
+    assert '[ "$urc" = 0 ] || exit 1' in build
+
+
+def test_the_keychain_host_builds_with_an_isolated_docker_config(
+    tmp_path: Path,
+) -> None:
+    assert CFG.host("lab-200").docker_config == "isolated"
+    assert CFG.host("lab-101").docker_config == "host"
+    hosts = {"lab-200": FakeHost(cores=24, load=2.0)}
+    pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _params(tmp_path),
+        "me",
+        60,
+        "lab-200",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    env = next(tmp_path.glob("*.resolved.env")).read_text(encoding="utf-8")
+    assert "DOCKER_CONFIG_MODE=isolated" in env

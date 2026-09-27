@@ -55,6 +55,10 @@ hosts:
     surface: 200-runtime
     os: macos
     status: pool
+    # its docker credsStore is the login keychain, which will not unlock from a
+    # non-interactive ssh session, so the image build failed there (MSG
+    # 2026-09-27T16:25:02Z-drain-runtime-token-83); build with a private config
+    docker_config: isolated
   - name: lab-201
     ssh_target: "192.168.86.201" # onex-allow-internal-ip
     surface: 201-dev-runtime

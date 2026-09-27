@@ -99,6 +99,9 @@ class PoolHost:
     os: str
     status: str
     reason: str = ""
+    # "isolated": build with a private DOCKER_CONFIG that has no credential
+    # store, for a host whose keychain cannot unlock over ssh
+    docker_config: str = "host"
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,10 @@ def load_pool_config(path: Path = POOL_CONFIG) -> PoolConfig:
         status = h["status"]
         if status not in ("pool", "excluded"):
             raise ValueError(f"{path}: host {h['name']} has status {status!r}")
+        if str(h.get("docker_config", "host")) not in ("host", "isolated"):
+            raise ValueError(
+                f"{path}: host {h['name']} docker_config must be host or isolated"
+            )
         if status == "excluded" and not h.get("reason"):
             raise ValueError(f"{path}: excluded host {h['name']} states no reason")
         hosts.append(
@@ -138,6 +145,7 @@ def load_pool_config(path: Path = POOL_CONFIG) -> PoolConfig:
                 os=h["os"],
                 status=status,
                 reason=str(h.get("reason", "")).strip(),
+                docker_config=str(h.get("docker_config", "host")),
             )
         )
     return PoolConfig(
@@ -781,9 +789,12 @@ def run_proof(
     text = render_readback(
         rb, host, params, started, now_fn().strftime("%Y-%m-%dT%H:%M:%SZ")
     )
+    # the ledger grammar takes PASS, FAIL or ABORTED on a surface RELEASE; an
+    # INCONCLUSIVE run is released as ABORTED with the verdict in its text
+    release_result = rb.outcome if rb.outcome in ("PASS", "FAIL") else "ABORTED"
     text += (
         f"\n  ledger: RELEASE re=<your HOLD id> surface={host.surface} "
-        f"result={rb.outcome} restored={'yes' if rb.restored else 'no'}"
+        f"result={release_result} restored={'yes' if rb.restored else 'no'}"
     )
     code = {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(rb.outcome, EXIT_INCONCLUSIVE)
     return code, text
@@ -807,12 +818,13 @@ def _run_stack(
     env_lines = [
         f"{k}={shlex.quote(v)}"
         for k, v in params.items()
-        if k not in ("TAG", "W", "MODEL_ENDPOINT")
+        if k not in ("TAG", "W", "MODEL_ENDPOINT", "DOCKER_CONFIG_MODE")
     ]
     env_lines += [
         f"TAG={tag}",
         f"W={work}",
         f"MODEL_ENDPOINT={shlex.quote(cfg.model_endpoint)}",
+        f"DOCKER_CONFIG_MODE={shlex.quote(host.docker_config)}",
     ]
     local_env = params_path.with_suffix(".resolved.env")
     local_env.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
