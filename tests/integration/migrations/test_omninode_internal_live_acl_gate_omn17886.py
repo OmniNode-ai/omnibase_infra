@@ -225,6 +225,31 @@ def _live_privileges(server: _Server, table: str, grantee: str) -> set[str]:
     return set(result.stdout.split())
 
 
+_GATEWAY_STATUS_VIEW = "gateway_link_health_status"
+
+
+def _relation_exists(server: _Server, relation: str) -> bool:
+    result = subprocess.run(
+        [
+            "psql",
+            "-At",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-v",
+            f"relname={relation}",
+            "-d",
+            NODE_DB,
+        ],
+        input="SELECT to_regclass('omninode_internal.' || :'relname') IS NOT NULL;\n",
+        capture_output=True,
+        text=True,
+        check=False,
+        env=server.env(),
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip() == "t"
+
+
 def test_allowlist_entries_are_unique_and_name_their_removal() -> None:
     entries = _load_allowlist()
     findings = [entry["finding"] for entry in entries]
@@ -307,6 +332,14 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     topic_activity_live = _live_privileges(fresh_build, "topic_activity", _RUNTIME)
     assert topic_activity_live == topic_activity_declared
     assert "DELETE" not in topic_activity_live
+
+    # OMN-17886 AC2 revoke: no runtime node reads or writes the
+    # gateway_link_health_status view, so the runtime role holds nothing on it.
+    # Named here so a default-privilege rule that grants it again fails by
+    # name, not only in the diff below. The existence check keeps an empty set
+    # from coming from a view the build never created.
+    assert _relation_exists(fresh_build, _GATEWAY_STATUS_VIEW)
+    assert _live_privileges(fresh_build, _GATEWAY_STATUS_VIEW, _RUNTIME) == set()
 
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}

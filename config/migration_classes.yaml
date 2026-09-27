@@ -137,6 +137,7 @@ migrations:
   forward/nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT EVIDENCE_DASHBOARD_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT EVIDENCE_CO
   forward/nodes/node_evidence_dashboard_reducer/0002_grant_omninode_runtime_evidence_dashboard_tables.sql: expand-only
   forward/nodes/node_gateway_link_health_write_effect/0001_create_gateway_link_health.sql: forward-only # ALTER TABLE ALTER COLUMN; CREATE OR REPLACE
+  forward/nodes/node_gateway_link_health_write_effect/0002_revoke_omninode_runtime_gateway_link_health_status.sql: forward-only # REVOKE
   forward/nodes/node_hook_event_capture/0001_create_hook_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT HOOK_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_HOOK_EVENTS_TENANT_EVENT_S
   forward/nodes/node_hook_event_capture/0002_hook_events_tenant_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql: expand-only
