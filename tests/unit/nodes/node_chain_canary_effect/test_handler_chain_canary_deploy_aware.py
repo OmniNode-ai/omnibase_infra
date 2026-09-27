@@ -97,15 +97,26 @@ class _Clock:
 class _Ingress:
     """Each submission takes ``elapsed_s`` of fake wall clock."""
 
-    def __init__(self, clock: _Clock, elapsed_s: float = 125.0) -> None:
+    def __init__(
+        self,
+        clock: _Clock,
+        elapsed_s: float = 125.0,
+        unreachable_calls: frozenset[int] = frozenset(),
+    ) -> None:
         self.clock = clock
         self.elapsed_s = elapsed_s
         self.calls = 0
+        # 1-based call numbers whose connection is refused, the way onex-api
+        # answered while deploy 3d3f4b1a recreated it (lab run 36279784915).
+        self.unreachable_calls = unreachable_calls
 
     async def __call__(
         self, url: str, body: dict[str, object], timeout_s: float
     ) -> tuple[dict[str, object] | None, str, int]:
         self.calls += 1
+        if self.calls in self.unreachable_calls:
+            self.clock.now += timedelta(seconds=1)
+            return None, "ConnectError: All connection attempts failed", 1000
         self.clock.now += timedelta(seconds=self.elapsed_s)
         # The ingress answer is recorded, never trusted (OMN-16931): the
         # verdict comes from the terminal readback below.
@@ -464,7 +475,7 @@ async def test_no_deploy_retry_when_readiness_never_answers() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_no_deploy_retry_for_any_verdict_but_terminal_missing() -> None:
+async def test_no_deploy_retry_for_a_green_first_attempt() -> None:
     """A GREEN first attempt is never re-fired, even with a deploy running."""
     clock = _Clock()
     agent = _Agent(_idle(), _deploying(_DEPLOY_JOB, _T0 + timedelta(seconds=5)))
@@ -707,3 +718,81 @@ def test_an_unread_queue_does_not_make_an_idle_agent_busy() -> None:
     )
     assert snapshot.queued_commands is None
     assert snapshot.busy is False
+
+
+# -- INGRESS_UNREACHABLE: the other face of a redeploy ---------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_deploy_in_window_ingress_unreachable_retries_once() -> None:
+    """Lab run 36279784915 (2026-09-26T23:54Z): fired while deploy 3d3f4b1a
+    recreated onex-api, so the submission route refused the connection. The
+    deploy explains it exactly as it explains a missing terminal."""
+    clock = _Clock()
+    started = _T0 - timedelta(seconds=60)
+    agent = _Agent(
+        _idle(),  # pre-fire
+        _deploying(_DEPLOY_JOB, started),  # after the attempt
+        _idle(_DEPLOY_JOB, started, _T0 + timedelta(seconds=200)),
+    )
+    ingress = _Ingress(clock, unreachable_calls=frozenset({1}))
+    handler, _ = _handler(
+        clock, agent, _TerminalReadback(_SUCCESS_TOPIC), ingress=ingress
+    )
+
+    result = await handler.handle(_request())
+
+    assert ingress.calls == 2
+    assert result.verdict is EnumChainCanaryVerdict.GREEN
+    window = result.deploy_window
+    assert window.status is EnumDeployWindowStatus.DEPLOY_IN_WINDOW_RETRIED
+    assert window.first_attempt_verdict is EnumChainCanaryVerdict.INGRESS_UNREACHABLE
+    assert window.deploy_correlation_ids == (_DEPLOY_JOB,)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_deploy_ingress_unreachable_stays_red_without_retry() -> None:
+    """An ingress that is down with no deploy behind it is a real outage."""
+    clock = _Clock()
+    agent = _Agent(
+        _idle(
+            UUID("01d00000-0000-4000-8000-000000000000"),
+            _T0 - timedelta(hours=2),
+            _T0 - timedelta(hours=1),
+        )
+    )
+    ingress = _Ingress(clock, unreachable_calls=frozenset({1, 2}))
+    handler, _ = _handler(
+        clock, agent, _TerminalReadback(_SUCCESS_TOPIC), ingress=ingress
+    )
+
+    result = await handler.handle(_request())
+
+    assert ingress.calls == 1
+    assert result.verdict is EnumChainCanaryVerdict.INGRESS_UNREACHABLE
+    assert result.success is False
+    assert result.deploy_window.status is EnumDeployWindowStatus.NO_DEPLOY_IN_WINDOW
+    assert "ingress_unreachable" in result.deploy_window.detail
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_deploy_retry_for_a_red_a_redeploy_does_not_explain() -> None:
+    """A deploy running in the window does not earn a retry for a verdict it
+    cannot cause: an unreadable bus is not a missing terminal."""
+    clock = _Clock()
+    agent = _Agent(_idle(), _deploying(_DEPLOY_JOB, _T0 + timedelta(seconds=5)))
+    handler, ingress = _handler(clock, agent, _TerminalReadback(None))  # type: ignore[arg-type]
+
+    result = await handler.handle(_request())
+
+    assert ingress.calls == 1
+    assert result.success is False
+    assert result.verdict not in (
+        EnumChainCanaryVerdict.TERMINAL_MISSING,
+        EnumChainCanaryVerdict.INGRESS_UNREACHABLE,
+    )
+    assert result.deploy_window.status is EnumDeployWindowStatus.NOT_NEEDED
+    assert result.deploy_window.retried is False

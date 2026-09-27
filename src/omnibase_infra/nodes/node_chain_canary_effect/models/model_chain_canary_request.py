@@ -351,16 +351,18 @@ class ModelChainCanaryRequest(BaseModel):
         ),
     )
     deploy_wait_seconds: int = Field(
-        default=1200,
+        default=2400,
         ge=0,
         le=3600,
         description=(
             "Total wall-clock the run may spend waiting for a deploy to "
             "converge, shared between the pre-fire wait and the wait before "
             "the single retry. The deploy agent's measured mean service time "
-            "on .201 was ~956 s on 2026-09-26. When it runs out the run fires "
-            "anyway (pre-fire) or does not retry (post-fire); it never turns "
-            "a RED into a GREEN."
+            "on .201 was ~937 s on 2026-09-26, and deploys arrive back to "
+            "back during a merge train (lab run 36279784915 met two), so the "
+            "default is about two and a half jobs. When it runs out the run "
+            "fires anyway (pre-fire) or does not retry (post-fire); it never "
+            "turns a RED into a GREEN."
         ),
     )
 

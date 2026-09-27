@@ -246,6 +246,19 @@ TypeSleep = Callable[[float], Awaitable[None]]
 _DEPLOY_POLL_SECONDS: float = 15.0
 # Per-read HTTP timeout for the deploy agent and the lane readiness routes.
 _DEPLOY_READ_TIMEOUT_SECONDS: float = 10.0
+# The verdicts a redeploy of the lane produces on a healthy chain (OMN-19811),
+# and so the only ones a deploy in the window can earn a retry for.
+# TERMINAL_MISSING is run 36202173467: omninode-runtime recreated mid-budget.
+# INGRESS_UNREACHABLE is this change's own lab run 36279784915
+# (2026-09-26T23:54Z): fired while deploy 3d3f4b1a recreated onex-api, so the
+# submission route refused the connection. Every other verdict names a fault a
+# redeploy does not explain and is never retried.
+_DEPLOY_EXPLICABLE_VERDICTS: frozenset[EnumChainCanaryVerdict] = frozenset(
+    {
+        EnumChainCanaryVerdict.TERMINAL_MISSING,
+        EnumChainCanaryVerdict.INGRESS_UNREACHABLE,
+    }
+)
 
 
 def _utc_now() -> datetime:
@@ -1137,7 +1150,7 @@ class HandlerChainCanary:
     async def _probe_around_deploys(
         self, request: ModelChainCanaryRequest
     ) -> ModelChainCanaryResult:
-        """Fire the probe, and retry ONCE when a deploy caused its TERMINAL_MISSING.
+        """Fire the probe, and retry ONCE when a deploy explains its RED.
 
         Run 36202173467 (2026-09-25T23:44Z) reported ``terminal_missing``
         because deploy-agent job 193cfeda recreated ``omninode-runtime`` inside
@@ -1147,7 +1160,9 @@ class HandlerChainCanary:
         1. Before firing, read the deploy agent. If it is busy, wait (bounded by
            ``deploy_wait_seconds``) for it to go idle and the lane's readiness
            routes to answer, then fire -- or fire anyway when the wait runs out.
-        2. If the attempt ends ``TERMINAL_MISSING``, read the agent again and
+        2. If the attempt ends ``TERMINAL_MISSING`` or ``INGRESS_UNREACHABLE``
+           (the two verdicts a redeploy produces on a healthy chain), read the
+           agent again and
            ask whether a deploy job was accepted, running or completed inside
            the attempt's window. Only then, and only if the lane converges
            inside what is left of the wait budget, fire ONE more time. The
@@ -1155,8 +1170,9 @@ class HandlerChainCanary:
 
         What this never does: retry on any other verdict, retry twice, or
         retry when the agent is unreadable or reports no deploy in the
-        window. A ``TERMINAL_MISSING`` with no deploy behind it is exactly the
-        dead chain this canary exists to catch, and it stays RED.
+        window. A ``TERMINAL_MISSING`` or ``INGRESS_UNREACHABLE`` with no
+        deploy behind it is exactly the dead chain or lane this canary exists
+        to catch, and it stays RED.
         """
         agent_url = request.deploy_agent_url
         if not agent_url:
@@ -1228,15 +1244,17 @@ class HandlerChainCanary:
                 }
             )
 
-        if first.verdict is not EnumChainCanaryVerdict.TERMINAL_MISSING:
+        if first.verdict not in _DEPLOY_EXPLICABLE_VERDICTS:
             return _attach(
                 first,
                 status=EnumDeployWindowStatus.NOT_NEEDED,
                 detail=(
-                    f"first attempt ended {first.verdict.value}, not "
-                    "terminal_missing; the window was not examined for a retry"
+                    f"first attempt ended {first.verdict.value}, which a "
+                    "redeploy does not explain; the window was not examined "
+                    "for a retry"
                 ),
             )
+        red = first.verdict.value
 
         first_attempt = {
             "first_attempt_probe_correlation_id": first.probe_correlation_id,
@@ -1254,7 +1272,7 @@ class HandlerChainCanary:
                 detail=(
                     f"the deploy agent at {agent_url} could not be read after "
                     f"the attempt ({after.error}); with no evidence of a deploy "
-                    "the terminal_missing stands and no retry was made"
+                    f"the {red} stands and no retry was made"
                 ),
             )
 
@@ -1267,7 +1285,7 @@ class HandlerChainCanary:
                 detail=(
                     f"the deploy agent at {agent_url} reports no job accepted, "
                     "running or completed inside the attempt's window; the "
-                    "terminal_missing is not explained by a deploy and stands"
+                    f"{red} is not explained by a deploy and stands"
                 ),
             )
 
@@ -1284,20 +1302,21 @@ class HandlerChainCanary:
                     f"deploy job(s) {', '.join(str(i) for i in deploy_ids)} overlapped the "
                     f"attempt, and the lane had not converged after {waited:.0f}s "
                     f"of the {remaining:.0f}s left in the wait budget; no retry "
-                    "was made and the terminal_missing stands"
+                    f"was made and the {red} stands"
                 ),
             )
 
         logger.info(
-            "chain canary: terminal_missing overlapped deploy job(s) %s; lane "
+            "chain canary: %s overlapped deploy job(s) %s; lane "
             "converged after %.0fs; retrying once",
+            red,
             ", ".join(str(i) for i in deploy_ids),
             waited,
         )
         retry = await self._probe_once(request)
         note = (
             f"[OMN-19811 retry: the first attempt "
-            f"({first.probe_correlation_id}) ended terminal_missing while deploy "
+            f"({first.probe_correlation_id}) ended {red} while deploy "
             f"job(s) {', '.join(str(i) for i in deploy_ids)} ran inside its window; this is the "
             "single retry after the lane converged]"
         )

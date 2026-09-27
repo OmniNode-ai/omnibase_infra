@@ -182,7 +182,7 @@ class ModelChainCanaryResult(BaseModel):
         default_factory=ModelDeployWindowEvidence,
         description=(
             "OMN-19811. What the lane's deploy agent reported before the probe "
-            "fired and, on a TERMINAL_MISSING, across the probe's window. When "
+            "fired and, on a TERMINAL_MISSING or INGRESS_UNREACHABLE, across the probe's window. When "
             "status is deploy_in_window_retried every other field of this "
             "receipt describes the single retry, and the first attempt and the "
             "deploy job ids that separated the two are recorded here."

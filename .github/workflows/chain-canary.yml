@@ -156,7 +156,7 @@ on:
       deploy_wait_seconds:
         description: 'Total seconds the run may wait for a dev-lane deploy to converge, shared by the pre-fire wait and the wait before the single retry (OMN-19811).'
         required: false
-        default: '1200'
+        default: '2400'
 
 concurrency:
   # A canary must never race itself: two overlapping probes make the
@@ -195,13 +195,16 @@ jobs:
     # the .201 verify runner, so the pair fails SAFE -- if that runner is down
     # the job queues rather than running somewhere it cannot observe anything.
     runs-on: [self-hosted, omnibase-verify, host-201]
-    # OMN-19811: 25 -> 45. The probe itself still fits the old 25 (setup, a
-    # 120 s budget and its readbacks, at most twice). The added 20 minutes is
-    # the deploy_wait_seconds default of 1200 s, spent only when the deploy
-    # agent reports a deploy around the probe. config/lab_probe_windows.yaml
-    # carries the same number and scripts/ci/check_lab_probe_windows.py refuses
-    # a disagreement.
-    timeout-minutes: 45
+    # OMN-19811: 25 -> 65. The probe itself still fits the old 25 (setup, a
+    # 120 s budget and its readbacks, at most twice). The added 40 minutes is
+    # the deploy_wait_seconds default of 2400 s, spent only when the deploy
+    # agent reports a deploy around the probe. 2400 s, not one mean job
+    # (~937 s): the lab run of this change (36279784915, 2026-09-26T23:33Z)
+    # met two deploys back to back (278ab2e2 settling, then 3d3f4b1a) and a
+    # 1200 s budget ran out mid-rebuild. config/lab_probe_windows.yaml carries
+    # the same number and scripts/ci/check_lab_probe_windows.py refuses a
+    # disagreement.
+    timeout-minutes: 65
 
     steps:
       - name: Checkout omnibase_infra
@@ -424,7 +427,7 @@ jobs:
           TASK_TYPE: ${{ github.event.inputs.task_type || 'test' }}
           BUDGET_MS: ${{ github.event.inputs.budget_ms || '120000' }}
           # OMN-19811: bounded by timeout-minutes above; see that comment.
-          DEPLOY_WAIT_SECONDS: ${{ github.event.inputs.deploy_wait_seconds || '1200' }}
+          DEPLOY_WAIT_SECONDS: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
           # Empty means "use the lane declaration", resolved into
           # KAFKA_BOOTSTRAP_SERVERS by the step above. An explicit override is
           # still honoured, and the request model refuses it if it names a
@@ -662,22 +665,28 @@ jobs:
           deploy = result.get("deploy_window") or {}
           if deploy:
               ids = ", ".join(deploy.get("deploy_correlation_ids") or []) or "none"
-              lines += [
-                  "### Deploy window (OMN-19811)",
-                  "",
+              block = [
                   f"- status: `{deploy.get('status', '?')}` — {deploy.get('detail', '')}",
                   f"- deploy agent: {deploy.get('agent_url') or 'not configured'}",
                   f"- deploy job(s) in the first attempt's window: {ids}",
                   f"- pre-fire deploy: {deploy.get('preflight_deploy_correlation_id') or 'none'}"
-                  f" (waited {deploy.get('preflight_waited_seconds', 0):.0f}s)",
+                  f", queued {deploy.get('preflight_queued_commands')}"
+                  f" (waited {deploy.get('preflight_waited_seconds', 0):.0f}s,"
+                  f" converged={deploy.get('preflight_converged')})",
               ]
               if deploy.get("retried"):
-                  lines.append(
+                  block.append(
                       f"- first attempt `{deploy.get('first_attempt_verdict')}` "
                       f"({deploy.get('first_attempt_probe_correlation_id')}); "
                       "this receipt's verdict is the single retry's"
                   )
-              lines.append("")
+              lines += ["### Deploy window (OMN-19811)", "", *block, ""]
+              # Also to the job log: the step summary is not readable from
+              # `gh run view --log`, and the deploy evidence is what a reader
+              # of a red run needs first.
+              print("deploy window (OMN-19811):")
+              for entry in block:
+                  print(f"  {entry}")
 
           lines += [
               "### Receipt",

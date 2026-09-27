@@ -123,12 +123,15 @@ node_type: "EFFECT_GENERIC"
 # asked. Two new inputs, `deploy_agent_url` (the lane's deploy agent HTTP
 # surface, the one verify-lane-converged reads) and `deploy_wait_seconds`,
 # and one new output, `deploy_window`. Before firing, the probe waits out a
-# deploy in flight. When an attempt ends TERMINAL_MISSING and the agent
-# reports a job accepted, running or completed inside that attempt's window,
+# deploy in flight or queued. When an attempt ends TERMINAL_MISSING or
+# INGRESS_UNREACHABLE (the two verdicts a redeploy produces on a healthy
+# chain; the second was met by this change's own lab run 36279784915, fired
+# while deploy 3d3f4b1a recreated onex-api) and the agent reports a job
+# accepted, running or completed inside that attempt's window,
 # the run waits for the lane to converge and fires ONCE more; the receipt
 # names the deploy job and keeps the first attempt. Every other case --
 # another verdict, no deploy in the window, an unreadable agent, a deploy that
-# never converged, a retry that is itself TERMINAL_MISSING -- leaves the RED
+# never converged, a retry that is itself RED -- leaves the RED
 # standing. No verdict member is added or removed.
 contract_version:
   major: 1
@@ -213,10 +216,10 @@ error_handling:
     # end. Cadence is the retry: the next scheduled run is 2h away.
     #
     # The one exception lives in the handler, not here, and is narrow by
-    # construction (OMN-19811): a TERMINAL_MISSING whose window the deploy
-    # agent itself says a deploy job overlapped earns ONE re-fire after the
-    # lane converges. The deploy is evidence of why the terminal was missing;
-    # without that evidence nothing is retried.
+    # construction (OMN-19811): a TERMINAL_MISSING or INGRESS_UNREACHABLE
+    # whose window the deploy agent itself says a deploy job overlapped earns
+    # ONE re-fire after the lane converges. The deploy is evidence of why the
+    # run went red; without that evidence nothing is retried.
     max_retries: 0
     initial_delay_ms: 0
     max_delay_ms: 0

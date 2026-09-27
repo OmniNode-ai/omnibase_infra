@@ -27,11 +27,12 @@ class EnumDeployWindowStatus(StrEnum):
     # No deploy-agent URL was configured. The run behaves exactly as it did
     # before OMN-19811, and says so.
     NOT_CONFIGURED = "not_configured"
-    # The first attempt did not end TERMINAL_MISSING, so the window was not
+    # The first attempt ended in a verdict a redeploy does not explain (only
+    # TERMINAL_MISSING and INGRESS_UNREACHABLE are), so the window was not
     # examined for a retry. The pre-fire wait (if any) is still recorded.
     NOT_NEEDED = "not_needed"
     # The agent was read and no deploy job was accepted, running or completed
-    # inside the window. The TERMINAL_MISSING is a real one and stays RED.
+    # inside the window. The RED is a real one and stays RED.
     NO_DEPLOY_IN_WINDOW = "no_deploy_in_window"
     # The agent's surface could not be read after the first attempt, so there
     # is no evidence either way. Fails closed: no retry, the RED stands.
