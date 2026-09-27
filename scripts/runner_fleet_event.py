@@ -145,6 +145,21 @@ def _resolve_status(runner: Mapping[str, Any]) -> str:
     return STATUS_OFFLINE
 
 
+def _parse_name_prefixes(name_prefix: str) -> tuple[str, ...]:
+    """Split a comma-separated prefix set into its non-empty members.
+
+    OMN-19842: `name_prefix` used to be matched as a single literal string. A
+    fleet spanning several hosts (OMN-17477) has several declared
+    `runner_name_prefix` values that share no common substring —
+    `omninode-runner` and `omnipc2-verify-runner` are both real prefixes in
+    the live inventory — so the caller now passes the whole declared set,
+    comma-joined, and a runner is kept if it starts with ANY member. A bare
+    single prefix with no comma still works exactly as before: it is the
+    one-element case of this same split.
+    """
+    return tuple(part for part in (p.strip() for p in name_prefix.split(",")) if part)
+
+
 def build_event(
     *,
     runners_payload: Mapping[str, Any],
@@ -159,6 +174,10 @@ def build_event(
 
     `runners_payload` is the verbatim body of
     `GET /orgs/{org}/actions/runners?per_page=100`.
+
+    `name_prefix` is a comma-separated SET of prefixes (OMN-19842), matched
+    with startswith-any; a plain single prefix (no comma) behaves exactly as
+    it always has.
     """
     now = now or datetime.now(UTC)
     observed_at = now.isoformat()
@@ -181,6 +200,7 @@ def build_event(
         )
 
     jobs: Mapping[str, Any] = job_by_runner or {}
+    name_prefixes = _parse_name_prefixes(name_prefix)
 
     rows: list[dict[str, Any]] = []
     for runner in raw_runners:
@@ -193,7 +213,7 @@ def build_event(
                 "unidentifiable runner"
             )
         name = str(name)
-        if name_prefix and not name.startswith(name_prefix):
+        if name_prefixes and not any(name.startswith(p) for p in name_prefixes):
             # A foreign org runner is not this fleet's liveness and must not
             # dilute its counts.
             continue

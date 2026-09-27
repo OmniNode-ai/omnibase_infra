@@ -264,11 +264,20 @@ jobs:
     # happen when nothing was queued.
     outputs:
       reemit_candidates: ${{ steps.converge.outputs.reemit_candidates }}
-    # Only when a command was actually published, and only for the dev lane. A
-    # no-op trigger run has nothing to wait for, and merges to main target the
-    # stability-test lane, which this guard deliberately does not read.
+    # Only for the dev lane: merges to main target the stability-test lane,
+    # which this guard deliberately does not read.
+    #
+    # OMN-18976, the residual gap: NOT only when a command was published. A
+    # NON_RUNTIME merge has no rebuild to wait for, and until this change the
+    # whole job was skipped with it -- including the answer for merges queued
+    # behind an earlier one. When the lane then converged by a route this
+    # repository never watched (another repository's push naming a newer ref),
+    # a queued merge was orphaned for good: 84a1e7c3ec (#4160) on 2026-09-26,
+    # followed by two NON_RUNTIME merges whose runs skipped this job. Only the
+    # WAIT is skippable. With nothing published the guard runs in --observe
+    # mode: no wait, the lane read as it is, and an answer only when the deploy
+    # agent is idle and a receipt-less runtime-affecting merge exists.
     if: >-
-      needs.trigger-rebuild.outputs.published == 'true' &&
       needs.trigger-rebuild.outputs.runtime_lane == 'dev'
     # The lane's docker daemon is on the LAN; hosted compute cannot see it.
     # Unconditional self-hosted rather than the fork fallback the publisher
@@ -356,6 +365,27 @@ jobs:
           # on the self-hosted fleet. The base branch is repo-owned code.
           ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
+          # OMN-18976 durable floor: the re-emission walk reads up to 40
+          # first-parent commits below the lane's revision and classifies each
+          # one, which needs their trees. 250 leaves the base branch room to
+          # have moved past the lane; a commit outside it fails the walk
+          # closed (nothing is widened), never open.
+          fetch-depth: 250
+
+      # OMN-18976 durable floor. The walk answers only for RUNTIME-AFFECTING
+      # merges, classified by the trigger's own predicate (OMN-19318), which
+      # reads omniclaude's canonical deploy-gate validator -- the same file the
+      # trigger job above fetches, by the same sparse checkout.
+      - name: Fetch canonical deploy-path classifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omniclaude
+          ref: main
+          path: .deploy-gate-source
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/deploy-gate/validate_pr_deploy_required.py
+          sparse-checkout-cone-mode: false
 
       # Repo invariant (tests/ci/test_ci_workflow_resilience.py): every job in
       # this workflow resolves Python through the shared CI env action, never
@@ -466,8 +496,35 @@ jobs:
           DEPLOY_AGENT_URL: ${{ env.DEPLOY_AGENT_URL }}
           JOB_TIMEOUT_MINUTES: 45
           RESERVED_TAIL_SECONDS: 120
+          PUBLISHED: ${{ needs.trigger-rebuild.outputs.published }}
+          RUNTIME_PATH_VALIDATOR: .deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py
         run: |
           set -euo pipefail
+          # OMN-18976: a merge that published no rebuild has nothing to wait
+          # for, so the WAIT is skipped and the lane is observed as it is. The
+          # observation answers for receipt-less runtime-affecting merges the
+          # lane already contains, and writes emit_receipt/probe_lane false
+          # when there are none, so no probe runs and nothing is uploaded.
+          if [[ "$PUBLISHED" != "true" ]]; then
+            # Fail-closed defaults, overwritten by the guard when it decides.
+            # A guard that dies mid-observation leaves these: nothing probed,
+            # nothing emitted, nothing re-emitted -- and the step red.
+            {
+              echo "mode=observe"
+              echo "emit_receipt=false"
+              echo "probe_lane=false"
+              echo "reemit_candidates=[]"
+            } >> "$GITHUB_OUTPUT"
+            uv run python scripts/ci/check_dev_lane_staleness.py \
+              --lane "$RECEIPT_LANE" \
+              --observe \
+              --observed-merge "$MERGE_SHA" \
+              --agent-url "$DEPLOY_AGENT_URL" \
+              --runtime-path-validator "$RUNTIME_PATH_VALIDATOR" \
+              --clone .
+            exit 0
+          fi
+
           STARTED_EPOCH=$(date -u -d "${LAB_PASS_STARTED_AT}" +%s 2>/dev/null \
             || python3 -c "import datetime,os;print(int(datetime.datetime.strptime(os.environ['LAB_PASS_STARTED_AT'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.UTC).timestamp()))")
           ELAPSED=$(( $(date -u +%s) - STARTED_EPOCH ))
@@ -490,7 +547,9 @@ jobs:
             --poll-interval 60s \
             --agent-url "$DEPLOY_AGENT_URL" \
             --correlation-id "$CORRELATION_ID" \
-            --wall-clock-seconds "$CONVERGE_WALL_CLOCK"
+            --wall-clock-seconds "$CONVERGE_WALL_CLOCK" \
+            --runtime-path-validator "$RUNTIME_PATH_VALIDATOR" \
+            --clone .
 
       # OMN-17530 rule 24(a) -- the .201 compose dev lane's half of the
       # automatic lab pass.
@@ -552,7 +611,8 @@ jobs:
 
       - name: Derive this lane's declared writer consumer groups
         id: groups
-        if: always()
+        # OMN-18976: an observation with nothing to answer for probes nothing.
+        if: always() && steps.converge.outputs.probe_lane != 'false'
         run: |
           set -euo pipefail
           # Derived from the lane's OWN compose file, which is the minting
@@ -591,7 +651,8 @@ jobs:
             --out "${LAB_PASS_DIR}/declared-groups.txt"
 
       - name: Take the earlier consumer-lag sample
-        if: always()
+        # OMN-18976: an observation with nothing to answer for probes nothing.
+        if: always() && steps.converge.outputs.probe_lane != 'false'
         env:
           DEV_LANE_BROKER_CONTAINER: ${{ env.DEV_LANE_BROKER_CONTAINER }}
           # The broker's INTERNAL listener, addressed from inside its own
@@ -683,7 +744,8 @@ jobs:
 
       - name: Probe the dev lane
         id: probe
-        if: always()
+        # OMN-18976: an observation with nothing to answer for probes nothing.
+        if: always() && steps.converge.outputs.probe_lane != 'false'
         env:
           # Must equal this job's own `timeout-minutes`, and the settle budget
           # below is derived from it. A tail is reserved for the three probe
@@ -1001,8 +1063,16 @@ jobs:
           # process list.
           KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
           KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          # OMN-18976: an observation's receipt is keyed by a non-runtime
+          # merge and uploaded under a name no gate reads; announcing it as
+          # that merge's lab-pass verdict would be a claim nothing supports.
+          PUBLISHED: ${{ needs.trigger-rebuild.outputs.published }}
         run: |
           set -uo pipefail
+          if [[ "$PUBLISHED" != "true" ]]; then
+            echo "observation run for a non-runtime merge: no lab-pass verdict is published"
+            exit 0
+          fi
           uv run python scripts/ci/publish_lab_fact_event.py \
             --event "${LAB_PASS_DIR}/event.json" \
             --bus-lane "dev" \
@@ -1020,8 +1090,21 @@ jobs:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
           RECEIPT_LANE: ${{ needs.trigger-rebuild.outputs.receipt_lane }}
           QUEUE_EVIDENCE: ${{ steps.converge.outputs.evidence }}
+          CONVERGE_MODE: ${{ steps.converge.outputs.mode }}
         run: |
           set -euo pipefail
+          if [[ "$CONVERGE_MODE" == "observe" ]]; then
+            {
+              echo "### ${RECEIPT_LANE} lab-pass: OBSERVED, nothing answered for (OMN-18976)"
+              echo ""
+              echo "\`${MERGE_SHA}\` published no rebuild, so no receipt is due for it"
+              echo "and none is uploaded. The lane was observed for receipt-less"
+              echo "runtime-affecting merges it contains; this run answered for none:"
+              echo ""
+              echo "    ${QUEUE_EVIDENCE:-(the guard wrote no evidence)}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           {
             echo "### ${RECEIPT_LANE} lab-pass: QUEUED (OMN-18976)"
             echo ""
@@ -1051,11 +1134,21 @@ jobs:
       # only for the one verdict that suppresses emission.
       - name: Assert the compose-dev lab-pass receipt is present and non-empty
         if: always() && steps.converge.outputs.emit_receipt != 'false'
+        env:
+          PUBLISHED: ${{ needs.trigger-rebuild.outputs.published }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/assert_evidence_artifact.py \
-            --artifact lab-pass-receipt-compose-dev \
-            --require "${LAB_PASS_DIR}/receipt.json"
+          # OMN-18976: an observation is uploaded under its own name, and is
+          # asserted under that name so each uploader has its own assertion.
+          if [[ "$PUBLISHED" == "true" ]]; then
+            python3 scripts/ci/assert_evidence_artifact.py \
+              --artifact lab-pass-receipt-compose-dev \
+              --require "${LAB_PASS_DIR}/receipt.json"
+          else
+            python3 scripts/ci/assert_evidence_artifact.py \
+              --artifact lab-pass-observation-compose-dev \
+              --require "${LAB_PASS_DIR}/receipt.json"
+          fi
 
       # OMN-18420: presence is not identity. A receipt left on this host by an
       # earlier job satisfies the assertion above exactly as well as a fresh
@@ -1087,12 +1180,26 @@ jobs:
       # upload leaves the subject with no artifact at all, which reads as
       # PENDING and stays recoverable, which is what OMN-18976 intended.
       - name: Upload the compose-dev lab-pass receipt
-        if: always() && steps.converge.outputs.emit_receipt != 'false'
+        if: always() && steps.converge.outputs.emit_receipt != 'false' && needs.trigger-rebuild.outputs.published == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # The NAME is the key scripts/ci/lab_pass_receipt.py's gate queries
           # by; it must match artifact_name() exactly.
           name: lab-pass-receipt-${{ needs.trigger-rebuild.outputs.receipt_lane }}-${{ needs.trigger-rebuild.outputs.source_sha }}
+          path: ${{ env.LAB_PASS_DIR }}
+          retention-days: 90
+          if-no-files-found: error
+
+      # OMN-18976: an OBSERVATION -- a merge that published no rebuild, whose
+      # guard found receipt-less runtime-affecting merges the lane contains --
+      # is NOT this merge's receipt. It goes under a name no gate queries, and
+      # exists only as the source the re-emission job re-keys, exactly as a
+      # converged run's own receipt is.
+      - name: Upload the compose-dev lab-pass observation
+        if: always() && steps.converge.outputs.emit_receipt != 'false' && needs.trigger-rebuild.outputs.published != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lab-pass-observation-${{ needs.trigger-rebuild.outputs.receipt_lane }}-${{ needs.trigger-rebuild.outputs.source_sha }}
           path: ${{ env.LAB_PASS_DIR }}
           retention-days: 90
           if-no-files-found: error
@@ -1225,10 +1332,12 @@ jobs:
           echo "LAB_PASS_EXISTING_DIR=${LAB_PASS_WORK}/existing" >> "$GITHUB_ENV"
         env:
           REEMIT_SHA: ${{ matrix.candidate.sha }}
+      # OMN-18976: on a merge that published no rebuild the source is the
+      # verify job's OBSERVATION of the lane, uploaded under its own name.
       - name: Download the converged receipt
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.1.8
         with:
-          name: lab-pass-receipt-compose-dev-${{ needs.trigger-rebuild.outputs.source_sha }}
+          name: ${{ needs.trigger-rebuild.outputs.published == 'true' && format('lab-pass-receipt-compose-dev-{0}', needs.trigger-rebuild.outputs.source_sha) || format('lab-pass-observation-compose-dev-{0}', needs.trigger-rebuild.outputs.source_sha) }}
           path: ${{ env.LAB_PASS_SOURCE_DIR }}
       # A candidate may ALREADY have a receipt. Absent is the queued-ahead
       # case; present decides on its own failure CLASS. A missing artifact must
@@ -1358,12 +1467,16 @@ jobs:
   rerun-refused-deliveries:
     name: Re-run staging deliveries refused while this subject's receipt was pending
     needs: [trigger-rebuild, verify-lane-converged, reemit-queued-receipts]
+    # OMN-18976: an observation run (nothing published) re-reads only when it
+    # answered for something; with no candidate there is no new receipt.
     if: >-
       always() &&
-      needs.trigger-rebuild.outputs.published == 'true' &&
       needs.trigger-rebuild.outputs.runtime_lane == 'dev' &&
       needs.verify-lane-converged.result != 'skipped' &&
-      needs.verify-lane-converged.result != 'cancelled'
+      needs.verify-lane-converged.result != 'cancelled' &&
+      (needs.trigger-rebuild.outputs.published == 'true' ||
+       (needs.verify-lane-converged.outputs.reemit_candidates != '' &&
+        needs.verify-lane-converged.outputs.reemit_candidates != '[]'))
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&

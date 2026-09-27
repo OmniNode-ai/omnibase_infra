@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Typed, fail-closed dogfood-only provider fault route declarations."""
+"""Typed dogfood fault declarations and fault-pin admission for delegation.
+
+The OMN-18931 guard owns fault pins only. OMN-19124 routing pins pass through;
+dev run 8c2b5dfc-3907-475d-aab6-126fade5f707 exposed the blanket refusal.
+"""
 
 from __future__ import annotations
 
@@ -125,18 +129,33 @@ def load_dogfood_delegation_fault_routes(
     return tuple(routes)
 
 
+def is_dogfood_fault_pin(
+    *,
+    backend_id: str,
+    no_escalation: bool,
+    path_for_test: Path | None = None,
+) -> bool:
+    """Classify a pin using the declared faults and the no-escalation policy.
+
+    OMN-19124 routing pins pass through the fault guard; the declaration must
+    still load before classification so a missing fault authority fails closed.
+    """
+    routes = load_dogfood_delegation_fault_routes(path_for_test=path_for_test)
+    return no_escalation or any(route.backend_key == backend_id for route in routes)
+
+
 def validate_dogfood_delegation_fault_request(
     *,
     request: object,
     event_bus: object | None,
     path_for_test: Path | None = None,
 ) -> None:
-    """Accept only a declared dogfood fault pin on the trusted consumer bus.
+    """Validate fault pins on the trusted consumer bus; admit routing pins.
 
-    Requests without a pin retain the ordinary delegation route. A pinned request
-    is validated at the consumer boundary as well as the producer port, so a raw
-    broker record cannot turn the caller-controlled pin or no-escalation flag
-    into a retry-policy bypass.
+    The OMN-18931 guard owns fault pins only. OMN-19124 routing pins are
+    resolved downstream (dev run 8c2b5dfc-3907-475d-aab6-126fade5f707).
+    Fault pins are checked at both boundaries, so a raw broker record cannot
+    turn a caller-controlled pin or no-escalation flag into a retry bypass.
     """
 
     backend_id = getattr(request, "backend_id", None)
@@ -149,6 +168,12 @@ def validate_dogfood_delegation_fault_request(
         return
     if not isinstance(backend_id, str) or not backend_id.strip():
         raise InfraUnavailableError("delegation backend pin must be a non-empty string")
+    if not is_dogfood_fault_pin(
+        backend_id=backend_id,
+        no_escalation=no_escalation,
+        path_for_test=path_for_test,
+    ):
+        return
     if event_bus is None:
         raise InfraUnavailableError(
             "dogfood fault backend pin requires trusted runtime bus identity"
@@ -224,6 +249,7 @@ def resolve_dogfood_delegation_fault_route(
 
 __all__ = [
     "ModelDogfoodDelegationFaultRoute",
+    "is_dogfood_fault_pin",
     "load_dogfood_delegation_fault_routes",
     "resolve_dogfood_delegation_fault_route",
     "validate_dogfood_delegation_fault_request",

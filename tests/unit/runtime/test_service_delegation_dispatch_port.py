@@ -362,6 +362,11 @@ async def test_runtime_delegation_dispatch_port_forwards_declared_fault_pin(
     """A validated isolated pin is carried unchanged onto the public bus wire."""
     monkeypatch.setattr(
         fault_routes,
+        "load_dogfood_delegation_fault_routes",
+        lambda **_kwargs: (SimpleNamespace(backend_key="dogfood-fault-429"),),
+    )
+    monkeypatch.setattr(
+        fault_routes,
         "resolve_dogfood_delegation_fault_route",
         lambda **_kwargs: SimpleNamespace(
             no_escalation=True,
