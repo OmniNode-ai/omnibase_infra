@@ -336,6 +336,15 @@ def active_flow_key(consumer_group: str, topic: str) -> Iterator[None]:
         _ACTIVE_FLOW_KEY.reset(token)
 
 
+def get_active_flow_key() -> tuple[str, str] | None:
+    """Return the subscription currently dispatching on this task, if any.
+
+    This is a read-only seam for runtime components that must avoid feeding a
+    record back into the subscription that is presently processing it.
+    """
+    return _ACTIVE_FLOW_KEY.get()
+
+
 def record_active_out(count: int = 1) -> None:
     """Record ``messages_out`` against the in-flight subscription, if any."""
     key = _ACTIVE_FLOW_KEY.get()

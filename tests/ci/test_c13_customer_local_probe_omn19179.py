@@ -400,3 +400,155 @@ def test_the_overlay_declares_every_shipped_local_backend() -> None:
 def test_the_customer_writes_the_documented_file_and_nothing_else() -> None:
     """OMN-16200: one documented file under HOME, no environment binding."""
     assert probe.OVERLAY_RELATIVE_PATH == ".omninode/delegation/bifrost_overrides.yaml"
+
+
+# --------------------------------------------------------------------------
+# a model the customer serves elsewhere in their own private network (OMN-19805)
+# --------------------------------------------------------------------------
+
+_PRIVATE_MODEL_HOST = "10.20.30.40"
+
+
+def _served_from_private_host(obs: dict[str, Any]) -> dict[str, Any]:
+    """The recorded session, as if its model answered from a private LAN host."""
+    port = obs["model_port"]
+    loopback = f'sin_port=htons({port}), sin_addr=inet_addr("127.0.0.1")'
+    private = f'sin_port=htons({port}), sin_addr=inet_addr("{_PRIVATE_MODEL_HOST}")'
+    for step in obs["steps"].values():
+        if isinstance(step, dict) and step.get("strace"):
+            step["strace"] = step["strace"].replace(loopback, private)
+    receipt = _receipt(obs)
+    receipt["endpoint"] = f"http://{_PRIVATE_MODEL_HOST}:{port}/v1/chat/completions"
+    _set_receipt(obs, receipt)
+    obs["model_host"] = _PRIVATE_MODEL_HOST
+    return obs
+
+
+@pytest.mark.unit
+def test_a_session_served_by_the_declared_private_host_grades_pass() -> None:
+    obs = _served_from_private_host(_pass_observations())
+    assert _failed(obs) == {}
+    connects = probe.parse_connects(
+        obs["steps"]["configured"]["strace"],
+        model_port=obs["model_port"],
+        model_host=_PRIVATE_MODEL_HOST,
+    )
+    assert probe.count_kinds(connects).get("model", 0) >= 1
+
+
+@pytest.mark.unit
+def test_a_private_host_connect_the_session_did_not_declare_is_external() -> None:
+    """The same strace, graded with no declared host, is a set of external calls."""
+    obs = _served_from_private_host(_pass_observations())
+    del obs["model_host"]
+    failed = _failed(obs)
+    assert "zero_provider" in failed
+    assert "local_model" in failed
+
+
+@pytest.mark.unit
+def test_only_the_declared_host_and_port_is_the_model() -> None:
+    connects = probe.parse_connects(
+        '1 connect(3, {sa_family=AF_INET, sin_port=htons(8000), sin_addr=inet_addr("10.20.30.40")}, 16) = 0\n'
+        '1 connect(4, {sa_family=AF_INET, sin_port=htons(8001), sin_addr=inet_addr("10.20.30.40")}, 16) = 0\n'
+        '1 connect(5, {sa_family=AF_INET, sin_port=htons(8000), sin_addr=inet_addr("10.20.30.41")}, 16) = 0\n'
+        '1 connect(6, {sa_family=AF_INET, sin_port=htons(8000), sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n',
+        model_port=8000,
+        model_host=_PRIVATE_MODEL_HOST,
+    )
+    assert [c.kind for c in connects] == [
+        "model",
+        "external",
+        "external",
+        "loopback_other",
+    ]
+
+
+@pytest.mark.unit
+def test_a_receipt_endpoint_on_another_private_host_fails() -> None:
+    obs = _served_from_private_host(_pass_observations())
+    receipt = _receipt(obs)
+    receipt["endpoint"] = f"http://10.20.30.41:{obs['model_port']}/v1/chat/completions"
+    _set_receipt(obs, receipt)
+    assert "local_model" in _failed(obs)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("host", ["127.0.0.1", "::1", "10.20.30.40", "172.16.0.9"])
+def test_loopback_and_private_model_hosts_are_accepted(host: str) -> None:
+    assert probe.validate_model_host(host)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("host", ["1.1.1.1", "8.8.8.8", "model.example.com", ""])
+def test_a_public_or_named_model_host_is_refused_before_anything_runs(
+    host: str,
+) -> None:
+    with pytest.raises(probe.ProbeInputError):
+        probe.validate_model_host(host)
+
+
+@pytest.mark.unit
+def test_a_public_model_host_exits_could_not_run(tmp_path: Path) -> None:
+    record = tmp_path / "record.json"
+    argv = [
+        "run",
+        "--customer-home",
+        str(tmp_path / "home"),
+        "--customer-bin",
+        str(tmp_path / "bin"),
+        "--workdir",
+        str(tmp_path / "work"),
+        "--trace-dir",
+        str(tmp_path / "traces"),
+        "--model-port",
+        "8000",
+        "--model-host",
+        "8.8.8.8",
+        "--served-model",
+        "m",
+        "--observations-out",
+        str(tmp_path / "obs.json"),
+        "--record",
+        str(record),
+    ]
+    assert probe.main(argv) == 2
+    assert "public internet" in json.loads(record.read_text())["reason"]
+
+
+@pytest.mark.unit
+def test_the_overlay_points_at_the_declared_private_host() -> None:
+    overlay = probe.bifrost_overlay_yaml("m", 8000, 8192, _PRIVATE_MODEL_HOST)
+    assert overlay.count(
+        f'    endpoint_url: "http://{_PRIVATE_MODEL_HOST}:8000/v1/chat/completions"\n'
+    ) == len(probe.LOCAL_BACKEND_IDS)
+
+
+@pytest.mark.unit
+def test_an_ipv6_model_host_is_bracketed_in_the_url() -> None:
+    assert probe.model_base_url("::1", 8000) == "http://[::1]:8000"
+
+
+@pytest.mark.unit
+def test_the_vllm_token_counter_is_summed_across_label_sets() -> None:
+    text = (
+        "# HELP vllm:generation_tokens_total Number of generation tokens processed.\n"
+        'vllm:generation_tokens_total{engine="0",model_name="m"} 1.5e+03\n'
+        'vllm:generation_tokens_total{engine="1",model_name="m"} 20.0\n'
+        'vllm:generation_tokens_total_created{engine="0",model_name="m"} 9e+09\n'
+    )
+    assert probe.tokens_predicted_from_metrics(text) == 1520
+
+
+@pytest.mark.unit
+def test_the_llamacpp_token_counter_still_reads() -> None:
+    assert (
+        probe.tokens_predicted_from_metrics("llamacpp:tokens_predicted_total 42\n")
+        == 42
+    )
+
+
+@pytest.mark.unit
+def test_a_server_with_no_token_counter_cannot_prove_the_positive_control() -> None:
+    with pytest.raises(probe.ProbeInputError):
+        probe.tokens_predicted_from_metrics("process_cpu_seconds_total 1\n")
