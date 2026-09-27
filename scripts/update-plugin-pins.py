@@ -96,14 +96,44 @@ _PIN_RE = re.compile(
 )
 
 
+# A bounded range ``>=<floor>,<<ceiling>`` (OMN-18595, omnibase_infra#3749).
+_BOUNDED_RANGE_RE = re.compile(r"^>=(?P<floor>[^,<>=\s]+),<(?P<ceiling>[^,<>=\s]+)$")
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    """Numeric release tuple for comparison; a non-numeric part refuses."""
+    core = re.match(r"^\d+(?:\.\d+)*", version)
+    if core is None:
+        raise ValueError(f"cannot compare non-numeric version {version!r}")
+    return tuple(int(part) for part in core.group(0).split("."))
+
+
 def _replace_pin(match: re.Match[str], versions: dict[str, str]) -> str:
-    """Replace a single regex match with an exact pin."""
+    """Advance one plugin pin to *versions*, keeping the specifier's form.
+
+    OMN-18596: a bounded range keeps its ceiling and advances only its floor.
+    The runtime Dockerfile moved to bounded ranges under OMN-18595 because an
+    exact ``--no-deps`` pin fails the Dockerfile plugin pin validator as soon
+    as a newer plugin publishes; rewriting the range to ``==`` reverted that on
+    every cascade (omnibase_infra#4168). A release at or above the ceiling is a
+    decision for a person, so it raises rather than silently widening the range.
+    An exact pin (or any other specifier) is rewritten to an exact pin, as before.
+    """
     pkg = match.group("pkg")
     quote = match.group("q")
     latest = versions.get(pkg)
     if latest is None:
         return match.group(0)  # unknown package — leave untouched
-    return f"{quote}{pkg}=={latest}{quote}"
+    bounded = _BOUNDED_RANGE_RE.match(match.group("spec"))
+    if bounded is None:
+        return f"{quote}{pkg}=={latest}{quote}"
+    ceiling = bounded.group("ceiling")
+    if _version_key(latest) >= _version_key(ceiling):
+        raise ValueError(
+            f"{pkg} {latest} is at or above the range ceiling <{ceiling}; "
+            "raising a ceiling is a deliberate change, not a cascade"
+        )
+    return f"{quote}{pkg}>={latest},<{ceiling}{quote}"
 
 
 def rewrite_content(content: str, versions: dict[str, str]) -> str:
@@ -168,7 +198,11 @@ def main(argv: list[str] | None = None) -> int:
 
     # Read and rewrite.
     original = dockerfile.read_text(encoding="utf-8")
-    updated = rewrite_content(original, versions)
+    try:
+        updated = rewrite_content(original, versions)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     if original == updated:
         print("No changes — Dockerfile pins already up to date.")

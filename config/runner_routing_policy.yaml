@@ -1088,6 +1088,9 @@ route:
         - Migration Integration Test
         - no-noncanonical-lifecycle-classes
         - Node Migration Declaration Check
+        # OMN-19677: the five shared shrink-only callers are strict CI Summary
+        # gates and therefore belong in this umbrella-enforced snapshot.
+        - Noncanonical Class Allowlist One-way (OMN-19677) / anti-growth-baseline
         - non-dev-base-guard
         - OCC Companion Merged Gate (OMN-15214)
         - occ-preflight / eligibility
@@ -1102,19 +1105,23 @@ route:
         - receipt-honesty
         - required-check-skip-guard / check-skip-vectors
         - Runner Route (OMN-18031) / route
+        - Runtime Profiles Allowlist One-way (OMN-19677) / anti-growth-baseline
         # OMN-18926: the from-empty migration proof, now called from ci.yml and
         # registered STRICT. Enforced by the CI Summary poller and absent from
         # branch protection, which is exactly the shape this list records.
         - Sanitized Legacy RDS Fixture Proof / PostgreSQL 16 Fresh + Legacy Fixture
+        - Skip Count Baseline One-way (OMN-19677) / anti-growth-baseline
         - Skip Count Ratchet (OMN-18776)
         - Stale TODO Gate
         - Subscribe Wiring Health
         - Topic Drift Check
         - Topic Enum Drift Check
+        - Topic Naming Baseline One-way (OMN-19677) / anti-growth-baseline
         - Topic Naming Lint
         - Trivyignore Expiry Check (OMN-16229)
         - Type Safety Validation
         - URL Authority Gate
+        - Validator Requirements Baseline One-way (OMN-19677) / anti-growth-baseline
         - verify / verify
         - wheel-content-parity
         - Writer-Migration Coupling Check
