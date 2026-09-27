@@ -78,6 +78,7 @@ databases:
               - ci_attempt_outcome
               - consumer_flow_windows
               - delegate_skill_command_claims
+              - demo_readiness_latest
               - dod_verify_runs
               - lab_lane_health
               - live_events
@@ -359,5 +360,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 9cee69e2c9ddc39f74911dd46b73c6cfbf9228d09178a3b45602494cc371ee0b
+  sha256: 5310dc6569af871a0362a628305849c44a1c9b95873a59615c8d10a58e44b870
 topology_instance: local

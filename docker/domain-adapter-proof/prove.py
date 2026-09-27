@@ -606,9 +606,7 @@ def _prove_restart_reads_back_what_the_previous_process_wrote(
         second.close()
 
     rows = _admin_rows(
-        "SELECT task_type FROM tenant."
-        + TENANT_TABLE
-        + " WHERE correlation_id = %s",
+        "SELECT task_type FROM tenant." + TENANT_TABLE + " WHERE correlation_id = %s",
         (correlation,),
     )
     assert [row[0] for row in rows] == ["after-restart"]
