@@ -10,6 +10,7 @@ a terminal publisher supplied by the declared workflow composition.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 
 from omnibase_core.models.execution_graph_replay.model_execution_graph_request import (
@@ -18,12 +19,16 @@ from omnibase_core.models.execution_graph_replay.model_execution_graph_request i
 from omnibase_core.models.execution_graph_replay.model_execution_graph_stored_chain_annotation import (
     ModelExecutionGraphStoredChainAnnotation,
 )
+from omnibase_core.models.execution_graph_replay.model_execution_graph_terminal_refusal import (
+    ModelExecutionGraphTerminalRefusal,
+)
 from omnibase_core.models.execution_graph_replay.model_execution_graph_terminal_result import (
     ModelExecutionGraphTerminalResult,
 )
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     ExecutionGraphCurrentEvidence,
     ExecutionGraphCurrentEvidenceReader,
+    ExecutionGraphOwnerNotFoundError,
 )
 from omnibase_infra.runtime.db.protocol_execution_graph_stored_chain_reader import (
     ProtocolExecutionGraphStoredChainReader,
@@ -33,6 +38,7 @@ from omnibase_infra.runtime.dispatch_envelope_context import (
 )
 from omnibase_infra.runtime.execution_graph_ownership import (
     ExecutionGraphOwnershipAdmission,
+    ExecutionGraphOwnershipRefusalError,
     admit_current_ownership,
 )
 from omnibase_infra.runtime.execution_graph_read_authority import (
@@ -56,6 +62,8 @@ type ExecutionGraphTerminalPublisher = Callable[
     [VerifiedExecutionGraphReadAuthority, ModelExecutionGraphTerminalResult],
     Awaitable[None],
 ]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ExecutionGraphReadCommandError(PermissionError):
@@ -100,10 +108,34 @@ class ExecutionGraphReadCommandExecutor:
                 "Execution graph command conflicts with signed request"
             )
 
-        evidence = await self._evidence_reader.read_authorized_current(
-            authority, self._topology.read_set
-        )
-        admission = admit_current_ownership(evidence, self._topology.read_set)
+        try:
+            evidence = await self._evidence_reader.read_authorized_current(
+                authority, self._topology.read_set
+            )
+            admission = admit_current_ownership(evidence, self._topology.read_set)
+        except (
+            ExecutionGraphOwnerNotFoundError,
+            ExecutionGraphOwnershipRefusalError,
+        ) as exc:
+            reason = (
+                exc.reason.value
+                if isinstance(exc, ExecutionGraphOwnershipRefusalError)
+                else "owner_not_found"
+            )
+            _LOGGER.info("execution graph ownership refused: %s", reason)
+            terminal = ModelExecutionGraphTerminalResult(
+                tenant_id=authority.tenant_id,
+                correlation_id=authority.correlation_id,
+                workflow_type=self._workflow_type,
+                status="failed",
+                refusal=ModelExecutionGraphTerminalRefusal(
+                    code="not_found",
+                    message="Execution graph correlation was not found.",
+                ),
+            )
+            self._validate_terminal(terminal, authority)
+            await self._publish_terminal(authority, terminal)
+            return terminal
         stored_chain = await self._stored_chain_reader.read_current(
             authority, admission.owner, admission.owned_envelope_ids
         )

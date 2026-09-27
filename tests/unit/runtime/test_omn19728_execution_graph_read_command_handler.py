@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -33,6 +34,7 @@ from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     ExecutionGraphCurrentEvidence,
     ExecutionGraphCurrentEvidenceReader,
     ExecutionGraphLedgerRecord,
+    ExecutionGraphOwnerNotFoundError,
 )
 from omnibase_infra.runtime.db.protocol_execution_graph_stored_chain_reader import (
     ProtocolExecutionGraphStoredChainReader,
@@ -286,7 +288,7 @@ async def test_signed_owner_first_admission_precedes_fold_and_published_terminal
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_second_head_refuses_before_stored_chain_read_or_publish() -> None:
+async def test_second_head_refuses_before_stored_chain_read_or_fold() -> None:
     authority = _signed_authority()
     current = _evidence(authority)
     second_head = replace(
@@ -305,7 +307,13 @@ async def test_second_head_refuses_before_stored_chain_read_or_publish() -> None
         calls.append("fold")
         return _failed_terminal(authority)
 
-    async def publish(*_args: object) -> None:
+    async def publish(
+        _authority: VerifiedExecutionGraphReadAuthority,
+        terminal: ModelExecutionGraphTerminalResult,
+    ) -> None:
+        assert terminal.status == "failed"
+        assert terminal.refusal is not None
+        assert terminal.refusal.code == "not_found"
         calls.append("publish")
 
     handler = ExecutionGraphReadCommandExecutor(
@@ -319,9 +327,9 @@ async def test_second_head_refuses_before_stored_chain_read_or_publish() -> None
         publish_terminal=publish,
     )
     with bind_execution_graph_read_authority(authority):
-        with pytest.raises(ValueError, match="exactly one"):
-            await handler.handle(authority.request)
-    assert calls == ["owner-first-read"]
+        terminal = await handler.handle(authority.request)
+    assert terminal.status == "failed"
+    assert calls == ["owner-first-read", "publish"]
 
 
 @pytest.mark.unit
@@ -369,6 +377,88 @@ async def test_faulty_stored_chain_reader_cannot_inject_unowned_or_duplicate_nod
         with pytest.raises(ExecutionGraphReadCommandError, match="stored chain"):
             await handler.handle(authority.request)
     assert calls == ["owner-first-read", "stored-chain-read"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_absent_foreign_reused_and_colliding_ownership_have_one_client_refusal(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    authority = _signed_authority()
+    current = _evidence(authority)
+    head = current.ledger_rows[0]
+    published: list[ModelExecutionGraphTerminalResult] = []
+    calls: list[str] = []
+    failure_kind = "absent"
+
+    async def read(*_args: object) -> ExecutionGraphCurrentEvidence:
+        calls.append("owner-first-read")
+        if failure_kind in {"absent", "foreign"}:
+            raise ExecutionGraphOwnerNotFoundError(
+                "absent owner" if failure_kind == "absent" else "foreign owner"
+            )
+        if failure_kind == "reused":
+            second = replace(
+                head, ledger_entry_id=uuid4(), envelope_id=uuid4(), kafka_offset=999
+            )
+        else:
+            second = replace(
+                head,
+                ledger_entry_id=uuid4(),
+                kafka_offset=999,
+                event_value=b'{"tenant_id":null,"conflicting":true}',
+            )
+        return replace(current, ledger_rows=(head, second))
+
+    async def fold(*_args: object) -> ModelExecutionGraphTerminalResult:
+        calls.append("fold")
+        return _failed_terminal(authority)
+
+    async def publish(
+        _authority_arg: VerifiedExecutionGraphReadAuthority,
+        terminal: ModelExecutionGraphTerminalResult,
+    ) -> None:
+        calls.append("publish")
+        published.append(terminal)
+
+    handler = ExecutionGraphReadCommandExecutor(
+        evidence_reader=cast("ExecutionGraphCurrentEvidenceReader", _Reader(read)),
+        stored_chain_reader=cast(
+            "ProtocolExecutionGraphStoredChainReader", _StoredChainReader(calls)
+        ),
+        topology=_topology(),
+        workflow_type=_WORKFLOW_TYPE,
+        fold=fold,
+        publish_terminal=publish,
+    )
+    for failure_kind in ("absent", "foreign", "reused", "collision"):
+        calls.clear()
+        with bind_execution_graph_read_authority(authority):
+            result = await handler.handle(authority.request)
+        assert result == published[-1]
+        assert calls == ["owner-first-read", "publish"]
+    assert len(published) == 4
+    assert len({terminal.model_dump_json() for terminal in published}) == 1
+    assert published[0].status == "failed"
+    assert published[0].refusal is not None
+    assert published[0].refusal.code == "not_found"
+    assert published[0].result is None
+    assert all(
+        secret not in published[0].model_dump_json()
+        for secret in (
+            "absent owner",
+            "foreign owner",
+            "multiple_chain_heads",
+            "collision",
+        )
+    )
+    assert [record.getMessage() for record in caplog.records] == [
+        "execution graph ownership refused: owner_not_found",
+        "execution graph ownership refused: owner_not_found",
+        "execution graph ownership refused: multiple_chain_heads",
+        "execution graph ownership refused: envelope_id_collision",
+    ]
 
 
 @pytest.mark.unit
