@@ -10,7 +10,8 @@ Features:
     - Queue-based decoupling (sync logging -> async emission)
     - Allowlist-only attachment (NOT root logger)
     - Rate limited: max 5 events per fingerprint per 5 minutes
-    - Self-metrics: events_emitted, events_dropped, events_rate_limited
+    - Self-metrics: events_emitted, events_dropped, events_rate_limited,
+      events_suppressed_in_flight
 
 Feature flag: ENABLE_RUNTIME_LOG_BRIDGE (default off)
 
@@ -136,6 +137,8 @@ class RuntimeLogEventBridge(logging.Handler):
         events_emitted: Count of successfully emitted events.
         events_dropped: Count of events that failed to emit or were queue-full.
         events_rate_limited: Count of events suppressed by rate limiter.
+        events_suppressed_in_flight: Count of records suppressed because this
+            bridge's topic is already being dispatched on the current task.
     """
 
     def __init__(
@@ -180,6 +183,7 @@ class RuntimeLogEventBridge(logging.Handler):
         self.events_emitted: int = 0
         self.events_dropped: int = 0
         self.events_rate_limited: int = 0
+        self.events_suppressed_in_flight: int = 0
 
     @staticmethod
     def is_enabled() -> bool:
@@ -212,6 +216,18 @@ class RuntimeLogEventBridge(logging.Handler):
 
         # Circular prevention: skip records from our own bridge logger
         if record.name.startswith(__name__):
+            return
+
+        # Do not feed an error logged by a runtime-error consumer back into the
+        # same topic while that dispatch is still in flight. The task-local flow
+        # context is also what flow counters use, so concurrent dispatches do
+        # not suppress one another. The counter is an observable bridge metric;
+        # no log is emitted here because that would be another bridge candidate.
+        from omnibase_infra.runtime.observability import get_active_flow_key
+
+        active_flow = get_active_flow_key()
+        if active_flow is not None and active_flow[1] == self._topic:
+            self.events_suppressed_in_flight += 1
             return
 
         try:
