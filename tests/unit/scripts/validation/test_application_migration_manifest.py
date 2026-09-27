@@ -830,7 +830,10 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # nullable delegation_events.caller_lane column, so a delegation row names
     # the ledger lane that issued it. Additive (expand-only), vendored FIRST
     # per the vendor-parity ordering.
-    assert len(result.declarations) == 220
+    # 220 -> 221 for OMN-17886: node_projection_live_events/0003 drops the
+    # hand-made jake_ro and lakshman_ro roles after flat 108 clears
+    # omnibase_infra. The stream lives in omnibase_infra, so nothing is vendored.
+    assert len(result.declarations) == 221
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
