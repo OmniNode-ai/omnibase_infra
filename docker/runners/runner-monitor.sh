@@ -231,6 +231,35 @@ config_field() {
     echo "${value}"
 }
 
+# config_host_prefixes — every declared `runner_name_prefix` under the
+# `hosts:` inventory (OMN-17477), deduped, comma-joined. OMN-19842: the fleet
+# emit's default name-prefix used to be a single hardcoded literal
+# ("omninode-") that happened to cover four of the five declared hosts and
+# silently dropped the fifth (.202's `omnipc2-verify-runner`) the moment it
+# was added to this config without a matching edit here — exactly the
+# duplication the config file's own header warns against ("Do not duplicate
+# these values in scripts."). Reading the set from the config instead of
+# guessing a common substring means a sixth host with an unrelated prefix
+# needs no edit to this script, only to the config it already must edit to
+# add the host at all.
+#
+# Prints nothing (not an error) when the config predates OMN-17477 and carries
+# no `hosts:` block at all, so the caller can fall back to the pre-existing
+# scalar-derived default unchanged.
+config_host_prefixes() {
+    [[ -f "${RUNNER_FLEET_CONFIG_PATH}" ]] || return 0
+    awk '
+        /^hosts:/ { in_hosts=1; next }
+        in_hosts && /^[A-Za-z_][A-Za-z0-9_]*:/ { in_hosts=0 }
+        in_hosts && /runner_name_prefix:[[:space:]]*/ {
+            line=$0
+            sub(/^.*runner_name_prefix:[[:space:]]*/, "", line)
+            gsub(/[[:space:]"]+$/, "", line)
+            if (line != "") print line
+        }
+    ' "${RUNNER_FLEET_CONFIG_PATH}" | sort -u | paste -sd, -
+}
+
 RUNNER_ORG="$(config_field github_org)"
 RUNNER_GROUP="$(config_field runner_group)"
 RUNNER_NAME_PREFIX="$(config_field runner_name_prefix)"
@@ -1343,7 +1372,17 @@ RUNNER_FLEET_TOPIC="${RUNNER_FLEET_TOPIC:-onex.evt.omnibase-infra.runner-fleet.v
 # a name the detection prefix does not match. Emitting on the narrow prefix
 # would have dropped the only runner that was down, which is precisely the
 # false-green AC4 exists to refuse.
-RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-omninode-}"
+#
+# OMN-19842: the default is now every `runner_name_prefix` declared under
+# `hosts:` in the fleet config, comma-joined, rather than the single literal
+# "omninode-" this used to hardcode. That literal covered four of the five
+# declared hosts by coincidence of a shared substring and silently excluded
+# the fifth (.202's `omnipc2-verify-runner`, added by OMN-19507 with no
+# matching edit here) forever. A config with no `hosts:` block (pre-OMN-17477)
+# makes config_host_prefixes print nothing, so the fallback below preserves
+# today's behavior unchanged.
+RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG="$(config_host_prefixes)"
+RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG:-omninode-}}"
 RUNNER_FLEET_EMIT="${RUNNER_FLEET_EMIT:-true}"
 # The dev lane's broker container on this host, and the names of the env
 # vars INSIDE it that carry its SASL pair. Names, never values: the monitor
