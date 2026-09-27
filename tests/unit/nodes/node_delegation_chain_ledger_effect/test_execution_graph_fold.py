@@ -13,6 +13,7 @@ import pytest
 from omnibase_core.models.execution_graph_replay import (
     EnumExecutionGraphEdgeKind,
     EnumExecutionGraphNodeKind,
+    EnumExecutionGraphUnresolvedReason,
     ModelExecutionGraph,
     ModelExecutionGraphSourceCursor,
     ModelExecutionGraphStoredChainAnnotation,
@@ -136,6 +137,73 @@ def test_fold_uses_recorded_branch_and_pure_recomputed_grades() -> None:
     assert all(
         edge.kind is EnumExecutionGraphEdgeKind.CAUSED for edge in graph.replay.edges
     )
+
+
+def test_exact_redelivery_has_one_node_and_earliest_source_reference() -> None:
+    request = _request()
+    first_delivery = request.bounded_evidence[0].model_copy(update={"kafka_offset": 5})
+    earlier_delivery_seen_later = first_delivery.model_copy(
+        update={"observed_index": 3, "kafka_offset": 2}
+    )
+    request = request.model_copy(
+        update={
+            "bounded_evidence": (
+                first_delivery,
+                *request.bounded_evidence[1:],
+                earlier_delivery_seen_later,
+            ),
+            "source_cursors": tuple(
+                cursor.model_copy(update={"max_kafka_offset": 5})
+                if cursor.topic == "left"
+                else cursor
+                for cursor in request.source_cursors
+            ),
+        }
+    )
+
+    graph = DelegationExecutionGraphFold().handle(request)
+
+    assert graph.replay.order == (HEAD, LEFT, RIGHT)
+    assert len(graph.replay.nodes) == 3
+    assert len(graph.replay.edges) == 2
+    left = next(node for node in graph.replay.nodes if node.id == LEFT)
+    assert left.kafka_offset == 2
+    assert left.source_ref.kafka_offset == 2
+    caused = next(edge for edge in graph.replay.edges if edge.to_id.node_id == LEFT)
+    assert caused.evidence_ref.kafka_offset == 2
+
+
+def test_missing_parent_is_unresolved_without_a_fabricated_edge() -> None:
+    request = _request()
+    request = request.model_copy(
+        update={"bounded_evidence": (request.bounded_evidence[0],)}
+    )
+
+    graph = DelegationExecutionGraphFold().handle(request)
+
+    assert graph.replay.order == (LEFT,)
+    assert graph.replay.nodes[0].parent_envelope_id == HEAD
+    assert graph.replay.edges == ()
+    assert len(graph.replay.unresolved) == 1
+    unresolved = graph.replay.unresolved[0]
+    assert unresolved.subject_id == LEFT
+    assert unresolved.reason is EnumExecutionGraphUnresolvedReason.MISSING_PARENT
+    assert unresolved.source_ref.kafka_offset == 0
+
+
+def test_recorded_parent_cycle_refuses_the_whole_fold() -> None:
+    request = _request()
+    request = request.model_copy(
+        update={
+            "bounded_evidence": (
+                _record(HEAD, "head", LEFT, 0),
+                _record(LEFT, "left", HEAD, 1),
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="cycle"):
+        DelegationExecutionGraphFold().handle(request)
 
 
 def test_stored_rewrite_changes_annotations_but_not_replay() -> None:
