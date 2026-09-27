@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 593
+    max_skips: 587
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -112,18 +112,6 @@ suites:
             One positive control across a seam that has not landed yet, the same shape as the OMN-19507 entry above for the .202 runner: test_the_dev_200_route_labels_have_a_runner_to_land_on in tests/ci/test_studio_verify_runner_omn19657.py. It asserts that the verify labels the deploy-lane routing table declares for the dev-200 instance are satisfiable by the new .200 (stickybeatz-studio) verify runner this PR adds. The dev-200 instance declares no verify block in config/deploy_lane_routing.yaml until a sibling PR lands one, so on this base the test skips with a named reason instead of passing without looking. The other tests in the module assert the runner's compose labels, that host-200 is its own exclusive label, the absence of forbidden mounts (lab kubeconfig, operator env, OMNI_HOME clone bind), and its CPU/memory caps, all from committed state, and run in every job. The skip ends in the same change that gives dev-200 a verify block: the test then runs, and that change removes this id from this baseline.
           node_ids:
             - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on
-        - measured_at: '2026-09-26'
-          measured_by: OMN-17887
-          delta: 6
-          reason: >-
-            Six Postgres proofs for the forward migration that drops onex-lab's empty tenant schema (OMN-17887, nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql). Each one builds omnidash_analytics and applies the migration with scripts/run-forward-migrations.sh as a NOSUPERUSER role_omnidash, which needs a real server: OMN17887_GATE_DB_URL, or a throwaway cluster from the shared ephemeral_postgres fixture (initdb/pg_ctl, or a postgres:16-alpine container when initdb is absent or fails). The module gates on EPHEMERAL_POSTGRES_UNAVAILABLE, so a split collects all six as skips when it has no OMN17887_GATE_DB_URL and the shared fixture cannot provide a cluster: no psql, or neither initdb/pg_ctl nor a reachable Docker daemon, or a daemon that cannot start postgres:16-alpine. Where a split can start one, they run, and the ratchet does not fail on a baseline id that stopped skipping. Recorded on the same footing as the test_102 ids, which OMN-15425 (f0ba82fc0) moved onto the same container fallback without removing them from this baseline. They are not unexecuted: the migration-integration job runs them against its own empty acl_gate_postgres service with OMN17887_REQUIRE_PG=1, ahead of the OMN-17886 gate on the same server, so a missing server fails there instead of skipping. All six passed locally on PostgreSQL 16.15 (initdb backend) on 2026-09-26. All six fail when the migration is absent; five fail when only its DROP is removed (the post-condition case runs the SELECT alone).
-          node_ids:
-            - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_a_absent_schema_is_a_no_op
-            - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_b_empty_schema_owned_through_membership_is_dropped
-            - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_c_schema_holding_a_relation_fails_closed_and_keeps_it
-            - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_d_schema_owned_outside_the_runners_roles_fails_unledgered
-            - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_e_rerun_after_the_drop_is_a_no_op
-            - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_the_post_condition_refuses_a_present_schema
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -409,12 +397,6 @@ suites:
       - tests.integration.migrations.test_omn17316_role_set_membership_guard::test_usage_and_set_are_independent_predicates
       - tests.integration.migrations.test_omninode_internal_live_acl_gate_omn17886::test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist
       - tests.integration.migrations.test_omninode_internal_live_acl_omn17886::test_live_catalog_green_red_and_default_rule
-      - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_a_absent_schema_is_a_no_op
-      - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_b_empty_schema_owned_through_membership_is_dropped
-      - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_c_schema_holding_a_relation_fails_closed_and_keeps_it
-      - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_d_schema_owned_outside_the_runners_roles_fails_unledgered
-      - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_e_rerun_after_the_drop_is_a_no_op
-      - tests.integration.migrations.test_drop_empty_tenant_schema_omn17887::test_the_post_condition_refuses_a_present_schema
       - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_null_ticket_is_storable
       - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_a_zero_attempt_ordinal_is_refused
       - tests.integration.migrations.test_ci_attempt_outcome_omn18903::test_an_unknown_cause_code_is_refused

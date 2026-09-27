@@ -59,7 +59,12 @@ import pytest
 
 from tests.integration.migrations.conftest import EPHEMERAL_POSTGRES_UNAVAILABLE
 
-pytestmark = pytest.mark.integration
+# The heavy marker deselects this module from ci.yml's Tests (Split n/m),
+# whose filter is not heavy, so it never counts as a split skip against the
+# shrink-only config/skip_count_baseline.yaml (OMN-19677). It executes in
+# ci.yml's migration-integration job by explicit path with OMN17887_REQUIRE_PG=1,
+# so a missing server fails there instead of skipping.
+pytestmark = [pytest.mark.integration, pytest.mark.heavy]
 
 # ruff: noqa: S608 -- every interpolated name is a literal defined in this file;
 # no query here carries untrusted input.
