@@ -126,6 +126,74 @@ def test_incomplete_or_malformed_endpoint_is_rejected(endpoint_url: str) -> None
 
 
 @pytest.mark.unit
+def test_embedding_backend_endpoint_accepts_the_v1_embeddings_path() -> None:
+    """local-embedding is served by a real endpoint at ``/v1/embeddings``.
+
+    Live probe 2026-09-27: ``http://192.168.86.201:8002/v1/chat/completions``
+    404s (the endpoint serves an embedding-only model), while
+    ``http://192.168.86.201:8002/v1/embeddings`` returns real vectors. Binding
+    the real endpoint must not be rejected by a path check narrowed to a
+    literal chat-completions path.
+    """
+    overlay = ModelBifrostLaneOverlay.model_validate(
+        _overlay(
+            backends=[
+                *[_binding(bid) for bid in _SHAPES],
+                {
+                    "backend_id": "local-embedding",
+                    "endpoint_url": "http://192.168.86.201:8002/v1/embeddings",
+                    "served_model_id": "text-embedding-qwen3",
+                    "parameter_count": "0.6B",
+                    "context_window": 8192,
+                    "max_tokens": 1,
+                    "timeout_ms": 30_000,
+                },
+            ]
+        )
+    )
+    by_id = {binding.backend_key: binding for binding in overlay.backends}
+    assert (
+        by_id["local-embedding"].endpoint_url
+        == "http://192.168.86.201:8002/v1/embeddings"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "endpoint_url",
+    [
+        # A bare version base under /v1/embeddings is still not a complete
+        # endpoint, and a chat-completions-shaped path is not an embeddings
+        # backend's endpoint either -- only the two known complete shapes
+        # are ever legal.
+        "http://192.168.86.201:8002/v1/embed",
+        "http://192.168.86.201:8002/v1/embeddings?model=text-embedding-qwen3",
+        "http://192.168.86.201:8002/v1/embeddings/",
+    ],
+)
+def test_embedding_backend_rejects_a_path_that_is_not_exactly_v1_embeddings(
+    endpoint_url: str,
+) -> None:
+    with pytest.raises(ValidationError, match="endpoint_url"):
+        ModelBifrostLaneOverlay.model_validate(
+            _overlay(
+                backends=[
+                    *[_binding(bid) for bid in _SHAPES],
+                    {
+                        "backend_id": "local-embedding",
+                        "endpoint_url": endpoint_url,
+                        "served_model_id": "text-embedding-qwen3",
+                        "parameter_count": "0.6B",
+                        "context_window": 8192,
+                        "max_tokens": 1,
+                        "timeout_ms": 30_000,
+                    },
+                ]
+            )
+        )
+
+
+@pytest.mark.unit
 def test_the_endpoint_host_is_the_lane_overlays_declaration() -> None:
     """OMN-17099: the model no longer pins a binding to a shipped lab host."""
     overlay = ModelBifrostLaneOverlay.model_validate(
