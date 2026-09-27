@@ -54,6 +54,8 @@ GOOD = {
         "/omnibase-infra-local-migration-gate health=healthy restarts=0 running exit=0\n"
         "omnibase-infra-local-omninode-runtime lines=900 autowire-fail=0 dup-dispatcher=0 ERROR=0 Traceback=0\n"
         "omnibase-infra-local-runtime-effects lines=800 autowire-fail=0 dup-dispatcher=0 ERROR=0 Traceback=0\n"
+        "failed-contracts omnibase-infra-local-omninode-runtime: \n"
+        "failed-contracts omnibase-infra-local-runtime-effects: \n"
     ),
     "tests": "omnibase_infra focused rc=0 2026-09-27T14:40:00Z",
     "teardown": (
@@ -82,6 +84,7 @@ class FakeHost:
         )
         self.lease: str | None = None
         self.phases = dict(GOOD)
+        self.base_phases = dict(GOOD)
         self.ran: list[str] = []
 
 
@@ -98,8 +101,9 @@ class FakeTransport:
             return 255, "ssh: connect to host: Operation timed out"
         m = re.search(r"prove\.sh \S+ (\S+)$", command)
         if m:
-            h.ran.append(m.group(1))
-            return 0, h.phases[m.group(1)]
+            base = "-base-" in command
+            h.ran.append(("base:" if base else "") + m.group(1))
+            return 0, (h.base_phases if base else h.phases)[m.group(1)]
         if "CORES=$(getconf" in command:
             return 0, (
                 f"CORES={h.cores}\nLOAD={h.load}\nSLOT={h.slot}\nLISTEN={h.listen}\n"
@@ -192,6 +196,15 @@ def test_prove_script_touches_only_the_slot_project() -> None:
                 or '"$i"' in line
                 or '"$v"' in line
             ), line
+
+
+def test_probe_waits_for_the_runtimes_before_reading_health() -> None:
+    # The first live run (omnimarket#3016, 2026-09-27) probed the second `up`
+    # returned and read no health at all: the runtimes need minutes to settle.
+    text = PROVE_SH.read_text(encoding="utf-8")
+    probe = text[text.index("probe)") : text.index("tests)")]
+    assert probe.index("health wait") < probe.index("== health")
+    assert "health: starting" in probe and "PROBE_WAIT_S" in probe
 
 
 # ------------------------------------------------------------------ ledger
@@ -468,3 +481,90 @@ def test_run_refuses_a_host_under_a_peer_ledger_hold(tmp_path: Path) -> None:
     )
     assert code == pool.EXIT_NO_FREE_HOST and "peer" in text
     assert hosts["lab-101"].ran == []
+
+
+# ------------------------------------------------------------------ base control
+
+DEV_FAILS = (
+    GOOD["probe"]
+    .replace(
+        "failed-contracts omnibase-infra-local-omninode-runtime: ",
+        "failed-contracts omnibase-infra-local-omninode-runtime: projection_baselines projection_traces",
+    )
+    .replace("port 8085 HTTP 200 status healthy", "port 8085 HTTP 200 status degraded")
+)
+
+
+def test_a_failure_dev_already_has_is_not_the_prs() -> None:
+    rb = pool.judge({**GOOD, "probe": DEV_FAILS}, base_probe=DEV_FAILS)
+    assert rb.outcome == "PASS", rb
+    assert any("fail to wire at dev too" in n for n in rb.notes)
+    assert any("status degraded" in n for n in rb.notes)
+
+
+def test_without_a_base_every_failed_contract_is_the_prs() -> None:
+    assert pool.judge({**GOOD, "probe": DEV_FAILS}).outcome == "FAIL"
+
+
+def test_a_contract_that_wires_at_the_base_and_fails_at_the_head_is_the_prs() -> None:
+    head = DEV_FAILS.replace(
+        "projection_traces", "projection_traces projection_pr_landing"
+    )
+    rb = pool.judge({**GOOD, "probe": head}, base_probe=DEV_FAILS)
+    assert rb.outcome == "FAIL"
+    assert any("projection_pr_landing" in n for n in rb.notes)
+
+
+def test_a_missing_failed_contracts_line_is_an_unread_log_not_a_clean_one() -> None:
+    probe = "\n".join(
+        line
+        for line in GOOD["probe"].splitlines()
+        if not line.startswith("failed-contracts")
+    )
+    assert pool.judge({**GOOD, "probe": probe}).checks["no_wiring_failures"] is False
+
+
+def test_base_control_runs_on_the_same_lease_only_when_needed(tmp_path: Path) -> None:
+    hosts = {"lab-101": FakeHost()}
+    hosts["lab-101"].phases["probe"] = DEV_FAILS
+    hosts["lab-101"].base_phases["probe"] = DEV_FAILS
+    code, text = pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _params(tmp_path),
+        "me",
+        90,
+        "lab-101",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+        with_base_control=True,
+    )
+    assert code == pool.EXIT_PASS, text
+    ran = hosts["lab-101"].ran
+    assert ran[: len(pool.PHASES)] == list(pool.PHASES)
+    assert ran[len(pool.PHASES) :] == [
+        "base:snap-pre",
+        "base:clone",
+        "base:build",
+        "base:probe",
+        "base:teardown",
+        "base:snap-post",
+    ]
+    assert "base control run at dev" in text
+    assert hosts["lab-101"].lease is None
+
+    clean = {"lab-101": FakeHost()}
+    pool.run_proof(
+        CFG,
+        FakeTransport(clean),
+        _params(tmp_path),
+        "me",
+        90,
+        "lab-101",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+        with_base_control=True,
+    )
+    assert not any(r.startswith("base:") for r in clean["lab-101"].ran)

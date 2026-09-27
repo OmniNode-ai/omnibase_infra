@@ -473,11 +473,25 @@ class Readback:
         return "PASS" if all(self.checks.values()) else "FAIL"
 
 
-def judge(outputs: Mapping[str, str]) -> Readback:
+def failed_contracts(probe: str) -> dict[str, set[str]]:
+    """Per container, the contracts the non-strict wiring pass gave up on."""
+    found: dict[str, set[str]] = {}
+    for container, names in re.findall(r"^failed-contracts (\S+): ?(.*)$", probe, re.M):
+        found[container] = set(names.split())
+    return found
+
+
+def judge(outputs: Mapping[str, str], base_probe: str | None = None) -> Readback:
     """Decide the run from the phase outputs of prepr_pool_prove.sh.
 
     Pure: every PASS/FAIL line a PR body cites is derived here from text, so a
     test can hand it the text a broken stack prints and see the FAIL.
+
+    ``base_probe`` is the probe output of the same bundle built at dev on the
+    same host (a base control). With it, a contract that fails to wire at dev
+    too is dev-inherited and not held against the PR; only a contract that
+    fails at the head and wires at the base is. Without it, any failed contract
+    is the PR's (interim recipes, common frame 8).
     """
     build = outputs.get("build", "")
     probe = outputs.get("probe", "")
@@ -496,17 +510,56 @@ def judge(outputs: Mapping[str, str]) -> Readback:
     )
     checks["image_identity"] = bool(ident) and all(m[3] == "yes" for m in ident)
     for port in ("8085", "8086"):
-        m = re.search(rf"^port {port} HTTP (\d+) status (\S+)", probe, re.M)
-        ok = m is not None and m.group(1) == "200" and m.group(2) == "healthy"
+        m = re.search(
+            rf"^port {port} HTTP (\d+) status (\S+) healthy (\S+)", probe, re.M
+        )
+        # A runtime that serves 200 with healthy True is up and consuming; a
+        # "degraded" status names projections that persist nothing, which the
+        # wiring check below attributes to the PR or to dev.
+        ok = m is not None and m.group(1) == "200" and m.group(3) == "True"
         checks[f"health_{port}"] = ok
         if not ok:
             notes.append(f"port {port}: {m.group(0) if m else 'no health line'}")
+        elif m is not None and m.group(2) != "healthy":
+            notes.append(f"port {port} reports status {m.group(2)}")
     gate = re.search(r"^/?\S*migration-gate health=(\w+)", probe, re.M)
     checks["migration_gate_healthy"] = gate is not None and gate.group(1) == "healthy"
-    wiring = re.findall(r"autowire-fail=(\d+) dup-dispatcher=(\d+)", probe)
-    checks["no_wiring_failures"] = bool(wiring) and all(
-        a == "0" and b == "0" for a, b in wiring
+    dups = re.findall(r"dup-dispatcher=(\d+)", probe)
+    head_failed = failed_contracts(probe)
+    base_failed = failed_contracts(base_probe) if base_probe is not None else {}
+    new_failures: list[str] = []
+    for container, names in head_failed.items():
+        extra = sorted(names - base_failed.get(container, set()))
+        new_failures += [f"{container}:{n}" for n in extra]
+        inherited = len(names) - len(extra)
+        if inherited:
+            notes.append(
+                f"{container}: {inherited} contract(s) fail to wire at dev too (base control)"
+            )
+    # both lines must be present: an absent failed-contracts line is an unread
+    # log, not a clean one
+    # a container that logged a wiring failure but names no failed contract is a
+    # log this parser could not read, never a clean one
+    unread = [
+        c
+        for c, fails, _ in re.findall(
+            r"^(\S+) lines=\d+ autowire-fail=(\d+) dup-dispatcher=(\d+)", probe, re.M
+        )
+        if fails != "0" and not head_failed.get(c)
+    ]
+    if unread:
+        notes.append("wiring failures logged but not named: " + ", ".join(unread))
+    checks["no_wiring_failures"] = (
+        bool(dups)
+        and len(head_failed) == len(dups)
+        and all(d == "0" for d in dups)
+        and not new_failures
+        and not unread
     )
+    if new_failures:
+        notes.append(
+            "wiring failures the base does not have: " + ", ".join(new_failures[:8])
+        )
     rcs = re.findall(r"^(\S+) focused rc=(\d+)", tests, re.M)
     checks["focused_tests"] = bool(rcs) and all(rc == "0" for _, rc in rcs)
     for repo, rc in rcs:
@@ -598,6 +651,8 @@ def run_proof(
     ledger_lines: Sequence[str],
     now_fn: Callable[[], dt.datetime] = _utcnow,
     log: Callable[[str], None] = lambda s: print(s, file=sys.stderr),
+    base_probe: str | None = None,
+    with_base_control: bool = False,
 ) -> tuple[int, str]:
     params = read_params(params_path)
     if not params.get("INFRA_PR") and not params.get("MARKET_PR"):
@@ -631,7 +686,87 @@ def run_proof(
         f"{host.surface} until={until:%Y-%m-%dT%H:%M:%SZ} through /omni:ledger-msg now"
     )
 
-    tag = f"pool-{holder}-{now:%H%M%S}"
+    started = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    released, rwhy = False, "not attempted"
+    base_text = base_probe
+    try:
+        outputs = _run_stack(
+            cfg,
+            transport,
+            host,
+            params,
+            params_path,
+            f"pool-{holder}-{now:%H%M%S}",
+            holder,
+            with_tests=True,
+            log=log,
+        )
+        rb = judge(outputs, base_text)
+        wiring_or_health = not (
+            rb.checks.get("no_wiring_failures", False)
+            and rb.checks.get("health_8085", False)
+            and rb.checks.get("health_8086", False)
+        )
+        if (
+            base_text is None
+            and with_base_control
+            and rb.checks.get("stack_built")
+            and wiring_or_health
+        ):
+            # A base control at dev on the same host, so a failure dev already
+            # has is reported as dev-inherited instead of blamed on the PR.
+            base_params = {
+                k: v
+                for k, v in params.items()
+                if k
+                not in ("INFRA_PR", "INFRA_HEAD", "MARKET_PR", "MARKET_HEAD", "TESTS")
+            }
+            base_out = _run_stack(
+                cfg,
+                transport,
+                host,
+                base_params,
+                params_path.with_suffix(".base"),
+                f"pool-{holder}-base-{now:%H%M%S}",
+                holder,
+                with_tests=False,
+                log=log,
+            )
+            base_text = base_out.get("probe", "")
+            rb = judge(outputs, base_text)
+            rb.notes.append("base control run at dev on the same host")
+            base_rb = judge(base_out, None)
+            if not base_rb.restored:
+                rb.restored = False
+                rb.notes.append(f"base control left residue: {base_rb.residue}")
+    finally:
+        released, rwhy = release_lease(cfg, transport, host, holder)
+        log(f"lease {host.name}: {rwhy}")
+    if not released:
+        rb.notes.append(f"lease not released: {rwhy}")
+    text = render_readback(
+        rb, host, params, started, now_fn().strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
+    text += (
+        f"\n  ledger: RELEASE re=<your HOLD id> surface={host.surface} "
+        f"result={rb.outcome} restored={'yes' if rb.restored else 'no'}"
+    )
+    code = {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(rb.outcome, EXIT_INCONCLUSIVE)
+    return code, text
+
+
+def _run_stack(
+    cfg: PoolConfig,
+    transport: Transport,
+    host: PoolHost,
+    params: Mapping[str, str],
+    params_path: Path,
+    tag: str,
+    holder: str,
+    with_tests: bool,
+    log: Callable[[str], None],
+) -> dict[str, str]:
+    """One stack on the leased host: every phase, then ALWAYS teardown."""
     # A path on the REMOTE host, private to this run and removed at the end.
     remote_dir = f"/tmp/{tag}"  # noqa: S108
     work = f"$HOME/{cfg.work_root_prefix}{holder}"
@@ -647,53 +782,41 @@ def run_proof(
     ]
     local_env = params_path.with_suffix(".resolved.env")
     local_env.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
-
+    phases = ["snap-pre", "clone", "build", "probe"] + (["tests"] if with_tests else [])
+    # probe waits up to PROBE_WAIT_S (default 1500 s) for the runtimes to settle
+    budget = {"clone": 900, "build": 3600, "probe": 1800, "tests": 2400}
     outputs: dict[str, str] = {}
-    started = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def phase_run(phase: str, timeout: float) -> int:
+        rc, out = transport.run(
+            host,
+            f"bash {remote_dir}/prove.sh {remote_dir}/params.env {phase}",
+            timeout=timeout,
+        )
+        outputs[phase] = out
+        log(f"[{host.name} {tag} {phase} rc={rc}]\n{out.rstrip()}")
+        return rc
+
     try:
         transport.run(host, f"mkdir -p {remote_dir}", timeout=30)
         if transport.put(host, PROVE_SH, f"{remote_dir}/prove.sh") or transport.put(
             host, local_env, f"{remote_dir}/params.env"
         ):
             raise RuntimeError("copy to host failed")
-        budget = {"clone": 900, "build": 3600, "probe": 600, "tests": 2400}
-        for phase in ("snap-pre", "clone", "build", "probe", "tests"):
-            rc, out = transport.run(
-                host,
-                f"bash {remote_dir}/prove.sh {remote_dir}/params.env {phase}",
-                timeout=budget.get(phase, 120),
-            )
-            outputs[phase] = out
-            log(f"[{host.name} {phase} rc={rc}]\n{out.rstrip()}")
-            if phase in ("clone", "build") and rc != 0:
+        for phase in phases:
+            if phase_run(phase, budget.get(phase, 120)) != 0 and phase in (
+                "clone",
+                "build",
+            ):
                 break
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-        # teardown and release below must run whatever failed above
+        # teardown below must run whatever failed above
         log(f"run aborted before teardown: {exc}")
     finally:
         for phase in ("teardown", "snap-post"):
-            rc, out = transport.run(
-                host,
-                f"bash {remote_dir}/prove.sh {remote_dir}/params.env {phase}",
-                timeout=600,
-            )
-            outputs[phase] = out
-            log(f"[{host.name} {phase} rc={rc}]\n{out.rstrip()}")
+            phase_run(phase, 600)
         transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=30)
-        released, rwhy = release_lease(cfg, transport, host, holder)
-        log(f"lease {host.name}: {rwhy}")
-    rb = judge(outputs)
-    if not released:
-        rb.notes.append(f"lease not released: {rwhy}")
-    text = render_readback(
-        rb, host, params, started, now_fn().strftime("%Y-%m-%dT%H:%M:%SZ")
-    )
-    text += (
-        f"\n  ledger: RELEASE re=<your HOLD id> surface={host.surface} "
-        f"result={rb.outcome} restored={'yes' if rb.restored else 'no'}"
-    )
-    code = {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(rb.outcome, EXIT_INCONCLUSIVE)
-    return code, text
+    return outputs
 
 
 # --------------------------------------------------------------------------- cli
@@ -742,6 +865,16 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
     rn.add_argument("--holder", required=True, help="your ledger lane name")
     rn.add_argument("--ttl-minutes", type=int, default=75)
     rn.add_argument("--host", help="insist on this pool host")
+    rn.add_argument(
+        "--base-control",
+        action="store_true",
+        help="when health or wiring fails, build dev on the same host and hold only new failures against the PR",
+    )
+    rn.add_argument(
+        "--base-probe",
+        type=Path,
+        help="probe output of an earlier base control at the same dev, instead of building one",
+    )
     rl = sub.add_parser("release", help="release a lease this holder left behind")
     rl.add_argument("--host", required=True)
     rl.add_argument("--holder", required=True)
@@ -795,6 +928,10 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         args.ttl_minutes,
         args.host,
         _ledger_lines(args.ledger),
+        base_probe=args.base_probe.read_text(encoding="utf-8")
+        if args.base_probe
+        else None,
+        with_base_control=args.base_control,
     )
     print(text)
     return code

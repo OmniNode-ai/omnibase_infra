@@ -17,7 +17,7 @@
 # dogfood lane, a runner) is read for a positive control and never written.
 #
 # Params (sourced): TAG W [INFRA_PR INFRA_HEAD] [MARKET_PR MARKET_HEAD]
-#   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS]
+#   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS CORE_REF SPI_REF COMPAT_REF]
 #
 # The id and file lists below ($C $V $N $IMGS $FILES and the like) are word-split
 # ON PURPOSE, and the macOS hosts run bash 3.2, which has no mapfile; hence:
@@ -75,6 +75,13 @@ clone)
   git clone -q --branch main https://github.com/OmniNode-ai/omnibase_compat.git "$R/omnibase_compat"
   git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_core.git "$R/omnibase_core"
   git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_spi.git "$R/omnibase_spi"
+  # The workspace build vendors each sibling from these clones, not from the PR's
+  # pin, so a PR that moves a sibling pin names the ref here (CORE_REF=v0.47.24).
+  for pair in "omnibase_core:${CORE_REF:-}" "omnibase_spi:${SPI_REF:-}" "omnibase_compat:${COMPAT_REF:-}"; do
+    repo=${pair%%:*}; ref=${pair#*:}; [ -n "$ref" ] || continue
+    git -C "$R/$repo" fetch -q --tags origin "$ref" && git -C "$R/$repo" switch -q --detach FETCH_HEAD
+    echo "$repo pinned to $ref = $(git -C "$R/$repo" rev-parse HEAD)"
+  done
   for d in "$R"/* "$T"/*; do [ -d "$d" ] && echo "$d $(git -C "$d" rev-parse HEAD)"; done
   echo "clone done $(ts)"
   ;;
@@ -108,6 +115,19 @@ build)
   ;;
 probe)
   echo "probe $(ts)"
+  # `up` returns as soon as the containers start; the runtimes take minutes to
+  # discover contracts and join their groups. Wait until no runtime container is
+  # still in its health start period and both ports answer, or PROBE_WAIT_S.
+  start=$(date +%s); end=$(( start + ${PROBE_WAIT_S:-1500} ))
+  while :; do
+    starting=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}} {{.Status}}' | grep -- '-runtime' | grep -c 'health: starting')
+    c1=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 localhost:8085/health)
+    c2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 localhost:8086/health)
+    if [ "$starting" = 0 ] && [ "$c1" != 000 ] && [ "$c2" != 000 ]; then break; fi
+    if [ "$(date +%s)" -ge "$end" ]; then echo "health wait timed out"; break; fi
+    sleep 15
+  done
+  echo "health wait $(( $(date +%s) - start ))s ended $(ts) starting=$starting 8085=$c1 8086=$c2"
   echo "== identity"
   docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$M" 2>&1
   echo "build GIT_SHA $(git -C "$R/omnibase_infra" rev-parse HEAD) market $(git -C "$R/omnimarket" rev-parse HEAD)"
@@ -117,11 +137,21 @@ probe)
     got=$(docker exec $M python -c "import $pkg, hashlib, os; b=os.path.dirname(os.path.dirname($pkg.__file__)); print(hashlib.sha256(open(b+'/$f','rb').read()).hexdigest()[:12])" 2>&1 | tail -1)
     echo "file $f image=$got build-tree=$want match=$([ "$got" = "$want" ] && echo yes || echo NO)"; done
   echo "== health"
-  for p in 8085 8086; do echo "port $p HTTP $(curl -s -o /tmp/$TAG-h$p.json -w '%{http_code}' --max-time 10 localhost:$p/health) $(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); det=d.get("details") if isinstance(d.get("details"),dict) else {}; print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",det.get("failed_handlers"))' /tmp/$TAG-h$p.json 2>&1)"; done
+  for p in 8085 8086; do rm -f "/tmp/$TAG-h$p.json"; code=$(curl -s -o "/tmp/$TAG-h$p.json" -w '%{http_code}' --max-time 10 "localhost:$p/health")
+    echo "port $p HTTP $code $(python3 -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    d={}
+det=d.get("details") if isinstance(d.get("details"),dict) else {}
+print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",det.get("failed_handlers"))' "/tmp/$TAG-h$p.json")"; done
   docker ps -aq --filter label=com.docker.compose.project=$P | xargs docker inspect -f '{{.Name}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} restarts={{.RestartCount}} {{.State.Status}} exit={{.State.ExitCode}}'
   echo "== wiring"
   for c in $M $E; do L=$(docker logs $c 2>&1); echo "$c lines=$(echo "$L" | wc -l | tr -d ' ') autowire-fail=$(echo "$L" | grep -c 'Auto-wiring failed for') dup-dispatcher=$(echo "$L" | grep -c 'Cannot register duplicate dispatcher ID') ERROR=$(echo "$L" | grep -c ERROR) Traceback=$(echo "$L" | grep -c Traceback)"
     echo "$L" | grep -E 'ERROR|Traceback|Auto-wiring failed' | sed -E 's/^[0-9T:.,Z -]+//' | cut -c1-160 | sort | uniq -c | sort -rn | head -4
+    # the contract names the non-strict wiring pass gave up on, so a run can be
+    # compared with a base control at dev (a failure dev already has is not the PR's)
+    echo "failed-contracts $c: $(echo "$L" | grep 'Auto-wiring failed for' | sed -E 's/.*enforce\): //' | awk -v RS='; ' -F': ' 'NF>1{print $1}' | sort -u | tr '\n' ' ')"
     for n in ${LIVE_GREP:-}; do echo "  $c mentions $n: $(echo "$L" | grep -c "$n")"; done; done
   if [ -n "${SQL:-}" ]; then echo "== sql"; PG=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 postgres)
     for db in $(docker exec "$PG" psql -U postgres -Atc "select datname from pg_database where datname not in ('postgres','template0','template1')"); do
