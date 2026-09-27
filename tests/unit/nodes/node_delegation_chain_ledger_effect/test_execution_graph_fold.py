@@ -208,18 +208,20 @@ def test_recorded_parent_cycle_refuses_the_whole_fold() -> None:
 
 def test_stored_rewrite_changes_annotations_but_not_replay() -> None:
     handler = DelegationExecutionGraphFold()
-    first = handler.handle(_request())
+    stored = ModelExecutionGraphStoredChainAnnotation(
+        node_id=LEFT,
+        hop_index=1,
+        replay_green=True,
+        verifier_verdict="pass",
+    )
+    first = handler.handle(_request(stored_chain=(stored,)))
     changed = handler.handle(
         _request(
             stored_chain=(
-                ModelExecutionGraphStoredChainAnnotation(
-                    node_id=LEFT,
-                    hop_index=9,
-                    replay_green=False,
-                    verifier_verdict="fail",
+                stored.model_copy(
+                    update={"replay_green": False, "verifier_verdict": "fail"}
                 ),
             ),
-            read_at=datetime(2026, 9, 27, tzinfo=UTC),
         )
     )
 
@@ -227,8 +229,13 @@ def test_stored_rewrite_changes_annotations_but_not_replay() -> None:
         mode="json"
     )
     assert first.annotations != changed.annotations
+    assert first.annotations.read_at == changed.annotations.read_at
+    assert first.annotations.stored_chain[0].node_id == LEFT
+    assert first.annotations.stored_chain[0].hop_index == 1
+    assert first.annotations.stored_chain[0].replay_green is True
     assert next(node for node in changed.replay.nodes if node.id == LEFT).replay_green
     assert changed.annotations.stored_chain[0].replay_green is False
+    assert changed.annotations.stored_chain[0].hop_index == 1
 
 
 def test_same_key_stored_verdict_reprocessing_changes_only_annotations() -> None:
@@ -255,29 +262,45 @@ def test_same_key_stored_verdict_reprocessing_changes_only_annotations() -> None
     assert reprocessed.annotations.stored_verdicts[0].projection_cursor == 7
 
 
-def test_timestamp_change_affects_only_labels() -> None:
-    first_request = _request()
-    changed_request = first_request.model_copy(
-        update={
-            "bounded_evidence": tuple(
-                item.model_copy(
-                    update={
-                        "event_timestamp": datetime(2040, 1, 1, tzinfo=UTC),
-                        "ledger_written_at": datetime(2041, 1, 1, tzinfo=UTC),
-                    }
-                )
-                for item in first_request.bounded_evidence
-            )
-        }
+def test_permuting_distinct_timestamps_changes_only_labels() -> None:
+    request = _request()
+    event_times = tuple(datetime(year, 1, 1, tzinfo=UTC) for year in (2040, 2020, 2030))
+    written_times = tuple(
+        datetime(year, 1, 1, tzinfo=UTC) for year in (2050, 2070, 2060)
     )
+
+    def with_times(order: tuple[int, ...]) -> ModelExecutionGraphFoldRequest:
+        return request.model_copy(
+            update={
+                "bounded_evidence": tuple(
+                    item.model_copy(
+                        update={
+                            "event_timestamp": event_times[stamp_index],
+                            "ledger_written_at": written_times[stamp_index],
+                        }
+                    )
+                    for item, stamp_index in zip(
+                        request.bounded_evidence, order, strict=True
+                    )
+                )
+            }
+        )
+
     handler = DelegationExecutionGraphFold()
-    first = handler.handle(first_request)
-    changed = handler.handle(changed_request)
+    first = handler.handle(with_times((0, 1, 2)))
+    changed = handler.handle(with_times((1, 2, 0)))
 
     assert first.replay.model_dump(mode="json") == changed.replay.model_dump(
         mode="json"
     )
+    assert first.replay.order == (HEAD, LEFT, RIGHT)
     assert first.labels != changed.labels
+    assert {label.node_id: label.event_timestamp for label in first.labels} != {
+        label.node_id: label.event_timestamp for label in changed.labels
+    }
+    assert {label.node_id: label.ledger_written_at for label in first.labels} != {
+        label.node_id: label.ledger_written_at for label in changed.labels
+    }
 
 
 def test_same_pinned_versions_refold_to_identical_replay_bytes() -> None:
