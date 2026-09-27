@@ -21,9 +21,9 @@ decisions, each pinned here:
   NoConvergeAtProbe violated), and so does a guard that looks only forward;
 * it stages each omnimarket head at most once.
 
-The committed routing table routes nothing to dev-202, so omnimarket is not
-routed elsewhere and the converge never fires: .201's behaviour is unchanged
-(``test_idle_converge_is_inert_under_the_committed_table``).
+The committed routing table routes omnimarket to dev-202, so the .201 idle
+converge fires under the default router
+(``test_idle_converge_fires_under_the_committed_table``).
 """
 
 from __future__ import annotations
@@ -247,7 +247,7 @@ class TestIdleConvergeReaders:
 
 
 # --------------------------------------------------------------------------- #
-# The agent: the idle branch, and inert under the committed table              #
+# The agent: the idle branch, and convergence under the committed table        #
 # --------------------------------------------------------------------------- #
 class _FakeExecutor:
     def __init__(self) -> None:
@@ -334,14 +334,25 @@ class TestIdleConvergeInTheAgent:
         agent._maybe_idle_converge()
         assert len(list((tmp_path / "jobs").glob("*.json"))) == 1
 
-    def test_idle_converge_is_inert_under_the_committed_table(
+    def test_idle_converge_fires_under_the_committed_table(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The committed table routes nothing to dev-202: .201 is unchanged."""
+        """The committed table routes omnimarket to dev-202."""
         agent = _agent(tmp_path, monkeypatch, omnimarket_to_202=False)
+
         agent._maybe_idle_converge()
-        assert list((tmp_path / "jobs").glob("*.json")) == []
-        assert agent.executor.calls == []  # type: ignore[attr-defined]
+
+        jobs = [
+            JobStore(tmp_path / "jobs").load(UUID(p.stem))
+            for p in (tmp_path / "jobs").glob("*.json")
+        ]
+        assert len(jobs) == 1
+        job = jobs[0]
+        assert job is not None
+        assert job.command["requested_by"] == IDLE_CONVERGE_REQUESTER
+        assert job.command["runtime_lane"] == "dev"
+        assert job.status == "success"
+        assert "rebuild_scope" in agent.executor.calls  # type: ignore[attr-defined]
 
     def test_idle_converge_only_on_the_poll_loops_idle_branch(self) -> None:
         """QueuedFirst and SingleWriter201 hold because the converge is called
