@@ -7,7 +7,16 @@
 # (omniclaude, omniintelligence, omnimemory) after each PyPI release.
 # Updates Dockerfile.runtime pins for the released plugin and opens a PR.
 #
-# Ticket: OMN-5375
+# Ticket: OMN-5375 (origin), OMN-18596 (downstream pin-bump PRs on publish)
+#
+# OMN-18596: the PR this opens must be attributable and must target the branch
+# its commit was cut from. Before this, it opened ticketless (so occ-autobind
+# had no ticket to bind a change-control companion to, and the PR stayed red on
+# the missing evidence) and against a literal `main` while the checkout cut the
+# branch from the default branch `dev` (omnibase_infra#4168: a three-line pin
+# change rendered as a 100-file dev..main diff). Both now follow the
+# dependency-cascade.yml convention: a validated ticket in the head ref, title
+# and body, and a base read from the checkout rather than written here.
 
 name: Plugin Pin Cascade
 
@@ -24,6 +33,17 @@ on:
         description: 'Released version (e.g. 0.5.0)'
         required: true
         type: string
+      ticket:
+        description: 'OMN ticket the PR cites; defaults to the standing cascade ticket'
+        required: false
+        type: string
+
+# OMN-18596: the standing ticket every plugin pin cascade PR cites when the
+# dispatch names none. Declared here, once, as configuration: occ-autobind reads
+# the ticket from the PR title and head ref, and a PR with neither cannot get a
+# companion at all.
+env:
+  PLUGIN_PIN_CASCADE_STANDING_TICKET: OMN-18596
 
 permissions:
   contents: write
@@ -44,16 +64,55 @@ jobs:
     steps:
       - name: Resolve inputs
         id: inputs
+        # Inputs arrive through env, never interpolated into the script, and
+        # every field that reaches a ref, a PR title or a PR body is validated
+        # first (the dependency-cascade.yml OMN-16286 rule).
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_PACKAGE: ${{ github.event.client_payload.package }}
+          DISPATCH_VERSION: ${{ github.event.client_payload.version }}
+          DISPATCH_SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+          DISPATCH_TICKET: ${{ github.event.client_payload.ticket }}
+          MANUAL_PACKAGE: ${{ inputs.package }}
+          MANUAL_VERSION: ${{ inputs.version }}
+          MANUAL_TICKET: ${{ inputs.ticket }}
         run: |
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "package=${{ github.event.client_payload.package }}" >> $GITHUB_OUTPUT
-            echo "version=${{ github.event.client_payload.version }}" >> $GITHUB_OUTPUT
-            echo "source_repo=${{ github.event.client_payload.source_repo }}" >> $GITHUB_OUTPUT
+          # >>> OMN-18596 plugin pin inputs >>>
+          if [ "${EVENT_NAME}" = "repository_dispatch" ]; then
+            PACKAGE="${DISPATCH_PACKAGE}"
+            VERSION="${DISPATCH_VERSION}"
+            SOURCE_REPO="${DISPATCH_SOURCE_REPO}"
+            TICKET="${DISPATCH_TICKET}"
           else
-            echo "package=${{ inputs.package }}" >> $GITHUB_OUTPUT
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-            echo "source_repo=manual" >> $GITHUB_OUTPUT
+            PACKAGE="${MANUAL_PACKAGE}"
+            VERSION="${MANUAL_VERSION}"
+            SOURCE_REPO="manual"
+            TICKET="${MANUAL_TICKET}"
           fi
+          TICKET="${TICKET:-${PLUGIN_PIN_CASCADE_STANDING_TICKET}}"
+          if ! [[ "${PACKAGE}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "::error::OMN-18596: package '${PACKAGE}' does not match ^[A-Za-z0-9_-]+\$."
+            exit 1
+          fi
+          if ! [[ "${VERSION}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([A-Za-z0-9.+-]*)?$ ]]; then
+            echo "::error::OMN-18596: version '${VERSION}' is not a SemVer-ish release version."
+            exit 1
+          fi
+          if ! [[ "${TICKET}" =~ ^OMN-[0-9]+$ ]]; then
+            echo "::error::OMN-18596: ticket '${TICKET}' does not match ^OMN-[0-9]+\$; a pin cascade PR must be attributable."
+            exit 1
+          fi
+          if ! [[ "${SOURCE_REPO}" =~ ^[A-Za-z0-9_./-]*$ ]]; then
+            echo "::error::OMN-18596: source_repo '${SOURCE_REPO}' contains characters outside ^[A-Za-z0-9_./-]*\$."
+            exit 1
+          fi
+          {
+            echo "package=${PACKAGE}"
+            echo "version=${VERSION}"
+            echo "source_repo=${SOURCE_REPO}"
+            echo "ticket=${TICKET}"
+          } >> "$GITHUB_OUTPUT"
+          # <<< OMN-18596 plugin pin inputs <<<
 
       # OMN-18273: this job used to push with the default workflow token, which
       # both mis-attributes the commit to github-actions[bot] and does NOT start
@@ -82,12 +141,30 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set branch name
+      - name: Set branch name and resolve the base
         id: branch
+        env:
+          PKG: ${{ steps.inputs.outputs.package }}
+          VER: ${{ steps.inputs.outputs.version }}
+          TICKET: ${{ steps.inputs.outputs.ticket }}
         run: |
-          PKG="${{ steps.inputs.outputs.package }}"
-          VER="${{ steps.inputs.outputs.version }}"
-          echo "name=automation/pin-${PKG}-${VER}" >> $GITHUB_OUTPUT
+          TICKET_SLUG="$(printf '%s' "${TICKET}" | tr '[:upper:]' '[:lower:]')"
+          echo "name=automation/pin-${PKG}-${VER}-${TICKET_SLUG}" >> "$GITHUB_OUTPUT"
+          # The pre-OMN-18596 branch shape: a PR still open under it is the
+          # same cascade, and the already-open check must see it.
+          echo "legacy_name=automation/pin-${PKG}-${VER}" >> "$GITHUB_OUTPUT"
+          # >>> OMN-18596 plugin pin base resolver >>>
+          # The base is the ref the checkout landed on, read BEFORE the pin
+          # branch is cut from it. The checkout passes no `ref:`, so this is
+          # the repository's default branch, resolved at run time. A literal
+          # base opened omnibase_infra#4168 against a release-synced main.
+          BASE_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+          if [ -z "${BASE_BRANCH}" ] || [ "${BASE_BRANCH}" = "HEAD" ]; then
+            echo "::error::OMN-18596: refusing to open a plugin pin PR: the checkout is detached or its branch could not be read, so the base cannot be bound to the commit's own parent."
+            exit 1
+          fi
+          echo "base=${BASE_BRANCH}" >> "$GITHUB_OUTPUT"
+          # <<< OMN-18596 plugin pin base resolver <<<
 
       - name: Create branch
         run: git checkout -b "${{ steps.branch.outputs.name }}"
@@ -112,20 +189,36 @@ jobs:
         # to fetch an older version, fail loudly rather than silently succeed with
         # stale data.
         #
+        # OMN-19866: OMN-18596 (update-plugin-pins.py's _replace_pin) rewrites a
+        # range-pinned package to a bounded range that keeps its ceiling and
+        # advances only its floor ("PKG>=FLOOR,<CEILING"), specifically so the
+        # Dockerfile plugin pin validator does not reject the result. This check
+        # still only looked for an exact "PKG==VERSION" pin, so ACTUAL was always
+        # empty for a range-pinned package and every cascade run failed here
+        # even though the pin update itself had succeeded. Accept either shape:
+        # the postcondition is an exact match for an exact pin, or the floor for
+        # a bounded range.
+        #
         # The dispatched version may carry a 'v' prefix (e.g. v0.15.0 from the
         # release tag) while the Dockerfile pin is bare (0.15.0). Strip the prefix
         # before comparing.
+        env:
+          PKG: ${{ steps.inputs.outputs.package }}
+          EXPECTED_VER: ${{ steps.inputs.outputs.version }}
         run: |
-          PKG="${{ steps.inputs.outputs.package }}"
-          EXPECTED_VER="${{ steps.inputs.outputs.version }}"
+          # >>> OMN-19866 plugin pin verify >>>
           # Strip leading 'v' prefix if present (e.g. v0.15.0 → 0.15.0)
           EXPECTED_VER="${EXPECTED_VER#v}"
           ACTUAL=$(grep -oP "(?<=${PKG}==)[0-9]+\.[0-9]+\.[0-9]+" docker/Dockerfile.runtime || true)
+          if [ -z "$ACTUAL" ]; then
+            ACTUAL=$(grep -oP "(?<=${PKG}>=)[0-9]+\.[0-9]+\.[0-9]+(?=,<)" docker/Dockerfile.runtime || true)
+          fi
           if [ "$ACTUAL" != "$EXPECTED_VER" ]; then
             echo "ERROR: Dockerfile pin for ${PKG} did not reach expected version ${EXPECTED_VER} (actual: ${ACTUAL}) — PyPI propagation lag. Re-run workflow after 60s." >&2
             exit 1
           fi
-          echo "Pin confirmed: ${PKG}==${ACTUAL}"
+          echo "Pin confirmed: ${PKG} at ${ACTUAL}"
+          # <<< OMN-19866 plugin pin verify <<<
 
       - name: Check for changes
         id: diff
@@ -154,17 +247,19 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          EXISTING=$(gh pr list \
-            --head "${{ steps.branch.outputs.name }}" \
-            --state open \
-            --json number \
-            --jq 'length')
-          if [ "$EXISTING" -gt 0 ]; then
-            echo "PR already exists — skipping."
-            exit 0
-          fi
+          for HEAD_REF in "${{ steps.branch.outputs.name }}" "${{ steps.branch.outputs.legacy_name }}"; do
+            EXISTING=$(gh pr list \
+              --head "${HEAD_REF}" \
+              --state open \
+              --json number \
+              --jq 'length')
+            if [ "$EXISTING" -gt 0 ]; then
+              echo "PR already exists for ${HEAD_REF} — skipping."
+              exit 0
+            fi
+          done
           gh pr create \
-            --title "chore(deps): reconcile plugin pins (triggered by ${{ steps.inputs.outputs.package }} ${{ steps.inputs.outputs.version }})" \
+            --title "chore(deps): reconcile plugin pins (triggered by ${{ steps.inputs.outputs.package }} ${{ steps.inputs.outputs.version }}) (${{ steps.inputs.outputs.ticket }})" \
             --body "$(cat <<'PREOF'
           ## Summary
 
@@ -178,10 +273,12 @@ jobs:
           - [ ] CI passes
           - [ ] Dockerfile.runtime pin reflects correct version
           - [ ] Runtime image builds successfully with new pin
+
+          Evidence-Ticket: ${{ steps.inputs.outputs.ticket }}
           PREOF
           )" \
             --head "${{ steps.branch.outputs.name }}" \
-            --base main
+            --base "${{ steps.branch.outputs.base }}"
 
       - name: Skip summary
         if: steps.diff.outputs.changed == 'false'

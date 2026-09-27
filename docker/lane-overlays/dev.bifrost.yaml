@@ -27,6 +27,25 @@ backends:
     context_window: 131072
     max_tokens: 65536
     timeout_ms: 300000
+  # OMN-17099: local-embedding was declared by the base contract with
+  # endpoint_url: null and never bound by this overlay, so every render of
+  # the dev lane shipped it dark even though the endpoint itself is live —
+  # live probe 2026-09-27, GET http://192.168.86.201:8002/v1/models returns
+  # 200, served id "text-embedding-qwen3", max_model_len 8192 (owned_by vllm,
+  # root /data/inference/hf-cache/qwen3-embedding-0.6b — same host and note as
+  # the base contract's OMN-16442 comment on this backend_id). The endpoint
+  # is embeddings-only: :8002/v1/chat/completions 404s, :8002/v1/embeddings
+  # serves real vectors, so the bound URL is the embeddings path, not the
+  # chat-completions path every other local rung here uses. Probe recorded in
+  # tests/fixtures/bifrost_served_models_probe.json.
+  # onex-allow-internal-ip OMN-17099 reason="typed dev-lane delegation contract"
+  - backend_id: local-embedding
+    endpoint_url: "http://192.168.86.201:8002/v1/embeddings"
+    served_model_id: "text-embedding-qwen3"
+    parameter_count: "0.6B"
+    context_window: 8192
+    max_tokens: 1
+    timeout_ms: 30000
   # OMN-19187: omnipc2, the second RTX 4090 host at .202, serving the same
   # Qwen3.8-27B as .201 under llama.cpp, keyless (operator ruling, ledger row
   # 5474). A NEW backend id, added by this lane overlay (OMN-17099) — the

@@ -292,6 +292,22 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
         assert _live_privileges(fresh_build, table, _RUNTIME) == declared, table
         assert table not in allowlisted, f"{table} is still on the allow-list"
 
+    # OMN-19716: the topic-activity writer marks a vanished topic ABSENT and
+    # never deletes, so the runtime role holds exactly the declared
+    # SELECT/INSERT/UPDATE on topic_activity and no DELETE. Named per table so
+    # a re-added DELETE grant fails here by name, not only in the diff below.
+    topic_activity_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "topic_activity"
+    }
+    assert topic_activity_declared == {"SELECT", "INSERT", "UPDATE"}
+    topic_activity_live = _live_privileges(fresh_build, "topic_activity", _RUNTIME)
+    assert topic_activity_live == topic_activity_declared
+    assert "DELETE" not in topic_activity_live
+
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}
     new = sorted(live - allowed)

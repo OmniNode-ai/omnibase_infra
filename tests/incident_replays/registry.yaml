@@ -171,6 +171,14 @@ scope:
     # psql read has no re-fetchable locator of the kind R3 requires; claiming
     # one would be the free-text provenance this registry exists to refuse.
     - scripts/ci/c16_receipt_identity_probe.py
+    # OMN-19812: a PROBE, the C28 producer, in the same class as the C11, C12
+    # and C16 entries above. It re-measures a hand readback on the live lane,
+    # not a past incident's bytes. Its grading is proven offline in
+    # tests/ci/test_c28_consumer_flow_probe.py over a built observation plus
+    # the seam's own log lines captured from the dev lane -- a regression
+    # suite, not an incident replay: a `docker logs` window has no
+    # re-fetchable locator of the kind R2 requires.
+    - scripts/ci/c28_consumer_flow_probe.py
     # OMN-17876: the offline contract canary is a new preventive evidence
     # projection; it deliberately cannot replay a live runner incident.
     - scripts/ci/model_review_capability_canary.py
@@ -1412,3 +1420,20 @@ cases:
     test: tests/ci/test_incident_replay_omn19613.py::test_the_scope_hands_the_real_plugin_emit_daemon_to_the_guard
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. OMN-19613 narrows the no-plugin-daemon-classes pre-commit step to the PR's own files on pull_request, and the only way a narrowing can go wrong is a false green: the scope computes the wrong range, the violating file is not in it, and the guard says OK. PluginEmitDaemon is the incident behind the guard: a Plugin* class that owned a daemon lifecycle, added by OMN-7640, deleted by OMN-10122 once it was replaced by a node entry point, and the reason OMN-10123 built the Plugin* lifecycle guard. The fixture is that file at 8d78fa80, the parent of the deletion, byte for byte from git cat-file, 13866 bytes. The replay adds it in a PR whose merge commit sits on a base that moved after the PR branched, which is the shape of GitHub's pull_request checkout, asks the real scope script for its range, and runs the real omnibase_core guard over the Python files in that range: the daemon must be in the range, the base's own new commit must not be, and the guard must reject. A scope that diffed against the second parent, or included the base branch's own commits, fails one of those three assertions. The discriminator is a PR that touches only an unrelated file with the same daemon already on the base, where the same scope must leave the daemon out and the guard must accept, so a scope that simply returns the whole tree cannot satisfy the case; the whole-tree fallbacks (push, merge_group, dispatch, a hook-config or workflow change, a moved omnibase-core pin, an unresolvable base) are pinned separately in tests/ci/test_lint_validator_runner.py.
+  - id: omn18812-a-merged-companion-left-the-preflight-red-with-no-heal-in-this-repo
+    guard: scripts/ci/occ_companion_merge_heal.py
+    incident: OMN-18812
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    artifact:
+      fixture: tests/fixtures/omn18812/check-runs-3999.json.gz.captured
+      sha256: 6dab91dcb76a157e8b619eb2618f505a680bd68ac19ff961864cfa83ace3e120
+    capture:
+      method: gh-api
+      source: gh-api:repos/OmniNode-ai/omnibase_infra/commits/c8de38dc6326751dcca5de28e9703a19cb9872a2/check-runs?per_page=100
+      captured_at: '2026-09-26T22:13:00Z'
+      captured_by: lane merge-throughput-fix-83 (OMN-18812)
+    test: tests/ci/test_incident_replay_omn18812.py::test_the_real_guard_reruns_exactly_the_runs_the_merged_companion_unblocks
+    discriminator: tests/ci/test_incident_replay_omn18812.py::test_the_same_guard_refuses_a_real_pr_whose_companion_is_still_open
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. On omnibase_infra#3999 (head c8de38dc6326, body stamped Evidence-Source: OCC#10983) the occ-preflight / eligibility and OCC Companion Merged Gate (OMN-15214) check runs failed between 18:02Z and 18:46Z on 2026-09-23, when the bounded 1500 s wait for the companion ran out. The companion onex_change_control#10983 merged at 20:35:00Z that day, and nothing in this repository listens for that event: the OMN-18352 occ-preflight-heal fires on pull_request edited and workflow_run completed, both of which had already fired. The head still carried the pre-merge failures when these bytes were captured three days later. The green-by-omission is the defect: the change-control fact became true and every gate that reads it stayed red, so the PR waited for a human or a drain lane to type gh run rerun --failed. NOT A RECONSTRUCTION -- the cited artifact is the head's check-run list read with --paginate --slurp (the exact shape the guard's GhCli reads) and gzip -n -9'd for size, and the sibling captures beside it are each one gh api read: the PR (pulls/3999), the companion (onex_change_control pulls/10983), the head's runs listing (actions/runs?head_sha=c8de38dc6326751dcca5de28e9703a19cb9872a2), and the job list of every failed run on it. The replay first asserts out of the bytes that every failed change-control verdict on the head completed before the companion's merged_at, then drives the real guard, which must select exactly the three runs whose own preflight-family job failed (35898373010, 35898372640, 35898371776) and leave alone the three that failed for other reasons. The one adaptation is the companion state: the guard reads gh pr view --json state, which has no re-fetchable locator, so the replay maps the REST payload's merged flag onto that single field before the guard's own parser sees it. THE DISCRIMINATOR IS MANDATORY: a guard hardwired to re-run would replay this incident perfectly and spend a second 1500 s budget on every PR whose companion is still open. The same guard is driven over omnibase_infra#4191 (pulls/4191, its check runs, and onex_change_control pulls/11538, open at capture) and must return COMPANION_UNMERGED without reading a single run. Both directions are mutation-proved: removing the merged-companion precondition reddens the discriminator, and matching every failed job instead of the preflight family reddens the incident case.

@@ -252,6 +252,12 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="aggregate_token_usage",
         ),
     ),
+    # OMN-19716: the topic_activity bridge that sat here was DELETED by the pin
+    # advance to 2e7cec7d45ed, which carries omnimarket#2953, the retiring pull
+    # request its own comment named. The expiry module went red on the bot pull
+    # request naming the entry, and the deletion rode the commit that caused
+    # it; the regeneration wrote nothing, which is the proof the contract
+    # derives what the entry used to.
     # OMN-18863: the runtime-error fingerprints entry that used to sit here was
     # DELETED when the pin advanced to ac35d56338b3, which is omnimarket#2664's
     # squash, because the contract declares the relation itself now. That is the

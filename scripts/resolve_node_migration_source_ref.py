@@ -35,6 +35,11 @@ SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SOURCE_PR_RE = re.compile(
     r"^(?:(?:OmniNode-ai/)?omnimarket)?#?(?P<number>[1-9][0-9]*)$"
 )
+# OMN-19807: a merge-queue group ref, ``gh-readonly-queue/<base>/pr-<n>-<sha>``
+# (GitHub may send it with or without the ``refs/heads/`` prefix).
+MERGE_GROUP_HEAD_REF_RE = re.compile(
+    r"^(?:refs/heads/)?gh-readonly-queue/[^/]+(?:/[^/]+)*/pr-(?P<number>[1-9][0-9]*)-[0-9a-f]{40}$"
+)
 
 
 def _body_from_event(path: str | None) -> str:
@@ -45,9 +50,49 @@ def _body_from_event(path: str | None) -> str:
         return ""
     payload = json.loads(event_path.read_text(encoding="utf-8"))
     pull_request = payload.get("pull_request")
-    if not isinstance(pull_request, dict):
-        return ""
-    body = pull_request.get("body")
+    if isinstance(pull_request, dict):
+        body = pull_request.get("body")
+        return body if isinstance(body, str) else ""
+    merge_group = payload.get("merge_group")
+    if isinstance(merge_group, dict):
+        return _body_from_merge_group(payload, merge_group)
+    return ""
+
+
+def _body_from_merge_group(
+    payload: dict[str, object], merge_group: dict[str, object]
+) -> str:
+    """Read the queued PR's live body for a ``merge_group`` event (OMN-19807).
+
+    A merge-group payload carries no ``pull_request`` object, so before this a
+    queued vendoring PR resolved to omnimarket ``dev`` and its paired, still
+    open source PR was never read: the queue then dropped a PR whose
+    ``pull_request`` run had passed. The body is read live from the API so the
+    same trailer rules and paired-source checks apply; an unreadable body fails
+    closed rather than falling back to ``dev``.
+    """
+    head_ref = merge_group.get("head_ref")
+    match = (
+        MERGE_GROUP_HEAD_REF_RE.fullmatch(head_ref)
+        if isinstance(head_ref, str)
+        else None
+    )
+    if match is None:
+        raise ValueError(f"merge_group head_ref is not a merge-queue ref: {head_ref!r}")
+    repository = payload.get("repository")
+    full_name = (
+        repository.get("full_name") if isinstance(repository, dict) else None
+    ) or os.environ.get("GITHUB_REPOSITORY")
+    if not isinstance(full_name, str) or "/" not in full_name:
+        raise ValueError("merge_group event names no repository")
+    number = int(match["number"])
+    status, pr, detail = _api_get(f"{_GITHUB_API}/repos/{full_name}/pulls/{number}")
+    if status != 200 or pr is None:
+        raise ValueError(
+            "could not read the queued PR body for the merge group "
+            f"(fail-closed): {full_name}#{number}; {detail}"
+        )
+    body = pr.get("body")
     return body if isinstance(body, str) else ""
 
 
