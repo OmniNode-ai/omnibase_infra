@@ -105,7 +105,10 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # declared in the shipped topology instances and derivable from no pinned
 # contract; add it in the same pull request that vendors it, and this module
 # will tell you when to take it out.
-_INTERIM_ENTRIES: dict[str, str] = {}
+_INTERIM_ENTRIES: dict[str, str] = {
+    "pr_landing_state": "omnimarket#3000",
+    "pr_landing_transitions": "omnimarket#3000",
+}
 
 _SKIP_REASON = (
     "requires the pinned omnimarket checkout at .proof-dependencies/omnimarket-pin "
