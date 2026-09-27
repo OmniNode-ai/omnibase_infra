@@ -481,6 +481,21 @@ def failed_contracts(probe: str) -> dict[str, set[str]]:
     return found
 
 
+def failure_signatures(probe: str) -> dict[tuple[str, str], str]:
+    """(container, contract) -> the error class and message, handler name removed.
+
+    Two contracts that fail for the same reason (say, a projection handler with
+    no configured DSN on the laptop bundle) carry the same signature.
+    """
+    sigs: dict[tuple[str, str], str] = {}
+    for container, name, reason in re.findall(
+        r"^\s*failed-contract-reason (\S+) (\S+): (.*)$", probe, re.M
+    ):
+        body = re.sub(r"^handler=\S+:\s*", "", reason)
+        sigs[(container, name)] = ": ".join(body.split(": ")[:2])
+    return sigs
+
+
 def judge(outputs: Mapping[str, str], base_probe: str | None = None) -> Readback:
     """Decide the run from the phase outputs of prepr_pool_prove.sh.
 
@@ -527,15 +542,29 @@ def judge(outputs: Mapping[str, str], base_probe: str | None = None) -> Readback
     dups = re.findall(r"dup-dispatcher=(\d+)", probe)
     head_failed = failed_contracts(probe)
     base_failed = failed_contracts(base_probe) if base_probe is not None else {}
+    sigs = failure_signatures(probe)
     new_failures: list[str] = []
     for container, names in head_failed.items():
-        extra = sorted(names - base_failed.get(container, set()))
-        new_failures += [f"{container}:{n}" for n in extra]
+        base_names = base_failed.get(container, set())
+        extra = sorted(names - base_names)
         inherited = len(names) - len(extra)
         if inherited:
             notes.append(
                 f"{container}: {inherited} contract(s) fail to wire at dev too (base control)"
             )
+        # A contract the PR adds that fails for exactly the reason a contract dev
+        # already has fails for is the same environment gap, not the PR's defect.
+        inherited_sigs = {
+            sigs[(container, n)] for n in names & base_names if (container, n) in sigs
+        }
+        for n in extra:
+            sig = sigs.get((container, n))
+            if base_probe is not None and sig and sig in inherited_sigs:
+                notes.append(
+                    f"{container}:{n} fails to wire for the reason dev's own failures share ({sig})"
+                )
+            else:
+                new_failures.append(f"{container}:{n}")
     # both lines must be present: an absent failed-contracts line is an unread
     # log, not a clean one
     # a container that logged a wiring failure but names no failed contract is a

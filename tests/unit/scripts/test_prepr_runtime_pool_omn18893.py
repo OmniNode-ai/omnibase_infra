@@ -580,3 +580,54 @@ def test_params_keep_a_quote_that_belongs_to_the_value(tmp_path: Path) -> None:
     params = pool.read_params(p)
     assert params["SQL"] == "select 1 where x<>'postgres'"
     assert params["A"] == "plain" and params["B"] == "bare"
+
+
+def _with_reasons(probe: str, reasons: dict[str, str]) -> str:
+    lines = [
+        f"  failed-contract-reason omnibase-infra-local-omninode-runtime {n}: handler=H{n}: {r}"
+        for n, r in reasons.items()
+    ]
+    return probe + "\n".join(lines) + "\n"
+
+
+DSN = "ValueError: Projection handler requires topology bindings with configured DSNs: omninode_x"
+
+
+def test_a_new_contract_failing_for_devs_own_reason_is_the_same_gap() -> None:
+    # Found live (omnibase_infra#4154 + omnimarket#2905, 2026-09-27): the PR's new
+    # projection failed to wire on the laptop bundle for the same missing-DSN
+    # reason 27 projections at dev fail for.
+    head = _with_reasons(
+        DEV_FAILS.replace(
+            "projection_traces", "projection_traces projection_session_content"
+        ),
+        {
+            "projection_baselines": DSN,
+            "projection_traces": DSN,
+            "projection_session_content": DSN,
+        },
+    )
+    rb = pool.judge({**GOOD, "probe": head}, base_probe=DEV_FAILS)
+    assert rb.outcome == "PASS", rb
+    assert any(
+        "projection_session_content fails to wire for the reason" in n for n in rb.notes
+    )
+
+
+def test_a_new_contract_failing_for_a_different_reason_is_the_prs() -> None:
+    head = _with_reasons(
+        DEV_FAILS.replace(
+            "projection_traces", "projection_traces projection_session_content"
+        ),
+        {
+            "projection_baselines": DSN,
+            "projection_traces": DSN,
+            "projection_session_content": "ImportError: cannot import name X",
+        },
+    )
+    rb = pool.judge({**GOOD, "probe": head}, base_probe=DEV_FAILS)
+    assert rb.outcome == "FAIL"
+    assert any(
+        "projection_session_content" in n and "base does not have" in n
+        for n in rb.notes
+    )
