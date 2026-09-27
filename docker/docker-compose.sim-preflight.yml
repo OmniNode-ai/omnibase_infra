@@ -1,0 +1,110 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19728 disposable validation overlay. Render only after its base lane
+# overlays through the dedicated wrapper project `omnibase-infra-sim-preflight`.
+# `-p omnibase-infra-sim-202` is forbidden: it targets the shared lane.
+name: omnibase-infra-sim-preflight
+x-sim-preflight-ambient-credentials: &sim-preflight-ambient-credentials
+  LLM_GLM_API_KEY: ""
+  GEMINI_API_KEY: ""
+  GOOGLE_API_KEY: ""
+  OPENROUTER_API_KEY: ""
+  LOCAL_LLM_SHARED_SECRET: ""
+  LINEAR_API_KEY: ""
+  GITHUB_TOKEN: ""
+  GH_TOKEN: ""
+services:
+  # These inherited dogfood fault providers have fixed dogfood container names.
+  # Keep them unavailable even when the base `dogfood` profile is selected.
+  dogfood-delegation-fault-429:
+    profiles: !override ["sim-preflight-faults-disabled"]
+  dogfood-delegation-fault-503:
+    profiles: !override ["sim-preflight-faults-disabled"]
+  postgres:
+    container_name: omnibase-infra-sim-preflight-postgres
+    ports: !override ["127.0.0.1:65036:5432"]
+  redpanda:
+    container_name: omnibase-infra-sim-preflight-redpanda
+    command: !override
+      - redpanda
+      - start
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://127.0.0.1:65092
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      - ${DOGFOOD_REDPANDA_MEMORY:-2G}
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
+    ports: !override ["127.0.0.1:65092:19092", "127.0.0.1:65444:9644"]
+  redpanda-partition-cap:
+    container_name: omnibase-infra-sim-preflight-redpanda-partition-cap
+  valkey:
+    container_name: omnibase-infra-sim-preflight-valkey
+    ports: !override ["127.0.0.1:65379:6379"]
+  forward-migration:
+    container_name: omnibase-infra-sim-preflight-forward-migration
+  migration-gate:
+    container_name: omnibase-infra-sim-preflight-migration-gate
+  intelligence-migration:
+    container_name: omnibase-infra-sim-preflight-intelligence-migration
+  omninode-runtime:
+    container_name: omninode-sim-preflight-runtime
+    environment:
+      !!merge <<: *sim-preflight-ambient-credentials
+      ONEX_BOX_ID: sim-preflight
+      ONEX_RUNTIME_ADDRESS: runtime://sim-preflight/main
+    ports: !override ["127.0.0.1:65085:8085"]
+    labels: !override
+      - com.omninode.lane=sim-preflight
+      - com.omninode.ticket=OMN-19728
+  runtime-effects:
+    container_name: omninode-sim-preflight-runtime-effects
+    environment:
+      !!merge <<: *sim-preflight-ambient-credentials
+      ONEX_BOX_ID: sim-preflight
+      ONEX_RUNTIME_ADDRESS: runtime://sim-preflight/effects
+    ports: !override ["127.0.0.1:65086:8085"]
+    labels: !override
+      - com.omninode.lane=sim-preflight
+      - com.omninode.ticket=OMN-19728
+  projection-api:
+    container_name: omnimarket-sim-preflight-projection-api
+    environment:
+      !!merge <<: *sim-preflight-ambient-credentials
+      ONEX_BOX_ID: sim-preflight
+    ports: !override ["127.0.0.1:65002:3002"]
+    labels: !override
+      - com.omninode.lane=sim-preflight
+      - com.omninode.ticket=OMN-19728
+networks:
+  omnibase-infra-dogfood-network:
+    name: omnibase-infra-sim-preflight-network
+volumes:
+  dogfood_postgres_data:
+    name: omnibase-infra-sim-preflight-postgres-data
+  dogfood_redpanda_data:
+    name: omnibase-infra-sim-preflight-redpanda-data
+  dogfood_valkey_data:
+    name: omnibase-infra-sim-preflight-valkey-data
+  dogfood_runtime_logs:
+    name: omninode-sim-preflight-runtime-logs
+  dogfood_runtime_data:
+    name: omninode-sim-preflight-runtime-data
+  dogfood_effects_logs:
+    name: omninode-sim-preflight-effects-logs
+  dogfood_effects_data:
+    name: omninode-sim-preflight-effects-data
