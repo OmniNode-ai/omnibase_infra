@@ -145,6 +145,27 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="state",
         ),
     ),
+    # OMN-19829. Same seam, same classification: durable per-PR landing
+    # workflow state for omnimarket's node_pr_landing_orchestrator, keyed on
+    # ``landing_key`` (``owner/repo#<number>``). Its ``tenant_id`` column is
+    # denormalized provenance from the opaque payload, never an authorization
+    # key, so operator ruling R-q's OMNINODE_INTERNAL classification holds.
+    ContractTableDeclaration(
+        node="state_io:pr_landing_workflow_state",
+        contract_path=Path(
+            "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_landing_workflow_state",
+            database_ref="omnibase_infra",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
+            ),
+            access="read_write",
+            role="state",
+        ),
+    ),
 )
 
 # Some migration-owned projection relations landed before their producing node's
