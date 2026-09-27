@@ -390,6 +390,10 @@ skills:
       - {name: quarantine-scan-records, payload_field: quarantine_scan_records, arg_type: integer}
       - {name: quarantine-timeout-seconds, payload_field: quarantine_timeout_seconds, arg_type: integer}
       - {name: settle-seconds, payload_field: settle_seconds, arg_type: integer}
+      # OMN-19811: the lane's deploy agent, so a run that lands on a redeploy
+      # waits it out and retries once instead of reporting terminal_missing.
+      - {name: deploy-agent-url, payload_field: deploy_agent_url, arg_type: string}
+      - {name: deploy-wait-seconds, payload_field: deploy_wait_seconds, arg_type: integer}
   # OMN-16897: headless Infisical seeding. The operator asked for one command
   # with no UI and no interactive login; this row is what makes it one
   # command. Note what is NOT here: any arg that carries a secret VALUE.

@@ -86,7 +86,13 @@ _GLM_BACKEND = "cloud-glm"
 _GLM_MODEL = "glm-5.3-flash"
 
 
-def _attempt(*, tier: str, backend_id: str, model_id: str) -> dict[str, object]:
+def _attempt(
+    *,
+    tier: str,
+    backend_id: str,
+    model_id: str,
+    substituted_from_backend_id: str | None = None,
+) -> dict[str, object]:
     return {
         "tier": tier,
         "backend_id": backend_id,
@@ -98,6 +104,7 @@ def _attempt(*, tier: str, backend_id: str, model_id: str) -> dict[str, object]:
         "error_message": "",
         "acceptance_decision": "accept",
         "acceptance_reason": "quality_bar_met",
+        "substituted_from_backend_id": substituted_from_backend_id,
     }
 
 
@@ -106,6 +113,7 @@ def _receipt(
     tier: str = "local",
     backend_id: str = "local-coder",
     model_id: str = "Qwen3.8-27B",
+    substituted_from_backend_id: str | None = None,
 ) -> ModelSkillResult[dict[str, object]]:
     return ModelSkillResult(
         skill_name="node_delegate_skill_orchestrator",
@@ -121,7 +129,14 @@ def _receipt(
             "model_name": model_id,
             "provider": tier,
             "response": "OK",
-            "attempts": [_attempt(tier=tier, backend_id=backend_id, model_id=model_id)],
+            "attempts": [
+                _attempt(
+                    tier=tier,
+                    backend_id=backend_id,
+                    model_id=model_id,
+                    substituted_from_backend_id=substituted_from_backend_id,
+                )
+            ],
             "terminal_failure_cause": None,
         },
         result_model=_RESULT_MODEL,
@@ -318,6 +333,109 @@ class TestAPinIsNeverSilentlyDropped:
         assert _validate_backend_pin("a-backend-this-cli-has-never-heard-of") == (
             "a-backend-this-cli-has-never-heard-of"
         )
+
+
+class TestAc2PinHonoursTheLocalByokSubstitution:
+    """OMN-19765 AC2/AC3.
+
+    On a machine with a locally registered BYOK key, ``omnimarket``'s
+    ``substitute_local_byok_route`` replaces a HOUSE rung (``cloud-glm``) with
+    the declared customer-paid rung (``byok-glm``) before dispatch — see
+    ``omnimarket/routing/local_byok_route.py``. The accepted attempt therefore
+    names ``byok-glm``, not the pinned ``cloud-glm``, even though no escalation
+    happened: the FIRST and only attempt answered. ``_backend_pin_defect``
+    compared ``served`` to the raw pin string and reported a false escalation
+    (run ``86538bdd-0a35-47c6-98e1-b4d13ad39e55``, 2026-09-26T15:27Z,
+    ``backend_pin_honoured: false`` on a first-attempt success).
+
+    A pin naming ``byok-glm`` directly is refused (run
+    ``f44cba6f-755f-45f2-b530-24cfd9290595``: no bifrost backend of that id),
+    so a customer-local caller holding their own key had no pin that could
+    ever exit 0. The fix reads the attempt's own ``substituted_from_backend_id``
+    -- set by the routing layer, never inferred here -- and honours the pin
+    when THAT names the pinned backend, while a real escalation (no
+    substitution, or a substitution of some OTHER backend) still refuses.
+    """
+
+    def test_a_pin_answered_via_byok_substitution_is_honoured(self) -> None:
+        """RED before the fix: this failed with exit 1 on a correct first answer."""
+        receipt = _receipt(
+            tier="cheap_cloud",
+            backend_id="byok-glm",
+            model_id=_GLM_MODEL,
+            substituted_from_backend_id=_GLM_BACKEND,
+        )
+        assert (
+            _delegate_receipt_evidence_error(receipt, requested_backend_id=_GLM_BACKEND)
+            is None
+        )
+
+    def test_a_pinned_byok_receipt_records_the_pin_as_honoured(
+        self, tmp_path: Path
+    ) -> None:
+        receipt = _receipt(
+            tier="cheap_cloud",
+            backend_id="byok-glm",
+            model_id=_GLM_MODEL,
+            substituted_from_backend_id=_GLM_BACKEND,
+        )
+        written = _write(tmp_path, receipt, requested_backend_id=_GLM_BACKEND)
+        assert written["requested_backend_id"] == _GLM_BACKEND
+        assert written["backend_pin_honoured"] is True
+        assert written["backend_id"] == "byok-glm"
+
+    def test_the_control_a_real_escalation_off_the_pin_still_refuses(self) -> None:
+        """Same served backend id shape (not the pin), but NO substitution.
+
+        This is the exact case the fix must not blind itself to: an accepted
+        attempt on a different backend, with no ``substituted_from_backend_id``
+        at all, is a genuine escalation and must still exit non-zero.
+        """
+        receipt = _receipt(
+            tier="claude",
+            backend_id="claude-sonnet",
+            model_id="sonnet",
+            substituted_from_backend_id=None,
+        )
+        defect = _delegate_receipt_evidence_error(
+            receipt, requested_backend_id=_GLM_BACKEND
+        )
+        assert defect is not None
+        assert _GLM_BACKEND in defect
+        assert "claude-sonnet" in defect
+
+    def test_the_control_a_substitution_of_a_different_backend_still_refuses(
+        self,
+    ) -> None:
+        """A substitution happened, but not OF the pinned backend.
+
+        Guards against a naive fix that honours ANY substituted run rather
+        than checking WHICH backend the substitution replaced.
+        """
+        receipt = _receipt(
+            tier="cheap_cloud",
+            backend_id="byok-openrouter",
+            model_id="house/model:free",
+            substituted_from_backend_id="openrouter-qwen3-coder-480b",
+        )
+        defect = _delegate_receipt_evidence_error(
+            receipt, requested_backend_id=_GLM_BACKEND
+        )
+        assert defect is not None
+        assert _GLM_BACKEND in defect
+        assert "byok-openrouter" in defect
+
+    def test_a_violated_byok_pin_is_recorded_on_the_receipt(
+        self, tmp_path: Path
+    ) -> None:
+        receipt = _receipt(
+            tier="cheap_cloud",
+            backend_id="byok-openrouter",
+            model_id="house/model:free",
+            substituted_from_backend_id="openrouter-qwen3-coder-480b",
+        )
+        written = _write(tmp_path, receipt, requested_backend_id=_GLM_BACKEND)
+        assert written["backend_pin_honoured"] is False
 
 
 class TestAPinNothingReachedIsNotAViolatedPin:

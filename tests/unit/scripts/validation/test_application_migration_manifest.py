@@ -828,10 +828,18 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 217 -> 219 for OMN-19716: node_projection_topic_activity/0000 creates the
     # topic_activity table and 0001 grants the runtime role SELECT, INSERT and
     # UPDATE on it. Vendored FIRST per the vendor-parity ordering.
-    # 219 -> 220 for OMN-19550: node_projection_session_content/0001 creates
+    # 219 -> 220 for OMN-19860: node_projection_delegation/0048 adds the
+    # nullable delegation_events.caller_lane column, so a delegation row names
+    # the ledger lane that issued it. Additive (expand-only), vendored FIRST
+    # per the vendor-parity ordering.
+    # 220 -> 222 for OMN-19833: node_projection_pr_landing/0000 creates the
+    # pr_landing_state and pr_landing_transitions read models and 0001 grants
+    # the runtime role on both. Vendored FIRST per the vendor-parity ordering,
+    # ahead of omnimarket#3000.
+    # 222 -> 223 for OMN-19550: node_projection_session_content/0001 creates
     # omninode_internal.session_content and grants the projection writer role.
     # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
-    assert len(result.declarations) == 220
+    assert len(result.declarations) == 223
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
