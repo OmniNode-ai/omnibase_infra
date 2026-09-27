@@ -32,6 +32,17 @@ delegation on the dev lane terminalised ``provider_error`` with
 arguments``, chain canary correlation ``b267d3bd-0f60-466e-8c8a-e7c60446e1f0``
 at 19:44Z on 2026-09-20. This module ran 3 passed, 0 failed against that tree.
 
+A FOURTH ASSERTION, AND THE ONE SPLAT SHAPE THIS MODULE RESOLVES (OMN-19817).
+``test_runtime_port_accepts_every_keyword_the_call_site_can_send_including_splats``
+holds every keyword the call site can send, explicit or splatted, to what this
+repo accepts. It exists because omnimarket#2841 (OMN-18931) passes
+``no_escalation`` as ``**_no_escalation_dispatch_kwargs(request)``, a
+module-level helper annotated to return a module-level ``TypedDict``: the
+splat is deliberate, so that a released port predating the keyword keeps
+working. That exact shape resolves to the TypedDict's keys, which are checked
+here and never counted as passed-on-every-call for direction 3. Every other
+splat still fails closed.
+
 DIRECTION 3 READS THE CALL SITE, NOT THE PROTOCOL, and that distinction is the
 assertion rather than an implementation detail. The consumer's protocol is what
 it INTENDS; the ``dispatch(`` call in its handler is what actually executes and
@@ -87,6 +98,7 @@ import ast
 import inspect
 import os
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -270,8 +282,136 @@ def test_consumer_optional_keywords_are_optional_on_the_runtime_port() -> None:
 _CONSUMER_CALL_ATTRIBUTE = "_dispatch_port"
 
 
-def _consumer_passed_keywords(source: Path) -> set[str]:
-    """Keyword names the consumer's handler actually PASSES at its call site.
+class _CallSiteKeywords(NamedTuple):
+    """What the consumer's dispatch call site can send, split by certainty.
+
+    ``passed`` holds keywords written explicitly at the call site: they are
+    sent on every call. ``conditional`` holds keywords that arrive through a
+    resolved TypedDict-typed helper splat (OMN-19817): they MAY be sent, so
+    they are checked against what this repo accepts, and they are NEVER
+    counted toward what this repo may require.
+    """
+
+    passed: frozenset[str]
+    conditional: frozenset[str]
+
+
+def _splat_refusal(source: Path, reason: str) -> AssertionError:
+    return AssertionError(
+        f"{source} splats **kwargs into its {_CONSUMER_METHOD}() call, and {reason}, "
+        "so the keywords it passes cannot be read statically and this direction "
+        "cannot be proven. Pass them explicitly, or splat the result of a "
+        "module-level helper whose return annotation is a module-level TypedDict "
+        "(the one splat shape this reader resolves, OMN-19817)."
+    )
+
+
+def _module_level_definition(
+    tree: ast.Module, name: str, kind: type[ast.stmt]
+) -> ast.stmt | None:
+    """The one module-level ``kind`` statement named ``name``, else None.
+
+    Two definitions of the same name make the binding depend on order, which
+    this reader does not model, so they resolve to None and fail closed.
+    """
+    matches = [
+        statement
+        for statement in tree.body
+        if isinstance(statement, kind) and getattr(statement, "name", None) == name
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _typed_dict_splat_keys(
+    tree: ast.Module, value: ast.expr, source: Path
+) -> frozenset[str]:
+    """Resolve ``**helper(...)`` to the keys of the TypedDict it returns.
+
+    OMN-19817. omnimarket#2841 (OMN-18931) passes ``no_escalation`` as
+    ``**_no_escalation_dispatch_kwargs(request)``: a module-level function
+    annotated to return ``_NoEscalationDispatchKwargs(TypedDict, total=False)``.
+    The splat is deliberate -- released omnibase_infra ports predating the
+    keyword would raise ``TypeError`` on an explicit ``no_escalation=False`` --
+    and its key set is statically bounded by that TypedDict, which the
+    consumer's own ``mypy --strict`` holds the helper to.
+
+    Exactly that shape resolves. Everything else FAILS, as before: a splat of
+    a name, an attribute, a subscript, a call to anything but a single
+    module-level ``def``, a helper with no return annotation or one naming
+    anything but a single module-level class whose only base is ``TypedDict``,
+    and a TypedDict body holding anything but annotated names (a docstring is
+    allowed). An inherited TypedDict base is refused rather than followed,
+    because its keys would be invisible here.
+    """
+    if not isinstance(value, ast.Call) or not isinstance(value.func, ast.Name):
+        raise _splat_refusal(
+            source, "the splatted value is not a call to a named helper"
+        )
+    helper_name = value.func.id
+    helper = _module_level_definition(tree, helper_name, ast.FunctionDef)
+    if not isinstance(helper, ast.FunctionDef):
+        raise _splat_refusal(
+            source, f"{helper_name} is not exactly one module-level def in that file"
+        )
+
+    annotation = helper.returns
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        annotated_name: str | None = annotation.value.strip()
+    elif isinstance(annotation, ast.Name):
+        annotated_name = annotation.id
+    else:
+        annotated_name = None
+    if not annotated_name:
+        raise _splat_refusal(
+            source, f"{helper_name} has no plain-name return annotation to resolve"
+        )
+
+    typed_dict = _module_level_definition(tree, annotated_name, ast.ClassDef)
+    if not isinstance(typed_dict, ast.ClassDef):
+        raise _splat_refusal(
+            source,
+            f"{helper_name} returns {annotated_name}, which is not exactly one "
+            "module-level class in that file",
+        )
+    bases_are_typed_dict = len(typed_dict.bases) == 1 and (
+        (
+            isinstance(typed_dict.bases[0], ast.Name)
+            and typed_dict.bases[0].id == "TypedDict"
+        )
+        or (
+            isinstance(typed_dict.bases[0], ast.Attribute)
+            and typed_dict.bases[0].attr == "TypedDict"
+        )
+    )
+    if not bases_are_typed_dict:
+        raise _splat_refusal(source, f"{annotated_name}'s only base is not TypedDict")
+
+    keys: set[str] = set()
+    for index, statement in enumerate(typed_dict.body):
+        if isinstance(statement, ast.AnnAssign) and isinstance(
+            statement.target, ast.Name
+        ):
+            keys.add(statement.target.id)
+            continue
+        is_docstring = (
+            index == 0
+            and isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        )
+        if not is_docstring:
+            raise _splat_refusal(
+                source,
+                f"{annotated_name}'s body holds a statement other than an annotated "
+                f"name (line {statement.lineno})",
+            )
+    if not keys:
+        raise _splat_refusal(source, f"{annotated_name} declares no keys")
+    return frozenset(keys)
+
+
+def _consumer_call_site_keywords(source: Path) -> _CallSiteKeywords:
+    """Keyword names the consumer's handler actually sends at its call site.
 
     Deliberately NOT the same input as ``_consumer_declared_keywords``. The
     protocol declaration states intent; this states what runs. A newly-required
@@ -279,12 +419,15 @@ def _consumer_passed_keywords(source: Path) -> set[str]:
     whatever its protocol says.
 
     Finds every ``<something>._dispatch_port.dispatch(...)`` call and unions
-    their keywords. A ``**kwargs`` splat at a call site makes the passed set
+    their keywords. A ``**`` splat at a call site makes the passed set
     unknowable by reading, so it FAILS rather than returning a set it cannot
-    stand behind -- the same fail-closed posture as an unresolvable source.
+    stand behind -- the same fail-closed posture as an unresolvable source --
+    with the single exception ``_typed_dict_splat_keys`` names, whose keys go
+    to ``conditional`` and never to ``passed``.
     """
     tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     passed: set[str] = set()
+    conditional: set[str] = set()
     found = False
 
     for node in ast.walk(tree):
@@ -302,13 +445,9 @@ def _consumer_passed_keywords(source: Path) -> set[str]:
         found = True
         for keyword in node.keywords:
             if keyword.arg is None:
-                raise AssertionError(
-                    f"{source} splats **kwargs into its {_CONSUMER_METHOD}() call, "
-                    "so the keywords it passes cannot be read statically and this "
-                    "direction cannot be proven. Pass them explicitly, or move "
-                    "this check to something that can see the runtime call."
-                )
-            passed.add(keyword.arg)
+                conditional |= _typed_dict_splat_keys(tree, keyword.value, source)
+            else:
+                passed.add(keyword.arg)
 
     if not found:
         raise AssertionError(
@@ -317,7 +456,14 @@ def _consumer_passed_keywords(source: Path) -> set[str]:
             "renamed; repoint this check in the same change rather than deleting "
             "it -- an empty result here is indistinguishable from parity."
         )
-    return passed
+    return _CallSiteKeywords(
+        passed=frozenset(passed), conditional=frozenset(conditional - passed)
+    )
+
+
+def _consumer_passed_keywords(source: Path) -> set[str]:
+    """Keywords sent on EVERY call: the explicit ones, never a splat's keys."""
+    return set(_consumer_call_site_keywords(source).passed)
 
 
 @pytest.mark.parametrize(
@@ -363,3 +509,131 @@ def test_every_required_keyword_is_one_the_consumer_passes(
         "rather than requiring the consumer to catch up -- the two repos deploy "
         "independently and the consumer is behind by construction."
     )
+
+
+@pytest.mark.parametrize(
+    "dispatch_method",
+    [
+        pytest.param(ProtocolDelegationDispatchPort.dispatch, id="protocol"),
+        pytest.param(RuntimeDelegationDispatchPort.dispatch, id="implementation"),
+    ],
+)
+def test_runtime_port_accepts_every_keyword_the_call_site_can_send_including_splats(
+    dispatch_method: object,
+) -> None:
+    """Every keyword the call site can send, explicit or splatted, is accepted here.
+
+    OMN-19817. Direction 1 starts from the consumer's PROTOCOL; this starts
+    from its CALL SITE, and it is the assertion that makes resolving a
+    TypedDict-typed splat safe: a key that only arrives through the splat is
+    held to exactly the same bar as one written out, so resolving the splat
+    adds a check rather than removing one.
+    """
+    source = _resolve_consumer_source()
+    call_site = _consumer_call_site_keywords(source)
+    accepted = set(inspect.signature(dispatch_method).parameters)  # type: ignore[arg-type]
+    missing = sorted(
+        name
+        for name in call_site.passed | call_site.conditional
+        if name not in accepted
+    )
+
+    assert not missing, (
+        f"{dispatch_method.__qualname__} does not accept {missing}, which "  # type: ignore[attr-defined]
+        f"{source.name} can send at its {_CONSUMER_METHOD}() call site. On the "
+        "deployed bus path that is a TypeError the consumer swallows into a "
+        "failed terminal (OMN-18321). Accept the keyword here, defaulted, and "
+        "thread it onto the published payload."
+    )
+
+
+_SPLAT_HELPER_SOURCE = '''
+from typing import TypedDict
+
+
+class _Kwargs(TypedDict, total=False):
+    """Docstring is allowed."""
+
+    no_escalation: bool
+
+
+def _helper(request) -> _Kwargs:
+    return {}
+
+
+class Handler:
+    async def handle(self, request):
+        return await self._dispatch_port.dispatch(prompt="p", **_helper(request))
+'''
+
+
+def _write_consumer(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "handler_delegate_skill.py"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_splat_reader_resolves_a_typed_dict_helper_as_conditional_only(
+    tmp_path: Path,
+) -> None:
+    """The splat's keys are read, and never counted as passed on every call.
+
+    Counting them as passed would let direction 3 accept a REQUIRED keyword
+    the consumer sends only sometimes -- the OMN-18924 outage shape.
+    """
+    call_site = _consumer_call_site_keywords(
+        _write_consumer(tmp_path, _SPLAT_HELPER_SOURCE)
+    )
+    assert call_site.passed == frozenset({"prompt"})
+    assert call_site.conditional == frozenset({"no_escalation"})
+    assert "no_escalation" not in _consumer_passed_keywords(
+        _write_consumer(tmp_path, _SPLAT_HELPER_SOURCE)
+    )
+
+
+_OPAQUE_SPLATS = {
+    "bare_name": _SPLAT_HELPER_SOURCE.replace("**_helper(request)", "**kwargs"),
+    "attribute": _SPLAT_HELPER_SOURCE.replace("**_helper(request)", "**self.kwargs"),
+    "dict_literal": _SPLAT_HELPER_SOURCE.replace(
+        "**_helper(request)", '**{"no_escalation": True}'
+    ),
+    "method_call": _SPLAT_HELPER_SOURCE.replace(
+        "**_helper(request)", "**self._helper(request)"
+    ),
+    "undefined_helper": _SPLAT_HELPER_SOURCE.replace(
+        "**_helper(request)", "**_missing(request)"
+    ),
+    "unannotated_helper": _SPLAT_HELPER_SOURCE.replace(
+        "def _helper(request) -> _Kwargs:", "def _helper(request):"
+    ),
+    "dict_annotation": _SPLAT_HELPER_SOURCE.replace(
+        "def _helper(request) -> _Kwargs:",
+        "def _helper(request) -> dict[str, object]:",
+    ),
+    "not_a_typed_dict": _SPLAT_HELPER_SOURCE.replace(
+        "class _Kwargs(TypedDict, total=False):", "class _Kwargs(dict):"
+    ),
+    "inherited_typed_dict": _SPLAT_HELPER_SOURCE.replace(
+        "class _Kwargs(TypedDict, total=False):", "class _Kwargs(_Base):"
+    ),
+    "non_key_statement": _SPLAT_HELPER_SOURCE.replace(
+        "    no_escalation: bool\n", "    no_escalation: bool\n    x = 1\n"
+    ),
+    "duplicate_helper": _SPLAT_HELPER_SOURCE
+    + "\n\ndef _helper(request) -> _Kwargs:\n    return {}\n",
+}
+
+
+@pytest.mark.parametrize("variant", sorted(_OPAQUE_SPLATS))
+def test_splat_reader_still_fails_closed_on_every_other_splat(
+    tmp_path: Path, variant: str
+) -> None:
+    """Only the TypedDict-helper shape resolves; every other splat still fails.
+
+    Each variant is checked to differ from the resolvable source, so a
+    replace() that silently matched nothing cannot pass as a refusal.
+    """
+    text = _OPAQUE_SPLATS[variant]
+    assert text != _SPLAT_HELPER_SOURCE, f"{variant} did not change the source"
+    with pytest.raises(AssertionError, match=r"splats \*\*kwargs"):
+        _consumer_call_site_keywords(_write_consumer(tmp_path, text))
