@@ -1381,8 +1381,18 @@ RUNNER_FLEET_TOPIC="${RUNNER_FLEET_TOPIC:-onex.evt.omnibase-infra.runner-fleet.v
 # matching edit here) forever. A config with no `hosts:` block (pre-OMN-17477)
 # makes config_host_prefixes print nothing, so the fallback below preserves
 # today's behavior unchanged.
+#
+# The declared set is ADDED to "omninode-", never substituted for it. The
+# role runners on .201 (omninode-verify-runner-N, omninode-deploy-runner,
+# omninode-prod-deploy-runner-N, omninode-customer-plane-runner-N) are not
+# declared under `hosts:`, so the declared set alone dropped seven observed
+# runners (measured on .201 against the live org runner list, 2026-09-27:
+# 69 -> 63). The union keeps every runner "omninode-" already covered and
+# adds each declared host whose prefix it does not reach (.202's
+# omnipc2-verify-runner), and still excludes a runner outside both, such as
+# the rootless-podman omnipc2-customer-N.
 RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG="$(config_host_prefixes)"
-RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG:-omninode-}}"
+RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-omninode-${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG:+,${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG}}}"
 RUNNER_FLEET_EMIT="${RUNNER_FLEET_EMIT:-true}"
 # The dev lane's broker container on this host, and the names of the env
 # vars INSIDE it that carry its SASL pair. Names, never values: the monitor

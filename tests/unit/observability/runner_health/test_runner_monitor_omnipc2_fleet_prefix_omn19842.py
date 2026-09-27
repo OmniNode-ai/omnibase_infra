@@ -117,6 +117,16 @@ def _runners_json_with_omnipc2(*, count: int) -> str:
             ],
         }
     )
+    # A role runner on .201 that no `hosts:` entry declares; "omninode-"
+    # already covered it before OMN-19842 and must keep covering it.
+    runners.append(
+        {
+            "name": "omninode-verify-runner-1",
+            "status": "online",
+            "busy": False,
+            "labels": [{"name": "self-hosted"}, {"name": "omnibase-verify"}],
+        }
+    )
     # A runner outside every declared prefix must stay excluded.
     runners.append(
         {
@@ -264,5 +274,23 @@ def test_a_scalar_only_config_keeps_the_pre_existing_default(
     assert result.returncode == 0, result.stdout + result.stderr
     assert len(events) == 1
     names = {row["runner_name"] for row in events[0]["runners"]}
-    assert names == {f"{PREFIX}-{i}" for i in range(1, TEST_FLEET_COUNT + 1)}
+    assert names == {f"{PREFIX}-{i}" for i in range(1, TEST_FLEET_COUNT + 1)} | {
+        "omninode-verify-runner-1"
+    }
     assert "omnipc2-verify-runner-1" not in names
+
+
+def test_an_undeclared_omninode_role_runner_is_still_observed(
+    tmp_path: Path,
+) -> None:
+    """The declared set is added to "omninode-", not substituted for it: a
+    .201 role runner no `hosts:` entry names (verify, deploy, customer-plane)
+    stays in the fleet event, as it was before OMN-19842."""
+    _, events = _run(
+        tmp_path,
+        write_fleet_config=_write_multi_host_fleet_config,
+        runners_json=_runners_json_with_omnipc2(count=TEST_FLEET_COUNT),
+    )
+    names = {row["runner_name"] for row in events[0]["runners"]}
+    assert "omninode-verify-runner-1" in names
+    assert "omnipc2-verify-runner-1" in names
