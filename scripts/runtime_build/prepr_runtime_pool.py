@@ -598,10 +598,33 @@ def judge(outputs: Mapping[str, str], base_probe: str | None = None) -> Readback
             "wiring failures the base does not have: " + ", ".join(new_failures[:8])
         )
     rcs = re.findall(r"^(\S+) focused rc=(\d+)", tests, re.M)
-    checks["focused_tests"] = bool(rcs) and all(rc == "0" for _, rc in rcs)
+    failed_ids = re.findall(r"^FAILED (\S+)", tests, re.M)
+    # pytest rc 1 = tests failed; a dev control at rc 1 means the test fails at
+    # dev too. rc 4/5 (no such test at dev) means the PR introduced it.
+    dev_rc = {
+        i: rc
+        for _, i, rc in re.findall(r"^dev-control (\S+) (\S+) rc=(\d+)", tests, re.M)
+    }
+    # the phase prints only the tail of pytest's output, so the dev-control
+    # lines (one per failed test) are the complete list
+    all_failed = sorted(set(failed_ids) | set(dev_rc))
+    inherited_tests = [i for i in all_failed if dev_rc.get(i) == "1"]
+    pr_tests = [i for i in all_failed if dev_rc.get(i) != "1"]
+    focused_ok = bool(rcs)
     for repo, rc in rcs:
-        if rc != "0":
-            notes.append(f"{repo} focused tests rc={rc}")
+        if rc == "0":
+            continue
+        if rc == "1" and all_failed and not pr_tests:
+            continue
+        focused_ok = False
+        notes.append(f"{repo} focused tests rc={rc}")
+    if inherited_tests:
+        notes.append(
+            "fails at dev too (dev control): " + ", ".join(inherited_tests[:5])
+        )
+    if pr_tests:
+        notes.append("fails at the head only: " + ", ".join(pr_tests[:5]))
+    checks["focused_tests"] = focused_ok
 
     residue_m = re.search(
         r"containers=(\d+) volumes=(\d+) networks=(\d+) images=(\d+) listeners=(\d+) workdir=(\w+)",

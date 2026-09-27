@@ -192,7 +192,22 @@ tests)
     cd "$T/$repo" || continue
     FILES=$(awk -v r=$repo '$1==r{print $2}' /tmp/$TAG-tests.lst | tr '\n' ' ')
     echo "== $repo at $(git rev-parse HEAD) sync $(ts)"; uv sync -q --frozen 2>&1 | tail -2
-    uv run --frozen pytest $FILES -q -p no:cacheprovider 2>&1 | tail -6; echo "$repo focused rc=${PIPESTATUS[0]} $(ts)"
+    uv run --frozen pytest $FILES -q -rf -p no:cacheprovider > "/tmp/$TAG-$repo-pytest.out" 2>&1; frc=$?
+    tail -6 "/tmp/$TAG-$repo-pytest.out"; echo "$repo focused rc=$frc $(ts)"
+    # Dev control: every test that failed here is run again at dev in the same
+    # clone and on the same host. A test that fails at dev too (a host git
+    # version, say) is dev-inherited, not the PR's; one that passes at dev, or
+    # does not exist there, is the PR's.
+    FAILED=$(sed -n 's/^FAILED \([^ ]*\).*/\1/p' "/tmp/$TAG-$repo-pytest.out" | sort -u)
+    if [ "$frc" != 0 ] && [ -n "$FAILED" ]; then
+      HEADSHA=$(git rev-parse HEAD)
+      git fetch -q origin dev && git switch -q --detach FETCH_HEAD && uv sync -q --frozen 2>&1 | tail -1
+      for id in $FAILED; do
+        uv run --frozen pytest "$id" -q -p no:cacheprovider > /dev/null 2>&1; drc=$?
+        echo "dev-control $repo $id rc=$drc at $(git rev-parse HEAD)"
+      done
+      git switch -q --detach "$HEADSHA"
+    fi
   done
   ;;
 teardown)

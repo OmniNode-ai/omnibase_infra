@@ -680,3 +680,28 @@ def test_the_keychain_host_builds_with_an_isolated_docker_config(
     )
     env = next(tmp_path.glob("*.resolved.env")).read_text(encoding="utf-8")
     assert "DOCKER_CONFIG_MODE=isolated" in env
+
+
+FAILED_TEST = "tests/unit/test_x.py::test_git_trace"
+
+
+def test_a_focused_failure_that_fails_at_dev_too_is_dev_inherited() -> None:
+    # Found live (omnimarket#3016 at 1273db3ac on .101, 2026-09-27): a test from
+    # dev asserts a git trace string Apple Git 2.39 does not print.
+    tests = (
+        f"FAILED {FAILED_TEST} - AssertionError\nomnibase_infra focused rc=1 t\n"
+        f"dev-control omnibase_infra {FAILED_TEST} rc=1 at abc\n"
+    )
+    rb = pool.judge({**GOOD, "tests": tests})
+    assert rb.checks["focused_tests"] is True
+    assert any("fails at dev too" in n for n in rb.notes)
+
+
+@pytest.mark.parametrize("dev_rc", ["0", "4", "5", None])
+def test_a_focused_failure_dev_does_not_share_is_the_prs(dev_rc: str | None) -> None:
+    tests = f"FAILED {FAILED_TEST} - AssertionError\nomnibase_infra focused rc=1 t\n"
+    if dev_rc is not None:
+        tests += f"dev-control omnibase_infra {FAILED_TEST} rc={dev_rc} at abc\n"
+    rb = pool.judge({**GOOD, "tests": tests})
+    assert rb.checks["focused_tests"] is False
+    assert any("fails at the head only" in n for n in rb.notes)
