@@ -21,6 +21,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_terminal_readback
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_link_verdict import (
     ModelChainLinkVerdict,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.model_deploy_window_evidence import (
+    ModelDeployWindowEvidence,
+)
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readback_outcome import (
     TypeDelegationTrafficClass,
 )
@@ -172,6 +175,17 @@ class ModelChainCanaryResult(BaseModel):
             "answers 'is the delegation chain proven'. A GREEN verdict with "
             "chain_proof_complete=False means the probe's own checks passed "
             "and the gate is still open."
+        ),
+    )
+
+    deploy_window: ModelDeployWindowEvidence = Field(
+        default_factory=ModelDeployWindowEvidence,
+        description=(
+            "OMN-19811. What the lane's deploy agent reported before the probe "
+            "fired and, on a TERMINAL_MISSING or INGRESS_UNREACHABLE, across the probe's window. When "
+            "status is deploy_in_window_retried every other field of this "
+            "receipt describes the single retry, and the first attempt and the "
+            "deploy job ids that separated the two are recorded here."
         ),
     )
 
