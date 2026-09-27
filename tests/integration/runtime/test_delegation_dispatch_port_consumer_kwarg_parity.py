@@ -270,6 +270,35 @@ def test_consumer_optional_keywords_are_optional_on_the_runtime_port() -> None:
 _CONSUMER_CALL_ATTRIBUTE = "_dispatch_port"
 
 
+def _always_passed_helper_keywords(tree: ast.Module, expression: ast.expr) -> set[str]:
+    """Prove a local helper splats only literal-dict keys on every return path."""
+    if not isinstance(expression, ast.Call) or not isinstance(
+        expression.func, ast.Name
+    ):
+        raise AssertionError("dispatch splat is not a local literal-dict helper call")
+    helpers = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == expression.func.id
+    ]
+    if len(helpers) != 1 or not isinstance(helpers[0].body[-1], ast.Return):
+        raise AssertionError("dispatch splat helper has no proven final return")
+    returns = [node for node in ast.walk(helpers[0]) if isinstance(node, ast.Return)]
+    if not returns:
+        raise AssertionError("dispatch splat helper has no returns")
+    keys_by_return: list[set[str]] = []
+    for result in returns:
+        if not isinstance(result.value, ast.Dict):
+            raise AssertionError("dispatch splat helper returns a nonliteral dict")
+        keys: set[str] = set()
+        for key in result.value.keys:
+            if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                raise AssertionError("dispatch splat helper has a nonliteral key")
+            keys.add(key.value)
+        keys_by_return.append(keys)
+    return set.intersection(*keys_by_return)
+
+
 def _consumer_passed_keywords(source: Path) -> set[str]:
     """Keyword names the consumer's handler actually PASSES at its call site.
 
@@ -279,9 +308,9 @@ def _consumer_passed_keywords(source: Path) -> set[str]:
     whatever its protocol says.
 
     Finds every ``<something>._dispatch_port.dispatch(...)`` call and unions
-    their keywords. A ``**kwargs`` splat at a call site makes the passed set
-    unknowable by reading, so it FAILS rather than returning a set it cannot
-    stand behind -- the same fail-closed posture as an unresolvable source.
+    their keywords. A splat is accepted only when a local helper's every return
+    is a literal dict; only keys present on every return count as always passed.
+    Unknown splats fail closed.
     """
     tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     passed: set[str] = set()
@@ -302,13 +331,9 @@ def _consumer_passed_keywords(source: Path) -> set[str]:
         found = True
         for keyword in node.keywords:
             if keyword.arg is None:
-                raise AssertionError(
-                    f"{source} splats **kwargs into its {_CONSUMER_METHOD}() call, "
-                    "so the keywords it passes cannot be read statically and this "
-                    "direction cannot be proven. Pass them explicitly, or move "
-                    "this check to something that can see the runtime call."
-                )
-            passed.add(keyword.arg)
+                passed.update(_always_passed_helper_keywords(tree, keyword.value))
+            else:
+                passed.add(keyword.arg)
 
     if not found:
         raise AssertionError(
@@ -318,6 +343,28 @@ def _consumer_passed_keywords(source: Path) -> set[str]:
             "it -- an empty result here is indistinguishable from parity."
         )
     return passed
+
+
+@pytest.mark.parametrize(
+    "splat",
+    [
+        "**kwargs",
+        "**unknown_helper(request)",
+        "**dynamic_helper(request)",
+    ],
+)
+def test_unknown_dispatch_splat_remains_fail_closed(tmp_path: Path, splat: str) -> None:
+    source = tmp_path / "consumer.py"
+    source.write_text(
+        "def dynamic_helper(request):\n"
+        "    return dict(no_escalation=True)\n"
+        "class Consumer:\n"
+        "    def call(self, request, kwargs):\n"
+        f"        self._dispatch_port.dispatch(prompt='x', {splat})\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError, match="splat"):
+        _consumer_passed_keywords(source)
 
 
 @pytest.mark.parametrize(
