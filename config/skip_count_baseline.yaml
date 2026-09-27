@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 588
+    max_skips: 587
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -112,13 +112,6 @@ suites:
             One positive control across a seam that has not landed yet, the same shape as the OMN-19507 entry above for the .202 runner: test_the_dev_200_route_labels_have_a_runner_to_land_on in tests/ci/test_studio_verify_runner_omn19657.py. It asserts that the verify labels the deploy-lane routing table declares for the dev-200 instance are satisfiable by the new .200 (stickybeatz-studio) verify runner this PR adds. The dev-200 instance declares no verify block in config/deploy_lane_routing.yaml until a sibling PR lands one, so on this base the test skips with a named reason instead of passing without looking. The other tests in the module assert the runner's compose labels, that host-200 is its own exclusive label, the absence of forbidden mounts (lab kubeconfig, operator env, OMNI_HOME clone bind), and its CPU/memory caps, all from committed state, and run in every job. The skip ends in the same change that gives dev-200 a verify block: the test then runs, and that change removes this id from this baseline.
           node_ids:
             - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on
-        - measured_at: '2026-09-27'
-          measured_by: OMN-19373
-          delta: 1
-          reason: >-
-            One node id added by the already-merged OMN-19373 change, inherited onto this branch by a base update rather than introduced by this pull request: test_the_real_contract_scan_does_not_hold_the_event_loop in tests/integration/test_runtime_health_discovery_off_loop_omn19373.py. Per the module's own docstring, this test measures how long the REAL contract scan (ServiceRuntimeHealthMonitor, no patched discovery) takes on the box it runs on, and asserts the event loop was not held for anything like that duration; it does not assert a fixed wall-clock number, because the premise it proves only holds where the scan is slow enough to matter. On the .201 runtime, with roughly 1,000 installed contracts, the scan takes about eleven seconds and is the documented cause of the onex-api gateway 503 this ticket exists to diagnose. A CI runner in this job's matrix installs a handful of contracts and completes the scan in milliseconds, below the module's own MEANINGFUL_SCAN_SECONDS floor, so the test SKIPS with the measured number rather than passing vacuously -- a green tick that only means "discovery was instant on this runner" is the exact failure mode the module's docstring says it exists to argue against. It is not collected-and-never-run: it runs and asserts on every CI image, and only its own too-fast measurement turns the assertion into a skip. Recorded here rather than left to grow the set silently.
-          node_ids:
-            - tests.integration.test_runtime_health_discovery_off_loop_omn19373::test_the_real_contract_scan_does_not_hold_the_event_loop
       measurement_command: gh run download 35402899669 --repo OmniNode-ai/omnibase_infra --pattern 'test-results-*' --dir <dir> && uv run python scripts/ci/skip_count_ratchet.py --print-observed --suite omnibase_infra/test-parallel --junit <dir>/*/junit-*.xml
       source_runs:
         - '35402899669'
@@ -719,4 +712,3 @@ suites:
       - tests.unit.topology.test_validator_ro_principal_omn17792::test_validator_ro_reaches_a_cluster_only_where_the_seam_is_invoked
       - tests.unit.validators.test_topology_validator::test_canonical_contract_file_is_valid
       - tests.ci.test_studio_verify_runner_omn19657::test_the_dev_200_route_labels_have_a_runner_to_land_on
-      - tests.integration.test_runtime_health_discovery_off_loop_omn19373::test_the_real_contract_scan_does_not_hold_the_event_loop
