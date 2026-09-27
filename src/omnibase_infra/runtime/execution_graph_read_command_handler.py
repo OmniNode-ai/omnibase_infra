@@ -15,12 +15,18 @@ from collections.abc import Awaitable, Callable
 from omnibase_core.models.execution_graph_replay.model_execution_graph_request import (
     ModelExecutionGraphRequest,
 )
+from omnibase_core.models.execution_graph_replay.model_execution_graph_stored_chain_annotation import (
+    ModelExecutionGraphStoredChainAnnotation,
+)
 from omnibase_core.models.execution_graph_replay.model_execution_graph_terminal_result import (
     ModelExecutionGraphTerminalResult,
 )
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     ExecutionGraphCurrentEvidence,
     ExecutionGraphCurrentEvidenceReader,
+)
+from omnibase_infra.runtime.db.protocol_execution_graph_stored_chain_reader import (
+    ProtocolExecutionGraphStoredChainReader,
 )
 from omnibase_infra.runtime.dispatch_envelope_context import (
     current_execution_graph_read_authority,
@@ -42,6 +48,7 @@ type ExecutionGraphReadFold = Callable[
         VerifiedExecutionGraphReadAuthority,
         PinnedExecutionGraphTopology,
         ExecutionGraphOwnershipAdmission,
+        tuple[ModelExecutionGraphStoredChainAnnotation, ...],
     ],
     Awaitable[ModelExecutionGraphTerminalResult],
 ]
@@ -62,6 +69,7 @@ class ExecutionGraphReadCommandExecutor:
         self,
         *,
         evidence_reader: ExecutionGraphCurrentEvidenceReader,
+        stored_chain_reader: ProtocolExecutionGraphStoredChainReader,
         topology: PinnedExecutionGraphTopology,
         workflow_type: str,
         fold: ExecutionGraphReadFold,
@@ -72,6 +80,7 @@ class ExecutionGraphReadCommandExecutor:
         if not workflow_type or workflow_type != workflow_type.strip():
             raise ValueError("Graph read workflow type must be non-empty and canonical")
         self._evidence_reader = evidence_reader
+        self._stored_chain_reader = stored_chain_reader
         self._topology = topology
         self._workflow_type = workflow_type
         self._fold = fold
@@ -95,7 +104,20 @@ class ExecutionGraphReadCommandExecutor:
             authority, self._topology.read_set
         )
         admission = admit_current_ownership(evidence, self._topology.read_set)
-        terminal = await self._fold(request, authority, self._topology, admission)
+        stored_chain = await self._stored_chain_reader.read_current(
+            authority, admission.owner, admission.owned_envelope_ids
+        )
+        owned_ids = set(admission.owned_envelope_ids)
+        stored_ids = tuple(annotation.node_id for annotation in stored_chain)
+        if len(stored_ids) != len(set(stored_ids)) or any(
+            node_id not in owned_ids for node_id in stored_ids
+        ):
+            raise ExecutionGraphReadCommandError(
+                "stored chain annotation conflicts with admitted ownership"
+            )
+        terminal = await self._fold(
+            request, authority, self._topology, admission, stored_chain
+        )
         self._validate_terminal(terminal, authority)
         await self._publish_terminal(authority, terminal)
         return terminal

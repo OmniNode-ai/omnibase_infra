@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 from collections.abc import AsyncGenerator
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -21,6 +22,13 @@ import pytest
 from omnibase_core.crypto.crypto_ed25519_signer import generate_keypair
 from omnibase_core.models.envelope.model_message_envelope import ModelMessageEnvelope
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.models.execution_graph_replay.model_execution_graph_topology_version import (
+    ModelExecutionGraphTopologyVersion,
+)
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.nodes.node_delegation_chain_ledger_effect.execution_graph_read_fold import (
+    ExecutionGraphReadFold,
+)
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     DelegationOwnerProof,
     ExecutionGraphCurrentEvidenceReader,
@@ -28,6 +36,7 @@ from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     PinnedExecutionGraphReadSet,
     PostgresDelegationOwnerReader,
     PostgresExecutionGraphLedgerReader,
+    PostgresExecutionGraphStoredChainReader,
     PostgresExecutionGraphVerdictCandidateReader,
 )
 from omnibase_infra.runtime.execution_graph_ownership import (
@@ -41,6 +50,9 @@ from omnibase_infra.runtime.execution_graph_read_authority import (
     VerifiedExecutionGraphReadAuthority,
     verify_signed_execution_graph_read_authority,
 )
+from omnibase_infra.runtime.execution_graph_topology_registry import (
+    PackagedExecutionGraphTopologyContract,
+)
 from tests.helpers.projection_tenant_authority import InMemoryKeyProvider
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -53,6 +65,7 @@ VERDICT_LINK_MIGRATION = (
     REPO_ROOT
     / "docker/migrations/forward/nodes/node_projection_dod_verdict/0002_dod_verify_runs_delegation_correlation_id.sql"
 )
+CHAIN_MIGRATION = REPO_ROOT / "docker/migrations/forward/105_create_ledger_chain.sql"
 
 
 def _test_read_set(
@@ -119,6 +132,7 @@ async def local_pool(tmp_path: Path) -> AsyncGenerator[asyncpg.Pool, None]:
             await conn.execute("CREATE SCHEMA omninode_internal")
             await conn.execute(VERDICT_BASE_MIGRATION.read_text(encoding="utf-8"))
             await conn.execute(VERDICT_LINK_MIGRATION.read_text(encoding="utf-8"))
+            await conn.execute(CHAIN_MIGRATION.read_text(encoding="utf-8"))
             await conn.execute(
                 "CREATE TABLE public.delegation_events ("
                 "correlation_id TEXT UNIQUE NOT NULL, tenant_id UUID NOT NULL)"
@@ -385,3 +399,99 @@ async def test_verdict_discovery_uses_index_only_then_raw_terminal_evidence(
     )
     with pytest.raises(ExecutionGraphOwnershipRefusalError):
         admit_verdict_candidates(admission, (conflicting,), read_set)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_owned_stored_chain_rewrite_changes_only_current_annotations(
+    local_pool: asyncpg.Pool,
+) -> None:
+    tenant = uuid4()
+    correlation = uuid4()
+    head = uuid4()
+    stray = uuid4()
+    head_topic = "onex.cmd.omnimarket.delegate-skill.v1"
+    verdict_topic = "onex.evt.omnimarket.dod-verify-completed.v1"
+    read_set = _test_read_set(
+        topics=frozenset({head_topic, verdict_topic}),
+        head_topic=head_topic,
+        verdict_topic=verdict_topic,
+    )
+    async with local_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO public.delegation_events (correlation_id, tenant_id) "
+            "VALUES ($1, $2)",
+            str(correlation),
+            tenant,
+        )
+        await conn.execute(
+            "INSERT INTO public.event_ledger "
+            "(topic, partition, kafka_offset, event_value, correlation_id, "
+            "envelope_id, onex_headers) VALUES ($1, 0, 1, $2, $3, $4, '{}'::jsonb)",
+            head_topic,
+            b'{"tenant_id":null}',
+            correlation,
+            head,
+        )
+        for index, envelope in enumerate((head, stray)):
+            await conn.execute(
+                "INSERT INTO public.ledger_chain "
+                "(correlation_id, hop_index, hop, replay_green, verifier_verdict, "
+                "observed_topic, envelope_id) VALUES ($1, $2, 'delegate-skill', "
+                "TRUE, 'pass', $3, $4)",
+                str(correlation),
+                index,
+                head_topic,
+                str(envelope),
+            )
+    authority = _authority(tenant, correlation)
+    current = await ExecutionGraphCurrentEvidenceReader(
+        PostgresDelegationOwnerReader(local_pool),
+        PostgresExecutionGraphLedgerReader(local_pool),
+    ).read_authorized_current(authority, read_set)
+    admission = admit_current_ownership(current, read_set)
+    reader = PostgresExecutionGraphStoredChainReader(local_pool)
+    first = await reader.read_current(
+        authority, admission.owner, admission.owned_envelope_ids
+    )
+    assert len(first) == 1
+    assert first[0].node_id == head
+    assert first[0].replay_green is True
+    with pytest.raises(ExecutionGraphOwnerNotFoundError):
+        await reader.read_current(
+            _authority(uuid4(), correlation),
+            admission.owner,
+            admission.owned_envelope_ids,
+        )
+
+    topology = PackagedExecutionGraphTopologyContract().resolve(
+        ModelExecutionGraphTopologyVersion(
+            contract_version=ModelSemVer(major=1, minor=3, patch=0),
+            topology_sha256="0505ab0b163492380739a15646c0442a3ecfb54efb0acb53bc23d232640fbfd3",
+        )
+    )
+    fold = ExecutionGraphReadFold(
+        workflow_type="delegation_execution_graph_read",
+        read_clock=lambda: datetime(2026, 9, 27, tzinfo=UTC),
+    )
+    before = await fold(authority.request, authority, topology, admission, first)
+    async with local_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE public.ledger_chain SET replay_green = FALSE, "
+            "verifier_verdict = 'fail' WHERE correlation_id = $1 AND envelope_id = $2",
+            str(correlation),
+            str(head),
+        )
+    changed = await reader.read_current(
+        authority, admission.owner, admission.owned_envelope_ids
+    )
+    after = await fold(authority.request, authority, topology, admission, changed)
+    assert before.result is not None and after.result is not None
+    assert before.result.replay.model_dump(
+        mode="json"
+    ) == after.result.replay.model_dump(mode="json")
+    assert before.result.annotations.stored_chain == first
+    assert after.result.annotations.stored_chain == changed
+    assert first != changed
+    assert before.result.annotations.stored_verdicts == ()
+    assert after.result.replay.verdicts == ()

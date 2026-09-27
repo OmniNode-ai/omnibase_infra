@@ -15,11 +15,17 @@ from uuid import UUID
 
 import asyncpg
 
+from omnibase_core.models.execution_graph_replay.model_execution_graph_stored_chain_annotation import (
+    ModelExecutionGraphStoredChainAnnotation,
+)
 from omnibase_infra.runtime.db.protocol_delegation_owner_reader import (
     ProtocolDelegationOwnerReader,
 )
 from omnibase_infra.runtime.db.protocol_execution_graph_ledger_reader import (
     ProtocolExecutionGraphLedgerReader,
+)
+from omnibase_infra.runtime.db.protocol_execution_graph_stored_chain_reader import (
+    ProtocolExecutionGraphStoredChainReader,
 )
 from omnibase_infra.runtime.db.protocol_execution_graph_verdict_candidate_reader import (
     ProtocolExecutionGraphVerdictCandidateReader,
@@ -61,6 +67,13 @@ FROM public.event_ledger
 WHERE correlation_id = ANY($1::uuid[])
   AND topic = $2::text
 ORDER BY topic, partition, kafka_offset
+"""
+_SQL_READ_STORED_CHAIN = """
+SELECT envelope_id, hop_index, replay_green, verifier_verdict
+FROM public.ledger_chain
+WHERE correlation_id = $1::text
+  AND envelope_id = ANY($2::text[])
+ORDER BY hop_index, envelope_id
 """
 _OWNER_PROOF_MINT = object()
 _PINNED_READ_SET_MINT = object()
@@ -285,6 +298,46 @@ class PostgresExecutionGraphVerdictCandidateReader:
         )
 
 
+class PostgresExecutionGraphStoredChainReader:
+    """Current comparison rows, filtered to fully admitted envelope identities."""
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def read_current(
+        self,
+        authority: VerifiedExecutionGraphReadAuthority,
+        owner: DelegationOwnerProof,
+        owned_envelope_ids: tuple[UUID, ...],
+    ) -> tuple[ModelExecutionGraphStoredChainAnnotation, ...]:
+        _require_matching_owner(authority, owner)
+        if not owned_envelope_ids or any(
+            type(envelope_id) is not UUID or envelope_id.int == 0
+            for envelope_id in owned_envelope_ids
+        ):
+            raise ValueError("Stored chain read requires admitted envelope identities")
+        owned = {str(envelope_id) for envelope_id in owned_envelope_ids}
+        async with self._pool.acquire() as connection:
+            async with connection.transaction(
+                isolation="repeatable_read", readonly=True
+            ):
+                rows = await connection.fetch(
+                    _SQL_READ_STORED_CHAIN,
+                    str(owner.correlation_id),
+                    sorted(owned),
+                )
+        return tuple(
+            ModelExecutionGraphStoredChainAnnotation(
+                node_id=UUID(row["envelope_id"]),
+                hop_index=row["hop_index"],
+                replay_green=row["replay_green"],
+                verifier_verdict=row["verifier_verdict"],
+            )
+            for row in rows
+            if row["envelope_id"] in owned
+        )
+
+
 class ExecutionGraphCurrentEvidenceReader:
     """Orchestrate the non-negotiable owner-first IO ordering."""
 
@@ -318,9 +371,11 @@ __all__ = [
     "ExecutionGraphVerdictCandidates",
     "PostgresDelegationOwnerReader",
     "PostgresExecutionGraphLedgerReader",
+    "PostgresExecutionGraphStoredChainReader",
     "PostgresExecutionGraphVerdictCandidateReader",
     "PinnedExecutionGraphReadSet",
     "ProtocolDelegationOwnerReader",
     "ProtocolExecutionGraphLedgerReader",
+    "ProtocolExecutionGraphStoredChainReader",
     "ProtocolExecutionGraphVerdictCandidateReader",
 ]

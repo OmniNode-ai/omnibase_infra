@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID, uuid4
@@ -18,6 +19,9 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.execution_graph_replay.model_execution_graph_request import (
     ModelExecutionGraphRequest,
 )
+from omnibase_core.models.execution_graph_replay.model_execution_graph_stored_chain_annotation import (
+    ModelExecutionGraphStoredChainAnnotation,
+)
 from omnibase_core.models.execution_graph_replay.model_execution_graph_terminal_refusal import (
     ModelExecutionGraphTerminalRefusal,
 )
@@ -29,6 +33,9 @@ from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     ExecutionGraphCurrentEvidence,
     ExecutionGraphCurrentEvidenceReader,
     ExecutionGraphLedgerRecord,
+)
+from omnibase_infra.runtime.db.protocol_execution_graph_stored_chain_reader import (
+    ProtocolExecutionGraphStoredChainReader,
 )
 from omnibase_infra.runtime.dispatch_envelope_context import (
     bind_execution_graph_read_authority,
@@ -168,6 +175,9 @@ async def test_unsigned_command_never_reads_folds_or_publishes() -> None:
 
     handler = ExecutionGraphReadCommandExecutor(
         evidence_reader=cast("ExecutionGraphCurrentEvidenceReader", _Reader(read)),
+        stored_chain_reader=cast(
+            "ProtocolExecutionGraphStoredChainReader", _StoredChainReader(calls)
+        ),
         topology=_topology(),
         workflow_type=_WORKFLOW_TYPE,
         fold=fold,
@@ -192,6 +202,9 @@ async def test_signed_command_requires_matching_request_before_read() -> None:
 
     handler = ExecutionGraphReadCommandExecutor(
         evidence_reader=cast("ExecutionGraphCurrentEvidenceReader", _Reader(read)),
+        stored_chain_reader=cast(
+            "ProtocolExecutionGraphStoredChainReader", _StoredChainReader(calls)
+        ),
         topology=_topology(),
         workflow_type=_WORKFLOW_TYPE,
         fold=cast("Callable[..., Awaitable[ModelExecutionGraphTerminalResult]]", None),
@@ -212,6 +225,12 @@ async def test_signed_owner_first_admission_precedes_fold_and_published_terminal
     calls: list[str] = []
     authority = _signed_authority()
     evidence = _evidence(authority)
+    stored = ModelExecutionGraphStoredChainAnnotation(
+        node_id=evidence.ledger_rows[0].envelope_id,
+        hop_index=0,
+        replay_green=False,
+        verifier_verdict="fail",
+    )
 
     async def read(
         received_authority: VerifiedExecutionGraphReadAuthority,
@@ -227,12 +246,14 @@ async def test_signed_owner_first_admission_precedes_fold_and_published_terminal
         received_authority: VerifiedExecutionGraphReadAuthority,
         topology: PinnedExecutionGraphTopology,
         received_admission: ExecutionGraphOwnershipAdmission,
+        stored_chain: tuple[ModelExecutionGraphStoredChainAnnotation, ...],
     ) -> ModelExecutionGraphTerminalResult:
         assert request == authority.request
         assert received_authority is authority
         assert topology == _topology()
         assert received_admission.owner == evidence.owner
-        assert calls == ["owner-first-read"]
+        assert stored_chain == (stored,)
+        assert calls == ["owner-first-read", "stored-chain-read"]
         calls.append("fold")
         return _failed_terminal(authority)
 
@@ -242,11 +263,15 @@ async def test_signed_owner_first_admission_precedes_fold_and_published_terminal
     ) -> None:
         assert received_authority is authority
         assert terminal == _failed_terminal(authority)
-        assert calls == ["owner-first-read", "fold"]
+        assert calls == ["owner-first-read", "stored-chain-read", "fold"]
         calls.append("publish")
 
     handler = ExecutionGraphReadCommandExecutor(
         evidence_reader=cast("ExecutionGraphCurrentEvidenceReader", _Reader(read)),
+        stored_chain_reader=cast(
+            "ProtocolExecutionGraphStoredChainReader",
+            _StoredChainReader(calls, (stored,)),
+        ),
         topology=_topology(),
         workflow_type=_WORKFLOW_TYPE,
         fold=fold,
@@ -256,7 +281,94 @@ async def test_signed_owner_first_admission_precedes_fold_and_published_terminal
     with bind_execution_graph_read_authority(authority):
         result = await handler.handle(authority.request)
     assert result == _failed_terminal(authority)
-    assert calls == ["owner-first-read", "fold", "publish"]
+    assert calls == ["owner-first-read", "stored-chain-read", "fold", "publish"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_second_head_refuses_before_stored_chain_read_or_publish() -> None:
+    authority = _signed_authority()
+    current = _evidence(authority)
+    second_head = replace(
+        current.ledger_rows[0],
+        ledger_entry_id=uuid4(),
+        envelope_id=uuid4(),
+        kafka_offset=999,
+    )
+    calls: list[str] = []
+
+    async def read(*_args: object) -> ExecutionGraphCurrentEvidence:
+        calls.append("owner-first-read")
+        return replace(current, ledger_rows=(*current.ledger_rows, second_head))
+
+    async def fold(*_args: object) -> ModelExecutionGraphTerminalResult:
+        calls.append("fold")
+        return _failed_terminal(authority)
+
+    async def publish(*_args: object) -> None:
+        calls.append("publish")
+
+    handler = ExecutionGraphReadCommandExecutor(
+        evidence_reader=cast("ExecutionGraphCurrentEvidenceReader", _Reader(read)),
+        stored_chain_reader=cast(
+            "ProtocolExecutionGraphStoredChainReader", _StoredChainReader(calls)
+        ),
+        topology=_topology(),
+        workflow_type=_WORKFLOW_TYPE,
+        fold=fold,
+        publish_terminal=publish,
+    )
+    with bind_execution_graph_read_authority(authority):
+        with pytest.raises(ValueError, match="exactly one"):
+            await handler.handle(authority.request)
+    assert calls == ["owner-first-read"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_kind", ["foreign", "duplicate"])
+async def test_faulty_stored_chain_reader_cannot_inject_unowned_or_duplicate_nodes(
+    invalid_kind: str,
+) -> None:
+    authority = _signed_authority()
+    current = _evidence(authority)
+    head = current.ledger_rows[0].envelope_id
+    assert head is not None
+    admitted = ModelExecutionGraphStoredChainAnnotation(
+        node_id=head, hop_index=0, replay_green=True, verifier_verdict="pass"
+    )
+    stray = ModelExecutionGraphStoredChainAnnotation(
+        node_id=uuid4(), hop_index=1, replay_green=True, verifier_verdict="pass"
+    )
+    returned = (admitted, stray) if invalid_kind == "foreign" else (admitted,) * 2
+    calls: list[str] = []
+
+    async def read(*_args: object) -> ExecutionGraphCurrentEvidence:
+        calls.append("owner-first-read")
+        return current
+
+    async def fold(*_args: object) -> ModelExecutionGraphTerminalResult:
+        calls.append("fold")
+        return _failed_terminal(authority)
+
+    async def publish(*_args: object) -> None:
+        calls.append("publish")
+
+    handler = ExecutionGraphReadCommandExecutor(
+        evidence_reader=cast("ExecutionGraphCurrentEvidenceReader", _Reader(read)),
+        stored_chain_reader=cast(
+            "ProtocolExecutionGraphStoredChainReader",
+            _StoredChainReader(calls, returned),
+        ),
+        topology=_topology(),
+        workflow_type=_WORKFLOW_TYPE,
+        fold=fold,
+        publish_terminal=publish,
+    )
+    with bind_execution_graph_read_authority(authority):
+        with pytest.raises(ExecutionGraphReadCommandError, match="stored chain"):
+            await handler.handle(authority.request)
+    assert calls == ["owner-first-read", "stored-chain-read"]
 
 
 @pytest.mark.unit
@@ -276,6 +388,9 @@ async def test_terminal_with_foreign_tenant_is_not_published() -> None:
 
     handler = ExecutionGraphReadCommandExecutor(
         evidence_reader=cast("ExecutionGraphCurrentEvidenceReader", _Reader(read)),
+        stored_chain_reader=cast(
+            "ProtocolExecutionGraphStoredChainReader", _StoredChainReader(calls)
+        ),
         topology=_topology(),
         workflow_type=_WORKFLOW_TYPE,
         fold=fold,
@@ -285,7 +400,7 @@ async def test_terminal_with_foreign_tenant_is_not_published() -> None:
     with bind_execution_graph_read_authority(authority):
         with pytest.raises(ExecutionGraphReadCommandError, match="conflicts"):
             await handler.handle(authority.request)
-    assert calls == []
+    assert calls == ["stored-chain-read"]
 
 
 class _Reader:
@@ -294,3 +409,19 @@ class _Reader:
 
     async def read_authorized_current(self, *args: object) -> object:
         return await self._read(*args)
+
+
+class _StoredChainReader:
+    def __init__(
+        self,
+        calls: list[str],
+        annotations: tuple[ModelExecutionGraphStoredChainAnnotation, ...] = (),
+    ) -> None:
+        self._calls = calls
+        self._annotations = annotations
+
+    async def read_current(
+        self, *_args: object
+    ) -> tuple[ModelExecutionGraphStoredChainAnnotation, ...]:
+        self._calls.append("stored-chain-read")
+        return self._annotations

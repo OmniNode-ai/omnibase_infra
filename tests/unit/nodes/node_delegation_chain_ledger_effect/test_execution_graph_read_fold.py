@@ -148,6 +148,7 @@ async def test_latest_folds_owned_rows_without_leaking_raw_body() -> None:
         _authority(request, tenant_id),
         _topology(),
         _admission(request, tenant_id),
+        (),
     )
 
     assert terminal.status == "completed"
@@ -188,6 +189,7 @@ async def test_bounded_request_folds_only_selected_partition_offsets() -> None:
         _authority(request, tenant_id),
         _topology(),
         _admission(request, tenant_id),
+        (),
     )
 
     assert terminal.status == "completed"
@@ -223,6 +225,7 @@ async def test_bounded_request_excludes_rows_above_selected_offset() -> None:
         _authority(request, tenant_id),
         _topology(),
         _admission(request, tenant_id),
+        (),
     )
 
     assert terminal.status == "completed"
@@ -247,7 +250,7 @@ async def test_full_read_withheld_count_is_visible_without_exposing_rows() -> No
     terminal = await ExecutionGraphReadFold(
         workflow_type="delegation-execution-graph-read",
         read_clock=lambda: READ_AT,
-    )(request, _authority(request, tenant_id), _topology(), admission)
+    )(request, _authority(request, tenant_id), _topology(), admission, ())
 
     assert terminal.status == "completed"
     assert terminal.result is not None
@@ -286,7 +289,7 @@ async def test_latest_refuses_admitted_reroute_without_partial_success() -> None
     terminal = await ExecutionGraphReadFold(
         workflow_type="delegation-execution-graph-read",
         read_clock=lambda: READ_AT,
-    )(request, _authority(request, tenant_id), _topology(), admission)
+    )(request, _authority(request, tenant_id), _topology(), admission, ())
 
     assert terminal.status == "failed"
     assert terminal.result is None

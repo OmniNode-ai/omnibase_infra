@@ -20,6 +20,9 @@ from omnibase_core.models.execution_graph_replay import (
     ModelExecutionGraphRequest,
     ModelExecutionGraphSourceCursor,
 )
+from omnibase_core.models.execution_graph_replay.model_execution_graph_stored_chain_annotation import (
+    ModelExecutionGraphStoredChainAnnotation,
+)
 from omnibase_core.models.execution_graph_replay.model_execution_graph_terminal_refusal import (
     ModelExecutionGraphTerminalRefusal,
 )
@@ -142,6 +145,7 @@ class ExecutionGraphReadFold:
         authority: VerifiedExecutionGraphReadAuthority,
         topology: PinnedExecutionGraphTopology,
         admission: ExecutionGraphOwnershipAdmission,
+        stored_chain: tuple[ModelExecutionGraphStoredChainAnnotation, ...],
     ) -> ModelExecutionGraphTerminalResult:
         if (
             type(authority) is not VerifiedExecutionGraphReadAuthority
@@ -190,6 +194,7 @@ class ExecutionGraphReadFold:
                     source_cursors=source_cursors,
                     read_at=self._read_clock(),
                     withheld_count=admission.withheld_count,
+                    stored_chain=stored_chain,
                 )
             )
         except ValueError:
