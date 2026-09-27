@@ -7,10 +7,14 @@
 -- only -- never auto-applied (rollback/ is not mounted to
 -- docker-entrypoint-initdb.d and no runner reads it).
 --
--- Run it only on a lane where the forward file actually removed something. On
--- a lane where the role held nothing on the view, the forward file changed
--- nothing, and this file would add grants that the topology does not declare
--- and the live-ACL gate reports as UNDECLARED_GRANT.
+-- The forward file runs REVOKE ALL and records nothing about what it removed,
+-- so this file restores the from-empty set only. What a given lane held comes
+-- from the read-only readback of the view's ACL taken before the forward file
+-- reached that lane. Compare against it before running this: if the lane held
+-- more than SELECT, INSERT and UPDATE, add the rest by hand; if it held
+-- nothing, the forward file changed nothing, and this file must not be run
+-- there, because it would add grants the topology does not declare and the
+-- live-ACL gate reports as UNDECLARED_GRANT.
 --
 -- It does not remove the forward file's ledger row, so the node loop will not
 -- revoke again unless that row is removed too.
