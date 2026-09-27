@@ -39,7 +39,7 @@ concurrency:
 
 jobs:
   runner-label-exists:
-    uses: OmniNode-ai/omniclaude/.github/workflows/runner-label-exists-reusable.yml@aaa1e969dbda5ce81273ef7a556858f96cf6474a
+    uses: OmniNode-ai/omniclaude/.github/workflows/runner-label-exists-reusable.yml@6ccd525e2b6390869d18f8e00d1b36294aa5550a
     secrets:
       # The Actions job token cannot read the ORGANISATION runner listing --
       # that read needs organisation administration scope, which a workflow
