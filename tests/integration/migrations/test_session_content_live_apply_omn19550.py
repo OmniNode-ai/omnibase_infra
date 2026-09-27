@@ -94,6 +94,7 @@ def _table_exists(pg: EphemeralPostgres) -> bool:
 
 
 @pytest.mark.integration
+@pytest.mark.ephemeral_pg
 def test_session_content_live_apply_creates_shape_and_runtime_acl(
     ephemeral_postgres: EphemeralPostgres,
 ) -> None:
@@ -160,6 +161,7 @@ def test_session_content_live_apply_creates_shape_and_runtime_acl(
 
 
 @pytest.mark.integration
+@pytest.mark.ephemeral_pg
 def test_session_content_apply_is_idempotent(
     ephemeral_postgres: EphemeralPostgres,
 ) -> None:
@@ -177,6 +179,7 @@ def test_session_content_apply_is_idempotent(
 
 
 @pytest.mark.integration
+@pytest.mark.ephemeral_pg
 def test_session_content_apply_refuses_a_drifted_table_before_any_grant(
     ephemeral_postgres: EphemeralPostgres,
 ) -> None:
@@ -233,6 +236,7 @@ def test_session_content_apply_refuses_a_drifted_table_before_any_grant(
 
 
 @pytest.mark.integration
+@pytest.mark.ephemeral_pg
 def test_session_content_apply_rejects_missing_runtime_role(
     ephemeral_postgres: EphemeralPostgres,
 ) -> None:
