@@ -299,6 +299,53 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
     #
+    # OMN-19833: the two PR landing read models, the same infra-first window as
+    # the retired bridges above. This repo vendors
+    # node_projection_pr_landing/0000 and 0001 ahead of omnimarket#3000, whose
+    # node-migration-vendor-parity gate needs the vendored copy at dev tip
+    # before it can merge; the pin cannot declare either relation until it
+    # does. 0001 grants omninode_runtime SELECT, INSERT, UPDATE on
+    # pr_landing_state and SELECT, INSERT on pr_landing_transitions. Both
+    # entries carry the access and role the source contract declares, so the
+    # derivation reproduces the grants the instances already carry and writes
+    # no generated diff. Inert, then removable, once the pin advances past
+    # omnimarket#3000; the expiry module names both.
+    ContractTableDeclaration(
+        node="legacy_migration:pr_landing_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_pr_landing/"
+            "0000_create_pr_landing.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_landing_state",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_pr_landing/"
+                "0000_create_pr_landing.sql"
+            ),
+            access="read_write",
+            role="pr_landing_state",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:pr_landing_transitions",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_pr_landing/"
+            "0000_create_pr_landing.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_landing_transitions",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_pr_landing/"
+                "0000_create_pr_landing.sql"
+            ),
+            access="read_write",
+            role="pr_landing_transitions",
+        ),
+    ),
     # OMN-19513: infra vendors both Claude hook event projection tables before
     # omnimarket#2956 lands the node contract. Until the pin advances, these
     # interim declarations keep the shipped table grants derivable. The expiry

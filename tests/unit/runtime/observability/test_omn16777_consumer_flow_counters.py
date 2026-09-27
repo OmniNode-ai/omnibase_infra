@@ -254,6 +254,7 @@ def test_heartbeat_carries_the_window_and_absence_is_not_zero() -> None:
     )
     assert round_tripped.flow_window is not None
     assert _delta_for(round_tripped.flow_window).messages_in == 15750
+    assert _delta_for(round_tripped.flow_window).declares_output is None
 
 
 @pytest.mark.unit
@@ -276,6 +277,7 @@ def test_flow_delta_wire_field_set_is_pinned() -> None:
         "messages_out",
         "messages_dlq",
         "handler_errors",
+        "declares_output",
     }
 
 

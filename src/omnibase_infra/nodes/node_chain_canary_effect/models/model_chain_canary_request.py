@@ -338,6 +338,33 @@ class ModelChainCanaryRequest(BaseModel):
             "QUARANTINED run into a vaguer TERMINAL_MISSING one."
         ),
     )
+    # OMN-19811. Run 36202173467 went RED because a deploy recreated the
+    # runtime inside the probe's budget, and nothing here knew to ask.
+    deploy_agent_url: str = Field(
+        default="",
+        description=(
+            "Base URL of the lane's deploy agent HTTP surface (/health, /queue, "
+            "/job/{id}) -- the same surface the verify-lane-converged job "
+            "reads, resolved from config/deploy_lane_routing.yaml "
+            "verify.deploy_agent_url. Empty makes no claim about deploys and "
+            "never retries (deploy_window.status=not_configured)."
+        ),
+    )
+    deploy_wait_seconds: int = Field(
+        default=2400,
+        ge=0,
+        le=3600,
+        description=(
+            "Total wall-clock the run may spend waiting for a deploy to "
+            "converge, shared between the pre-fire wait and the wait before "
+            "the single retry. The deploy agent's measured mean service time "
+            "on .201 was ~937 s on 2026-09-26, and deploys arrive back to "
+            "back during a merge train (lab run 36279784915 met two), so the "
+            "default is about two and a half jobs. When it runs out the run "
+            "fires anyway (pre-fire) or does not retry (post-fire); it never "
+            "turns a RED into a GREEN."
+        ),
+    )
 
     @field_validator(
         "terminal_success_topics",
@@ -462,6 +489,19 @@ class ModelChainCanaryRequest(BaseModel):
         if not stripped.startswith(("http://", "https://")):
             raise ValueError(
                 f"gateway_url must be an absolute http(s) URL, got: {value!r}"
+            )
+        return stripped
+
+    @field_validator("deploy_agent_url")
+    @classmethod
+    def _validate_deploy_agent_url(cls, value: str) -> str:
+        """Empty means not configured; anything else must be a real URL."""
+        stripped = value.strip().rstrip("/")
+        if not stripped:
+            return ""
+        if not stripped.startswith(("http://", "https://")):
+            raise ValueError(
+                f"deploy_agent_url must be an absolute http(s) URL, got: {value!r}"
             )
         return stripped
 

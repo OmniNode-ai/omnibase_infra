@@ -106,6 +106,8 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # contract; add it in the same pull request that vendors it, and this module
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
+    "pr_landing_state": "omnimarket#3000",
+    "pr_landing_transitions": "omnimarket#3000",
     "claude_agent_spans": "omnimarket#2956",
     "claude_hook_events": "omnimarket#2956",
 }
