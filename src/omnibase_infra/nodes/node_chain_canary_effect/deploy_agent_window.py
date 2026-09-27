@@ -180,7 +180,12 @@ async def read_deploy_agent_via_httpx(
     """
     base = agent_url.rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
+        # See module docstring "THE SOURCE": this reads the deploy agent's own
+        # ops-plane HTTP surface, the same one check_dev_lane_staleness.py
+        # already polls, resolved from config/deploy_lane_routing.yaml -- not
+        # a domain transport a node contract should own or inject.
+        client = httpx.AsyncClient(timeout=timeout_s)  # no-contract-check: the seam
+        async with client:
             response = await client.get(f"{base}/health")
             try:
                 health = response.json()
@@ -236,7 +241,10 @@ async def read_deploy_agent_via_httpx(
 async def lane_ready_via_httpx(url: str, timeout_s: float) -> bool:
     """``GET {url}/health`` answers 200. Never raises."""
     try:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
+        # See module docstring "THE SOURCE": same ops-plane deploy-agent read
+        # as read_deploy_agent_via_httpx above, not a domain transport.
+        client = httpx.AsyncClient(timeout=timeout_s)  # no-contract-check: the seam
+        async with client:
             response = await client.get(f"{url.rstrip('/')}/health")
     except Exception:  # noqa: BLE001 — not ready is the only answer a failure gives
         return False
