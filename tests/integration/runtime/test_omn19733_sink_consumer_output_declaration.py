@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19733: subscription flow rows carry contract output capability."""
+"""OMN-19733: subscription flow rows carry contract output capability.
+
+Integration: the real ``wire_from_manifest`` path wires a sink contract and a
+publishing contract, and the drained flow window says which is which.
+"""
 
 from __future__ import annotations
 
@@ -74,7 +78,7 @@ def _clean_flow_counters() -> Iterator[None]:
     reset_consumer_flow_counters()
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("publish_topics", "expected"),
