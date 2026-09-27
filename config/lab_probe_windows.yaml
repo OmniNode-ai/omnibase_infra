@@ -72,6 +72,14 @@ probes:
     lane: dev
     lane_source: job_name
     max_duration_minutes: 10
+  - id: C28
+    name: consumer flow
+    repo: omnibase_infra
+    workflow: .github/workflows/chain-canary-c28-consumer-flow.yml
+    cron: ['13 0,6,12,18 * * *']
+    lane: dev
+    lane_source: job_name
+    max_duration_minutes: 30
   - id: provider-rung
     name: provider-rung liveness canary
     repo: omnibase_infra

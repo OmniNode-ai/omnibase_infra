@@ -171,6 +171,14 @@ scope:
     # psql read has no re-fetchable locator of the kind R3 requires; claiming
     # one would be the free-text provenance this registry exists to refuse.
     - scripts/ci/c16_receipt_identity_probe.py
+    # OMN-19812: a PROBE, the C28 producer, in the same class as the C11, C12
+    # and C16 entries above. It re-measures a hand readback on the live lane,
+    # not a past incident's bytes. Its grading is proven offline in
+    # tests/ci/test_c28_consumer_flow_probe.py over a built observation plus
+    # the seam's own log lines captured from the dev lane -- a regression
+    # suite, not an incident replay: a `docker logs` window has no
+    # re-fetchable locator of the kind R2 requires.
+    - scripts/ci/c28_consumer_flow_probe.py
     # OMN-17876: the offline contract canary is a new preventive evidence
     # projection; it deliberately cannot replay a live runner incident.
     - scripts/ci/model_review_capability_canary.py
