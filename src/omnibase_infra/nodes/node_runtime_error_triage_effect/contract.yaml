@@ -51,10 +51,6 @@ input_model:
   name: "ModelRuntimeErrorEvent"
   module: "omnibase_infra.models.health.model_runtime_error_event"
   description: "Structured runtime error event from Kafka."
-output_model:
-  name: "ModelRuntimeErrorTriageResult"
-  module: "omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage"
-  description: "Result of the first-match-wins triage."
 # Handler routing
 handler_routing:
   routing_strategy: "operation_match"
@@ -131,7 +127,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-19"
-  updated: "2026-08-30"
+  updated: "2026-09-26"
   tags:
     - effect
     - health
