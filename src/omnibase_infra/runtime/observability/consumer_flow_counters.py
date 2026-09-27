@@ -130,7 +130,7 @@ class ConsumerFlowCounters:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._registered: set[tuple[str, str]] = set()
+        self._registered: dict[tuple[str, str], bool | None] = {}
         self._messages_in: dict[tuple[str, str], int] = {}
         self._messages_out: dict[tuple[str, str], int] = {}
         self._messages_dlq: dict[tuple[str, str], int] = {}
@@ -147,16 +147,28 @@ class ConsumerFlowCounters:
 
     # ---------------------------------------------------------------- register
 
-    def register(self, consumer_group: str, topic: str) -> None:
+    def register(
+        self,
+        consumer_group: str,
+        topic: str,
+        *,
+        declares_output: bool | None = None,
+    ) -> None:
         """Declare a subscription so it emits a row every window, traffic or not.
 
         Without this, a consumer that takes nothing would emit no row, and "took
         nothing" would be indistinguishable from "not observed".
+
+        ``declares_output`` is learned from the typed contract at subscription
+        wiring. ``None`` is retained for callers that do not have that contract
+        fact, matching older producers on the wire.
         """
         if not consumer_group or not topic:
             return
         with self._lock:
-            self._registered.add((consumer_group, topic))
+            key = (consumer_group, topic)
+            if key not in self._registered or declares_output is not None:
+                self._registered[key] = declares_output
 
     # ----------------------------------------------------------------- record
 
@@ -194,7 +206,7 @@ class ConsumerFlowCounters:
         if not key[0] or not key[1] or count <= 0:
             return
         with self._lock:
-            self._registered.add(key)
+            self._registered.setdefault(key, None)
             target[key] = target.get(key, 0) + count
 
     # ------------------------------------------------------------------ drain
@@ -251,6 +263,7 @@ class ConsumerFlowCounters:
                     messages_out=self._messages_out.get((group, topic), 0),
                     messages_dlq=self._messages_dlq.get((group, topic), 0),
                     handler_errors=self._handler_errors.get((group, topic), 0),
+                    declares_output=self._registered[(group, topic)],
                 )
                 for group, topic in sorted(self._registered)
             )
