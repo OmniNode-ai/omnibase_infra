@@ -1,0 +1,21 @@
+-- OMN-17886: Rollback for
+-- nodes/node_gateway_link_health_write_effect/0003_grant_omninode_runtime_gateway_link_health.sql.
+--
+-- Removes the three table privileges the forward file granted. Manual
+-- execution only -- never auto-applied (rollback/ is not mounted to
+-- docker-entrypoint-initdb.d and no runner reads it).
+--
+-- Read before running it: while the default-privilege rule in omninode_internal
+-- still exists (until OMN-17886 AC2 step 4), a lane may have held these same
+-- privileges before the forward file ran, and this REVOKE removes them too,
+-- which denies HandlerGatewayLinkHealthUpsert. Compare with the lane's ACL
+-- readback taken before the forward file reached it, and re-grant what it
+-- held. The schema USAGE the forward file re-asserted is left alone: it is
+-- declared for this role independently of this table.
+--
+-- It does not remove the forward file's ledger row, so the node loop will not
+-- grant again unless that row is removed too.
+--
+-- Run as the table's owner, a member of the owner role, or a superuser.
+
+REVOKE SELECT, INSERT, UPDATE ON omninode_internal.gateway_link_health FROM omninode_runtime;
