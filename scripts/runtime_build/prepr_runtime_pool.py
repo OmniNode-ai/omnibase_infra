@@ -473,8 +473,18 @@ def survey(
 
 
 def pick(states: Sequence[HostState]) -> HostState | None:
+    """The least-loaded free isolated member, else the least-loaded free slot.
+
+    An isolated member owns its whole stack; a .201 pre-PR slot shares the dev
+    lane's servers and the busiest lab host, so it is taken only when every
+    isolated member is busy, offline or overloaded.
+    """
     free = [s for s in states if s.verdict == "FREE"]
-    return min(free, key=lambda s: s.load_ratio) if free else None
+    return (
+        min(free, key=lambda s: (s.host.kind == "prepr-slot", s.load_ratio))
+        if free
+        else None
+    )
 
 
 # --------------------------------------------------------------------------- lease

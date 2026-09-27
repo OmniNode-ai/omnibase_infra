@@ -954,3 +954,14 @@ def test_one_holder_on_both_slots_gets_two_work_directories(tmp_path: Path) -> N
         env = next(d.glob("*.resolved.env")).read_text(encoding="utf-8")
         works.append(next(x for x in env.splitlines() if x.startswith("W=")))
     assert len(set(works)) == 2, works
+
+
+def test_a_slot_is_picked_only_when_every_isolated_member_is_taken() -> None:
+    hosts = {
+        "lab-101": FakeHost(cores=12, load=11.0),
+        "lab-201-prepr-1": FakeHost(cores=32, load=1.0),
+        "lab-201-prepr-2": FakeHost(cores=32, load=1.0),
+    }
+    assert pool.pick(_survey(hosts)).host.name == "lab-101"
+    hosts["lab-101"].online = False
+    assert pool.pick(_survey(hosts)).host.name == "lab-201-prepr-1"
