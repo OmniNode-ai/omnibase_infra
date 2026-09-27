@@ -33,11 +33,14 @@ _ROOT = Path(__file__).resolve().parents[3]
 _DEV_OVERLAY = _ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
 _PLACED = "local-omnipc2-chat"
 
-#: The base-declared local rungs the dev overlay binds, with the env hint the
-#: base contract carries for each (the renderer strips it).
+#: The base-declared local backends the dev overlay binds, with the env hint the
+#: base contract carries for each (the renderer strips it). local-embedding
+#: (OMN-17099) is bound by the dev overlay since omnibase_infra#4207, so the
+#: minimal base contract must declare it too, matching the real base contract.
 _ENDPOINT_URL_ENV = {
     "local-coder": "LLM_CODER_URL",
     "local-heavy-reasoning": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
+    "local-embedding": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
 }
 
 
