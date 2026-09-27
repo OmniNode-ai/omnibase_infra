@@ -45,10 +45,10 @@ _DOCKERFILE_RANGE_PINS = """\
 FROM python:3.12-slim AS builder
 RUN --mount=type=cache,target=/root/.cache/uv \\
     uv pip install --no-deps \\
-    "omninode-claude>=0.3.0,<0.5.0"
+    "omninode-claude>=0.3.0,<2.0.0"
 RUN --mount=type=cache,target=/root/.cache/uv \\
     uv pip install --no-deps \\
-    "omninode-memory>=0.6.0,<0.8.0"
+    "omninode-memory>=0.6.0,<3.0.0"
 CMD ["onex-runtime"]
 """
 
@@ -77,14 +77,22 @@ _VERSIONS = {
 
 @pytest.mark.unit
 def test_pin_rewrite() -> None:
-    """Given known version strings, rewrite_content rewrites Dockerfile lines."""
+    """A bounded range keeps its form: the floor advances, the ceiling stays.
+
+    OMN-18596: the runtime Dockerfile moved to bounded ranges under OMN-18595
+    (omnibase_infra#3749) because exact ``--no-deps`` pins fail the Dockerfile
+    plugin pin validator as soon as a newer plugin publishes. Rewriting a range
+    into ``==`` reverted that decision on every cascade (omnibase_infra#4168).
+    """
     result = rewrite_content(_DOCKERFILE_RANGE_PINS, _VERSIONS)
 
-    assert '"omninode-claude==1.2.3"' in result
-    assert '"omninode-memory==2.3.4"' in result
-    # Original range pins should be gone
-    assert ">=0.3.0,<0.5.0" not in result
-    assert ">=0.6.0,<0.8.0" not in result
+    assert '"omninode-claude>=1.2.3,<2.0.0"' in result
+    assert '"omninode-memory>=2.3.4,<3.0.0"' in result
+    assert "omninode-claude==" not in result
+    assert "omninode-memory==" not in result
+    # Original floors should be gone
+    assert ">=0.3.0,<2.0.0" not in result
+    assert ">=0.6.0,<3.0.0" not in result
     # Unrelated lines unchanged
     assert "FROM python:3.12-slim AS builder" in result
     assert 'CMD ["onex-runtime"]' in result
@@ -217,3 +225,52 @@ def test_rewrite_updates_all_three_plugins() -> None:
     assert '"omninode-claude==1.2.3"' in result
     assert '"omninode-intelligence==3.4.5"' in result
     assert '"omninode-memory==2.3.4"' in result
+
+
+# ---------------------------------------------------------------------------
+# OMN-18596: bounded ranges keep their ceiling, and a release above it refuses
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_live_runtime_range_shape_advances_only_the_floor() -> None:
+    content = (
+        "    uv-with-retry pip install --no-deps \\\n"
+        '    "omninode-claude>=0.25.1,<1.0.0" \\\n'
+        '    "omninode-memory>=0.18.2,<1.0.0" \\\n'
+        '    "omninode-intelligence>=0.24.0,<1.0.0"\n'
+    )
+    versions = {
+        "omninode-claude": "0.26.0",
+        "omninode-memory": "0.18.3",
+        "omninode-intelligence": "0.24.0",
+    }
+    result = rewrite_content(content, versions)
+    assert '"omninode-claude>=0.26.0,<1.0.0"' in result
+    assert '"omninode-memory>=0.18.3,<1.0.0"' in result
+    assert '"omninode-intelligence>=0.24.0,<1.0.0"' in result
+    assert "==" not in result
+
+
+@pytest.mark.unit
+def test_a_release_at_or_above_the_ceiling_refuses() -> None:
+    content = '    "omninode-memory>=0.18.2,<1.0.0"\n'
+    with pytest.raises(ValueError, match="ceiling"):
+        rewrite_content(content, {"omninode-memory": "1.0.0"})
+
+
+@pytest.mark.unit
+def test_ceiling_refusal_fails_the_run_without_writing(tmp_path: Path) -> None:
+    dockerfile = tmp_path / "Dockerfile.runtime"
+    original = '    "omninode-memory>=0.18.2,<1.0.0"\n'
+    dockerfile.write_text(original, encoding="utf-8")
+    with patch.object(_mod, "fetch_latest_version", return_value="1.0.0"):
+        exit_code = _mod.main(["--dockerfile", str(dockerfile)])
+    assert exit_code != 0
+    assert dockerfile.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.unit
+def test_exact_pins_stay_exact() -> None:
+    result = rewrite_content(_DOCKERFILE_EXACT_PINS, {"omninode-claude": "1.2.4"})
+    assert '"omninode-claude==1.2.4"' in result
