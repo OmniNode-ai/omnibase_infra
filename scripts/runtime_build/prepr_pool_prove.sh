@@ -12,13 +12,22 @@
 # usage: bash prepr_pool_prove.sh <params.env> <phase>
 #   phases: snap-pre clone build probe tests teardown snap-post
 #
-# It only ever touches the compose project omnibase-infra-local and the work
-# directory named by W in the params file. Every other project on the host (a
-# dogfood lane, a runner) is read for a positive control and never written.
+# It only ever touches its own compose project and the work directory named by W
+# in the params file. Every other project on the host (a dogfood lane, a runner,
+# a declared lane) is read for a positive control and never written.
+#
+# Two kinds of member (config/prepr_runtime_pool.yaml):
+#   isolated    the laptop-bundle project omnibase-infra-local, with its own
+#               Postgres, Redpanda and Valkey on the fixed ports.
+#   prepr-slot  a numbered .201 pre-PR slot (omnibase-infra-prepr-N), brought up
+#               ONLY through prepr_verify_lane.sh and destroyed ONLY through
+#               prepr_teardown_slot.sh, both from the test-merge tree. Neither
+#               takes a lane argument; the project is derived from the slot.
 #
 # Params (sourced): TAG W [INFRA_PR INFRA_HEAD] [MARKET_PR MARKET_HEAD]
 #   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS CORE_REF SPI_REF COMPAT_REF
-#   DOCKER_CONFIG_MODE]
+#   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
+#   POSITIVE_CONTROL REASON]
 #
 # The id and file lists below ($C $V $N $IMGS $FILES and the like) are word-split
 # ON PURPOSE, and the macOS hosts run bash 3.2, which has no mapfile; hence:
@@ -29,7 +38,18 @@ export PATH=/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:$HOME
 source "$1"
 PHASE=$2
 : "${TAG:?}" "${W:?}"
-P=omnibase-infra-local; M=$P-omninode-runtime; E=$P-runtime-effects
+KIND=${SLOT_KIND:-isolated}
+if [ "$KIND" = prepr-slot ]; then
+  case "${PREPR_SLOT:-}" in 1|2) ;; *) echo "prepr-slot needs PREPR_SLOT 1 or 2"; exit 2;; esac
+  P=omnibase-infra-prepr-$PREPR_SLOT; M=omninode-prepr-$PREPR_SLOT-runtime; E=omninode-prepr-$PREPR_SLOT-runtime-effects
+else
+  P=omnibase-infra-local; M=$P-omninode-runtime; E=$P-runtime-effects
+fi
+# The driver passes PROJECT too; it must agree with the project derived here, so
+# a params file can never aim this script at another project.
+[ "${PROJECT:-$P}" = "$P" ] || { echo "refusing: PROJECT=$PROJECT but this member is $P"; exit 2; }
+MAIN=${MAIN_PORT:-8085}; EFF=${EFFECTS_PORT:-8086}; PORTS=${SLOT_PORTS:-5436|19092|16379|8085|8086}
+PC=${POSITIVE_CONTROL:-omnibase-infra-dogfood}
 R=$W/root; T=$W/test
 ts() { date -u +%FT%TZ; }
 lsn() { if command -v ss >/dev/null 2>&1; then ss -ltn; else lsof -nP -iTCP -sTCP:LISTEN; fi; }
@@ -52,18 +72,30 @@ fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls ba
 case "$PHASE" in
 snap-pre|snap-post)
   out=/tmp/$TAG-$PHASE.txt
+  if [ "$KIND" = prepr-slot ]; then
+    # .201 runs a dozen declared lanes that rebuild and restart on their own, so a
+    # whole-host diff would never read zero. Snapshot the slot's own axes; the
+    # shared-server axes are prepr_teardown_slot.sh's readback.
+    { ts; uptime
+      echo "## ps"; docker ps -a --filter label=com.docker.compose.project=$P --format '{{.Names}} {{.ID}}' | sort
+      echo "## volumes"; docker volume ls -q --filter label=com.docker.compose.project=$P | sort
+      echo "## networks"; docker network ls --filter label=com.docker.compose.project=$P --format '{{.Name}}' | sort
+      echo "## listeners"; lsn | grep -E ":($PORTS)\b" || echo none
+    } > "$out"
+  else
   { ts; uptime
     echo "## ps"; docker ps -a --format '{{.Names}} {{.ID}} {{.Label "com.docker.compose.project"}}' | sort
     echo "## volumes"; docker volume ls -q | sort
     echo "## networks"; docker network ls --format '{{.Name}}' | sort
     echo "## images"; docker images -q | sort -u
-    echo "## listeners"; lsn | grep -E ':(5436|19092|16379|8085|8086)\b' || echo none
+    echo "## listeners"; lsn | grep -E ":($PORTS)\b" || echo none
   } > "$out"
+  fi
   if [ "$PHASE" = snap-post ] && [ -f "/tmp/$TAG-snap-pre.txt" ]; then
     D=$(diff <(sed '1,2d' "/tmp/$TAG-snap-pre.txt") <(sed '1,2d' "$out") | grep -E '^[<>]')
     echo "snapshot-diff=$(printf '%s' "$D" | grep -c .)"; printf '%s\n' "$D" | head -20
   fi
-  echo "$PHASE lines=$(wc -l < "$out") local-containers=$(docker ps -a --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') listeners=$(grep -cE ':(5436|19092|16379|8085|8086)\b' "$out")"
+  echo "$PHASE lines=$(wc -l < "$out") local-containers=$(docker ps -a --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') listeners=$(grep -cE ":($PORTS)\b" "$out")"
   ;;
 clone)
   echo "clone start $(ts)"; mkdir -p "$R" "$T"
@@ -87,6 +119,28 @@ clone)
   echo "clone done $(ts)"
   ;;
 build)
+  if [ "$KIND" = prepr-slot ]; then
+    # The sanctioned .201 entrypoint, from the test-merge tree. Its siblings
+    # resolve from the ticket directory ($R), where clone put every one.
+    cd "$R/omnibase_infra" || exit 1
+    echo "slot $PREPR_SLOT bring-up start $(ts) GIT_SHA=$(git rev-parse HEAD)"
+    OMNI_HOME="$R" bash scripts/runtime_build/prepr_verify_lane.sh --slot "$PREPR_SLOT" \
+      --worktree "$R/omnibase_infra" --reason "${REASON:?REASON is required on a prepr slot}" \
+      --descriptor-out "$W/descriptor.json" > "$W/build.log" 2>&1
+    src=$?; echo "prepr_verify_lane rc=$src $(ts)"; grep '^\[prepr-verify-lane\]' "$W/build.log" | tail -6
+    case $src in
+      0) echo "build rc=0"; echo "up rc=0"; : > "$W/migrated" ;;
+      8) # another holder owns the slot: never tear down what this run did not start
+         : > "$W/foreign-slot"; echo "build rc=8 slot lock held by another process" ;;
+      9) if grep -q 'migration failed' "$W/build.log"; then
+           echo "build rc=0"; echo "slot-migration FAILED"; echo "up rc=9"
+         else echo "build rc=9 slot provisioning failed"; fi ;;
+      11|12) echo "build rc=0"; echo "up rc=$src" ;;
+      *) echo "build rc=$src" ;;
+    esac
+    [ "$src" = 0 ] || exit 1
+    exit 0
+  fi
   export DEPLOY_SOURCE_REFS_OUT=$W/refs.json
   cd "$R/omnibase_infra" || exit 1
   echo "stage start $(ts)"
@@ -145,13 +199,13 @@ probe)
   start=$(date +%s); end=$(( start + ${PROBE_WAIT_S:-1500} ))
   while :; do
     starting=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}} {{.Status}}' | grep -- '-runtime' | grep -c 'health: starting')
-    c1=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 localhost:8085/health)
-    c2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 localhost:8086/health)
+    c1=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "localhost:$MAIN/health")
+    c2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "localhost:$EFF/health")
     if [ "$starting" = 0 ] && [ "$c1" != 000 ] && [ "$c2" != 000 ]; then break; fi
     if [ "$(date +%s)" -ge "$end" ]; then echo "health wait timed out"; break; fi
     sleep 15
   done
-  echo "health wait $(( $(date +%s) - start ))s ended $(ts) starting=$starting 8085=$c1 8086=$c2"
+  echo "health wait $(( $(date +%s) - start ))s ended $(ts) starting=$starting $MAIN=$c1 $EFF=$c2"
   echo "== identity"
   docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$M" 2>&1
   echo "build GIT_SHA $(git -C "$R/omnibase_infra" rev-parse HEAD) market $(git -C "$R/omnimarket" rev-parse HEAD)"
@@ -161,7 +215,7 @@ probe)
     got=$(docker exec $M python -c "import $pkg, hashlib, os; b=os.path.dirname(os.path.dirname($pkg.__file__)); print(hashlib.sha256(open(b+'/$f','rb').read()).hexdigest()[:12])" 2>&1 | tail -1)
     echo "file $f image=$got build-tree=$want match=$([ "$got" = "$want" ] && echo yes || echo NO)"; done
   echo "== health"
-  for p in 8085 8086; do rm -f "/tmp/$TAG-h$p.json"; code=$(curl -s -o "/tmp/$TAG-h$p.json" -w '%{http_code}' --max-time 10 "localhost:$p/health")
+  for p in $MAIN $EFF; do rm -f "/tmp/$TAG-h$p.json"; code=$(curl -s -o "/tmp/$TAG-h$p.json" -w '%{http_code}' --max-time 10 "localhost:$p/health")
     echo "port $p HTTP $code $(python3 -c 'import json,sys
 try:
     d=json.load(open(sys.argv[1]))
@@ -169,6 +223,9 @@ except (OSError, ValueError):
     d={}
 det=d.get("details") if isinstance(d.get("details"),dict) else {}
 print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",det.get("failed_handlers"))' "/tmp/$TAG-h$p.json")"; done
+  # a slot has no migration-gate container: prepr_verify_lane.sh ran both
+  # migrations against its fresh databases and exits non-zero when one fails
+  [ "$KIND" = prepr-slot ] && echo "slot-migration-gate health=$([ -f "$W/migrated" ] && echo healthy || echo unknown)"
   docker ps -aq --filter label=com.docker.compose.project=$P | xargs docker inspect -f '{{.Name}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} restarts={{.RestartCount}} {{.State.Status}} exit={{.State.ExitCode}}'
   echo "== wiring"
   for c in $M $E; do L=$(docker logs $c 2>&1); echo "$c lines=$(echo "$L" | wc -l | tr -d ' ') autowire-fail=$(echo "$L" | grep -c 'Auto-wiring failed for') dup-dispatcher=$(echo "$L" | grep -c 'Cannot register duplicate dispatcher ID') ERROR=$(echo "$L" | grep -c ERROR) Traceback=$(echo "$L" | grep -c Traceback)"
@@ -179,10 +236,12 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
     echo "$L" | grep 'Auto-wiring failed for' | sed -E 's/.*enforce\): //' | awk -v RS='; ' 'NF{sub(/^ +/, ""); print}' \
       | sed -E "s/^([^:]+): .*failed: (.*)$/  failed-contract-reason $c \\1: \\2/" | cut -c1-260
     for n in ${LIVE_GREP:-}; do echo "  $c mentions $n: $(echo "$L" | grep -c "$n")"; done; done
-  if [ -n "${SQL:-}" ]; then echo "== sql"; PG=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 postgres)
+  if [ "$KIND" = prepr-slot ] && { [ -n "${SQL:-}" ] || [ -n "${GROUP_GREP:-}" ]; }; then
+    echo "== sql and consumer groups: not read on a prepr slot (its databases and groups live on the dev lane's shared servers)"
+  elif [ -n "${SQL:-}" ]; then echo "== sql"; PG=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 postgres)
     for db in $(docker exec "$PG" psql -U postgres -Atc "select datname from pg_database where datname not in ('postgres','template0','template1')"); do
       echo "-- db $db"; docker exec "$PG" psql -U postgres -d "$db" -Atc "$SQL" 2>&1 | head -12; done; fi
-  if [ -n "${GROUP_GREP:-}" ]; then echo "== consumer groups"; RP=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 'redpanda$')
+  if [ "$KIND" != prepr-slot ] && [ -n "${GROUP_GREP:-}" ]; then echo "== consumer groups"; RP=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 'redpanda$')
     docker exec "$RP" rpk group list 2>&1 | grep -E "$GROUP_GREP" | head -10; echo "groups matching: $(docker exec "$RP" rpk group list 2>&1 | grep -cE "$GROUP_GREP") of $(docker exec "$RP" rpk group list 2>&1 | wc -l)"; fi
   uptime
   ;;
@@ -211,6 +270,39 @@ tests)
   done
   ;;
 teardown)
+  if [ "$KIND" = prepr-slot ]; then
+    if [ -f "$W/foreign-slot" ]; then
+      echo "slot $PREPR_SLOT belongs to another holder: not torn down"; SV=FOREIGN; SI=0
+    else
+      TD="$R/omnibase_infra/scripts/runtime_build/prepr_teardown_slot.sh"
+      if [ ! -f "$TD" ]; then
+        git clone -q --depth 1 --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$W/td"
+        TD="$W/td/scripts/runtime_build/prepr_teardown_slot.sh"
+      fi
+      bash "$TD" --slot "$PREPR_SLOT" --reason "${REASON:-lab pool teardown $TAG}" --report-out "/tmp/$TAG-slot-teardown.json" > "/tmp/$TAG-slot-teardown.log" 2>&1
+      echo "prepr_teardown_slot rc=$? $(ts)"; tail -4 "/tmp/$TAG-slot-teardown.log"
+      read -r SV SI <<EOF_TD
+$(python3 -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    d={}
+r=d.get("residue") or {}
+print(d.get("verdict","MISSING"), r.get("images",0))' "/tmp/$TAG-slot-teardown.json")
+EOF_TD
+      python3 -c 'import json,sys
+try:
+    print("slot residue", json.dumps(json.load(open(sys.argv[1])).get("residue")))
+except (OSError, ValueError):
+    print("slot residue unreadable")' "/tmp/$TAG-slot-teardown.json"
+    fi
+    echo "slot-teardown verdict=$SV"
+    cd "$HOME" || exit 1; rm -rf "$W"
+    echo "== zero residue $(ts)"
+    echo "containers=$(docker ps -a --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') volumes=$(docker volume ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') networks=$(docker network ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') images=$SI listeners=$(lsn | grep -cE ":($PORTS)\b") workdir=$([ -e "$W" ] && echo present || echo gone)"
+    echo "positive control $PC containers $(docker ps -a --filter label=com.docker.compose.project=$PC -q | wc -l | tr -d ' ') running $(docker ps --filter label=com.docker.compose.project=$PC -q | wc -l | tr -d ' ')"
+    exit 0
+  fi
   IMGS=$(docker images --filter reference="$P*" -q | sort -u)
   C=$(docker ps -a --filter label=com.docker.compose.project=$P -q); echo "containers $(echo $C | wc -w)"; [ -n "$C" ] && docker rm -f $C >/dev/null; echo "rm rc=$?"
   V=$(docker volume ls --filter label=com.docker.compose.project=$P -q); echo "volumes $(echo $V | wc -w)"; [ -n "$V" ] && docker volume rm $V >/dev/null; echo "vol rm rc=$?"
@@ -227,8 +319,8 @@ teardown)
   else echo "no pre-snapshot: anonymous volumes left as they are"; fi
   cd "$HOME" || exit 1; rm -rf "$W"
   echo "== zero residue $(ts)"
-  echo "containers=$(docker ps -a --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') volumes=$(docker volume ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') networks=$(docker network ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') images=$(docker images --filter reference="$P*" -q | wc -l | tr -d ' ') listeners=$(lsn | grep -cE ':(5436|19092|16379|8085|8086)\b') workdir=$([ -e "$W" ] && echo present || echo gone)"
-  echo "positive control dogfood containers $(docker ps -a --filter label=com.docker.compose.project=omnibase-infra-dogfood -q | wc -l | tr -d ' ') running $(docker ps --filter label=com.docker.compose.project=omnibase-infra-dogfood -q | wc -l | tr -d ' ')"
+  echo "containers=$(docker ps -a --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') volumes=$(docker volume ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') networks=$(docker network ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') images=$(docker images --filter reference="$P*" -q | wc -l | tr -d ' ') listeners=$(lsn | grep -cE ":($PORTS)\b") workdir=$([ -e "$W" ] && echo present || echo gone)"
+  echo "positive control $PC containers $(docker ps -a --filter label=com.docker.compose.project=$PC -q | wc -l | tr -d ' ') running $(docker ps --filter label=com.docker.compose.project=$PC -q | wc -l | tr -d ' ')"
   ;;
 *) echo "unknown phase $PHASE"; exit 2;;
 esac

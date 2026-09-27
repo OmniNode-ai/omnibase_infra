@@ -16,6 +16,7 @@ import datetime as dt
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -157,17 +158,64 @@ def _lease(holder: str, until: dt.datetime) -> str:
 
 def test_every_pool_host_is_declared_in_the_lane_manifest() -> None:
     declared = pool.declared_manifest_hosts()
-    assert {h.name for h in CFG.hosts} <= declared
+    assert {h.machine for h in CFG.hosts} <= declared
 
 
 def test_the_slot_project_is_never_a_declared_lane() -> None:
     assert CFG.compose_project not in pool.declared_lane_projects()
+    isolated = [h for h in CFG.hosts if h.kind == "isolated"]
+    assert {h.compose_project for h in isolated} == {CFG.compose_project}
 
 
-def test_202_is_excluded_and_every_exclusion_states_a_reason() -> None:
-    by_name = {h.name: h for h in CFG.hosts}
-    assert by_name["lab-202"].status == "excluded"
+def test_every_lab_machine_takes_part_and_every_exclusion_states_a_reason() -> None:
+    # Operator ruling 2026-09-27T20:20:42Z: ".105, .201 and .202 are available,
+    # what do you mean only 1 lab host?" Every lab machine has a pool member.
+    in_pool = {h.machine for h in CFG.hosts if h.status == "pool"}
+    assert in_pool == {"lab-101", "lab-105", "lab-200", "lab-201", "lab-202"}
+    assert CFG.host("lab-202").status == "pool"
+    assert CFG.host("lab-202").positive_control == "omnibase-infra-dev-202"
     assert all(h.reason for h in CFG.hosts if h.status == "excluded")
+
+
+def test_201_takes_part_only_through_its_pre_pr_slots() -> None:
+    on_201 = [h for h in CFG.hosts if h.machine == "lab-201"]
+    assert CFG.host("lab-201").status == "excluded"
+    members = sorted((h for h in on_201 if h.status == "pool"), key=lambda h: h.slot)
+    assert [h.kind for h in members] == ["prepr-slot", "prepr-slot"]
+    assert [h.compose_project for h in members] == [
+        "omnibase-infra-prepr-1",
+        "omnibase-infra-prepr-2",
+    ]
+    assert [(h.main_port, h.effects_port) for h in members] == [
+        (28085, 28086),
+        (38085, 38086),
+    ]
+    # never a governed .201 lane's project, and never its ports
+    policy = pool._slot_policy()
+    for h in members:
+        assert policy.assert_target_is_a_pool_slot(h.compose_project).slot == h.slot
+        assert not {8085, 8086, 5436, 19092, 16379} & set(h.ports)
+    assert len({h.lease_dir for h in members} | {CFG.lease_dir}) == 3
+    assert len({h.surface for h in CFG.hosts}) == len(CFG.hosts)
+
+
+@pytest.mark.parametrize(
+    ("edit", "match"),
+    [
+        ({"kind": "prepr-slot", "slot": 3}, "not a pre-PR slot"),
+        ({"slot": 1}, "names a slot but is not a prepr-slot"),
+        ({"kind": "declared-lane"}, "has kind"),
+    ],
+)
+def test_a_member_outside_the_slot_policy_is_refused(
+    tmp_path: Path, edit: dict[str, Any], match: str
+) -> None:
+    raw = yaml.safe_load(pool.POOL_CONFIG.read_text(encoding="utf-8"))
+    raw["hosts"][0].update(edit)
+    bad = tmp_path / "pool.yaml"
+    bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match=match):
+        pool.load_pool_config(bad)
 
 
 def test_model_endpoint_is_not_the_202_server() -> None:
@@ -176,7 +224,7 @@ def test_model_endpoint_is_not_the_202_server() -> None:
 
 def test_an_exclusion_without_a_reason_is_refused(tmp_path: Path) -> None:
     raw = yaml.safe_load(pool.POOL_CONFIG.read_text(encoding="utf-8"))
-    raw["hosts"][-1].pop("reason")
+    next(h for h in raw["hosts"] if h["status"] == "excluded").pop("reason")
     bad = tmp_path / "pool.yaml"
     bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="states no reason"):
@@ -245,7 +293,8 @@ def test_pick_takes_the_least_loaded_free_host_and_never_an_excluded_one() -> No
     }
     states = _survey(hosts)
     verdicts = {s.host.name: s.verdict for s in states}
-    assert verdicts["lab-201"] == verdicts["lab-202"] == "EXCLUDED"
+    assert verdicts["lab-201"] == "EXCLUDED"
+    assert verdicts["lab-202"] == "FREE"
     assert pool.pick(states).host.name == "lab-105"
 
 
@@ -459,7 +508,8 @@ def test_run_refuses_when_no_host_is_free(tmp_path: Path) -> None:
     assert (
         "lab-101 OVERLOADED" in text
         and "lab-105 OFFLINE" in text
-        and "lab-202 EXCLUDED" in text
+        and "lab-201 EXCLUDED" in text
+        and "lab-202 OFFLINE" in text
     )
 
 
@@ -705,3 +755,165 @@ def test_a_focused_failure_dev_does_not_share_is_the_prs(dev_rc: str | None) -> 
     rb = pool.judge({**GOOD, "tests": tests})
     assert rb.checks["focused_tests"] is False
     assert any("fails at the head only" in n for n in rb.notes)
+
+
+# ------------------------------------------------------------------ .201 pre-PR slots
+
+SLOT_GOOD = {
+    **GOOD,
+    "build": ("prepr_verify_lane rc=0 2026-09-27T14:40:00Z\nbuild rc=0\nup rc=0"),
+    "probe": (
+        "file omnibase_infra/x.py image=aaa build-tree=aaa match=yes\n"
+        "port 28085 HTTP 200 status healthy healthy True failed_handlers 0\n"
+        "port 28086 HTTP 200 status healthy healthy True failed_handlers 0\n"
+        "slot-migration-gate health=healthy\n"
+        "omninode-prepr-1-runtime lines=900 autowire-fail=0 dup-dispatcher=0 ERROR=0 Traceback=0\n"
+        "omninode-prepr-1-runtime-effects lines=800 autowire-fail=0 dup-dispatcher=0 ERROR=0 Traceback=0\n"
+        "failed-contracts omninode-prepr-1-runtime: \n"
+        "failed-contracts omninode-prepr-1-runtime-effects: \n"
+    ),
+    "teardown": (
+        "prepr_teardown_slot rc=0\nslot-teardown verdict=CLEAN\n"
+        "containers=0 volumes=0 networks=0 images=0 listeners=0 workdir=gone\n"
+        "positive control omnibase-infra containers 26 running 26"
+    ),
+}
+
+
+class RecordingTransport(FakeTransport):
+    def __init__(self, hosts: dict[str, FakeHost]) -> None:
+        super().__init__(hosts)
+        self.commands: list[tuple[str, str]] = []
+
+    def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+        self.commands.append((host.name, command))
+        return super().run(host, command, timeout)
+
+
+def test_a_slot_is_probed_on_its_own_project_ports_and_lease() -> None:
+    hosts = {"lab-201-prepr-1": FakeHost(cores=32, load=10.0)}
+    tp = RecordingTransport(hosts)
+    states = pool.survey(CFG, tp, {}, NOW)
+    by = {s.host.name: s for s in states}
+    assert by["lab-201-prepr-1"].verdict == "FREE"
+    probe = next(c for n, c in tp.commands if n == "lab-201-prepr-1")
+    assert "com.docker.compose.project=omnibase-infra-prepr-1 " in probe
+    assert ":(28085|28086|28090|23002)" in probe
+    assert ".onex-prepr-pool/lease-prepr-1/lease.json" in probe
+    assert "8085|" not in probe.replace("28085|", "")
+
+    busy = {"lab-201-prepr-2": FakeHost(cores=32, load=10.0, slot=12)}
+    s2 = {s.host.name: s for s in pool.survey(CFG, FakeTransport(busy), {}, NOW)}
+    assert s2["lab-201-prepr-2"].verdict == "BUSY"
+    assert "omnibase-infra-prepr-2 containers present" in s2["lab-201-prepr-2"].detail
+
+
+def test_a_slot_run_passes_end_to_end_with_the_slot_ports(tmp_path: Path) -> None:
+    hosts = {"lab-201-prepr-1": FakeHost(cores=32, load=10.0)}
+    hosts["lab-201-prepr-1"].phases = dict(SLOT_GOOD)
+    code, text = pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _params(tmp_path),
+        "me",
+        150,
+        "lab-201-prepr-1",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_PASS, text
+    assert "pre-PR slot project omnibase-infra-prepr-1" in text
+    assert "ok   health_28085" in text and "ok   health_28086" in text
+    assert "surface=prepr-1-201 result=PASS restored=yes" in text
+    env = next(tmp_path.glob("*.resolved.env")).read_text(encoding="utf-8")
+    for line in (
+        "SLOT_KIND=prepr-slot",
+        "PREPR_SLOT=1",
+        "PROJECT=omnibase-infra-prepr-1",
+        "MAIN_PORT=28085",
+        "EFFECTS_PORT=28086",
+        "POSITIVE_CONTROL=omnibase-infra",
+    ):
+        assert line in env.splitlines(), line
+    assert hosts["lab-201-prepr-1"].lease is None
+
+
+def test_a_params_file_cannot_move_a_run_onto_another_project(tmp_path: Path) -> None:
+    p = _params(tmp_path)
+    p.write_text(
+        p.read_text(encoding="utf-8")
+        + "PROJECT=omnibase-infra\nSLOT_KIND=prepr-slot\nPREPR_SLOT=1\nMAIN_PORT=8085\n",
+        encoding="utf-8",
+    )
+    pool.run_proof(
+        CFG,
+        FakeTransport({"lab-101": FakeHost()}),
+        p,
+        "me",
+        60,
+        "lab-101",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    env = next(tmp_path.glob("*.resolved.env")).read_text(encoding="utf-8").splitlines()
+    assert "PROJECT=omnibase-infra-local" in env and "PROJECT=omnibase-infra" not in env
+    assert "SLOT_KIND=isolated" in env and "MAIN_PORT=8085" in env
+    assert sum(line.startswith("PROJECT=") for line in env) == 1
+
+
+def test_a_slot_migration_failure_is_the_prs_finding() -> None:
+    build = "prepr_verify_lane rc=9\nbuild rc=0\nslot-migration FAILED\nup rc=9"
+    rb = pool.judge({**SLOT_GOOD, "build": build, "probe": ""}, ports=(28085, 28086))
+    assert rb.outcome == "FAIL"
+    assert rb.checks["stack_built"] and not rb.checks["migration_gate_healthy"]
+    assert any("migration failed" in n for n in rb.notes)
+
+
+def test_a_slot_teardown_that_is_not_clean_is_not_restored() -> None:
+    td = SLOT_GOOD["teardown"].replace("verdict=CLEAN", "verdict=RESIDUE")
+    rb = pool.judge({**SLOT_GOOD, "teardown": td}, ports=(28085, 28086))
+    assert not rb.restored
+    assert any("slot teardown verdict RESIDUE" in n for n in rb.notes)
+    assert pool.judge(SLOT_GOOD, ports=(28085, 28086)).restored
+
+
+def test_the_prove_script_brings_a_slot_up_and_down_only_through_the_sanctioned_pair() -> (
+    None
+):
+    text = PROVE_SH.read_text(encoding="utf-8")
+    build = text[text.index("build)") : text.index("probe)")]
+    slot_build = build[: build.index("export DEPLOY_SOURCE_REFS_OUT")]
+    assert "scripts/runtime_build/prepr_verify_lane.sh --slot" in slot_build
+    assert "docker compose" not in slot_build and "catalog.cli" not in slot_build
+    teardown = text[text.index("teardown)") :]
+    slot_td = teardown[: teardown.index("IMGS=")]
+    assert "prepr_teardown_slot.sh" in slot_td
+    assert not re.search(r"docker (rm|volume rm|network rm|image rm)", slot_td)
+    # a slot another holder started is never torn down by this run
+    assert "foreign-slot" in slot_build and "foreign-slot" in slot_td
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        "SLOT_KIND=prepr-slot\nPREPR_SLOT=1\nPROJECT=omnibase-infra\n",
+        "SLOT_KIND=prepr-slot\nPREPR_SLOT=3\n",
+        "SLOT_KIND=isolated\nPROJECT=omnibase-infra-stability-test\n",
+    ],
+)
+def test_the_prove_script_refuses_a_project_it_did_not_derive(
+    tmp_path: Path, params: str
+) -> None:
+    env = tmp_path / "params.env"
+    env.write_text(f"TAG=t\nW={tmp_path}/w\n{params}", encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", str(PROVE_SH), str(env), "snap-pre"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert not (tmp_path / "w").exists()
