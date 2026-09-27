@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -124,6 +125,75 @@ def test_tenantless_descendant_is_owned_but_unreachable_is_withheld() -> None:
         child.envelope_id,
     }
     assert not hasattr(admitted, "evidence")
+
+
+@pytest.mark.unit
+def test_real_five_hop_tenantless_chain_is_owned_by_head_reachability() -> None:
+    """The recorded legacy chain has no tenant on any event, including its head."""
+    fixture_path = (
+        Path(__file__).parents[2] / "fixtures" / "omn19726" / "real_branch_legacy.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    correlation = UUID(fixture["correlation_id"])
+    tenant = UUID(fixture["owner_tenant_id"])
+    records = fixture["records"]
+    read_set = object.__new__(PinnedExecutionGraphReadSet)
+    object.__setattr__(read_set, "topology_version", "real-branch-legacy-v1")
+    object.__setattr__(
+        read_set,
+        "topics",
+        frozenset({record["topic"] for record in records} | {_VERDICT_TOPIC}),
+    )
+    object.__setattr__(read_set, "head_topic", _HEAD_TOPIC)
+    object.__setattr__(read_set, "verdict_topic", _VERDICT_TOPIC)
+    rows = tuple(
+        _row(
+            correlation,
+            topic=record["topic"],
+            offset=record["kafka_offset"],
+            envelope_id=UUID(record["envelope_id"]),
+            parent_id=(
+                UUID(record["parent_envelope_id"])
+                if record["parent_envelope_id"]
+                else None
+            ),
+        )
+        for record in records
+    )
+
+    admitted = admit_current_ownership(_evidence(tenant, correlation, rows), read_set)
+
+    expected_hops = {
+        UUID(record["envelope_id"])
+        for record in records
+        if record["stored_hop_index"] is not None
+    }
+    expected_withheld = {
+        UUID(record["envelope_id"])
+        for record in records
+        if record["stored_hop_index"] is None
+    }
+    assert admitted.head_envelope_id == UUID(records[0]["envelope_id"])
+    assert set(admitted.owned_envelope_ids) == expected_hops
+    assert set(admitted.withheld_envelope_ids) == expected_withheld
+    assert admitted.withheld_count == 2
+
+    foreign = replace(
+        rows[3], event_value=json.dumps({"tenant_id": str(uuid4())}).encode()
+    )
+    with pytest.raises(ExecutionGraphOwnershipRefusalError, match="foreign"):
+        admit_current_ownership(
+            _evidence(tenant, correlation, (*rows[:3], foreign, *rows[4:])),
+            read_set,
+        )
+
+    # A requested bound below the second head is irrelevant to full-current
+    # authorization; the owner gate sees both heads before replay selection.
+    second_head = _row(correlation, topic=_HEAD_TOPIC, offset=999)
+    with pytest.raises(ExecutionGraphOwnershipRefusalError, match="exactly one"):
+        admit_current_ownership(
+            _evidence(tenant, correlation, (*rows, second_head)), read_set
+        )
 
 
 @pytest.mark.unit
