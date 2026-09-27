@@ -828,7 +828,9 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # UPDATE on it. Vendored FIRST per the vendor-parity ordering.
     # 219 -> 221 for OMN-19513: the claude_hook_events and claude_agent_spans
     # create/grant pair is vendored ahead of omnimarket#2956.
-    assert len(result.declarations) == 221
+    # 221 -> 222 for OMN-19813: node_projection_claude_hook_events/0002 adds
+    # the non-empty agent_id CHECKs, vendored ahead of omnimarket#2968.
+    assert len(result.declarations) == 222
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
