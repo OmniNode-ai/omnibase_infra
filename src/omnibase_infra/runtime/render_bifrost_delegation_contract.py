@@ -51,6 +51,12 @@ from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
 _LANE_OVERLAY_PATH_ENV = "BIFROST_LANE_OVERLAY_PATH"
 _CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
+#: OMN-17099: the embedding backend's real endpoint is OpenAI-embeddings-shaped,
+#: not chat-completions-shaped (live probe 2026-09-27: .201:8002/v1/chat/completions
+#: 404s; .201:8002/v1/embeddings returns real vectors). ``ModelBifrostLaneBackendBinding``
+#: accepts the same two suffixes; this module's own completeness gate must agree.
+_EMBEDDINGS_PATH_SUFFIX = "/embeddings"
+_COMPLETE_ENDPOINT_SUFFIXES = (_CHAT_COMPLETIONS_PATH_SUFFIX, _EMBEDDINGS_PATH_SUFFIX)
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
 #: The base contract's own declaration that a backend is served from the lab.
 _LOCAL_TIER = "local"
@@ -164,9 +170,13 @@ def _probe_openai_model_endpoint(
 ) -> str | None:
     parsed = urlsplit(endpoint_url)
     path = parsed.path.rstrip("/")
+    matched_suffix = next(
+        (suffix for suffix in _COMPLETE_ENDPOINT_SUFFIXES if path.endswith(suffix)),
+        None,
+    )
     models_path = (
-        f"{path[: -len(_CHAT_COMPLETIONS_PATH_SUFFIX)]}/models"
-        if path.endswith(_CHAT_COMPLETIONS_PATH_SUFFIX)
+        f"{path[: -len(matched_suffix)]}/models"
+        if matched_suffix is not None
         else f"{path}/v1/models"
     )
     endpoint = urlunsplit((parsed.scheme, parsed.netloc, models_path, "", ""))
@@ -467,7 +477,7 @@ def _validate_rendered_contract(
                 )
             continue
         if isinstance(endpoint_url, str) and endpoint_url.strip():
-            if not endpoint_url.rstrip("/").endswith(_CHAT_COMPLETIONS_PATH_SUFFIX):
+            if not endpoint_url.rstrip("/").endswith(_COMPLETE_ENDPOINT_SUFFIXES):
                 raise ProtocolConfigurationError(
                     f"Rendered Bifrost endpoint must be complete: {endpoint_url!r}"
                 )

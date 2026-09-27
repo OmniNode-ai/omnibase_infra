@@ -367,3 +367,26 @@ def test_no_dsn_ever_reaches_a_command_line(
             f"the workflow spells {marker!r}; the DSN is a secret and belongs "
             "in the lab store under the declared name"
         )
+
+
+@pytest.mark.unit
+def test_the_deploy_agent_comes_from_the_verify_route_declaration(
+    workflow_text: str,
+) -> None:
+    """OMN-19811 -- the canary asks the deploy agent the convergence guard asks.
+
+    Run 36202173467 went RED because a deploy recreated the runtime inside the
+    probe's budget. The probe now reads the lane's deploy agent, and the URL
+    must come from the declaration verify-lane-converged reads
+    (config/deploy_lane_routing.yaml), never a literal: two readers of one
+    agent with two addresses drift apart silently.
+    """
+    registry = yaml.safe_load(_SKILL_MAPPING.read_text(encoding="utf-8"))
+    mapping = next(s for s in registry["skills"] if s["skill_name"] == _SKILL_NAME)
+    declared = {f"--{arg['name']}" for arg in mapping["args"]}
+    for flag in ("--deploy-agent-url", "--deploy-wait-seconds"):
+        assert flag in workflow_text, f"workflow no longer passes {flag}"
+        assert flag in declared, f"skill mapping no longer declares {flag}"
+
+    assert "targets_for_receipt_lane(load_table(), 'compose-dev')" in workflow_text
+    assert ":8098" not in workflow_text
