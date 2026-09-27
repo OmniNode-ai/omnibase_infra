@@ -132,6 +132,10 @@ from omnibase_infra.backends.auto_configure import (
     resolve_bus_type,
 )
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract
+from omnibase_infra.cli.delegate_caller import (
+    DELEGATE_CALLER_LANE_METADATA_KEY,
+    resolve_delegate_caller,
+)
 from omnibase_infra.cli.delegate_lane import (
     DelegateLaneSelectionError,
     resolve_lane_target,
@@ -158,6 +162,7 @@ from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
     resolve_delegate_terminal,
 )
+from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
 from omnibase_infra.cli.model_delegate_default_bus import ModelDelegateDefaultBus
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
@@ -597,6 +602,21 @@ def _backend_pin_defect(
     escalation spend. It makes that spend impossible to mistake for the pinned
     run. Refusing to escalate off a pin at all is a change to the routing port
     in ``omnimarket`` and is not in this layer's gift.
+
+    OMN-19765: on a machine with a locally registered BYOK key, the local
+    path's ``substitute_local_byok_route`` (``omnimarket/routing/
+    local_byok_route.py``) replaces a HOUSE rung this CLI's pin named (e.g.
+    ``cloud-glm``) with the declared customer-paid rung (``byok-glm``) BEFORE
+    dispatch — a routing decision, not an escalation, and the FIRST and only
+    attempt still answers. Comparing ``served`` to the raw pin string alone
+    made that indistinguishable from a real escalation off the pin (run
+    ``86538bdd-0a35-47c6-98e1-b4d13ad39e55``, first-attempt success, exited 1
+    anyway). The attempt's own ``substituted_from_backend_id`` — set by the
+    routing layer that performed the substitution, never inferred here — names
+    which backend, if any, was substituted TO produce ``served``; the pin is
+    honoured when that equals the requested id, and still refused when no
+    substitution occurred or it substituted a DIFFERENT backend, which is what
+    keeps a real escalation refused.
     """
     if requested_backend_id is None:
         return None
@@ -604,7 +624,12 @@ def _backend_pin_defect(
         return None
     accepted = result.accepted_attempt
     served = (accepted.backend_id or "").strip() if accepted is not None else ""
-    if served == requested_backend_id:
+    substituted_from = (
+        (accepted.substituted_from_backend_id or "").strip()
+        if accepted is not None
+        else ""
+    )
+    if served == requested_backend_id or substituted_from == requested_backend_id:
         return None
     return (
         f"delegation was pinned to backend {requested_backend_id!r} but the "
@@ -1709,6 +1734,7 @@ def _write_payload(
     requested_timeout_seconds: int | None = None,
     backend_id: str | None = None,
     ticket_id: str | None = None,
+    caller: ModelDelegateCaller | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -1778,8 +1804,19 @@ def _write_payload(
     # map, which every released request consumer already accepts. A declared
     # request field would be refused by the deployed consumer until a release
     # carried it. Omitted entirely when no ticket was named.
+    metadata: dict[str, str] = {}
     if ticket_id is not None:
-        payload["metadata"] = {DELEGATE_TICKET_METADATA_KEY: ticket_id}
+        metadata[DELEGATE_TICKET_METADATA_KEY] = ticket_id
+    # OMN-19860: who issued the run. The lane rides in the same metadata map,
+    # for the same reason as the ticket; the session rides in the request's
+    # declared ``session_id`` field, only ever as a UUID. Each is omitted
+    # entirely when unresolved, so an unattributed caller changes no shape.
+    if caller is not None and caller.lane is not None:
+        metadata[DELEGATE_CALLER_LANE_METADATA_KEY] = caller.lane
+    if metadata:
+        payload["metadata"] = metadata
+    if caller is not None and caller.session_id is not None:
+        payload["session_id"] = caller.session_id
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -2167,6 +2204,21 @@ def _timeout_receipt(
     ),
 )
 @click.option(
+    "--caller-lane",
+    "caller_lane",
+    default=None,
+    help=(
+        "The ledger lane issuing this delegation (OMN-19860). It rides in the "
+        "request metadata onto the delegation's terminal and its "
+        "delegation_events row, beside the Claude Code session id, so per-lane "
+        "delegation use is queryable from the event stream. Omitted, it is read "
+        "from ONEX_LANE, ONEX_LANE_ID, ONEX_AGENT_NAME, CLAUDE_AGENT_NAME or "
+        "CLAUDE_SUBAGENT_NAME, then from the lane registered for the "
+        "omni_worktrees/<ticket>/<dir> worktree; otherwise none is recorded. A "
+        "malformed value is a usage error, never dropped."
+    ),
+)
+@click.option(
     "--omnibase-path",
     "omnibase_path",
     type=click.Path(path_type=Path),
@@ -2217,6 +2269,7 @@ def delegate_command(
     omnibase_path: Path | None,
     allow_omnimarket_drift: bool,
     ticket: str | None,
+    caller_lane: str | None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print exactly one typed result.
 
@@ -2241,6 +2294,9 @@ def delegate_command(
     """
     try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
+        caller = resolve_delegate_caller(
+            caller_lane, cwd=Path.cwd(), environ=os.environ
+        )
         acceptance_criteria = _validate_criteria(tuple(criteria))
         declared_contract = _load_response_contract(response_contract)
         _validate_replace_mode_authority(
@@ -2268,6 +2324,7 @@ def delegate_command(
             allow_drift=allow_omnimarket_drift,
             ticket_id=ticket_id,
             ticket_resolution=ticket_resolution,
+            caller=caller,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2297,6 +2354,7 @@ def run_delegate(
     allow_drift: bool = False,
     ticket_id: str | None = None,
     ticket_resolution: str = "none",
+    caller: ModelDelegateCaller | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -2533,10 +2591,13 @@ def run_delegate(
             run_id=run_id,
             correlation_id=correlation_id,
             ticket_id=ticket_id,
+            caller=caller,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.
         click.echo(f"ticket: {ticket_id or 'none'} ({ticket_resolution})", err=True)
+        # OMN-19860: and who issued it, the same way.
+        click.echo((caller or ModelDelegateCaller.unattributed()).describe(), err=True)
         contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
         # OMN-17295 / OMN-17304: decide WHERE the orchestrator runs, and — for a
         # dispatched run — prove a deployed one is actually consuming the command

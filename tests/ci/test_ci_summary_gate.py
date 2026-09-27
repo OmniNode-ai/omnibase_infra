@@ -94,6 +94,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DEPLOY_AGENT_GATE = "Deploy Agent Tests (OMN-15378) / deploy-agent-tests"
 APPLICATION_DB_GATE = "Application Database Domain Enforcement (OMN-15361)"
+CASCADE_REPORT_JOB = "CI cascade reason-graph (report-only)"
 
 # Real, unedited `commits/{sha}/check-runs` rows captured from the 16 dev PRs
 # merged 2026-07-29T23:04Z → 2026-07-30T14:54Z, filtered to merge-time state.
@@ -269,6 +270,16 @@ class TestCiSummaryGate:
     def test_allowlisted_advisory_failure_is_ignored(self) -> None:
         # A failing advisory job (Test-Failure Ratchet Gate) must NOT block.
         jobs = _all_gates("success") + [_job("Test-Failure Ratchet Gate", "failure")]
+        code, _ = evaluate(jobs)
+        assert code == EXIT_SUCCESS
+
+    def test_cascade_report_failure_does_not_change_the_verdict(self) -> None:
+        jobs = _all_gates("success") + [_job(CASCADE_REPORT_JOB, "failure")]
+        code, _ = evaluate(jobs)
+        assert code == EXIT_SUCCESS
+
+    def test_queued_cascade_report_does_not_hold_the_verdict_pending(self) -> None:
+        jobs = _all_gates("success") + [_job(CASCADE_REPORT_JOB, None, status="queued")]
         code, _ = evaluate(jobs)
         assert code == EXIT_SUCCESS
 
@@ -793,6 +804,56 @@ class TestExternalAssertionIsWiredIntoCiYml:
         )
         run = str(poll["run"])
         assert run.count("rm -f check_runs.json") >= 2
+
+
+class TestCascadeReportIsOutsideRequiredContext:
+    """OMN-14909 telemetry must not weaken or delay the CI Summary verdict."""
+
+    def test_ci_summary_has_no_warn_only_step(self) -> None:
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["ci-summary"]
+        assert all("continue-on-error" not in step for step in job["steps"])
+        assert all(
+            "reason-graph" not in str(step.get("name", "")) for step in job["steps"]
+        )
+
+    def test_cascade_report_is_a_separate_advisory_job(self) -> None:
+        jobs = _load_workflow(CI_WORKFLOW)["jobs"]
+        report = jobs["ci-cascade-reason-graph"]
+        assert report["name"] == CASCADE_REPORT_JOB
+        assert report["needs"] == ["ci-summary"]
+        assert report["if"] == "always()"
+        assert report["continue-on-error"] is True
+        assert report["runs-on"] == jobs["ci-summary"]["runs-on"]
+        assert report["timeout-minutes"] == 10
+        assert report["permissions"] == {
+            "actions": "read",
+            "checks": "read",
+            "contents": "read",
+        }
+
+        summary_checkout = next(
+            step
+            for step in jobs["ci-summary"]["steps"]
+            if step.get("name") == "Checkout (gate script)"
+        )
+        report_checkout = next(
+            step
+            for step in report["steps"]
+            if step.get("name") == "Checkout (gate script)"
+        )
+        assert report_checkout == summary_checkout
+        assert CASCADE_REPORT_JOB in SOFT_ALLOWLIST
+
+    def test_advisory_marker_is_directly_above_continue_on_error(self) -> None:
+        lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
+        job_start = lines.index("  ci-cascade-reason-graph:")
+        next_job = next(
+            index
+            for index in range(job_start + 1, len(lines))
+            if re.fullmatch(r"  [a-z0-9][a-z0-9-]*:", lines[index])
+        )
+        continue_line = lines.index("    continue-on-error: true", job_start, next_job)
+        assert re.search(r"#\s*advisory-ok:\s*OMN-\d+\s+\S", lines[continue_line - 1])
 
 
 # --------------------------------------------------------------------------
