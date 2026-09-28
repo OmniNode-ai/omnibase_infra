@@ -16,6 +16,8 @@ import datetime as dt
 import importlib.util
 import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -157,17 +159,64 @@ def _lease(holder: str, until: dt.datetime) -> str:
 
 def test_every_pool_host_is_declared_in_the_lane_manifest() -> None:
     declared = pool.declared_manifest_hosts()
-    assert {h.name for h in CFG.hosts} <= declared
+    assert {h.machine for h in CFG.hosts} <= declared
 
 
 def test_the_slot_project_is_never_a_declared_lane() -> None:
     assert CFG.compose_project not in pool.declared_lane_projects()
+    isolated = [h for h in CFG.hosts if h.kind == "isolated"]
+    assert {h.compose_project for h in isolated} == {CFG.compose_project}
 
 
-def test_202_is_excluded_and_every_exclusion_states_a_reason() -> None:
-    by_name = {h.name: h for h in CFG.hosts}
-    assert by_name["lab-202"].status == "excluded"
+def test_every_lab_machine_takes_part_and_every_exclusion_states_a_reason() -> None:
+    # Operator ruling 2026-09-27T20:20:42Z: ".105, .201 and .202 are available,
+    # what do you mean only 1 lab host?" Every lab machine has a pool member.
+    in_pool = {h.machine for h in CFG.hosts if h.status == "pool"}
+    assert in_pool == {"lab-101", "lab-105", "lab-200", "lab-201", "lab-202"}
+    assert CFG.host("lab-202").status == "pool"
+    assert CFG.host("lab-202").positive_control == "omnibase-infra-dev-202"
     assert all(h.reason for h in CFG.hosts if h.status == "excluded")
+
+
+def test_201_takes_part_only_through_its_pre_pr_slots() -> None:
+    on_201 = [h for h in CFG.hosts if h.machine == "lab-201"]
+    assert CFG.host("lab-201").status == "excluded"
+    members = sorted((h for h in on_201 if h.status == "pool"), key=lambda h: h.slot)
+    assert [h.kind for h in members] == ["prepr-slot", "prepr-slot"]
+    assert [h.compose_project for h in members] == [
+        "omnibase-infra-prepr-1",
+        "omnibase-infra-prepr-2",
+    ]
+    assert [(h.main_port, h.effects_port) for h in members] == [
+        (28085, 28086),
+        (38085, 38086),
+    ]
+    # never a governed .201 lane's project, and never its ports
+    policy = pool._slot_policy()
+    for h in members:
+        assert policy.assert_target_is_a_pool_slot(h.compose_project).slot == h.slot
+        assert not {8085, 8086, 5436, 19092, 16379} & set(h.ports)
+    assert len({h.lease_dir for h in members} | {CFG.lease_dir}) == 3
+    assert len({h.surface for h in CFG.hosts}) == len(CFG.hosts)
+
+
+@pytest.mark.parametrize(
+    ("edit", "match"),
+    [
+        ({"kind": "prepr-slot", "slot": 3}, "not a pre-PR slot"),
+        ({"slot": 1}, "names a slot but is not a prepr-slot"),
+        ({"kind": "declared-lane"}, "has kind"),
+    ],
+)
+def test_a_member_outside_the_slot_policy_is_refused(
+    tmp_path: Path, edit: dict[str, Any], match: str
+) -> None:
+    raw = yaml.safe_load(pool.POOL_CONFIG.read_text(encoding="utf-8"))
+    raw["hosts"][0].update(edit)
+    bad = tmp_path / "pool.yaml"
+    bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match=match):
+        pool.load_pool_config(bad)
 
 
 def test_model_endpoint_is_not_the_202_server() -> None:
@@ -176,7 +225,7 @@ def test_model_endpoint_is_not_the_202_server() -> None:
 
 def test_an_exclusion_without_a_reason_is_refused(tmp_path: Path) -> None:
     raw = yaml.safe_load(pool.POOL_CONFIG.read_text(encoding="utf-8"))
-    raw["hosts"][-1].pop("reason")
+    next(h for h in raw["hosts"] if h["status"] == "excluded").pop("reason")
     bad = tmp_path / "pool.yaml"
     bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="states no reason"):
@@ -245,7 +294,8 @@ def test_pick_takes_the_least_loaded_free_host_and_never_an_excluded_one() -> No
     }
     states = _survey(hosts)
     verdicts = {s.host.name: s.verdict for s in states}
-    assert verdicts["lab-201"] == verdicts["lab-202"] == "EXCLUDED"
+    assert verdicts["lab-201"] == "EXCLUDED"
+    assert verdicts["lab-202"] == "FREE"
     assert pool.pick(states).host.name == "lab-105"
 
 
@@ -376,6 +426,211 @@ def test_restored_needs_zero_residue_a_positive_control_and_an_empty_diff() -> N
     assert not pool.judge({k: v for k, v in GOOD.items() if k != "snap-post"}).restored
 
 
+# ------------------------------------------------------------------ image identity (OMN-19896)
+
+# The probe identity section of a runtime PR that changes nothing under src/,
+# as the fixed prove script prints it: omnibase_infra#4111 changed only
+# config/deploy_lane_routing.yaml and deploy-agent tests, so the caller listed
+# no ID_FILES and no per-file line exists. Before OMN-19896 this FAILed
+# image_identity by construction (ledger RELEASE 2026-09-28T02:32:13Z).
+_M = "omnibase-infra-local-omninode-runtime"
+_E = "omnibase-infra-local-runtime-effects"
+_TREE_OK = (
+    "image-revision-label 2fdde86b86d9fc4c4c1c7261ab449cb081737f9e\n"
+    "build GIT_SHA 2fdde86b86d9fc4c4c1c7261ab449cb081737f9e market 8db69992fc\n"
+    "identity-subject omnibase_infra\n"
+    "src-diff omnibase_infra files=0\n"
+    f"pkg-tree omnibase_infra {_M} tree-files=4210 image-files=4210 missing=0 differ=0 stale-py=0 extra-other=0 match=yes\n"
+    f"pkg-tree omnibase_infra {_E} tree-files=4210 image-files=4210 missing=0 differ=0 stale-py=0 extra-other=0 match=yes\n"
+)
+NO_SRC_PROBE = _TREE_OK + GOOD["probe"].split("\n", 1)[1]
+
+
+def test_image_identity_passes_a_runtime_pr_with_no_src_diff() -> None:
+    rb = pool.judge({**GOOD, "probe": NO_SRC_PROBE})
+    assert rb.checks["image_identity"] is True, rb
+    assert rb.outcome == "PASS"
+    assert any("changes nothing under src/" in n for n in rb.notes)
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        # a module the PR deleted still ships in the image
+        _TREE_OK.replace(
+            f"{_E} tree-files=4210 image-files=4210 missing=0 differ=0 stale-py=0 extra-other=0 match=yes",
+            f"{_E} tree-files=4210 image-files=4211 missing=0 differ=0 stale-py=1 extra-other=0 match=NO",
+        ),
+        # the image runs code the build tree does not hold
+        _TREE_OK.replace(
+            "differ=0 stale-py=0 extra-other=0 match=yes",
+            "differ=3 stale-py=0 extra-other=0 match=NO",
+            1,
+        ),
+        # the subject has no compare line at all (the compare never ran)
+        "\n".join(ln for ln in _TREE_OK.splitlines() if not ln.startswith("pkg-tree "))
+        + "\n",
+    ],
+)
+def test_image_identity_fails_when_the_image_is_not_the_build_tree(broken: str) -> None:
+    probe = broken + GOOD["probe"].split("\n", 1)[1]
+    rb = pool.judge({**GOOD, "probe": probe})
+    assert rb.checks["image_identity"] is False
+    assert rb.outcome == "FAIL"
+
+
+def test_image_identity_fails_on_a_changed_file_mismatch_even_when_the_package_matches() -> (
+    None
+):
+    probe = (
+        _TREE_OK
+        + "file omnibase_infra/x.py image=aaa build-tree=bbb match=NO\n"
+        + GOOD["probe"].split("\n", 1)[1]
+    )
+    assert pool.judge({**GOOD, "probe": probe}).checks["image_identity"] is False
+
+
+def test_image_identity_fails_on_an_unreadable_per_file_line() -> None:
+    # the in-container read raised, and its message has spaces: before OMN-19896
+    # the line failed to parse and was silently dropped beside a matching one
+    probe = GOOD["probe"].replace(
+        "file omnibase_infra/x.py image=aaa build-tree=aaa match=yes\n",
+        "file omnibase_infra/x.py image=aaa build-tree=aaa match=yes\n"
+        "file omnibase_infra/y.py image=FileNotFoundError: [Errno 2] No such file build-tree=bbb match=NO\n",
+    )
+    assert pool.judge({**GOOD, "probe": probe}).checks["image_identity"] is False
+
+
+def test_an_older_probe_with_no_subject_keeps_the_per_file_rule() -> None:
+    assert pool.judge(GOOD).checks["image_identity"] is True
+    no_lines = "\n".join(
+        ln for ln in GOOD["probe"].splitlines() if not ln.startswith("file ")
+    )
+    assert pool.judge({**GOOD, "probe": no_lines}).checks["image_identity"] is False
+
+
+def _heredoc(name: str) -> str:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    start = text.index(f"IFS= read -r -d '' {name} <<'PY' || :\n")
+    body = text[start:].split("\n", 1)[1]
+    return body[: body.index("\nPY\n") + 1]
+
+
+def _run(args: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, capture_output=True, text=True, check=False, **kw)
+
+
+def _fake_tree(tmp_path: Path) -> tuple[Path, Path]:
+    """A build tree with a tracked package, and the same package installed."""
+    tree = tmp_path / "tree"
+    pkg = tree / "src" / "fakepkg"
+    (pkg / "sub").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("X = 1\n")
+    (pkg / "sub" / "mod.py").write_text("Y = 2\n")
+    (pkg / "sub" / "contract.yaml").write_text("name: y\n")
+    for cmd in (
+        ["git", "init", "-q"],
+        ["git", "add", "-A"],
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t.invalid",
+            "commit",
+            "-qm",
+            "t",
+        ],
+    ):
+        assert _run(cmd, cwd=tree).returncode == 0
+    site = tmp_path / "site"
+    shutil.copytree(pkg, site / "fakepkg")
+    # bytecode the image carries is not source and never compared
+    (site / "fakepkg" / "__pycache__").mkdir()
+    (site / "fakepkg" / "__pycache__" / "mod.cpython-312.pyc").write_bytes(b"\0")
+    return tree, site
+
+
+def _compare(tree: Path, site: Path, tmp_path: Path) -> str:
+    listing = tmp_path / "img.txt"
+    lst = _run(
+        [sys.executable, "-c", _heredoc("IMG_LIST_PY"), "fakepkg"],
+        env={"PYTHONPATH": str(site), "PATH": "/usr/bin:/bin"},
+    )
+    assert lst.returncode == 0, lst.stderr
+    listing.write_text(lst.stdout)
+    out = _run(
+        [
+            sys.executable,
+            "-c",
+            _heredoc("PKG_TREE_PY"),
+            str(tree),
+            "fakepkg",
+            "rt",
+            str(listing),
+        ]
+    )
+    assert out.returncode == 0, out.stderr
+    return out.stdout
+
+
+def test_the_whole_package_compare_reads_an_identical_install_as_a_match(
+    tmp_path: Path,
+) -> None:
+    tree, site = _fake_tree(tmp_path)
+    out = _compare(tree, site, tmp_path)
+    assert (
+        "pkg-tree fakepkg rt tree-files=3 image-files=3 missing=0 differ=0 stale-py=0"
+        in out
+    )
+    assert out.splitlines()[0].endswith("match=yes"), out
+
+
+@pytest.mark.parametrize(
+    ("mutate", "kind"),
+    [
+        (lambda s: (s / "fakepkg" / "sub" / "mod.py").write_text("Y = 3\n"), "differ"),
+        (lambda s: (s / "fakepkg" / "sub" / "mod.py").unlink(), "missing"),
+        (lambda s: (s / "fakepkg" / "old.py").write_text("Z = 0\n"), "stale-py"),
+    ],
+)
+def test_the_whole_package_compare_names_what_differs(
+    tmp_path: Path, mutate: Any, kind: str
+) -> None:
+    tree, site = _fake_tree(tmp_path)
+    mutate(site)
+    out = _compare(tree, site, tmp_path)
+    assert out.splitlines()[0].endswith("match=NO"), out
+    assert f"pkg-tree-diff fakepkg rt {kind} " in out
+    rb = pool.judge(
+        {
+            **GOOD,
+            "probe": "identity-subject fakepkg\n"
+            + out
+            + GOOD["probe"].split("\n", 1)[1],
+        }
+    )
+    assert rb.checks["image_identity"] is False
+
+
+def test_a_force_included_resource_is_counted_not_held_against_the_image(
+    tmp_path: Path,
+) -> None:
+    tree, site = _fake_tree(tmp_path)
+    (site / "fakepkg" / "config").mkdir()
+    (site / "fakepkg" / "config" / "lanes.yaml").write_text("a: 1\n")
+    out = _compare(tree, site, tmp_path)
+    assert "extra-other=1 match=yes" in out
+
+
+def test_the_probe_compares_every_repo_under_test_in_both_runtimes() -> None:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    probe = text[text.index("probe)") : text.index("tests)")]
+    assert 'echo "identity-subject $repo"' in probe
+    assert "for c in $M $E; do" in probe[probe.index("identity-subject") :]
+    assert '"$IMG_LIST_PY"' in probe and '"$PKG_TREE_PY"' in probe
+
+
 # ------------------------------------------------------------------ run end to end
 
 
@@ -459,7 +714,8 @@ def test_run_refuses_when_no_host_is_free(tmp_path: Path) -> None:
     assert (
         "lab-101 OVERLOADED" in text
         and "lab-105 OFFLINE" in text
-        and "lab-202 EXCLUDED" in text
+        and "lab-201 EXCLUDED" in text
+        and "lab-202 OFFLINE" in text
     )
 
 
@@ -705,3 +961,355 @@ def test_a_focused_failure_dev_does_not_share_is_the_prs(dev_rc: str | None) -> 
     rb = pool.judge({**GOOD, "tests": tests})
     assert rb.checks["focused_tests"] is False
     assert any("fails at the head only" in n for n in rb.notes)
+
+
+# ------------------------------------------------------------------ .201 pre-PR slots
+
+SLOT_GOOD = {
+    **GOOD,
+    "build": ("prepr_verify_lane rc=0 2026-09-27T14:40:00Z\nbuild rc=0\nup rc=0"),
+    "probe": (
+        "file omnibase_infra/x.py image=aaa build-tree=aaa match=yes\n"
+        "port 28085 HTTP 200 status healthy healthy True failed_handlers 0\n"
+        "port 28086 HTTP 200 status healthy healthy True failed_handlers 0\n"
+        "slot-migration-gate health=healthy\n"
+        "omninode-prepr-1-runtime lines=900 autowire-fail=0 dup-dispatcher=0 ERROR=0 Traceback=0\n"
+        "omninode-prepr-1-runtime-effects lines=800 autowire-fail=0 dup-dispatcher=0 ERROR=0 Traceback=0\n"
+        "failed-contracts omninode-prepr-1-runtime: \n"
+        "failed-contracts omninode-prepr-1-runtime-effects: \n"
+    ),
+    "teardown": (
+        "prepr_teardown_slot rc=0\nslot-teardown verdict=CLEAN\n"
+        "containers=0 volumes=0 networks=0 images=0 listeners=0 workdir=gone\n"
+        "positive control omnibase-infra containers 26 running 26"
+    ),
+}
+
+
+class RecordingTransport(FakeTransport):
+    def __init__(self, hosts: dict[str, FakeHost]) -> None:
+        super().__init__(hosts)
+        self.commands: list[tuple[str, str]] = []
+
+    def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+        self.commands.append((host.name, command))
+        return super().run(host, command, timeout)
+
+
+def test_a_slot_is_probed_on_its_own_project_ports_and_lease() -> None:
+    hosts = {"lab-201-prepr-1": FakeHost(cores=32, load=10.0)}
+    tp = RecordingTransport(hosts)
+    states = pool.survey(CFG, tp, {}, NOW)
+    by = {s.host.name: s for s in states}
+    assert by["lab-201-prepr-1"].verdict == "FREE"
+    probe = next(c for n, c in tp.commands if n == "lab-201-prepr-1")
+    assert "com.docker.compose.project=omnibase-infra-prepr-1 " in probe
+    assert ":(28085|28086|28090|23002)" in probe
+    assert ".onex-prepr-pool/lease-prepr-1/lease.json" in probe
+    assert "8085|" not in probe.replace("28085|", "")
+
+    busy = {"lab-201-prepr-2": FakeHost(cores=32, load=10.0, slot=12)}
+    s2 = {s.host.name: s for s in pool.survey(CFG, FakeTransport(busy), {}, NOW)}
+    assert s2["lab-201-prepr-2"].verdict == "BUSY"
+    assert "omnibase-infra-prepr-2 containers present" in s2["lab-201-prepr-2"].detail
+
+
+def test_a_slot_run_passes_end_to_end_with_the_slot_ports(tmp_path: Path) -> None:
+    hosts = {"lab-201-prepr-1": FakeHost(cores=32, load=10.0)}
+    hosts["lab-201-prepr-1"].phases = dict(SLOT_GOOD)
+    code, text = pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _params(tmp_path),
+        "me",
+        150,
+        "lab-201-prepr-1",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_PASS, text
+    assert "pre-PR slot project omnibase-infra-prepr-1" in text
+    assert "ok   health_28085" in text and "ok   health_28086" in text
+    assert "surface=prepr-1-201 result=PASS restored=yes" in text
+    env = next(tmp_path.glob("*.resolved.env")).read_text(encoding="utf-8")
+    for line in (
+        "SLOT_KIND=prepr-slot",
+        "PREPR_SLOT=1",
+        "PROJECT=omnibase-infra-prepr-1",
+        "MAIN_PORT=28085",
+        "EFFECTS_PORT=28086",
+        "POSITIVE_CONTROL=omnibase-infra",
+    ):
+        assert line in env.splitlines(), line
+    assert hosts["lab-201-prepr-1"].lease is None
+
+
+def test_a_params_file_cannot_move_a_run_onto_another_project(tmp_path: Path) -> None:
+    p = _params(tmp_path)
+    p.write_text(
+        p.read_text(encoding="utf-8")
+        + "PROJECT=omnibase-infra\nSLOT_KIND=prepr-slot\nPREPR_SLOT=1\nMAIN_PORT=8085\n",
+        encoding="utf-8",
+    )
+    pool.run_proof(
+        CFG,
+        FakeTransport({"lab-101": FakeHost()}),
+        p,
+        "me",
+        60,
+        "lab-101",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    env = next(tmp_path.glob("*.resolved.env")).read_text(encoding="utf-8").splitlines()
+    assert "PROJECT=omnibase-infra-local" in env and "PROJECT=omnibase-infra" not in env
+    assert "SLOT_KIND=isolated" in env and "MAIN_PORT=8085" in env
+    assert sum(line.startswith("PROJECT=") for line in env) == 1
+
+
+def test_a_slot_migration_failure_is_the_prs_finding() -> None:
+    build = "prepr_verify_lane rc=9\nbuild rc=0\nslot-migration FAILED\nup rc=9"
+    rb = pool.judge({**SLOT_GOOD, "build": build, "probe": ""}, ports=(28085, 28086))
+    assert rb.outcome == "FAIL"
+    assert rb.checks["stack_built"] and not rb.checks["migration_gate_healthy"]
+    assert any("migration failed" in n for n in rb.notes)
+
+
+def test_a_slot_teardown_that_is_not_clean_is_not_restored() -> None:
+    td = SLOT_GOOD["teardown"].replace("verdict=CLEAN", "verdict=RESIDUE")
+    rb = pool.judge({**SLOT_GOOD, "teardown": td}, ports=(28085, 28086))
+    assert not rb.restored
+    assert any("slot teardown verdict RESIDUE" in n for n in rb.notes)
+    assert pool.judge(SLOT_GOOD, ports=(28085, 28086)).restored
+
+
+def test_the_prove_script_brings_a_slot_up_and_down_only_through_the_sanctioned_pair() -> (
+    None
+):
+    text = PROVE_SH.read_text(encoding="utf-8")
+    build = text[text.index("build)") : text.index("probe)")]
+    slot_build = build[: build.index("export DEPLOY_SOURCE_REFS_OUT")]
+    assert "scripts/runtime_build/prepr_verify_lane.sh --slot" in slot_build
+    assert "docker compose" not in slot_build and "catalog.cli" not in slot_build
+    teardown = text[text.index("teardown)") :]
+    slot_td = teardown[: teardown.index("IMGS=")]
+    assert "prepr_teardown_slot.sh" in slot_td
+    assert not re.search(r"docker (rm|volume rm|network rm|image rm)", slot_td)
+    # a slot another holder started is never torn down by this run
+    assert "foreign-slot" in slot_build and "foreign-slot" in slot_td
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        "SLOT_KIND=prepr-slot\nPREPR_SLOT=1\nPROJECT=omnibase-infra\n",
+        "SLOT_KIND=prepr-slot\nPREPR_SLOT=3\n",
+        "SLOT_KIND=isolated\nPROJECT=omnibase-infra-stability-test\n",
+    ],
+)
+def test_the_prove_script_refuses_a_project_it_did_not_derive(
+    tmp_path: Path, params: str
+) -> None:
+    env = tmp_path / "params.env"
+    env.write_text(f"TAG=t\nW={tmp_path}/w\n{params}", encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", str(PROVE_SH), str(env), "snap-pre"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert not (tmp_path / "w").exists()
+
+
+def test_the_slot_publishes_the_port_its_effects_runtime_listens_on() -> None:
+    # Found live (omnibase_infra#4180 on lab-201-prepr-1, 2026-09-27): the slot
+    # published 28086 onto container port 8086, where nothing listens, so its
+    # effects runtime was healthy inside and unreachable from the host.
+    docker = REPO_ROOT / "docker"
+    infra = (docker / "docker-compose.infra.yml").read_text(encoding="utf-8")
+    prepr = (docker / "docker-compose.prepr.yml").read_text(encoding="utf-8")
+    base = re.search(r'"\$\{DEV_RUNTIME_EFFECTS_PORT:[^}]*\}:(\d+)"', infra)
+    slot = re.search(r'"\$\{PREPR_RUNTIME_EFFECTS_PORT:[^}]*\}:(\d+)"', prepr)
+    main = re.search(r'"\$\{PREPR_RUNTIME_MAIN_PORT:[^}]*\}:(\d+)"', prepr)
+    assert base and slot and main
+    assert slot.group(1) == base.group(1) == main.group(1) == "8085"
+
+
+def test_one_holder_on_both_slots_gets_two_work_directories(tmp_path: Path) -> None:
+    works = []
+    for name in ("lab-201-prepr-1", "lab-201-prepr-2"):
+        hosts = {name: FakeHost(cores=32, load=4.0)}
+        hosts[name].phases = dict(SLOT_GOOD)
+        d = tmp_path / name
+        d.mkdir()
+        pool.run_proof(
+            CFG,
+            FakeTransport(hosts),
+            _params(d),
+            "me",
+            150,
+            name,
+            [],
+            now_fn=lambda: NOW,
+            log=lambda s: None,
+        )
+        env = next(d.glob("*.resolved.env")).read_text(encoding="utf-8")
+        works.append(next(x for x in env.splitlines() if x.startswith("W=")))
+    assert len(set(works)) == 2, works
+
+
+def test_a_slot_is_picked_only_when_every_isolated_member_is_taken() -> None:
+    hosts = {
+        "lab-101": FakeHost(cores=12, load=11.0),
+        "lab-201-prepr-1": FakeHost(cores=32, load=1.0),
+        "lab-201-prepr-2": FakeHost(cores=32, load=1.0),
+    }
+    assert pool.pick(_survey(hosts)).host.name == "lab-101"
+    hosts["lab-101"].online = False
+    assert pool.pick(_survey(hosts)).host.name == "lab-201-prepr-1"
+
+
+# ------------------------------------------------------------------ group proof
+
+GROUP_CLONE = """omnibase_infra group base cd2cc37bd48852d195eb18d3d6b08b04d973f064 (dev cd2cc37bd48852d195eb18d3d6b08b04d973f064)
+omnibase_infra#4134 fetched head fdd93c786c27fd9daf2a878a0d9cd189f4868989 expected fdd93c786c27fd9daf2a878a0d9cd189f4868989 match=yes
+group-step omnibase_infra#4134 commit 27629e91ea63223168320f848a371aac38868c27 tree 29a02c42f933477f8210ed83fdcd706a3fe07e30
+omnibase_infra#4198 fetched head e812bfd787753ea76eb7f599b7cdbf933ebf534c expected e812bfd787753ea76eb7f599b7cdbf933ebf534c match=yes
+group-step omnibase_infra#4198 commit 606e69a0e2ef1d176049fb83ba2f67dfb1932bcc tree bc5de1bd286eee60ef64e5970e120eeecf48f756
+omnibase_infra#4214 fetched head 0ba71c956606c2a500b4f0d095bcde22e2ffb29b expected 0ba71c956606c2a500b4f0d095bcde22e2ffb29b match=yes
+group-step omnibase_infra#4214 commit 8036b4c7a3b574ddfc29266d991163574a7b7d0c tree bca014d9c20c11139da49d5395d94b87b86b7a28
+group-commit omnibase_infra 8036b4c7a3b574ddfc29266d991163574a7b7d0c tree bca014d9c20c11139da49d5395d94b87b86b7a28 base cd2cc37bd48852d195eb18d3d6b08b04d973f064 tree-agrees=yes
+"""
+GROUP_MEMBERS = [
+    ("4134", "fdd93c786c27fd9daf2a878a0d9cd189f4868989"),
+    ("4198", "e812bfd787753ea76eb7f599b7cdbf933ebf534c"),
+    ("4214", "0ba71c956606c2a500b4f0d095bcde22e2ffb29b"),
+]
+GROUP_SPEC = " ".join(f"{number}:{head}" for number, head in GROUP_MEMBERS)
+
+
+@pytest.mark.unit
+def test_group_facts_parse_real_host_clone_output() -> None:
+    facts = pool.group_facts(GROUP_CLONE)
+    assert facts is not None
+    assert facts.repo == "omnibase_infra"
+    assert facts.members == [(f"omnibase_infra#{n}", h) for n, h in GROUP_MEMBERS]
+    assert facts.commit == "8036b4c7a3b574ddfc29266d991163574a7b7d0c"
+    assert facts.tree == "bca014d9c20c11139da49d5395d94b87b86b7a28"
+    assert facts.base == "cd2cc37bd48852d195eb18d3d6b08b04d973f064"
+    assert facts.tree_agrees == "yes"
+    assert facts.failures == []
+    assert facts.empty == []
+
+
+@pytest.mark.unit
+def test_non_group_clone_has_no_group_facts() -> None:
+    assert pool.group_facts(GOOD["clone"]) is None
+
+
+@pytest.mark.unit
+def test_judge_accepts_a_group_built_with_the_planned_tree() -> None:
+    rb = pool.judge({**GOOD, "clone": GROUP_CLONE})
+    assert rb.checks["group_built"] is True
+    assert rb.outcome == "PASS"
+
+
+@pytest.mark.unit
+def test_judge_names_a_group_conflict_without_a_final_commit() -> None:
+    conflict = "group-conflict omnibase_infra#4134 CONFLICT (content)"
+    clone = "\n".join(GROUP_CLONE.splitlines()[:2]) + "\n" + conflict + "\n"
+    rb = pool.judge({**GOOD, "clone": clone})
+    assert rb.checks["group_built"] is False
+    assert any(conflict in note for note in rb.notes)
+    assert rb.group is not None and rb.group.commit is None
+
+
+@pytest.mark.unit
+def test_judge_rejects_a_group_tree_that_disagrees() -> None:
+    rb = pool.judge(
+        {**GOOD, "clone": GROUP_CLONE.replace("tree-agrees=yes", "tree-agrees=NO")}
+    )
+    assert rb.checks["group_built"] is False
+    assert any("different tree" in note for note in rb.notes)
+
+
+@pytest.mark.unit
+def test_group_members_parse_valid_spec_in_order() -> None:
+    assert pool.group_members(GROUP_SPEC) == GROUP_MEMBERS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("spec", "reason"),
+    [
+        (f"4134:abc 4198:{'b' * 40}", "40-hex head sha"),
+        (f"4134:{'a' * 40}", "at least two members"),
+        (f"4134:{'a' * 40} 4134:{'b' * 40}", "names a PR twice"),
+    ],
+)
+def test_group_members_reject_invalid_specs(spec: str, reason: str) -> None:
+    with pytest.raises(ValueError, match=reason):
+        pool.group_members(spec)
+
+
+@pytest.mark.unit
+def test_group_readback_names_every_member_and_group() -> None:
+    facts = pool.group_facts(GROUP_CLONE)
+    assert facts is not None
+    rb = pool.Readback(
+        checks={"stack_built": True, "group_built": True},
+        notes=[],
+        restored=True,
+        residue="clean",
+        group=facts,
+    )
+    text = pool.render_readback(
+        rb,
+        CFG.host("lab-101"),
+        {"INFRA_GROUP": GROUP_SPEC},
+        "2026-09-28T10:00:00Z",
+        "2026-09-28T10:30:00Z",
+    )
+    lines = text.splitlines()
+    assert lines[0].startswith(
+        "LAB PROOF PASS: omnibase_infra#4134 head fdd93c786c + "
+        "omnibase_infra#4198 head e812bfd787 + "
+        "omnibase_infra#4214 head 0ba71c9566 on lab-101"
+    )
+    assert any(line.startswith("  group: 3 member(s)") for line in lines)
+
+
+class NoHostTransport:
+    def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+        pytest.fail(
+            "invalid group params must be rejected before running a host command"
+        )
+
+    def put(self, host: Any, local: Path, remote: str) -> int:
+        pytest.fail("invalid group params must be rejected before copying to a host")
+
+
+@pytest.mark.unit
+def test_run_rejects_pr_and_group_before_touching_any_host(tmp_path: Path) -> None:
+    path = _params(tmp_path)
+    path.write_text(
+        path.read_text(encoding="utf-8") + f"INFRA_GROUP='{GROUP_SPEC}'\n",
+        encoding="utf-8",
+    )
+    code, text = pool.run_proof(
+        CFG,
+        NoHostTransport(),
+        path,
+        "me",
+        60,
+        None,
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == 5
+    assert "both INFRA_PR and INFRA_GROUP" in text

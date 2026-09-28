@@ -81,5 +81,9 @@ STRIPE_WEBHOOK_SECRET
 TENANT_BOOTSTRAP_ADMIN_SECRET
 TENANT_CLIENTS_ADMIN_SECRET
 TENANT_OFFBOARD_ADMIN_SECRET
+# OMN-17454 provenance: the tenant projection DSN for the three split
+# standalone writers. The base compose already requires this password for
+# ONEX_TENANT_DB_URL; the overlay now names that requirement too.
+TENANT_PROJECTION_WRITER_PASSWORD
 TENANT_TOPICS_ADMIN_SECRET
 VALKEY_PASSWORD
