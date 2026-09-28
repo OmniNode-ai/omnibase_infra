@@ -21,6 +21,9 @@
 #     `extra_hosts: host.docker.internal:host-gateway` mapping that puts it in
 #     the lane's reachability domain, so the label is pinned literally here
 #     rather than read from a routing variable a flip can move underneath it.
+#     OMN-19894 superseded that pin: the broker is a declared address any lab
+#     runner reaches, so the job runs on the lab pool the overlay names
+#     (vars.LAB_PROBE_RUNS_ON_JSON), a variable no trusted-CI flip touches.
 #   * `source ~/.omnibase/.env` never supplied the address either: it is a
 #     no-op on a hosted runner, and on the deploy runner the operator env is
 #     mounted at /home/runner/.runner-creds/operator.env instead. No
@@ -64,18 +67,12 @@ env:
 jobs:
   baselines-compute:
     name: Baselines Batch Compute
-    # See "WHAT OMN-17163 CHANGED" above before changing this. The constraint
-    # is network namespace, not trust: this job must sit where the .201 lane's
-    # published broker port is reachable.
-    #
-    # OMN-18602: the label moved from `omnibase-deploy` to the verify class.
-    # The network-namespace constraint above is UNCHANGED, and `host-201` is
-    # what now carries it -- the bare `omnibase-verify` class would admit the
-    # verify runners on the other lab hosts, which cannot reach this lane's
-    # published broker port. This job computes from what it reads and writes
-    # nothing to the lane, so it never needed the deploy runner's private clone
-    # tree.
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    # OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check
+    # must not rely on one machine). Any runner of the overlay's pool
+    # (vars.LAB_PROBE_RUNS_ON_JSON): this job reads the lane over the network
+    # only (the broker declared in omnimarket config/ci_bus_lanes.yaml), and a
+    # runner on any lab host reaches it. No host label is written here.
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     timeout-minutes: 15
     permissions:
       contents: read

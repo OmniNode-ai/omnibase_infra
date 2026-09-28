@@ -48,6 +48,14 @@ HANDLER_ID_PR_STATE_UPSERT: str = "pr-state-upsert-handler"
 # UPSERT keyed on (repo, pr_number). RETURNING (xmax = 0) distinguishes an
 # INSERT (was_insert=True) from an UPDATE via the ON CONFLICT branch —
 # same idiom as HandlerWriteDecision's SQL_UPSERT_DECISION.
+#
+# OMN-19492: every state column is COALESCE(new, stored). A webhook delivery
+# carries part of a PR's state, and a NULL parameter means "this observation
+# says nothing about the column", never "clear it". The insert branch resolves
+# the NOT NULL columns to the same defaults the fold used before (triage
+# 'needs_review', title '', is_draft FALSE). as_of only moves forward.
+# Out-of-order deliveries can still regress a column; the reconciler
+# (OMN-19493) heals that from a conditional read.
 _SQL_UPSERT = """
 INSERT INTO public.pr_state (
     repo,
@@ -67,22 +75,23 @@ INSERT INTO public.pr_state (
     is_draft,
     projected_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()
+    $1, $2, COALESCE($3, 'needs_review'), COALESCE($4, ''), $5, $6, $7, $8, $9,
+    $10, $11, $12, $13, $14, COALESCE($15, FALSE), NOW()
 )
 ON CONFLICT (repo, pr_number) DO UPDATE SET
-    triage_state        = EXCLUDED.triage_state,
-    title                = EXCLUDED.title,
-    ci_status            = EXCLUDED.ci_status,
-    review_decision      = EXCLUDED.review_decision,
-    mergeable            = EXCLUDED.mergeable,
-    merge_state_status   = EXCLUDED.merge_state_status,
-    merge_queue_state    = EXCLUDED.merge_queue_state,
-    base_ref             = EXCLUDED.base_ref,
-    head_ref             = EXCLUDED.head_ref,
+    triage_state         = COALESCE($3, public.pr_state.triage_state),
+    title                = COALESCE($4, public.pr_state.title),
+    ci_status            = COALESCE($5, public.pr_state.ci_status),
+    review_decision      = COALESCE($6, public.pr_state.review_decision),
+    mergeable            = COALESCE($7, public.pr_state.mergeable),
+    merge_state_status   = COALESCE($8, public.pr_state.merge_state_status),
+    merge_queue_state    = COALESCE($9, public.pr_state.merge_queue_state),
+    base_ref             = COALESCE($10, public.pr_state.base_ref),
+    head_ref             = COALESCE($11, public.pr_state.head_ref),
     source               = EXCLUDED.source,
     correlation_id       = EXCLUDED.correlation_id,
-    as_of                = EXCLUDED.as_of,
-    is_draft             = EXCLUDED.is_draft,
+    as_of                = GREATEST(EXCLUDED.as_of, public.pr_state.as_of),
+    is_draft             = COALESCE($15, public.pr_state.is_draft),
     projected_at         = NOW()
 RETURNING (xmax = 0) AS was_insert
 """

@@ -89,6 +89,8 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_GITHUB_POST_MERGE_RESULT,
     SUFFIX_GITHUB_PR_MERGED,
     SUFFIX_GITHUB_PR_STATUS,
+    SUFFIX_GITHUB_WEBHOOK_DELIVERY,
+    SUFFIX_GITHUB_WEBHOOK_DELIVERY_REFUSED,
     SUFFIX_GMAIL_ARCHIVE_PURGED,
     SUFFIX_GMAIL_INTENT_RECEIVED,
     SUFFIX_INTELLIGENCE_CLAUDE_HOOK_EVENT,
@@ -344,6 +346,9 @@ __all__: list[str] = [
     "SUFFIX_GITHUB_POST_MERGE_RESULT",
     # GitHub PR triage status events (OMN-2656)
     "SUFFIX_GITHUB_PR_STATUS",
+    # Signed GitHub webhook deliveries (OMN-19492)
+    "SUFFIX_GITHUB_WEBHOOK_DELIVERY",
+    "SUFFIX_GITHUB_WEBHOOK_DELIVERY_REFUSED",
     # Gmail intent received events (OMN-2730)
     "SUFFIX_GMAIL_INTENT_RECEIVED",
     # Reward binder events (OMN-2927)

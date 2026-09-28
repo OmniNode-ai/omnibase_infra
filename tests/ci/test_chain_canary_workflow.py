@@ -11,15 +11,11 @@ cannot be silently unwired by an unrelated edit.
 
 Pinned deliberately, each for a reason a past incident supplies:
 
-* **runs-on** — a .201 lab-host runner is the ONLY kind with the
-  host-gateway alias (`docker/docker-compose.runners.yml` `extra_hosts`).
-  Move this job off one and `host.docker.internal` stops resolving, every run
-  reports `ingress_unreachable`, and a permanently-red check is a disabled
-  check. The label is `omnibase-verify` since OMN-18408; it was
-  `omnibase-deploy`, whose single member also runs the release-train deploy. The
-  `host-201` label alongside it is required: `omnibase-verify` names a runner
-  CLASS, and a second verify-class runner on another lab host came online on
-  2026-09-16 that cannot reach this lane.
+* **runs-on** — the overlay's runner pool (``vars.LAB_PROBE_RUNS_ON_JSON``),
+  never a host label (OMN-19894, operator rulings 2026-09-28T01:58:06Z and
+  01:58:17Z). Until then the job was pinned to the .201 verify runner and
+  reached the lane through that host's Docker gateway alias; the lane it
+  grades is now the first answering lane of ``vars.LAB_LANES_JSON``.
 * **the probe host** — a `localhost` probe from inside a runner container
   hits the container itself (OMN-14958), manufacturing a false RED.
 * **the skill invocation** — the workflow is a thin shim over
@@ -75,11 +71,11 @@ def test_workflow_exists() -> None:
 
 
 @pytest.mark.unit
-def test_runs_on_the_only_runner_that_can_reach_the_lane(
+def test_runs_on_the_overlay_pool_not_one_host(
     canary_job: dict[str, object],
 ) -> None:
-    """OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify`. Both labels resolve to a container on the same .201 lab host carrying docker.sock and the `host.docker.internal` host-gateway alias, so every reachability reason this pin was written for is unchanged. What changed is that `omnibase-deploy` has exactly one member which also runs the release-train deploy, and this job was queueing behind it."""
-    assert canary_job["runs-on"] == ["self-hosted", "omnibase-verify", "host-201"]
+    """OMN-19894: any runner of the overlay's pool, never a host label."""
+    assert canary_job["runs-on"] == "${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}"
 
 
 @pytest.mark.unit
@@ -107,11 +103,17 @@ def test_no_pull_request_trigger(workflow: dict[str, object]) -> None:
 
 
 @pytest.mark.unit
-def test_probes_the_lane_through_the_host_gateway(workflow_text: str) -> None:
-    assert "http://host.docker.internal:8085" in workflow_text
+def test_probes_the_lane_the_overlay_resolved(workflow_text: str) -> None:
+    """OMN-19894: the addresses are the resolved lane's own declarations."""
+    assert "./.github/actions/resolve-lab-lane" in workflow_text
+    assert "require: ingress_url gateway_url" in workflow_text
+    assert "${PROBE_URL_OVERRIDE:-${LANE_INGRESS_URL:-}}" in workflow_text
+    assert "${GATEWAY_URL_OVERRIDE:-${LANE_GATEWAY_URL:-}}" in workflow_text
     # A localhost probe from inside the runner container hits the container
-    # itself and reports a false RED (OMN-14958).
-    assert "http://localhost:8085" not in workflow_text
+    # itself and reports a false RED (OMN-14958); a gateway alias reaches a
+    # different machine from every runner (OMN-19894).
+    for pin in ("http://localhost:", "host.docker.internal"):
+        assert pin not in workflow_text
 
 
 def _dispatch_inputs(workflow: dict[str, object]) -> dict[str, object]:
@@ -370,16 +372,14 @@ def test_no_dsn_ever_reaches_a_command_line(
 
 
 @pytest.mark.unit
-def test_the_deploy_agent_comes_from_the_verify_route_declaration(
+def test_the_deploy_agent_is_the_resolved_lanes_own(
     workflow_text: str,
 ) -> None:
-    """OMN-19811 -- the canary asks the deploy agent the convergence guard asks.
+    """OMN-19811 -- the canary reads the deploy agent of the lane it grades.
 
     Run 36202173467 went RED because a deploy recreated the runtime inside the
     probe's budget. The probe now reads the lane's deploy agent, and the URL
-    must come from the declaration verify-lane-converged reads
-    (config/deploy_lane_routing.yaml), never a literal: two readers of one
-    agent with two addresses drift apart silently.
+    comes from the lane's overlay entry (OMN-19894), never a literal.
     """
     registry = yaml.safe_load(_SKILL_MAPPING.read_text(encoding="utf-8"))
     mapping = next(s for s in registry["skills"] if s["skill_name"] == _SKILL_NAME)
@@ -388,5 +388,7 @@ def test_the_deploy_agent_comes_from_the_verify_route_declaration(
         assert flag in workflow_text, f"workflow no longer passes {flag}"
         assert flag in declared, f"skill mapping no longer declares {flag}"
 
-    assert "targets_for_receipt_lane(load_table(), 'compose-dev')" in workflow_text
+    # OMN-19894: the agent is the resolved lane's own declaration, so a run on
+    # any runner reads the agent of the lane it grades.
+    assert "DEPLOY_AGENT_URL=${LANE_DEPLOY_AGENT_URL}" in workflow_text
     assert ":8098" not in workflow_text

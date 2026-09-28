@@ -535,10 +535,17 @@ def test_replay_of_the_green_observation_exits_0(tmp_path: Path) -> None:
 # ---- the workflow ------------------------------------------------------------
 
 
-def test_the_workflow_runs_the_probe_on_the_host_201_verify_runner() -> None:
+def test_the_workflow_runs_the_probe_beside_the_resolved_lane() -> None:
+    """OMN-19894: the runner is the resolved lane's declared docker_runs_on."""
     wf = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job = wf["jobs"]["c28-consumer-flow"]
-    assert job["runs-on"] == ["self-hosted", "omnibase-verify", "host-201"]
+    assert (
+        job["runs-on"] == "${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}"
+    )
+    assert (
+        wf["jobs"]["resolve-lane"]["runs-on"]
+        == "${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}"
+    )
     assert job["name"] == "C28 consumer flow (dev lane)"
     triggers = wf[True] if True in wf else wf["on"]
     assert "schedule" in triggers and "workflow_dispatch" in triggers
