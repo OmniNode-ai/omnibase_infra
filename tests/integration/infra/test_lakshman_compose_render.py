@@ -70,6 +70,7 @@ EXPECTED_RENDERED_SERVICES = {
     "omninode-runtime",
     "runtime-effects",
     "projection-api",
+    "projection-delegation-writer",
 }
 #: Services that must never appear on this lane. ``keycloak`` and ``infisical``
 #: are the OMN-13581 cross-lane displacement risk (they carry no profile in the
@@ -99,6 +100,7 @@ EXPECTED_PUBLISHED_PORTS = {
     "omninode-runtime": {"58085"},
     "runtime-effects": {"58086"},
     "projection-api": {"53002"},
+    "projection-delegation-writer": set(),
 }
 #: Ports belonging to the four lanes that predate this one. Publishing any of
 #: them here would displace a live lane on the shared .201 host (OMN-13581).
@@ -298,6 +300,9 @@ def test_lakshman_lane_render_carries_its_own_runtime_identity() -> None:
     assert services["projection-api"]["container_name"] == (
         "omnimarket-lakshman-projection-api"
     )
+    assert services["projection-delegation-writer"]["container_name"] == (
+        "omnimarket-lakshman-projection-delegation-writer"
+    )
 
     for service_name in ("omninode-runtime", "runtime-effects"):
         environment = services[service_name]["environment"]
@@ -324,6 +329,40 @@ def test_lakshman_lane_render_carries_its_own_runtime_identity() -> None:
     assert services["runtime-effects"]["environment"]["ONEX_GROUP_ID"] == (
         "onex-lakshman-runtime-effects"
     )
+
+
+@pytest.mark.integration
+def test_lakshman_delegation_writer_is_lane_isolated() -> None:
+    """The AC3 writer must consume and project only inside the operator lane."""
+    writer = _compose_config_json()["services"]["projection-delegation-writer"]
+
+    assert writer["command"] == [
+        "python",
+        "-m",
+        "omnimarket.nodes.node_projection_delegation.handlers.handler_delegation",
+    ]
+    assert writer["environment"]["ONEX_ENVIRONMENT"] == "lakshman"
+    assert writer["environment"]["KAFKA_ENVIRONMENT"] == "lakshman"
+    assert writer["environment"]["KAFKA_BROKERS"] == "redpanda:9092"
+    assert writer["environment"]["KAFKA_BOOTSTRAP_SERVERS"] == "redpanda:9092"
+    assert writer["environment"]["KAFKA_CONSUMER_GROUP"] == (
+        "lakshman.omnimarket-projections.delegation-writer.consume.v1"
+    )
+    assert writer["environment"]["PROJECTION_RUNNER_HEALTH_PORT"] == "8199"
+    assert writer["environment"]["ONEX_TENANT_DB_URL"].startswith(
+        "postgresql://tenant_projection_writer:"
+    )
+    assert writer["environment"]["ONEX_TENANT_DB_URL"].endswith(
+        "@postgres:5432/omnidash_analytics"
+    )
+    assert set(writer["depends_on"]) == {"migration-gate", "postgres", "redpanda"}
+    assert writer["healthcheck"]["test"] == [
+        "CMD",
+        "curl",
+        "-sf",
+        "http://localhost:8199/ready",
+    ]
+    assert writer.get("ports", []) == []
 
 
 @pytest.mark.integration
