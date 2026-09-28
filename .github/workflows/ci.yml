@@ -4012,7 +4012,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: 8b8d5d3b5dda51bdcc99168d4c358a6df0f19380
+          ref: fa40689b11f296214d4f26920f1a769b951970c9
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -4352,6 +4352,7 @@ jobs:
             python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" \
               --check-runs-file check_runs.json --event-name "${EVENT_NAME}" \
               --workflow-runs-file workflow_runs.json \
+              --current-run-id "${RUN_ID}" \
               --pr-author "${PR_AUTHOR:-}" \
               --pr-title "${PR_TITLE:-}" \
               --pr-head-ref "${PR_HEAD_REF:-}" \
@@ -5199,6 +5200,11 @@ jobs:
       # fails here. The findings the corpus still produces are listed one by one
       # in config/omninode_internal_live_acl_allowlist.yaml, which is
       # shrink-only: an entry that stops reproducing fails the gate too.
+      # The gateway_link_health_status revoke proof runs first on the same
+      # server, as a NOSUPERUSER role_omnidash through the real forward runner:
+      # the gate itself builds as postgres, for which a REVOKE always takes. It
+      # refuses a server that already has its two databases or three roles and
+      # drops all of them afterwards, so the gate still starts empty.
       - name: omninode_internal live-ACL gate (OMN-17886)
         if: steps.ensure_psql.outputs.available == 'true'
         env:
@@ -5207,6 +5213,7 @@ jobs:
           OMN17886_REQUIRE_PG: "1"
         run: |
           uv run pytest \
+            tests/integration/migrations/test_revoke_gateway_link_health_status_omn17886.py \
             tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py \
             -v --tb=short -p no:randomly
 

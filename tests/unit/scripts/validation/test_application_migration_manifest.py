@@ -839,13 +839,16 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 222 -> 223 for OMN-19550: node_projection_session_content/0001 creates
     # omninode_internal.session_content and grants the projection writer role.
     # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
-    # 223 -> 224 for OMN-17887: node_projection_tenant_credentials/
+    # 223 -> 224 for OMN-17886: node_gateway_link_health_write_effect/0002
+    # revokes the runtime role's privileges on the gateway_link_health_status
+    # view. The node lives in omnibase_infra, so nothing is vendored.
+    # 224 -> 225 for OMN-17887: node_projection_tenant_credentials/
     # 004_drop_empty_tenant_schema.sql drops onex-lab's empty `tenant` schema
     # (RESTRICT; a no-op where the schema is absent). omnimarket's source for
     # this stream has no such file, so, like 0002 and 003 before it, the
     # declaration here is what binds it (legacy-declared in
     # sync-node-migrations.sh --check).
-    assert len(result.declarations) == 224
+    assert len(result.declarations) == 225
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
