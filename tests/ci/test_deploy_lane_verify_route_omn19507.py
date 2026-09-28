@@ -9,10 +9,12 @@ receipt now takes its runner, its receipt lane and every probe target from the
 routed instance's ``verify:`` block, through
 ``scripts/ci/deploy_lane_verify_route.py``.
 
-THE CONTROL THAT MATTERS MOST: the committed table routes nothing to dev-202, so
-every merge in both workflows still resolves to dev-201, and dev-201's block is
-literally the values the two workflows hard-coded before this change. So the
-behaviour on .201 is unchanged, and that is asserted below rather than argued.
+THE CONTROL THAT MATTERS MOST: the committed table's dev-201 block is literally
+the values the two workflows hard-coded before this change, and every requester
+but omnimarket still resolves there. Task B8 (OMN-19510) landed the real
+omnimarket -> dev-202 route on top of that; the committed-table assertions below
+were updated in step to match the row that's actually merged, rather than a
+synthetic future one.
 """
 
 from __future__ import annotations
@@ -79,6 +81,14 @@ REQUESTERS = (
     "agent/idle-converge",
 )
 
+#: Requesters still on dev-201 after task B8 (OMN-19510) landed the real
+#: omnimarket -> dev-202 route. omnimarket is asserted separately below,
+#: against the real committed table, since it now legitimately resolves
+#: to dev-202 rather than dev-201.
+REQUESTERS_STILL_ON_201 = tuple(
+    r for r in REQUESTERS if not r.startswith("gha/omnimarket/")
+)
+
 
 def _with_omnimarket_row() -> dict[str, Any]:
     """The plan's target table: (dev, omnimarket) -> dev-202 (task B8)."""
@@ -94,16 +104,31 @@ def _with_omnimarket_row() -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# .201 is unchanged                                                            #
+# .201 is unchanged for every requester except omnimarket (task B8, OMN-19510) #
 # --------------------------------------------------------------------------- #
 class TestTheCommittedTableKeepsEveryMergeOn201:
-    @pytest.mark.parametrize("requested_by", REQUESTERS)
+    @pytest.mark.parametrize("requested_by", REQUESTERS_STILL_ON_201)
     def test_every_requester_resolves_to_dev_201_with_the_pre_change_values(
         self, requested_by: str
     ) -> None:
         resolved = resolve(load_table(), runtime_lane="dev", requested_by=requested_by)
         assert resolved.instance == "dev-201"
         assert resolved.targets.model_dump() == PRE_CHANGE_201
+
+    def test_omnimarket_now_resolves_to_dev_202_on_the_committed_table(self) -> None:
+        """Task B8 (OMN-19510) landed the real route: the committed table (not
+        a synthetic one) now sends omnimarket's dev rebuilds to dev-202, and
+        every other requester is unaffected."""
+        resolved = resolve(
+            load_table(), runtime_lane="dev", requested_by="gha/omnimarket/pr-2870"
+        )
+        assert resolved.instance == "dev-202"
+        assert resolved.targets.receipt_lane == "compose-dev-202"
+        assert json.loads(job_outputs(resolved)["verify_runs_on"]) == [
+            "self-hosted",
+            "omnibase-verify",
+            "host-202",
+        ]
 
     def test_the_job_outputs_are_the_old_runner_and_lane(self) -> None:
         outputs = job_outputs(

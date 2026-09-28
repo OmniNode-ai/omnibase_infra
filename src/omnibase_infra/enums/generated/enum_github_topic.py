@@ -18,5 +18,8 @@ class EnumGithubTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_WEBHOOK_DELIVERY_V1 = "onex.cmd.github.webhook-delivery.v1"  # onex.cmd.github.webhook-delivery.v1
+    EVT_PR_MERGED_V1 = "onex.evt.github.pr-merged.v1"  # onex.evt.github.pr-merged.v1
     EVT_PR_STATUS_V1 = "onex.evt.github.pr-status.v1"  # onex.evt.github.pr-status.v1
     EVT_PR_WEBHOOK_V1 = "onex.evt.github.pr-webhook.v1"  # onex.evt.github.pr-webhook.v1
+    EVT_WEBHOOK_DELIVERY_REFUSED_V1 = "onex.evt.github.webhook-delivery-refused.v1"  # onex.evt.github.webhook-delivery-refused.v1

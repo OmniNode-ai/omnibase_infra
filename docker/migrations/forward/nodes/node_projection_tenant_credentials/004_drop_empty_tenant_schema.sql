@@ -1,0 +1,127 @@
+-- OMN-17887: drop the empty `tenant` schema that onex-lab's bootstrap left behind.
+--
+-- WHY
+--   The ruling on OMN-17887 (2026-09-24, recorded on the ticket as comment
+--   fbad6d0c, condition 3) retires the `tenant` schema, makes `public` the tenant
+--   schema for good, and says that where onex-lab still has `tenant` and it is
+--   empty, it is dropped by forward migration. Every declaration and bridge
+--   entry that named `tenant`, and every unconditional grant on it, is already
+--   gone (omnimarket#2847, omninode_infra#1660, omnibase_infra#4079,
+--   omninode_infra#1673). omninode_infra#1673 (e8f90853) also removed the lab
+--   bootstrap's `CREATE SCHEMA tenant AUTHORIZATION owner_onex_tenant`, but
+--   that bootstrap runs only at initdb and the lab volume persists, so the
+--   schema it already created stays until this file drops it.
+--
+--   One conditional grant is left, in a file this change does not edit:
+--   nodes/node_projection_delegation_inference_response/0004 runs
+--   `GRANT USAGE ON SCHEMA tenant TO tenant_projection_writer` when a schema
+--   named `tenant` exists, so on onex-lab the schema can carry that grant. 0004
+--   is already declared in _ledger/application-migrations.tsv, and
+--   scripts/validation/check_migration_append_only.py refuses an in-place edit
+--   to a declared file unless the same change supersedes it with a
+--   higher-numbered file in that node and a row in
+--   _ledger/migration-supersessions.tsv. The grant is an ACL entry on the
+--   schema, not an object that depends on it, so RESTRICT does not refuse on it
+--   and it is removed with the schema. A default-privileges entry scoped to the
+--   schema (ALTER DEFAULT PRIVILEGES ... IN SCHEMA tenant) does depend on it,
+--   but automatically (pg_depend deptype 'a'), so RESTRICT does not refuse on
+--   it either and drops it with the schema. The integration test's
+--   onex-lab-shaped case carries both.
+--
+--   Elsewhere on dev 8a177b86c, a GRANT, REVOKE or ALTER DEFAULT PRIVILEGES on
+--   a schema named `tenant` appears only in the manual
+--   rollback/rollback_103_create_tenant_projection_writer_role.sql, which
+--   revokes only when the schema exists, and in three proof harnesses
+--   (docker/application-acl-proof/seed.sql,
+--   docker/domain-adapter-proof/prove.py and
+--   scripts/ci/prove_application_database_acl.py) that act on a `tenant` they
+--   create inside their own throwaway postgres:16-alpine containers.
+--
+-- ============================================================================
+-- WHY IT LIVES UNDER THIS NODE
+-- ============================================================================
+-- Dropping a schema is schema-level DDL, and no node stream owns schema-level
+-- DDL in omnidash_analytics. On dev 8a177b86c (read 2026-09-26T19:43Z) no
+-- file under docker/migrations/forward/nodes/ issues CREATE, ALTER or DROP
+-- SCHEMA, and several say in their headers that they deliberately do not.
+-- Every TENANT-domain stream in _ledger/application-migrations.tsv is a
+-- table-owning node: at that sha there are 14 such streams, and each one's own
+-- files create at least one table. No stream owns this statement.
+--
+-- It rides the node-owned loop because the flat corpus cannot reach
+-- omnidash_analytics. omninode_infra's migrate Job
+-- (k8s/migrations/omnibase-infra-migrate.yaml, read at omninode_infra dev
+-- 6961104b) applies the flat corpus to DB_NAME="omnibase_infra" only: its flat
+-- loop fails the Job on any file whose first `\connect` gives a directive_db
+-- other than "$DB_NAME", unless the file is on the Job's tombstone allowlist.
+-- In this repo, tests/ci/test_flat_migration_no_foreign_connect_gate.py
+-- rejects any new flat migration whose first `\connect` names a database
+-- other than omnibase_infra. The ledger it reads,
+-- docker/migrations/forward/cross-database-flat-migrations.yaml, admits only
+-- the frozen OMN-15819 seed set (MANIFEST_FROZEN_SEED in
+-- scripts/ci/check_flat_migration_foreign_connect.py), so adding an entry
+-- there does not admit a new file. The node-owned loop connects to
+-- omnidash_analytics directly (NODE_POSTGRES_DB in
+-- scripts/run-forward-migrations.sh, NODE_DB_NAME in the Job).
+--
+-- The stream was chosen on the question asked on OMN-17887 (comment d80e502d)
+-- and answered on 2026-09-26: node_projection_tenant_credentials, a
+-- TENANT-domain stream. The file is forward-only in
+-- config/migration_classes.yaml because the class checker
+-- (scripts/validation/check_migration_class.py) treats any DROP that way: DROP
+-- is on its list of destructive statements, so a file that carries one cannot
+-- be declared expand-only, and this file is not the destructive half of an
+-- expand/contract pair. The drop does not touch the stream's own table: 003
+-- requires it at public.tenant_inference_credentials.
+--
+-- Homing a schema-level drop under one table-owning node is an ownership
+-- compromise, and it is called out here rather than hidden. It is the same
+-- trade node_projection_delegation_inference_response/0004 makes when it homes
+-- a cross-node grant block under one node.
+--
+-- The prefix is 004_, not 0004_. This stream already holds 0000_, 0001_,
+-- 0002_ and 003_, and both runners apply a node directory's files in sorted
+-- lexical order (scripts/run-forward-migrations.sh section 3, and the Job's
+-- node loop). 0004_ sorts before 003_; 004_ sorts after it.
+--
+-- LANES, AS MEASURED BEFORE THIS FILE WAS WRITTEN
+--   onex-lab (k3s on .201, omnidash_analytics): present with 0 relations
+--     (readback on OMN-17887, comment 539eab9c, 2026-09-25). Its owner was not
+--     read on the lab; the bootstrap line that created it, removed by
+--     omninode_infra#1673, named owner owner_onex_tenant.
+--   .201 shared dev lane (compose): absent, 2026-09-24T11:13:47Z.
+--   onex-dev RDS: absent, 2026-09-05 (SSM command 09b0d95b).
+--   No other lane was read. Where `tenant` is absent this file is a NOTICE and
+--   nothing else.
+--
+-- EXECUTING ROLE
+--   DROP SCHEMA needs ownership of `tenant`: the executing role must own it, be a
+--   member of its owner role that inherits the owner's privileges (a NOINHERIT
+--   member must SET ROLE first), or be a superuser. It needs no CREATE privilege
+--   on the database. On onex-lab the node loop connects as role_omnidash, which
+--   the lab bootstrap makes a member of owner_onex_tenant (omninode_infra
+--   c2a58281, k8s/onex-lab/substitutions/postgres.yaml:397); whether that
+--   membership inherits was not read on the lab, and a role inherits by
+--   default. The compose lanes run as postgres. Where `tenant` exists under an owner the executing role cannot act
+--   as, this file fails with "must be owner of schema tenant", that lane's
+--   migrate run stops, and nothing is ledgered.
+--
+-- FAIL-CLOSED, NEVER CASCADE
+--   RESTRICT refuses to drop a schema that holds any object and names the
+--   object. A non-empty `tenant` is not the empty schema the ruling covers, so
+--   this file stops rather than delete anything. Do not change it to CASCADE.
+--
+-- POST-CONDITION
+--   Static, in the style of 098 (no DO block): the division fails while a
+--   schema named `tenant` still exists.
+--
+-- ROLLBACK
+--   rollback/rollback_node_projection_tenant_credentials_004.sql: manual, and
+--   for onex-lab only. On a lane where `tenant` was absent this file changed
+--   nothing, so there is nothing to undo.
+--
+-- Proved by tests/integration/migrations/test_drop_empty_tenant_schema_omn17887.py.
+
+DROP SCHEMA IF EXISTS tenant RESTRICT;
+
+SELECT 1 / (1 - count(*))::int AS tenant_schema_absent_assertion FROM pg_catalog.pg_namespace WHERE nspname = 'tenant';

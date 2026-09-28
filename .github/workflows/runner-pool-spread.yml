@@ -1,0 +1,174 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# runner-pool-spread.yml -- OMN-19895
+#
+# WHY THIS EXISTS
+#   Operator rulings 2026-09-28T01:58:06Z ("it's a problem if checks are
+#   reliant on a specific machine") and 01:58:17Z ("chain of responders
+#   right?"). A workflow can name no machine and still rely on one: on
+#   2026-09-28T02:15Z every one of the 60 omnibase-ci runners, both
+#   omnibase-customer-plane runners, the deploy runner and the prod-deploy
+#   runner sat on the one .201 host, so every required CI context in every
+#   repository stopped the moment that host did. No lint can see that; it is a
+#   fact about the fleet, so it is read from the fleet.
+#
+# WHAT IT CHECKS
+#   For every runner label that a required context or a board probe runs on
+#   (SPREAD_LABELS below), the online runners carrying that label must sit on
+#   at least two hosts. A runner's host is the declared host whose
+#   runner_name_prefix its name carries (config/runner_fleet.yaml `hosts:`, the
+#   same inventory deploy-runners.sh reads). A runner no declared prefix
+#   matches is reported as undeclared and counts toward no host: an unknown
+#   host is not a second host. The run is RED naming each label that is on one
+#   host or none; a registry it cannot read is RED too, never a skip.
+#
+# WHY GITHUB-HOSTED
+#   Same reason as runner-fleet-canary.yml: a probe of the fleet must not share
+#   fate with the fleet it watches.
+#
+# WHAT IT DOES NOT DO
+#   It moves nothing. Spreading the fleet is runner registration on the lab
+#   hosts, which needs registration tokens the operator issues; this probe is
+#   the signal that says whether that has happened.
+
+name: runner-pool-spread
+
+on:
+  schedule:
+    # Hourly at :33, clear of runner-fleet-canary's quarter hours.
+    - cron: "33 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  runner-pool-spread:
+    name: runner-pool-spread
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (the declared host inventory)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: config/runner_fleet.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Every required runner label sits on at least two hosts
+        env:
+          RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+          SPREAD_LABELS: omnibase-ci omnibase-verify omnibase-customer-plane
+          SPREAD_MIN_HOSTS: "2"
+        run: |
+          set -euo pipefail
+          python3 - <<'RUNNER_POOL_SPREAD'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.request
+          from collections import defaultdict
+
+          def say(line):
+              sys.stdout.write(line + "\n")
+
+          def declared_prefixes(text):
+              """host -> runner_name_prefix, from the `hosts:` list of runner_fleet.yaml."""
+              prefixes = {}
+              in_hosts = False
+              host = None
+              for raw in text.splitlines():
+                  line = raw.split("#", 1)[0].rstrip()
+                  if not line:
+                      continue
+                  if re.match(r"^hosts:\s*$", line):
+                      in_hosts = True
+                      continue
+                  if in_hosts and re.match(r"^\S", line):
+                      break
+                  if not in_hosts:
+                      continue
+                  m = re.match(r"^\s*-\s*host:\s*(\S+)\s*$", line)
+                  if m:
+                      host = m.group(1)
+                      continue
+                  m = re.match(r"^\s+runner_name_prefix:\s*(\S+)\s*$", line)
+                  if m and host:
+                      prefixes[host] = m.group(1)
+              return prefixes
+
+          def host_of(name, prefixes):
+              best = None
+              for host, prefix in prefixes.items():
+                  if re.fullmatch(re.escape(prefix) + r"-\d+", name):
+                      if best is None or len(prefix) > len(prefixes[best]):
+                          best = host
+              return best
+
+          def fetch_runners():
+              fixture = os.environ.get("RUNNER_POOL_RUNNERS_FILE")
+              if fixture:
+                  with open(fixture, encoding="utf-8") as handle:
+                      return json.load(handle)
+              token = os.environ.get("RUNNER_FLEET_STATUS_TOKEN") or os.environ.get("CROSS_REPO_PAT")
+              if not token:
+                  say("::error::no token can read the org runner registry; that is RED, not a skip")
+                  sys.exit(1)
+              runners = []
+              for page in range(1, 11):
+                  request = urllib.request.Request(
+                      f"https://api.github.com/orgs/OmniNode-ai/actions/runners?per_page=100&page={page}",
+                      headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+                  )
+                  try:
+                      with urllib.request.urlopen(request, timeout=20) as response:
+                          batch = json.loads(response.read().decode("utf-8")).get("runners", [])
+                  except (urllib.error.URLError, OSError, ValueError) as exc:
+                      say(f"::error::the org runner registry could not be read ({exc}); that is RED, not a skip")
+                      sys.exit(1)
+                  runners.extend(batch)
+                  if len(batch) < 100:
+                      break
+              return runners
+
+          with open("config/runner_fleet.yaml", encoding="utf-8") as handle:
+              prefixes = declared_prefixes(handle.read())
+          if not prefixes:
+              say("::error::config/runner_fleet.yaml declares no hosts; that is RED")
+              sys.exit(1)
+          labels = os.environ["SPREAD_LABELS"].split()
+          minimum = int(os.environ.get("SPREAD_MIN_HOSTS", "2"))
+          by_label = defaultdict(lambda: defaultdict(int))
+          undeclared = defaultdict(list)
+          for runner in fetch_runners():
+              if runner.get("status") != "online":
+                  continue
+              names = {label.get("name") for label in runner.get("labels", [])}
+              host = host_of(runner.get("name", ""), prefixes)
+              for label in labels:
+                  if label not in names:
+                      continue
+                  if host is None:
+                      undeclared[label].append(runner.get("name", "?"))
+                  else:
+                      by_label[label][host] += 1
+          failed = []
+          for label in labels:
+              hosts = dict(by_label[label])
+              extra = f", {len(undeclared[label])} undeclared ({', '.join(sorted(undeclared[label])[:5])})" if undeclared[label] else ""
+              say(f"{label}: {len(hosts)} host(s) {hosts}{extra}")
+              if len(hosts) < minimum:
+                  failed.append(label)
+          if failed:
+              say(
+                  "::error::every online runner of "
+                  + ", ".join(failed)
+                  + f" sits on fewer than {minimum} declared hosts: a required check relies on one machine"
+              )
+              sys.exit(1)
+          say(f"every required runner label sits on at least {minimum} hosts")
+          RUNNER_POOL_SPREAD

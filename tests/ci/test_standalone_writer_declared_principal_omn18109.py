@@ -28,14 +28,12 @@ ACLs on that lane, names only::
 is the refusal. ``projection_watermarks`` lives there, so EVERY writer's
 watermark write is refused; the two above are simply the two receiving traffic.
 
-SATISFIABLE AND UNSATISFIABLE, AND WHY THIS FILE ONLY CLOSES THE FIRST HALF
----------------------------------------------------------------------------
-A ``BaseProjectionRunner`` opens ONE connection as ONE principal. The topology
-declares a principal per schema domain. For a writer whose declared relations
-span two domains, no single DSN is satisfiable -- picking any one trades one
-refusal for another. That is OMN-17454, which owns the multi-principal
-mechanism, and this file must not paper over it: the split writers are asserted
-to BE split rather than quietly left alone.
+SINGLE- AND TWO-DOMAIN WRITERS
+-----------------------------
+The topology declares a principal per schema domain. OMN-17454 gives each of
+the three split writers two pools; its watermark and tenant relation can then
+use their own declared identities. The live-events writer remains on its old
+binding until its physical schema split is resolved separately.
 
 What is enforced
 ----------------
@@ -45,8 +43,8 @@ What is enforced
 2. A single-domain writer resolves the principal the topology declares for that
    domain, read from ``omnibase_infra.topology.application_database`` rather than
    restated here.
-3. A multi-domain writer is named, with its split, so the boundary is an
-   assertion instead of an absence.
+3. A multi-domain writer has both fail-closed carriers and the topology profile
+   on the dev and stability-test compose overlays.
 4. No writer's DSN carries a literal credential, and every one fails closed on an
    unset password variable.
 """
@@ -60,6 +58,7 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.application_database import (
     _EXPECTED_BINDING_DSN_ENVS,
     _EXPECTED_BINDING_PRINCIPALS,
@@ -70,12 +69,14 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKER_DIR = REPO_ROOT / "docker"
 DEV_LANE_OVERLAY = DOCKER_DIR / "docker-compose.dev-lane.yml"
+STABILITY_OVERLAY = DOCKER_DIR / "docker-compose.stability-test.yml"
+SPLIT_WRITERS = (
+    "projection-delegation-writer",
+    "projection-savings-writer",
+    "projection-tenant-credentials-writer",
+)
 
-# The schema domains a node contract may declare, mapped to the topology binding
-# that owns them. Read from `db_io.db_tables[].schema` in each node's
-# `contract.yaml` (omnimarket). A domain absent from this map has no single
-# declared binding principal on this lane, which makes any writer touching it
-# unsatisfiable by construction -- see `public` on the tenant-credentials writer.
+# The binding that owns each domain returned by topology.schema_domain.
 DOMAIN_BINDING: dict[str, str] = {
     "omninode_internal": "omninode_runtime_service",
     "tenant": "tenant_projection",
@@ -163,14 +164,14 @@ _TolerantLoader.add_multi_constructor(  # type: ignore[no-untyped-call]
 )
 
 
-def _compose() -> dict[str, Any]:
+def _compose(path: Path = DEV_LANE_OVERLAY) -> dict[str, Any]:
     # S506: _TolerantLoader subclasses SafeLoader; the only widening is a
     # multi-constructor for compose's `!override` / `!!merge` tags, which
     # constructs plain mappings, sequences and scalars and instantiates no
     # arbitrary object. Same suppression, same reason, as the OMN-18012 gate.
-    text = DEV_LANE_OVERLAY.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
     loaded = yaml.load(text, Loader=_TolerantLoader)  # noqa: S506
-    assert isinstance(loaded, dict), DEV_LANE_OVERLAY
+    assert isinstance(loaded, dict), path
     return loaded
 
 
@@ -190,7 +191,16 @@ def _standalone_writers() -> dict[str, dict[str, Any]]:
 
 
 def _declared_domains(service_name: str) -> frozenset[str]:
-    return WRITER_CONTRACT_DOMAINS[service_name] | RUNNER_BASE_DOMAINS
+    topology = load_topology_profile("local")
+    # The tenant family still lives physically in public until OMN-15359's
+    # governed copy. Ask the topology for the PHYSICAL schema's domain; never
+    # keep a second hand-written public->tenant domain table in this gate.
+    return frozenset(
+        topology.schema_domain(
+            "application", "public" if schema == "tenant" else schema
+        ).value.lower()
+        for schema in WRITER_CONTRACT_DOMAINS[service_name] | RUNNER_BASE_DOMAINS
+    )
 
 
 def _is_single_domain(service_name: str) -> bool:
@@ -291,8 +301,8 @@ class TestSingleDomainWritersUseTheirDeclaredPrincipal:
         assert _resolved_dsn_env_name(service) == _expected_dsn_env(service_name)
 
 
-class TestMultiDomainWritersAreDeclaredUnsatisfiable:
-    """AC3. The boundary is asserted, not left as an absence."""
+class TestMultiDomainWritersUseSplitBindings:
+    """AC3. The two-domain requirement and its carriers are asserted."""
 
     def test_exactly_the_three_known_splits_are_multi_domain(self) -> None:
         multi = {
@@ -327,17 +337,27 @@ class TestMultiDomainWritersAreDeclaredUnsatisfiable:
         assert len(domains) > 1, domains
 
     @pytest.mark.parametrize(
-        "service_name",
-        sorted(name for name in WRITER_CONTRACT_DOMAINS if not _is_satisfiable(name)),
+        ("overlay", "profile"),
+        [(DEV_LANE_OVERLAY, "local"), (STABILITY_OVERLAY, "stability-test")],
     )
-    def test_a_split_writer_is_left_on_the_legacy_binding(
-        self, service_name: str
+    @pytest.mark.parametrize("service_name", SPLIT_WRITERS)
+    def test_a_split_writer_has_both_binding_carriers(
+        self, overlay: Path, profile: str, service_name: str
     ) -> None:
-        # Deliberate. Moving one of these to any single principal trades the
-        # watermark refusal for a table refusal, which is strictly worse than
-        # the state OMN-17454 is open on.
-        service = _standalone_writers()[service_name]
-        assert _resolved_dsn_env_name(service) == LEGACY_DSN_ENV
+        service = _compose(overlay)["services"][service_name]
+        env = service.get("environment") or {}
+        assert env.get("ONEX_DATABASE_TOPOLOGY_PROFILE") == profile, (
+            overlay,
+            service_name,
+        )
+        assert str(env.get("ONEX_TENANT_DB_URL") or "").startswith(
+            "postgresql://tenant_projection_writer:"
+        ), (overlay, service_name)
+        assert str(env.get("OMNINODE_INTERNAL_DB_URL") or "").startswith(
+            "postgresql://omninode_runtime:"
+        ), (overlay, service_name)
+        for key in ("ONEX_TENANT_DB_URL", "OMNINODE_INTERNAL_DB_URL"):
+            assert ":?" in str(env[key]), (overlay, service_name, key)
 
 
 class TestNoCredentialMaterialAndFailClosed:
