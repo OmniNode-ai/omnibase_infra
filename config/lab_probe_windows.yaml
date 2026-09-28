@@ -71,7 +71,7 @@ probes:
     cron: ['27 2,8,14,20 * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 10
+    max_duration_minutes: 15
   - id: C28
     name: consumer flow
     repo: omnibase_infra
@@ -79,7 +79,7 @@ probes:
     cron: ['13 0,6,12,18 * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 30
+    max_duration_minutes: 35
   - id: provider-rung
     name: provider-rung liveness canary
     repo: omnibase_infra

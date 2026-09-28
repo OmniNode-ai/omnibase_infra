@@ -1,0 +1,31 @@
+name: 'Resolve the lab lane a probe grades'
+description: >-
+  OMN-19894. Walk the deployment overlay's ordered lane list (the repository variable LAB_LANES_JSON, cheapest first) and pick the first lane whose required surfaces all answer GET <url>/health. Exports LANE_NAME and LANE_<FIELD> for that lane. No lane answering is RED naming every lane tried, never a skip and never a default. See resolve_lab_lane.py beside this file.
+author: 'OmniNode'
+inputs:
+  lanes-json:
+    description: 'The overlay list, normally vars.LAB_LANES_JSON.'
+    required: true
+  require:
+    description: 'Space-separated fields a lane must declare; each *_url among them must answer.'
+    required: true
+outputs:
+  name:
+    description: 'The chosen lane name.'
+    value: ${{ steps.resolve.outputs.name }}
+  lane:
+    description: 'The chosen lane entry as JSON.'
+    value: ${{ steps.resolve.outputs.lane }}
+  docker_runs_on:
+    description: 'The chosen lane''s docker_runs_on label list as JSON, when it declares one.'
+    value: ${{ steps.resolve.outputs.docker_runs_on }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve the lab lane through the overlay's chain of responders
+      id: resolve
+      shell: bash
+      env:
+        LAB_LANES_JSON: ${{ inputs.lanes-json }}
+        LANE_REQUIRE: ${{ inputs.require }}
+      run: python3 "${GITHUB_ACTION_PATH}/resolve_lab_lane.py"

@@ -33,17 +33,19 @@
 #   deployed package through the deployed interpreter is the strongest reading
 #   available, and the same one the hand readback took.
 #
-# WHY THIS REPOSITORY, THIS RUNNER, THIS LANE
-#   The subject is the dev lane's onex-api container on the lab host. Reaching
-#   it needs that host's docker socket, which the `omnibase-verify` runner on
-#   host-201 already carries — runtime-rebuild-trigger.yml's
-#   verify-lane-converged job reads the same lane's Postgres through it with
-#   `docker exec`. So the runner, the socket and the lane are already here, and
-#   the board already holds a grant for this repository (C11 and C15 are probed
-#   from it), so registering this producer needs no new board credential.
-#   `host-201` is required, not decoration: `omnibase-verify` names a runner
-#   CLASS and a run placed on another lab host would find no such container.
-#   The pair fails SAFE — if the runner is down the job queues.
+# WHY THIS REPOSITORY, WHICH LANE, WHICH RUNNER (OMN-19894)
+#   The subject is a lab lane's onex-api container, read through the docker
+#   daemon that runs it: over HTTP there is nothing to read (above). So the
+#   job is two: `resolve-lane` runs on any runner of the overlay's pool
+#   (vars.LAB_PROBE_RUNS_ON_JSON) and picks the first lane of the overlay's
+#   ordered list (vars.LAB_LANES_JSON) whose onex-api answers and which
+#   declares `docker_runs_on`, the runner labels that sit beside that lane's
+#   docker daemon; `c12-provider-catalogue` then runs there. No host label or
+#   address is written in this file: the only place a host is named is the
+#   lane's own overlay entry (operator rulings 2026-09-28T01:58:06Z and
+#   01:58:17Z). No lane answering is RED naming each lane tried. The board
+#   already holds a grant for this repository, so this needs no new board
+#   credential.
 #
 #   No credential is used at all. `docker exec` into a container on the
 #   runner's own host needs none, and the probe calls no route.
@@ -96,9 +98,39 @@ permissions:
   contents: read
 
 jobs:
+  resolve-lane:
+    name: Resolve the lab lane (chain of responders)
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
+    timeout-minutes: 5
+    outputs:
+      lane: ${{ steps.lane.outputs.name }}
+      docker_runs_on: ${{ steps.lane.outputs.docker_runs_on }}
+    steps:
+      - name: Checkout the lane resolver
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/resolve-lab-lane
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Resolve the lab lane through the overlay's chain of responders
+        id: lane
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_LANES_JSON }}
+          require: gateway_url docker_runs_on
+
   c12-provider-catalogue:
     name: C12 provider catalogue (dev lane)
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    needs: resolve-lane
+    # The runner beside the resolved lane's docker daemon, as that lane's
+    # overlay entry declares it. Data, never a literal here.
+    runs-on: ${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}
     timeout-minutes: 10
 
     steps:
@@ -118,8 +150,10 @@ jobs:
       - name: Read the deployed catalogue and grade it
         env:
           C12_CONTAINER: ${{ github.event.inputs.container || 'onex-api' }}
+          LANE_NAME: ${{ needs.resolve-lane.outputs.lane }}
         run: |
           set -uo pipefail
+          echo "lane: ${LANE_NAME}, container ${C12_CONTAINER}"
           # NOT `set -e`: a non-zero probe is the verdict and must still write
           # its record before the job ends.
           python3 scripts/ci/c12_provider_catalogue_probe.py \

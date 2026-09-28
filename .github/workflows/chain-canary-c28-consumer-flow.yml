@@ -31,17 +31,19 @@
 #               validation errors, and that zero proven live by one malformed
 #               trigger the seam must observe and dead-letter
 #
-# WHY THIS REPOSITORY, THIS RUNNER, THIS LANE
-#   The subject is the dev lane on the lab host: its projection-api through
-#   this host's `host.docker.internal` gateway, its runtime containers' logs,
-#   its broker and its analytics database through the docker socket that the
-#   `omnibase-verify` runner on host-201 already mounts (the C12 producer and
-#   verify-lane-converged read the lane the same way). `host-201` is required,
-#   not decoration: a verify-class runner on another lab host has none of
-#   these containers. The pair fails SAFE — if the runner is down the job
-#   queues. The board already holds a grant for this repository (C11, C12,
-#   C15 and C16 are probed from it), so registering this producer needs no
-#   new board credential.
+# WHY THIS REPOSITORY, WHICH LANE, WHICH RUNNER (OMN-19894)
+#   The subject is a lab lane: its projection-api over the network, and its
+#   runtime containers' logs, broker and analytics database through the docker
+#   daemon that runs them. So the job is two: `resolve-lane` runs on any runner
+#   of the overlay's pool (vars.LAB_PROBE_RUNS_ON_JSON) and picks the first
+#   lane of the overlay's ordered list (vars.LAB_LANES_JSON) whose
+#   projection-api answers and which declares `docker_runs_on`, the runner
+#   labels beside that lane's docker daemon; `c28-consumer-flow` runs there
+#   against that lane's declared projection_url. No host label or address is
+#   written in this file (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z).
+#   No lane answering is RED naming each lane tried. The board already holds a
+#   grant for this repository, so registering this producer needs no new board
+#   credential.
 #
 #   No repository secret is used. The broker credential is read by `rpk`
 #   inside the broker container from that container's own environment and
@@ -83,9 +85,9 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: 'The dev lane projection-api, as this runner reaches it.'
+        description: 'Projection-api override. Empty uses the resolved lane''s projection_url.'
         required: false
-        default: 'http://host.docker.internal:3002'
+        default: ''
 
 concurrency:
   # One run at a time: two injections racing would still each be attributed,
@@ -100,9 +102,40 @@ env:
   UV_VERSION: "0.8.3"
 
 jobs:
+  resolve-lane:
+    name: Resolve the lab lane (chain of responders)
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
+    timeout-minutes: 5
+    outputs:
+      lane: ${{ steps.lane.outputs.name }}
+      projection_url: ${{ steps.lane.outputs.projection_url }}
+      docker_runs_on: ${{ steps.lane.outputs.docker_runs_on }}
+    steps:
+      - name: Checkout the lane resolver
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/resolve-lab-lane
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Resolve the lab lane through the overlay's chain of responders
+        id: lane
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_LANES_JSON }}
+          require: projection_url docker_runs_on
+
   c28-consumer-flow:
     name: C28 consumer flow (dev lane)
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    needs: resolve-lane
+    # The runner beside the resolved lane's docker daemon, as that lane's
+    # overlay entry declares it. Data, never a literal here.
+    runs-on: ${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}
     timeout-minutes: 30
 
     steps:
@@ -133,9 +166,11 @@ jobs:
 
       - name: Re-measure C28 on the dev lane and grade it
         env:
-          C28_BASE_URL: ${{ github.event.inputs.base_url || 'http://host.docker.internal:3002' }}
+          C28_BASE_URL: ${{ github.event.inputs.base_url || needs.resolve-lane.outputs.projection_url }}
+          LANE_NAME: ${{ needs.resolve-lane.outputs.lane }}
         run: |
           set -uo pipefail
+          echo "lane: ${LANE_NAME}, projection-api ${C28_BASE_URL}"
           # NOT `set -e`: a non-zero probe is the verdict and must still write
           # its record before the job ends.
           python3 scripts/ci/c28_consumer_flow_probe.py \

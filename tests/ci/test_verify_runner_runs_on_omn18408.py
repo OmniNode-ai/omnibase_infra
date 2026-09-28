@@ -55,7 +55,6 @@ DEPLOY_LABEL = ["self-hosted", "omnibase-deploy"]
 MOVED_JOBS = (
     ("dev-lane-liveness.yml", "dev-lane-liveness", "dev-lane-liveness"),
     ("dev-lane-staleness.yml", "dev-lane-staleness", "dev-lane-staleness"),
-    ("chain-canary.yml", "chain-canary", "Chain Canary (dev lane)"),
     ("msk-bastion-canary.yml", "bastion-canary", "MSK bastion routing canary"),
     (
         "runtime-rebuild-trigger.yml",
@@ -111,41 +110,6 @@ NEW_VERIFY_JOBS = (
         "refresh",
         "Collect the lab census and open a bump PR when it has moved",
     ),
-    # OMN-19175: the C11 negative-paths producer. Born on the label, and it
-    # clears the OMN-18602 bar by a wide margin: four HTTP GETs against the
-    # lane's onex-api plus one POST that request validation refuses BEFORE the
-    # endpoint function runs, so the mutating path is structurally unreachable
-    # rather than merely unused. It publishes nothing to the bus, unlike the
-    # chain canary beside it.
-    #
-    # It needs the HOST label for the identical reason every entry above does,
-    # and the failure without it is the bad kind: `omnibase-verify` names a
-    # runner CLASS and a second verify-class runner exists on another lab host,
-    # so a run placed there cannot see this lane at all and would report it
-    # unreachable. A permanently-red probe is a disabled probe. The pair fails
-    # SAFE -- if the .201 verify runner is down the job queues rather than
-    # answering from somewhere blind.
-    (
-        "chain-canary-c11-negative-paths.yml",
-        "c11-negative-paths",
-        "C11 negative paths (dev lane)",
-    ),
-    # OMN-19195: the C12 provider-catalogue producer. Born on the label, and
-    # it clears the OMN-18602 bar the same way `verify-lane-converged` does: it
-    # reads the lane through the docker socket this runner already mounts. Its
-    # one `docker exec` runs a Python process as the container's own
-    # unprivileged user that imports the deployed package and calls pure
-    # functions on in-memory copies. No file is written, no route is called and
-    # nothing is published. It calls no HTTP surface at all.
-    #
-    # It needs the HOST label for the identical reason: on another lab host's
-    # daemon there is no `onex-api` container to exec into, so an unpinned run
-    # would exit 2 on every tick and be read as a lane outage.
-    (
-        "chain-canary-c12-provider-catalogue.yml",
-        "c12-provider-catalogue",
-        "C12 provider catalogue (dev lane)",
-    ),
     # OMN-16987: the provider-rung liveness canary. Born on the label, and it
     # clears the OMN-18602 bar the same way C12 does: one `docker exec`, as the
     # runtime's own user, runs a Python process that reads the deployed
@@ -160,36 +124,6 @@ NEW_VERIFY_JOBS = (
         "provider-rung-canary.yml",
         "provider-rung-canary",
         "Provider-rung liveness canary (dev lane)",
-    ),
-    # OMN-19181: the C16 receipt-identity producer. Born on the label, for the
-    # identical reason as C11 above: the lane's onex-api is reachable only
-    # through THIS host's gateway alias, and a verify-class runner on another
-    # lab host would report the lane unreachable forever. Its lane writes are
-    # two delegations through the tenant-bearing API -- the canary's own
-    # liveness prompt and one with a task class no consumer accepts -- plus a
-    # correlation-scoped read of the orchestrator's terminal off the bus, as chain-canary already does. It publishes nothing to the
-    # bus directly and reconfigures nothing.
-    (
-        "chain-canary-c16-receipt-identity.yml",
-        "c16-receipt-identity",
-        "C16 receipt identity (dev lane)",
-    ),
-    # OMN-19812: the C28 consumer-flow producer. Born on the label, for the
-    # reasons the C12 producer is: it reads the dev lane through this host's
-    # docker socket (runtime container logs, `rpk` inside the broker
-    # container, a `psql` select inside the lane's Postgres) and its
-    # projection-api through this host's gateway alias. Its one lane write is
-    # a single malformed payload on the stall-alert trigger topic per run, the
-    # positive control the hand readback it replaces also published, so the
-    # zero it counts is a measurement; it restarts and reconfigures nothing.
-    #
-    # It needs the HOST label for the identical reason: on another lab host's
-    # daemon none of those containers exist, so an unpinned run would exit 2
-    # on every tick and be read as a lane outage.
-    (
-        "chain-canary-c28-consumer-flow.yml",
-        "c28-consumer-flow",
-        "C28 consumer flow (dev lane)",
     ),
     # OMN-19445: the R1/MD-14 front-door probe. Born on the label, and it
     # clears the OMN-18602 bar the same way the read-only canaries above do:
@@ -242,6 +176,36 @@ def _jobs(workflow: str) -> dict[str, Any]:
     jobs = loaded.get("jobs")
     assert isinstance(jobs, dict), f"{workflow} declares no jobs mapping"
     return jobs
+
+
+# OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check must
+# not rely on one machine). These jobs left the host label. They run on the
+# overlay's runner pool and grade the first lane of the overlay's ordered list
+# that answers; where a job must sit beside the lane's docker daemon, the
+# runner labels are that lane's overlay entry, never a literal in the workflow.
+POOL_RUNS_ON = "${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}"
+LANE_SIDE_RUNS_ON = "${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}"
+UNPINNED_JOBS = (
+    ("chain-canary.yml", "chain-canary", POOL_RUNS_ON),
+    ("chain-canary-c11-negative-paths.yml", "c11-negative-paths", POOL_RUNS_ON),
+    ("chain-canary-c12-provider-catalogue.yml", "resolve-lane", POOL_RUNS_ON),
+    (
+        "chain-canary-c12-provider-catalogue.yml",
+        "c12-provider-catalogue",
+        LANE_SIDE_RUNS_ON,
+    ),
+    ("chain-canary-c16-receipt-identity.yml", "c16-receipt-identity", POOL_RUNS_ON),
+    ("chain-canary-c28-consumer-flow.yml", "resolve-lane", POOL_RUNS_ON),
+    ("chain-canary-c28-consumer-flow.yml", "c28-consumer-flow", LANE_SIDE_RUNS_ON),
+)
+
+
+@pytest.mark.parametrize(("workflow", "job_key", "runs_on"), UNPINNED_JOBS)
+def test_unpinned_job_runs_on_the_overlay_not_a_host(
+    workflow: str, job_key: str, runs_on: str
+) -> None:
+    assert _jobs(workflow)[job_key]["runs-on"] == runs_on
+    assert HOST_LABEL not in (WORKFLOWS / workflow).read_text(encoding="utf-8")
 
 
 #: OMN-19507 AC2: the two per-merge convergence jobs run where the deploy-agent
