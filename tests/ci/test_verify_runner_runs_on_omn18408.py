@@ -53,6 +53,11 @@ DEPLOY_LABEL = ["self-hosted", "omnibase-deploy"]
 # acceptance criteria and in the authorising operator-consent row, plus the
 # five OMN-18602 moved when it took the follow-up decision OMN-18408 deferred.
 MOVED_JOBS = (
+    # Still host-pinned, knowingly (OMN-19894 residual): its AWS OIDC role trust
+    # is scoped to the dev branch, so no feature-branch run can prove it off
+    # this host, and the bastion's reachability from the other lab hosts is
+    # unmeasured. It moves when both are settled.
+    ("msk-bastion-canary.yml", "bastion-canary", "MSK bastion routing canary"),
     (
         "runtime-rebuild-trigger.yml",
         "verify-lab-overlay-converged",
@@ -140,7 +145,6 @@ UNPINNED_JOBS = (
     ("chain-canary-c28-consumer-flow.yml", "c28-consumer-flow", LANE_SIDE_RUNS_ON),
     ("baselines-scheduler.yml", "baselines-compute", POOL_RUNS_ON),
     ("dlq-depth-monitor.yml", "dlq-depth-monitor", POOL_RUNS_ON),
-    ("msk-bastion-canary.yml", "bastion-canary", POOL_RUNS_ON),
     ("r1-front-door-probe.yml", "r1-front-door-probe", POOL_RUNS_ON),
     ("dev-lane-liveness.yml", "resolve-lane", POOL_RUNS_ON),
     ("dev-lane-liveness.yml", "dev-lane-liveness", LANE_SIDE_RUNS_ON),

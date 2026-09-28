@@ -301,7 +301,6 @@ def test_canary_names_no_machine(workflow: str, job: str, runs_on: str) -> None:
 OTHER_PROBES = (
     ("baselines-scheduler.yml", "baselines-compute", POOL_RUNS_ON),
     ("dlq-depth-monitor.yml", "dlq-depth-monitor", POOL_RUNS_ON),
-    ("msk-bastion-canary.yml", "bastion-canary", POOL_RUNS_ON),
     ("r1-front-door-probe.yml", "r1-front-door-probe", POOL_RUNS_ON),
     ("dev-lane-liveness.yml", "dev-lane-liveness", LANE_SIDE_RUNS_ON),
     ("dev-lane-staleness.yml", "dev-lane-staleness", LANE_SIDE_RUNS_ON),
