@@ -1163,6 +1163,7 @@ route:
 probe_placement_variables:
   omnibase_infra:
     LAB_PROBE_RUNS_ON_JSON: '["self-hosted","omnibase-verify"]'
+    LANE_CENSUS_RUNS_ON_JSON: '["self-hosted","omnibase-verify","host-201"]'
     OMNI_DOCKER_CI_RUNS_ON_JSON: '["ubuntu-latest"]'
     OMNI_PUBLIC_PR_RUNS_ON_JSON: '["ubuntu-latest"]'
     OMNI_REQUIRED_CI_RUNS_ON_JSON: null
