@@ -8,8 +8,13 @@ Why this exists
 Operator ruling 2026-09-28T06:31:26Z: runtime-affecting omnibase_infra PRs whose
 changed files are disjoint, and that carry no migration and no contract or topic
 schema change, are proved together on the commit the dev merge queue would land,
-merged individually on PASS, and bisected on FAIL. Until this file every runtime
-PR took its own pool run, one host for 15 to 60 minutes each.
+merged individually on PASS, and bisected on FAIL. Operator ruling
+2026-09-28T12:23:22Z ("can we start bundling prs in other repos as well?") extends
+the same proof to omnimarket. Omnimarket has no merge queue: its PRs squash onto
+dev one by one, and the proved tree is the tree those squashes produce when
+nothing else lands between them. verify-landed reports base drift otherwise, as
+it does for omnibase_infra. Until this file every runtime PR took its own pool
+run, one host for 15 to 60 minutes each.
 
 The dev merge queue squashes each entry onto the one before it, so the commit
 that lands for the last member of a group is the group base with every member
@@ -56,6 +61,8 @@ EXIT_USAGE = 5
 #: of eight takes three more rounds at most.
 DEFAULT_MAX = 8
 
+GROUP_REPOS = ("omnibase_infra", "omnimarket")
+
 #: A change here migrates a database. Migrations run once, in order, on shared
 #: lanes; one that fails in a group cannot be told apart cheaply, and two that
 #: touch the same ledger conflict. Proved alone.
@@ -72,6 +79,7 @@ CONTRACT_PATTERNS = (
     "contracts/*",
     "*/topics/*",
     "src/omnibase_infra/topics/*",
+    "src/omnimarket/topics/*",
     "*platform_topic_suffixes.py",
     "*enum_*topic*.py",
     "*/schemas/*",
@@ -98,10 +106,11 @@ class Candidate:
     head: str
     files: tuple[str, ...]
     labels: tuple[str, ...] = ()
+    repo: str = "omnibase_infra"
 
     @property
     def key(self) -> str:
-        return f"omnibase_infra#{self.number}"
+        return f"{self.repo}#{self.number}"
 
 
 @dataclass
@@ -254,7 +263,7 @@ def build_group(git: Git, base: str, members: Sequence[Candidate]) -> GroupBuild
             "-p",
             current,
             "-m",
-            f"lab-pool group member omnibase_infra#{c.number} {head}",
+            f"lab-pool group member {c.key} {head}",
             env=GROUP_GIT_ENV,
         )
         steps.append((c.number, head, commit, tree))
@@ -290,9 +299,15 @@ def params_text(
     extra: Mapping[str, str] | None = None,
 ) -> str:
     """The params file prepr_runtime_pool.py ``run`` takes for a group."""
+    if not members:
+        raise ValueError("a group needs at least one member")
+    repo = members[0].repo
+    if any(c.repo != repo for c in members):
+        raise ValueError("a group cannot mix repositories")
+    prefix = "INFRA" if repo == "omnibase_infra" else "MARKET"
     tests = sorted(
         {
-            f"omnibase_infra:{f}"
+            f"{repo}:{f}"
             for c in members
             for f in c.files
             if f.startswith("tests/") and f.endswith(".py") and "/test_" in f
@@ -300,22 +315,22 @@ def params_text(
     )
     ids = sorted(
         {
-            f"omnibase_infra:{f[len('src/') :]}"
+            f"{repo}:{f[len('src/') :]}"
             for c in members
             for f in c.files
             if f.startswith("src/") and f.endswith(".py")
         }
     )
     lines = [
-        "INFRA_GROUP="
+        f"{prefix}_GROUP="
         + shlex.quote(
             " ".join(
                 f"{c.number}:{h}"
                 for c, (_, h, _, _) in zip(members, build.steps, strict=True)
             )
         ),
-        f"INFRA_GROUP_BASE={build.base}",
-        f"INFRA_GROUP_TREE={build.tree}",
+        f"{prefix}_GROUP_BASE={build.base}",
+        f"{prefix}_GROUP_TREE={build.tree}",
     ]
     if tests:
         lines.append("TESTS=" + shlex.quote(" ".join(tests)))
@@ -341,6 +356,8 @@ def verify_landed(
     proved_tree: str,
     landed: Sequence[tuple[int, str]],
     member_files: Mapping[int, Sequence[str]],
+    *,
+    repo: str = "omnibase_infra",
 ) -> LandedVerdict:
     """Compare what landed with what was proved.
 
@@ -370,7 +387,7 @@ def verify_landed(
     lines = []
     for pr, sha in landed:
         lines.append(
-            f"omnibase_infra#{pr} landed {sha} group-tip {tip[:12]} "
+            f"{repo}#{pr} landed {sha} group-tip {tip[:12]} "
             f"proved-tree {proved_tree[:12]} tip-tree {tip_tree[:12]} "
             f"{'exact' if exact else ('base-drift' if not bad else 'MISMATCH')}"
         )
@@ -395,7 +412,7 @@ def verify_landed(
 # --------------------------------------------------------------------------- cli
 
 
-def _load_candidates(path: Path) -> list[Candidate]:
+def _load_candidates(path: Path, repo: str) -> list[Candidate]:
     """JSON list of {pr, head, files, labels?}, in priority order."""
     raw = json.loads(path.read_text(encoding="utf-8"))
     out = []
@@ -406,24 +423,28 @@ def _load_candidates(path: Path) -> list[Candidate]:
                 head=str(item["head"]),
                 files=tuple(item.get("files") or ()),
                 labels=tuple(item.get("labels") or ()),
+                repo=repo,
             )
         )
     return out
 
 
-def _candidates_from_map(map_dir: Path, prs: Sequence[int]) -> list[Candidate]:
+def _candidates_from_map(
+    map_dir: Path, prs: Sequence[int], repo: str
+) -> list[Candidate]:
     """Candidates from a drain map's changed-files.json (drain_map.py --out)."""
     cf = json.loads((map_dir / "changed-files.json").read_text(encoding="utf-8"))
     out = []
     for n in prs:
-        entry = cf.get(f"omnibase_infra#{n}")
+        entry = cf.get(f"{repo}#{n}")
         if not isinstance(entry, dict):
-            raise ValueError(
-                f"omnibase_infra#{n} is not in {map_dir}/changed-files.json"
-            )
+            raise ValueError(f"{repo}#{n} is not in {map_dir}/changed-files.json")
         out.append(
             Candidate(
-                number=n, head=str(entry["head"]), files=tuple(entry.get("files") or ())
+                number=n,
+                head=str(entry["head"]),
+                files=tuple(entry.get("files") or ()),
+                repo=repo,
             )
         )
     return out
@@ -442,6 +463,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     src.add_argument(
         "--pr", type=int, action="append", default=[], help="with --map-dir, in order"
     )
+    src.add_argument("--repo", choices=GROUP_REPOS, default="omnibase_infra")
 
     p_plan = sub.add_parser("plan", parents=[src])
     p_plan.add_argument("--max", type=int, default=DEFAULT_MAX)
@@ -451,14 +473,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--canonical",
         type=Path,
         required=True,
-        help="the omnibase_infra canonical clone",
+        help="the canonical clone of --repo",
     )
     p_build.add_argument(
         "--scratch", type=Path, help="scratch bare repo (default: a new temp dir)"
     )
-    p_build.add_argument(
-        "--remote", default="https://github.com/OmniNode-ai/omnibase_infra.git"
-    )
+    p_build.add_argument("--remote", default=None)
     p_build.add_argument(
         "--base", default="dev", help="base ref or sha (default: the fetched dev)"
     )
@@ -470,9 +490,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_ver = sub.add_parser("verify-landed", parents=[src])
     p_ver.add_argument("--canonical", type=Path, required=True)
     p_ver.add_argument("--scratch", type=Path)
-    p_ver.add_argument(
-        "--remote", default="https://github.com/OmniNode-ai/omnibase_infra.git"
-    )
+    p_ver.add_argument("--remote", default=None)
     p_ver.add_argument("--proved-tree", required=True)
     p_ver.add_argument(
         "--landed",
@@ -484,9 +502,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     a = ap.parse_args(argv)
     try:
         if a.candidates:
-            cands = _load_candidates(a.candidates)
+            cands = _load_candidates(a.candidates, a.repo)
         elif a.map_dir and a.pr:
-            cands = _candidates_from_map(a.map_dir, a.pr)
+            cands = _candidates_from_map(a.map_dir, a.pr, a.repo)
         else:
             print("give --candidates, or --map-dir with --pr", file=sys.stderr)
             return EXIT_USAGE
@@ -514,6 +532,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_OK
 
     scratch = a.scratch or Path(tempfile.mkdtemp(prefix="lab-pool-group-"))
+    remote = a.remote or f"https://github.com/OmniNode-ai/{a.repo}.git"
     if a.cmd == "build":
         if len(cands) < 2:
             print("a group needs at least two members", file=sys.stderr)
@@ -521,7 +540,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         refspecs = ["+refs/heads/dev:refs/remotes/origin/dev"] + [
             f"+refs/pull/{c.number}/head:refs/pull/{c.number}/head" for c in cands
         ]
-        git = scratch_repo(a.canonical, a.remote, refspecs, scratch)
+        git = scratch_repo(a.canonical, remote, refspecs, scratch)
         for c in cands:
             got = git("rev-parse", f"refs/pull/{c.number}/head")
             if got != c.head:
@@ -537,10 +556,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return EXIT_MISMATCH
         a.params_out.write_text(params_text(b, cands), encoding="utf-8")
-        for pr, head, commit, tree in b.steps:
-            print(
-                f"group-step omnibase_infra#{pr} head {head} commit {commit} tree {tree}"
-            )
+        for c, (_pr, head, commit, tree) in zip(cands, b.steps, strict=True):
+            print(f"group-step {c.key} head {head} commit {commit} tree {tree}")
         print(
             f"group-commit {b.commit} tree {b.tree} base {b.base} params {a.params_out}"
         )
@@ -558,9 +575,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("give --landed for every member, in merge order", file=sys.stderr)
         return EXIT_USAGE
     git = scratch_repo(
-        a.canonical, a.remote, ["+refs/heads/dev:refs/remotes/origin/dev"], scratch
+        a.canonical, remote, ["+refs/heads/dev:refs/remotes/origin/dev"], scratch
     )
-    v = verify_landed(git, a.proved_tree, landed, {c.number: c.files for c in cands})
+    v = verify_landed(
+        git,
+        a.proved_tree,
+        landed,
+        {c.number: c.files for c in cands},
+        repo=a.repo,
+    )
     print("\n".join(v.lines))
     return (
         EXIT_OK
