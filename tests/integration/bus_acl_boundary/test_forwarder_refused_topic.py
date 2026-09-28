@@ -305,15 +305,27 @@ def _log_tail(log_path: Path, lines: int = 60) -> str:
     )
 
 
+def _signal_group(process: subprocess.Popen[bytes], sig: int) -> None:
+    """Signal the forwarder's whole process group (it is its own session leader)."""
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        pass
+
+
 def _stop(process: subprocess.Popen[bytes]) -> None:
+    # The forwarder is spawned with start_new_session=True (OMN-16995), so a
+    # grandchild it forks cannot outlive the test: reap the whole group.
     if process.poll() is not None:
+        _signal_group(process, signal.SIGKILL)
         return
-    process.send_signal(signal.SIGTERM)
+    _signal_group(process, signal.SIGTERM)
     try:
         process.wait(timeout=45)
     except subprocess.TimeoutExpired:
-        process.kill()
+        _signal_group(process, signal.SIGKILL)
         process.wait(timeout=30)
+    _signal_group(process, signal.SIGKILL)
 
 
 def _inbound_record(canonical_topic: str) -> tuple[str, str]:
@@ -435,6 +447,7 @@ def test_the_forwarder_survives_a_topic_the_cloud_broker_refuses(
             stdout=log,
             stderr=subprocess.STDOUT,
             env=_forwarder_env(),
+            start_new_session=True,
         )
     try:
         started = time.monotonic()
