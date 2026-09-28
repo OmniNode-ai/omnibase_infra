@@ -97,6 +97,7 @@ def _observation() -> dict[str, Any]:
                 "memory_events": "low 0\nhigh 0\nmax 1060\noom 1\noom_kill 1\noom_group_kill 0\n",
             },
         ],
+        "journal_oom_kills": [],
         "worker_runs": _runs(
             {
                 "runner_name": "omnipc2-ci-runner-13",
@@ -319,6 +320,47 @@ def test_a_malformed_worker_run_is_refused() -> None:
         _build(observation)
 
 
+def test_a_kill_hidden_by_a_restart_is_counted_from_the_journal() -> None:
+    """The restarted cgroup reads oom_kill 0; the kernel journal named it three times."""
+    observation = _observation()
+    observation["containers"][0]["memory_events"] = "max 0\noom 0\noom_kill 0\n"
+    observation["journal_oom_kills"] = [
+        {
+            "container_id": REDPANDA_ID,
+            "container_name": "omnibase-infra-sim-202-redpanda",
+            "lane": "sim-202",
+            "count": 3,
+        }
+    ]
+    event, _state, alerts = _build(observation)
+    redpanda = _record(event, "omnibase-infra-sim-202-redpanda")
+    assert redpanda["oom_kill_delta"] == 3
+    assert redpanda["oom_kill_total"] == 0, "the total stays the cgroup's own counter"
+    assert any(
+        a.startswith(
+            "OOM_KILL lane=sim-202 container=omnibase-infra-sim-202-redpanda delta=3"
+        )
+        for a in alerts
+    )
+
+
+def test_a_killed_container_that_is_not_running_is_still_alerted() -> None:
+    observation = _observation()
+    observation["journal_oom_kills"] = [
+        {
+            "container_id": "d" * 64,
+            "container_name": "omninode-sim-202-runtime",
+            "lane": "sim-202",
+            "count": 1,
+        }
+    ]
+    _event, _state, alerts = _build(observation)
+    assert (
+        "OOM_KILL lane=sim-202 container=omninode-sim-202-runtime delta=1 "
+        "(container not running)"
+    ) in alerts
+
+
 def test_the_event_matches_the_published_v1_fixture() -> None:
     """Task 5b builds its wire model against this file; a drift here is a schema change."""
     event, _state, _alerts = _build()
@@ -406,6 +448,9 @@ class _Pass:
         )
         shim.chmod(shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
         self.state = self.home / ".local/state/onex/lane-container-memory-state.json"
+        self.journal = tmp_path / "journal.txt"
+        self.journal.write_text("")
+        fake.write_journalctl_stub(self.bin, self.journal)
 
     def run(
         self,
@@ -484,6 +529,23 @@ def test_an_oom_kill_fails_the_pass_naming_the_container(
     census: _Pass, tmp_path: Path
 ) -> None:
     host = _host(tmp_path, "max 3\noom 1\noom_kill 1\n")
+    try:
+        result = census.run(host)
+    finally:
+        host.close()
+    assert result.returncode == 31, result.stderr
+    assert (
+        "OOM_KILL lane=sim-202 container=omninode-sim-202-runtime-effects"
+        in result.stderr
+    )
+
+
+def test_a_kill_the_restart_hid_from_the_cgroup_fails_the_pass(
+    census: _Pass, tmp_path: Path
+) -> None:
+    """The lab case: counters read zero after the restart; the journal names the kill."""
+    host = _host(tmp_path, _CLEAN)
+    census.journal.write_text(fake.oom_kill_line(CONSUMER_ID, 1790625222.276671))
     try:
         result = census.run(host)
     finally:

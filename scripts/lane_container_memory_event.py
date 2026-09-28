@@ -31,6 +31,16 @@ WHAT THE CI JOBS ARE FOR
     per-job worker log (``_diag/Worker_<UTC start>-utc.log``). A lane peak can
     then be set beside the CI burst that ran on the same host at the same time.
 
+OOM KILLS ACROSS A RESTART
+    A lane container with a restart policy that is OOM-killed comes back with a
+    new cgroup whose counters read zero, so its own ``memory.events`` never
+    shows the kill (measured on .202: nine kills in a minute, every read
+    ``oom_kill 0``). The collector therefore also reads the kernel journal's
+    ``oom-kill:`` lines for the window, which name the victim's container id
+    across restarts. ``oom_kill_delta`` is the larger of the cgroup rise and
+    that journal count; a killed container that is not running now is alerted
+    by name without a record.
+
 PURE BUILDER
     The collector (``lane_census_inventory.py --memory-out``) reads the host;
     this module performs no I/O in its functions and turns one observation plus
@@ -350,7 +360,9 @@ def build_event(
     ``observation`` is the collector's document: ``host_boot_id``,
     ``boot_time``, ``read_at``, ``containers`` (each with ``container_id``,
     ``container_name``, ``lane``, ``started_at``, ``memory_max``,
-    ``memory_peak``, ``memory_events`` as the raw file text) and
+    ``memory_peak``, ``memory_events`` as the raw file text),
+    ``journal_oom_kills`` (kernel-logged kills in the window per lane container
+    id, each with ``container_id``, ``container_name``, ``lane``, ``count``) and
     ``worker_runs``: the runner worker logs the collector parsed with
     :func:`parse_worker_log`, one CI run entry each. The collector parses them
     as it streams each runner's ``_diag`` archive, so no log text is ever held
@@ -380,6 +392,20 @@ def build_event(
     window_start = format_ts(window_start_dt)
     window_end = format_ts(window_end_dt)
 
+    # Kernel-logged kills per container id in this window (collector:
+    # read_journal_oom_kills). They survive a restart, which resets the cgroup.
+    journal: dict[str, Mapping[str, Any]] = {}
+    for index, entry in enumerate(
+        _require(observation, "journal_oom_kills", "observation")
+    ):
+        where = f"journal_oom_kills[{index}]"
+        count = _require(entry, "count", where)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            raise MemoryObservationError(
+                f"{where}: count {count!r} is not a positive int"
+            )
+        journal[str(_require(entry, "container_id", where))] = entry
+
     records: list[dict[str, Any]] = []
     next_containers: dict[str, dict[str, int]] = {}
     alerts: list[str] = []
@@ -406,11 +432,16 @@ def build_event(
             started_at=started_dt,
             window_start=window_start_dt,
         )
-        oom_delta = _delta(
-            oom_total,
-            int(prev_oom) if prev_oom is not None else None,
-            started_at=started_dt,
-            window_start=window_start_dt,
+        # The larger of the two views: the cgroup counts kills in this instance
+        # only, the journal counts them across a restart in this window.
+        oom_delta = max(
+            _delta(
+                oom_total,
+                int(prev_oom) if prev_oom is not None else None,
+                started_at=started_dt,
+                window_start=window_start_dt,
+            ),
+            int(journal.get(cid, {}).get("count") or 0),
         )
 
         records.append(
@@ -447,6 +478,16 @@ def build_event(
             alerts.append(
                 f"LIMIT_HIT lane={lane} container={name} max_delta={max_delta} "
                 f"previous_max_delta={prev_max_delta} peak/limit={peak}/{limit_text}"
+            )
+
+    # A lane container killed in this window that is not running now has no
+    # record to carry the kill, so the alert names it on its own.
+    recorded = {r["container_id"] for r in records}
+    for cid, entry in sorted(journal.items()):
+        if cid not in recorded:
+            alerts.append(
+                f"OOM_KILL lane={entry.get('lane')} container={entry.get('container_name')} "
+                f"delta={entry['count']} (container not running)"
             )
 
     runs: list[dict[str, str | None]] = []

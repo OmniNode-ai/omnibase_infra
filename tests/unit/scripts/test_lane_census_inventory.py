@@ -448,7 +448,15 @@ def _memory_run(
     tmp_path: Path, host: Any, extra_env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     out = tmp_path / "memory.json"
+    bin_dir = tmp_path / "journal-bin"
+    if not bin_dir.exists():
+        bin_dir.mkdir()
+        journal = tmp_path / "journal.txt"
+        if not journal.exists():
+            journal.write_text("")
+        _fake_engine().write_journalctl_stub(bin_dir, journal)
     env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
     env.update(host.env())
     env["LANE_MANIFEST"] = str(_MEMORY_FIXTURES / "lane-manifest.yaml")
     env["LANE_MEMORY_RUNNER_FLEET_CONFIG"] = str(_MEMORY_FIXTURES / "runner_fleet.yaml")
@@ -581,3 +589,48 @@ def test_an_absent_fleet_config_is_an_error_unless_declared_empty(
     assert declared.returncode == 0, declared.stderr
     observation = json.loads((tmp_path / "memory.json").read_text())
     assert observation["worker_runs"] == []
+
+
+def test_journal_oom_kills_are_attributed_to_lane_containers_only(
+    tmp_path: Path,
+) -> None:
+    """A lane container's kill is named; a runner's belongs to the runner monitor."""
+    fake = _fake_engine()
+    host = _memory_host(tmp_path)
+    (tmp_path / "journal.txt").write_text(
+        fake.oom_kill_line("a" * 64, fake.BOOT_EPOCH + 60)
+        + fake.oom_kill_line("a" * 64, fake.BOOT_EPOCH + 61)
+        + fake.oom_kill_line("c" * 64, fake.BOOT_EPOCH + 62, "omnirunners.slice")
+    )
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == 0, result.stderr
+    observation = json.loads((tmp_path / "memory.json").read_text())
+    assert observation["journal_oom_kills"] == [
+        {
+            "container_id": "a" * 64,
+            "container_name": "omnibase-infra-sim-202-redpanda",
+            "lane": "sim-202",
+            "count": 2,
+        }
+    ]
+
+
+def test_an_unreadable_kernel_journal_is_an_error_never_zero_kills(
+    tmp_path: Path, inventory: Any
+) -> None:
+    """A user without journal access reads nothing and exit 0; that is refused."""
+    host = _memory_host(tmp_path)
+    bin_dir = tmp_path / "journal-bin"
+    bin_dir.mkdir()
+    blind = bin_dir / "journalctl"
+    blind.write_text("#!/usr/bin/env bash\nexit 0\n")
+    blind.chmod(0o755)
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE, result.stderr
+    assert "kernel journal reads empty" in result.stderr

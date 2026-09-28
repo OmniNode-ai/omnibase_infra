@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -472,6 +473,82 @@ def _state_lower_bound(state_path: str | None, boot_id: str, boot_time: str) -> 
     return datetime.fromisoformat(end).timestamp()
 
 
+#: A kernel OOM kill names the victim's cgroup. For a container that is the
+#: container's own scope, whichever cgroup driver or parent slice it runs under.
+_OOM_KILL_MEMCG = re.compile(r"task_memcg=\S*?docker-([0-9a-f]{64})\.scope")
+
+
+def read_journal_oom_kills(
+    *, since_epoch: float, until_epoch: float, timeout_s: float
+) -> dict[str, int]:
+    """Kernel OOM kills per container id in ``[since, until]``, from the kernel journal.
+
+    WHY THE JOURNAL AND NOT ONLY THE CGROUP. A lane container with a restart
+    policy that is OOM-killed comes back with a NEW cgroup whose counters start
+    at zero, so its own ``memory.events`` never shows the kill. Measured on
+    .202 on 2026-09-28: the sim-202 projection API, held at a 24 MiB limit, was
+    killed and restarted nine times in a minute and every pass-time read of its
+    counters said ``oom_kill 0``. The kernel logs each kill with the victim's
+    cgroup, which names the container id across restarts.
+
+    FAIL LOUD. A user without journal access gets no kernel lines and a zero
+    exit, which would read as "no kills". So an empty kernel journal is refused
+    before the OOM query is believed: the kernel logs from the first second of
+    a boot, so an empty read is a read that could not see.
+    """
+    if shutil.which("journalctl") is None:
+        raise MemoryProbeError(
+            "journalctl not found on PATH; kernel OOM kills unreadable"
+        )
+
+    def run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                ["journalctl", "-k", "-q", "--no-pager", "-o", "short-unix", *args],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise MemoryProbeError(f"journalctl exceeded {timeout_s}s") from exc
+
+    probe = run(["-n", "1"])
+    if probe.returncode != 0 or not probe.stdout.strip():
+        raise MemoryProbeError(
+            "the kernel journal reads empty (exit "
+            f"{probe.returncode}: {probe.stderr.strip()[:200]}); the census user "
+            "needs journal access (group adm or systemd-journal)"
+        )
+    found = run(
+        [
+            # Microsecond bounds, so consecutive windows abut and a kill is
+            # counted in exactly one of them.
+            "--since",
+            f"@{since_epoch:.6f}",
+            "--until",
+            f"@{until_epoch:.6f}",
+            "--grep",
+            "oom-kill:",
+        ]
+    )
+    # journalctl --grep exits 1 when nothing matched; that is a real zero here,
+    # because the probe above has shown the kernel journal is readable.
+    if found.returncode not in (0, 1) or (
+        found.returncode == 1 and found.stderr.strip()
+    ):
+        raise MemoryProbeError(
+            f"journalctl --grep oom-kill: failed (exit {found.returncode}): "
+            f"{found.stderr.strip()[:200]}"
+        )
+    kills: dict[str, int] = {}
+    for line in found.stdout.splitlines():
+        match = _OOM_KILL_MEMCG.search(line)
+        if match:
+            kills[match.group(1)] = kills.get(match.group(1), 0) + 1
+    return kills
+
+
 def collect_memory_observation(
     *,
     socket_path: str,
@@ -495,6 +572,33 @@ def collect_memory_observation(
         rows = api_get(socket_path, API_CONTAINERS_PATH, api_timeout_s)
     except (OSError, InventoryProbeError, ValueError) as exc:
         raise MemoryProbeError(f"container list unreadable: {exc}") from exc
+
+    # Every lane container in any state: an OOM-killed container that did not
+    # come back is stopped now, and its kill must still be named.
+    lane_ids: dict[str, tuple[str, str]] = {}
+    for row in rows:
+        row_names = row.get("Names") or []
+        row_name = (row_names[0] if row_names else "").lstrip("/").strip()
+        row_lane = lane_projects.get(
+            str((row.get("Labels") or {}).get(COMPOSE_PROJECT_LABEL) or "")
+        )
+        if row.get("Id") and row_name and row_lane is not None:
+            lane_ids[str(row["Id"])] = (row_name, row_lane)
+    kills = read_journal_oom_kills(
+        since_epoch=since_epoch,
+        until_epoch=datetime.fromisoformat(read_at.replace("Z", "+00:00")).timestamp(),
+        timeout_s=api_timeout_s,
+    )
+    journal_oom_kills = [
+        {
+            "container_id": cid,
+            "container_name": lane_ids[cid][0],
+            "lane": lane_ids[cid][1],
+            "count": count,
+        }
+        for cid, count in sorted(kills.items())
+        if cid in lane_ids
+    ]
 
     containers: list[dict[str, Any]] = []
     worker_runs: list[dict[str, str | None]] = []
@@ -565,6 +669,7 @@ def collect_memory_observation(
         "boot_time": boot_time,
         "read_at": read_at,
         "containers": sorted(containers, key=lambda c: str(c["container_name"])),
+        "journal_oom_kills": journal_oom_kills,
         "worker_runs": sorted(
             worker_runs,
             key=lambda r: (str(r["runner_name"]), str(r["job_started_at"])),

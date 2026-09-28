@@ -184,3 +184,34 @@ def worker_log(*, repo: str, run_id: str, started: str, completed: str | None) -
         )
         lines.append(f"[{completed} INFO Worker] Job completed.")
     return "\n".join(lines) + "\n"
+
+
+def write_journalctl_stub(bin_dir: Path, journal_file: Path) -> None:
+    """A ``journalctl`` that answers the collector's two kernel-journal reads.
+
+    ``-n 1`` is the readability probe and prints one kernel line. The
+    ``--grep`` query prints ``journal_file`` and exits 1 when it is empty, as
+    real journalctl does when nothing matches.
+    """
+    stub = bin_dir / "journalctl"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'for a in "$@"; do\n'
+        '  if [[ "$a" == "-n" ]]; then echo "1790597400.000001 omnipc2 kernel: Linux version"; exit 0; fi\n'
+        "done\n"
+        f'if [[ -s "{journal_file}" ]]; then cat "{journal_file}"; exit 0; fi\n'
+        "exit 1\n"
+    )
+    stub.chmod(0o755)
+
+
+def oom_kill_line(
+    container_id: str, epoch: float, slice_name: str = "system.slice"
+) -> str:
+    """A kernel ``oom-kill:`` line in the shape .202 logged on 2026-09-28."""
+    scope = f"/{slice_name}/docker-{container_id}.scope"
+    return (
+        f"{epoch:.6f} omnipc2 kernel: oom-kill:constraint=CONSTRAINT_MEMCG,"
+        f"nodemask=(null),cpuset=docker-{container_id}.scope,mems_allowed=0,"
+        f"oom_memcg={scope},task_memcg={scope},task=python,pid=4242,uid=0\n"
+    )
