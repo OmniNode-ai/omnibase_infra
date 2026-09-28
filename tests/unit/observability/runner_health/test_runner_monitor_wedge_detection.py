@@ -918,3 +918,66 @@ def test_script_documents_safe_bounce_and_forbids_docker_restart() -> None:
         "script appears to invoke `docker restart` against the fleet: "
         f"{invocation_lines}"
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-19852: repository reads on the read-only App token, org reads on gh.
+# ---------------------------------------------------------------------------
+
+
+def _spy_gh(bindir: Path, log: Path) -> None:
+    real = bindir / "gh.real"
+    (bindir / "gh").rename(real)
+    _write_exec(
+        bindir / "gh",
+        f"""\
+        path=""
+        for a in "$@"; do
+          if [[ "$a" == /* ]]; then path="$a"; fi
+        done
+        echo "${{GH_TOKEN:-<gh-login>}} ${{path}}" >> "{log}"
+        exec "{real}" "$@"
+        """,
+    )
+
+
+def test_repo_reads_use_the_reader_token_and_org_reads_stay_on_gh(
+    tmp_path: Path,
+) -> None:
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir, status="online", busy=False, queued=True, queued_age_seconds=3600
+    )
+    log = tmp_path / "gh-identity.log"
+    _spy_gh(bindir, log)
+    token_file = tmp_path / "reader-token"
+    token_file.write_text("ghs_fixture-reader\n", encoding="utf-8")
+    state = _run_monitor(
+        tmp_path, bindir, extra_env={"RUNNER_GH_READ_TOKEN_FILE": str(token_file)}
+    )
+    # Detection is unchanged by the identity swap.
+    assert _int(state, "wedge_count") >= 1, state
+    calls = [line.split(" ", 1) for line in log.read_text().splitlines()]
+    repo = [tok for tok, path in calls if path.startswith("/repos/")]
+    org = [tok for tok, path in calls if path.startswith("/orgs/")]
+    assert repo and set(repo) == {"ghs_fixture-reader"}, calls
+    assert org and set(org) == {"<gh-login>"}, calls
+
+
+def test_missing_reader_token_file_falls_back_to_gh(tmp_path: Path) -> None:
+    _require_tools()
+    bindir = tmp_path / "bin"
+    _scenario_bin(
+        bindir, status="online", busy=False, queued=True, queued_age_seconds=3600
+    )
+    log = tmp_path / "gh-identity.log"
+    _spy_gh(bindir, log)
+    state = _run_monitor(
+        tmp_path,
+        bindir,
+        extra_env={"RUNNER_GH_READ_TOKEN_FILE": str(tmp_path / "absent")},
+    )
+    assert _int(state, "wedge_count") >= 1, state
+    tokens = {line.split(" ", 1)[0] for line in log.read_text().splitlines()}
+    assert tokens == {"<gh-login>"}, tokens

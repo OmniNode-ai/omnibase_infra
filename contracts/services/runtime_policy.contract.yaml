@@ -160,6 +160,17 @@ profiles:
         source:
           source_type: env
           source_path: KEYCLOAK_ADMIN_CLIENT_SECRET
+      # OMN-19492: the GitHub App webhook HMAC secret, for
+      # node_github_webhook_ingress_effect on this lane (the lab end of the
+      # webhook feed, OMN-14375). service_kernel builds that handler's
+      # SecretResolver only when this logical name is mapped; every other
+      # profile leaves it unmapped and the handler refuses each delivery.
+      # Source of truth: secret store key dev:/shared/env/GITHUB_WEBHOOK_SECRET,
+      # delivered to the container env through docker-compose.infra.yml.
+      - logical_name: github.webhook.secret
+        source:
+          source_type: env
+          source_path: GITHUB_WEBHOOK_SECRET
     services:
       main:
         runtime_id: dev-main

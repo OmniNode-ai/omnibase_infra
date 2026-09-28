@@ -686,9 +686,22 @@ omninode_infra_fleet_runner_variable:
   # of whatever the trusted seam is doing, so the same collision cannot recur
   # through this path.
   #
-  # Fallback literal while unset: '["self-hosted","omnibase-ci"]' -- the exact
-  # label these 40 jobs were hardcoded to before #1390, so leaving the
-  # variable unset is placement-neutral by construction.
+  # SET, 2026-09-28 (OMN-19895 AC4; operator rulings 2026-09-28T01:58:06Z and
+  # 01:58:17Z). This entry used to say the variable was deliberately unset and
+  # that its 51 job definitions ran on a literal fallback,
+  # '["self-hosted","omnibase-ci"]', behind `||`. That literal was a silent
+  # default: a deleted or mistyped variable could never surface. omninode_infra
+  # removed every literal fallback, so an unset variable now fails the job
+  # (`fromJSON('')`). The variable was created at the omninode_infra
+  # repository scope with the same value, so no job moved. Rule 14 claim:
+  # omni_home ledger CLAIM 2026-09-28T04:59:31Z
+  # lane=checks-unpin-leftovers-83-fleetvar, closed by TERMINAL 04:59:46Z. Org
+  # scope stays absent. A set value is now the intended state and an unset one
+  # is the defect. It is still NOT a member of SCOPED_VARIABLE_KEYS, so no live
+  # audit reads it: the omninode_infra test
+  # tests/scripts/test_runs_on_no_literal_fallback_omn19895.py pins the
+  # no-fallback spelling, and omninode_infra's private-repo-runner-placement
+  # pre-commit hook refuses a runs-on that reads an unset variable.
   #
   # NOTE FOR THE NEXT COMPANION PR ON THIS TICKET: do not hand-write a
   # companion-citation line into a PR body or commit message before the
@@ -698,16 +711,11 @@ omninode_infra_fleet_runner_variable:
   # (this PR's own history, corrected in a follow-up commit). Leave that
   # field blank and let the automated PATCH populate it.
   #
-  # Deliberately UNSET everywhere, on the same terms as
-  # OMNI_OCC_AUTOBIND_RUNS_ON_JSON and OMNI_RUNTIME_REBUILD_RUNS_ON_JSON
-  # documented in trusted_runner_variable above: unset is the intended state
-  # and a set one is the defect. NOT a member of SCOPED_VARIABLE_KEYS /
-  # audit_scoped_variables below -- there is no live per-repo absence check
-  # for it, the same honest limit those two knobs carry. Setting it is its own
-  # single-owner claim under rule 14 (name every scope live before the first
-  # PATCH) and must never be bundled with a write to
-  # OMNI_TRUSTED_CI_RUNS_ON_JSON at any scope.
-  fallback_json: '["self-hosted","omnibase-ci"]'
+  # Setting or changing it is its own single-owner claim under rule 14 (name
+  # every scope live before the first PATCH) and must never be bundled with a
+  # write to OMNI_TRUSTED_CI_RUNS_ON_JSON at any scope.
+  expected_json: '["self-hosted","omnibase-ci"]'
+  scope: repository
   owner: cloud-ci lane (OMN-18205)
   repositories:
     - omninode_infra
@@ -801,6 +809,8 @@ hosted_runner_allowlist:
     reason: "OMN-18205: the migration image build pushes to ECR, which is the workload OMN-13747 recorded as failing from the self-hosted fleet's egress path -- the same reason build-and-push-runtime.yml and build-workspace-candidate-runtime.yml above are pinned. It had been reading the trusted seam, so a routing flip would have moved a registry push onto the fleet as an unenumerated side effect. The workflow has no pull_request trigger, so its fork branch was decoration and was removed with the pin."
   - path: .github/workflows/shared-env-runner-parity.yml
     reason: "OMN-16555: the hosted half of the shared-env two-runner-class parity gate must be pinned to a literal ubuntu-latest -- routing it through OMNI_RUNNER_SELECTOR_V1 would let a var change move it back onto the fleet and void the ephemeral-runner proof. Its self-hosted half does use the standard selector."
+  - path: .github/workflows/runner-pool-spread.yml
+    reason: "OMN-19895: the hourly runner-pool single-host-of-fate probe must not share fate with the self-hosted fleet it watches -- the same isolation rationale as runner-fleet-canary.yml above. Routing it through OMNI_RUNNER_SELECTOR_V1 could place it on the very fleet it is checking for single-host concentration, silencing the probe exactly when the fleet is unhealthy."
 # OMN-18031 — per-run routing thresholds for the hosted `route` job.
 #
 # The route job (scripts/ci/runner_route_decision.py) decides, once per run,
@@ -1125,3 +1135,59 @@ route:
         - verify / verify
         - wheel-content-parity
         - Writer-Migration Coupling Check
+# OMN-19412 follow-up, 2026-09-28. THE COMMITTED PLACEMENT OF EVERY SCHEDULED
+# JOB THAT A VARIABLE PLACES, in the three repositories whose schedules the
+# required "Lab Probe Windows (OMN-19412)" check reads (omnibase_infra,
+# omninode_infra, omnimarket).
+#
+# Why it is committed. omnibase_infra#4241 made that check resolve
+# `runs-on: ${{ fromJSON(vars.NAME) }}` from the live Actions variables, and no
+# installed App can read variables, so the check read them with CROSS_REPO_PAT,
+# the operator's personal token, which is being retired (operator RULING
+# 2026-09-27T22:46:17Z item 3). The check now resolves each placement from this
+# map instead: a reviewed value, changed only by a pull request. The PAT step is
+# gone from ci.yml and nothing in the check reads live state.
+#
+# What keeps it true. `scripts/ci/check_probe_placement_drift.py` compares this
+# map with what `vars.NAME` actually resolves to in each repository, run by
+# `.github/workflows/probe-placement-drift.yml` in each of the three
+# repositories. It reads the variables through the workflow's own `vars`
+# context, which every run can read with no token at all, so no credential and
+# no App permission is involved. A difference is a red run naming the variable,
+# the committed value and the live one.
+#
+# The rule 14 discipline extends here: a write to any variable listed below is
+# accompanied, in the same action, by the pull request that changes its value
+# in this map, exactly as expected_json above.
+#
+# Shape. `<repo>: {<NAME>: <value>}`. The value is what `vars.NAME` resolves to
+# IN THAT REPOSITORY -- its own variable over the organisation's, the same order
+# the runner uses -- or null when neither scope sets it, in which case the
+# workflow expression's `|| '<literal>'` fallback applies. Every variable that
+# places a scheduled job in one of the three repositories must be declared for
+# that repository: the check refuses an undeclared one (naming the job) rather
+# than read it as unset, because an unread placement could hide a probe.
+#
+# Read live 2026-09-28T07:20Z (read-only) when this map was written; each
+# value below is that reading.
+probe_placement_variables:
+  omnibase_infra:
+    LAB_PROBE_RUNS_ON_JSON: '["self-hosted","omnibase-verify"]'
+    LANE_CENSUS_RUNS_ON_JSON: '["self-hosted","omnibase-verify","host-201"]'
+    OMNI_DOCKER_CI_RUNS_ON_JSON: '["ubuntu-latest"]'
+    OMNI_PUBLIC_PR_RUNS_ON_JSON: '["ubuntu-latest"]'
+    OMNI_REQUIRED_CI_RUNS_ON_JSON: null
+    OMNI_SECURITY_SCAN_RUNS_ON_JSON: '["ubuntu-latest"]'
+    OMNI_TRUSTED_CI_RUNS_ON_JSON: '["ubuntu-latest"]'
+  omninode_infra:
+    CUSTOMER_MACHINE_RUNS_ON_JSON: '["self-hosted","omnibase-verify"]'
+    # Live value, recorded as read. omninode_infra_fleet_runner_variable above
+    # says this variable is meant to be unset; it is set, to the same pair as
+    # its fallback, so placement is unchanged either way. Reconciling the two is
+    # that entry's owner's call; this map records what the runner resolves.
+    OMNI_INFRA_FLEET_RUNS_ON_JSON: '["self-hosted","omnibase-ci"]'
+    OMNI_TRUSTED_CI_RUNS_ON_JSON: '["self-hosted","omnibase-ci"]'
+  omnimarket:
+    OMNI_OCC_AUTOBIND_RUNS_ON_JSON: null
+    OMNI_PUBLIC_PR_RUNS_ON_JSON: '["ubuntu-latest"]'
+    OMNI_TRUSTED_CI_RUNS_ON_JSON: '["ubuntu-latest"]'

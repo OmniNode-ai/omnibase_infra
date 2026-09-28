@@ -28,8 +28,12 @@ import yaml
 from omnibase_infra.lab_proof.enum_lab_proof_exempt_class import (
     EnumLabProofExemptClass,
 )
+from omnibase_infra.lab_proof.enum_lab_proof_kind import EnumLabProofKind
 from omnibase_infra.lab_proof.model_lab_proof_exemption_decision import (
     ModelLabProofExemptionDecision,
+)
+from omnibase_infra.lab_proof.model_lab_proof_profile_pin import (
+    ModelLabProofProfilePin,
 )
 from omnibase_infra.lab_proof.model_lab_proof_profile_registry import (
     ModelLabProofProfileRegistry,
@@ -44,6 +48,33 @@ def load_lab_proof_profile_registry(path: Path) -> ModelLabProofProfileRegistry:
     if not isinstance(loaded, dict):
         raise ValueError(f"{path}: the registry must be a mapping")
     return ModelLabProofProfileRegistry.model_validate(loaded)
+
+
+def profile_pin(
+    registry: ModelLabProofProfileRegistry, repo: str, proof_kind: EnumLabProofKind
+) -> ModelLabProofProfilePin:
+    """The registry's current profile for ``repo`` and its ``proof_kind`` checks.
+
+    Raises KeyError when the registry has no row for ``repo`` and ValueError when
+    the row has no variant of that kind or the variant names no mandatory check
+    (an empty set would accept any PASS). OMN-19566.
+    """
+    profile = registry.profile_for(repo)
+    for variant in profile.variants:
+        if variant.proof_kind is proof_kind:
+            if not variant.mandatory_checks:
+                raise ValueError(
+                    f"profile {profile.profile_key} variant {variant.variant_key} "
+                    "names no mandatory check"
+                )
+            return ModelLabProofProfilePin(
+                repo=repo,
+                proof_kind=proof_kind,
+                profile_key=profile.profile_key,
+                profile_version=str(profile.profile_version),
+                mandatory_checks=variant.mandatory_checks,
+            )
+    raise ValueError(f"profile {profile.profile_key} has no {proof_kind} variant")
 
 
 def _contract_operations(contract_path: Path) -> set[str]:

@@ -1918,7 +1918,7 @@ jobs:
             # the sweep spawns (`_dod_verify_argv`). Going through `uv run`
             # would resolve the gate venv, which by design carries no
             # node_dod_verify.
-            "${DISPATCH_VENV}/bin/onex" skill dod_verify "${ticket}" > "${RUNNER_TEMP}/${ticket}.json" 2> "${RUNNER_TEMP}/${ticket}.err" || true
+            "${DISPATCH_VENV}/bin/onex" skill dod_verify "${ticket}" --execution-audience hosted > "${RUNNER_TEMP}/${ticket}.json" 2> "${RUNNER_TEMP}/${ticket}.err" || true
             python3 - "${RUNNER_TEMP}/${ticket}.json" <<'PYEOF'
           import json
           import sys

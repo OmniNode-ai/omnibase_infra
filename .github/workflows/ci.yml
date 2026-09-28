@@ -1600,6 +1600,14 @@ jobs:
             .github/workflows
           sparse-checkout-cone-mode: false
 
+      # A probe job placed by `fromJSON(vars.NAME)` (omninode_infra#1725,
+      # omnibase_infra#4233) is resolved from the COMMITTED value of the
+      # variable, config/runner_routing_policy.yaml probe_placement_variables,
+      # so this check reads no live state and needs no token. It used to read
+      # the live variables with CROSS_REPO_PAT, the operator's personal token,
+      # which is being retired (RULING 2026-09-27T22:46:17Z item 3). Live vs
+      # committed agreement is probe-placement-drift.yml's job, in each repo,
+      # over that repo's own vars context.
       - name: Every probe cron, lane and duration agrees with its workflow, and every probe is listed
         run: |
           set -euo pipefail
@@ -2456,7 +2464,7 @@ jobs:
           fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -2487,7 +2495,7 @@ jobs:
         run: |
           uv run pytest \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -4012,7 +4020,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: 8b8d5d3b5dda51bdcc99168d4c358a6df0f19380
+          ref: fa40689b11f296214d4f26920f1a769b951970c9
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -4352,6 +4360,7 @@ jobs:
             python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" \
               --check-runs-file check_runs.json --event-name "${EVENT_NAME}" \
               --workflow-runs-file workflow_runs.json \
+              --current-run-id "${RUN_ID}" \
               --pr-author "${PR_AUTHOR:-}" \
               --pr-title "${PR_TITLE:-}" \
               --pr-head-ref "${PR_HEAD_REF:-}" \
@@ -5175,12 +5184,36 @@ jobs:
             tests/integration/migrations/test_omn15683_mixed_representation_conversion.py \
             -v --tb=short -p no:randomly
 
+      # OMN-17887: the migration that drops onex-lab's empty `tenant` schema,
+      # applied by the real forward runner as a NOSUPERUSER role_omnidash to a
+      # schema that is absent, empty (carrying a USAGE grant and a
+      # default-privileges entry), holding a relation, foreign-owned, and
+      # already dropped. It shares the OMN-17886 gate's empty server and runs
+      # first: it refuses a server that already has its two databases or four
+      # roles, and drops all of them afterwards, so the gate still starts empty.
+      - name: Drop-empty-tenant-schema migration proof (OMN-17887)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMN17887_GATE_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.acl_gate_postgres.ports['5432'] }}/postgres
+          # With a Postgres in hand a SKIP is a vacuous green.
+          OMN17887_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_drop_empty_tenant_schema_omn17887.py \
+            -v --tb=short -p no:randomly
+
       # OMN-17886 AC4: build omnidash_analytics from EMPTY with the real forward
       # runner, then diff its omninode_internal ACLs against the topology. A
       # migration that confers an undeclared grant, or omits a declared one,
       # fails here. The findings the corpus still produces are listed one by one
       # in config/omninode_internal_live_acl_allowlist.yaml, which is
       # shrink-only: an entry that stops reproducing fails the gate too.
+      # The gateway_link_health_status revoke proof and the gateway_link_health
+      # grant proof both run first on the same server, as a NOSUPERUSER
+      # role_omnidash through the real forward runner: the gate itself builds
+      # as postgres, for which a REVOKE or a GRANT always takes. It refuses a
+      # server that already has its two databases or three roles and drops all
+      # of them afterwards, so the gate still starts empty.
       - name: omninode_internal live-ACL gate (OMN-17886)
         if: steps.ensure_psql.outputs.available == 'true'
         env:
@@ -5189,8 +5222,28 @@ jobs:
           OMN17886_REQUIRE_PG: "1"
         run: |
           uv run pytest \
+            tests/integration/migrations/test_grant_gateway_link_health_omn17886.py \
+            tests/integration/migrations/test_revoke_gateway_link_health_status_omn17886.py \
             tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py \
             -v --tb=short -p no:randomly
+
+      # OMN-19550: the EphemeralPostgres live-apply proofs. Each test needs its
+      # own throwaway cluster (it creates and drops cluster-wide roles), which
+      # the sharded splits cannot provide, so the splits deselect the
+      # `ephemeral_pg` marker and this job EXECUTES them: the fixture starts a
+      # postgres:16-alpine container per test through this runner's docker and
+      # drives the migration through psql, as the forward runner does in
+      # production. ONEX_MIGRATION_PROOF_REQUIRE_PG=1 turns a missing backend
+      # (no psql, no docker) into a failure, never a skip, so deselected there
+      # is not skipped here. Named by path, like the steps above.
+      - name: EphemeralPostgres live-apply proofs (OMN-19550)
+        env:
+          ONEX_MIGRATION_PROOF_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_session_content_live_apply_omn19550.py \
+            -m ephemeral_pg \
+            -v -rs --tb=short -p no:randomly
 
       - name: Assert manifest tables exist
         env:

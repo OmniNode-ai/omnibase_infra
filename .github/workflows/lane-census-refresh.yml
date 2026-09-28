@@ -16,7 +16,7 @@
 # WHY IT COLLECTS THE CENSUS RATHER THAN READING THE HOST'S FILE. The hourly
 # `onex-disk-gc.service` drop-in writes a snapshot to
 # `~/.local/state/onex/census-snapshot.json` on the lab host. This job cannot
-# read it: `host-201` is carried by the `omninode-verify-runner-1` CONTAINER,
+# read it: the runner the overlay names (vars.LANE_CENSUS_RUNS_ON_JSON) is a CONTAINER,
 # whose mounts are its creds volume, `/var/run/docker.sock`, the operator env
 # file and three entrypoint scripts — that state directory is not among them.
 # Mounting it would be a runner-fleet change (a full recreate) to gain nothing,
@@ -64,11 +64,12 @@ concurrency:
 jobs:
   refresh:
     name: Collect the lab census and open a bump PR when it has moved
-    # `host-201` is carried ONLY by the .201 verify runner, and this job is
-    # meaningless anywhere else — the census describes THAT host's lanes. The
-    # pairing fails SAFE: if the runner is down the job queues rather than
+    # OMN-19894: the census describes the lanes of ONE host, so this job runs
+    # beside that host's docker daemon, named only by the overlay
+    # (vars.LANE_CENSUS_RUNS_ON_JSON), never by a label written here. The
+    # placement fails SAFE: if that runner is down the job queues rather than
     # running somewhere it would observe a different docker daemon.
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    runs-on: ${{ fromJSON(vars.LANE_CENSUS_RUNS_ON_JSON) }}
     timeout-minutes: 20
 
     steps:
@@ -118,7 +119,7 @@ jobs:
           # `python3` inside the collector resolves to the RUNNER's system
           # interpreter and dies with ModuleNotFoundError on `yaml`. Both live
           # dispatches failed that way (runs 35265905466, 35266125665).
-          # `uv run python` is the resolution the other host-201 jobs use
+          # `uv run python` is the resolution the other lab-probe jobs use
           # (dev-lane-staleness.yml, "Check dev lane staleness").
           LANE_CENSUS_PYTHON="$(uv run python -c 'import sys; print(sys.executable)')"
           export LANE_CENSUS_PYTHON
@@ -267,7 +268,7 @@ jobs:
           {
             printf '%s\n' "Automated lane-census refresh, opened by the refresh leg built in OMN-18606."
             printf '\n'
-            printf '%s\n' "Collected on the lab host by the \`host-201\` verify runner against the"
+            printf '%s\n' "Collected on the lab host by the census runner (vars.LANE_CENSUS_RUNS_ON_JSON) against the"
             printf '%s\n' "same docker daemon the hourly \`onex-disk-gc\` census pass reads."
             printf '\n'
             printf '%s\n' "- \`emitted_at\`: \`${EMITTED}\`"

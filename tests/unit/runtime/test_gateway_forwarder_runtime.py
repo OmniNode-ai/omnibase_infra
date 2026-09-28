@@ -542,7 +542,8 @@ def test_staging_canary_resolves_topics_from_node_contract(tmp_path: Path) -> No
         lane_credential_map_path=credential_map,
     )
 
-    assert len(loaded.forwarder.mirror_topics.inbound) == 3
+    # 4 after OMN-19593/OMN-14375's signed GitHub webhook-delivery command topic.
+    assert len(loaded.forwarder.mirror_topics.inbound) == 4
     # 8 after OMN-16204's OD-9 pair; 13 after OMN-16979's seven governed hook
     # classes; 15 after OMN-19439's two metadata-scrubbed delegate-skill
     # terminals. The governance half is asserted in

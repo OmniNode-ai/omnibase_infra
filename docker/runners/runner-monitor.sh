@@ -301,6 +301,43 @@ slack_post() {
         )" > /dev/null 2>&1
 }
 
+# OMN-19852 — repository reads on the read-only App token.
+#
+# Every tick reads the org runner list, one queued-runs page per watched repo
+# and one jobs page per queued run: about 12 calls a tick at 2026-09-27's queue
+# depth, 26 ticks an hour (*/3 plus */10), all on the operator's own gh login
+# and so on the one per-user 5,000/hour bucket merges and arming need (operator
+# ruling 2026-09-25T14:18:52Z: reads move to the read-only App
+# onexbot-pr-reader, writes stay on the operator). When RUNNER_GH_READ_TOKEN_FILE
+# names a fresh installation-token file (refreshed by the host's token cron), the
+# /repos/ reads use it. The org runner list and the registration token stay on gh:
+# the App has no organization permission, and a registration token is a write.
+# A configured file that is missing, empty or older than the bound is not used;
+# the reads fall back to gh and the tick logs why, once.
+RUNNER_GH_READ_TOKEN_FILE="${RUNNER_GH_READ_TOKEN_FILE:-}"
+# An installation token lives 60 minutes; a file no older than 40 leaves 20.
+RUNNER_GH_READ_TOKEN_MAX_AGE_SECONDS="${RUNNER_GH_READ_TOKEN_MAX_AGE_SECONDS:-2400}"
+GH_READ_TOKEN=""
+
+# resolve_gh_read_token — set GH_READ_TOKEN, or leave it empty and say why.
+resolve_gh_read_token() {
+    [[ -n "${RUNNER_GH_READ_TOKEN_FILE}" ]] || return 0
+    if [[ ! -r "${RUNNER_GH_READ_TOKEN_FILE}" || ! -s "${RUNNER_GH_READ_TOKEN_FILE}" ]]; then
+        log "GitHub reads on gh: reader token file ${RUNNER_GH_READ_TOKEN_FILE} is missing or empty"
+        return 0
+    fi
+    local age
+    age=$(( $(date +%s) - $(date -r "${RUNNER_GH_READ_TOKEN_FILE}" +%s) ))
+    if (( age > RUNNER_GH_READ_TOKEN_MAX_AGE_SECONDS )); then
+        log "GitHub reads on gh: reader token file is ${age}s old (bound ${RUNNER_GH_READ_TOKEN_MAX_AGE_SECONDS}s)"
+        return 0
+    fi
+    GH_READ_TOKEN="$(head -n 1 "${RUNNER_GH_READ_TOKEN_FILE}")"
+}
+# Resolved here, at top level and once per tick, never inside github_api_get:
+# that runs in a command substitution, where a log line would land in the JSON.
+resolve_gh_read_token
+
 # github_api_get — fetch a GitHub API path as JSON. Empty string on failure.
 # Prefer `gh api` because the deployed host already has working gh auth; fall
 # back to RUNNER_GITHUB_TOKEN for environments without gh. Retry transient
@@ -310,7 +347,9 @@ github_api_get() {
     local attempt output
     for attempt in 1 2 3; do
         output=""
-        if command -v gh >/dev/null 2>&1; then
+        if [[ -n "${GH_READ_TOKEN}" && "${path}" == /repos/* ]] && command -v gh >/dev/null 2>&1; then
+            output=$(GH_TOKEN="${GH_READ_TOKEN}" gh api "${path}" 2>/dev/null || true)
+        elif command -v gh >/dev/null 2>&1; then
             output=$(gh api "${path}" 2>/dev/null || true)
         else
             output=$(curl -fsS \

@@ -21,9 +21,9 @@ decisions, each pinned here:
   NoConvergeAtProbe violated), and so does a guard that looks only forward;
 * it stages each omnimarket head at most once.
 
-The committed routing table routes nothing to dev-202, so omnimarket is not
-routed elsewhere and the converge never fires: .201's behaviour is unchanged
-(``test_idle_converge_is_inert_under_the_committed_table``).
+The committed routing table routes omnimarket to dev-202, so the .201 idle
+converge fires under the default router
+(``test_idle_converge_fires_under_the_committed_table``).
 """
 
 from __future__ import annotations
@@ -65,10 +65,16 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 HEAD = "b" * 40
 RUNNING = "a" * 40
 
-#: A C15 run in the committed window file: `41 1,3,...,23 * * *`, 25 minutes.
+#: A C15 run in the committed window file: `41 1,3,...,23 * * *`, 65 minutes
+#: (OMN-19811: 25 -> 65, config/lab_probe_windows.yaml).
 C15_START = datetime(2026, 9, 25, 5, 41, tzinfo=UTC)
-#: Far from every guarded probe (C15 odd hours :41, C16 3/9/15/21 :29).
-QUIET = datetime(2026, 9, 25, 4, 30, tzinfo=UTC)
+#: Far from every guarded probe. With C15's 65-minute duration and the 40-minute
+#: lead (CONVERGE_CEILING + PROBE_MARGIN), each C15 occurrence (every 2 hours at
+#: :41) excludes [start-40, start+65], a 105-minute span inside the 120-minute
+#: period -- only the 15 minutes between 04:46 and 05:01 stay clear of both the
+#: 03:41 and 05:41 occurrences, and C16 (3/9/15/21 :29, unchanged 15-minute
+#: duration) does not reach into that gap either.
+QUIET = datetime(2026, 9, 25, 4, 53, tzinfo=UTC)
 
 
 def _inputs(**overrides: Any) -> ModelIdleConvergeInputs:
@@ -185,7 +191,11 @@ class TestIdleConvergeRespectsProbeWindow:
         windows = self._windows()
         assert probe_blocking(C15_START + timedelta(minutes=5), windows) is not None
         assert probe_blocking(C15_START + timedelta(minutes=25), windows) is not None
-        assert probe_blocking(C15_START + timedelta(minutes=26), windows) is None
+        # Duration is 65 minutes (OMN-19811); the run is still excluded there.
+        assert probe_blocking(C15_START + timedelta(minutes=65), windows) is not None
+        # One minute past the exclusion end (start + 65) is clear, and the next
+        # C15 occurrence two hours later has not started its own lead yet.
+        assert probe_blocking(C15_START + timedelta(minutes=66), windows) is None
 
     def test_idle_converge_respects_probe_window_for_c16(self) -> None:
         c16 = datetime(2026, 9, 25, 9, 29, tzinfo=UTC)
@@ -247,7 +257,7 @@ class TestIdleConvergeReaders:
 
 
 # --------------------------------------------------------------------------- #
-# The agent: the idle branch, and inert under the committed table              #
+# The agent: the idle branch, and convergence under the committed table        #
 # --------------------------------------------------------------------------- #
 class _FakeExecutor:
     def __init__(self) -> None:
@@ -334,14 +344,25 @@ class TestIdleConvergeInTheAgent:
         agent._maybe_idle_converge()
         assert len(list((tmp_path / "jobs").glob("*.json"))) == 1
 
-    def test_idle_converge_is_inert_under_the_committed_table(
+    def test_idle_converge_fires_under_the_committed_table(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The committed table routes nothing to dev-202: .201 is unchanged."""
+        """The committed table routes omnimarket to dev-202."""
         agent = _agent(tmp_path, monkeypatch, omnimarket_to_202=False)
+
         agent._maybe_idle_converge()
-        assert list((tmp_path / "jobs").glob("*.json")) == []
-        assert agent.executor.calls == []  # type: ignore[attr-defined]
+
+        jobs = [
+            JobStore(tmp_path / "jobs").load(UUID(p.stem))
+            for p in (tmp_path / "jobs").glob("*.json")
+        ]
+        assert len(jobs) == 1
+        job = jobs[0]
+        assert job is not None
+        assert job.command["requested_by"] == IDLE_CONVERGE_REQUESTER
+        assert job.command["runtime_lane"] == "dev"
+        assert job.status == "success"
+        assert "rebuild_scope" in agent.executor.calls  # type: ignore[attr-defined]
 
     def test_idle_converge_only_on_the_poll_loops_idle_branch(self) -> None:
         """QueuedFirst and SingleWriter201 hold because the converge is called

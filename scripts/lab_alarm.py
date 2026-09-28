@@ -419,14 +419,33 @@ def resolve_delivered_sha(*, agent_url: str, ready_url: str) -> tuple[str, str]:
     return "", "no surface answered (deploy agent, runtime /ready)"
 
 
+class SubjectResolver(Protocol):
+    def __call__(self, sha: str) -> tuple[str, str]:
+        """Return ``(subject sha, note)``: the commit whose receipt describes ``sha``."""
+
+
 def evaluate_lab_pass_receipt(
     *,
     repo: str,
     lane: EnumLabLane,
     sha: str,
     reader: ReceiptReader,
+    resolve_subject: SubjectResolver | None = None,
 ) -> ModelConditionReport:
-    """A FAIL receipt for the delivered sha is an alarm naming that sha."""
+    """A FAIL receipt for the delivered sha is an alarm naming that sha.
+
+    OMN-18867 (2026-09-28): the receipt is asked of the delivered sha's
+    nearest runtime-affecting first-parent ancestor when ``resolve_subject``
+    is given, by the same OMN-18664 rule the staging lab-pass gate and the
+    release train use (``lab_pass_receipt.resolve_required_subject_from_clone``,
+    reused, never restated). The deploy agent rebuilds the lane at
+    ``origin/dev``, so the delivered sha is routinely a merge the rebuild
+    trigger classifies non-runtime; such a merge never gets a receipt of its
+    own, and asking it for one read INDETERMINATE for eight hours on
+    2026-09-28 (03:25Z to 11:25Z) while every runtime-affecting ancestor
+    carried a compose-dev PASS. A resolver that cannot run resolves to the
+    exact sha, which keeps the fail-closed INDETERMINATE.
+    """
     condition = EnumAlarmCondition.LAB_PASS_RECEIPT
     if not sha:
         return ModelConditionReport(
@@ -437,39 +456,62 @@ def evaluate_lab_pass_receipt(
                 "could be looked up; an unresolved sha is not a passing lane"
             ),
         )
+    subject, subject_note = sha, f"{sha} itself (no ancestor rule configured)"
+    if resolve_subject is not None:
+        subject, subject_note = resolve_subject(sha)
     try:
-        receipt = reader(repo, lane, sha)
+        receipt = reader(repo, lane, subject)
     except ReceiptLookupError as exc:
         return ModelConditionReport(
             condition=condition,
             outcome=EnumConditionOutcome.INDETERMINATE,
             evidence=(
-                f"the receipt surface for {lane.value} at {sha} could not be "
-                f"read: {exc}. Unread is not passed"
+                f"the receipt surface for {lane.value} at {subject} could not be "
+                f"read: {exc}. Unread is not passed. Subject for delivered "
+                f"{sha}: {subject_note}"
             ),
         )
 
     failed = [check.name for check in receipt.checks if not check.ok]
+    subject_clause = (
+        "" if subject == sha else f"; subject for delivered {sha}: {subject_note}"
+    )
     if receipt.result is EnumLabPassResult.FAIL:
         detail = (
             f"compose lane {receipt.lane.value} receipt for {receipt.sha} is FAIL "
             f"on {', '.join(failed) or 'an unnamed check'} "
-            f"(finished {receipt.finished_at})"
+            f"(finished {receipt.finished_at}){subject_clause}"
         )
         return ModelConditionReport(
             condition=condition,
             outcome=EnumConditionOutcome.ALARM,
             evidence=detail,
-            alarms=(ModelAlarm(condition=condition, subject=sha, detail=detail),),
+            alarms=(ModelAlarm(condition=condition, subject=subject, detail=detail),),
         )
     return ModelConditionReport(
         condition=condition,
         outcome=EnumConditionOutcome.OK,
         evidence=(
             f"lane {receipt.lane.value} receipt for {receipt.sha} is "
-            f"{receipt.result.value} over {len(receipt.checks)} checks"
+            f"{receipt.result.value} over {len(receipt.checks)} checks{subject_clause}"
         ),
     )
+
+
+def make_clone_subject_resolver(
+    *, clone: Path, runtime_path_validator: str, repo: str
+) -> SubjectResolver | None:
+    """The staging gate's ancestor rule over this clone, or None when unconfigured."""
+    if not runtime_path_validator:
+        return None
+    from scripts.ci.lab_pass_receipt import resolve_required_subject_from_clone
+
+    validator = Path(runtime_path_validator)
+
+    def resolve(sha: str) -> tuple[str, str]:
+        return resolve_required_subject_from_clone(sha, clone, validator, repo)
+
+    return resolve
 
 
 # ---------------------------------------------------------------------------
@@ -1725,6 +1767,10 @@ class ModelAlarmConfig:
     #: is a prefix/suffix match rather than one pinned literal.
     effects_group_prefix: str
     effects_group_suffix: str
+    #: OMN-18867: omniclaude's deploy-gate path validator, the runtime-change
+    #: classifier's path rule. Empty disables the nearest-runtime-affecting
+    #: ancestor rule and asks the delivered sha itself.
+    runtime_path_validator: str = ""
 
     @classmethod
     def load(cls, path: Path) -> ModelAlarmConfig:
@@ -1753,6 +1799,9 @@ class ModelAlarmConfig:
             consumer_groups=tuple(str(g) for g in groups),
             effects_group_prefix=str(payload["effects_group_prefix"]),
             effects_group_suffix=str(payload["effects_group_suffix"]),
+            runtime_path_validator=expand_env(
+                str(payload.get("runtime_path_validator", "")), source=path
+            ),
         )
 
 
@@ -1778,13 +1827,18 @@ def run_once(
     effects_reader: EffectsHeldReader,
     posting_channel: str,
     env_file: Path,
+    subject_resolver: SubjectResolver | None = None,
 ) -> ModelAlarmRun:
     """Evaluate all five conditions, record the run, return it."""
     started = _now()
     state = ModelAlarmState.load(state_dir / "state.json")
 
     receipt_report = evaluate_lab_pass_receipt(
-        repo=config.repo, lane=config.lane, sha=sha, reader=receipt_reader
+        repo=config.repo,
+        lane=config.lane,
+        sha=sha,
+        reader=receipt_reader,
+        resolve_subject=subject_resolver,
     )
     restart_report = evaluate_container_restarts(
         config.container_restart_bounds, runner=runner
@@ -2048,6 +2102,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         posting_channel=args.posting_channel,
         env_file=args.env_file,
+        subject_resolver=make_clone_subject_resolver(
+            clone=_REPO_ROOT,
+            runtime_path_validator=config.runtime_path_validator,
+            repo=config.repo,
+        ),
     )
     sys.stdout.write(render(run) + "\n")
     return exit_code(run)

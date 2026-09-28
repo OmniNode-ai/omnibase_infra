@@ -145,6 +145,27 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="state",
         ),
     ),
+    # OMN-19829. Same seam, same classification: durable per-PR landing
+    # workflow state for omnimarket's node_pr_landing_orchestrator, keyed on
+    # ``landing_key`` (``owner/repo#<number>``). Its ``tenant_id`` column is
+    # denormalized provenance from the opaque payload, never an authorization
+    # key, so operator ruling R-q's OMNINODE_INTERNAL classification holds.
+    ContractTableDeclaration(
+        node="state_io:pr_landing_workflow_state",
+        contract_path=Path(
+            "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_landing_workflow_state",
+            database_ref="omnibase_infra",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
+            ),
+            access="read_write",
+            role="state",
+        ),
+    ),
 )
 
 # Some migration-owned projection relations landed before their producing node's
@@ -299,6 +320,89 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
     #
+    # OMN-19550: the same infra-first window, for session_content -- the full
+    # prompt, tool input, tool result and assistant reply captured for one
+    # session content chunk. This repository vendors the create migration
+    # BEFORE omnimarket lands the node package that declares the relation in
+    # its contract, because omnimarket's node-migration-vendor-parity gate
+    # refuses a node migration with no vendored counterpart here. So for one
+    # window the shipped topology instances declare a relation the PINNED
+    # contracts cannot derive.
+    #
+    # Regenerating against the pin instead of bridging would DELETE that
+    # declaration while the vendored migration still grants the relation,
+    # tripping the OMN-18768 reverse ratchet and refusing the projection
+    # binding at boot. This entry is SELF-EXPIRING: it is registered in
+    # _INTERIM_ENTRIES in
+    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes red
+    # on the pin advance that makes it redundant and says to delete it.
+    #
+    # Retired by: omnimarket#2905 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:session_content",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_session_content/"
+            "0001_create_session_content.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="session_content",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_session_content/"
+                "0001_create_session_content.sql"
+            ),
+            access="write",
+            role="session_content",
+        ),
+    ),
+    # OMN-19833: the two PR landing read models, the same infra-first window as
+    # the retired bridges above. This repo vendors
+    # node_projection_pr_landing/0000 and 0001 ahead of omnimarket#3000, whose
+    # node-migration-vendor-parity gate needs the vendored copy at dev tip
+    # before it can merge; the pin cannot declare either relation until it
+    # does. 0001 grants omninode_runtime SELECT, INSERT, UPDATE on
+    # pr_landing_state and SELECT, INSERT on pr_landing_transitions. Both
+    # entries carry the access and role the source contract declares, so the
+    # derivation reproduces the grants the instances already carry and writes
+    # no generated diff. Inert, then removable, once the pin advances past
+    # omnimarket#3000; the expiry module names both.
+    ContractTableDeclaration(
+        node="legacy_migration:pr_landing_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_pr_landing/"
+            "0000_create_pr_landing.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_landing_state",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_pr_landing/"
+                "0000_create_pr_landing.sql"
+            ),
+            access="read_write",
+            role="pr_landing_state",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:pr_landing_transitions",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_pr_landing/"
+            "0000_create_pr_landing.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_landing_transitions",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_pr_landing/"
+                "0000_create_pr_landing.sql"
+            ),
+            access="read_write",
+            role="pr_landing_transitions",
+        ),
+    ),
     # OMN-19513: infra vendors both Claude hook event projection tables before
     # omnimarket#2956 lands the node contract. Until the pin advances, these
     # interim declarations keep the shipped table grants derivable. The expiry
@@ -413,13 +517,17 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     #     handler_savings_correlation). read_write matches the SELECT, INSERT,
     #     UPDATE the creating migrations grant.
     #
-    # gateway_link_health is not declared yet, although its write effect
-    # upserts it: no migration GRANTs it, so its omninode_runtime privileges
-    # come only from the default-privilege rules, and declaring it now would be
-    # a declared grant nothing delivers (check_topology_grant_delivery). It is
-    # declared together with its explicit GRANT migration (AC2 step 2). The
-    # gateway_link_health_status VIEW is not declared at all: no runtime node
-    # reads or writes it, so its privileges are revoked rather than declared.
+    #   * gateway_link_health (AC2 step 2): HandlerGatewayLinkHealthUpsert
+    #     runs INSERT ... ON CONFLICT (tenant_id) DO UPDATE, which needs SELECT,
+    #     INSERT and UPDATE. Declared together with the migration that GRANTs
+    #     it explicitly (node_gateway_link_health_write_effect/0003), so the
+    #     declaration never runs ahead of a migration that delivers it
+    #     (check_topology_grant_delivery). Before that file, its privileges came
+    #     only from the default-privilege rules, which AC2 step 4 drops.
+    #
+    # The gateway_link_health_status VIEW is not declared at all: no runtime
+    # node reads or writes it, so its privileges are revoked rather than
+    # declared.
     ContractTableDeclaration(
         node="infra_direct_sql:node_savings_estimation_compute",
         contract_path=Path(
@@ -472,6 +580,24 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="savings_correlation_finalizations",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_gateway_link_health_write_effect",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
+            "0001_create_gateway_link_health.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="gateway_link_health",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
+                "0001_create_gateway_link_health.sql"
+            ),
+            access="read_write",
+            role="gateway_link_health",
         ),
     ),
 )

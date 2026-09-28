@@ -330,7 +330,22 @@ def required_contexts(gh: GitHub, repo: str, branch: str) -> list[str]:
     except ProbeError as exc:
         if "HTTP 404" in str(exc):
             return []  # unprotected branch: nothing is required, nothing to miss
-        raise
+        if "HTTP 403" not in str(exc):
+            raise
+        # OMN-19852: the reporter now reads on the read-only App token, which has
+        # no Administration permission, so the protection endpoint is 403 for it.
+        # The branch endpoint needs only Contents read and carries the same
+        # required_status_checks block. An unprotected branch has no block there
+        # either, which reads as "nothing required" exactly as the 404 above does.
+        branch_doc = _unwrap(
+            gh.get(
+                f"/repos/{OWNER}/{repo}/branches/{urllib.parse.quote(branch, safe='')}"
+            )
+        )
+        protection = (
+            branch_doc.get("protection") if isinstance(branch_doc, dict) else None
+        )
+        payload = (protection or {}).get("required_status_checks") or {}
     contexts = payload.get("contexts", []) if isinstance(payload, dict) else []
     return [str(c) for c in contexts]
 

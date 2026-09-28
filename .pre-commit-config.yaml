@@ -396,9 +396,9 @@ repos:
         stages: [pre-commit]
       - id: lab-probe-windows
         name: lab probe-window file agrees with the workflows (OMN-19412)
-        entry: uv run --frozen pytest tests/ci/test_check_lab_probe_windows.py -q
+        entry: uv run --frozen pytest tests/ci/test_check_lab_probe_windows.py tests/ci/test_lab_probe_windows_expression_runners.py tests/ci/test_check_probe_placement_drift.py -q
         language: system
-        files: ^(\.github/workflows/.*\.ya?ml|config/lab_probe_windows\.yaml|scripts/ci/check_lab_probe_windows\.py|tests/ci/test_check_lab_probe_windows\.py)$
+        files: ^(\.github/workflows/.*\.ya?ml|config/lab_probe_windows\.yaml|config/runner_routing_policy\.yaml|scripts/ci/check_lab_probe_windows\.py|scripts/ci/check_probe_placement_drift\.py|tests/ci/test_check_lab_probe_windows\.py|tests/ci/test_lab_probe_windows_expression_runners\.py|tests/ci/test_check_probe_placement_drift\.py)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-19179: the C13 customer-local producer grades four clauses and

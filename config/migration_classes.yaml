@@ -117,6 +117,7 @@ migrations:
   forward/103_create_tenant_projection_writer_role.sql: forward-only # ALTER ROLE
   forward/105_create_ledger_chain.sql: expand-only
   forward/106_add_delegation_workflow_state_traffic_class.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT CK_DELEGATION_WORKFLOW_STATE_TRAFFIC_CLASS
+  forward/108_create_pr_landing_workflow_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
@@ -137,6 +138,8 @@ migrations:
   forward/nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT EVIDENCE_DASHBOARD_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT EVIDENCE_CO
   forward/nodes/node_evidence_dashboard_reducer/0002_grant_omninode_runtime_evidence_dashboard_tables.sql: expand-only
   forward/nodes/node_gateway_link_health_write_effect/0001_create_gateway_link_health.sql: forward-only # ALTER TABLE ALTER COLUMN; CREATE OR REPLACE
+  forward/nodes/node_gateway_link_health_write_effect/0002_revoke_omninode_runtime_gateway_link_health_status.sql: forward-only # REVOKE
+  forward/nodes/node_gateway_link_health_write_effect/0003_grant_omninode_runtime_gateway_link_health.sql: expand-only
   forward/nodes/node_hook_event_capture/0001_create_hook_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT HOOK_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_HOOK_EVENTS_TENANT_EVENT_S
   forward/nodes/node_hook_event_capture/0002_hook_events_tenant_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql: expand-only
@@ -173,7 +176,6 @@ migrations:
   forward/nodes/node_projection_ci_attempt_outcome/0001_grant_omninode_runtime_ci_attempt_outcome.sql: expand-only
   forward/nodes/node_projection_claude_hook_events/0000_create_claude_hook_events.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.claude_hook_events); UNIQUE INDEX on an existing table (omninode_internal.claude_agent_spans)
   forward/nodes/node_projection_claude_hook_events/0001_grant_omninode_runtime_claude_hook_events.sql: expand-only
-  forward/nodes/node_projection_claude_hook_events/0002_reject_empty_agent_id.sql: forward-only # ALTER TABLE ADD CONSTRAINT CHECK on existing tables (omninode_internal.claude_hook_events, omninode_internal.claude_agent_spans); DROP CONSTRAINT IF EXISTS for idempotent re-add
   forward/nodes/node_projection_consumer_flow/0000_create_consumer_flow_windows.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_consumer_flow/0001_add_projection_cursor.sql: forward-only # ALTER TABLE ALTER COLUMN; UNIQUE INDEX on an existing table
   forward/nodes/node_projection_consumer_flow/0001_reconcile_consumer_flow_window_columns.sql: forward-only # ALTER TABLE ALTER COLUMN
@@ -232,6 +234,7 @@ migrations:
   forward/nodes/node_projection_delegation/0045_terminal_construction_outcome_metrics.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation/0046_delegation_events_cohort_key.sql: expand-only
   forward/nodes/node_projection_delegation/0047_delegation_events_ticket_id.sql: expand-only
+  forward/nodes/node_projection_delegation/0048_delegation_events_caller_lane.sql: expand-only
   forward/nodes/node_projection_delegation_inference_response/0001_create_projection_delegation_inference_response_text.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PROJECTION_DELEGATION_INFERENCE_RESPONSE_TEXT_PKEY; ALTER TABLE ADD CONSTR
   forward/nodes/node_projection_delegation_inference_response/0002_inference_response_text_tenant_rekey.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; UPDATE
   forward/nodes/node_projection_delegation_inference_response/0003_inference_response_text_rls_tenant_isolation.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
@@ -271,6 +274,8 @@ migrations:
   forward/nodes/node_projection_pattern_learning/0000_create_pattern_learning_artifacts.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PK_PATTERN_LEARNING_ARTIFACTS; ALTER TABLE ADD CONSTRAINT UQ_PATTERN_LEARN
   forward/nodes/node_projection_pattern_learning/0001_pattern_learning_artifacts_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_projection_pattern_learning/002_grant_tenant_projection_writer_pattern_learning_artifacts.sql: expand-only
+  forward/nodes/node_projection_pr_landing/0000_create_pr_landing.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.pr_landing_state); UNIQUE INDEX on an existing table (omninode_internal.pr_landing_transitions)
+  forward/nodes/node_projection_pr_landing/0001_grant_omninode_runtime_pr_landing.sql: expand-only # additive
   forward/nodes/node_projection_prod_promotion_gate/0000_create_prod_promotion_gate_decisions.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_prod_promotion_gate/0001_grant_omninode_runtime_prod_promotion_gate_decisions.sql: expand-only
   forward/nodes/node_projection_receipt_gate/0000_create_receipt_gate_projection_table.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT RECEIPT_GATE_ROWS_PKEY
@@ -315,6 +320,7 @@ migrations:
   forward/nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql: expand-only
   forward/nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql: forward-only # CREATE OR REPLACE
   forward/nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; transaction-scoped CREATE/DROP POLICY inside one DO block
+  forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only
   forward/nodes/node_projection_session_replay/0001_create_session_replay_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_S
@@ -327,6 +333,7 @@ migrations:
   forward/nodes/node_projection_tenant_credentials/0001_relax_name_provider_not_null.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_tenant_credentials/0002_credential_identity_not_null.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_INFEREN
   forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql: expand-only
+  forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql: forward-only # DROP
   forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_REGISTR
   forward/nodes/node_projection_tenant_registry/0001_grant_omninode_runtime_tenant_registry_mirror.sql: expand-only
   forward/nodes/node_projection_traces/0001_create_traces.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT TRACES_PKEY; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_TRACES_EVENT_COUNT; A
