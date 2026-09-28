@@ -139,6 +139,7 @@ migrations:
   forward/nodes/node_evidence_dashboard_reducer/0002_grant_omninode_runtime_evidence_dashboard_tables.sql: expand-only
   forward/nodes/node_gateway_link_health_write_effect/0001_create_gateway_link_health.sql: forward-only # ALTER TABLE ALTER COLUMN; CREATE OR REPLACE
   forward/nodes/node_gateway_link_health_write_effect/0002_revoke_omninode_runtime_gateway_link_health_status.sql: forward-only # REVOKE
+  forward/nodes/node_gateway_link_health_write_effect/0003_grant_omninode_runtime_gateway_link_health.sql: expand-only
   forward/nodes/node_hook_event_capture/0001_create_hook_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT HOOK_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_HOOK_EVENTS_TENANT_EVENT_S
   forward/nodes/node_hook_event_capture/0002_hook_events_tenant_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql: expand-only
@@ -332,6 +333,7 @@ migrations:
   forward/nodes/node_projection_tenant_credentials/0001_relax_name_provider_not_null.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_tenant_credentials/0002_credential_identity_not_null.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_INFEREN
   forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql: expand-only
+  forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql: forward-only # DROP
   forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_REGISTR
   forward/nodes/node_projection_tenant_registry/0001_grant_omninode_runtime_tenant_registry_mirror.sql: expand-only
   forward/nodes/node_projection_traces/0001_create_traces.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT TRACES_PKEY; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_TRACES_EVENT_COUNT; A

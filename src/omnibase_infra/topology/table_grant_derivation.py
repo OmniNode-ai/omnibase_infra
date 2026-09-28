@@ -501,13 +501,17 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     #     handler_savings_correlation). read_write matches the SELECT, INSERT,
     #     UPDATE the creating migrations grant.
     #
-    # gateway_link_health is not declared yet, although its write effect
-    # upserts it: no migration GRANTs it, so its omninode_runtime privileges
-    # come only from the default-privilege rules, and declaring it now would be
-    # a declared grant nothing delivers (check_topology_grant_delivery). It is
-    # declared together with its explicit GRANT migration (AC2 step 2). The
-    # gateway_link_health_status VIEW is not declared at all: no runtime node
-    # reads or writes it, so its privileges are revoked rather than declared.
+    #   * gateway_link_health (AC2 step 2): HandlerGatewayLinkHealthUpsert
+    #     runs INSERT ... ON CONFLICT (tenant_id) DO UPDATE, which needs SELECT,
+    #     INSERT and UPDATE. Declared together with the migration that GRANTs
+    #     it explicitly (node_gateway_link_health_write_effect/0003), so the
+    #     declaration never runs ahead of a migration that delivers it
+    #     (check_topology_grant_delivery). Before that file, its privileges came
+    #     only from the default-privilege rules, which AC2 step 4 drops.
+    #
+    # The gateway_link_health_status VIEW is not declared at all: no runtime
+    # node reads or writes it, so its privileges are revoked rather than
+    # declared.
     ContractTableDeclaration(
         node="infra_direct_sql:node_savings_estimation_compute",
         contract_path=Path(
@@ -560,6 +564,24 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="savings_correlation_finalizations",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_gateway_link_health_write_effect",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
+            "0001_create_gateway_link_health.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="gateway_link_health",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
+                "0001_create_gateway_link_health.sql"
+            ),
+            access="read_write",
+            role="gateway_link_health",
         ),
     ),
 )
