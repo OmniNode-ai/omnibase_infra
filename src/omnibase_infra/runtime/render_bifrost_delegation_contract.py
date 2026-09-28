@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.resources
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -50,9 +51,25 @@ from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
 _LANE_OVERLAY_PATH_ENV = "BIFROST_LANE_OVERLAY_PATH"
 _CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
+#: OMN-17099: the embedding backend's real endpoint is OpenAI-embeddings-shaped,
+#: not chat-completions-shaped (live probe 2026-09-27: .201:8002/v1/chat/completions
+#: 404s; .201:8002/v1/embeddings returns real vectors). ``ModelBifrostLaneBackendBinding``
+#: accepts the same two suffixes; this module's own completeness gate must agree.
+_EMBEDDINGS_PATH_SUFFIX = "/embeddings"
+_COMPLETE_ENDPOINT_SUFFIXES = (_CHAT_COMPLETIONS_PATH_SUFFIX, _EMBEDDINGS_PATH_SUFFIX)
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
 #: The base contract's own declaration that a backend is served from the lab.
 _LOCAL_TIER = "local"
+#: OMN-19432: the base contract's own declaration that a backend answers TYPED
+#: DECISIONS on its provider's own schema (TypeSafe Jev's System One API)
+#: rather than OpenAI chat completions. Such a backend is never a rung: no
+#: routing rule or tier ladder names it, so it is not an "active endpoint" for
+#: delegation, and its complete URL names its own operation instead of ending
+#: in the chat path.
+_TYPED_DECISION_TIER = "typed_decision"
+#: A last path segment that is only an API version (``v1``, ``v1beta``) marks a
+#: bare base, which OMN-12815 forbids: nothing downstream appends a path.
+_BARE_VERSION_SEGMENT = re.compile(r"^v\d+(?:(?:alpha|beta)\d*)?$")
 
 EndpointProbe = Callable[[str, str, float], str | None]
 
@@ -153,9 +170,13 @@ def _probe_openai_model_endpoint(
 ) -> str | None:
     parsed = urlsplit(endpoint_url)
     path = parsed.path.rstrip("/")
+    matched_suffix = next(
+        (suffix for suffix in _COMPLETE_ENDPOINT_SUFFIXES if path.endswith(suffix)),
+        None,
+    )
     models_path = (
-        f"{path[: -len(_CHAT_COMPLETIONS_PATH_SUFFIX)]}/models"
-        if path.endswith(_CHAT_COMPLETIONS_PATH_SUFFIX)
+        f"{path[: -len(matched_suffix)]}/models"
+        if matched_suffix is not None
         else f"{path}/v1/models"
     )
     endpoint = urlunsplit((parsed.scheme, parsed.netloc, models_path, "", ""))
@@ -202,6 +223,25 @@ def _index_base_backends(base: dict[str, object]) -> dict[str, dict[object, obje
 def _is_local_backend(backend: dict[object, object]) -> bool:
     """Whether the contract declares this backend as lab-served (its ``tier``)."""
     return backend.get("tier") == _LOCAL_TIER
+
+
+def _is_typed_decision_backend(backend: dict[object, object]) -> bool:
+    """Whether the contract declares this backend a typed-decision one (OMN-19432)."""
+    return backend.get("tier") == _TYPED_DECISION_TIER
+
+
+def _typed_decision_endpoint_is_complete(endpoint_url: str) -> bool:
+    """A typed-decision endpoint is complete when it is an absolute https URL
+    whose last path segment names the operation, never a bare version base.
+
+    It is posted verbatim, exactly as a chat endpoint is (OMN-12815); only the
+    operation it names differs.
+    """
+    parsed = urlsplit(endpoint_url.strip())
+    if parsed.scheme != "https" or not parsed.hostname:
+        return False
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    return bool(segments) and not _BARE_VERSION_SEGMENT.match(segments[-1])
 
 
 def _routed_local_backend_ids(
@@ -290,7 +330,7 @@ def _added_backend_entry(
     assert binding.provider is not None
     assert binding.tier is not None
     assert binding.credential is not None
-    return {
+    entry: dict[object, object] = {
         "backend_id": binding.backend_key,
         "provider": binding.provider,
         "endpoint_url": binding.endpoint_url if binding.serving else None,
@@ -301,6 +341,12 @@ def _added_backend_entry(
         "secret_ref": binding.credential.secret_ref,
         "capabilities": list(binding.capabilities),
     }
+    # OMN-19215: passed through for the routing authority, which checks the
+    # tier and rung names against the ladder it loads. Absent means absent, so
+    # an added backend with no placement renders exactly as it did before.
+    if binding.placement is not None:
+        entry["placement"] = binding.placement.model_dump(mode="json")
+    return entry
 
 
 def _merge_lane_overlay(
@@ -423,8 +469,21 @@ def _validate_rendered_contract(
                 "Rendered Bifrost contract must not contain endpoint_url_env"
             )
         endpoint_url = backend.get("endpoint_url")
+        if (
+            isinstance(endpoint_url, str)
+            and endpoint_url.strip()
+            and _is_typed_decision_backend(backend)
+        ):
+            # OMN-19432: not a delegation rung, so it neither needs the chat
+            # path nor counts toward the contract's active endpoints.
+            if not _typed_decision_endpoint_is_complete(endpoint_url):
+                raise ProtocolConfigurationError(
+                    "Rendered Bifrost typed-decision endpoint must be a complete "
+                    f"https URL naming its operation: {endpoint_url!r}"
+                )
+            continue
         if isinstance(endpoint_url, str) and endpoint_url.strip():
-            if not endpoint_url.rstrip("/").endswith(_CHAT_COMPLETIONS_PATH_SUFFIX):
+            if not endpoint_url.rstrip("/").endswith(_COMPLETE_ENDPOINT_SUFFIXES):
                 raise ProtocolConfigurationError(
                     f"Rendered Bifrost endpoint must be complete: {endpoint_url!r}"
                 )

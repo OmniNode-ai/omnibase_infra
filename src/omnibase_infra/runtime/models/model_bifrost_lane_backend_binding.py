@@ -39,8 +39,18 @@ from omnibase_infra.runtime.models.enum_bifrost_lane_credential_kind import (
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_credential import (
     ModelBifrostLaneBackendCredential,
 )
+from omnibase_infra.runtime.models.model_bifrost_lane_backend_placement import (
+    ModelBifrostLaneBackendPlacement,
+)
 
 _CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+#: OMN-17099: the embedding backend's real endpoint is OpenAI-embeddings-shaped,
+#: not chat-completions-shaped (live probe 2026-09-27: .201:8002/v1/chat/completions
+#: 404s; .201:8002/v1/embeddings returns real vectors). These are the only two
+#: complete endpoint shapes Bifrost backends are known to serve; a binding's path
+#: must be exactly one of them.
+_EMBEDDINGS_PATH = "/v1/embeddings"
+_COMPLETE_ENDPOINT_PATHS = frozenset({_CHAT_COMPLETIONS_PATH, _EMBEDDINGS_PATH})
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 #: The fields an ADDED backend declares and a base-declared backend inherits
@@ -82,6 +92,9 @@ class ModelBifrostLaneBackendBinding(BaseModel):
     tier: str | None = Field(default=None, min_length=1)
     credential: ModelBifrostLaneBackendCredential | None = None
     capabilities: tuple[str, ...] = ()
+    #: OMN-19215. Where an ADDED backend sits in the routing tier ladder; passed
+    #: through to the rendered contract. None keeps it reachable by pin only.
+    placement: ModelBifrostLaneBackendPlacement | None = None
 
     @property
     def declares_new_backend(self) -> bool:
@@ -115,6 +128,20 @@ class ModelBifrostLaneBackendBinding(BaseModel):
                 "being an added backend: the base contract owns a declared "
                 "backend's capabilities"
             )
+        if self.placement is not None:
+            if not declared:
+                raise ValueError(
+                    f"backend {self.backend_key!r} declares a placement without "
+                    "being an added backend: a base-declared backend is already "
+                    "in the routing ladder (OMN-19215)"
+                )
+            if self.placement.max_context_tokens > self.context_window:
+                raise ValueError(
+                    f"backend {self.backend_key!r} placement offers "
+                    f"{self.placement.max_context_tokens} context tokens but the "
+                    f"backend declares a context_window of {self.context_window} "
+                    "(OMN-19215)"
+                )
 
         parsed = urlsplit(self.endpoint_url)
         try:
@@ -126,7 +153,7 @@ class ModelBifrostLaneBackendBinding(BaseModel):
         if (
             parsed.scheme not in _ALLOWED_SCHEMES
             or not parsed.hostname
-            or parsed.path != _CHAT_COMPLETIONS_PATH
+            or parsed.path not in _COMPLETE_ENDPOINT_PATHS
             or parsed.username is not None
             or parsed.password is not None
             or parsed.query
@@ -134,8 +161,8 @@ class ModelBifrostLaneBackendBinding(BaseModel):
         ):
             raise ValueError(
                 f"endpoint_url for {self.backend_key!r} must be a complete "
-                f"http(s) endpoint ending in {_CHAT_COMPLETIONS_PATH} with a "
-                "host; userinfo, query, and fragment are forbidden, got "
+                f"http(s) endpoint ending in one of {sorted(_COMPLETE_ENDPOINT_PATHS)} "
+                "with a host; userinfo, query, and fragment are forbidden, got "
                 f"{self.endpoint_url!r}"
             )
         if (

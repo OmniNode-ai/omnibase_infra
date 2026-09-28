@@ -196,6 +196,12 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
         # qualification scanner only; the created-object ownership check still
         # applies unconditionally.
         Path("docker/migrations/forward/102_create_session_phase_state.sql"),
+        # OMN-19829: pr_landing_workflow_state is the third state_io relation in
+        # the omnibase_infra SERVICE database, created by the exact sibling of
+        # 102 above (same StateStoreAdapter, same `public`-only database, same
+        # unqualified search_path read). The same absence of an accepting
+        # qualification form applies; the ownership check still applies.
+        Path("docker/migrations/forward/108_create_pr_landing_workflow_state.sql"),
         # OMN-18172: 106 alters the existing delegation_workflow_state relation
         # created by 090 in the omnibase_infra SERVICE database. That database
         # has exactly one declared schema, public, while StateStoreAdapter and

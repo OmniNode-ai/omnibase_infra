@@ -1,0 +1,119 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# The pre-merge runtime pool (OMN-18893): every lab host a runtime pull request may
+# be deployed to BEFORE it merges, and the one isolated slot each host offers.
+#
+# Read by scripts/runtime_build/prepr_runtime_pool.py. Operator ruling
+# 2026-09-27: runtime PRs deploy to any free runtime lane on any lab machine, are
+# tested, and merge when everything clears; nothing may serialize them on the one
+# .201 dev lane.
+#
+# WHAT A POOL SLOT IS. One disposable compose project per host, built from a local
+# test merge of the PR head into dev and torn down to zero residue afterwards. It
+# is never a declared lane (deploy/lane-census/lane-manifest.yaml), so there is no
+# lane image to "restore": restoration is the teardown, proved by a zero-residue
+# readback against a pre-run snapshot. That is the reason the pool never deploys
+# onto a declared lane, and the reason it needs no image rollback.
+#
+# TWO KINDS OF POOL MEMBER. `kind: isolated` (the default) is the slot above: the
+# laptop-bundle project with its own Postgres, Redpanda and Valkey on the fixed
+# ports, one per machine. `kind: prepr-slot` is one of the two numbered pre-PR
+# slots on .201 (omnibase-infra-prepr-1/-2), brought up through the one entrypoint
+# rule 24(e) sanctions, scripts/runtime_build/prepr_verify_lane.sh, and destroyed
+# through prepr_teardown_slot.sh. Its compose project and ports come from
+# scripts/runtime_build/prepr_slot_policy.py, never from this file, so no entry
+# here can aim the pool at a declared .201 lane. `machine` names the lane-manifest
+# host a member runs on (default: its own name).
+#
+# A PREPR SLOT SHARES THE DEV LANE'S SERVERS, ON PURPOSE AND FENCED. It gets its
+# own databases (suffix _prepr1/_prepr2) and login principals on the dev lane's
+# Postgres, its own topic namespace and consumer-group token on the dev lane's
+# Redpanda, and its own Valkey index; provision_db_slot.sh never touches a shared
+# role, and the teardown reads every axis back to zero beside a dev-lane positive
+# control. That is safe for a pre-merge proof of runtime code. It is NOT a proof
+# of a change to the servers themselves (a Postgres extension, server config, a
+# shared role, broker settings): prove those on an isolated member. The slot's
+# onex-api stays off, because an image without the namespace surface would
+# publish unprefixed into the dev lane's topics (prepr_verify_lane.sh --help).
+#
+# `positive_control` is the compose project whose containers the teardown counts
+# as its non-zero control, read only (default omnibase-infra-dogfood). A host
+# with no dogfood lane names the lane it does run.
+#
+# WHY A HOST IS EXCLUDED is written next to it. An excluded host is still listed,
+# so `status` reports it and a reader sees the reason instead of a missing row.
+#
+# Every host here must also be declared under `hosts:` in the lane manifest; a
+# test asserts it, so the pool cannot drift onto an undeclared machine.
+schema_version: 1
+slot:
+  # The laptop-bundle project the interim recipes A and B boot. Fixed name, one per
+  # host, which is why the unit of leasing is the host.
+  compose_project: omnibase-infra-local
+  ports: [5436, 19092, 16379, 8085, 8086]
+  # Relative to the remote $HOME. mkdir is atomic on every host OS, so the lease is
+  # a directory, and lease.json inside it names the holder and the expiry.
+  lease_dir: .onex-prepr-pool/lease
+  # Relative to the remote $HOME; one work directory per run, removed at teardown.
+  work_root_prefix: prove-pool-
+  # The model rung the booted runtime is pointed at: the .201 primary rung.
+  model_endpoint: "http://192.168.86.201:8000/v1/chat/completions" # onex-allow-internal-ip
+  # A host whose load1 divided by its core count exceeds this is not started on
+  # (a host at load 72-82 could not hold an isolated runtime healthy, RELEASE
+  # 2026-09-25T13:08:23Z lane=prove-200). Same bar as config/lab_proof_profiles.yaml.
+  max_load_ratio: 1.0
+hosts:
+  - name: lab-101
+    ssh_target: "192.168.86.101" # onex-allow-internal-ip
+    surface: 101-runtime
+    os: macos
+    status: pool
+  - name: lab-105
+    ssh_target: "192.168.86.105" # onex-allow-internal-ip
+    surface: 105-runtime
+    os: macos
+    status: pool
+  - name: lab-200
+    ssh_target: "192.168.86.200" # onex-allow-internal-ip
+    surface: 200-runtime
+    os: macos
+    status: pool
+    # its docker credsStore is the login keychain, which will not unlock from a
+    # non-interactive ssh session, so the image build failed there (MSG
+    # 2026-09-27T16:25:02Z-drain-runtime-token-83); build with a private config
+    docker_config: isolated
+  - name: lab-201-prepr-1
+    machine: lab-201
+    ssh_target: "192.168.86.201" # onex-allow-internal-ip
+    # the surface name the first slot bring-ups held (HOLD 2026-09-24, OMN-19404)
+    surface: prepr-1-201
+    os: linux
+    status: pool
+    kind: prepr-slot
+    slot: 1
+    positive_control: omnibase-infra
+  - name: lab-201-prepr-2
+    machine: lab-201
+    ssh_target: "192.168.86.201" # onex-allow-internal-ip
+    surface: prepr-2-201
+    os: linux
+    status: pool
+    kind: prepr-slot
+    slot: 2
+    positive_control: omnibase-infra
+  - name: lab-201
+    ssh_target: "192.168.86.201" # onex-allow-internal-ip
+    surface: 201-dev-runtime
+    os: linux
+    status: excluded
+    reason: >-
+      the isolated slot's fixed ports are the dev lane's (8085/8086/5436/19092/16379), so .201 takes part through its two pre-PR slots above instead
+  - name: lab-202
+    ssh_target: "192.168.86.202" # onex-allow-internal-ip
+    surface: 202-runtime
+    os: linux
+    status: pool
+    # back in service on its boot NVMe (operator 2026-09-27T20:20:42Z); it runs
+    # no dogfood lane, so its teardown control is its own dev lane
+    positive_control: omnibase-infra-dev-202
