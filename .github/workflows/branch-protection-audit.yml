@@ -27,11 +27,17 @@
 # OMN-9034 (original gate), OMN-14696 (dev coverage), OMN-14683, OMN-14288
 # (parity ratchet), OMN-18287 (review-gated carve-out), OMN-18346 (this dedupe)
 #
-# Token: uses CROSS_REPO_PAT if configured (required for cross-repo audit of the
-# sibling repos). Falls back to GITHUB_TOKEN with a warning, in which case only
-# the current repo is audited and all other repos SKIP with "branch protection
-# not enabled or inaccessible" — that is expected and documented here so an
-# on-call does not get confused.
+# Token (OMN-19852): mints a read-only `onexbot` App installation token instead
+# of running on the operator's personal CROSS_REPO_PAT. Same App, same
+# permission set, as the `evidence-autoclose-sweep.yml` job in this repo
+# (app_id 3342522, installation 123040063, `repository_selection: all`), which
+# already proved administration:read across the org for a cross-repo audit.
+# The old fallback chain (CROSS_REPO_PAT with a partial, GITHUB_TOKEN-only
+# degrade) is gone: `administration:read` is not a grantable scope for
+# GITHUB_TOKEN at all, so that fallback always produced a silently-partial
+# audit rather than an error, and CROSS_REPO_PAT put a personal credential on
+# a scheduled job's critical path. Minting fails loudly if the App secrets are
+# ever missing, matching the OMN-16832 precedent in evidence-autoclose-sweep.yml.
 
 name: Branch Protection Audit
 
@@ -97,21 +103,26 @@ jobs:
       contents: read
 
     steps:
+      # THE credential this job runs under (OMN-19852). Everything below that
+      # touches the GitHub API uses this token and nothing else — no
+      # CROSS_REPO_PAT, no GITHUB_TOKEN fallback. Same App and permission set
+      # as `evidence-autoclose-sweep.yml`'s "Mint onexbot App token" step
+      # (OMN-16832) in this same repo.
+      - name: Mint onexbot App token (OMN-19852)
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          permission-administration: read
+          permission-contents: read
+          permission-metadata: read
+          permission-pull-requests: read
+          permission-checks: read
+
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Check CROSS_REPO_PAT is configured
-        id: pat_check
-        env:
-          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
-        run: |
-          if [ -z "$CROSS_REPO_PAT" ]; then
-            echo "::warning::CROSS_REPO_PAT is not set — audit will SKIP sibling repos."
-            echo "To audit across the org, set CROSS_REPO_PAT to a PAT with repo scope."
-            echo "has_pat=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_pat=true" >> "$GITHUB_OUTPUT"
-          fi
 
       # Read-only fetch of the canonical auditor at the pinned sha. Same shape as
       # omni_home's branch-protection-guard.yml, deliberately: one clone recipe.
@@ -135,7 +146,7 @@ jobs:
       - name: Canonical branch-protection audit
         id: canonical
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           rc=0
           bash "${RUNNER_TEMP}/onex_change_control/scripts/audit_branch_protection.sh" || rc=$?
@@ -146,7 +157,7 @@ jobs:
       - name: Orphaned required-context audit (this repo's only local check)
         id: orphans
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           rc=0
           python3 scripts/audit_orphan_required_contexts.py --owner OmniNode-ai || rc=$?
@@ -184,6 +195,6 @@ jobs:
         if: always()
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           uv run python scripts/audit_required_context_parity_cli.py report --owner OmniNode-ai
