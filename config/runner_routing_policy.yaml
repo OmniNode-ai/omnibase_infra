@@ -686,9 +686,22 @@ omninode_infra_fleet_runner_variable:
   # of whatever the trusted seam is doing, so the same collision cannot recur
   # through this path.
   #
-  # Fallback literal while unset: '["self-hosted","omnibase-ci"]' -- the exact
-  # label these 40 jobs were hardcoded to before #1390, so leaving the
-  # variable unset is placement-neutral by construction.
+  # SET, 2026-09-28 (OMN-19895 AC4; operator rulings 2026-09-28T01:58:06Z and
+  # 01:58:17Z). This entry used to say the variable was deliberately unset and
+  # that its 51 job definitions ran on a literal fallback,
+  # '["self-hosted","omnibase-ci"]', behind `||`. That literal was a silent
+  # default: a deleted or mistyped variable could never surface. omninode_infra
+  # removed every literal fallback, so an unset variable now fails the job
+  # (`fromJSON('')`). The variable was created at the omninode_infra
+  # repository scope with the same value, so no job moved. Rule 14 claim:
+  # omni_home ledger CLAIM 2026-09-28T04:59:31Z
+  # lane=checks-unpin-leftovers-83-fleetvar, closed by TERMINAL 04:59:46Z. Org
+  # scope stays absent. A set value is now the intended state and an unset one
+  # is the defect. It is still NOT a member of SCOPED_VARIABLE_KEYS, so no live
+  # audit reads it: the omninode_infra test
+  # tests/scripts/test_runs_on_no_literal_fallback_omn19895.py pins the
+  # no-fallback spelling, and omninode_infra's private-repo-runner-placement
+  # pre-commit hook refuses a runs-on that reads an unset variable.
   #
   # NOTE FOR THE NEXT COMPANION PR ON THIS TICKET: do not hand-write a
   # companion-citation line into a PR body or commit message before the
@@ -698,16 +711,11 @@ omninode_infra_fleet_runner_variable:
   # (this PR's own history, corrected in a follow-up commit). Leave that
   # field blank and let the automated PATCH populate it.
   #
-  # Deliberately UNSET everywhere, on the same terms as
-  # OMNI_OCC_AUTOBIND_RUNS_ON_JSON and OMNI_RUNTIME_REBUILD_RUNS_ON_JSON
-  # documented in trusted_runner_variable above: unset is the intended state
-  # and a set one is the defect. NOT a member of SCOPED_VARIABLE_KEYS /
-  # audit_scoped_variables below -- there is no live per-repo absence check
-  # for it, the same honest limit those two knobs carry. Setting it is its own
-  # single-owner claim under rule 14 (name every scope live before the first
-  # PATCH) and must never be bundled with a write to
-  # OMNI_TRUSTED_CI_RUNS_ON_JSON at any scope.
-  fallback_json: '["self-hosted","omnibase-ci"]'
+  # Setting or changing it is its own single-owner claim under rule 14 (name
+  # every scope live before the first PATCH) and must never be bundled with a
+  # write to OMNI_TRUSTED_CI_RUNS_ON_JSON at any scope.
+  expected_json: '["self-hosted","omnibase-ci"]'
+  scope: repository
   owner: cloud-ci lane (OMN-18205)
   repositories:
     - omninode_infra
