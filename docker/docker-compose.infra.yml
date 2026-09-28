@@ -241,6 +241,12 @@ x-runtime-env: &runtime-env
   ONEXBOT_OCC_APP_ID: ${ONEXBOT_OCC_APP_ID:-}
   ONEXBOT_OCC_PRIVATE_KEY: ${ONEXBOT_OCC_PRIVATE_KEY:-}
   OMNI_OCC_GITHUB_AUTH_MODE: ${OMNI_OCC_GITHUB_AUTH_MODE:-}
+  # OMN-19492: HMAC secret of the onexbot-pr-reader App webhook, read by
+  # node_github_webhook_ingress_effect. Source of truth: secret store key
+  # dev:/shared/env/GITHUB_WEBHOOK_SECRET. Optional for the same reason as the
+  # OCC App pair above: a lane without it renders and runs, and the ingress
+  # node refuses every delivery (dead-lettered, never a silent success).
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
   # OMN-15009: node_redeploy_deploy_effect signs rebuild commands before they
   # cross the runtime/deploy-agent trust boundary. The deploy agent rejects
   # unsigned commands, so an absent secret must fail at compose render time.

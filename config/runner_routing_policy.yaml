@@ -801,6 +801,8 @@ hosted_runner_allowlist:
     reason: "OMN-18205: the migration image build pushes to ECR, which is the workload OMN-13747 recorded as failing from the self-hosted fleet's egress path -- the same reason build-and-push-runtime.yml and build-workspace-candidate-runtime.yml above are pinned. It had been reading the trusted seam, so a routing flip would have moved a registry push onto the fleet as an unenumerated side effect. The workflow has no pull_request trigger, so its fork branch was decoration and was removed with the pin."
   - path: .github/workflows/shared-env-runner-parity.yml
     reason: "OMN-16555: the hosted half of the shared-env two-runner-class parity gate must be pinned to a literal ubuntu-latest -- routing it through OMNI_RUNNER_SELECTOR_V1 would let a var change move it back onto the fleet and void the ephemeral-runner proof. Its self-hosted half does use the standard selector."
+  - path: .github/workflows/runner-pool-spread.yml
+    reason: "OMN-19895: the hourly runner-pool single-host-of-fate probe must not share fate with the self-hosted fleet it watches -- the same isolation rationale as runner-fleet-canary.yml above. Routing it through OMNI_RUNNER_SELECTOR_V1 could place it on the very fleet it is checking for single-host concentration, silencing the probe exactly when the fleet is unhealthy."
 # OMN-18031 — per-run routing thresholds for the hosted `route` job.
 #
 # The route job (scripts/ci/runner_route_decision.py) decides, once per run,

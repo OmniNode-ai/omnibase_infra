@@ -305,7 +305,8 @@ class TestTheWiring:
         report 'I cannot look', which this guard treats as a failure."""
         document = yaml.safe_load(STALENESS_WORKFLOW.read_text(encoding="utf-8"))
         runs_on = document["jobs"]["dev-lane-staleness"]["runs-on"]
-        assert "self-hosted" in runs_on
+        # OMN-19894: beside the lane the overlay resolves, never a host label.
+        assert runs_on == "${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}"
 
     def test_the_hourly_workflow_invokes_the_real_guard(self) -> None:
         body = STALENESS_WORKFLOW.read_text(encoding="utf-8")

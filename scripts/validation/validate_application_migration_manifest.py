@@ -685,6 +685,24 @@ def validate_manifests(
         aliases.append(alias)
 
     declared_paths = [item.artifact_path for item in declarations]
+    if declared_paths != sorted(declared_paths):
+        first_bad = next(
+            i
+            for i, (a, b) in enumerate(
+                zip(declared_paths, sorted(declared_paths), strict=True)
+            )
+            if a != b
+        )
+        raise ManifestError(
+            f"{declaration_path}: rows are not sorted by artifact_path (OMN-19899). "
+            "A new declaration must be inserted in sorted order, not appended at the "
+            "end of the file -- appending at the end is what makes two concurrent PRs "
+            "collide on this file's last lines. First out-of-order row is at position "
+            f"{first_bad}: {declared_paths[first_bad]!r} should sort before "
+            f"{sorted(declared_paths)[first_bad]!r}. Re-sort with: "
+            "LC_ALL=C sort -t $'\\t' -k1,1 "
+            f"{declaration_path.name} -o {declaration_path.name}"
+        )
     blocked_paths = [item.artifact_path for item in blocked]
     legacy_versions = [item.version for item in legacy_node_declarations]
     declared_identities = [

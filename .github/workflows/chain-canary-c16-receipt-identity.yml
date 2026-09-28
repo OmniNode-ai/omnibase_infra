@@ -30,12 +30,13 @@
 #   correlation ids of their own — cannot make its verdict ambiguous; the
 #   concurrency group below only stops a dispatch stacking on a scheduled tick.
 #
-# WHY SELF-HOSTED, AND WHY host-201 IS REQUIRED
-#   Unchanged from chain-canary.yml: `omnibase-verify` names a runner CLASS and
-#   a second verify-class runner exists on another lab host. The lane's
-#   onex-api is reachable only through THIS host's `host.docker.internal`
-#   gateway alias, so a run placed elsewhere reports the lane unreachable, and
-#   a permanently-red check is a disabled check. The pair fails SAFE.
+# WHERE IT RUNS, AND WHICH LANE IT GRADES (OMN-19894)
+#   On any runner of the overlay's pool (vars.LAB_PROBE_RUNS_ON_JSON), against
+#   the first lane of the overlay's ordered list (vars.LAB_LANES_JSON) whose
+#   onex-api answers, at the address the overlay declares. No host label or
+#   address is written here (operator rulings 2026-09-28T01:58:06Z and
+#   01:58:17Z). No lane answering is RED naming each lane tried, never a skip.
+#   A lane listed for this probe must honour the credentials below.
 #
 # THE CREDENTIALS: EXISTING, LANE-LOCAL, REUSED IN THEIR OWN REPOSITORY
 #   `CHAIN_CANARY_GATEWAY_API_KEY`, `KAFKA_SASL_USERNAME` and
@@ -81,9 +82,9 @@ on:
   workflow_dispatch:
     inputs:
       gateway_url:
-        description: 'Tenant-bearing API base URL (onex-api on the dev lane).'
+        description: 'Tenant-bearing API base URL. Empty grades the first lane of vars.LAB_LANES_JSON whose gateway answers.'
         required: false
-        default: 'http://host.docker.internal:8090'
+        default: ''
       budget_seconds:
         description: 'How long each run may take to reach a terminal status.'
         required: false
@@ -102,7 +103,7 @@ env:
 jobs:
   c16-receipt-identity:
     name: C16 receipt identity (dev lane)
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     timeout-minutes: 15
 
     steps:
@@ -160,12 +161,18 @@ jobs:
                   handle.write(f'{key}={value}\n')
           "
 
+      - name: Resolve the lab lane through the overlay's chain of responders
+        if: ${{ !github.event.inputs.gateway_url }}
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_LANES_JSON }}
+          require: gateway_url
+
       - name: Drive the healthy and the dying delegation and grade C16
         env:
-          # Inside a runner container `localhost` is the container itself; the
-          # host-gateway alias reaches the lane's published port — same
-          # precedent as chain-canary.yml.
-          GATEWAY_URL: ${{ github.event.inputs.gateway_url || 'http://host.docker.internal:8090' }}
+          # The lane's address as the overlay declares it (LANE_GATEWAY_URL,
+          # from the resolve step), or an explicit dispatch override.
+          GATEWAY_URL_OVERRIDE: ${{ github.event.inputs.gateway_url }}
           BUDGET_SECONDS: ${{ github.event.inputs.budget_seconds || '240' }}
           RUNNER_IDENTITY: gha-${{ github.run_id }}-${{ github.run_attempt }}
           # The NAMES are what the probe is told; the VALUES reach it only
@@ -180,6 +187,8 @@ jobs:
           set -uo pipefail
           # NOT `set -e`: a non-zero probe is the verdict and must still write
           # its record before the job ends.
+          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_GATEWAY_URL:-}}"
+          echo "lane: ${LANE_NAME:-dispatch override}, gateway ${GATEWAY_URL}"
           uv run --frozen python scripts/ci/c16_receipt_identity_probe.py \
             --base-url "${GATEWAY_URL}" \
             --credential-env CHAIN_CANARY_GATEWAY_API_KEY \
