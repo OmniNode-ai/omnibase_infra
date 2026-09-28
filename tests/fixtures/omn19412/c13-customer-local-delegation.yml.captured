@@ -1,0 +1,437 @@
+# c13-customer-local-delegation.yml -- OMN-19179
+#
+# WHAT THIS IS
+#   The PRODUCER for beta criterion C13: "Customer-local delegation on a
+#   no-checkout machine: three files, local model named, zero provider calls".
+#   The job's EXIT CODE is the criterion's verdict (the C11 / C15 shape), and
+#   `tools/beta_board/beta_board_data.py` PROBES reads this file for C13.
+#
+# WHAT IS GRADED
+#   A customer installs the published packages and delegates to a model on
+#   their own machine, with no OmniNode checkout anywhere on it.
+#
+# THE MACHINE IS A FRESH CONTAINER, NOT A HOST (OMN-17427, operator RULINGs
+#   2026-09-28T01:58:06Z and 01:58:17Z: "it's a problem if checks are reliant on
+#   a specific machine", "chain of responders right?")
+#   The customer machine is a disposable container this job creates from a stock
+#   image pinned by digest and removes at the end. It is not the host its runner
+#   sits on, so this file names no host, scans no host filesystem and allow-lists
+#   no host path. The job runs on whichever runner of the deployment overlay's
+#   pool answers (runs-on is the repository variable
+#   CUSTOMER_MACHINE_RUNS_ON_JSON), with whichever container engine answers
+#   there (rootless podman first, then docker); none answering fails loudly.
+#
+# NO CLONE EVER LANDS ON THE MACHINE
+#   There is no actions/checkout. The one script the job needs is fetched by
+#   curl from omnibase_infra (public) at the commit pinned in PROBE_SHA and
+#   streamed into the customer machine on stdin. The machine proves itself clean
+#   before anything is installed (below); the last step removes it and proves
+#   none of this run's machines is left.
+#
+# THE CUSTOMER STEPS RUN IN A DISPOSABLE CONTAINER (OMN-19352, plan decision 19)
+#   Since OMN-19352 the install and the graded delegation run inside a FRESH
+#   container per run, from a stock ubuntu:24.04 image pinned by its multi-arch
+#   digest (python3, pipx and strace from the OS packages), as an
+#   unprivileged customer user. Nothing is bind-mounted: the customer steps and
+#   the probe arrive on stdin and the records leave as tagged base64 lines.
+#   Before anything OmniNode is installed the machine writes its clean record,
+#   onex=absent,tool_dir=absent,git_dirs=0,omni_home=unset, and anything else
+#   fails the job (C17's shape). That record is the clean-machine premise, and
+#   it holds by construction: nothing of the host is visible inside. --network
+#   host lets the machine reach the declared model server. These steps are
+#   byte-identical to the c13-in-container job of
+#   omnipc2-podman-producer-proof.yml, which proves them on a named pool host
+#   before they reach this producer.
+#
+# THE MODEL SERVER IS NOT OURS TO TOUCH
+#   Since OMN-19805 the model is the one the customer serves in their own
+#   private network. Since OMN-17427 it is resolved through the chain of
+#   responders: the repository variable CUSTOMER_LOCAL_MODEL_RESPONDERS lists
+#   http://<ipv4>:<port> bases, cheapest first, and the first that serves a
+#   model is the one graded (never a literal in this file). The
+#   probe accepts only loopback or a private address, and grades a connect to
+#   exactly that host and port as the model and any other non-loopback connect
+#   as external. The job never starts, stops or reconfigures the server. It
+#   reads the served id from /v1/models at proof time, and any served model
+#   counts. No responder answering, or no variable set, is a RED verdict naming
+#   every responder tried, never a skip: SKIP is not PASS.
+#
+# THE CUSTOMER CONFIGURES THE DOCUMENTED WAY, AND ONLY THAT WAY
+#   Since OMN-16200 (omnimarket 0.4.203) a clean install runs on its shipped
+#   routing and contract, and the customer declares their model in one file,
+#   ~/.omninode/delegation/bifrost_overrides.yaml. The probe writes only that
+#   file, after a negative control that runs with no file at all, and sets no
+#   environment binding. The trace needs no privilege: strace -f traces the
+#   customer's own children, which ptrace_scope 1 allows without sudo.
+
+name: C13 customer-local delegation (disposable customer machine)
+
+on:
+  schedule:
+    # Twice a day at :29.
+    - cron: '29 4,16 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: c13-customer-local
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # omnibase_infra commit whose scripts/ci/c13_customer_local_probe.py runs
+  # here (OMN-19805: the declared private-network model host).
+  PROBE_SHA: aed721ad8b0a5d77154c670878b85249bb3500cb  # pragma: allowlist secret
+  # The customer's model servers, cheapest first (OMN-19805, OMN-17427): a
+  # repository variable, never a literal. The job is RED when none answers.
+  MODEL_RESPONDERS: ${{ vars.CUSTOMER_LOCAL_MODEL_RESPONDERS }}
+
+jobs:
+  c13-customer-local:
+    name: C13 customer-local delegation (disposable customer machine)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ fromJSON(vars.CUSTOMER_MACHINE_RUNS_ON_JSON) }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Fetch the probe script at the pinned commit (no clone)
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/c13-probe"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/c13-probe/c13_customer_local_probe.py" \
+            "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/${PROBE_SHA}/scripts/ci/c13_customer_local_probe.py"
+
+      - name: Resolve the model server through the chain of responders
+        id: served
+        run: |
+          set -uo pipefail
+          # The customer's model server is whichever declared responder answers first,
+          # in the order declared (the delegation chain of responders, cheapest first).
+          # The ordered list is the deployment overlay's repository variable
+          # CUSTOMER_LOCAL_MODEL_RESPONDERS: http://<ipv4>:<port> bases separated by
+          # spaces or commas, never a literal here. An empty list, a malformed entry,
+          # or no responder serving a model is RED naming every responder tried, never
+          # a skip and never a default.
+          url_re='^http://([0-9]{1,3}(\.[0-9]{1,3}){3}):([0-9]{1,5})$'
+          IFS=', ' read -r -a responders <<< "${MODEL_RESPONDERS:-}"
+          if [ "${#responders[@]}" -eq 0 ]; then
+            echo "::error::no model responder is declared; set vars.CUSTOMER_LOCAL_MODEL_RESPONDERS"
+            exit 1
+          fi
+          for base in "${responders[@]}"; do
+            if [[ ! "${base}" =~ ${url_re} ]]; then
+              echo "::error::model responder '${base}' is not http://<ipv4>:<port>; fix vars.CUSTOMER_LOCAL_MODEL_RESPONDERS"
+              exit 1
+            fi
+          done
+          tried=()
+          for base in "${responders[@]}"; do
+            [[ "${base}" =~ ${url_re} ]]
+            host="${BASH_REMATCH[1]}"
+            port="${BASH_REMATCH[3]}"
+            if ! body="$(curl -sf --max-time 10 "${base}/v1/models")"; then
+              echo "responder ${base}: no answer"
+              tried+=("${base}:no-answer")
+              continue
+            fi
+            served="$(printf '%s' "${body}" | jq -r '.data[0].id // empty' 2>/dev/null || true)"
+            if [ -z "${served}" ]; then
+              echo "responder ${base}: answered with no served model id"
+              tried+=("${base}:no-model")
+              continue
+            fi
+            build="$(printf '%s' "${body}" | jq -r '.data[0].owned_by // "unknown"' 2>/dev/null || true)"
+            {
+              echo "MODEL_BASE=${base}"
+              echo "MODEL_HOST=${host}"
+              echo "MODEL_PORT=${port}"
+            } >> "${GITHUB_ENV}"
+            echo "id=${served}" >> "${GITHUB_OUTPUT}"
+            echo "build=${build:-unknown}" >> "${GITHUB_OUTPUT}"
+            echo "responder ${base} answered after ${#tried[@]} earlier: served model ${served}, build ${build:-unknown}"
+            echo "model responder: ${base} (${served}), after ${#tried[@]} earlier" >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          done
+          echo "::error::no declared model responder serves a model (${tried[*]}); that is RED, not a skip"
+          exit 1
+
+      - name: Write the disposable customer machine (fresh container, OMN-19351)
+        run: |
+          set -euo pipefail
+          d="${RUNNER_TEMP}/p21"
+          mkdir -p "${d}"
+          echo "P21_DIR=${d}" >> "${GITHUB_ENV}"
+          cat > "${d}/lib.sh" <<'P21_LIB_END'
+          # The runner-side half of the disposable customer machine (OMN-19351, OMN-17427).
+          # The customer machine IS a fresh container, made per run from a stock image
+          # pinned by its multi-arch index digest and removed at the end, the way C17 does
+          # on the fleet (omninode_infra#1637). It is not the host the runner sits on, so
+          # no host is named, scanned or allow-listed anywhere here: whichever runner in the
+          # overlay's pool (vars.CUSTOMER_MACHINE_RUNS_ON_JSON) takes the job starts it with
+          # whichever container engine answers there. Nothing is bind-mounted, the
+          # in-container script arrives on stdin, and results come back as tagged base64
+          # lines on stdout, so the engine may be local or a daemon behind a socket.
+          # --network host: the container reaches the declared model server and the
+          # resolver the runner's host uses, so no grader changes. The clean-machine
+          # guarantee is the image filesystem, recorded inside the machine before anything
+          # is installed.
+          P21_IMAGE='docker.io/library/ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3'
+          P21_CLEAN='onex=absent,tool_dir=absent,git_dirs=0,omni_home=unset'
+          # The engine is whatever answers on this runner, podman (rootless) first, then
+          # docker. None answering is a loud failure: this runner cannot host the machine.
+          p21_engine() {
+            case "${P21_ENGINE:-}" in
+              podman) podman --cgroup-manager=cgroupfs --events-backend=file "$@" ;;
+              docker) docker "$@" ;;
+              *) echo "::error::no container engine resolved (P21_ENGINE='${P21_ENGINE:-}')"; return 1 ;;
+            esac
+          }
+          p21_resolve_engine() {
+            local e
+            for e in podman docker; do
+              command -v "$e" >/dev/null 2>&1 || continue
+              if P21_ENGINE="$e" p21_engine info >/dev/null 2>&1; then
+                P21_ENGINE="$e"
+                echo "P21_ENGINE=${e}" >> "${GITHUB_ENV}"
+                echo "customer machine engine: ${e}, runner ${RUNNER_NAME:-unknown}"
+                echo "customer machine: fresh ${e} container on runner ${RUNNER_NAME:-unknown}" >> "${GITHUB_STEP_SUMMARY}"
+                return 0
+              fi
+            done
+            echo "::error::no container engine (podman or docker) answers on runner ${RUNNER_NAME:-unknown};" \
+                 "it cannot host the disposable customer machine"
+            return 1
+          }
+          # This job's machines only: the engine may be shared with other jobs, including
+          # the other jobs of this same run, so the name carries run, attempt and job id.
+          p21_suffix() { printf '%s-%s-%s' "${GITHUB_RUN_ID:-local}" "${GITHUB_RUN_ATTEMPT:-0}" "${GITHUB_JOB:-job}"; }
+          p21_mine() { p21_engine ps -aq --filter "name=^p21-.*-$(p21_suffix)\$" 2>/dev/null; }
+          # Nothing is ever bind-mounted into the machine: refuse any argument list that would.
+          p21_assert_no_mounts() {
+            local a
+            for a in "$@"; do
+              case "$a" in
+                -v|-v*|--volume|--volume=*|--mount|--mount=*|--volumes-from|--volumes-from=*)
+                  echo "::error::container argument list carries a mount flag: $a"; return 1 ;;
+              esac
+            done
+          }
+          p21_pull() {
+            local i
+            for i in 1 2 3; do p21_engine pull --quiet "$P21_IMAGE" >/dev/null && return 0; sleep 20; done
+            echo "::error::could not pull $P21_IMAGE after 3 attempts"; return 1
+          }
+          # p21_assemble <out> <probe.py> <customer-stage.sh> [VAR=value ...]
+          p21_assemble() {
+            local out=$1 probe=$2 stage=$3; shift 3
+            if grep -q 'P21_PROBE_SOURCE_END\|P21_CUSTOMER_END' "$probe" "$stage"; then
+              echo "::error::a heredoc delimiter occurs inside the streamed source"; return 1
+            fi
+            {
+              cat "${P21_DIR}/prologue.sh"
+              echo "cat > /tmp/p21-probe.py <<'P21_PROBE_SOURCE_END'"
+              cat "$probe"
+              echo "P21_PROBE_SOURCE_END"
+              echo "cat > /tmp/p21-customer.sh <<'P21_CUSTOMER_END'"
+              local kv
+              for kv in "$@"; do printf '%s=%q\n' "${kv%%=*}" "${kv#*=}"; done
+              cat "$stage"
+              echo "P21_CUSTOMER_END"
+              cat "${P21_DIR}/epilogue.sh"
+            } > "$out"
+          }
+          # p21_run <tag> <script> [extra podman run args...]; writes files into the cwd,
+          # prints the clean record, and returns the probe's own exit status.
+          p21_run() {
+            local tag=$1 script=$2; shift 2
+            local args=(run --rm -i --network host --pull never
+                        --name "p21-${tag}-$(p21_suffix)" "$@" "$P21_IMAGE" bash -s)
+            p21_assert_no_mounts "${args[@]}" || return 1
+            local out="${RUNNER_TEMP}/p21-${tag}.out"
+            p21_engine "${args[@]}" < "$script" > "$out"
+            local prc=$? clean="" rc="" line rest name
+            echo "${P21_ENGINE} exit status: ${prc}"
+            while IFS= read -r line; do
+              case "$line" in
+                P21:clean:*) clean="${line#P21:clean:}" ;;
+                P21:probe_rc:*) rc="${line#P21:probe_rc:}" ;;
+                P21:prereq_failed:*)
+                  echo "::error::installing OS packages in the container failed:"
+                  printf '%s' "${line#P21:prereq_failed:}" | base64 -d ;;
+                P21:file:*)
+                  rest="${line#P21:file:}"; name="${rest%%:*}"
+                  case "$name" in *[!A-Za-z0-9._-]*|'') echo "::error::bad file name from the container: $name"; return 1 ;; esac
+                  printf '%s' "${rest#*:}" | base64 -d > "$name" ;;
+              esac
+            done < "$out"
+            echo "clean record (inside the container, before install): ${clean:-<none>}"
+            printf '%s\n' "${clean}" > "${tag}-clean-record.txt"
+            if [ "$clean" != "$P21_CLEAN" ]; then
+              echo "::error::the container was not a clean machine before install: '${clean}' (expected '${P21_CLEAN}')"
+              return 1
+            fi
+            if [ -z "$rc" ]; then echo "::error::the container reported no probe status (${P21_ENGINE} exit ${prc})"; return 1; fi
+            return "$rc"
+          }
+          # Remove every customer machine this run made, and prove none is left. Only this
+          # run's containers are touched: never a reset or prune of an engine other jobs use.
+          # The pinned stock image stays in the engine's cache; it holds nothing of ours.
+          p21_teardown() {
+            local left=0 ids
+            ids="$(p21_mine)"
+            if [ -n "$ids" ]; then
+              echo "::warning::removing customer machine(s) that outlived their run: ${ids//$'\n'/ }"
+              # shellcheck disable=SC2086
+              p21_engine rm -f $ids >/dev/null 2>&1 || true
+            fi
+            local i
+            for i in 1 2 3 4 5 6 7 8 9 10; do [ -z "$(p21_mine)" ] && break; sleep 1; done
+            if [ -n "$(p21_mine)" ]; then echo "::error::a customer machine survived removal"; left=1; fi
+            return "$left"
+          }
+          P21_LIB_END
+          cat > "${d}/prologue.sh" <<'P21_PROLOGUE_END'
+          # ---- runs as the container's own root (a user-namespace root: host uid 1001) ----
+          set -u
+          # Tagged result lines go to the saved stdout (fd 3); everything else is log.
+          exec 3>&1 1>&2
+          emit() { printf 'P21:%s:%s\n' "$1" "$2" >&3; }
+          emit_file() { if [ -s "$2" ]; then emit "file:$1" "$(base64 -w0 < "$2")"; fi; }
+          export DEBIAN_FRONTEND=noninteractive
+          # OS packages only: the same interpreter, pipx and tracer the bare host carried.
+          # The Ubuntu mirrors behind one hostname are not always in sync: an index fetched
+          # from one backend can name a .deb that another backend answers 404 for (proof run
+          # 36031383450, security.ubuntu.com, 2026-09-24). A fresh update and install on new
+          # connections clears it, so try up to four times, then fail closed exactly as before.
+          p21_apt_ok=0
+          for p21_try in 1 2 3 4; do
+            if { apt-get -o Acquire::Retries=5 update -qq \
+                 && apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends \
+                      python3 python3-venv pipx strace curl ca-certificates; } >> /tmp/p21-apt.log 2>&1; then
+              p21_apt_ok=1
+              break
+            fi
+            echo "apt attempt ${p21_try} of 4 failed" >> /tmp/p21-apt.log
+            [ "$p21_try" -lt 4 ] && sleep $((p21_try * 20))
+          done
+          if [ "$p21_apt_ok" != 1 ]; then
+            emit prereq_failed "$(tail -c 3000 /tmp/p21-apt.log | base64 -w0)"
+            exit 0
+          fi
+          [ "$p21_try" -gt 1 ] && echo "apt: packages installed on attempt ${p21_try} of 4"
+          useradd -m -s /bin/bash customer
+          # The clean record, taken inside the machine before anything OmniNode is installed
+          # (C17's shape): no onex for the customer, no pipx tool home, no .git anywhere, no OMNI_HOME.
+          onex_seen=absent
+          runuser -u customer -- bash -c 'command -v onex' >/dev/null 2>&1 && onex_seen=present
+          # pipx is only LOOKED for here, never run: any pipx invocation creates its own home.
+          tools_seen=absent
+          for d in /home/customer/.local/pipx /home/customer/.local/share/pipx /home/customer/.local/bin \
+                   /root/.local/pipx /root/.local/share/pipx /opt/pipx; do
+            [ -e "$d" ] && tools_seen=present
+          done
+          git_dirs=$(find / -xdev -name .git 2>/dev/null | wc -l)
+          emit clean "onex=$onex_seen,tool_dir=$tools_seen,git_dirs=$git_dirs,omni_home=${OMNI_HOME:-unset}"
+          P21_PROLOGUE_END
+          cat > "${d}/epilogue.sh" <<'P21_EPILOGUE_END'
+          chmod 0644 /tmp/p21-probe.py /tmp/p21-customer.sh
+          # The customer's environment holds nothing from the job: only PATH, LANG and,
+          # for C29 alone, the one key variable the probe pops before spawning anything.
+          for v in $(compgen -e); do case "$v" in PATH|C29_PROVIDER_KEY) ;; *) unset "$v" ;; esac; done
+          export LANG=C.UTF-8
+          runuser -u customer -- /bin/bash /tmp/p21-customer.sh
+          rc=$?
+          emit probe_rc "$rc"
+          for f in /tmp/p21-out/*; do [ -f "$f" ] && emit_file "$(basename "$f")" "$f"; done
+          exit 0
+          P21_EPILOGUE_END
+          cat > "${d}/customer.sh" <<'P21_STAGE_END'
+          set -u
+          mkdir -p /tmp/p21-out
+          root="$(mktemp -d /tmp/c13-customer.XXXXXX)"
+          customer_home="${root}/home"
+          mkdir -p "${customer_home}"
+          customer_pipx() {
+            env -i HOME="${customer_home}" PATH=/usr/local/bin:/usr/bin:/bin \
+              PIPX_HOME="${customer_home}/.local/pipx" PIPX_BIN_DIR="${customer_home}/.local/bin" \
+              /usr/bin/pipx "$@"
+          }
+          customer_pipx install --python /usr/bin/python3 omnibase-core || exit 3
+          customer_pipx inject omnibase-core omnibase-infra omnimarket || exit 3
+          test -x "${customer_home}/.local/bin/onex" || exit 3
+          cd /tmp/p21-out || exit 3
+          python3 /tmp/p21-probe.py run \
+            --customer-home "${root}/home" \
+            --customer-bin "${root}/home/.local/bin" \
+            --workdir "${root}/work" \
+            --trace-dir "${root}/traces" \
+            --model-port "${MODEL_PORT}" \
+            --model-host "${MODEL_HOST}" \
+            --served-model "${SERVED_MODEL}" \
+            --server-build "${SERVER_BUILD}" \
+            --observations-out c13-observations.json \
+            --record c13-customer-local.json \
+            --summary /tmp/p21-out/summary.md
+          P21_STAGE_END
+          . "${d}/lib.sh"
+          p21_resolve_engine
+          # An earlier attempt of this run could have left a machine behind.
+          p21_teardown
+          p21_pull
+
+      - name: Drive one customer delegation and grade it
+        env:
+          SERVED_MODEL: ${{ steps.served.outputs.id }}
+          SERVER_BUILD: ${{ steps.served.outputs.build }}
+        run: |
+          set +e
+          set -uo pipefail
+          # NOT `set -e`: a non-zero probe is the verdict and must still write
+          # its record before the job ends.
+          . "${P21_DIR}/lib.sh"
+          p21_assemble "${P21_DIR}/container.sh" "${RUNNER_TEMP}/c13-probe/c13_customer_local_probe.py" "${P21_DIR}/customer.sh" \
+            SERVED_MODEL="${SERVED_MODEL}" MODEL_HOST="${MODEL_HOST}" MODEL_PORT="${MODEL_PORT}" \
+            SERVER_BUILD="${SERVER_BUILD}" || exit 1
+          p21_run c13 "${P21_DIR}/container.sh"
+          status=$?
+          if [ -f summary.md ]; then cat summary.md >> "${GITHUB_STEP_SUMMARY}"; rm -f summary.md; fi
+          echo "clean record: $(cat c13-clean-record.txt 2>/dev/null)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "probe exit status: ${status}"
+          exit "${status}"
+
+      - name: Delete the customer root and prove nothing is left behind
+        if: always()
+        run: |
+          set +e
+          set -uo pipefail
+          left=0
+          if [ -n "${P21_DIR:-}" ] && [ -f "${P21_DIR}/lib.sh" ]; then
+            . "${P21_DIR}/lib.sh"
+            p21_teardown || left=1
+          else
+            echo "no customer machine was written, so none was started"
+          fi
+          if command -v onex >/dev/null 2>&1; then echo "::error::onex is on PATH after the run"; left=1; fi
+          if [ -d "${HOME}/.local/pipx" ]; then echo "::error::a pipx home was left in the runner HOME"; left=1; fi
+          echo "left behind: ${left}"
+          exit "${left}"
+
+      - name: Assert the C13 record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s c13-customer-local.json
+          jq -e '.verdict' c13-customer-local.json
+
+      - name: Upload the C13 record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c13-customer-local
+          path: |
+            c13-customer-local.json
+            c13-observations.json
+            c13-clean-record.txt
+          if-no-files-found: error
+          retention-days: 30
