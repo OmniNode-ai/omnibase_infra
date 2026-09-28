@@ -477,6 +477,19 @@ def test_dev_lane_renders_the_standalone_projection_writers() -> None:
             "subscribes this projection's topics, commits every offset, and "
             "writes nothing (OMN-17448)"
         )
+    for name in (
+        "projection-delegation-writer",
+        "projection-savings-writer",
+        "projection-tenant-credentials-writer",
+    ):
+        writer_env = services[name]["environment"]
+        assert writer_env["ONEX_DATABASE_TOPOLOGY_PROFILE"] == "local", name
+        assert writer_env["ONEX_TENANT_DB_URL"].startswith(
+            "postgresql://tenant_projection_writer:"
+        ), name
+        assert writer_env["OMNINODE_INTERNAL_DB_URL"].startswith(
+            "postgresql://omninode_runtime:"
+        ), name
 
 
 @pytest.mark.integration

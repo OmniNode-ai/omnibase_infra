@@ -84,26 +84,10 @@ x-stability-test-lane-identity-env: &stability_test_lane_identity_env
 # docker-compose.infra.yml. Same values, declared locally -- the same reason
 # docker-compose.dev-lane.yml carries its own pair.
 #
-# ONE DATABASE VARIABLE, AND IT IS THE ONE THIS LANE ALREADY HAS
-# --------------------------------------------------------------
-# `BaseProjectionRunner` resolves its DSN through
-# `ModelProjectionRuntimeBinding.from_legacy_settings()`, which prefers
-# `OMNIDASH_ANALYTICS_DB_URL`. It is never handed the topology-resolved binding:
-# `bind_projection_database_url()` is called only on the in-process dispatch
-# path, and by construction the runtime does not dispatch these. So one variable
-# is the entire credential -- no topology binding, no secret-resolver config.
-#
-# The value is byte-identical to the form this lane already inherits from
-# docker-compose.infra.yml, and it keeps the `${POSTGRES_USER` identity that
-# OMN-15363's `test_no_other_lane_is_repointed` requires of every non-dev
-# overlay. The DEV lane spells the same variable with `ROLE_OMNIDASH_PASSWORD`
-# instead -- its own non-BYPASSRLS application-role identity, deliberately
-# scoped to the one overlay that repoints it and named nowhere else, this file
-# included. That variable does not exist on this lane and introducing it here
-# would be a NEW credential variable on top of repointing a lane this ticket
-# holds no grant for. OMN-17556 is moving this entire surface to a typed
-# `secret_ref` resolved from the store; these services adopt whatever it lands,
-# and until then they must not add a variable it would have to remove.
+# The unsplit writers retain this lane's legacy analytics DSN. The three
+# OMN-17454 split writers additionally receive the two principal-specific
+# carriers below. Both passwords are already required by the base runtime env;
+# an unset value fails Compose rendering, before a consumer starts.
 x-stability-test-logging: &stability_test_logging
   driver: json-file
   options:
@@ -111,6 +95,10 @@ x-stability-test-logging: &stability_test_logging
     max-file: "3"
 x-stability-test-analytics-env: &stability_test_analytics_env
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+x-stability-test-tenant-projection-env: &stability_test_tenant_projection_env
+  ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set for the stability-test tenant projection binding}@postgres:5432/omnidash_analytics"
+x-stability-test-internal-projection-env: &stability_test_internal_projection_env
+  OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set for the stability-test internal projection binding}@postgres:5432/omnidash_analytics"
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -674,7 +662,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_delegation.handlers.handler_delegation
     environment:
-      !!merge <<: *stability_test_analytics_env
+      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env]
+      ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.delegation-writer.consume.v1"
@@ -780,7 +769,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_savings.handlers.handler_savings
     environment:
-      !!merge <<: *stability_test_analytics_env
+      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env]
+      ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.savings-writer.consume.v1"
@@ -833,7 +823,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_tenant_credentials.handlers.handler_tenant_credentials_projection
     environment:
-      !!merge <<: *stability_test_analytics_env
+      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env]
+      ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.tenant-credentials-writer.consume.v1"
