@@ -124,6 +124,7 @@ class ExecutionGraphReadCommandExecutor:
             )
             _LOGGER.info("execution graph ownership refused: %s", reason)
             terminal = ModelExecutionGraphTerminalResult(
+                workflow_id=authority.workflow_id,
                 tenant_id=authority.tenant_id,
                 correlation_id=authority.correlation_id,
                 workflow_type=self._workflow_type,
@@ -162,7 +163,8 @@ class ExecutionGraphReadCommandExecutor:
         if type(terminal) is not ModelExecutionGraphTerminalResult:
             raise TypeError("Execution graph fold must return a typed terminal result")
         if (
-            terminal.tenant_id != authority.tenant_id
+            terminal.workflow_id != authority.workflow_id
+            or terminal.tenant_id != authority.tenant_id
             or terminal.correlation_id != authority.correlation_id
             or terminal.workflow_type != self._workflow_type
         ):

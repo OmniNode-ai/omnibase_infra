@@ -10,7 +10,7 @@ These tests verify that the ledger's idempotent write behavior works correctly:
 - Different offsets create separate entries
 
 Idempotency Key: (topic, partition, kafka_offset)
-Implementation: INSERT ... ON CONFLICT DO NOTHING RETURNING
+Implementation: transactional per-partition watermark allocator
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ class TestLedgerAppendIdempotency:
         assert result.duplicate is False
         assert result.ledger_entry_id is not None
         assert isinstance(result.ledger_entry_id, UUID)
+        assert result.ingest_watermark is not None
         assert result.topic == sample_ledger_payload.topic
         assert result.partition == sample_ledger_payload.partition
         assert result.kafka_offset == sample_ledger_payload.kafka_offset
@@ -83,7 +84,8 @@ class TestLedgerAppendIdempotency:
         result2 = await ledger_append_handler.append(payload)
         assert result2.success is True
         assert result2.duplicate is True
-        assert result2.ledger_entry_id is None  # No new entry created
+        assert result2.ledger_entry_id == result1.ledger_entry_id
+        assert result2.ingest_watermark == result1.ingest_watermark
 
     @pytest.mark.asyncio
     async def test_duplicate_append_does_not_create_second_row(

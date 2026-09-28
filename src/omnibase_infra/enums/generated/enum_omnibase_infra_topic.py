@@ -25,6 +25,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_CODING_AGENT_INVOKE_V1 = "onex.cmd.omnibase-infra.coding-agent-invoke.v1"  # onex.cmd.omnibase-infra.coding-agent-invoke.v1
     CMD_CODING_AGENT_WORKSPACE_VALIDATE_V1 = "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"  # onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
+    CMD_DELEGATION_EXECUTION_GRAPH_REQUESTED_V1 = "onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1"  # onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1
     CMD_DELEGATION_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-request.v1"  # onex.cmd.omnibase-infra.delegation-request.v1
     CMD_DELEGATION_ROUTING_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-routing-request.v1"  # onex.cmd.omnibase-infra.delegation-routing-request.v1
     CMD_FAULT_INJECT_FIXTURE_V1 = "onex.cmd.omnibase-infra.fault-inject-fixture.v1"  # onex.cmd.omnibase-infra.fault-inject-fixture.v1
@@ -73,6 +74,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_CODING_AGENT_WORKSPACE_VALIDATED_V1 = "onex.evt.omnibase-infra.coding-agent-workspace-validated.v1"  # onex.evt.omnibase-infra.coding-agent-workspace-validated.v1
     EVT_CONSUMER_HEALTH_V1 = "onex.evt.omnibase-infra.consumer-health.v1"  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
+    EVT_DELEGATION_EXECUTION_GRAPH_READ_TERMINAL_V1 = "onex.evt.omnibase-infra.delegation-execution-graph-read-terminal.v1"  # onex.evt.omnibase-infra.delegation-execution-graph-read-terminal.v1
     EVT_EVENT_FORWARDED_V1 = "onex.evt.omnibase-infra.event-forwarded.v1"  # onex.evt.omnibase-infra.event-forwarded.v1
     EVT_FAULT_INJECT_FIXTURE_COMPLETED_V1 = "onex.evt.omnibase-infra.fault-inject-fixture-completed.v1"  # onex.evt.omnibase-infra.fault-inject-fixture-completed.v1
     EVT_GATEWAY_HEARTBEAT_V1 = "onex.evt.omnibase-infra.gateway-heartbeat.v1"  # onex.evt.omnibase-infra.gateway-heartbeat.v1

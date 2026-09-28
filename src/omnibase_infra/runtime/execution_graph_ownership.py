@@ -12,6 +12,9 @@ from uuid import UUID
 from omnibase_core.models.execution_graph_replay.model_enum_execution_graph_replay import (
     EnumExecutionGraphRefusalReason,
 )
+from omnibase_core.models.execution_graph_replay.model_execution_graph_source_cursor import (
+    ModelExecutionGraphSourceCursor,
+)
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     DelegationOwnerProof,
     ExecutionGraphCurrentEvidence,
@@ -39,6 +42,7 @@ class ExecutionGraphOwnershipAdmission:
     withheld_envelope_ids: tuple[UUID, ...]
     withheld_count: int
     admitted_verdict_rows: tuple[ExecutionGraphLedgerRecord, ...] = ()
+    withheld_rows: tuple[ExecutionGraphLedgerRecord, ...] = ()
 
 
 def _refuse(reason: EnumExecutionGraphRefusalReason, detail: str) -> NoReturn:
@@ -188,8 +192,11 @@ def admit_current_ownership(
                 owned_ids.add(row.envelope_id)
                 changed = True
 
+    # Ownership is current, but delivery selection belongs to the bounded fold.
+    # Dropping an older delivery here would let a late lower Kafka offset replace
+    # evidence that was present at an earlier ingest watermark.
     owned_rows = tuple(
-        row for envelope_id, row in distinct.items() if envelope_id in owned_ids
+        row for row in evidence.ledger_rows if row.envelope_id in owned_ids
     )
     withheld_envelope_ids = tuple(
         envelope_id for envelope_id in distinct if envelope_id not in owned_ids
@@ -199,10 +206,76 @@ def admit_current_ownership(
         head_envelope_id=head.envelope_id,
         owned_rows=owned_rows,
         owned_envelope_ids=tuple(
-            row.envelope_id for row in owned_rows if row.envelope_id
+            envelope_id for envelope_id in distinct if envelope_id in owned_ids
         ),
         withheld_envelope_ids=withheld_envelope_ids,
         withheld_count=unknown_id_count + len(withheld_envelope_ids),
+        withheld_rows=tuple(
+            row for row in evidence.ledger_rows if row.envelope_id not in owned_ids
+        ),
+    )
+
+
+def bound_replay_ownership(
+    admission: ExecutionGraphOwnershipAdmission,
+    cursors: tuple[ModelExecutionGraphSourceCursor, ...],
+) -> ExecutionGraphOwnershipAdmission:
+    """Restrict admitted rows and ownership evidence to an immutable replay window.
+
+    Full-current authorization must already have passed. A later parent can
+    establish current reachability, but cannot expose a formerly withheld node
+    at an earlier bound. Withheld counts obey the same boundary as drawn nodes.
+    """
+    bounds = {
+        (cursor.topic, cursor.partition): cursor.max_ingest_watermark
+        for cursor in cursors
+    }
+    selected: list[ExecutionGraphLedgerRecord] = []
+    for row in (*admission.owned_rows, *admission.withheld_rows):
+        bound = bounds.get((row.topic, row.partition))
+        if bound is None:
+            continue
+        if row.ingest_watermark is None:
+            raise ValueError("replay ownership evidence lacks an ingest watermark")
+        if row.ingest_watermark <= bound:
+            selected.append(row)
+
+    current_owned = set(admission.owned_envelope_ids)
+    reachable = {
+        row.envelope_id
+        for row in selected
+        if row.envelope_id == admission.head_envelope_id
+    }
+    changed = True
+    while changed:
+        changed = False
+        for row in selected:
+            if row.envelope_id in reachable or row.envelope_id not in current_owned:
+                continue
+            if _parent_id(row) in reachable:
+                reachable.add(row.envelope_id)
+                changed = True
+    owned_ids = reachable.union(
+        row.envelope_id
+        for row in selected
+        if row.envelope_id in current_owned
+        and _recorded_tenant(row) == admission.owner.tenant_id
+    )
+    owned_rows = tuple(row for row in selected if row.envelope_id in owned_ids)
+    withheld_rows = tuple(row for row in selected if row.envelope_id not in owned_ids)
+    withheld_ids = tuple(
+        dict.fromkeys(row.envelope_id for row in withheld_rows if row.envelope_id)
+    )
+    return replace(
+        admission,
+        owned_rows=owned_rows,
+        owned_envelope_ids=tuple(
+            dict.fromkeys(row.envelope_id for row in owned_rows if row.envelope_id)
+        ),
+        withheld_rows=withheld_rows,
+        withheld_envelope_ids=withheld_ids,
+        withheld_count=len(withheld_ids)
+        + sum(row.envelope_id is None for row in withheld_rows),
     )
 
 
@@ -252,5 +325,6 @@ __all__ = [
     "ExecutionGraphOwnershipAdmission",
     "ExecutionGraphOwnershipRefusalError",
     "admit_current_ownership",
+    "bound_replay_ownership",
     "admit_verdict_candidates",
 ]

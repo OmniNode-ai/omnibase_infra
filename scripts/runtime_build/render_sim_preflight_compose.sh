@@ -19,13 +19,32 @@ fi
 
 export COMPOSE_PROJECT_NAME="${PROJECT}"
 cd "${ROOT}"
+compose_files=(
+  -f "${ROOT}/docker/docker-compose.dogfood.yml"
+  -f "${ROOT}/docker/docker-compose.sim-202.yml"
+  -f "${ROOT}/docker/docker-compose.sim-preflight.yml"
+)
+case "${SIM_PREFLIGHT_GRAPH_OVERLAY:-false}" in
+  true)
+    for name in SIM_PREFLIGHT_GRAPH_RUNTIME_CONFIG_FILE SIM_PREFLIGHT_GRAPH_GATEWAY_KEYMAP_FILE SIM_PREFLIGHT_GRAPH_TERMINAL_PRIVATE_KEY_FILE; do
+      if [[ -z "${!name:-}" || "${!name}" != /* || ! -f "${!name}" ]]; then
+        echo "${name} must name an existing absolute regular file" >&2
+        exit 64
+      fi
+    done
+    compose_files+=(-f "${ROOT}/docker/docker-compose.sim-preflight-graph.yml")
+    ;;
+  false) ;;
+  *)
+    echo "SIM_PREFLIGHT_GRAPH_OVERLAY must be true or false" >&2
+    exit 64
+    ;;
+esac
 if summary="$(docker compose -p "${PROJECT}" \
   --env-file /dev/null \
-  -f "${ROOT}/docker/docker-compose.dogfood.yml" \
-  -f "${ROOT}/docker/docker-compose.sim-202.yml" \
-  -f "${ROOT}/docker/docker-compose.sim-preflight.yml" \
+  "${compose_files[@]}" \
   --profile dogfood config --format json 2>/dev/null | \
-  uv run --project "${ROOT}" python \
+  uv run --no-sync --project "${ROOT}" python \
     "${ROOT}/scripts/runtime_build/summarize_sim_preflight_compose.py" 2>/dev/null)"; then
   printf '%s\n' "${summary}"
 else

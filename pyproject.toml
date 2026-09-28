@@ -657,6 +657,7 @@ node_dlq_depth_evaluate_compute = "omnibase_infra.nodes.node_dlq_depth_evaluate_
 node_dlq_depth_monitor_effect = "omnibase_infra.nodes.node_dlq_depth_monitor_effect"
 node_dlq_replay_effect = "omnibase_infra.nodes.node_dlq_replay_effect"
 node_emit_daemon_runtime = "omnibase_infra.nodes.node_emit_daemon_runtime"
+node_execution_graph_read_effect = "omnibase_infra.nodes.node_execution_graph_read_effect"
 node_event_bus_wiring_effect = "omnibase_infra.nodes.node_event_bus_wiring_effect"
 node_event_forward_effect = "omnibase_infra.nodes.node_event_forward_effect"
 node_evidence_autoclose_sweep_effect = "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect"

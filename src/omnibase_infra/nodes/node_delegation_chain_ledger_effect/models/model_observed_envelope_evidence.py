@@ -23,6 +23,7 @@ class ModelObservedEnvelopeEvidence(BaseModel):
     observed_index: int = Field(ge=0)
     partition: int = Field(ge=0)
     kafka_offset: int = Field(ge=0)
+    ingest_watermark: int | None = Field(default=None, ge=1)
     event_timestamp: datetime | None = None
     ledger_written_at: datetime | None = None
 

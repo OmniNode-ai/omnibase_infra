@@ -31,13 +31,7 @@ def select_bounded_evidence(
     evidence: Iterable[ModelObservedEnvelopeEvidence],
     cursors: Iterable[ModelExecutionGraphSourceCursor],
 ) -> tuple[ModelObservedEnvelopeEvidence, ...]:
-    """Select rows at explicit Kafka offset bounds for each partition.
-
-    A missing cursor contributes no evidence. This selection is deterministic
-    for a supplied evidence set but is not append-invariant: the Phase 0
-    report proved a lower offset can arrive after a higher one. The watermark
-    follow-up ticket owns the stronger cursor contract.
-    """
+    """Select rows at writer-assigned ingest bounds for each partition."""
     bounds: dict[tuple[str, int], ModelExecutionGraphSourceCursor] = {}
     for cursor in cursors:
         key = (cursor.topic, cursor.partition)
@@ -50,7 +44,9 @@ def select_bounded_evidence(
         bound = bounds.get((item.topic, item.partition))
         if bound is None:
             continue
-        if item.kafka_offset <= bound.max_kafka_offset:
+        if item.ingest_watermark is None:
+            raise ValueError("bounded evidence lacks an ingest watermark")
+        if item.ingest_watermark <= bound.max_ingest_watermark:
             selected.append(item)
     return tuple(selected)
 

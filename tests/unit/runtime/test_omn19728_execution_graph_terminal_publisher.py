@@ -37,7 +37,7 @@ _GATEWAY_SCOPE = TrustedGatewaySignerScope(
     runtime_id="trusted-gateway", realm="test", bus_id="gateway-bus"
 )
 _CONFIG = ModelExecutionGraphTerminalPublisherConfig(
-    terminal_topic="onex.evt.omnibase-infra.delegation-execution-graph-completed.v1",
+    terminal_topic="onex.evt.omnibase-infra.delegation-execution-graph-read-terminal.v1",
     runtime_id="infra-runtime",
     realm="test",
     bus_id="infra-bus",
@@ -53,6 +53,7 @@ def _authority() -> VerifiedExecutionGraphReadAuthority:
         tenant_id=str(tenant_id),
         correlation_id=correlation_id,
         event_type="delegation-execution-graph-requested",
+        metadata={"tags": {"workflow_id": str(uuid4())}},
         payload={"correlation_id": str(correlation_id), "cursor_mode": "latest"},
     ).model_dump(mode="json")
     signed = ModelMessageEnvelope[dict[str, object]].create_signed(
@@ -75,6 +76,7 @@ def _terminal(
     authority: VerifiedExecutionGraphReadAuthority,
 ) -> ModelExecutionGraphTerminalResult:
     return ModelExecutionGraphTerminalResult(
+        workflow_id=authority.workflow_id,
         tenant_id=authority.tenant_id,
         correlation_id=authority.correlation_id,
         workflow_type=_CONFIG.workflow_type,
@@ -107,6 +109,7 @@ async def test_terminal_is_signed_on_configured_topic_with_exact_identity() -> N
     assert topic == _CONFIG.terminal_topic
     assert envelope.trace_id == authority.correlation_id
     assert envelope.tenant_id == str(authority.tenant_id)
+    assert envelope.payload["workflow_id"] == str(authority.workflow_id)
     assert envelope.payload == _terminal(authority).model_dump(mode="json")
     assert envelope.verify_signature(
         InMemoryKeyProvider({_CONFIG.runtime_id: keys.public_key_bytes})
@@ -129,6 +132,28 @@ async def test_foreign_terminal_is_refused_before_any_publish() -> None:
         publish=transport,
     )
     foreign = _terminal(authority).model_copy(update={"tenant_id": uuid4()})
+
+    with pytest.raises(ExecutionGraphTerminalPublisherError, match="conflicts"):
+        await publisher.publish(authority, foreign)
+    assert calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foreign_workflow_terminal_is_refused_before_publish() -> None:
+    authority = _authority()
+    calls: list[str] = []
+    keys = generate_keypair()
+
+    async def transport(*_args: object) -> None:
+        calls.append("publish")
+
+    publisher = ExecutionGraphTerminalPublisher(
+        config=_CONFIG,
+        private_key=Ed25519PrivateKey.from_private_bytes(keys.private_key_bytes),
+        publish=transport,
+    )
+    foreign = _terminal(authority).model_copy(update={"workflow_id": uuid4()})
 
     with pytest.raises(ExecutionGraphTerminalPublisherError, match="conflicts"):
         await publisher.publish(authority, foreign)

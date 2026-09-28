@@ -57,6 +57,11 @@ services:
     ports: !override ["127.0.0.1:65379:6379"]
   forward-migration:
     container_name: omnibase-infra-sim-preflight-forward-migration
+    environment:
+      # This is a distinct disposable-only governed release, not the shared
+      # `dev` lane. The runner admits only the 0037 migration named by the
+      # checked profile; all other fenced migrations remain blocked.
+      ONEX_MIGRATION_LANE: sim-preflight
   migration-gate:
     container_name: omnibase-infra-sim-preflight-migration-gate
   intelligence-migration:
@@ -66,6 +71,7 @@ services:
     environment:
       !!merge <<: *sim-preflight-ambient-credentials
       ONEX_BOX_ID: sim-preflight
+      ONEX_RUNTIME_LANE: sim-202
       ONEX_RUNTIME_ADDRESS: runtime://sim-preflight/main
     ports: !override ["127.0.0.1:65085:8085"]
     labels: !override
@@ -76,6 +82,7 @@ services:
     environment:
       !!merge <<: *sim-preflight-ambient-credentials
       ONEX_BOX_ID: sim-preflight
+      ONEX_RUNTIME_LANE: sim-202
       ONEX_RUNTIME_ADDRESS: runtime://sim-preflight/effects
     ports: !override ["127.0.0.1:65086:8085"]
     labels: !override
@@ -86,6 +93,7 @@ services:
     environment:
       !!merge <<: *sim-preflight-ambient-credentials
       ONEX_BOX_ID: sim-preflight
+      ONEX_RUNTIME_LANE: sim-202
     ports: !override ["127.0.0.1:65002:3002"]
     labels: !override
       - com.omninode.lane=sim-preflight

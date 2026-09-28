@@ -5,12 +5,6 @@
 from __future__ import annotations
 
 from omnibase_core.models.execution_graph_replay import (
-    EnumExecutionGraphAnchorKind,
-    EnumExecutionGraphAnchorState,
-    EnumExecutionGraphEdgeKind,
-    EnumExecutionGraphEndpointKind,
-    EnumExecutionGraphNodeKind,
-    EnumExecutionGraphUnresolvedReason,
     ModelExecutionGraph,
     ModelExecutionGraphAnchor,
     ModelExecutionGraphAnnotations,
@@ -22,6 +16,14 @@ from omnibase_core.models.execution_graph_replay import (
     ModelExecutionGraphReplayPolicy,
     ModelExecutionGraphSourceRef,
     ModelExecutionGraphUnresolved,
+)
+from omnibase_core.models.execution_graph_replay.model_enum_execution_graph_replay import (
+    EnumExecutionGraphAnchorKind,
+    EnumExecutionGraphAnchorState,
+    EnumExecutionGraphEdgeKind,
+    EnumExecutionGraphEndpointKind,
+    EnumExecutionGraphNodeKind,
+    EnumExecutionGraphUnresolvedReason,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.chain_replay import (
     assemble_replay_and_verify,

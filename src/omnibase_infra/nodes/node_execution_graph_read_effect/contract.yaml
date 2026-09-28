@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_execution_graph_read_effect"
+node_type: "EFFECT_GENERIC"
+runtime_profiles:
+  - effects
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Chain-only delegation execution graph read under verified signed gateway authority. DoD verdict joins are not composed by this contract. The effect handler returns no unsigned event; its required executor publishes the terminal on the declared topic using the runtime signer.
+
+input_model:
+  name: "ModelExecutionGraphRequest"
+  module: "omnibase_core.models.execution_graph_replay.model_execution_graph_request"
+  description: "Watermark-bounded or latest graph read request."
+output_model:
+  name: "ModelExecutionGraphTerminalResult"
+  module: "omnibase_core.models.execution_graph_replay.model_execution_graph_terminal_result"
+  description: "Signed, workflow-bound graph terminal result."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1"
+  signed_ingress_topics:
+    - "onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.delegation-execution-graph-read-terminal.v1"
+handler_routing:
+  routing_strategy: "topic_match"
+  handlers:
+    - topic: "onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1"
+      operation: "execution_graph.read"
+      message_category: "command"
+      event_model:
+        name: "ModelExecutionGraphRequest"
+        module: "omnibase_core.models.execution_graph_replay.model_execution_graph_request"
+      handler:
+        name: "HandlerExecutionGraphRead"
+        module: "omnibase_infra.nodes.node_execution_graph_read_effect.handlers.handler_execution_graph_read"
+      supported_operations:
+        - "execution_graph.read"
+node_capabilities:
+  postgres: true
+  read: true
+  database: true
+dependencies:
+  - name: "handler_execution_graph_read"
+    type: "handler"
+    class_name: "HandlerExecutionGraphRead"
+    module: "omnibase_infra.nodes.node_execution_graph_read_effect.handlers.handler_execution_graph_read"
+    description: "Requires an explicitly composed owner-first executor."

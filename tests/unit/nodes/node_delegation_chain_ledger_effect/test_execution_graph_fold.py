@@ -11,13 +11,15 @@ from uuid import UUID
 import pytest
 
 from omnibase_core.models.execution_graph_replay import (
-    EnumExecutionGraphEdgeKind,
-    EnumExecutionGraphNodeKind,
-    EnumExecutionGraphUnresolvedReason,
     ModelExecutionGraph,
     ModelExecutionGraphSourceCursor,
     ModelExecutionGraphStoredChainAnnotation,
     ModelExecutionGraphStoredVerdictAnnotation,
+)
+from omnibase_core.models.execution_graph_replay.model_enum_execution_graph_replay import (
+    EnumExecutionGraphEdgeKind,
+    EnumExecutionGraphNodeKind,
+    EnumExecutionGraphUnresolvedReason,
 )
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.execution_graph_fold import (
@@ -79,6 +81,7 @@ def _record(
         observed_index=index,
         partition=0,
         kafka_offset=index,
+        ingest_watermark=index + 1,
         event_timestamp=event_timestamp,
     )
 
@@ -108,7 +111,7 @@ def _request(
         verdict_reducer_version=_version(),
         source_cursors=tuple(
             ModelExecutionGraphSourceCursor(
-                topic=topic, partition=0, max_kafka_offset=3
+                topic=topic, partition=0, max_ingest_watermark=3
             )
             for topic in ("head", "left", "right")
         ),
@@ -153,7 +156,7 @@ def test_exact_redelivery_has_one_node_and_earliest_source_reference() -> None:
                 earlier_delivery_seen_later,
             ),
             "source_cursors": tuple(
-                cursor.model_copy(update={"max_kafka_offset": 5})
+                cursor.model_copy(update={"max_ingest_watermark": 5})
                 if cursor.topic == "left"
                 else cursor
                 for cursor in request.source_cursors
@@ -390,6 +393,7 @@ def _real_branch_graph() -> ModelExecutionGraph:
             observed_index=index,
             partition=record["partition"],
             kafka_offset=record["kafka_offset"],
+            ingest_watermark=index + 1,
         )
         for index, record in enumerate(records)
     )
@@ -405,7 +409,7 @@ def _real_branch_graph() -> ModelExecutionGraph:
             ModelExecutionGraphSourceCursor(
                 topic=item.topic,
                 partition=item.partition,
-                max_kafka_offset=item.kafka_offset,
+                max_ingest_watermark=item.ingest_watermark,
             )
             for item in evidence
         ),

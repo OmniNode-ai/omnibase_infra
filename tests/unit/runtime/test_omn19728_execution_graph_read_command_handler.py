@@ -75,6 +75,7 @@ def _signed_authority() -> VerifiedExecutionGraphReadAuthority:
         tenant_id=str(tenant_id),
         correlation_id=correlation_id,
         event_type="omnibase-infra.delegation-execution-graph-requested",
+        metadata={"tags": {"workflow_id": str(uuid4())}},
         payload={
             "correlation_id": str(correlation_id),
             "cursor_mode": "latest",
@@ -120,6 +121,7 @@ def _failed_terminal(
     tenant_id: UUID | None = None,
 ) -> ModelExecutionGraphTerminalResult:
     return ModelExecutionGraphTerminalResult(
+        workflow_id=authority.workflow_id,
         tenant_id=tenant_id or authority.tenant_id,
         correlation_id=authority.correlation_id,
         workflow_type=_WORKFLOW_TYPE,
@@ -472,6 +474,40 @@ async def test_terminal_with_foreign_tenant_is_not_published() -> None:
 
     async def fold(*_args: object) -> ModelExecutionGraphTerminalResult:
         return _failed_terminal(authority, tenant_id=uuid4())
+
+    async def publish(*_args: object) -> None:
+        calls.append("publish")
+
+    handler = ExecutionGraphReadCommandExecutor(
+        evidence_reader=cast("ExecutionGraphCurrentEvidenceReader", _Reader(read)),
+        stored_chain_reader=cast(
+            "ProtocolExecutionGraphStoredChainReader", _StoredChainReader(calls)
+        ),
+        topology=_topology(),
+        workflow_type=_WORKFLOW_TYPE,
+        fold=fold,
+        publish_terminal=publish,
+    )
+
+    with bind_execution_graph_read_authority(authority):
+        with pytest.raises(ExecutionGraphReadCommandError, match="conflicts"):
+            await handler.handle(authority.request)
+    assert calls == ["stored-chain-read"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_terminal_with_wrong_workflow_id_is_not_published() -> None:
+    authority = _signed_authority()
+    calls: list[str] = []
+
+    async def read(*_args: object) -> object:
+        return _evidence(authority)
+
+    async def fold(*_args: object) -> ModelExecutionGraphTerminalResult:
+        return _failed_terminal(
+            authority,
+        ).model_copy(update={"workflow_id": uuid4()})
 
     async def publish(*_args: object) -> None:
         calls.append("publish")

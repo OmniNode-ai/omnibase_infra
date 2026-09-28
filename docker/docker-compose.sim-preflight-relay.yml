@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Optional approved host-stdio transport; never starts the Gateway server.
+# Apply after the isolated overlay. No credentials, mounts or published ports.
+services:
+  relay-transport:
+    image: ${SIM_PREFLIGHT_ONEX_API_IMAGE:?pinned disposable Gateway image required}
+    container_name: omnibase-infra-sim-preflight-relay-transport
+    profiles: [sim-preflight-auth]
+    entrypoint: [python]
+    command: ["-c", "import signal; signal.pause()"]
+    # The Gateway image's inherited HTTP probe expects a server this transport
+    # intentionally never starts. Verify the inert PID 1 and execution user.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os; assert os.getuid() == 1000; assert b'import signal; signal.pause()' in open('/proc/1/cmdline', 'rb').read().split(bytes([0]))"
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    dns: ["127.0.0.1"]
+    networks:
+      omnibase-infra-dogfood-network: {}

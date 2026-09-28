@@ -5,7 +5,7 @@
 """Unit tests for HandlerLedgerAppend.
 
 Tests validate:
-- Duplicate detection via RETURNING clause (rows vs empty rows)
+- Duplicate detection via the transactional append function result
 - Base64 decode errors raise RuntimeHostError with proper context
 - Lazy DB connection guard (missing DSN raises RuntimeHostError)
 - Successful append returns ModelLedgerAppendResult with ledger_entry_id
@@ -70,6 +70,12 @@ def make_handler_with_mock_db(
 
 def make_db_result(rows: list[dict[str, object]]) -> MagicMock:
     """Build a mock ModelHandlerOutput[ModelDbQueryResponse] with given rows."""
+    if not rows:
+        rows = [
+            {"ledger_entry_id": str(uuid4()), "ingest_watermark": 1, "duplicate": True}
+        ]
+    else:
+        rows = [{"ingest_watermark": 1, "duplicate": False, **row} for row in rows]
     correlation_id = uuid4()
     payload = ModelDbQueryPayload(rows=rows, row_count=len(rows))
     response = ModelDbQueryResponse(
@@ -207,12 +213,12 @@ class TestHandlerLedgerAppendInitialization:
 
 
 class TestHandlerLedgerAppendDuplicateDetection:
-    """Tests for duplicate detection via RETURNING clause."""
+    """Tests for idempotent duplicate result and stable watermark."""
 
     @pytest.mark.asyncio
     @pytest.mark.unit
     async def test_new_event_returns_ledger_entry_id(self) -> None:
-        """When RETURNING produces a row, result has ledger_entry_id and duplicate=False."""
+        """A new row returns its assigned watermark."""
         handler, db_handler = make_handler_with_mock_db()
         ledger_entry_id = uuid4()
         db_handler.execute = AsyncMock(
@@ -227,11 +233,12 @@ class TestHandlerLedgerAppendDuplicateDetection:
         assert result.success is True
         assert result.duplicate is False
         assert result.ledger_entry_id == ledger_entry_id
+        assert result.ingest_watermark == 1
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_duplicate_event_returns_no_entry_id(self) -> None:
-        """When RETURNING produces no rows (ON CONFLICT), result has duplicate=True."""
+    async def test_duplicate_event_returns_existing_entry_and_watermark(self) -> None:
+        """A duplicate returns the existing row's identity and watermark."""
         handler, db_handler = make_handler_with_mock_db()
         db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
 
@@ -240,7 +247,8 @@ class TestHandlerLedgerAppendDuplicateDetection:
 
         assert result.success is True
         assert result.duplicate is True
-        assert result.ledger_entry_id is None
+        assert result.ledger_entry_id is not None
+        assert result.ingest_watermark == 1
 
     @pytest.mark.asyncio
     @pytest.mark.unit

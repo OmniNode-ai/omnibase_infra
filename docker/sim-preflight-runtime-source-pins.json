@@ -1,0 +1,7 @@
+{
+  "profile": "sim-preflight-runtime-source-pins-v1",
+  "sources": {
+    "omnibase_core": "1afbad2135ae5ed2c26d36864ec1a15de99b46d5",
+    "omnibase_infra": "f9366cb9d13ef930af5625433b0537083b4efd0a"
+  }
+}

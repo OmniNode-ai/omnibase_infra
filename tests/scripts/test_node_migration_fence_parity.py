@@ -1077,7 +1077,7 @@ def test_fence_predicate_is_posix_sh() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_lane_release_arms_are_exactly_dev_default_and_unknown() -> None:
+def test_lane_release_arms_are_exactly_dev_sim_default_and_unknown() -> None:
     """Every arm must ASSIGN. An arm that falls through inherits the last value.
 
     ``case`` in POSIX sh does not reset the variable between arms, so an arm
@@ -1085,8 +1085,9 @@ def test_lane_release_arms_are_exactly_dev_default_and_unknown() -> None:
     arm set. That is the shape of a fail-open bug, so the arm set is pinned.
     """
     policies = parse_lane_release_policies(extract_fence_block())
-    assert set(policies) == {DEV_LANE_VALUE, "", "*"}, (
-        "the lane-release policy must have exactly three arms — the dev/lab "
+    assert set(policies) == {DEV_LANE_VALUE, "sim-preflight", "", "*"}, (
+        "the lane-release policy must have exactly four arms — the dev/lab "
+        "lane, the disposable sim-preflight "
         f"lane, the unset default, and the unknown-value catch-all. Found: "
         f"{sorted(policies)}"
     )
@@ -1095,6 +1096,14 @@ def test_lane_release_arms_are_exactly_dev_default_and_unknown() -> None:
         "these case arms match but never assign "
         f"LANE_RELEASED_NODE_MIGRATION_IDS, so they inherit the preceding "
         f"arm's value: {unassigned}"
+    )
+
+
+def test_disposable_sim_releases_only_the_source_tenant_shape_migration() -> None:
+    """The clone needs source UUID ownership, not the dev lane's RLS releases."""
+    policies = parse_lane_release_policies(extract_fence_block())
+    assert policies["sim-preflight"] == (
+        "node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
     )
 
 

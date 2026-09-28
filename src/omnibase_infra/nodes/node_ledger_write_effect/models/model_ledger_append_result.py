@@ -32,7 +32,12 @@ class ModelLedgerAppendResult(BaseModel):
     )
     ledger_entry_id: UUID | None = Field(
         default=None,
-        description="ID of the created entry, None if duplicate",
+        description="ID of the inserted or previously recorded entry",
+    )
+    ingest_watermark: int | None = Field(
+        default=None,
+        ge=1,
+        description="Writer-assigned partition watermark, None only for a legacy duplicate",
     )
     duplicate: bool = Field(
         default=False,

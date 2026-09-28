@@ -4,6 +4,8 @@
 # business-domain node handlers belong in omnimarket, and deleted/migrated
 # handlers must be removed from this allowlist in the same PR.
 #
+src/omnibase_infra/nodes/node_execution_graph_read_effect/handlers/__init__.py  # OMN-19726: infra-owned signed ingress and authorized read over platform event-ledger evidence; not a portable business-domain workflow.
+src/omnibase_infra/nodes/node_execution_graph_read_effect/handlers/handler_execution_graph_read.py  # OMN-19726: infra-owned signed ingress and authorized read over platform event-ledger evidence; not a portable business-domain workflow.
 src/omnibase_infra/nodes/node_architecture_validator/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_architecture_validator/handlers/handler_architecture_validation.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_artifact_change_detector_effect/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.

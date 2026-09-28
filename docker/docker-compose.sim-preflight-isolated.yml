@@ -1,0 +1,108 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Apply last, only via the approved isolated-clone launcher. Docker's internal
+# bridge denies routed egress; loopback DNS disables external DNS forwarding.
+# The typed node restriction is independently required on both runtimes.
+name: omnibase-infra-sim-preflight
+x-network-boundary: &network-boundary
+  dns: !override ["127.0.0.1"]
+  extra_hosts: !reset []
+x-graph-runtime-env: &graph-runtime-env
+  BUS_ID: sim-preflight
+  BIFROST_CONTRACT_PATH: ""
+  BIFROST_LANE_OVERLAY_PATH: ""
+  DELEGATION_ROUTING_TIERS_PATH: ""
+  OTEL_SDK_DISABLED: "true"
+  BIFROST_VERIFY_ENDPOINTS: "false"
+  OMNIMEMORY_ENABLED: "false"
+x-disposable-db-roles: &disposable-db-roles
+  ROLE_OMNIBASE_PASSWORD: ${ROLE_OMNIBASE_PASSWORD:?disposable infra role password required}
+  ROLE_OMNIDASH_PASSWORD: ${ROLE_OMNIDASH_PASSWORD:?disposable analytics role password required}
+  ROLE_OMNIINTELLIGENCE_PASSWORD: ${ROLE_OMNIINTELLIGENCE_PASSWORD:?disposable intelligence role password required}
+  ROLE_OMNICLAUDE_PASSWORD: ${ROLE_OMNICLAUDE_PASSWORD:?disposable Claude role password required}
+  ROLE_OMNIMEMORY_PASSWORD: ${ROLE_OMNIMEMORY_PASSWORD:?disposable memory role password required}
+services:
+  postgres:
+    !!merge <<: *network-boundary
+    environment:
+      !!merge <<: *disposable-db-roles
+  redpanda:
+    !!merge <<: *network-boundary
+  redpanda-partition-cap:
+    !!merge <<: *network-boundary
+  valkey:
+    !!merge <<: *network-boundary
+  forward-migration:
+    !!merge <<: *network-boundary
+    environment:
+      !!merge <<: *disposable-db-roles
+  migration-gate:
+    !!merge <<: *network-boundary
+  intelligence-migration:
+    !!merge <<: *network-boundary
+  projection-api:
+    profiles: !override ["sim-preflight-projection-disabled"]
+  omninode-runtime:
+    !!merge <<: *network-boundary
+    cap_drop: [ALL]
+    # Standard entrypoint repairs only private runtime volumes, then gosu
+    # drops to omniinfra. No network/admin capability is restored.
+    # FOWNER permits install(1) chmod after chown on fresh root-owned volumes.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    environment:
+      !!merge <<: *graph-runtime-env
+      ONEX_GROUP_ID: onex-sim-preflight-main
+      KAFKA_INSTANCE_ID: sim-preflight-main
+    volumes: !override
+      - dogfood_runtime_logs:/app/logs
+      - dogfood_runtime_data:/app/data
+      - ${SIM_PREFLIGHT_GRAPH_MAIN_RUNTIME_CONFIG_FILE:?restricted main runtime config required}:/app/contracts/runtime/runtime_config.yaml:ro
+  runtime-effects:
+    !!merge <<: *network-boundary
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    environment:
+      !!merge <<: *graph-runtime-env
+      ONEX_GROUP_ID: onex-sim-preflight-effects
+      KAFKA_INSTANCE_ID: sim-preflight-effects
+    volumes: !override
+      - dogfood_effects_logs:/app/logs
+      - dogfood_effects_data:/app/data
+      - ${SIM_PREFLIGHT_GRAPH_RUNTIME_CONFIG_FILE:?restricted effects runtime config required}:/app/contracts/runtime/runtime_config.yaml:ro
+      - ${SIM_PREFLIGHT_GRAPH_GATEWAY_KEYMAP_FILE:?gateway keymap required}:/app/config/execution-graph/gateway-keys.json:ro
+      - ${SIM_PREFLIGHT_GRAPH_TERMINAL_PRIVATE_KEY_FILE:?terminal signing key required}:/app/config/execution-graph/terminal-private.pem:ro
+  keycloak:
+    !!merge <<: *network-boundary
+    volumes: !override
+      - ${SIM_PREFLIGHT_KEYCLOAK_REALM_FILE:?disposable realm import required}:/opt/keycloak/data/import/omninode-realm.json:ro
+  cloud-migration-files:
+    !!merge <<: *network-boundary
+  cloud-migration:
+    !!merge <<: *network-boundary
+  onex-api:
+    !!merge <<: *network-boundary
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      GATEWAY_USER_CLIENT_ID: omnidash
+      DELEGATION_EXECUTION_GRAPH_SIGNING_KEY_FILE: /app/config/execution-graph/gateway-private.pem
+      DELEGATION_EXECUTION_GRAPH_SIGNER_REALM: sim-preflight
+      DELEGATION_EXECUTION_GRAPH_SIGNER_RUNTIME_ID: onex-api-sim-preflight
+      DELEGATION_EXECUTION_GRAPH_SIGNER_BUS_ID: sim-preflight
+      EXECUTION_GRAPH_TERMINAL_PUBLIC_KEY_FILE: /app/config/execution-graph/terminal-public.pem
+      EXECUTION_GRAPH_TERMINAL_RUNTIME_ID: runtime-effects-sim-preflight
+      EXECUTION_GRAPH_TERMINAL_REALM: sim-preflight
+      EXECUTION_GRAPH_TERMINAL_BUS_ID: sim-preflight
+      EXECUTION_GRAPH_TERMINAL_CONSUMER_GROUP_ID: onex-api-sim-preflight-graph-terminals
+    volumes: !override
+      - ${SIM_PREFLIGHT_GATEWAY_CATALOG_FILE:?graph-only workflow catalog required}:/app/workflow-contracts.yaml:ro
+      - ${SIM_PREFLIGHT_GATEWAY_SIGNING_PRIVATE_KEY_FILE:?gateway signing key required}:/app/config/execution-graph/gateway-private.pem:ro
+      - ${SIM_PREFLIGHT_GRAPH_TERMINAL_PUBLIC_KEY_FILE:?terminal verification key required}:/app/config/execution-graph/terminal-public.pem:ro
+networks:
+  omnibase-infra-dogfood-network:
+    name: omnibase-infra-sim-preflight-network
+    internal: true

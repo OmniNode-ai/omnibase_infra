@@ -74,6 +74,7 @@ import signal
 import sys
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AsyncExitStack
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -146,6 +147,7 @@ from omnibase_infra.observability.runtime_log_event_bridge import RuntimeLogEven
 from omnibase_infra.observability.wiring_health.wiring_health_checker import (
     WiringHealthChecker,
 )
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.health.contract_attach_readiness_gate import (
     CONTRACT_ATTACH_PROBE_NAME,
@@ -663,6 +665,8 @@ def _build_runtime_handler_dependencies(
     savings_correlation_pool: object | None = None,
     savings_correlation_publisher: object | None = None,
     dlq_tracking: object | None = None,
+    execution_graph_read_executor: object | None = None,
+    execution_graph_read_container: ModelONEXContainer | None = None,
 ) -> dict[str, dict[str, object]] | None:
     """Build constructor dependencies for runtime-owned handlers.
 
@@ -713,6 +717,13 @@ def _build_runtime_handler_dependencies(
             which discovers the required names from ``contract.yaml``.
     """
     dependencies: dict[str, dict[str, object]] = {}
+    if execution_graph_read_executor is not None:
+        if execution_graph_read_container is None:
+            raise ValueError("execution graph read requires a runtime container")
+        dependencies["HandlerExecutionGraphRead"] = {
+            "container": execution_graph_read_container,
+            "executor": execution_graph_read_executor,
+        }
     if postgres_pool is not None:
         dependencies.update(
             {
@@ -1539,6 +1550,7 @@ async def bootstrap() -> int:
     # in node_dlq_replay_effect's contract since OMN-12619 and never supplied
     # by this kernel until now, which is why that table has no rows.
     _dlq_replay_tracking: ServiceDlqTracking | None = None
+    _execution_graph_resources = AsyncExitStack()
     runtime_health_monitor = None  # ServiceRuntimeHealthMonitor | None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
@@ -1649,6 +1661,32 @@ async def bootstrap() -> int:
         # Pass correlation_id for consistent tracing across initialization sequence
         config_start_time = time.time()
         config = load_runtime_config(contracts_dir, correlation_id=correlation_id)
+        restricted_graph_ledger = config.graph_ledger_node_allowlist is not None
+        if config.graph_ledger_node_allowlist is not None:
+            from omnibase_infra.runtime.auto_wiring.graph_ledger_node_selection import (
+                validate_graph_ledger_boot,
+            )
+
+            validate_graph_ledger_boot(
+                config.graph_ledger_node_allowlist,
+                resolve_runtime_profile_name(),
+                os.environ,
+            )
+            if (
+                config.contract_registry.enabled
+                or config.local_ingress.enabled
+                or config.pattern_b_broker.enabled
+            ):
+                raise RuntimeHostError(
+                    "graph ledger allowlist forbids registry and alternate ingress consumers"
+                )
+            if (
+                resolve_runtime_profile_name() == "effects"
+                and config.execution_graph_read is None
+            ):
+                raise RuntimeHostError(
+                    "restricted effects runtime requires execution_graph_read configuration"
+                )
         deployment_topology = _load_runtime_database_topology()
         config_duration = time.time() - config_start_time
         # Log only safe config fields (no credentials or sensitive data)
@@ -2137,7 +2175,7 @@ async def bootstrap() -> int:
         # and emits baselines-computed.v1 snapshot events for omnidash.
         # Creates its own asyncpg pool for isolation from plugin pools.
         # (baselines_task and _baselines_pool pre-declared before try block)
-        if use_kafka:
+        if use_kafka and not restricted_graph_ledger:
             try:
                 import asyncpg as _asyncpg
 
@@ -2256,7 +2294,7 @@ async def bootstrap() -> int:
         # consumer (deleted in the same change).
         # (savings_correlation_task / _savings_correlation_pool pre-declared
         # before try block)
-        if use_kafka:
+        if use_kafka and not restricted_graph_ledger:
             try:
                 import asyncpg as _savings_asyncpg
 
@@ -2633,187 +2671,188 @@ async def bootstrap() -> int:
         # takes ~12 minutes. If Intelligence goes first, later plugins never
         # get their consumers started before the runtime is restarted or killed.
 
-        # Try to load and register PluginDelegation via entry-point discovery
-        # (graceful degradation - OMN-13690). omnimarket is optional and can be
-        # removed from the active runtime surface with ONEX_ACTIVE_RUNTIME_PACKAGES.
-        # Discovery via "onex.domain_plugins" avoids a direct infra-to-omnimarket
-        # import which violates the compat→core→spi→infra layering rule.
-        if is_runtime_package_active("omnimarket"):
-            try:
-                from importlib.metadata import entry_points
+        if not restricted_graph_ledger:
+            # Try to load and register PluginDelegation via entry-point discovery
+            # (graceful degradation - OMN-13690). omnimarket is optional and can be
+            # removed from the active runtime surface with ONEX_ACTIVE_RUNTIME_PACKAGES.
+            # Discovery via "onex.domain_plugins" avoids a direct infra-to-omnimarket
+            # import which violates the compat→core→spi→infra layering rule.
+            if is_runtime_package_active("omnimarket"):
+                try:
+                    from importlib.metadata import entry_points
 
-                delegation_eps = [
-                    e
-                    for e in entry_points(group="onex.domain_plugins")
-                    if e.name == "delegation"
-                ]
-                if delegation_eps:
-                    PluginDelegation = delegation_eps[0].load()
-                    plugin_registry.register(PluginDelegation())
-                    logger.info(
-                        "PluginDelegation registered (correlation_id=%s)",
-                        correlation_id,
-                    )
-                else:
-                    logger.debug(
-                        "omnimarket not installed, delegation plugin not available "
+                    delegation_eps = [
+                        e
+                        for e in entry_points(group="onex.domain_plugins")
+                        if e.name == "delegation"
+                    ]
+                    if delegation_eps:
+                        PluginDelegation = delegation_eps[0].load()
+                        plugin_registry.register(PluginDelegation())
+                        logger.info(
+                            "PluginDelegation registered (correlation_id=%s)",
+                            correlation_id,
+                        )
+                    else:
+                        logger.debug(
+                            "omnimarket not installed, delegation plugin not available "
+                            "(correlation_id=%s)",
+                            correlation_id,
+                        )
+                except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                    logger.warning(
+                        "PluginDelegation failed to initialize, continuing without it "
                         "(correlation_id=%s)",
                         correlation_id,
+                        exc_info=True,
                     )
-            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "PluginDelegation failed to initialize, continuing without it "
-                    "(correlation_id=%s)",
-                    correlation_id,
-                    exc_info=True,
-                )
-        else:
-            logger.info(
-                "PluginDelegation skipped by active runtime package filter "
-                "(correlation_id=%s)",
-                correlation_id,
-            )
-
-        # Try to register PluginLlm (OMN-6600: LLM domain plugin).
-        try:
-            from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
-
-            plugin_registry.register(PluginLlm())
-            logger.info(
-                "PluginLlm registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginLlm failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to register PluginDlq (OMN-6601: DLQ + retry worker).
-        try:
-            from omnibase_infra.dlq.plugin_dlq import PluginDlq
-
-            plugin_registry.register(PluginDlq())
-            logger.info(
-                "PluginDlq registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginDlq failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to load and register PluginIntelligence via entry-point discovery
-        # (graceful degradation). omniintelligence is optional and can be
-        # removed from the active runtime surface with ONEX_ACTIVE_RUNTIME_PACKAGES.
-        if is_runtime_package_active("omniintelligence"):
-            try:
-                from importlib.metadata import entry_points
-
-                intel_eps = [
-                    e
-                    for e in entry_points(group="onex.domain_plugins")
-                    if e.name == "intelligence"
-                ]
-                if intel_eps:
-                    PluginIntelligence = intel_eps[0].load()
-                    plugin_registry.register(PluginIntelligence())
-                    logger.info(
-                        "PluginIntelligence registered (correlation_id=%s)",
-                        correlation_id,
-                    )
-                else:
-                    logger.debug(
-                        "omniintelligence not installed, intelligence plugin not available "
-                        "(correlation_id=%s)",
-                        correlation_id,
-                    )
-            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "PluginIntelligence failed to initialize, continuing without it "
-                    "(correlation_id=%s)",
-                    correlation_id,
-                    exc_info=True,
-                )
-        else:
-            logger.info(
-                "PluginIntelligence skipped by active runtime package filter "
-                "(correlation_id=%s)",
-                correlation_id,
-            )
-
-        # 4.6. Discover domain plugins from entry_points (OMN-2000)
-        #
-        # After explicit registration, scan installed packages for plugins
-        # declared under the "onex.domain_plugins" entry_point group.
-        # Explicit registration takes precedence on duplicate plugin_id.
-        #
-        # Security: Discovery validates entry_point module paths against the
-        # namespace allowlist BEFORE calling .load() (pre-import gate).
-        # Post-import, isinstance(plugin, ProtocolDomainPlugin) is checked.
-        try:
-            security_config = ModelSecurityConfig()
-            discovery_report = plugin_registry.discover_from_entry_points(
-                security_config=security_config,
-            )
-            if discovery_report.has_errors:
-                logger.warning(
-                    "Plugin entry_point discovery had errors: %d entries with "
-                    "import/instantiation failures (correlation_id=%s)",
-                    len(
-                        [
-                            e
-                            for e in discovery_report.entries
-                            if e.status in ("import_error", "instantiation_error")
-                        ]
-                    ),
-                    correlation_id,
-                    extra={
-                        "group": discovery_report.group,
-                        "discovered_count": discovery_report.discovered_count,
-                        "accepted": discovery_report.accepted,
-                        "errors": [
-                            {
-                                "name": e.entry_point_name,
-                                "status": e.status,
-                                "reason": e.reason,
-                            }
-                            for e in discovery_report.entries
-                            if e.status in ("import_error", "instantiation_error")
-                        ],
-                    },
-                )
-            elif discovery_report.accepted:
-                logger.info(
-                    "Plugin entry_point discovery: %d plugins discovered from "
-                    "group '%s' (correlation_id=%s)",
-                    len(discovery_report.accepted),
-                    discovery_report.group,
-                    correlation_id,
-                    extra={
-                        "accepted_plugins": discovery_report.accepted,
-                        "discovered_count": discovery_report.discovered_count,
-                    },
-                )
             else:
-                logger.debug(
-                    "Plugin entry_point discovery: no new plugins found in "
-                    "group '%s' (correlation_id=%s)",
-                    discovery_report.group,
+                logger.info(
+                    "PluginDelegation skipped by active runtime package filter "
+                    "(correlation_id=%s)",
                     correlation_id,
                 )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "Plugin entry_point discovery failed; continuing with "
-                "explicitly registered plugins only (correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
+
+            # Try to register PluginLlm (OMN-6600: LLM domain plugin).
+            try:
+                from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
+
+                plugin_registry.register(PluginLlm())
+                logger.info(
+                    "PluginLlm registered (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "PluginLlm failed to initialize, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+
+            # Try to register PluginDlq (OMN-6601: DLQ + retry worker).
+            try:
+                from omnibase_infra.dlq.plugin_dlq import PluginDlq
+
+                plugin_registry.register(PluginDlq())
+                logger.info(
+                    "PluginDlq registered (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "PluginDlq failed to initialize, continuing without it "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
+
+            # Try to load and register PluginIntelligence via entry-point discovery
+            # (graceful degradation). omniintelligence is optional and can be
+            # removed from the active runtime surface with ONEX_ACTIVE_RUNTIME_PACKAGES.
+            if is_runtime_package_active("omniintelligence"):
+                try:
+                    from importlib.metadata import entry_points
+
+                    intel_eps = [
+                        e
+                        for e in entry_points(group="onex.domain_plugins")
+                        if e.name == "intelligence"
+                    ]
+                    if intel_eps:
+                        PluginIntelligence = intel_eps[0].load()
+                        plugin_registry.register(PluginIntelligence())
+                        logger.info(
+                            "PluginIntelligence registered (correlation_id=%s)",
+                            correlation_id,
+                        )
+                    else:
+                        logger.debug(
+                            "omniintelligence not installed, intelligence plugin not available "
+                            "(correlation_id=%s)",
+                            correlation_id,
+                        )
+                except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                    logger.warning(
+                        "PluginIntelligence failed to initialize, continuing without it "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                        exc_info=True,
+                    )
+            else:
+                logger.info(
+                    "PluginIntelligence skipped by active runtime package filter "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                )
+
+            # 4.6. Discover domain plugins from entry_points (OMN-2000)
+            #
+            # After explicit registration, scan installed packages for plugins
+            # declared under the "onex.domain_plugins" entry_point group.
+            # Explicit registration takes precedence on duplicate plugin_id.
+            #
+            # Security: Discovery validates entry_point module paths against the
+            # namespace allowlist BEFORE calling .load() (pre-import gate).
+            # Post-import, isinstance(plugin, ProtocolDomainPlugin) is checked.
+            try:
+                security_config = ModelSecurityConfig()
+                discovery_report = plugin_registry.discover_from_entry_points(
+                    security_config=security_config,
+                )
+                if discovery_report.has_errors:
+                    logger.warning(
+                        "Plugin entry_point discovery had errors: %d entries with "
+                        "import/instantiation failures (correlation_id=%s)",
+                        len(
+                            [
+                                e
+                                for e in discovery_report.entries
+                                if e.status in ("import_error", "instantiation_error")
+                            ]
+                        ),
+                        correlation_id,
+                        extra={
+                            "group": discovery_report.group,
+                            "discovered_count": discovery_report.discovered_count,
+                            "accepted": discovery_report.accepted,
+                            "errors": [
+                                {
+                                    "name": e.entry_point_name,
+                                    "status": e.status,
+                                    "reason": e.reason,
+                                }
+                                for e in discovery_report.entries
+                                if e.status in ("import_error", "instantiation_error")
+                            ],
+                        },
+                    )
+                elif discovery_report.accepted:
+                    logger.info(
+                        "Plugin entry_point discovery: %d plugins discovered from "
+                        "group '%s' (correlation_id=%s)",
+                        len(discovery_report.accepted),
+                        discovery_report.group,
+                        correlation_id,
+                        extra={
+                            "accepted_plugins": discovery_report.accepted,
+                            "discovered_count": discovery_report.discovered_count,
+                        },
+                    )
+                else:
+                    logger.debug(
+                        "Plugin entry_point discovery: no new plugins found in "
+                        "group '%s' (correlation_id=%s)",
+                        discovery_report.group,
+                        correlation_id,
+                    )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Plugin entry_point discovery failed; continuing with "
+                    "explicitly registered plugins only (correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
 
         # Create typed node identity for plugin subscriptions (OMN-1602)
         plugin_node_identity: ModelNodeIdentity | None = None
@@ -2990,7 +3029,9 @@ async def bootstrap() -> int:
         # --- Kernel-native: ServiceRegistration lifecycle (OMN-7115) ---
         # ServiceRegistration runs its lifecycle directly, not through the
         # plugin registry loop. It is always activated first.
-        if registration_service.should_activate(plugin_config):
+        if not restricted_graph_ledger and registration_service.should_activate(
+            plugin_config
+        ):
             reg_init = await registration_service.initialize(plugin_config)
             if reg_init:
                 activated_plugins.append(registration_service)
@@ -3248,6 +3289,14 @@ async def bootstrap() -> int:
             # 1. Discover all contracts from installed packages
             auto_wiring_start = time.time()
             manifest = discover_contracts()
+            if config.graph_ledger_node_allowlist is not None:
+                from omnibase_infra.runtime.auto_wiring.graph_ledger_node_selection import (
+                    select_graph_ledger_manifest,
+                )
+
+                manifest = select_graph_ledger_manifest(
+                    manifest, config.graph_ledger_node_allowlist
+                )
             auto_wiring_manifest_discovered = (
                 manifest  # OMN-11198: captured for introspection
             )
@@ -3266,6 +3315,13 @@ async def bootstrap() -> int:
                 },
             )
 
+            if (
+                manifest.total_discovered == 0
+                and config.execution_graph_read is not None
+            ):
+                raise RuntimeHostError(
+                    "execution_graph_read is enabled but no node contracts were discovered"
+                )
             if manifest.total_discovered > 0:
                 # OMN-17985: was a RAW os.getenv read that never consulted the
                 # profile resolved at boot, so an unregistered value reached the
@@ -3276,6 +3332,17 @@ async def bootstrap() -> int:
                     runtime_profile=runtime_profile,
                 )
                 manifest = ownership_result.manifest
+                # A discovered EFFECT contract would otherwise subscribe on the
+                # effects profile even when no graph read resources were
+                # declared. Exclude it before lifecycle and handler wiring.
+                from omnibase_infra.runtime.execution_graph_runtime_composition import (
+                    GRAPH_READ_CONTRACT_NAME,
+                    select_execution_graph_contract,
+                )
+
+                manifest, graph_contract = select_execution_graph_contract(
+                    manifest, enabled=config.execution_graph_read is not None
+                )
                 if ownership_result.skipped_contracts:
                     logger.info(
                         "Auto-wiring runtime profile ownership: profile=%s "
@@ -3358,6 +3425,13 @@ async def bootstrap() -> int:
                     contracts=filtered_contracts,
                     errors=manifest.errors,
                 )
+                if config.execution_graph_read is not None and not any(
+                    contract.name == GRAPH_READ_CONTRACT_NAME
+                    for contract in filtered_manifest.contracts
+                ):
+                    raise RuntimeHostError(
+                        "enabled execution graph read contract failed lifecycle validation"
+                    )
                 auto_wiring_manifest_for_subscriptions = filtered_manifest
                 db_io_contracts = tuple(
                     contract.name
@@ -3620,6 +3694,24 @@ async def bootstrap() -> int:
                 gateway_secret_resolver_config_path_raw = (
                     resolve_secret_resolver_config_path()
                 )
+                execution_graph_read_executor = None
+                if config.execution_graph_read is not None:
+                    from omnibase_infra.runtime.execution_graph_runtime_composition import (
+                        open_execution_graph_runtime_executor,
+                    )
+
+                    assert config.execution_graph_read_gateway is not None
+                    assert graph_contract is not None
+                    execution_graph_read_executor = (
+                        await _execution_graph_resources.enter_async_context(
+                            open_execution_graph_runtime_executor(
+                                config=config.execution_graph_read,
+                                gateway=config.execution_graph_read_gateway,
+                                contract=graph_contract,
+                                event_bus=cast("ProtocolEventBusLike", event_bus),
+                            )
+                        )
+                    )
                 runtime_handler_dependencies = _build_runtime_handler_dependencies(
                     registration_service.postgres_pool,
                     kafka_bootstrap_servers if use_kafka else None,
@@ -3637,6 +3729,8 @@ async def bootstrap() -> int:
                     savings_correlation_pool=_savings_correlation_pool,
                     savings_correlation_publisher=_savings_correlation_publisher,
                     dlq_tracking=_dlq_replay_tracking,
+                    execution_graph_read_executor=execution_graph_read_executor,
+                    execution_graph_read_container=container,
                 )
 
                 # 5. Wire handlers into dispatch engine
@@ -3651,6 +3745,39 @@ async def bootstrap() -> int:
                     materialized_explicit_dependencies=(runtime_handler_dependencies),
                     topology=deployment_topology,
                 )
+                if restricted_graph_ledger:
+                    selected_names = {
+                        c.name for c in ownership_result.manifest.contracts
+                    }
+                    wired_names = {
+                        r.contract_name
+                        for r in auto_wiring_report.results
+                        if r.outcome.value == "wired"
+                    }
+                    if (
+                        wired_names != selected_names
+                        or auto_wiring_report.quarantined_handlers
+                    ):
+                        raise RuntimeHostError(
+                            "restricted graph ledger runtime did not wire every selected node"
+                        )
+
+                if config.execution_graph_read is not None:
+                    graph_wired = tuple(
+                        result
+                        for result in auto_wiring_report.results
+                        if result.contract_name == GRAPH_READ_CONTRACT_NAME
+                        and result.outcome.value == "wired"
+                    )
+                    graph_quarantined = tuple(
+                        result
+                        for result in auto_wiring_report.quarantined_handlers
+                        if result.contract_name == GRAPH_READ_CONTRACT_NAME
+                    )
+                    if len(graph_wired) != 1 or graph_quarantined:
+                        raise RuntimeHostError(
+                            "enabled execution graph read contract did not wire completely"
+                        )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
 
@@ -4142,6 +4269,11 @@ async def bootstrap() -> int:
             # Without this the gate waits forever on a contract the interleave
             # filtered out, and /ready is 503 for the life of the process.
             _attach_exclusions: list[ModelContractAttachExclusion] = []
+            graph_ingress, graph_key_provider = (
+                runtime._execution_graph_read_ingress_dependencies()
+                if config.execution_graph_read is not None
+                else (None, None)
+            )
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
                 manifest=auto_wiring_manifest_for_subscriptions,
                 report=auto_wiring_report,
@@ -4155,6 +4287,8 @@ async def bootstrap() -> int:
                 exclusions_out=_attach_exclusions,
                 core_runtime_topics=core_runtime_topics,
                 core_runtime_owners=core_runtime_owners,
+                execution_graph_read_ingress=graph_ingress,
+                execution_graph_read_key_provider=graph_key_provider,
             )
             _contract_attach_gate.exclude(tuple(_attach_exclusions))
             _contract_attach_gate.record(tuple(_attach_results))
@@ -4293,6 +4427,8 @@ async def bootstrap() -> int:
                             readiness_config=resolve_topic_readiness_config(),
                             core_runtime_topics=core_runtime_topics,
                             core_runtime_owners=core_runtime_owners,
+                            execution_graph_read_ingress=graph_ingress,
+                            execution_graph_read_key_provider=graph_key_provider,
                             # OMN-17372: fold every retry outcome into the
                             # readiness gate so a contract that converges late
                             # flips /ready to 200 without a pod restart, and one
@@ -4726,7 +4862,7 @@ async def bootstrap() -> int:
         # Subscribes to runtime-error events and routes them to the
         # HandlerRuntimeErrorTriage for first-match-wins triage processing.
         # (triage_unsub pre-declared before try block)
-        if postgres_pool is not None and has_subscribe:
+        if not restricted_graph_ledger and postgres_pool is not None and has_subscribe:
             try:
                 from omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage import (
                     HandlerRuntimeErrorTriage,
@@ -5134,6 +5270,15 @@ async def bootstrap() -> int:
                 pass
             _savings_correlation_pool = None
 
+        try:
+            await _execution_graph_resources.aclose()
+        except Exception as cleanup_error:  # noqa: BLE001 — continue remaining cleanup
+            logger.warning(
+                "Failed to close execution graph read pools: %s (correlation_id=%s)",
+                sanitize_error_message(cleanup_error),
+                correlation_id,
+            )
+
         # Close the dlq_replay_history writer's pool (OMN-18111)
         if _dlq_replay_tracking is not None:
             try:
@@ -5457,6 +5602,16 @@ async def bootstrap() -> int:
                     sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
+
+        try:
+            await _execution_graph_resources.aclose()
+        except Exception as cleanup_error:  # noqa: BLE001 — continue remaining cleanup
+            logger.warning(
+                "Failed to close execution graph read pools during cleanup: %s "
+                "(correlation_id=%s)",
+                sanitize_error_message(cleanup_error),
+                correlation_id,
+            )
 
         # Shutdown plugins in LIFO order (handles pools, publishers, connections)
         # Uses minimal config for cleanup to avoid depending on resources that may

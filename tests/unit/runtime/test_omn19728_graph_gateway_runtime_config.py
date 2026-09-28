@@ -10,9 +10,14 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.runtime.models.model_execution_graph_trusted_gateway_config import (
+    ModelExecutionGraphTrustedGatewayConfig,
+)
+from omnibase_infra.runtime.models.model_runtime_config import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 
@@ -38,12 +43,60 @@ def _config(path: Path) -> dict[str, object]:
     }
 
 
+@pytest.mark.unit
+def test_trusted_gateway_json_roundtrip_preserves_verified_path(tmp_path: Path) -> None:
+    key = _key_file(tmp_path / "keys.json")
+    raw = _config(key)["execution_graph_read_gateway"]
+    model = ModelExecutionGraphTrustedGatewayConfig.model_validate(raw)
+    parsed = ModelExecutionGraphTrustedGatewayConfig.model_validate_json(
+        model.model_dump_json()
+    )
+    assert parsed == model
+    assert parsed.public_key_path == key
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("invalid", ["relative.json", "missing", "directory", 3])
+def test_trusted_gateway_json_refuses_unverified_path(
+    tmp_path: Path, invalid: object
+) -> None:
+    key: object = (
+        tmp_path
+        if invalid == "directory"
+        else tmp_path / "missing.json"
+        if invalid == "missing"
+        else invalid
+    )
+    raw = _config(Path("unused"))["execution_graph_read_gateway"]
+    assert isinstance(raw, dict)
+    raw["public_key_path"] = str(key) if isinstance(key, Path) else key
+    with pytest.raises(ValidationError):
+        ModelExecutionGraphTrustedGatewayConfig.model_validate_json(json.dumps(raw))
+
+
 @pytest.mark.unit  # type: ignore[untyped-decorator]
 def test_graph_gateway_runtime_config_builds_exact_provider(tmp_path: Path) -> None:
     host = RuntimeHostProcess(config=_config(_key_file(tmp_path / "keys.json")))
     ingress, provider = host._execution_graph_read_ingress_dependencies()
     assert ingress is not None and provider is not None
     assert next(iter(ingress.gateway_policy.scopes)).runtime_id == "gateway"
+
+
+@pytest.mark.unit
+def test_kernel_typed_config_preserves_graph_gateway_for_host(tmp_path: Path) -> None:
+    raw = _config(_key_file(tmp_path / "keys.json"))
+    parsed = ModelRuntimeConfig.model_validate(raw)
+    carried = parsed.model_dump(mode="json")
+    carried["service_name"] = "omnibase-infra"
+    carried["node_name"] = "graph-read"
+    host = RuntimeHostProcess(config=carried)
+
+    ingress, provider = host._execution_graph_read_ingress_dependencies()
+    assert ingress is not None and provider is not None
+    assert (
+        ingress.command_topic
+        == "onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1"
+    )
 
 
 @pytest.mark.unit  # type: ignore[untyped-decorator]

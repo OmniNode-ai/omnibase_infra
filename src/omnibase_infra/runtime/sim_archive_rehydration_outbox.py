@@ -16,8 +16,8 @@ from omnibase_infra.runtime.health.runtime_lane_identity import (
 from omnibase_infra.runtime.protocols.protocol_raw_replay_publisher import (
     ProtocolRawReplayPublisher,
 )
-from omnibase_infra.runtime.protocols.protocol_sim_archive_rehydration_plan import (
-    ProtocolSimArchiveRehydrationPlan,
+from omnibase_infra.runtime.sim_archive_source_receipt import (
+    VerifiedSimArchiveRehydrationPlan,
 )
 
 _INSERT = """
@@ -34,14 +34,18 @@ FROM public.sim_archive_rehydration_outbox
 WHERE source_topic = $1 AND source_partition = $2 AND source_offset = $3
 FOR UPDATE
 """
-_PENDING = """
+_PENDING_SELECTED = """
 SELECT source_topic, source_partition, source_offset, target_topic,
        record_key, record_value, headers_json, timestamp_ms
 FROM public.sim_archive_rehydration_outbox
-WHERE delivered_at IS NULL
-ORDER BY source_topic, source_partition, source_offset
+WHERE source_topic = $1 AND source_partition = $2 AND source_offset = $3
+  AND delivered_at IS NULL
+FOR UPDATE
+"""
+_TARGET_KEYS = """
+SELECT source_topic, source_partition, source_offset
+FROM public.sim_archive_rehydration_outbox
 LIMIT $1
-FOR UPDATE SKIP LOCKED
 """
 _DELIVERED = """
 UPDATE public.sim_archive_rehydration_outbox
@@ -119,8 +123,34 @@ class PostgresSimArchiveRehydrationOutbox:
             )
         return result
 
-    async def enqueue_once(self, plan: ProtocolSimArchiveRehydrationPlan) -> bool:
+    async def require_only_selected_keys(
+        self, plans: tuple[VerifiedSimArchiveRehydrationPlan, ...]
+    ) -> None:
+        """Refuse a target already used for any other archive coordinates."""
+        if (
+            type(plans) is not tuple
+            or not plans
+            or any(
+                type(plan) is not VerifiedSimArchiveRehydrationPlan for plan in plans
+            )
+            or len({plan.source_key for plan in plans}) != len(plans)
+        ):
+            raise TypeError("target guard requires distinct verified source receipts")
+        allowed = {plan.source_key for plan in plans}
+        async with self._pool.acquire() as connection:
+            async with connection.transaction(readonly=True):
+                rows = await connection.fetch(_TARGET_KEYS, len(plans) + 1)
+        if any(
+            (row["source_topic"], row["source_partition"], row["source_offset"])
+            not in allowed
+            for row in rows
+        ):
+            raise ValueError("disposable target contains unrelated archive rows")
+
+    async def enqueue_once(self, plan: VerifiedSimArchiveRehydrationPlan) -> bool:
         """Insert once or refuse a different record at the same source coordinate."""
+        if type(plan) is not VerifiedSimArchiveRehydrationPlan:
+            raise TypeError("sim archive enqueue requires a verified source receipt")
         source_topic, source_partition, source_offset = plan.source_key
         if (
             plan.target_topic != source_topic
@@ -159,19 +189,38 @@ class PostgresSimArchiveRehydrationOutbox:
                     raise ValueError("sim archive source coordinate collision")
                 return False
 
-    async def relay_once(self, *, limit: int = 100) -> int:
-        """Publish pending rows under locks; mark delivered after broker ack."""
-        if limit < 1:
-            raise ValueError("relay limit must be positive")
+    async def relay_selected_once(
+        self, plans: tuple[VerifiedSimArchiveRehydrationPlan, ...]
+    ) -> int:
+        """Publish only freshly verified source keys, then mark broker-acked rows."""
+        if (
+            type(plans) is not tuple
+            or not plans
+            or any(
+                type(plan) is not VerifiedSimArchiveRehydrationPlan for plan in plans
+            )
+            or len({plan.source_key for plan in plans}) != len(plans)
+        ):
+            raise TypeError("relay requires distinct verified source receipts")
         async with self._pool.acquire() as connection:
             async with connection.transaction():
-                rows = await connection.fetch(_PENDING, limit)
-                for row in rows:
+                delivered = 0
+                for plan in plans:
+                    row = await connection.fetchrow(_PENDING_SELECTED, *plan.source_key)
+                    if row is None:
+                        continue
                     if (
                         row["source_topic"] not in self._rehydration_targets
                         or row["target_topic"] != row["source_topic"]
+                        or row["target_topic"] != plan.target_topic
+                        or row["record_key"] != plan.key
+                        or row["record_value"] != plan.value
+                        or row["headers_json"] != self.encode_headers(plan.headers)
+                        or row["timestamp_ms"] != plan.timestamp_ms
                     ):
-                        raise ValueError("pending sim archive target is not allowed")
+                        raise ValueError(
+                            "pending sim archive row differs from verified source receipt"
+                        )
                     await self._publisher.publish(
                         row["target_topic"],
                         key=row["record_key"],
@@ -185,7 +234,8 @@ class PostgresSimArchiveRehydrationOutbox:
                         row["source_partition"],
                         row["source_offset"],
                     )
-                return len(rows)
+                    delivered += 1
+                return delivered
 
 
 __all__ = [

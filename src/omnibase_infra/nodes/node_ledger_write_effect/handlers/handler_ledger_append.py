@@ -14,8 +14,8 @@ Bytes Encoding:
     to bytes before passing to PostgreSQL, which stores them as BYTEA.
 
 Idempotency:
-    Uses INSERT ... ON CONFLICT (topic, partition, kafka_offset) DO NOTHING RETURNING.
-    If RETURNING returns no rows, the event was already in the ledger (duplicate).
+    Uses the transactional append function to assign a per-partition ingest
+    watermark. Duplicates return the original row and watermark.
     Duplicates are not errors - they enable idempotent replay.
 
 Design Decision - Composition with HandlerDb:
@@ -75,12 +75,11 @@ logger = logging.getLogger(__name__)
 HANDLER_ID_LEDGER_APPEND: str = "ledger-append-handler"
 
 _SQL_APPEND = """
-INSERT INTO event_ledger (
-    topic, partition, kafka_offset, event_key, event_value, onex_headers,
-    envelope_id, correlation_id, event_type, source, event_timestamp
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-ON CONFLICT (topic, partition, kafka_offset) DO NOTHING
-RETURNING ledger_entry_id
+SELECT ledger_entry_id, ingest_watermark, duplicate
+FROM public.append_event_ledger_with_watermark(
+    $1::text, $2::integer, $3::bigint, $4::bytea, $5::bytea, $6::jsonb,
+    $7::uuid, $8::uuid, $9::text, $10::text, $11::timestamptz
+)
 """
 
 
@@ -299,9 +298,27 @@ class HandlerLedgerAppend:
             raise RuntimeHostError("Database operation returned no result", context=ctx)
 
         rows = db_result.result.payload.rows
-        if rows and len(rows) > 0:
-            ledger_entry_id = UUID(str(rows[0]["ledger_entry_id"]))
-            duplicate = False
+        if len(rows) != 1:
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="ledger.append",
+            )
+            raise RuntimeHostError(
+                "Ledger append returned no unique result", context=ctx
+            )
+        row = rows[0]
+        ledger_entry_id = UUID(str(row["ledger_entry_id"]))
+        ingest_watermark = row["ingest_watermark"]
+        duplicate = row["duplicate"]
+        if type(duplicate) is not bool or (
+            ingest_watermark is not None
+            and (type(ingest_watermark) is not int or ingest_watermark <= 0)
+        ):
+            raise ValueError("Ledger append returned invalid watermark result")
+        if not duplicate and ingest_watermark is None:
+            raise ValueError("New ledger append is missing ingest watermark")
+        if not duplicate:
             logger.debug(
                 "Event appended to ledger",
                 extra={
@@ -312,8 +329,6 @@ class HandlerLedgerAppend:
                 },
             )
         else:
-            ledger_entry_id = None
-            duplicate = True
             logger.debug(
                 "Duplicate event detected (already in ledger)",
                 extra={
@@ -326,6 +341,7 @@ class HandlerLedgerAppend:
         return ModelLedgerAppendResult(
             success=True,
             ledger_entry_id=ledger_entry_id,
+            ingest_watermark=ingest_watermark,
             duplicate=duplicate,
             topic=payload.topic,
             partition=payload.partition,

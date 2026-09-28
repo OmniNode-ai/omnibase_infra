@@ -1,0 +1,26 @@
+{
+  "profile": "sim-preflight-source-compatible-v1",
+  "lane": "sim-preflight",
+  "required_migrations": [
+    {
+      "id": "node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
+      "path": "nodes/node_projection_delegation/0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
+      "sha256": "9bd85df5dfc2cbb5079ae63a653462208a3260f3d60b78441e43a7a128d47e43"
+    },
+    {
+      "id": "node:node_projection_delegation:0048_delegation_events_caller_lane.sql",
+      "path": "nodes/node_projection_delegation/0048_delegation_events_caller_lane.sql",
+      "sha256": "b175becdf97ddc6bdc91c3168bea75389ee54988c587c7653c50a03d1af17a76"
+    },
+    {
+      "id": "docker/108_create_sim_archive_rehydration_outbox.sql",
+      "path": "108_create_sim_archive_rehydration_outbox.sql",
+      "sha256": "6cae6196a8ae4d5b23a361f94ddc5ff9fc9900a81a5404ae837663dc93851aeb"
+    },
+    {
+      "id": "docker/109_add_event_ledger_ingest_watermark.sql",
+      "path": "109_add_event_ledger_ingest_watermark.sql",
+      "sha256": "7390d01435e42c50dcf74232527c99e7aed8d97c2756c1fda2f5aceb601546fb"
+    }
+  ]
+}

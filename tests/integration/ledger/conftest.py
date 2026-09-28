@@ -91,8 +91,8 @@ async def cleanup_event_ledger(
     After the test completes, all tracked entries are deleted.
 
     Note:
-        The list accepts ``UUID | None`` because duplicate appends return
-        ``ledger_entry_id=None``. None values are filtered during cleanup.
+        The list accepts ``UUID | None`` for older test helpers. Duplicate
+        appends return the existing UUID; repeated cleanup IDs are harmless.
 
     Usage:
         async def test_something(cleanup_event_ledger, ...):
@@ -111,7 +111,7 @@ async def cleanup_event_ledger(
     # Cleanup tracked entries
     if entry_ids:
         async with postgres_pool.acquire() as conn:
-            # Filter out None values (duplicates don't return an ID)
+            # Filter out None values from older test helpers.
             valid_ids = [str(eid) for eid in entry_ids if eid is not None]
             if valid_ids:
                 await conn.execute(
@@ -143,7 +143,7 @@ async def db_handler(
 
 @pytest.fixture
 async def ledger_append_handler(
-    db_handler: HandlerDb, mock_container: MagicMock
+    postgres_dsn: str, mock_container: MagicMock
 ) -> AsyncGenerator[HandlerLedgerAppend, None]:
     """Create and initialize a HandlerLedgerAppend for tests.
 
@@ -154,7 +154,7 @@ async def ledger_append_handler(
         HandlerLedgerAppend,
     )
 
-    handler = HandlerLedgerAppend(mock_container, db_handler)
+    handler = HandlerLedgerAppend(mock_container, db_dsn=postgres_dsn)
     await handler.initialize({})
 
     try:

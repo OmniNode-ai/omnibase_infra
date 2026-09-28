@@ -57,7 +57,8 @@ class ExecutionGraphTerminalPublisher:
         if type(terminal) is not ModelExecutionGraphTerminalResult:
             raise TypeError("Graph terminal publisher requires a typed terminal result")
         if (
-            terminal.tenant_id != authority.tenant_id
+            terminal.workflow_id != authority.workflow_id
+            or terminal.tenant_id != authority.tenant_id
             or terminal.correlation_id != authority.correlation_id
             or terminal.workflow_type != self._config.workflow_type
         ):

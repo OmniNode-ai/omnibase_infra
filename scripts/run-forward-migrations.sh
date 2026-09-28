@@ -729,6 +729,14 @@ node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_
 node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql
 node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
     ;;
+  sim-preflight)
+    # Disposable-only source-compatible profile. The dedicated lifecycle
+    # wrapper verifies the complete source-shape corpus before this runner is
+    # started. This lane releases only the fenced 0037 migration; 0048, 108 and 109
+    # remain normal declared migrations and are pinned by that verifier.
+    LANE_RELEASED_NODE_MIGRATION_IDS="\
+node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql"
+    ;;
   "")
     LANE_RELEASED_NODE_MIGRATION_IDS=""
     ;;

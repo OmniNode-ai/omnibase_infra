@@ -89,6 +89,10 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # node_dod_verify, outside this repository's publisher scan. The ledger
     # needs its raw event for bounded verdict replay.
     "onex.evt.omnimarket.dod-verify-completed.v1": "Published by omnimarket node_dod_verify (contract.yaml terminal_event), cross-repo; consumed by the OMN-19728 ledger projection | owner: jonah | expiry: 2026-12-26",
+    # OMN-19728: the gateway signs and publishes one graph-read command per
+    # workflow. Its producer is outside infra's node-contract scan; the
+    # consumer here still verifies the signed ingress before dispatch.
+    "onex.cmd.omnibase-infra.delegation-execution-graph-requested.v1": "Published by the OMN-19728 gateway signed graph-read command path (cross-repo), not an infra node contract | owner: jonah | expiry: 2026-12-26",
     # Pattern B dispatch commands enter through local runtime transport / skill clients;
     # RuntimePatternBBroker consumes them but no contract-declared node publishes them.
     "onex.cmd.omnibase-infra.pattern-b-dispatch.v1": "Published by local runtime transport / runtime-backed skill clients | owner: jonah | expiry: 2026-12-01",

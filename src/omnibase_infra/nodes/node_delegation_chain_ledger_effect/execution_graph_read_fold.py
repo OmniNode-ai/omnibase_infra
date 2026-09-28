@@ -1,11 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Offset-bounded adapter from admitted ledger structure to the pure chain fold.
-
-The selected rows and returned cursors are deterministic for a captured read.
-Kafka offsets are not writer watermarks: an earlier offset may arrive later,
-so append invariance is pending the separately ticketed watermark contract.
-"""
+"""Watermark-bounded adapter from admitted ledger structure to the pure fold."""
 
 from __future__ import annotations
 
@@ -16,9 +11,11 @@ from datetime import datetime
 from uuid import UUID
 
 from omnibase_core.models.execution_graph_replay import (
-    EnumExecutionGraphCursorMode,
     ModelExecutionGraphRequest,
     ModelExecutionGraphSourceCursor,
+)
+from omnibase_core.models.execution_graph_replay.model_enum_execution_graph_replay import (
+    EnumExecutionGraphCursorMode,
 )
 from omnibase_core.models.execution_graph_replay.model_execution_graph_stored_chain_annotation import (
     ModelExecutionGraphStoredChainAnnotation,
@@ -39,14 +36,12 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_execu
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_observed_envelope_evidence import (
     ModelObservedEnvelopeEvidence,
 )
-from omnibase_infra.nodes.node_delegation_chain_ledger_effect.replay_evidence import (
-    select_bounded_evidence,
-)
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     ExecutionGraphLedgerRecord,
 )
 from omnibase_infra.runtime.execution_graph_ownership import (
     ExecutionGraphOwnershipAdmission,
+    bound_replay_ownership,
 )
 from omnibase_infra.runtime.execution_graph_read_authority import (
     VerifiedExecutionGraphReadAuthority,
@@ -120,6 +115,7 @@ def _admitted_structure(
                 observed_index=index,
                 partition=row.partition,
                 kafka_offset=row.kafka_offset,
+                ingest_watermark=row.ingest_watermark,
                 event_timestamp=row.event_timestamp,
                 ledger_written_at=row.ledger_written_at,
             )
@@ -157,7 +153,6 @@ class ExecutionGraphReadFold:
             raise PermissionError("graph fold requires admitted signed ownership")
 
         try:
-            current_evidence = _admitted_structure(admission, topology)
             if request.cursor_mode is EnumExecutionGraphCursorMode.BOUNDED:
                 source_cursors = request.source_cursors or ()
                 if any(
@@ -165,23 +160,25 @@ class ExecutionGraphReadFold:
                     for cursor in source_cursors
                 ):
                     raise ValueError("cursor is outside the pinned read set")
-                bounded_evidence = select_bounded_evidence(
-                    current_evidence, source_cursors
-                )
             else:
                 bounds: dict[tuple[str, int], int] = {}
-                for item in current_evidence:
+                for item in (*admission.owned_rows, *admission.withheld_rows):
                     key = (item.topic, item.partition)
-                    bounds[key] = max(bounds.get(key, -1), item.kafka_offset)
+                    if item.ingest_watermark is None:
+                        raise ValueError("admitted evidence has no ingest watermark")
+                    bounds[key] = max(bounds.get(key, 0), item.ingest_watermark)
                 source_cursors = tuple(
                     ModelExecutionGraphSourceCursor(
                         topic=topic,
                         partition=partition,
-                        max_kafka_offset=max_kafka_offset,
+                        max_ingest_watermark=max_ingest_watermark,
                     )
-                    for (topic, partition), max_kafka_offset in sorted(bounds.items())
+                    for (topic, partition), max_ingest_watermark in sorted(
+                        bounds.items()
+                    )
                 )
-                bounded_evidence = current_evidence
+            bounded_admission = bound_replay_ownership(admission, source_cursors)
+            bounded_evidence = _admitted_structure(bounded_admission, topology)
             graph = self._fold.handle(
                 ModelExecutionGraphFoldRequest(
                     correlation_id=authority.correlation_id,
@@ -193,7 +190,7 @@ class ExecutionGraphReadFold:
                     verdict_reducer_version=_VERDICT_REDUCER_VERSION,
                     source_cursors=source_cursors,
                     read_at=self._read_clock(),
-                    withheld_count=admission.withheld_count,
+                    withheld_count=bounded_admission.withheld_count,
                     stored_chain=stored_chain,
                 )
             )
@@ -204,6 +201,7 @@ class ExecutionGraphReadFold:
                 message="The captured graph evidence cannot be folded.",
             )
         return ModelExecutionGraphTerminalResult(
+            workflow_id=authority.workflow_id,
             tenant_id=authority.tenant_id,
             correlation_id=authority.correlation_id,
             workflow_type=self._workflow_type,
@@ -219,6 +217,7 @@ class ExecutionGraphReadFold:
         message: str,
     ) -> ModelExecutionGraphTerminalResult:
         return ModelExecutionGraphTerminalResult(
+            workflow_id=authority.workflow_id,
             tenant_id=authority.tenant_id,
             correlation_id=authority.correlation_id,
             workflow_type=self._workflow_type,

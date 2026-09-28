@@ -58,8 +58,9 @@ class ProtocolLedgerPersistence(Protocol):
     ) -> ModelLedgerAppendResult:
         """Append an event to the audit ledger with idempotent write support.
 
-        Uses INSERT ... ON CONFLICT DO NOTHING with the (topic, partition, kafka_offset)
-        unique constraint. Duplicate events are detected without raising errors.
+        Uses a transactional per-partition ingest watermark allocator with the
+        (topic, partition, kafka_offset) idempotency constraint. Duplicates
+        return their original row and watermark without advancing the counter.
 
         Args:
             payload: Event payload containing Kafka position and event data.
@@ -69,8 +70,9 @@ class ProtocolLedgerPersistence(Protocol):
         Returns:
             ModelLedgerAppendResult with:
                 - success: True if operation completed without error
-                - ledger_entry_id: UUID of created entry, None if duplicate
-                - duplicate: True if ON CONFLICT was triggered
+                - ledger_entry_id: UUID of the inserted or existing entry
+                - ingest_watermark: assigned bound, or None for a legacy duplicate
+                - duplicate: True if the idempotency key already existed
 
         Raises:
             InfraConnectionError: If database connection fails

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -14,6 +15,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -57,6 +59,9 @@ from tests.helpers.projection_tenant_authority import InMemoryKeyProvider
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BASE_MIGRATION = REPO_ROOT / "docker/migrations/forward/044_create_event_ledger.sql"
+WATERMARK_MIGRATION = (
+    REPO_ROOT / "docker/migrations/forward/109_add_event_ledger_ingest_watermark.sql"
+)
 VERDICT_BASE_MIGRATION = (
     REPO_ROOT
     / "docker/migrations/forward/nodes/node_projection_dod_verdict/0000_create_dod_verify_runs.sql"
@@ -88,7 +93,39 @@ def _free_port() -> int:
 
 @pytest.fixture
 async def local_pool(tmp_path: Path) -> AsyncGenerator[asyncpg.Pool, None]:
-    """Isolated Unix-socket Postgres; no connection to shared runtime lanes."""
+    """Isolated Postgres only; the explicit DSN requires a disposable marker."""
+    test_dsn = os.environ.get("OMN19803_TEST_DSN")
+    if test_dsn is not None:
+        parsed = urlparse(test_dsn)
+        if (
+            parsed.scheme not in {"postgres", "postgresql"}
+            or parsed.hostname != "127.0.0.1"
+            or parsed.username != "postgres"
+            or parsed.password is None
+            or parsed.path != "/postgres"
+            or parsed.port is None
+        ):
+            raise ValueError(
+                "OMN19803_TEST_DSN must target dedicated loopback postgres"
+            )
+        pool = await asyncpg.create_pool(test_dsn, min_size=1, max_size=1)
+        try:
+            async with pool.acquire() as conn:
+                marker = await conn.fetchval(
+                    "SELECT to_regclass('omn19803_test_guard.disposable_instance') "
+                    "IS NOT NULL"
+                )
+                if marker is not True:
+                    raise ValueError("OMN19803_TEST_DSN lacks disposable DB marker")
+                await conn.execute("DROP SCHEMA IF EXISTS omninode_internal CASCADE")
+                await conn.execute("DROP SCHEMA public CASCADE")
+                await conn.execute("CREATE SCHEMA public")
+            await _initialize_schema(pool)
+            yield pool
+        finally:
+            await pool.close()
+        return
+
     initdb = shutil.which("initdb")
     pg_ctl = shutil.which("pg_ctl")
     if initdb is None or pg_ctl is None:
@@ -127,16 +164,7 @@ async def local_pool(tmp_path: Path) -> AsyncGenerator[asyncpg.Pool, None]:
         max_size=1,
     )
     try:
-        async with pool.acquire() as conn:
-            await conn.execute(BASE_MIGRATION.read_text(encoding="utf-8"))
-            await conn.execute("CREATE SCHEMA omninode_internal")
-            await conn.execute(VERDICT_BASE_MIGRATION.read_text(encoding="utf-8"))
-            await conn.execute(VERDICT_LINK_MIGRATION.read_text(encoding="utf-8"))
-            await conn.execute(CHAIN_MIGRATION.read_text(encoding="utf-8"))
-            await conn.execute(
-                "CREATE TABLE public.delegation_events ("
-                "correlation_id TEXT UNIQUE NOT NULL, tenant_id UUID NOT NULL)"
-            )
+        await _initialize_schema(pool)
         yield pool
     finally:
         await pool.close()
@@ -149,6 +177,20 @@ async def local_pool(tmp_path: Path) -> AsyncGenerator[asyncpg.Pool, None]:
         socket_dir.rmdir()
 
 
+async def _initialize_schema(pool: asyncpg.Pool) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(BASE_MIGRATION.read_text(encoding="utf-8"))
+        await conn.execute(WATERMARK_MIGRATION.read_text(encoding="utf-8"))
+        await conn.execute("CREATE SCHEMA omninode_internal")
+        await conn.execute(VERDICT_BASE_MIGRATION.read_text(encoding="utf-8"))
+        await conn.execute(VERDICT_LINK_MIGRATION.read_text(encoding="utf-8"))
+        await conn.execute(CHAIN_MIGRATION.read_text(encoding="utf-8"))
+        await conn.execute(
+            "CREATE TABLE public.delegation_events ("
+            "correlation_id TEXT UNIQUE NOT NULL, tenant_id UUID NOT NULL)"
+        )
+
+
 def _authority(
     tenant_id: UUID, correlation_id: UUID
 ) -> VerifiedExecutionGraphReadAuthority:
@@ -159,6 +201,7 @@ def _authority(
     inner = ModelEventEnvelope[dict[str, object]](
         tenant_id=str(tenant_id),
         correlation_id=correlation_id,
+        metadata={"tags": {"workflow_id": str(uuid4())}},
         payload={"correlation_id": str(correlation_id), "cursor_mode": "latest"},
     ).model_dump(mode="json")
     signed = ModelMessageEnvelope[dict[str, object]].create_signed(
@@ -427,9 +470,10 @@ async def test_owned_stored_chain_rewrite_changes_only_current_annotations(
         await conn.execute(
             "INSERT INTO public.event_ledger "
             "(topic, partition, kafka_offset, event_value, correlation_id, "
-            "envelope_id, onex_headers) VALUES ($1, 0, 1, $2, $3, $4, '{}'::jsonb)",
+            "envelope_id, onex_headers, ingest_watermark) "
+            "VALUES ($1, 0, 1, $2, $3, $4, '{}'::jsonb, 1)",
             head_topic,
-            b'{"tenant_id":null}',
+            json.dumps({"tenant_id": str(tenant)}).encode(),
             correlation,
             head,
         )
@@ -450,6 +494,8 @@ async def test_owned_stored_chain_rewrite_changes_only_current_annotations(
         PostgresExecutionGraphLedgerReader(local_pool),
     ).read_authorized_current(authority, read_set)
     admission = admit_current_ownership(current, read_set)
+    assert len(admission.owned_envelope_ids) == 1
+    assert type(admission.owned_envelope_ids[0]) is UUID
     reader = PostgresExecutionGraphStoredChainReader(local_pool)
     first = await reader.read_current(
         authority, admission.owner, admission.owned_envelope_ids

@@ -12,6 +12,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_core.models.execution_graph_replay.model_execution_graph_source_cursor import (
+    ModelExecutionGraphSourceCursor,
+)
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     DelegationOwnerProof,
     ExecutionGraphCurrentEvidence,
@@ -22,6 +25,7 @@ from omnibase_infra.runtime.execution_graph_ownership import (
     ExecutionGraphOwnershipRefusalError,
     admit_current_ownership,
     admit_verdict_candidates,
+    bound_replay_ownership,
 )
 
 _HEAD_TOPIC = "onex.cmd.omnimarket.delegate-skill.v1"
@@ -267,7 +271,58 @@ def test_exact_redelivery_does_not_create_second_head() -> None:
         _evidence(tenant, correlation, (head, redelivery)), _READ_SET
     )
 
-    assert len(admitted.owned_rows) == 1
+    assert admitted.owned_envelope_ids == (head.envelope_id,)
+    assert admitted.owned_rows == (head, redelivery)
+
+
+@pytest.mark.unit
+def test_idless_evidence_is_withheld_only_when_its_watermark_is_in_bound() -> None:
+    tenant = uuid4()
+    correlation = uuid4()
+    head = replace(
+        _row(correlation, topic=_HEAD_TOPIC, offset=1, tenant_id=tenant),
+        ingest_watermark=2,
+    )
+    idless = replace(
+        _row(correlation, topic="onex.evt.test.unlinked.v1", offset=2),
+        envelope_id=None,
+        ingest_watermark=4,
+    )
+    admitted = admit_current_ownership(
+        _evidence(tenant, correlation, (head, idless)), _READ_SET
+    )
+
+    assert admitted.withheld_rows == (idless,)
+    assert admitted.withheld_count == 1
+    assert admitted.withheld_envelope_ids == ()
+
+    included = bound_replay_ownership(
+        admitted,
+        (
+            ModelExecutionGraphSourceCursor(
+                topic=_HEAD_TOPIC, partition=0, max_ingest_watermark=2
+            ),
+            ModelExecutionGraphSourceCursor(
+                topic=idless.topic, partition=0, max_ingest_watermark=4
+            ),
+        ),
+    )
+    excluded = bound_replay_ownership(
+        admitted,
+        (
+            ModelExecutionGraphSourceCursor(
+                topic=_HEAD_TOPIC, partition=0, max_ingest_watermark=2
+            ),
+            ModelExecutionGraphSourceCursor(
+                topic=idless.topic, partition=0, max_ingest_watermark=3
+            ),
+        ),
+    )
+
+    assert included.withheld_rows == (idless,)
+    assert included.withheld_count == 1
+    assert excluded.withheld_rows == ()
+    assert excluded.withheld_count == 0
 
 
 @pytest.mark.unit

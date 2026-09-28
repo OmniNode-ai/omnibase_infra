@@ -18,6 +18,7 @@ pytestmark = pytest.mark.ci
 
 ROOT = Path(__file__).resolve().parents[2]
 OVERLAY = ROOT / "docker" / "docker-compose.sim-preflight.yml"
+GRAPH_OVERLAY = ROOT / "docker" / "docker-compose.sim-preflight-graph.yml"
 RENDERER = ROOT / "scripts" / "runtime_build" / "render_sim_preflight_compose.sh"
 SUMMARY = ROOT / "scripts" / "runtime_build" / "summarize_sim_preflight_compose.py"
 SIM_202_OVERLAY = ROOT / "docker" / "docker-compose.sim-202.yml"
@@ -28,9 +29,11 @@ _EXPECTED_SUMMARY = {
     "credential_fields_blank": True,
     "container_count": 10,
     "db_hosts_are_postgres": True,
+    "graph_overlay_enabled": False,
     "network_count": 1,
     "port_count": 7,
     "project_is_expected": True,
+    "runtime_lane_and_box_are_isolated": True,
     "service_count": 10,
     "volume_count": 7,
 }
@@ -85,6 +88,8 @@ def test_sim_preflight_overlay_has_no_shared_identifiers_or_ambient_credentials(
     assert "-p omnibase-infra-sim-202` is forbidden" in raw
     assert "omnibase-infra-dogfood-network" in raw
     assert "name: omnibase-infra-sim-preflight-network" in raw
+    assert raw.count("ONEX_RUNTIME_LANE: sim-202") == 3
+    assert raw.count("ONEX_BOX_ID: sim-preflight") == 3
     for name in (
         'GEMINI_API_KEY: ""',
         'OPENROUTER_API_KEY: ""',
@@ -106,6 +111,7 @@ def test_renderer_pins_only_the_disposable_project_and_has_no_lifecycle_mode() -
     assert 'COMPOSE_PROJECT_NAME="${PROJECT}"' in raw
     assert 'docker compose -p "${PROJECT}"' in raw
     assert "config --format json" in raw
+    assert 'uv run --no-sync --project "${ROOT}" python' in raw
     assert "summarize_sim_preflight_compose.py" in raw
     assert " up " not in raw
     assert " down " not in raw
@@ -182,6 +188,105 @@ def test_renderer_invokes_only_the_pinned_compose_chain(
         "--format",
         "json",
     ]
+
+
+def test_graph_renderer_requires_three_existing_absolute_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SIM_PREFLIGHT_GRAPH_OVERLAY", "true")
+    monkeypatch.setenv(
+        "SIM_PREFLIGHT_GRAPH_RUNTIME_CONFIG_FILE", str(tmp_path / "missing")
+    )
+    result = subprocess.run(
+        [str(RENDERER)], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 64
+    assert "SIM_PREFLIGHT_GRAPH_RUNTIME_CONFIG_FILE" in result.stderr
+
+
+def test_graph_overlay_mounts_only_effects_and_preserves_main(
+    tmp_path: Path,
+) -> None:
+    if not _docker_compose_available():
+        pytest.skip("compose renderer absent")
+    files = {
+        "SIM_PREFLIGHT_GRAPH_RUNTIME_CONFIG_FILE": tmp_path / "runtime_config.yaml",
+        "SIM_PREFLIGHT_GRAPH_GATEWAY_KEYMAP_FILE": tmp_path / "gateway-keys.json",
+        "SIM_PREFLIGHT_GRAPH_TERMINAL_PRIVATE_KEY_FILE": tmp_path
+        / "terminal-private.pem",
+    }
+    for path in files.values():
+        path.write_text("test-only", encoding="utf-8")
+        path.chmod(0o600)
+    environment = {
+        **_synthetic_environment(),
+        "SIM_PREFLIGHT_GRAPH_OVERLAY": "true",
+        **{name: str(path) for name, path in files.items()},
+    }
+    command = [
+        "docker",
+        "compose",
+        "-p",
+        "omnibase-infra-sim-preflight",
+        "--env-file",
+        "/dev/null",
+        *(
+            item
+            for path in (
+                ROOT / "docker" / "docker-compose.dogfood.yml",
+                SIM_202_OVERLAY,
+                OVERLAY,
+                GRAPH_OVERLAY,
+            )
+            for item in ("-f", str(path))
+        ),
+        "--profile",
+        "dogfood",
+        "config",
+        "--format",
+        "json",
+    ]
+    result = subprocess.run(
+        command, cwd=ROOT, capture_output=True, text=True, env=environment, check=True
+    )
+    rendered = cast("dict[str, Any]", json.loads(result.stdout))
+    services = cast("dict[str, dict[str, Any]]", rendered["services"])
+    targets = {
+        mount["target"]: mount
+        for mount in cast(
+            "list[dict[str, Any]]", services["runtime-effects"]["volumes"]
+        )
+        if mount["type"] == "bind"
+    }
+    graph_targets = {
+        "/app/contracts/runtime/runtime_config.yaml",
+        "/app/config/execution-graph/gateway-keys.json",
+        "/app/config/execution-graph/terminal-private.pem",
+    }
+    assert graph_targets <= targets.keys()
+    assert all(mount["read_only"] is True for mount in targets.values())
+    main_targets = {
+        mount["target"]
+        for mount in cast(
+            "list[dict[str, Any]]", services["omninode-runtime"]["volumes"]
+        )
+        if mount["type"] == "bind"
+    }
+    assert graph_targets.isdisjoint(main_targets)
+    summary = subprocess.run(
+        ["uv", "run", "--no-sync", "python", str(SUMMARY)],
+        cwd=ROOT,
+        input=result.stdout,
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=True,
+    )
+    assert json.loads(summary.stdout) == {
+        **_EXPECTED_SUMMARY,
+        "bind_mount_count": 11,
+        "graph_overlay_enabled": True,
+    }
 
 
 def test_renderer_suppresses_compose_failure_stderr(
@@ -290,6 +395,8 @@ def _valid_summary_config() -> dict[str, Any]:
         if service in {"omninode-runtime", "runtime-effects", "projection-api"}:
             service_config["environment"] = {
                 **dict.fromkeys(_CREDENTIAL_KEYS, ""),
+                "ONEX_RUNTIME_LANE": "sim-202",
+                "ONEX_BOX_ID": "sim-preflight",
                 "OMNIBASE_INFRA_DB_URL": "postgresql://x@postgres:5432/x",
                 "OMNIDASH_ANALYTICS_DB_URL": "postgresql://x@postgres:5432/x",
             }

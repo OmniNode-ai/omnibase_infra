@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Graph read folding selects explicit offset bounds without stability claims."""
+"""Graph read folding preserves replay at writer-assigned ingest bounds."""
 
 from __future__ import annotations
 
@@ -12,10 +12,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.models.execution_graph_replay import (
-    EnumExecutionGraphCursorMode,
     ModelExecutionGraphRequest,
     ModelExecutionGraphSourceCursor,
     ModelExecutionGraphTopologyVersion,
+)
+from omnibase_core.models.execution_graph_replay.model_enum_execution_graph_replay import (
+    EnumExecutionGraphCursorMode,
 )
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.execution_graph_read_fold import (
@@ -23,10 +25,12 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.execution_graph_re
 )
 from omnibase_infra.runtime.db.execution_graph_read_adapters import (
     DelegationOwnerProof,
+    ExecutionGraphCurrentEvidence,
     ExecutionGraphLedgerRecord,
 )
 from omnibase_infra.runtime.execution_graph_ownership import (
     ExecutionGraphOwnershipAdmission,
+    admit_current_ownership,
 )
 from omnibase_infra.runtime.execution_graph_read_authority import (
     TrustedGatewaySignerScope,
@@ -58,6 +62,7 @@ def _authority(
     authority = object.__new__(VerifiedExecutionGraphReadAuthority)
     object.__setattr__(authority, "tenant_id", tenant_id)
     object.__setattr__(authority, "correlation_id", request.correlation_id)
+    object.__setattr__(authority, "workflow_id", uuid4())
     object.__setattr__(authority, "request", request)
     object.__setattr__(
         authority,
@@ -82,6 +87,7 @@ def _row(
         topic=topic,
         partition=0,
         kafka_offset=offset,
+        ingest_watermark=offset,
         event_key=None,
         event_value=json.dumps(
             {"tenant_id": str(tenant_id), "prompt": "SECRET_NOT_FOR_GRAPH"}
@@ -140,26 +146,28 @@ async def test_latest_folds_owned_rows_without_leaking_raw_body() -> None:
         correlation_id=uuid4(), cursor_mode=EnumExecutionGraphCursorMode.LATEST
     )
     tenant_id = uuid4()
+    authority = _authority(request, tenant_id)
     terminal = await ExecutionGraphReadFold(
         workflow_type="delegation-execution-graph-read",
         read_clock=lambda: READ_AT,
     )(
         request,
-        _authority(request, tenant_id),
+        authority,
         _topology(),
         _admission(request, tenant_id),
         (),
     )
 
     assert terminal.status == "completed"
+    assert terminal.workflow_id == authority.workflow_id
     assert terminal.result is not None
     assert len(terminal.result.replay.nodes) == 2
     assert terminal.result.replay.source_cursors == (
         ModelExecutionGraphSourceCursor(
-            topic=CHILD_TOPIC, partition=0, max_kafka_offset=7
+            topic=CHILD_TOPIC, partition=0, max_ingest_watermark=7
         ),
         ModelExecutionGraphSourceCursor(
-            topic=HEAD_TOPIC, partition=0, max_kafka_offset=12
+            topic=HEAD_TOPIC, partition=0, max_ingest_watermark=12
         ),
     )
     assert "SECRET_NOT_FOR_GRAPH" not in terminal.model_dump_json()
@@ -173,10 +181,10 @@ async def test_bounded_request_folds_only_selected_partition_offsets() -> None:
         cursor_mode=EnumExecutionGraphCursorMode.BOUNDED,
         source_cursors=(
             ModelExecutionGraphSourceCursor(
-                topic=HEAD_TOPIC, partition=0, max_kafka_offset=12
+                topic=HEAD_TOPIC, partition=0, max_ingest_watermark=12
             ),
             ModelExecutionGraphSourceCursor(
-                topic=CHILD_TOPIC, partition=0, max_kafka_offset=7
+                topic=CHILD_TOPIC, partition=0, max_ingest_watermark=7
             ),
         ),
     )
@@ -209,10 +217,10 @@ async def test_bounded_request_excludes_rows_above_selected_offset() -> None:
         cursor_mode=EnumExecutionGraphCursorMode.BOUNDED,
         source_cursors=(
             ModelExecutionGraphSourceCursor(
-                topic=HEAD_TOPIC, partition=0, max_kafka_offset=12
+                topic=HEAD_TOPIC, partition=0, max_ingest_watermark=12
             ),
             ModelExecutionGraphSourceCursor(
-                topic=CHILD_TOPIC, partition=0, max_kafka_offset=6
+                topic=CHILD_TOPIC, partition=0, max_ingest_watermark=6
             ),
         ),
     )
@@ -242,9 +250,23 @@ async def test_full_read_withheld_count_is_visible_without_exposing_rows() -> No
         correlation_id=uuid4(), cursor_mode=EnumExecutionGraphCursorMode.LATEST
     )
     tenant_id = uuid4()
+    original = _admission(request, tenant_id)
+    withheld_rows = tuple(
+        replace(
+            original.owned_rows[1],
+            ledger_entry_id=uuid4(),
+            envelope_id=uuid4(),
+            event_value=b'{"tenant_id":null}',
+            onex_headers="{}",
+            kafka_offset=offset,
+            ingest_watermark=offset,
+        )
+        for offset in (8, 9)
+    )
     admission = replace(
-        _admission(request, tenant_id),
-        withheld_envelope_ids=(uuid4(), uuid4()),
+        original,
+        withheld_rows=withheld_rows,
+        withheld_envelope_ids=tuple(row.envelope_id for row in withheld_rows),
         withheld_count=2,
     )
     terminal = await ExecutionGraphReadFold(
@@ -295,3 +317,109 @@ async def test_latest_refuses_admitted_reroute_without_partial_success() -> None
     assert terminal.result is None
     assert terminal.refusal is not None
     assert terminal.refusal.code == "invalid_graph_evidence"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_late_lower_offset_redelivery_preserves_bounded_replay() -> None:
+    request = ModelExecutionGraphRequest(
+        correlation_id=uuid4(),
+        cursor_mode=EnumExecutionGraphCursorMode.BOUNDED,
+        source_cursors=(
+            ModelExecutionGraphSourceCursor(
+                topic=HEAD_TOPIC, partition=0, max_ingest_watermark=12
+            ),
+            ModelExecutionGraphSourceCursor(
+                topic=CHILD_TOPIC, partition=0, max_ingest_watermark=7
+            ),
+        ),
+    )
+    tenant_id = uuid4()
+    original = _admission(request, tenant_id)
+    topology = _topology()
+    authority = _authority(request, tenant_id)
+    fold = ExecutionGraphReadFold(
+        workflow_type="delegation-execution-graph-read", read_clock=lambda: READ_AT
+    )
+
+    async def read(rows: tuple[ExecutionGraphLedgerRecord, ...]):
+        admission = admit_current_ownership(
+            ExecutionGraphCurrentEvidence(owner=original.owner, ledger_rows=rows),
+            topology.read_set,
+        )
+        return await fold(request, authority, topology, admission, ())
+
+    before = await read(original.owned_rows)
+    late_copy = replace(
+        original.owned_rows[1],
+        ledger_entry_id=uuid4(),
+        kafka_offset=6,
+        ingest_watermark=8,
+    )
+    # Match the database's offset ordering: the late copy is visited first.
+    after = await read((late_copy, *original.owned_rows))
+    assert before.result is not None and after.result is not None
+    assert (
+        after.result.replay.model_dump_json() == before.result.replay.model_dump_json()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("append_kind", ["unowned", "parent_of_tenantless"])
+async def test_appended_ownership_evidence_does_not_change_bounded_replay(
+    append_kind: str,
+) -> None:
+    request = ModelExecutionGraphRequest(
+        correlation_id=uuid4(),
+        cursor_mode=EnumExecutionGraphCursorMode.BOUNDED,
+        source_cursors=(
+            ModelExecutionGraphSourceCursor(
+                topic=HEAD_TOPIC, partition=0, max_ingest_watermark=12
+            ),
+            ModelExecutionGraphSourceCursor(
+                topic=CHILD_TOPIC, partition=0, max_ingest_watermark=7
+            ),
+        ),
+    )
+    tenant_id = uuid4()
+    original = _admission(request, tenant_id)
+    parent_id = uuid4()
+    child = replace(
+        original.owned_rows[1],
+        event_value=b'{"tenant_id":null}',
+        onex_headers=json.dumps({"parent_message_id": str(parent_id)}),
+    )
+    initial = (original.owned_rows[0], child)
+    appended = replace(
+        child,
+        ledger_entry_id=uuid4(),
+        envelope_id=parent_id,
+        kafka_offset=8,
+        ingest_watermark=8,
+        onex_headers=json.dumps(
+            {"parent_message_id": str(original.head_envelope_id)}
+            if append_kind == "parent_of_tenantless"
+            else {}
+        ),
+    )
+    topology = _topology()
+    authority = _authority(request, tenant_id)
+    fold = ExecutionGraphReadFold(
+        workflow_type="delegation-execution-graph-read", read_clock=lambda: READ_AT
+    )
+
+    async def read(rows: tuple[ExecutionGraphLedgerRecord, ...]):
+        admission = admit_current_ownership(
+            ExecutionGraphCurrentEvidence(owner=original.owner, ledger_rows=rows),
+            topology.read_set,
+        )
+        return await fold(request, authority, topology, admission, ())
+
+    before = await read(initial)
+    after = await read((*initial, appended))
+    assert before.result is not None and after.result is not None
+    assert before.result.replay.withheld_count == 1
+    assert (
+        after.result.replay.model_dump_json() == before.result.replay.model_dump_json()
+    )

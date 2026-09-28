@@ -392,6 +392,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.projectors.model_projection_intent import (
         ModelProjectionIntent,
     )
+    from omnibase_core.protocols.crypto.protocol_key_provider import ProtocolKeyProvider
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.handlers.handler_infisical import HandlerInfisical
     from omnibase_infra.models.dispatch.model_dispatch_result import (
@@ -399,6 +400,9 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
         ProtocolPatternBBrokerTransport,
+    )
+    from omnibase_infra.runtime.models.model_execution_graph_read_ingress_config import (
+        ModelExecutionGraphReadIngressConfig,
     )
     from omnibase_infra.runtime.secret_resolver import SecretResolver
     from omnibase_infra.runtime.service_terminal_event_consumer import (
@@ -7193,6 +7197,8 @@ def _make_event_bus_callback(
     declares_output: bool | None = None,
     failure_terminal_topics: Sequence[str] = (),
     terminal_answer_topic: str | None = None,
+    execution_graph_read_ingress: ModelExecutionGraphReadIngressConfig | None = None,
+    execution_graph_read_key_provider: ProtocolKeyProvider | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -7260,7 +7266,17 @@ def _make_event_bus_callback(
     """
     import json
 
+    from omnibase_core.models.envelope.model_message_envelope import (
+        ModelMessageEnvelope,
+    )
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.runtime.dispatch_envelope_context import (
+        bind_execution_graph_read_authority,
+    )
+    from omnibase_infra.runtime.execution_graph_read_authority import (
+        ExecutionGraphReadAuthorityError,
+        verify_signed_execution_graph_read_authority,
+    )
     from omnibase_infra.runtime.observability import (
         active_flow_key,
         get_consumer_flow_counters,
@@ -7285,6 +7301,12 @@ def _make_event_bus_callback(
         dispatch_engine,
         contract_name=topic,
     )
+    if (execution_graph_read_ingress is None) != (
+        execution_graph_read_key_provider is None
+    ):
+        raise ValueError(
+            "graph read ingress and key provider must be supplied together"
+        )
 
     def _derive_event_type_from_topic(topic: str) -> str | None:
         parts = topic.split(".")
@@ -7830,6 +7852,44 @@ def _make_event_bus_callback(
     async def callback(message: object) -> None:
         from uuid import uuid4
 
+        # The graph command is a signed outer envelope, never a raw command.
+        # Verify before the generic raw-payload fallback or failure-terminal
+        # path can turn an untrusted body into an executable request or an
+        # unsigned graph answer.
+        graph_authority = None
+        graph_payload: dict[str, object] | None = None
+        if (
+            execution_graph_read_ingress is not None
+            and topic == execution_graph_read_ingress.command_topic
+        ):
+            raw_signed = getattr(message, "value", None)
+            if raw_signed is None or execution_graph_read_key_provider is None:
+                raise ExecutionGraphReadAuthorityError(
+                    "graph read requires a signed transport message"
+                )
+            try:
+                signed = ModelMessageEnvelope[object].model_validate_json(raw_signed)
+                graph_authority = verify_signed_execution_graph_read_authority(
+                    signed,
+                    execution_graph_read_key_provider,
+                    execution_graph_read_ingress.gateway_policy,
+                )
+                if not isinstance(signed.payload, dict):
+                    raise ExecutionGraphReadAuthorityError(
+                        "graph read signed payload is not an event envelope"
+                    )
+                graph_payload = signed.payload
+                if graph_payload.get("event_type") != _derive_event_type_from_topic(
+                    topic
+                ):
+                    raise ExecutionGraphReadAuthorityError(
+                        "graph read event type does not match command topic"
+                    )
+            except (ValueError, TypeError) as exc:
+                raise ExecutionGraphReadAuthorityError(
+                    "graph read requires trusted signed authority"
+                ) from exc
+
         # OMN-14498: seed lineage from the INGRESS transport headers before
         # anything can fail. The body is not a reliable lineage source -- a
         # poisoned message (truncated/undecodable JSON) raises inside
@@ -7846,8 +7906,12 @@ def _make_event_bus_callback(
         try:
             raw = getattr(message, "value", None)
             if raw is not None:
-                data = json.loads(
-                    raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                data = (
+                    graph_payload
+                    if graph_payload is not None
+                    else json.loads(
+                        raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                    )
                 )
                 from pydantic import ValidationError as PydanticValidationError
 
@@ -7925,18 +7989,19 @@ def _make_event_bus_callback(
                 envelope = message
             if envelope.correlation_id is not None:
                 correlation_id = envelope.correlation_id
-            if flow_counters is None or consumer_group is None:
-                await _dispatch_with_bounded_retry(envelope, message)
-            else:
-                # OMN-16777: an envelope reaching this line HAS been handed
-                # to dispatch. Counted before the call, not after, so a
-                # handler that hangs or dies still shows the message as
-                # taken in -- counting only successful dispatches would
-                # reproduce exactly the "green because nothing was
-                # measured" defect.
-                flow_counters.record_in(consumer_group, topic)
-                with active_flow_key(consumer_group, topic):
+            authority_context = (
+                bind_execution_graph_read_authority(graph_authority)
+                if graph_authority is not None
+                else contextlib.nullcontext()
+            )
+            with authority_context:
+                if flow_counters is None or consumer_group is None:
                     await _dispatch_with_bounded_retry(envelope, message)
+                else:
+                    # Count at ingress, including a handler that hangs or fails.
+                    flow_counters.record_in(consumer_group, topic)
+                    with active_flow_key(consumer_group, topic):
+                        await _dispatch_with_bounded_retry(envelope, message)
         except ProjectionNotMaterializedError:
             # OMN-17379: propagate unconditionally, for the same reason
             # BoundaryApplyPublishError does. Routing it through
@@ -10005,6 +10070,8 @@ async def subscribe_wired_contract_topics(
     exclusions_out: list[ModelContractAttachExclusion] | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
+    execution_graph_read_ingress: ModelExecutionGraphReadIngressConfig | None = None,
+    execution_graph_read_key_provider: ProtocolKeyProvider | None = None,
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
 
@@ -10041,6 +10108,14 @@ async def subscribe_wired_contract_topics(
     behavior is the original concurrent subscribe (no readiness gate).
     """
     _validate_initial_subscription_contract_identities(manifest, report)
+    if any(
+        contract.name == "node_execution_graph_read_effect"
+        for contract in manifest.contracts
+    ) and (
+        execution_graph_read_ingress is None
+        or execution_graph_read_key_provider is None
+    ):
+        raise ValueError("execution graph read subscription requires signed ingress")
     if event_bus is None:
         return {}
 
@@ -10197,6 +10272,8 @@ async def subscribe_wired_contract_topics(
                 readiness_config=knobs,
                 core_runtime_topics=core_runtime_topics,
                 core_runtime_owners=core_runtime_owners,
+                execution_graph_read_ingress=execution_graph_read_ingress,
+                execution_graph_read_key_provider=execution_graph_read_key_provider,
             )
 
     attach_results = await asyncio.gather(
@@ -10226,6 +10303,8 @@ async def _interleave_contract(
     readiness_config: ModelTopicReadinessConfig,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
+    execution_graph_read_ingress: ModelExecutionGraphReadIngressConfig | None = None,
+    execution_graph_read_key_provider: ProtocolKeyProvider | None = None,
 ) -> ModelContractAttachResult:
     """Provision -> confirm-ready -> attach for ONE contract (§3.2, OMN-13237).
 
@@ -10323,6 +10402,8 @@ async def _interleave_contract(
             allowed_dispatcher_ids=dispatcher_scope,
             core_runtime_topics=core_runtime_topics,
             core_runtime_owners=core_runtime_owners,
+            execution_graph_read_ingress=execution_graph_read_ingress,
+            execution_graph_read_key_provider=execution_graph_read_key_provider,
         )
     except Exception as exc:  # noqa: BLE001 — boundary: per-contract, never fatal
         logger.warning(
@@ -10367,6 +10448,8 @@ async def reattach_not_ready_contracts(
     readiness_config: ModelTopicReadinessConfig | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
+    execution_graph_read_ingress: ModelExecutionGraphReadIngressConfig | None = None,
+    execution_graph_read_key_provider: ProtocolKeyProvider | None = None,
 ) -> tuple[dict[str, tuple[str, ...]], tuple[ModelContractAttachResult, ...]]:
     """Re-attempt provision -> confirm-ready -> attach for UNATTACHED contracts.
 
@@ -10434,6 +10517,11 @@ async def reattach_not_ready_contracts(
     still_unattached_names = tuple(result.contract_name for result in pending_results)
     if not still_unattached_names:
         return {}, ()
+    if "node_execution_graph_read_effect" in still_unattached_names and (
+        execution_graph_read_ingress is None
+        or execution_graph_read_key_provider is None
+    ):
+        raise ValueError("execution graph read retry requires signed ingress")
 
     _validate_contract_dispatcher_ownership(
         dispatch_engine,
@@ -10465,6 +10553,8 @@ async def reattach_not_ready_contracts(
                 readiness_config=knobs,
                 core_runtime_topics=core_runtime_topics,
                 core_runtime_owners=core_runtime_owners,
+                execution_graph_read_ingress=execution_graph_read_ingress,
+                execution_graph_read_key_provider=execution_graph_read_key_provider,
             )
 
     retried = await asyncio.gather(
@@ -10493,6 +10583,8 @@ async def run_not_ready_reconciliation_loop(
     readiness_config: ModelTopicReadinessConfig | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
+    execution_graph_read_ingress: ModelExecutionGraphReadIngressConfig | None = None,
+    execution_graph_read_key_provider: ProtocolKeyProvider | None = None,
     initial_delay_seconds: float = DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS,
     backoff_seconds: float = DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS,
     max_attempts: int = DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS,
@@ -10553,6 +10645,8 @@ async def run_not_ready_reconciliation_loop(
             readiness_config=readiness_config,
             core_runtime_topics=core_runtime_topics,
             core_runtime_owners=core_runtime_owners,
+            execution_graph_read_ingress=execution_graph_read_ingress,
+            execution_graph_read_key_provider=execution_graph_read_key_provider,
         )
         for result in results:
             latest[result.contract_name] = result
@@ -11030,6 +11124,8 @@ async def _subscribe_contract_topics(
     allowed_dispatcher_ids: Collection[str] | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
+    execution_graph_read_ingress: ModelExecutionGraphReadIngressConfig | None = None,
+    execution_graph_read_key_provider: ProtocolKeyProvider | None = None,
 ) -> list[str]:
     """Subscribe all declared event-bus topics for a wired contract.
 
@@ -11049,6 +11145,15 @@ async def _subscribe_contract_topics(
     owner_by_topic = dict(core_runtime_owners or {})
     if contract.event_bus is None or not contract.event_bus.subscribe_topics:
         return []
+    if contract.name == "node_execution_graph_read_effect" and (
+        execution_graph_read_ingress is None
+        or execution_graph_read_key_provider is None
+        or contract.event_bus.subscribe_topics
+        != (execution_graph_read_ingress.command_topic,)
+    ):
+        raise ValueError(
+            "execution graph read subscription requires exact signed ingress"
+        )
 
     dispatcher_scope = _require_registered_contract_dispatcher_scope(
         dispatch_engine,
@@ -11240,7 +11345,16 @@ async def _subscribe_contract_topics(
                 # listening for this contract's answer. Same value the applier
                 # publishes SUCCESS to, so it is inside the publish allowlist by
                 # construction and needs no second derivation.
-                terminal_answer_topic=output_topic,
+                # The graph executor alone signs its declared terminal. A
+                # generic boundary failure event here would be unsigned and
+                # must never be mistaken for a graph workflow terminal.
+                terminal_answer_topic=(
+                    None
+                    if contract.name == "node_execution_graph_read_effect"
+                    else output_topic
+                ),
+                execution_graph_read_ingress=execution_graph_read_ingress,
+                execution_graph_read_key_provider=execution_graph_read_key_provider,
             )
         topic_callbacks.append((topic, callback))
 

@@ -147,6 +147,9 @@ from omnibase_infra.runtime.models.model_execution_graph_read_ingress_config imp
 from omnibase_infra.runtime.models.model_execution_graph_trusted_gateway_config import (
     ModelExecutionGraphTrustedGatewayConfig,
 )
+from omnibase_infra.runtime.models.model_graph_ledger_node_allowlist import (
+    ModelGraphLedgerNodeAllowlist,
+)
 from omnibase_infra.runtime.models.model_materialized_resources import (
     ModelMaterializedResources,
 )
@@ -734,6 +737,13 @@ async def _wire_package_node_subscriptions(
 
     for contract in contracts:
         node_name = str(contract["name"])
+        if node_name == "node_execution_graph_read_effect":
+            skipped_no_topics += 1
+            logger.info(
+                "Skipping execution graph read legacy package subscription; "
+                "runtime auto-wiring owns its opt-in subscription"
+            )
+            continue
         event_bus_section = contract.get("event_bus")
 
         if not isinstance(event_bus_section, dict) or not event_bus_section.get(
@@ -1356,6 +1366,12 @@ class RuntimeHostProcess:
 
         # Store full config for handler initialization
         self._config: dict[str, object] | None = config
+        selection_raw = config.get("graph_ledger_node_allowlist")
+        self._graph_ledger_node_allowlist = (
+            ModelGraphLedgerNodeAllowlist.model_validate(selection_raw)
+            if selection_raw is not None
+            else None
+        )
 
         # Runtime state
         self._is_running: bool = False
@@ -1949,6 +1965,17 @@ class RuntimeHostProcess:
         # An advertised signed ingress must be usable even when this runtime
         # has no descriptors or package subscriptions to wire.
         self._execution_graph_read_ingress_dependencies()
+
+        if self._graph_ledger_node_allowlist is not None:
+            from omnibase_infra.runtime.auto_wiring.graph_ledger_node_selection import (
+                validate_graph_ledger_boot,
+            )
+
+            validate_graph_ledger_boot(
+                self._graph_ledger_node_allowlist,
+                resolve_runtime_profile_name(),
+                os.environ,
+            )
 
         # Step 1: Validate architecture compliance FIRST (OMN-1138)
         # This runs before event bus starts or handlers are wired to ensure
@@ -3192,6 +3219,26 @@ class RuntimeHostProcess:
         error_count = 0
 
         for descriptor in descriptors:
+            if self._graph_ledger_node_allowlist is not None:
+                # Transport/protocol handlers remain available. Node contracts
+                # must be selected before importing or registering their handler.
+                node_name = descriptor.name or ""
+                if descriptor.contract_path:
+                    raw_contract = yaml.safe_load(
+                        Path(descriptor.contract_path).read_text(encoding="utf-8")
+                    )
+                    if not isinstance(raw_contract, dict) or not isinstance(
+                        raw_contract.get("name"), str
+                    ):
+                        raise RuntimeHostError(
+                            "restricted runtime descriptor has no contract identity"
+                        )
+                    node_name = raw_contract["name"]
+                if (
+                    node_name.startswith("node_")
+                    and node_name not in self._graph_ledger_node_allowlist.nodes
+                ):
+                    continue
             try:
                 # Extract protocol type from handler_id
                 # Handler IDs use "proto." prefix for identity matching (e.g., "proto.consul" -> "consul")
@@ -3597,6 +3644,8 @@ class RuntimeHostProcess:
         .. versionadded:: 0.9.0
             Added as part of OMN-1989 live contract materialization.
         """
+        if self._graph_ledger_node_allowlist is not None:
+            return False
         try:
             # Typed database projections use the same contract-driven wiring path
             # as cold boot. The historical registry-only path below cannot inject
@@ -3873,6 +3922,8 @@ class RuntimeHostProcess:
         .. versionadded:: 0.9.0
             Added as part of OMN-1989 live contract materialization.
         """
+        if self._graph_ledger_node_allowlist is not None:
+            return
         if self._event_bus_wiring is None:
             return
 
@@ -6247,6 +6298,8 @@ class RuntimeHostProcess:
         .. versionadded:: 0.2.5
             Part of OMN-1621 contract-driven event bus wiring.
         """
+        if self._graph_ledger_node_allowlist is not None:
+            return
         # Guard: require both event_bus and dispatch_engine
         if not self._event_bus:
             logger.debug("Event bus not available, skipping subcontract wiring")
@@ -6323,6 +6376,15 @@ class RuntimeHostProcess:
                 if isinstance(raw_contract, dict)
                 else None
             )
+            if (
+                isinstance(raw_contract, dict)
+                and raw_contract.get("name") == "node_execution_graph_read_effect"
+            ):
+                logger.info(
+                    "Skipping execution graph read legacy descriptor subscription; "
+                    "runtime auto-wiring owns its opt-in subscription"
+                )
+                continue
             if not _raw_contract_owned_by_runtime_profile(raw_contract):
                 logger.info(
                     "Skipping event_bus subcontract wiring for "
@@ -6433,6 +6495,8 @@ class RuntimeHostProcess:
 
         .. versionadded:: OMN-7410
         """
+        if self._graph_ledger_node_allowlist is not None:
+            return
         if _package_node_subscription_wiring_disabled():
             logger.info(
                 "Package-node subscription wiring disabled; marketplace auto-wiring "
@@ -6534,6 +6598,8 @@ class RuntimeHostProcess:
         .. versionadded:: 0.8.0
             Created for event-driven contract discovery.
         """
+        if self._graph_ledger_node_allowlist is not None:
+            return
         if _baseline_subscription_wiring_disabled():
             logger.info(
                 "Baseline contract-registry subscription wiring skipped for "
@@ -6757,6 +6823,8 @@ class RuntimeHostProcess:
         .. versionadded:: 0.9.4
             Added as part of OMN-11247 post-freeze dynamic contract registration.
         """
+        if self._graph_ledger_node_allowlist is not None:
+            return
         if self._event_bus is None:
             logger.debug("Skipping dynamic contract listener: no event bus available")
             return

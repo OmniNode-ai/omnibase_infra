@@ -85,6 +85,13 @@ MEASURED_ABSENT_2026_09_17: tuple[str, ...] = (
 ALREADY_DECLARED_CONTROL = "20260727_storage_bytes_metering"
 
 
+@pytest.mark.unit
+def test_graph_terminal_migration_is_importable_after_cloud_runner() -> None:
+    """OMN-19726: warm forward replay must accept the graph cloud migration."""
+    name = "20260926_gateway_workflows_signed_terminal_result"
+    assert dict(_rows()).get(name) == f"{name}.sql"
+
+
 def _rows() -> list[tuple[str, str]]:
     parsed: list[tuple[str, str]] = []
     for number, line in enumerate(

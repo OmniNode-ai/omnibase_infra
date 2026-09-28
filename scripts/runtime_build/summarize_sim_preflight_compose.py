@@ -52,6 +52,13 @@ _VOLUMES = frozenset(
 _PORTS = frozenset({"65036", "65092", "65444", "65379", "65085", "65086", "65002"})
 _RUNTIME_SERVICES = frozenset({"omninode-runtime", "runtime-effects", "projection-api"})
 _EXPECTED_BIND_MOUNT_COUNT = 8
+_GRAPH_MOUNT_TARGETS = frozenset(
+    {
+        "/app/contracts/runtime/runtime_config.yaml",
+        "/app/config/execution-graph/gateway-keys.json",
+        "/app/config/execution-graph/terminal-private.pem",
+    }
+)
 _CREDENTIAL_KEYS = (
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
@@ -88,7 +95,9 @@ def main() -> int:
     credential_fields_blank: dict[str, bool] = {}
     all_bind_mounts_read_only = True
     bind_mount_count = 0
+    graph_mount_targets: list[str] = []
     db_hosts_are_postgres = True
+    runtime_lane_and_box_are_isolated = True
     for service_name, service in services.items():
         if not isinstance(service, dict):
             raise ValueError(f"compose services.{service_name} must be an object")
@@ -100,6 +109,11 @@ def main() -> int:
             environment = _mapping(service.get("environment"), label="environment")
             credential_fields_blank[service_name] = all(
                 environment.get(key) == "" for key in _CREDENTIAL_KEYS
+            )
+            runtime_lane_and_box_are_isolated = (
+                runtime_lane_and_box_are_isolated
+                and environment.get("ONEX_RUNTIME_LANE") == "sim-202"
+                and environment.get("ONEX_BOX_ID") == "sim-preflight"
             )
             db_hosts_are_postgres = db_hosts_are_postgres and all(
                 "@postgres:5432/" in str(environment.get(key, ""))
@@ -120,6 +134,13 @@ def main() -> int:
                     all_bind_mounts_read_only = all_bind_mounts_read_only and (
                         mount.get("read_only") is True
                     )
+                    target = mount.get("target")
+                    if target in _GRAPH_MOUNT_TARGETS:
+                        if service_name != "runtime-effects":
+                            raise ValueError(
+                                "graph files must mount only on runtime-effects"
+                            )
+                        graph_mount_targets.append(str(target))
         ports = service.get("ports", [])
         if isinstance(ports, list):
             for port in ports:
@@ -159,9 +180,19 @@ def main() -> int:
         raise ValueError("compose runtime credentials are not blank")
     if not db_hosts_are_postgres:
         raise ValueError("compose runtime database hosts are not postgres")
+    if not runtime_lane_and_box_are_isolated:
+        raise ValueError("compose runtime lane or isolated box identity is invalid")
     if not all_bind_mounts_read_only:
         raise ValueError("compose bind mounts are not read-only")
-    if bind_mount_count != _EXPECTED_BIND_MOUNT_COUNT:
+    graph_overlay_enabled = bool(graph_mount_targets)
+    if graph_overlay_enabled and (
+        len(graph_mount_targets) != len(_GRAPH_MOUNT_TARGETS)
+        or set(graph_mount_targets) != _GRAPH_MOUNT_TARGETS
+    ):
+        raise ValueError("graph overlay must mount the exact three graph files")
+    if bind_mount_count != _EXPECTED_BIND_MOUNT_COUNT + (
+        len(_GRAPH_MOUNT_TARGETS) if graph_overlay_enabled else 0
+    ):
         raise ValueError("compose bind mount count does not match sim-preflight")
     print(
         json.dumps(
@@ -171,9 +202,11 @@ def main() -> int:
                 "credential_fields_blank": all(credential_fields_blank.values()),
                 "container_count": len(container_names),
                 "db_hosts_are_postgres": db_hosts_are_postgres,
+                "graph_overlay_enabled": graph_overlay_enabled,
                 "network_count": len(_NETWORKS),
                 "port_count": len(published_ports),
                 "project_is_expected": True,
+                "runtime_lane_and_box_are_isolated": runtime_lane_and_box_are_isolated,
                 "service_count": len(services),
                 "volume_count": len(_VOLUMES),
             },

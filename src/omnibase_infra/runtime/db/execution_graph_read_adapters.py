@@ -45,7 +45,7 @@ _SQL_READ_FULL_CURRENT = """
 SELECT
     ledger_entry_id, topic, partition, kafka_offset, event_key, event_value,
     onex_headers::text AS onex_headers, envelope_id, correlation_id, event_type,
-    source, event_timestamp, ledger_written_at
+    source, event_timestamp, ledger_written_at, ingest_watermark
 FROM public.event_ledger
 WHERE correlation_id = $1::uuid
   AND topic = ANY($2::text[])
@@ -62,7 +62,7 @@ _SQL_READ_VERDICT_TERMINALS = """
 SELECT
     ledger_entry_id, topic, partition, kafka_offset, event_key, event_value,
     onex_headers::text AS onex_headers, envelope_id, correlation_id, event_type,
-    source, event_timestamp, ledger_written_at
+    source, event_timestamp, ledger_written_at, ingest_watermark
 FROM public.event_ledger
 WHERE correlation_id = ANY($1::uuid[])
   AND topic = $2::text
@@ -154,6 +154,7 @@ class ExecutionGraphLedgerRecord:
     source: str | None
     event_timestamp: datetime | None
     ledger_written_at: datetime
+    ingest_watermark: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +171,16 @@ class ExecutionGraphVerdictCandidates:
 
     verification_correlation_ids: tuple[UUID, ...]
     ledger_rows: tuple[ExecutionGraphLedgerRecord, ...]
+
+
+def _ledger_record(row: asyncpg.Record) -> ExecutionGraphLedgerRecord:
+    """Normalize asyncpg's UUID subclass at the database adapter boundary."""
+    fields = dict(row)
+    fields["ledger_entry_id"] = UUID(str(fields["ledger_entry_id"]))
+    fields["correlation_id"] = UUID(str(fields["correlation_id"]))
+    if fields["envelope_id"] is not None:
+        fields["envelope_id"] = UUID(str(fields["envelope_id"]))
+    return ExecutionGraphLedgerRecord(**fields)
 
 
 def _require_authority(authority: VerifiedExecutionGraphReadAuthority) -> None:
@@ -257,7 +268,7 @@ class PostgresExecutionGraphLedgerReader:
                     authority.correlation_id,
                     sorted(read_set.topics),
                 )
-        return tuple(ExecutionGraphLedgerRecord(**dict(row)) for row in rows)
+        return tuple(_ledger_record(row) for row in rows)
 
 
 class PostgresExecutionGraphVerdictCandidateReader:
@@ -282,7 +293,9 @@ class PostgresExecutionGraphVerdictCandidateReader:
                 index_rows = await connection.fetch(
                     _SQL_READ_VERIFICATION_IDS, owner.correlation_id
                 )
-                verification_ids = tuple(row["correlation_id"] for row in index_rows)
+                verification_ids = tuple(
+                    UUID(str(row["correlation_id"])) for row in index_rows
+                )
                 rows = (
                     await connection.fetch(
                         _SQL_READ_VERDICT_TERMINALS,
@@ -294,7 +307,7 @@ class PostgresExecutionGraphVerdictCandidateReader:
                 )
         return ExecutionGraphVerdictCandidates(
             verification_correlation_ids=verification_ids,
-            ledger_rows=tuple(ExecutionGraphLedgerRecord(**dict(row)) for row in rows),
+            ledger_rows=tuple(_ledger_record(row) for row in rows),
         )
 
 

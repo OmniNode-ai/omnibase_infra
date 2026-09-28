@@ -64,6 +64,8 @@ def _signed_request(
     realm: str = _SCOPE.realm,
     bus_id: str = _SCOPE.bus_id,
     event_type: str | None = None,
+    workflow_id_tag: str | None = None,
+    include_workflow_id: bool = True,
 ) -> tuple[ModelMessageEnvelope[dict[str, object]], InMemoryKeyProvider]:
     tenant = tenant_id or uuid4()
     correlation = correlation_id or uuid4()
@@ -73,6 +75,13 @@ def _signed_request(
         if inner_correlation_id
         else correlation,
         event_type=event_type,
+        metadata={
+            "tags": (
+                {"workflow_id": workflow_id_tag or str(uuid4())}
+                if include_workflow_id
+                else {}
+            )
+        },
         payload={
             "correlation_id": str(correlation),
             "cursor_mode": "latest",
@@ -94,7 +103,8 @@ def _signed_request(
 
 @pytest.mark.unit
 def test_trusted_signed_request_mints_sealed_authority() -> None:
-    envelope, provider = _signed_request()
+    workflow_id = uuid4()
+    envelope, provider = _signed_request(workflow_id_tag=str(workflow_id))
 
     authority = verify_signed_execution_graph_read_authority(
         envelope, provider, _POLICY
@@ -103,6 +113,7 @@ def test_trusted_signed_request_mints_sealed_authority() -> None:
     assert type(authority) is VerifiedExecutionGraphReadAuthority
     assert authority.tenant_id == UUID(envelope.tenant_id or "")
     assert authority.correlation_id == envelope.trace_id
+    assert authority.workflow_id == workflow_id
     with pytest.raises(TypeError):
         VerifiedExecutionGraphReadAuthority(  # type: ignore[call-arg]
             tenant_id=authority.tenant_id,
@@ -152,6 +163,17 @@ def test_signed_conflicting_inner_tenant_or_correlation_is_refused() -> None:
         verify_signed_execution_graph_read_authority(
             correlation_conflict, provider, _POLICY
         )
+
+
+@pytest.mark.unit
+def test_missing_or_noncanonical_signed_workflow_id_is_refused() -> None:
+    malformed, provider = _signed_request(workflow_id_tag="NOT-A-UUID")
+    with pytest.raises(ExecutionGraphReadAuthorityError, match="workflow"):
+        verify_signed_execution_graph_read_authority(malformed, provider, _POLICY)
+
+    missing, provider = _signed_request(include_workflow_id=False)
+    with pytest.raises(ExecutionGraphReadAuthorityError, match="workflow"):
+        verify_signed_execution_graph_read_authority(missing, provider, _POLICY)
 
 
 @pytest.mark.unit

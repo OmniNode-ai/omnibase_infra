@@ -60,6 +60,7 @@ class TrustedExecutionGraphGatewayPolicy:
 class VerifiedExecutionGraphReadAuthority:
     """In-process capability tied to one signed tenant/correlation request."""
 
+    workflow_id: UUID
     tenant_id: UUID
     correlation_id: UUID
     request: ModelExecutionGraphRequest
@@ -69,6 +70,7 @@ class VerifiedExecutionGraphReadAuthority:
     def __init__(
         self,
         *,
+        workflow_id: UUID,
         tenant_id: UUID,
         correlation_id: UUID,
         request: ModelExecutionGraphRequest,
@@ -80,6 +82,7 @@ class VerifiedExecutionGraphReadAuthority:
             raise TypeError(
                 "Graph read authority requires gateway signature verification"
             )
+        object.__setattr__(self, "workflow_id", workflow_id)
         object.__setattr__(self, "tenant_id", tenant_id)
         object.__setattr__(self, "correlation_id", correlation_id)
         object.__setattr__(self, "request", request)
@@ -151,6 +154,9 @@ def verify_signed_execution_graph_read_authority(
         raise ExecutionGraphReadAuthorityError(
             "Graph read inner correlation conflicts with signed trace"
         )
+    workflow_id = _canonical_uuid(
+        inner.metadata.tags.get("workflow_id"), name="workflow"
+    )
     try:
         request = ModelExecutionGraphRequest.model_validate(inner.payload)
     except Exception as exc:
@@ -162,6 +168,7 @@ def verify_signed_execution_graph_read_authority(
             "Graph read request correlation conflicts with signed trace"
         )
     return VerifiedExecutionGraphReadAuthority(
+        workflow_id=workflow_id,
         tenant_id=tenant_id,
         correlation_id=envelope.trace_id,
         request=request,

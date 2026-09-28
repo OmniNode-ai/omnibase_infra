@@ -50,6 +50,7 @@ def _evidence(
     fingerprint: str = "a" * 64,
     partition: int = 0,
     kafka_offset: int | None = None,
+    ingest_watermark: int | None = None,
 ) -> ModelObservedEnvelopeEvidence:
     return ModelObservedEnvelopeEvidence(
         envelope_id=envelope_id,
@@ -60,6 +61,9 @@ def _evidence(
         observed_index=observed_index,
         partition=partition,
         kafka_offset=observed_index if kafka_offset is None else kafka_offset,
+        ingest_watermark=(
+            observed_index + 1 if ingest_watermark is None else ingest_watermark
+        ),
     )
 
 
@@ -138,26 +142,33 @@ def test_exact_redelivery_collapses_but_conflicting_same_id_refuses() -> None:
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Pending 2026-09-26-omn-19726-watermark-cursor-ticket-draft.md: "
-        "Phase 0 finding 2 proves an offset bound can admit a lower offset "
-        "that lands later after the swallowed-exception/auto-commit path."
-    ),
-)
-def test_offset_bound_cannot_prove_append_invariance_after_late_lower_offset() -> None:
+def test_watermark_bound_excludes_late_lower_offset() -> None:
     head = _evidence(HEAD, "head", None, 0, kafka_offset=5)
     child = _evidence(CHILD, "child", HEAD, 1, kafka_offset=5)
     late = _evidence(SIBLING, "child", HEAD, 2, kafka_offset=4)
     bounds = (
-        ModelExecutionGraphSourceCursor(topic="head", partition=0, max_kafka_offset=5),
-        ModelExecutionGraphSourceCursor(topic="child", partition=0, max_kafka_offset=5),
+        ModelExecutionGraphSourceCursor(
+            topic="head", partition=0, max_ingest_watermark=1
+        ),
+        ModelExecutionGraphSourceCursor(
+            topic="child", partition=0, max_ingest_watermark=2
+        ),
     )
     before = select_bounded_evidence((head, child), bounds)
     after = select_bounded_evidence((head, child, late), bounds)
 
     assert before == after == (head, child)
+
+
+def test_bounded_selection_refuses_legacy_row_without_watermark() -> None:
+    legacy = _evidence(HEAD, "head", None, 0).model_copy(
+        update={"ingest_watermark": None}
+    )
+    bound = ModelExecutionGraphSourceCursor(
+        topic="head", partition=0, max_ingest_watermark=1
+    )
+    with pytest.raises(ValueError, match="lacks an ingest watermark"):
+        select_bounded_evidence((legacy,), (bound,))
 
 
 def test_topological_order_is_deterministic_and_preserves_observed_order() -> None:

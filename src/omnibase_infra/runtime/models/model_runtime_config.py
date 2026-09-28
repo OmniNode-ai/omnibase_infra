@@ -48,7 +48,9 @@ Example:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.gateway.models import ModelGatewayConfig
 from omnibase_infra.runtime.models.model_contract_registry_config import (
@@ -58,6 +60,15 @@ from omnibase_infra.runtime.models.model_enabled_protocols_config import (
     ModelEnabledProtocolsConfig,
 )
 from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
+from omnibase_infra.runtime.models.model_execution_graph_read_runtime_config import (
+    ModelExecutionGraphReadRuntimeConfig,
+)
+from omnibase_infra.runtime.models.model_execution_graph_trusted_gateway_config import (
+    ModelExecutionGraphTrustedGatewayConfig,
+)
+from omnibase_infra.runtime.models.model_graph_ledger_node_allowlist import (
+    ModelGraphLedgerNodeAllowlist,
+)
 from omnibase_infra.runtime.models.model_local_runtime_ingress_config import (
     ModelLocalRuntimeIngressConfig,
 )
@@ -178,6 +189,32 @@ class ModelRuntimeConfig(BaseModel):
         default_factory=ModelPatternBBrokerConfig,
         description="Configuration for the runtime-owned Pattern B broker.",
     )
+    execution_graph_read_gateway: ModelExecutionGraphTrustedGatewayConfig | None = (
+        Field(
+            default=None,
+            description="Trusted signed gateway identity for graph read commands.",
+        )
+    )
+    execution_graph_read: ModelExecutionGraphReadRuntimeConfig | None = Field(
+        default=None,
+        description="Explicit opt-in graph read resources and runtime terminal signer.",
+    )
+    graph_ledger_node_allowlist: ModelGraphLedgerNodeAllowlist | None = Field(
+        default=None,
+        description="Explicit disposable four-node evidence-only runtime selection.",
+    )
+
+    @model_validator(mode="after")
+    def graph_read_requires_gateway(self) -> Self:
+        """A graph read runtime must also declare its signed ingress authority."""
+        if (
+            self.execution_graph_read is not None
+            and self.execution_graph_read_gateway is None
+        ):
+            raise ValueError(
+                "execution_graph_read requires execution_graph_read_gateway"
+            )
+        return self
 
 
 __all__: list[str] = ["ModelRuntimeConfig"]

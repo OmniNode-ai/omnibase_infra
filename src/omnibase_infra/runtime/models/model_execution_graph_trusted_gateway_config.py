@@ -20,17 +20,14 @@ class ModelExecutionGraphTrustedGatewayConfig(BaseModel):
     bus_id: str = Field(min_length=1)  # string-id-ok: named message bus
     public_key_path: Path
 
-    @field_validator("public_key_path", mode="before")  # type: ignore[untyped-decorator]
+    @field_validator("public_key_path", mode="after")  # type: ignore[untyped-decorator]
     @classmethod
-    def _path(cls, value: object) -> Path:
-        if not isinstance(value, (str, Path)):
-            raise ValueError("graph gateway public_key_path must be a path")
-        path = Path(value)
-        if not path.is_absolute() or not path.is_file():
+    def _path(cls, value: Path) -> Path:
+        if not value.is_absolute() or not value.is_file():
             raise ValueError(
                 "graph gateway public_key_path must be an existing absolute file"
             )
-        return path
+        return value
 
 
 __all__ = ["ModelExecutionGraphTrustedGatewayConfig"]

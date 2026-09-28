@@ -1,0 +1,159 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Disposable auth/Gateway candidate ONLY. Apply after dogfood, sim-202, and
+# sim-preflight under project omnibase-infra-sim-preflight, with profiles
+# dogfood and sim-preflight-auth. Never add this file to a shared lane or the
+# default sim start wrapper. The graph workflow stays fenced in the API image;
+# this overlay does not import clients/users or grant credentials.
+name: omnibase-infra-sim-preflight
+services:
+  postgres:
+    environment:
+      # Both cold initdb and the warm forward-migration path need this role.
+      ROLE_OMNINODE_PASSWORD: ${SIM_PREFLIGHT_CLOUD_ROLE_PASSWORD:?disposable cloud DB role password required}
+  forward-migration:
+    environment:
+      ROLE_OMNINODE_PASSWORD: ${SIM_PREFLIGHT_CLOUD_ROLE_PASSWORD:?disposable cloud DB role password required}
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3
+    container_name: omnibase-infra-sim-preflight-keycloak
+    profiles: !override ["sim-preflight-auth"]
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-postgres}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?disposable Postgres password required}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${SIM_PREFLIGHT_KEYCLOAK_ADMIN_USERNAME:?disposable Keycloak admin username required}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${SIM_PREFLIGHT_KEYCLOAK_ADMIN_PASSWORD:?disposable Keycloak admin password required}
+      KC_HTTP_ENABLED: "true"
+      # One issuer/port on both sides: Mac resolves auth.localhost to loopback;
+      # Docker DNS resolves this network alias to the Keycloak container.
+      KC_HTTP_PORT: "28080"
+      KC_HOSTNAME: http://auth.localhost:28080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports: !override ["127.0.0.1:28080:28080"]
+    volumes:
+      - ./keycloak/omninode-realm.json:/opt/keycloak/data/import/omninode-realm.json:ro
+    networks: !override
+      omnibase-infra-dogfood-network:
+        aliases: [auth.localhost]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec \"{ printf 'HEAD /health/ready HTTP/1.0\\r\\n\\r\\n' >&0; grep 'HTTP/1.0 200'; } 0<>/dev/tcp/localhost/9000\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: "no"
+    labels:
+      - com.omninode.lane=sim-preflight
+      - com.omninode.ticket=OMN-19726
+  cloud-migration-files:
+    image: ${SIM_PREFLIGHT_CLOUD_MIGRATE_IMAGE:?pinned disposable cloud-migrate image required}
+    container_name: omnibase-infra-sim-preflight-cloud-migration-files
+    profiles: ["sim-preflight-auth"]
+    # The private volume must never retain SQL removed from the pinned image.
+    command:
+      - sh
+      - -c
+      - 'set -eu; rm -rf /work/* /work/.[!.]* 2>/dev/null || true; cp -a /migrations/. /work/; touch /work/.corpus-ready'
+    volumes:
+      - sim_preflight_cloud_migrations:/work
+    networks:
+      - omnibase-infra-dogfood-network
+    restart: "no"
+    labels:
+      - com.omninode.lane=sim-preflight
+  cloud-migration:
+    image: postgres:16
+    container_name: omnibase-infra-sim-preflight-cloud-migration
+    profiles: ["sim-preflight-auth"]
+    command: ["bash", "/run-cloud-migrations.sh"]
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: omninode_cloud
+      DB_USER: role_omninode
+      MIGRATION_DIR: /work
+      PGPASSWORD: ${SIM_PREFLIGHT_CLOUD_ROLE_PASSWORD:?disposable cloud DB role password required}
+      PGCONNECT_TIMEOUT: "10"
+    volumes:
+      - sim_preflight_cloud_migrations:/work
+      - ./migrations/cloud/run-cloud-migrations.sh:/run-cloud-migrations.sh:ro
+    networks:
+      - omnibase-infra-dogfood-network
+    depends_on:
+      cloud-migration-files:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
+    restart: "no"
+    labels:
+      - com.omninode.lane=sim-preflight
+  onex-api:
+    image: ${SIM_PREFLIGHT_ONEX_API_IMAGE:?pinned disposable onex-api image required}
+    container_name: omnibase-infra-sim-preflight-onex-api
+    profiles: ["sim-preflight-auth"]
+    ports: ["127.0.0.1:8090:8000"]
+    networks:
+      - omnibase-infra-dogfood-network
+    depends_on:
+      cloud-migration:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      OMNINODE_CLOUD_DB_URL: postgresql://role_omninode:${SIM_PREFLIGHT_CLOUD_ROLE_PASSWORD:?disposable cloud DB role password required}@postgres:5432/omninode_cloud
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      WORKFLOW_RATE_LIMIT_VALKEY_URL: redis://:${VALKEY_PASSWORD:?disposable Valkey password required}@valkey:6379
+      WORKFLOW_RATE_LIMIT_EXPECTED_REPLICAS: "1"
+      KEYCLOAK_ISSUER_URL: http://auth.localhost:28080/realms/omninode
+      KEYCLOAK_AUDIENCE: onex-api
+      KEYCLOAK_TENANT_ID_CLAIM: tenant_id
+      KEYCLOAK_TENANT_SLUG_CLAIM: tenant_slug
+      ONEX_API_BASE_URL: http://localhost:8090
+      ONEX_API_ALLOWED_ORIGINS: http://localhost:3000
+      GATEWAY_USER_CLIENT_ID: omniweb
+      GATEWAY_P0B_PER_TENANT_CREDENTIALS: disabled
+      GATEWAY_ATTACH_TOKEN_EXCHANGE: disabled
+      GATEWAY_SIGNUP_TOPIC_PROVISIONING: disabled
+      STRIPE_API_KEY: ${SIM_PREFLIGHT_STRIPE_API_KEY:?disposable Stripe sentinel required}
+      STRIPE_WEBHOOK_SECRET: ${SIM_PREFLIGHT_STRIPE_WEBHOOK_SECRET:?disposable Stripe webhook sentinel required}
+      STRIPE_CHECKOUT_SUCCESS_URL: ${SIM_PREFLIGHT_STRIPE_CHECKOUT_SUCCESS_URL:?disposable checkout success URL required}
+      STRIPE_CHECKOUT_CANCEL_URL: ${SIM_PREFLIGHT_STRIPE_CHECKOUT_CANCEL_URL:?disposable checkout cancel URL required}
+      STRIPE_PORTAL_RETURN_URL: ${SIM_PREFLIGHT_STRIPE_PORTAL_RETURN_URL:?disposable portal return URL required}
+      TENANT_BOOTSTRAP_ADMIN_SECRET: ${SIM_PREFLIGHT_TENANT_BOOTSTRAP_ADMIN_SECRET:?disposable tenant bootstrap secret required}
+      TENANT_TOPICS_ADMIN_SECRET: ${SIM_PREFLIGHT_TENANT_TOPICS_ADMIN_SECRET:?disposable tenant topics secret required}
+      TENANT_CLIENTS_ADMIN_SECRET: ${SIM_PREFLIGHT_TENANT_CLIENTS_ADMIN_SECRET:?disposable tenant clients secret required}
+      TENANT_OFFBOARD_ADMIN_SECRET: ${SIM_PREFLIGHT_TENANT_OFFBOARD_ADMIN_SECRET:?disposable tenant offboard secret required}
+      ALPHA_INVITE_ADMIN_SECRET: ${SIM_PREFLIGHT_ALPHA_INVITE_ADMIN_SECRET:?disposable invite secret required}
+      ONEX_ENVIRONMENT: local
+      TRUST_PROXY_HEADERS: "false"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: "no"
+    labels:
+      - com.omninode.lane=sim-preflight
+      - com.omninode.ticket=OMN-19726
+networks:
+  omnibase-infra-dogfood-network:
+    name: omnibase-infra-sim-preflight-network
+volumes:
+  sim_preflight_cloud_migrations:
+    name: omnibase-infra-sim-preflight-cloud-migrations

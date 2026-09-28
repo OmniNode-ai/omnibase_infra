@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Optional fourth overlay for the disposable graph-read proof. Never apply to
+# the shared sim-202 project. Only runtime-effects receives these mounts;
+# omninode-runtime retains the unmodified repository runtime configuration.
+services:
+  runtime-effects:
+    volumes:
+      - ${SIM_PREFLIGHT_GRAPH_RUNTIME_CONFIG_FILE:?graph runtime config file required}:/app/contracts/runtime/runtime_config.yaml:ro
+      - ${SIM_PREFLIGHT_GRAPH_GATEWAY_KEYMAP_FILE:?graph gateway keymap file required}:/app/config/execution-graph/gateway-keys.json:ro
+      - ${SIM_PREFLIGHT_GRAPH_TERMINAL_PRIVATE_KEY_FILE:?graph terminal private key file required}:/app/config/execution-graph/terminal-private.pem:ro
