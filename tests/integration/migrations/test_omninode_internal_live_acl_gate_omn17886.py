@@ -308,6 +308,27 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     assert topic_activity_live == topic_activity_declared
     assert "DELETE" not in topic_activity_live
 
+    # OMN-19833: the two PR landing read models vendored from
+    # node_projection_pr_landing. The runtime role holds exactly the declared
+    # SELECT/INSERT/UPDATE on each and never DELETE. pr_landing_transitions
+    # holds UPDATE live even though its own 0001 grants only SELECT, INSERT:
+    # migration 099's ALTER DEFAULT PRIVILEGES IN SCHEMA omninode_internal
+    # confers SELECT/INSERT/UPDATE on every table created there afterwards, so
+    # append-only is a property of the writer, not of the ACL. Asserting live
+    # equals declared names that here instead of leaving it to the diff below.
+    for pr_landing_table in ("pr_landing_state", "pr_landing_transitions"):
+        pr_landing_declared = {
+            privilege
+            for principal, relation, privilege in declared_acl(
+                load_topology_profile(PROFILE)
+            ).table_grants
+            if principal == _RUNTIME and relation == pr_landing_table
+        }
+        assert pr_landing_declared == {"SELECT", "INSERT", "UPDATE"}, pr_landing_table
+        pr_landing_live = _live_privileges(fresh_build, pr_landing_table, _RUNTIME)
+        assert pr_landing_live == pr_landing_declared, pr_landing_table
+        assert "DELETE" not in pr_landing_live, pr_landing_table
+
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}
     new = sorted(live - allowed)

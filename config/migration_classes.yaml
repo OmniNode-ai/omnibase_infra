@@ -269,6 +269,8 @@ migrations:
   forward/nodes/node_projection_pattern_learning/0000_create_pattern_learning_artifacts.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PK_PATTERN_LEARNING_ARTIFACTS; ALTER TABLE ADD CONSTRAINT UQ_PATTERN_LEARN
   forward/nodes/node_projection_pattern_learning/0001_pattern_learning_artifacts_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_projection_pattern_learning/002_grant_tenant_projection_writer_pattern_learning_artifacts.sql: expand-only
+  forward/nodes/node_projection_pr_landing/0000_create_pr_landing.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.pr_landing_state); UNIQUE INDEX on an existing table (omninode_internal.pr_landing_transitions)
+  forward/nodes/node_projection_pr_landing/0001_grant_omninode_runtime_pr_landing.sql: expand-only # additive
   forward/nodes/node_projection_prod_promotion_gate/0000_create_prod_promotion_gate_decisions.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_prod_promotion_gate/0001_grant_omninode_runtime_prod_promotion_gate_decisions.sql: expand-only
   forward/nodes/node_projection_receipt_gate/0000_create_receipt_gate_projection_table.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT RECEIPT_GATE_ROWS_PKEY
@@ -313,6 +315,7 @@ migrations:
   forward/nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql: expand-only
   forward/nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql: forward-only # CREATE OR REPLACE
   forward/nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; transaction-scoped CREATE/DROP POLICY inside one DO block
+  forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only
   forward/nodes/node_projection_session_replay/0001_create_session_replay_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_S
