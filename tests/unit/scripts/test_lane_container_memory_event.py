@@ -98,6 +98,7 @@ def _observation() -> dict[str, Any]:
             },
         ],
         "journal_oom_kills": [],
+        "unnamed_worker_logs": [],
         "worker_runs": _runs(
             {
                 "runner_name": "omnipc2-ci-runner-13",
@@ -140,8 +141,18 @@ def _previous_state() -> dict[str, Any]:
         "host_boot_id": BOOT_ID,
         "window_end": "2026-09-28T18:00:00.000000Z",
         "containers": {
-            REDPANDA_ID: {"max_total": 0, "oom_kill_total": 0, "max_delta": 0},
-            CONSUMER_ID: {"max_total": 1053, "oom_kill_total": 0, "max_delta": 5},
+            REDPANDA_ID: {
+                "started_at": "2026-09-28T12:11:26.559476Z",
+                "max_total": 0,
+                "oom_kill_total": 0,
+                "max_delta": 0,
+            },
+            CONSUMER_ID: {
+                "started_at": "2026-09-28T12:12:00.000000Z",
+                "max_total": 1053,
+                "oom_kill_total": 0,
+                "max_delta": 5,
+            },
         },
     }
 
@@ -361,6 +372,40 @@ def test_a_killed_container_that_is_not_running_is_still_alerted() -> None:
     ) in alerts
 
 
+def test_a_restart_counts_the_new_instance_in_full() -> None:
+    """Same id, new start: the old totals do not apply even when the new count is higher."""
+    observation = _observation()
+    consumer = observation["containers"][1]
+    consumer["started_at"] = "2026-09-28T18:30:00Z"
+    consumer["memory_events"] = "max 1500\noom 0\noom_kill 0\n"
+    event, state, _alerts = _build(observation)
+    record = _record(event, "omninode-sim-202-runtime-effects")
+    assert record["max_delta"] == 1500, (
+        "the new cgroup's 1500 hits are all in this window"
+    )
+    assert (
+        state["containers"][CONSUMER_ID]["started_at"] == "2026-09-28T18:30:00.000000Z"
+    )
+
+
+def test_an_unnamed_completed_log_alerts_once_and_does_not_block() -> None:
+    observation = _observation()
+    observation["unnamed_worker_logs"] = [
+        {
+            "runner_name": "omnipc2-ci-runner-4",
+            "log_name": "Worker_20260928-183000-utc.log",
+        }
+    ]
+    event, _state, alerts = _build(observation)
+    assert any(
+        a.startswith(
+            "UNNAMED_JOB runner=omnipc2-ci-runner-4 log=Worker_20260928-183000-utc.log"
+        )
+        for a in alerts
+    )
+    assert len(event["ci_runs"]) == 2, "the named runs are still published"
+
+
 def test_the_event_matches_the_published_v1_fixture() -> None:
     """Task 5b builds its wire model against this file; a drift here is a schema change."""
     event, _state, _alerts = _build()
@@ -555,6 +600,38 @@ def test_a_kill_the_restart_hid_from_the_cgroup_fails_the_pass(
         "OOM_KILL lane=sim-202 container=omninode-sim-202-runtime-effects"
         in result.stderr
     )
+
+
+def test_an_undeclared_host_publishes_no_memory_event(
+    census: _Pass, tmp_path: Path
+) -> None:
+    """OMN-19088: a host the manifest does not declare publishes nothing, memory included."""
+    host = _host(tmp_path, "max 3\noom 1\noom_kill 1\n")
+    try:
+        env_host = host.env()
+        result = subprocess.run(
+            ["/bin/bash", str(_CENSUS_SH), "--memory"],
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": f"{census.bin}:{os.environ['PATH']}",
+                "HOME": str(census.home),
+                "LANE_CENSUS_PYTHON": sys.executable,
+                "LANE_CENSUS_HOST": "some-undeclared-host",
+                "LANE_MANIFEST": str(_FIXTURES / "lane-manifest.yaml"),
+                "LANE_MEMORY_RUNNER_FLEET_CONFIG": str(_FIXTURES / "runner_fleet.yaml"),
+                "LANE_MEMORY_BROKER_CONTAINER": "omnibase-infra-dev-202-redpanda",
+                **env_host,
+            },
+            cwd=_REPO,
+            timeout=120,
+            check=False,
+        )
+    finally:
+        host.close()
+    assert result.returncode == 5, result.stderr
+    assert not census.produced.exists(), "an undeclared host published a memory event"
+    assert not census.state.exists()
 
 
 def test_a_sustained_limit_hit_fails_and_a_restored_limit_clears(

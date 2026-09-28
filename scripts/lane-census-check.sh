@@ -243,9 +243,9 @@ fi
 while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/inventory.err"
 
 # ---------------------------------------------------------------------------
-# OMN-19959: the lane container memory pass. Runs before the planner so a
-# drifted or clean census publishes it alike. Every failure is a distinct exit
-# code carried to the end of the script by finish(); none is a warning.
+# OMN-19959: the lane container memory pass (invoked after the planner, below).
+# Every failure is a distinct exit code carried to the end of the script by
+# finish(); none is a warning.
 # ---------------------------------------------------------------------------
 memory_pass() {
   local event_file="$SCRATCH/memory-event.json"
@@ -308,21 +308,6 @@ memory_pass() {
   return 0
 }
 
-if [[ "$MEMORY" == true && $MEMORY_RC -eq 0 ]]; then
-  memory_pass
-fi
-
-# The census's own clean (0) and drift (30) outcomes give way to a memory code,
-# so a memory failure or alert is never masked by a clean fleet. The census's
-# failure codes (2, 3, 4, 5) exit before this is reached and keep their meaning.
-finish() {
-  local rc="$1"
-  if [[ $MEMORY_RC -ne 0 ]]; then
-    log "exit $MEMORY_RC (memory pass) in place of census exit $rc"
-    exit "$MEMORY_RC"
-  fi
-  exit "$rc"
-}
 
 # OMN-19088: the planner evaluates only the lanes the manifest declares for this
 # host and reports the others not-applicable. It resolves HOST through the
@@ -343,6 +328,27 @@ Publishing NO census — declare the host and its lanes first."
   fi
   exit "$PLAN_RC"
 fi
+
+# OMN-19959: the memory pass runs once the planner has accepted this host, so a
+# host the manifest does not declare (exit 5) publishes nothing at all, as
+# OMN-19088 requires. It runs before the drift handling, so a drifted or clean
+# census publishes it alike.
+if [[ "$MEMORY" == true && $MEMORY_RC -eq 0 ]]; then
+  memory_pass
+fi
+
+# The census's own clean (0) and drift (30) outcomes give way to a memory code,
+# so a memory failure or alert is never masked by a clean fleet. The census's
+# failure codes (2, 3, 4, 5) exit above, before the memory pass, and keep their
+# meaning.
+finish() {
+  local rc="$1"
+  if [[ $MEMORY_RC -ne 0 ]]; then
+    log "exit $MEMORY_RC (memory pass) in place of census exit $rc"
+    exit "$MEMORY_RC"
+  fi
+  exit "$rc"
+}
 
 if [[ "$EMIT_JSON" == true ]]; then
   echo "$PLAN_JSON"

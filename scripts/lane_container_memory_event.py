@@ -338,8 +338,8 @@ def _delta(
 ) -> int:
     """Counter rise inside this window.
 
-    A container seen last pass: the difference. A counter lower than last pass
-    means the cgroup was recreated under the same id, so all of it is new. A
+    A container seen last pass: the difference (a restart is caught before this
+    by its new start time; a lower counter is treated the same way). A
     container first seen now that STARTED inside the window: everything it
     counted happened in the window. One first seen now that started BEFORE the
     window: its counts cannot be placed in this window, so it is a baseline (0).
@@ -407,7 +407,7 @@ def build_event(
         journal[str(_require(entry, "container_id", where))] = entry
 
     records: list[dict[str, Any]] = []
-    next_containers: dict[str, dict[str, int]] = {}
+    next_containers: dict[str, dict[str, Any]] = {}
     alerts: list[str] = []
     for raw in _require(observation, "containers", "observation"):
         where = f"container {raw.get('container_name') or raw.get('container_id')!r}"
@@ -423,6 +423,10 @@ def build_event(
         oom_total = events["oom_kill"]
 
         previous = previous_containers.get(cid) or {}
+        if previous and previous.get("started_at") != started:
+            # Same id, new start: the container restarted and its cgroup (and
+            # every counter in it) is new, so last pass's totals do not apply.
+            previous = {}
         prev_max = previous.get("max_total")
         prev_oom = previous.get("oom_kill_total")
         prev_max_delta = int(previous.get("max_delta") or 0)
@@ -463,6 +467,7 @@ def build_event(
             }
         )
         next_containers[cid] = {
+            "started_at": started,
             "max_total": max_total,
             "oom_kill_total": oom_total,
             "max_delta": max_delta,
@@ -489,6 +494,16 @@ def build_event(
                 f"OOM_KILL lane={entry.get('lane')} container={entry.get('container_name')} "
                 f"delta={entry['count']} (container not running)"
             )
+
+    for index, log in enumerate(
+        _require(observation, "unnamed_worker_logs", "observation")
+    ):
+        where = f"unnamed_worker_logs[{index}]"
+        alerts.append(
+            f"UNNAMED_JOB runner={_require(log, 'runner_name', where)} "
+            f"log={_require(log, 'log_name', where)} (completed, names no repository "
+            "and run id; not attributed)"
+        )
 
     runs: list[dict[str, str | None]] = []
     for index, run in enumerate(_require(observation, "worker_runs", "observation")):

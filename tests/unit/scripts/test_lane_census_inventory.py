@@ -634,3 +634,36 @@ def test_an_unreadable_kernel_journal_is_an_error_never_zero_kills(
         host.close()
     assert result.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE, result.stderr
     assert "kernel journal reads empty" in result.stderr
+
+
+def test_the_journal_names_a_container_under_either_cgroup_driver(
+    inventory: Any,
+) -> None:
+    systemd = "task_memcg=/system.slice/docker-" + "a" * 64 + ".scope,task=python"
+    cgroupfs = "task_memcg=/docker/" + "b" * 64 + ",task=python"
+    assert inventory._OOM_KILL_MEMCG.search(systemd).group(1) == "a" * 64
+    assert inventory._OOM_KILL_MEMCG.search(cgroupfs).group(1) == "b" * 64
+
+
+def test_a_completed_log_naming_no_job_is_reported_not_fatal(tmp_path: Path) -> None:
+    """Failing the pass would hold the window open and re-read the log forever."""
+    fake = _fake_engine()
+    host = _memory_host(tmp_path)
+    host.containers[2].worker_logs["Worker_20260928-183000-utc.log"] = (
+        "[2026-09-28 18:30:00Z INFO HostContext] start\n"
+        "[2026-09-28 18:31:00Z INFO Worker] Job completed.\n",
+        fake.BOOT_EPOCH + 7200,
+    )
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == 0, result.stderr
+    observation = json.loads((tmp_path / "memory.json").read_text())
+    assert observation["unnamed_worker_logs"] == [
+        {
+            "runner_name": "omnipc2-ci-runner-13",
+            "log_name": "Worker_20260928-183000-utc.log",
+        }
+    ]
+    assert len(observation["worker_runs"]) == 1

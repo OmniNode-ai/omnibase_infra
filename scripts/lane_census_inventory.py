@@ -419,15 +419,21 @@ def _parse_worker_log() -> Callable[..., dict[str, str | None] | None]:
 
 def worker_runs_from_archive(
     stream: IO[bytes], *, runner_name: str, since_epoch: float
-) -> list[dict[str, str | None]]:
+) -> tuple[list[dict[str, str | None]], list[dict[str, str]]]:
     """CI runs from a streamed ``_diag`` archive, for logs written since ``since_epoch``.
 
     A log's mtime is its last write, so a log older than the window's start
     belongs to a job that finished before the window and is not read. Each log
     is parsed and dropped before the next is read.
+
+    Returns ``(runs, unnamed)``. A completed log that names no repository and
+    run id is returned in ``unnamed`` rather than failing the pass: failing it
+    would hold the window open, and every later pass would re-read the same log
+    and fail again. The builder alerts on each unnamed log once.
     """
     parse = _parse_worker_log()
     runs: list[dict[str, str | None]] = []
+    unnamed: list[dict[str, str]] = []
     try:
         with tarfile.open(fileobj=stream, mode="r|*") as tar:
             for member in tar:
@@ -445,15 +451,16 @@ def worker_runs_from_archive(
                         runner_name=runner_name,
                         log_name=base,
                     )
-                except ValueError as exc:
-                    raise MemoryProbeError(str(exc)) from exc
+                except ValueError:
+                    unnamed.append({"runner_name": runner_name, "log_name": base})
+                    continue
                 if run is not None:
                     runs.append(run)
     except tarfile.TarError as exc:
         raise MemoryProbeError(
             f"{runner_name}: unreadable _diag archive: {exc}"
         ) from exc
-    return runs
+    return runs, unnamed
 
 
 def _state_lower_bound(state_path: str | None, boot_id: str, boot_time: str) -> float:
@@ -474,8 +481,9 @@ def _state_lower_bound(state_path: str | None, boot_id: str, boot_time: str) -> 
 
 
 #: A kernel OOM kill names the victim's cgroup. For a container that is the
-#: container's own scope, whichever cgroup driver or parent slice it runs under.
-_OOM_KILL_MEMCG = re.compile(r"task_memcg=\S*?docker-([0-9a-f]{64})\.scope")
+#: container's own cgroup: ``.../docker-<id>.scope`` under the systemd driver
+#: (any parent slice) or ``/docker/<id>`` under the cgroupfs driver.
+_OOM_KILL_MEMCG = re.compile(r"task_memcg=\S*?(?:docker-|/docker/)([0-9a-f]{64})")
 
 
 def read_journal_oom_kills(
@@ -566,8 +574,6 @@ def collect_memory_observation(
         raise MemoryProbeError("empty host boot id")
     boot_time = boot_time_iso(proc_root)
     since_epoch = _state_lower_bound(state_path, boot_id, boot_time)
-    read_at = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
     try:
         rows = api_get(socket_path, API_CONTAINERS_PATH, api_timeout_s)
     except (OSError, InventoryProbeError, ValueError) as exc:
@@ -584,9 +590,56 @@ def collect_memory_observation(
         )
         if row.get("Id") and row_name and row_lane is not None:
             lane_ids[str(row["Id"])] = (row_name, row_lane)
+
+    # Pass 1: the lane containers' cgroup counters, back to back. The window
+    # closes (read_at) right after them and the journal is cut at the same
+    # instant, so a kill falls in the cgroup read or the journal window of one
+    # pass, not both. The runners' slower archive reads come after the cut.
+    containers: list[dict[str, Any]] = []
+    runners: list[tuple[str, str]] = []
+    for row in rows:
+        if str(row.get("State") or "") != "running":
+            continue
+        cid = str(row.get("Id") or "")
+        names = row.get("Names") or []
+        name = (names[0] if names else "").lstrip("/").strip()
+        if not cid or not name:
+            continue
+        labels = row.get("Labels") or {}
+        lane = lane_projects.get(str(labels.get(COMPOSE_PROJECT_LABEL) or ""))
+        if any(name.startswith(prefix) for prefix in runner_prefixes):
+            runners.append((cid, name))
+        if lane is None:
+            continue
+
+        try:
+            detail = api_get(socket_path, f"/containers/{cid}/json", api_timeout_s)
+        except (OSError, InventoryProbeError, ValueError) as exc:
+            raise MemoryProbeError(f"{name}: inspect failed: {exc}") from exc
+        state = detail.get("State") or {}
+        pid = int(state.get("Pid") or 0)
+        if not state.get("Running") or pid <= 0:
+            # Stopped between the list and the inspect: no cgroup to read.
+            continue
+        cgroup_dir = cgroup_dir_for_pid(pid, proc_root=proc_root, sysfs_root=sysfs_root)
+        files = {f: _read_text(Path(cgroup_dir) / f) for f in _MEMORY_FILES}
+        containers.append(
+            {
+                "container_id": cid,
+                "container_name": name,
+                "lane": lane,
+                "started_at": str(state.get("StartedAt") or ""),
+                "memory_max": files["memory.max"],
+                "memory_peak": files["memory.peak"],
+                "memory_events": files["memory.events"],
+            }
+        )
+
+    read_at_dt = datetime.now(tz=UTC)
+    read_at = read_at_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     kills = read_journal_oom_kills(
         since_epoch=since_epoch,
-        until_epoch=datetime.fromisoformat(read_at.replace("Z", "+00:00")).timestamp(),
+        until_epoch=read_at_dt.timestamp(),
         timeout_s=api_timeout_s,
     )
     journal_oom_kills = [
@@ -600,69 +653,30 @@ def collect_memory_observation(
         if cid in lane_ids
     ]
 
-    containers: list[dict[str, Any]] = []
+    # Pass 2: the runners' worker logs.
     worker_runs: list[dict[str, str | None]] = []
-    for row in rows:
-        if str(row.get("State") or "") != "running":
-            continue
-        cid = str(row.get("Id") or "")
-        names = row.get("Names") or []
-        name = (names[0] if names else "").lstrip("/").strip()
-        if not cid or not name:
-            continue
-        labels = row.get("Labels") or {}
-        lane = lane_projects.get(str(labels.get(COMPOSE_PROJECT_LABEL) or ""))
-        is_runner = any(name.startswith(prefix) for prefix in runner_prefixes)
-        if lane is None and not is_runner:
-            continue
+    unnamed: list[dict[str, str]] = []
+    query = urllib.parse.urlencode({"path": runner_diag_path})
+    for cid, name in runners:
+
+        def consume(
+            body: IO[bytes], runner_name: str = name
+        ) -> tuple[list[dict[str, str | None]], list[dict[str, str]]]:
+            return worker_runs_from_archive(
+                body, runner_name=runner_name, since_epoch=since_epoch
+            )
 
         try:
-            detail = api_get(socket_path, f"/containers/{cid}/json", api_timeout_s)
-        except (OSError, InventoryProbeError, ValueError) as exc:
-            raise MemoryProbeError(f"{name}: inspect failed: {exc}") from exc
-        state = detail.get("State") or {}
-        pid = int(state.get("Pid") or 0)
-        if not state.get("Running") or pid <= 0:
-            # Stopped between the list and the inspect: no cgroup to read.
-            continue
-
-        if lane is not None:
-            cgroup_dir = cgroup_dir_for_pid(
-                pid, proc_root=proc_root, sysfs_root=sysfs_root
+            runs, skipped = api_stream(
+                socket_path,
+                f"/containers/{cid}/archive?{query}",
+                api_timeout_s,
+                consume,
             )
-            files = {f: _read_text(Path(cgroup_dir) / f) for f in _MEMORY_FILES}
-            containers.append(
-                {
-                    "container_id": cid,
-                    "container_name": name,
-                    "lane": lane,
-                    "started_at": str(state.get("StartedAt") or ""),
-                    "memory_max": files["memory.max"],
-                    "memory_peak": files["memory.peak"],
-                    "memory_events": files["memory.events"],
-                }
-            )
-        if is_runner:
-            query = urllib.parse.urlencode({"path": runner_diag_path})
-
-            def consume(
-                body: IO[bytes], runner_name: str = name
-            ) -> list[dict[str, str | None]]:
-                return worker_runs_from_archive(
-                    body, runner_name=runner_name, since_epoch=since_epoch
-                )
-
-            try:
-                worker_runs.extend(
-                    api_stream(
-                        socket_path,
-                        f"/containers/{cid}/archive?{query}",
-                        api_timeout_s,
-                        consume,
-                    )
-                )
-            except (OSError, MemoryProbeError) as exc:
-                raise MemoryProbeError(f"{name}: _diag archive failed: {exc}") from exc
+        except (OSError, MemoryProbeError) as exc:
+            raise MemoryProbeError(f"{name}: _diag archive failed: {exc}") from exc
+        worker_runs.extend(runs)
+        unnamed.extend(skipped)
 
     return {
         "host_boot_id": boot_id,
@@ -673,6 +687,9 @@ def collect_memory_observation(
         "worker_runs": sorted(
             worker_runs,
             key=lambda r: (str(r["runner_name"]), str(r["job_started_at"])),
+        ),
+        "unnamed_worker_logs": sorted(
+            unnamed, key=lambda u: (u["runner_name"], u["log_name"])
         ),
     }
 
