@@ -169,17 +169,28 @@ def test_project_defaults_is_draft_false_when_missing(
 
 
 def test_is_draft_field_type_matches_reader_contract() -> None:
-    """OMN-14208 seam discipline: ModelPayloadPrStateUpsert.is_draft must stay
-    a non-nullable bool defaulting to False, matching omnimarket's
-    ModelOpenPrSummary.is_draft (node_github_repo_gateway_effect)
-    field-for-field. The reader lives in a separate repo (omnimarket), so a
-    live cross-repo runtime round-trip isn't possible from here -- this pins
-    the producer's half of the contract so a type change on this side (e.g.
-    widening to bool | None, which the reader's required bool would reject)
-    fails loudly in THIS repo's suite rather than silently at the seam."""
+    """OMN-14208 seam discipline, as amended by OMN-19492.
+
+    The reader half of the seam is omnimarket's ModelOpenPrSummary.is_draft, a
+    required bool, and what it reads is the pr_state ROW. The row stays
+    non-null: the poller path still defaults a missing draft flag to False,
+    and the writer's insert branch resolves a None to FALSE.
+
+    The intent payload between fold and writer is widened to ``bool | None``
+    because a partial webhook observation (a check_run delivery) says nothing
+    about the draft flag, and None is how it says so -- the writer then keeps
+    the stored value instead of overwriting it with False. This pins all three
+    halves so a change to any one of them fails here, not at the seam.
+    """
+    from omnibase_infra.nodes.node_pr_state_write_effect.handlers.handler_pr_state_upsert import (
+        _SQL_UPSERT,
+    )
+
     field = ModelPayloadPrStateUpsert.model_fields["is_draft"]
-    assert field.annotation is bool
+    assert field.annotation == bool | None
     assert field.default is False
+    values = _SQL_UPSERT.split("VALUES", 1)[1].split("ON CONFLICT", 1)[0]
+    assert "COALESCE($15, FALSE)" in values
 
 
 def test_project_raises_when_repo_missing(
@@ -286,3 +297,82 @@ async def test_handle_accepts_dict_shaped_envelope(
     assert payload.repo == "OmniNode-ai/omnibase_infra"
     assert payload.pr_number == 2262
     assert payload.is_draft is True
+
+
+def test_project_keeps_a_partial_webhook_observation_partial(
+    handler: HandlerPrStateProjection,
+) -> None:
+    """OMN-19492: a webhook check_run observation carries only the CI verdict.
+
+    Every field it does not carry must reach the writer as None ("unobserved"),
+    never as the poller defaults, or the writer would overwrite the stored
+    title, triage state and draft flag with blanks.
+    """
+    body = {
+        "payload": {
+            "topic": "onex.evt.github.pr-status.v1",
+            "entity_id": "OmniNode-ai/omnibase_infra#4242",
+            "repo": "OmniNode-ai/omnibase_infra",
+            "pr_number": 4242,
+            "source": "webhook",
+            "delivery_id": "72d3162e-cc78-11e3-81ab-4c9367dc0958",
+            "github_event": "check_run",
+            "as_of": "2026-09-27T22:58:00+00:00",
+            "triage_state": None,
+            "title": None,
+            "is_draft": None,
+            "ci_status": "SUCCESS",
+            "review_decision": None,
+            "head_sha": "a" * 40,
+        }
+    }
+
+    payload = handler.project(_from_dict(body)).payload
+
+    assert isinstance(payload, ModelPayloadPrStateUpsert)
+    assert payload.source == "webhook"
+    assert payload.ci_status == "SUCCESS"
+    assert (payload.triage_state, payload.title, payload.is_draft) == (None, None, None)
+
+
+def test_project_carries_webhook_enrichment_columns(
+    handler: HandlerPrStateProjection,
+) -> None:
+    """OMN-19492: the reserved CI/review/merge-queue/ref columns now flow."""
+    body = {
+        "repo": "OmniNode-ai/omnibase_infra",
+        "pr_number": 4242,
+        "source": "webhook",
+        "as_of": "2026-09-27T22:59:00+00:00",
+        "triage_state": "needs_review",
+        "title": "feat(OMN-19492): ingress",
+        "is_draft": False,
+        "ci_status": "PENDING",
+        "review_decision": "APPROVED",
+        "mergeable": "MERGEABLE",
+        "merge_state_status": "CLEAN",
+        "merge_queue_state": "AUTO_MERGE_ARMED",
+        "base_ref": "dev",
+        "head_ref": "jonah/omn-14375-github-webhook-ingress",
+    }
+
+    payload = handler.project(_from_dict(body)).payload
+
+    assert isinstance(payload, ModelPayloadPrStateUpsert)
+    assert (
+        payload.ci_status,
+        payload.review_decision,
+        payload.mergeable,
+        payload.merge_state_status,
+        payload.merge_queue_state,
+        payload.base_ref,
+        payload.head_ref,
+    ) == (
+        "PENDING",
+        "APPROVED",
+        "MERGEABLE",
+        "CLEAN",
+        "AUTO_MERGE_ARMED",
+        "dev",
+        "jonah/omn-14375-github-webhook-ingress",
+    )

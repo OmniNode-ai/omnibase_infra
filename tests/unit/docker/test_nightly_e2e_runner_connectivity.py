@@ -110,6 +110,12 @@ def test_spin_up_e2e_stack_does_not_hardcode_advertise_host() -> None:
 # ---------------------------------------------------------------------------
 
 
+# OMN-19894: the live lab hosts come from the deployment overlay's lane list
+# (vars.LAB_LANES_JSON), named once per job into LAB_HOSTS. A neutral address
+# stands in for a lab host here; no real lab address is written.
+_LAB_HOST = ".".join(("10", "9", "8", "7"))
+
+
 def _write_stub(path: Path, body: str) -> None:
     path.write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
     path.chmod(0o700)
@@ -138,6 +144,7 @@ def _run_step(
     github_env.write_text("", encoding="utf-8")
     env = (
         os.environ
+        | {"LAB_HOSTS": _LAB_HOST}
         | extra_env
         | {
             "GITHUB_ENV": str(github_env),
@@ -378,8 +385,9 @@ def test_resolve_connectivity_uses_container_specific_hosts_for_docker_dns(
 def test_resolve_connectivity_refuses_to_resolve_to_live_201_host(
     tmp_path: Path,
 ) -> None:
-    """Even a reachable gateway is refused if it is the live .201 instance."""
-    live_host = "192.168.86.201"
+    """Even a reachable gateway is refused if it is a live lab host (OMN-19894:
+    any host of the overlay's lab lanes, not one literal address)."""
+    live_host = _LAB_HOST
     result, github_env = _run_step(
         "Resolve reachable e2e connectivity host",
         tmp_path,
@@ -391,7 +399,7 @@ def test_resolve_connectivity_refuses_to_resolve_to_live_201_host(
         },
     )
     assert result.returncode != 0, result.stdout + result.stderr
-    assert "live .201 instance" in (result.stdout + result.stderr)
+    assert "live lab host" in (result.stdout + result.stderr)
     values = _read_github_env(github_env)
     assert live_host not in values.get("KAFKA_BOOTSTRAP_SERVERS", "")
     assert live_host not in values.get("OMNIBASE_INFRA_DB_URL", "")
@@ -423,6 +431,7 @@ def _run_teardown_step(
 
     env = (
         os.environ
+        | {"LAB_HOSTS": _LAB_HOST}
         | extra_env
         | {
             "DOCKER_CALL_LOG": str(call_log),
@@ -621,3 +630,67 @@ def test_python_can_import_the_fixed_kafka_test_modules() -> None:
             timeout=60,
         )
         assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_resolve_connectivity_refuses_when_no_lab_host_was_named(
+    tmp_path: Path,
+) -> None:
+    """An unset LAB_HOSTS fails closed: the guard cannot say what it protects."""
+    result, _ = _run_step(
+        "Resolve reachable e2e connectivity host",
+        tmp_path,
+        extra_env={
+            **_BASE_RESOLVE_ENV,
+            "E2E_REDPANDA_ADVERTISE_HOST": "localhost",
+            "LAB_HOSTS": "",
+        },
+        stubs={
+            "python3": _python3_can_connect_stub(
+                f"localhost:{_POSTGRES_PORT} localhost:{_KAFKA_PORT}"
+            )
+        },
+    )
+    assert result.returncode != 0
+    assert "LAB_HOSTS is unset" in (result.stdout + result.stderr)
+
+
+@pytest.mark.parametrize(
+    ("overlay", "expected"),
+    [
+        (
+            '[{"name": "a", "ingress_url": "http://'
+            + _LAB_HOST
+            + ':8085", "gateway_url": "http://lab-b.example:8090"}]',
+            _LAB_HOST + " lab-b.example",
+        ),
+    ],
+)
+def test_lab_hosts_are_named_from_the_overlay(
+    tmp_path: Path, overlay: str, expected: str
+) -> None:
+    github_env = tmp_path / "github-env"
+    github_env.write_text("", encoding="utf-8")
+    result = subprocess.run(
+        ["bash", "-c", _step("Name the live lab hosts from the overlay")["run"]],
+        cwd=REPO_ROOT,
+        env=os.environ | {"LAB_LANES_JSON": overlay, "GITHUB_ENV": str(github_env)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert github_env.read_text(encoding="utf-8").strip() == f"LAB_HOSTS={expected}"
+
+
+def test_lab_hosts_step_refuses_an_unset_overlay(tmp_path: Path) -> None:
+    result = subprocess.run(
+        ["bash", "-c", _step("Name the live lab hosts from the overlay")["run"]],
+        cwd=REPO_ROOT,
+        env={k: v for k, v in os.environ.items() if k != "LAB_LANES_JSON"}
+        | {"GITHUB_ENV": str(tmp_path / "e")},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "LAB_LANES_JSON is unset" in result.stderr

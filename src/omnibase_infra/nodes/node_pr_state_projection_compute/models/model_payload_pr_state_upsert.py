@@ -34,6 +34,17 @@ of an implicit assumption:
 This is a raw-string passthrough today (``ci_status: str | None``); the
 mapping above is the reader-side transform a consumer must apply, not
 something this payload performs.
+
+PARTIAL OBSERVATIONS (OMN-19492): the webhook ingress
+(node_github_webhook_ingress_effect) is the richer producer the columns above
+were reserved for, and it only ever sees part of a PR per delivery -- a
+check_run knows the CI verdict and nothing about the title. For a
+``source="webhook"`` payload, ``triage_state``, ``title`` and ``is_draft`` may
+be ``None`` as well, and every ``None`` means "this observation says nothing
+about the column": the writer keeps the stored value (COALESCE) and never
+clears it. A poller payload (``source="poller"``) is unchanged: the fold still
+resolves a missing ``triage_state`` to ``needs_review`` and a missing
+``is_draft`` to ``False``, so the table columns stay non-null (OMN-14394).
 """
 
 from __future__ import annotations
@@ -89,18 +100,24 @@ class ModelPayloadPrStateUpsert(BaseModel):
         ge=1,
         description="Pull request number.",
     )
-    triage_state: str = Field(
+    triage_state: str | None = Field(
         ...,
         min_length=1,
-        description="Current triage classification of the pull request.",
+        description=(
+            "Current triage classification of the pull request; None only on a "
+            "partial webhook observation that says nothing about it."
+        ),
     )
-    title: str = Field(
+    title: str | None = Field(
         default="",
-        description="Pull request title.",
+        description="Pull request title; None when a webhook observation lacks it.",
     )
-    is_draft: bool = Field(
+    is_draft: bool | None = Field(
         default=False,
-        description="GitHub PR draft status, mirrored from pr['draft'].",
+        description=(
+            "GitHub PR draft status, mirrored from pr['draft']; None when a "
+            "webhook observation lacks it."
+        ),
     )
     ci_status: str | None = Field(
         default=None,
