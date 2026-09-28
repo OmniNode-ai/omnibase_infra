@@ -594,6 +594,61 @@ def failure_signatures(probe: str) -> dict[tuple[str, str], str]:
     return sigs
 
 
+def image_identity(probe: str, notes: list[str]) -> bool:
+    """Whether the running image holds exactly the code the build tree holds.
+
+    Content, never the revision label (OMN-18893: a label is evidence of intent).
+    Two kinds of line prove it:
+
+    ``file <path> image=<h> build-tree=<h> match=yes|NO``, one per ID_FILES entry
+    the caller listed. Every such line must parse and match.
+
+    ``pkg-tree <repo> <container> ... match=yes|NO``, the whole installed package
+    of each repository under test (``identity-subject <repo>``) compared with its
+    build tree in each runtime. When the probe names subjects, each needs at
+    least one compare line and every compare must match, so a PR that changes
+    nothing under ``src/`` is proven by its unchanged package reading identical,
+    and a missing, differing or stale module fails it (OMN-19896).
+
+    A probe that names no subject (an older prove script) keeps the per-file
+    rule: at least one file line, all matching.
+    """
+    file_lines = re.findall(r"^file .*$", probe, re.M)
+    ident = re.findall(
+        r"^file (\S+) image=(\S+) build-tree=(\S+) match=(\w+)$", probe, re.M
+    )
+    files_ok = len(ident) == len(file_lines) and all(m[3] == "yes" for m in ident)
+    if len(ident) != len(file_lines):
+        notes.append(
+            f"image identity: {len(file_lines) - len(ident)} per-file line(s) unreadable"
+        )
+    subjects = re.findall(r"^identity-subject (\S+)$", probe, re.M)
+    if not subjects:
+        return bool(ident) and files_ok
+    trees = re.findall(r"^pkg-tree (\S+) (\S+) .*\bmatch=(\w+)$", probe, re.M)
+    ok = files_ok
+    for repo in subjects:
+        mine = [t for t in trees if t[0] == repo]
+        if not mine:
+            notes.append(f"image identity: no whole-package compare for {repo}")
+            ok = False
+        for _, container, match in mine:
+            if match != "yes":
+                notes.append(
+                    f"image identity: {repo} in {container} differs from its build tree"
+                )
+                ok = False
+    for kind_line in re.findall(r"^pkg-tree-diff (.*)$", probe, re.M)[:5]:
+        notes.append(f"image identity: {kind_line}")
+    diffs = dict(re.findall(r"^src-diff (\S+) files=(\d+)$", probe, re.M))
+    for repo in subjects:
+        if ok and not ident and diffs.get(repo) == "0":
+            notes.append(
+                f"image identity: {repo} changes nothing under src/; its whole package reads identical to the build tree"
+            )
+    return ok
+
+
 def judge(
     outputs: Mapping[str, str],
     base_probe: str | None = None,
@@ -629,10 +684,7 @@ def judge(
     checks["stack_built"] = bool(re.search(r"build rc=0\b", build)) and (
         bool(re.search(r"up rc=0\b", build)) or migration_failed
     )
-    ident = re.findall(
-        r"^file (\S+) image=(\S+) build-tree=(\S+) match=(\w+)", probe, re.M
-    )
-    checks["image_identity"] = bool(ident) and all(m[3] == "yes" for m in ident)
+    checks["image_identity"] = image_identity(probe, notes)
     for port in (str(ports[0]), str(ports[1])):
         m = re.search(
             rf"^port {port} HTTP (\d+) status (\S+) healthy (\S+)", probe, re.M
