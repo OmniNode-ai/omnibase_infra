@@ -20,6 +20,7 @@ be counted toward the action fleet's capacity floor.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -170,8 +171,10 @@ def test_a_runner_name_resolves_to_the_host_its_pool_is_on() -> None:
     assert config.host_of_runner("omnipc2-ci-runner") is None
 
 
-def _with_pool(prefix: str) -> dict:
-    raw = yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))
+def _with_pool(prefix: str) -> dict[str, Any]:
+    raw = cast(
+        "dict[str, Any]", yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))
+    )
     raw["hosts"][1].setdefault("pools", []).append(
         {"runner_name_prefix": prefix, "expected_count": 1, "classes": ["verify"]}
     )

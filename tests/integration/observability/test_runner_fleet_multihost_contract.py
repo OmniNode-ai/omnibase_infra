@@ -23,13 +23,18 @@ compose test knows nothing about the inventory.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
 
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     load_runner_fleet_config,
+)
+from omnibase_infra.observability.runner_health.model_runner_fleet_host import (
+    ModelRunnerFleetHost,
 )
 
 REPO_ROOT = Path(__file__).parents[3]
@@ -54,7 +59,7 @@ def _compose_for(prefix: str, *, on_primary: bool = False) -> Path:
     return REPO_ROOT / "docker" / f"docker-compose.runners-{prefix}.yml"
 
 
-def _declared_units():
+def _declared_units() -> Iterator[tuple[ModelRunnerFleetHost, str, int, Path]]:
     """(host, prefix, expected_count, compose) for every host row and pool."""
     config = load_runner_fleet_config(FLEET_CONFIG)
     for host in config.hosts:
@@ -74,8 +79,9 @@ def _declared_units():
             )
 
 
-def _services(path: Path) -> dict[str, dict]:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))["services"]
+def _services(path: Path) -> dict[str, dict[str, Any]]:
+    loaded = cast("dict[str, Any]", yaml.safe_load(path.read_text(encoding="utf-8")))
+    return cast("dict[str, dict[str, Any]]", loaded["services"])
 
 
 @pytest.mark.integration
@@ -185,7 +191,7 @@ def test_every_arm64_verify_host_has_a_leg_in_the_proof_workflow() -> None:
     }
     assert declared, "the inventory declares no arm64 verify host"
 
-    compose_labels = set()
+    compose_labels: set[str] = set()
     for host in config.hosts:
         if host.arch.value != "arm64" or "verify" not in host.classes:
             continue

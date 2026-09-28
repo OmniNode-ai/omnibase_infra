@@ -29,7 +29,7 @@ would report every absence as satisfied.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -91,7 +91,7 @@ def _service(name: str) -> dict[str, Any]:
     path = SERVICE_FILES.get(name, COMPOSE_FILE)
     services = _compose(path)["services"]
     assert name in services, f"{name} is not defined in {path}"
-    return services[name]
+    return cast("dict[str, Any]", services[name])
 
 
 def _volumes(service: dict[str, Any]) -> list[str]:
