@@ -301,7 +301,7 @@ def run_skill_by_name(
     \b
     Examples:
         onex skill compliance_sweep --repos omnibase_core,omnibase_infra
-        onex skill dod_verify OMN-1234
+        onex skill dod_verify OMN-1234 --execution-audience hosted
         onex skill delegate "summarize this paragraph" --task-type document
     """
     try:
