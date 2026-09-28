@@ -63,6 +63,10 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     OMN-19655: the published core requirement becomes ``>=0.47.23,<0.48.0``;
     the proven runtime pin, read from the override, is unchanged at 0.47.23.
+
+    OMN-19749 refresh: the proven runtime advances to core 0.47.24, the
+    release carrying the shipped ``runtime.lane`` example /
+    ``ModelRuntimeLaneDeclaration`` path; spi stays 0.23.5.
     """
 
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
@@ -70,7 +74,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     pins = _declared_pins()
 
     # The proven runtime pins the published PyPI releases (exact versions).
-    assert pins["omnibase-core"] == "0.47.23"
+    assert pins["omnibase-core"] == "0.47.24"
     assert pins["omnibase-spi"] == "0.23.5"
 
     # The retired git-rev overrides must be gone from both manifest and lock:

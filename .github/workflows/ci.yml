@@ -2456,7 +2456,7 @@ jobs:
           fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -2487,7 +2487,7 @@ jobs:
         run: |
           uv run pytest \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -5197,6 +5197,24 @@ jobs:
             tests/integration/migrations/test_revoke_gateway_link_health_status_omn17886.py \
             tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py \
             -v --tb=short -p no:randomly
+
+      # OMN-19550: the EphemeralPostgres live-apply proofs. Each test needs its
+      # own throwaway cluster (it creates and drops cluster-wide roles), which
+      # the sharded splits cannot provide, so the splits deselect the
+      # `ephemeral_pg` marker and this job EXECUTES them: the fixture starts a
+      # postgres:16-alpine container per test through this runner's docker and
+      # drives the migration through psql, as the forward runner does in
+      # production. ONEX_MIGRATION_PROOF_REQUIRE_PG=1 turns a missing backend
+      # (no psql, no docker) into a failure, never a skip, so deselected there
+      # is not skipped here. Named by path, like the steps above.
+      - name: EphemeralPostgres live-apply proofs (OMN-19550)
+        env:
+          ONEX_MIGRATION_PROOF_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_session_content_live_apply_omn19550.py \
+            -m ephemeral_pg \
+            -v -rs --tb=short -p no:randomly
 
       - name: Assert manifest tables exist
         env:
