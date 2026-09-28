@@ -1283,6 +1283,28 @@ def test_group_readback_names_every_member_and_group() -> None:
     assert any(line.startswith("  group: 3 member(s)") for line in lines)
 
 
+@pytest.mark.unit
+def test_market_group_readback_names_every_member() -> None:
+    rb = pool.Readback(
+        checks={"stack_built": True, "group_built": True},
+        notes=[],
+        restored=True,
+        residue="clean",
+    )
+    text = pool.render_readback(
+        rb,
+        CFG.host("lab-101"),
+        {"MARKET_GROUP": GROUP_SPEC},
+        "2026-09-28T10:00:00Z",
+        "2026-09-28T10:30:00Z",
+    )
+    assert text.splitlines()[0].startswith(
+        "LAB PROOF PASS: omnimarket#4134 head fdd93c786c + "
+        "omnimarket#4198 head e812bfd787 + "
+        "omnimarket#4214 head 0ba71c9566 on lab-101"
+    )
+
+
 class NoHostTransport:
     def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
         pytest.fail(
@@ -1313,3 +1335,76 @@ def test_run_rejects_pr_and_group_before_touching_any_host(tmp_path: Path) -> No
     )
     assert code == 5
     assert "both INFRA_PR and INFRA_GROUP" in text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("extra", "reason"),
+    [
+        (f"MARKET_GROUP='{GROUP_SPEC}'\n", "both MARKET_PR and MARKET_GROUP"),
+        (
+            f"INFRA_GROUP='{GROUP_SPEC}'\nMARKET_GROUP='{GROUP_SPEC}'\n",
+            "both INFRA_GROUP and MARKET_GROUP",
+        ),
+        (f"MARKET_GROUP='{GROUP_SPEC}'\n", "both INFRA_PR and MARKET_GROUP"),
+    ],
+)
+def test_run_rejects_market_group_cross_subjects_before_touching_a_host(
+    tmp_path: Path, extra: str, reason: str
+) -> None:
+    path = _params(tmp_path)
+    if "MARKET_PR" in reason:
+        path.write_text(
+            "MARKET_PR=4210\nMARKET_HEAD=" + "a" * 40 + "\n" + extra,
+            encoding="utf-8",
+        )
+    else:
+        path.write_text(path.read_text(encoding="utf-8") + extra, encoding="utf-8")
+    code, text = pool.run_proof(
+        CFG,
+        NoHostTransport(),
+        path,
+        "me",
+        60,
+        None,
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_USAGE
+    assert reason in text
+
+
+@pytest.mark.unit
+def test_run_rejects_a_one_member_market_group_before_touching_a_host(
+    tmp_path: Path,
+) -> None:
+    path = _params(tmp_path)
+    path.write_text(f"MARKET_GROUP='4134:{'a' * 40}'\n", encoding="utf-8")
+    code, text = pool.run_proof(
+        CFG,
+        NoHostTransport(),
+        path,
+        "me",
+        60,
+        None,
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_USAGE
+    assert "MARKET_GROUP needs at least two members" in text
+
+
+@pytest.mark.unit
+def test_prove_script_fetches_market_groups_and_probes_them_as_subjects() -> None:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    clone = text[text.index("clone)") : text.index("build)")]
+    assert (
+        'fetch_group "$R/omnimarket" omnimarket "$MARKET_GROUP" '
+        '"${MARKET_GROUP_BASE:-}" "${MARKET_GROUP_TREE:-}"' in clone
+    )
+    assert (
+        '[ -n "${MARKET_PR:-}${MARKET_GROUP:-}" ] && SUBJECTS="$SUBJECTS omnimarket"'
+        in text
+    )

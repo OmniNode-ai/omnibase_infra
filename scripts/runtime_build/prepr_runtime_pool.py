@@ -922,6 +922,11 @@ def render_readback(
             f"omnibase_infra#{n} head {h[:10]}"
             for n, h in group_members(params["INFRA_GROUP"])
         )
+    if params.get("MARKET_GROUP"):
+        subject.extend(
+            f"omnimarket#{n} head {h[:10]}"
+            for n, h in group_members(params["MARKET_GROUP"], name="MARKET_GROUP")
+        )
     if params.get("INFRA_PR"):
         subject.append(
             f"omnibase_infra#{params['INFRA_PR']} head {params.get('INFRA_HEAD', '?')[:10]}"
@@ -1375,22 +1380,22 @@ def read_params(path: Path) -> dict[str, str]:
 GROUP_MEMBER_RE = re.compile(r"^(\d+):([0-9a-f]{40})$")
 
 
-def group_members(spec: str) -> list[tuple[str, str]]:
-    """Parse INFRA_GROUP: space-separated ``<pr>:<full head sha>``, in queue order."""
+def group_members(spec: str, name: str = "INFRA_GROUP") -> list[tuple[str, str]]:
+    """Parse a group parameter: ``<pr>:<full head sha>``, in queue order."""
     members: list[tuple[str, str]] = []
     for item in spec.split():
         m = GROUP_MEMBER_RE.match(item)
         if m is None:
             raise ValueError(
-                f"INFRA_GROUP member {item!r} is not <pr number>:<40-hex head sha>"
+                f"{name} member {item!r} is not <pr number>:<40-hex head sha>"
             )
         members.append((m.group(1), m.group(2)))
     if len(members) < 2:
         raise ValueError(
-            "INFRA_GROUP needs at least two members; prove one PR with INFRA_PR"
+            f"{name} needs at least two members; prove one PR with {name[:-6]}PR"
         )
     if len({n for n, _ in members}) != len(members):
-        raise ValueError("INFRA_GROUP names a PR twice")
+        raise ValueError(f"{name} names a PR twice")
     return members
 
 
@@ -1415,16 +1420,40 @@ def run_proof(
     publish: Callable[[Sequence[MintedReceipt]], list[str]] | None = None,
 ) -> tuple[int, str]:
     params = read_params(params_path)
-    if not any(params.get(k) for k in ("INFRA_PR", "INFRA_GROUP", "MARKET_PR")):
-        return EXIT_USAGE, "params name none of INFRA_PR, INFRA_GROUP, MARKET_PR"
+    if not any(
+        params.get(k) for k in ("INFRA_PR", "INFRA_GROUP", "MARKET_PR", "MARKET_GROUP")
+    ):
+        return (
+            EXIT_USAGE,
+            "params name none of INFRA_PR, INFRA_GROUP, MARKET_PR, MARKET_GROUP",
+        )
+    if params.get("MARKET_GROUP") and (
+        params.get("INFRA_GROUP") or params.get("INFRA_PR")
+    ):
+        other = "INFRA_GROUP" if params.get("INFRA_GROUP") else "INFRA_PR"
+        return (
+            EXIT_USAGE,
+            f"params name both {other} and MARKET_GROUP; one group per run: "
+            "a cross-repo group is not proved",
+        )
     if params.get("INFRA_PR") and params.get("INFRA_GROUP"):
         return (
             EXIT_USAGE,
             "params name both INFRA_PR and INFRA_GROUP; a run proves one or the other",
         )
+    if params.get("MARKET_PR") and params.get("MARKET_GROUP"):
+        return (
+            EXIT_USAGE,
+            "params name both MARKET_PR and MARKET_GROUP; a run proves one or the other",
+        )
     if params.get("INFRA_GROUP"):
         try:
             group_members(params["INFRA_GROUP"])
+        except ValueError as exc:
+            return EXIT_USAGE, str(exc)
+    if params.get("MARKET_GROUP"):
+        try:
+            group_members(params["MARKET_GROUP"], name="MARKET_GROUP")
         except ValueError as exc:
             return EXIT_USAGE, str(exc)
     now = now_fn()
@@ -1499,6 +1528,9 @@ def run_proof(
                     "INFRA_GROUP_TREE",
                     "MARKET_PR",
                     "MARKET_HEAD",
+                    "MARKET_GROUP",
+                    "MARKET_GROUP_BASE",
+                    "MARKET_GROUP_TREE",
                     "TESTS",
                 )
             }

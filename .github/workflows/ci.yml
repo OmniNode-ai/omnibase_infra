@@ -5200,17 +5200,36 @@ jobs:
             tests/integration/migrations/test_omn15683_mixed_representation_conversion.py \
             -v --tb=short -p no:randomly
 
+      # OMN-17887: the migration that drops onex-lab's empty `tenant` schema,
+      # applied by the real forward runner as a NOSUPERUSER role_omnidash to a
+      # schema that is absent, empty (carrying a USAGE grant and a
+      # default-privileges entry), holding a relation, foreign-owned, and
+      # already dropped. It shares the OMN-17886 gate's empty server and runs
+      # first: it refuses a server that already has its two databases or four
+      # roles, and drops all of them afterwards, so the gate still starts empty.
+      - name: Drop-empty-tenant-schema migration proof (OMN-17887)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMN17887_GATE_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.acl_gate_postgres.ports['5432'] }}/postgres
+          # With a Postgres in hand a SKIP is a vacuous green.
+          OMN17887_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_drop_empty_tenant_schema_omn17887.py \
+            -v --tb=short -p no:randomly
+
       # OMN-17886 AC4: build omnidash_analytics from EMPTY with the real forward
       # runner, then diff its omninode_internal ACLs against the topology. A
       # migration that confers an undeclared grant, or omits a declared one,
       # fails here. The findings the corpus still produces are listed one by one
       # in config/omninode_internal_live_acl_allowlist.yaml, which is
       # shrink-only: an entry that stops reproducing fails the gate too.
-      # The gateway_link_health_status revoke proof runs first on the same
-      # server, as a NOSUPERUSER role_omnidash through the real forward runner:
-      # the gate itself builds as postgres, for which a REVOKE always takes. It
-      # refuses a server that already has its two databases or three roles and
-      # drops all of them afterwards, so the gate still starts empty.
+      # The gateway_link_health_status revoke proof and the gateway_link_health
+      # grant proof both run first on the same server, as a NOSUPERUSER
+      # role_omnidash through the real forward runner: the gate itself builds
+      # as postgres, for which a REVOKE or a GRANT always takes. It refuses a
+      # server that already has its two databases or three roles and drops all
+      # of them afterwards, so the gate still starts empty.
       - name: omninode_internal live-ACL gate (OMN-17886)
         if: steps.ensure_psql.outputs.available == 'true'
         env:
@@ -5219,6 +5238,7 @@ jobs:
           OMN17886_REQUIRE_PG: "1"
         run: |
           uv run pytest \
+            tests/integration/migrations/test_grant_gateway_link_health_omn17886.py \
             tests/integration/migrations/test_revoke_gateway_link_health_status_omn17886.py \
             tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py \
             -v --tb=short -p no:randomly
