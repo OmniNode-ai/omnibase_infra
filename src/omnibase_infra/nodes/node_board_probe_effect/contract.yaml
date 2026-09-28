@@ -74,6 +74,17 @@ handler_routing:
         name: "ModelForwarderRefusedTopicRequest"
         module: "omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request"
         description: "The forwarder to read and what its lane declares."
+    - operation: "board_probe.read_forwarder_state"
+      handler:
+        name: "HandlerDockerForwarderStateReader"
+        module: "omnibase_infra.nodes.node_board_probe_effect.handlers.handler_docker_forwarder_state_reader"
+      description: "Read the forwarder's process state, recent topic events and broker map through bounded Docker CLI calls"
+      supported_operations:
+        - "board_probe.read_forwarder_state"
+      input_model:
+        name: "ModelForwarderRefusedTopicRequest"
+        module: "omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request"
+        description: "The forwarder to read and what its lane declares."
 error_handling:
   retry_policy:
     max_retries: 0

@@ -89,6 +89,12 @@ class HandlerDockerForwarderStateReader(ProtocolForwarderStateReader):
         """Read process state, recent topic events, and the mounted broker map."""
         return await asyncio.to_thread(self._observe, request)
 
+    async def handle(
+        self, request: ModelForwarderRefusedTopicRequest
+    ) -> ModelForwarderStateObservation:
+        """Contract entrypoint for ``board_probe.read_forwarder_state``."""
+        return await self.observe(request)
+
     def _run(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
         return self._runner(
             argv,

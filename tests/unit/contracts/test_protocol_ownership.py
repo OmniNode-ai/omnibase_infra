@@ -248,6 +248,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "OmniGateValidatorCallable": "gate/validator_registry.py",
     # [NODE] OMN-11207 structural protocol for evidence bundles accepted by the writer
     "ProtocolEvidenceBundle": "utils/util_evidence_bundle_writer.py",
+    "ProtocolForwarderStateReader": "nodes/node_board_probe_effect/protocols/protocol_forwarder_state_reader.py",  # [NODE] OMN-19930 one-method read seam (observe) the board_probe forwarder_refused_topic check grades through; the Docker CLI reader implements it and tests inject a fake. Infra-local, not spi: a node-internal test seam bound to this probe, not a cross-repo contract.
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal
