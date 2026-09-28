@@ -83,6 +83,7 @@ databases:
               - dod_verify_runs
               - gateway_link_health
               - lab_lane_health
+              - lab_proof_receipts
               - live_events
               - log_entries
               - open_obligations

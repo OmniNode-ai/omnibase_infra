@@ -444,6 +444,28 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="claude_hook_events",
         ),
     ),
+    # OMN-19566: infra vendors lab_proof_receipts before omnimarket#3043
+    # lands the node contract. Until the pin advances, this interim declaration
+    # keeps the shipped table grant derivable. The supplemental expiry test
+    # requires removal once omnimarket#3043 merges and the pin advances past it.
+    ContractTableDeclaration(
+        node="legacy_migration:lab_proof_receipts",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_lab_proof_receipts/"
+            "0000_create_lab_proof_receipts.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="lab_proof_receipts",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_lab_proof_receipts/"
+                "0000_create_lab_proof_receipts.sql"
+            ),
+            access="read_write",
+            role="lab_proof_receipts",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
