@@ -29,8 +29,13 @@ def _load(name: str, path: Path) -> Any:
 group = _load("prepr_pool_group", GROUP_PY)
 
 
-def _candidate(number: int, *files: str, labels: tuple[str, ...] = ()) -> Any:
-    return group.Candidate(number, f"{number:040x}", tuple(files), labels)
+def _candidate(
+    number: int,
+    *files: str,
+    labels: tuple[str, ...] = (),
+    repo: str = "omnibase_infra",
+) -> Any:
+    return group.Candidate(number, f"{number:040x}", tuple(files), labels, repo)
 
 
 @pytest.mark.unit
@@ -249,6 +254,64 @@ def test_params_include_ordered_members_and_only_test_and_source_python_paths() 
     ]
 
 
+@pytest.mark.unit
+def test_omnimarket_candidate_key_and_params_use_market_prefix() -> None:
+    members = [
+        _candidate(
+            3,
+            "tests/unit/test_three.py",
+            "src/omnimarket/three.py",
+            repo="omnimarket",
+        ),
+        _candidate(
+            1,
+            "tests/integration/test_one.py",
+            "src/omnimarket/one.py",
+            repo="omnimarket",
+        ),
+    ]
+    build = group.GroupBuild(
+        base="a" * 40,
+        steps=[
+            (c.number, c.head, f"{i:040x}", f"{i + 10:040x}")
+            for i, c in enumerate(members, 1)
+        ],
+    )
+    params = dict(
+        item.split("=", 1) for item in shlex.split(group.params_text(build, members))
+    )
+    assert members[0].key == "omnimarket#3"
+    assert params["MARKET_GROUP"] == f"3:{members[0].head} 1:{members[1].head}"
+    assert params["MARKET_GROUP_BASE"] == build.base
+    assert params["MARKET_GROUP_TREE"] == build.tree
+    assert "INFRA_GROUP" not in params
+    assert params["TESTS"].split() == [
+        "omnimarket:tests/integration/test_one.py",
+        "omnimarket:tests/unit/test_three.py",
+    ]
+    assert params["ID_FILES"].split() == [
+        "omnimarket:omnimarket/one.py",
+        "omnimarket:omnimarket/three.py",
+    ]
+
+
+@pytest.mark.unit
+def test_params_reject_members_from_different_repositories() -> None:
+    members = [
+        _candidate(1, "src/one.py"),
+        _candidate(2, "src/two.py", repo="omnimarket"),
+    ]
+    build = group.GroupBuild(
+        base="a" * 40,
+        steps=[
+            (c.number, c.head, f"{i:040x}", f"{i + 10:040x}")
+            for i, c in enumerate(members, 1)
+        ],
+    )
+    with pytest.raises(ValueError, match="mix repositories"):
+        group.params_text(build, members)
+
+
 def _candidates_json(tmp_path: Path, members: list[Any]) -> Path:
     path = tmp_path / "candidates.json"
     path.write_text(
@@ -353,6 +416,74 @@ def test_main_plan_prints_groups_json(
         "solo": [],
     }
     assert captured.err == ""
+
+
+@pytest.mark.unit
+def test_main_build_and_plan_support_omnimarket(
+    git_repo: tuple[Path, str, list[Any], Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, _base, infra_members, _conflict = git_repo
+    git = group.make_git(repo)
+    members = [
+        group.Candidate(c.number, c.head, c.files, repo="omnimarket")
+        for c in infra_members[:2]
+    ]
+    for member in members:
+        git("update-ref", f"refs/pull/{member.number}/head", member.head)
+    candidates = _candidates_json(tmp_path, members)
+    params = tmp_path / "market.env"
+    assert (
+        group.main(
+            [
+                "build",
+                "--repo",
+                "omnimarket",
+                "--candidates",
+                str(candidates),
+                "--canonical",
+                str(repo),
+                "--remote",
+                str(repo),
+                "--scratch",
+                str(tmp_path / "market-scratch.git"),
+                "--params-out",
+                str(params),
+            ]
+        )
+        == 0
+    )
+    captured = capsys.readouterr()
+    assert "group-step omnimarket#1" in captured.out
+    assert "MARKET_GROUP=" in params.read_text(encoding="utf-8")
+    assert (
+        group.main(["plan", "--repo", "omnimarket", "--candidates", str(candidates)])
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["groups"]
+
+
+@pytest.mark.unit
+def test_verify_landed_names_omnimarket(
+    git_repo: tuple[Path, str, list[Any], Any],
+) -> None:
+    repo, base, infra_members, _conflict = git_repo
+    members = [
+        group.Candidate(c.number, c.head, c.files, repo="omnimarket")
+        for c in infra_members
+    ]
+    git = group.make_git(repo)
+    built = group.build_group(git, base, members)
+    landed = _squash_members(git, members)
+    verdict = group.verify_landed(
+        git,
+        built.tree,
+        landed,
+        {c.number: c.files for c in members},
+        repo="omnimarket",
+    )
+    assert verdict.lines[0].startswith("omnimarket#1 landed")
 
 
 @pytest.mark.unit
