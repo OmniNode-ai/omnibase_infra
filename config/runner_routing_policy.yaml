@@ -1125,3 +1125,58 @@ route:
         - verify / verify
         - wheel-content-parity
         - Writer-Migration Coupling Check
+# OMN-19412 follow-up, 2026-09-28. THE COMMITTED PLACEMENT OF EVERY SCHEDULED
+# JOB THAT A VARIABLE PLACES, in the three repositories whose schedules the
+# required "Lab Probe Windows (OMN-19412)" check reads (omnibase_infra,
+# omninode_infra, omnimarket).
+#
+# Why it is committed. omnibase_infra#4241 made that check resolve
+# `runs-on: ${{ fromJSON(vars.NAME) }}` from the live Actions variables, and no
+# installed App can read variables, so the check read them with CROSS_REPO_PAT,
+# the operator's personal token, which is being retired (operator RULING
+# 2026-09-27T22:46:17Z item 3). The check now resolves each placement from this
+# map instead: a reviewed value, changed only by a pull request. The PAT step is
+# gone from ci.yml and nothing in the check reads live state.
+#
+# What keeps it true. `scripts/ci/check_probe_placement_drift.py` compares this
+# map with what `vars.NAME` actually resolves to in each repository, run by
+# `.github/workflows/probe-placement-drift.yml` in each of the three
+# repositories. It reads the variables through the workflow's own `vars`
+# context, which every run can read with no token at all, so no credential and
+# no App permission is involved. A difference is a red run naming the variable,
+# the committed value and the live one.
+#
+# The rule 14 discipline extends here: a write to any variable listed below is
+# accompanied, in the same action, by the pull request that changes its value
+# in this map, exactly as expected_json above.
+#
+# Shape. `<repo>: {<NAME>: <value>}`. The value is what `vars.NAME` resolves to
+# IN THAT REPOSITORY -- its own variable over the organisation's, the same order
+# the runner uses -- or null when neither scope sets it, in which case the
+# workflow expression's `|| '<literal>'` fallback applies. Every variable that
+# places a scheduled job in one of the three repositories must be declared for
+# that repository: the check refuses an undeclared one (naming the job) rather
+# than read it as unset, because an unread placement could hide a probe.
+#
+# Read live 2026-09-28T07:20Z (read-only) when this map was written; each
+# value below is that reading.
+probe_placement_variables:
+  omnibase_infra:
+    LAB_PROBE_RUNS_ON_JSON: '["self-hosted","omnibase-verify"]'
+    OMNI_DOCKER_CI_RUNS_ON_JSON: '["ubuntu-latest"]'
+    OMNI_PUBLIC_PR_RUNS_ON_JSON: '["ubuntu-latest"]'
+    OMNI_REQUIRED_CI_RUNS_ON_JSON: null
+    OMNI_SECURITY_SCAN_RUNS_ON_JSON: '["ubuntu-latest"]'
+    OMNI_TRUSTED_CI_RUNS_ON_JSON: '["ubuntu-latest"]'
+  omninode_infra:
+    CUSTOMER_MACHINE_RUNS_ON_JSON: '["self-hosted","omnibase-verify"]'
+    # Live value, recorded as read. omninode_infra_fleet_runner_variable above
+    # says this variable is meant to be unset; it is set, to the same pair as
+    # its fallback, so placement is unchanged either way. Reconciling the two is
+    # that entry's owner's call; this map records what the runner resolves.
+    OMNI_INFRA_FLEET_RUNS_ON_JSON: '["self-hosted","omnibase-ci"]'
+    OMNI_TRUSTED_CI_RUNS_ON_JSON: '["self-hosted","omnibase-ci"]'
+  omnimarket:
+    OMNI_OCC_AUTOBIND_RUNS_ON_JSON: null
+    OMNI_PUBLIC_PR_RUNS_ON_JSON: '["ubuntu-latest"]'
+    OMNI_TRUSTED_CI_RUNS_ON_JSON: '["ubuntu-latest"]'

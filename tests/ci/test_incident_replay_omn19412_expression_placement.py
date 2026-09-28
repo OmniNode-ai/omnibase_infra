@@ -15,9 +15,10 @@ The input was good; the verdict was wrong (false_red).
 
 THE ARTIFACT is the C13 workflow exactly as it stood at the #1725 merge commit,
 read with ``git show`` and committed unmodified. The guard is driven over those
-bytes with the value the live repository variable held at the time and must
-accept. THE DISCRIMINATOR drives the same bytes with the variable unset and
-requires a refusal naming the job, so a guard stuck open cannot pass.
+bytes with the committed placement value (the value the live repository
+variable held at the time) and must accept. THE DISCRIMINATOR drives the same
+bytes with that placement declared null and requires a refusal naming the job,
+so a guard stuck open cannot pass.
 """
 
 from __future__ import annotations
@@ -70,8 +71,8 @@ def test_the_captured_c13_is_placed_by_the_variable() -> None:
 def test_the_real_guard_accepts_the_captured_c13_on_the_live_pool(
     tmp_path: Path,
 ) -> None:
-    variables = plw.ActionsVariables(
-        {"org": {}, "omninode_infra": {"CUSTOMER_MACHINE_RUNS_ON_JSON": LIVE_POOL}}
+    variables = plw.CommittedPlacements(
+        {"omninode_infra": {"CUSTOMER_MACHINE_RUNS_ON_JSON": LIVE_POOL}}
     )
     assert (
         plw.check(_committed_c13(), {"omninode_infra": _root(tmp_path)}, variables)
@@ -83,8 +84,11 @@ def test_the_real_guard_accepts_the_captured_c13_on_the_live_pool(
 def test_the_same_guard_refuses_the_captured_c13_with_the_variable_unset(
     tmp_path: Path,
 ) -> None:
-    variables = plw.ActionsVariables({"org": {}, "omninode_infra": {}})
+    variables = plw.CommittedPlacements(
+        {"omninode_infra": {"CUSTOMER_MACHINE_RUNS_ON_JSON": None}}
+    )
     errors = plw.check(_committed_c13(), {"omninode_infra": _root(tmp_path)}, variables)
     assert len(errors) == 1, errors
     assert "c13-customer-local" in errors[0]
     assert "CUSTOMER_MACHINE_RUNS_ON_JSON" in errors[0]
+    assert "committed as unset" in errors[0]
