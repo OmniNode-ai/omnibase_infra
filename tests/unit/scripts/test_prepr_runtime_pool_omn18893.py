@@ -16,6 +16,7 @@ import datetime as dt
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -423,6 +424,211 @@ def test_restored_needs_zero_residue_a_positive_control_and_an_empty_diff() -> N
     ).restored
     assert not pool.judge({**GOOD, "snap-post": "snapshot-diff=3"}).restored
     assert not pool.judge({k: v for k, v in GOOD.items() if k != "snap-post"}).restored
+
+
+# ------------------------------------------------------------------ image identity (OMN-19896)
+
+# The probe identity section of a runtime PR that changes nothing under src/,
+# as the fixed prove script prints it: omnibase_infra#4111 changed only
+# config/deploy_lane_routing.yaml and deploy-agent tests, so the caller listed
+# no ID_FILES and no per-file line exists. Before OMN-19896 this FAILed
+# image_identity by construction (ledger RELEASE 2026-09-28T02:32:13Z).
+_M = "omnibase-infra-local-omninode-runtime"
+_E = "omnibase-infra-local-runtime-effects"
+_TREE_OK = (
+    "image-revision-label 2fdde86b86d9fc4c4c1c7261ab449cb081737f9e\n"
+    "build GIT_SHA 2fdde86b86d9fc4c4c1c7261ab449cb081737f9e market 8db69992fc\n"
+    "identity-subject omnibase_infra\n"
+    "src-diff omnibase_infra files=0\n"
+    f"pkg-tree omnibase_infra {_M} tree-files=4210 image-files=4210 missing=0 differ=0 stale-py=0 extra-other=0 match=yes\n"
+    f"pkg-tree omnibase_infra {_E} tree-files=4210 image-files=4210 missing=0 differ=0 stale-py=0 extra-other=0 match=yes\n"
+)
+NO_SRC_PROBE = _TREE_OK + GOOD["probe"].split("\n", 1)[1]
+
+
+def test_image_identity_passes_a_runtime_pr_with_no_src_diff() -> None:
+    rb = pool.judge({**GOOD, "probe": NO_SRC_PROBE})
+    assert rb.checks["image_identity"] is True, rb
+    assert rb.outcome == "PASS"
+    assert any("changes nothing under src/" in n for n in rb.notes)
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        # a module the PR deleted still ships in the image
+        _TREE_OK.replace(
+            f"{_E} tree-files=4210 image-files=4210 missing=0 differ=0 stale-py=0 extra-other=0 match=yes",
+            f"{_E} tree-files=4210 image-files=4211 missing=0 differ=0 stale-py=1 extra-other=0 match=NO",
+        ),
+        # the image runs code the build tree does not hold
+        _TREE_OK.replace(
+            "differ=0 stale-py=0 extra-other=0 match=yes",
+            "differ=3 stale-py=0 extra-other=0 match=NO",
+            1,
+        ),
+        # the subject has no compare line at all (the compare never ran)
+        "\n".join(ln for ln in _TREE_OK.splitlines() if not ln.startswith("pkg-tree "))
+        + "\n",
+    ],
+)
+def test_image_identity_fails_when_the_image_is_not_the_build_tree(broken: str) -> None:
+    probe = broken + GOOD["probe"].split("\n", 1)[1]
+    rb = pool.judge({**GOOD, "probe": probe})
+    assert rb.checks["image_identity"] is False
+    assert rb.outcome == "FAIL"
+
+
+def test_image_identity_fails_on_a_changed_file_mismatch_even_when_the_package_matches() -> (
+    None
+):
+    probe = (
+        _TREE_OK
+        + "file omnibase_infra/x.py image=aaa build-tree=bbb match=NO\n"
+        + GOOD["probe"].split("\n", 1)[1]
+    )
+    assert pool.judge({**GOOD, "probe": probe}).checks["image_identity"] is False
+
+
+def test_image_identity_fails_on_an_unreadable_per_file_line() -> None:
+    # the in-container read raised, and its message has spaces: before OMN-19896
+    # the line failed to parse and was silently dropped beside a matching one
+    probe = GOOD["probe"].replace(
+        "file omnibase_infra/x.py image=aaa build-tree=aaa match=yes\n",
+        "file omnibase_infra/x.py image=aaa build-tree=aaa match=yes\n"
+        "file omnibase_infra/y.py image=FileNotFoundError: [Errno 2] No such file build-tree=bbb match=NO\n",
+    )
+    assert pool.judge({**GOOD, "probe": probe}).checks["image_identity"] is False
+
+
+def test_an_older_probe_with_no_subject_keeps_the_per_file_rule() -> None:
+    assert pool.judge(GOOD).checks["image_identity"] is True
+    no_lines = "\n".join(
+        ln for ln in GOOD["probe"].splitlines() if not ln.startswith("file ")
+    )
+    assert pool.judge({**GOOD, "probe": no_lines}).checks["image_identity"] is False
+
+
+def _heredoc(name: str) -> str:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    start = text.index(f"IFS= read -r -d '' {name} <<'PY' || :\n")
+    body = text[start:].split("\n", 1)[1]
+    return body[: body.index("\nPY\n") + 1]
+
+
+def _run(args: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, capture_output=True, text=True, check=False, **kw)
+
+
+def _fake_tree(tmp_path: Path) -> tuple[Path, Path]:
+    """A build tree with a tracked package, and the same package installed."""
+    tree = tmp_path / "tree"
+    pkg = tree / "src" / "fakepkg"
+    (pkg / "sub").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("X = 1\n")
+    (pkg / "sub" / "mod.py").write_text("Y = 2\n")
+    (pkg / "sub" / "contract.yaml").write_text("name: y\n")
+    for cmd in (
+        ["git", "init", "-q"],
+        ["git", "add", "-A"],
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t.invalid",
+            "commit",
+            "-qm",
+            "t",
+        ],
+    ):
+        assert _run(cmd, cwd=tree).returncode == 0
+    site = tmp_path / "site"
+    shutil.copytree(pkg, site / "fakepkg")
+    # bytecode the image carries is not source and never compared
+    (site / "fakepkg" / "__pycache__").mkdir()
+    (site / "fakepkg" / "__pycache__" / "mod.cpython-312.pyc").write_bytes(b"\0")
+    return tree, site
+
+
+def _compare(tree: Path, site: Path, tmp_path: Path) -> str:
+    listing = tmp_path / "img.txt"
+    lst = _run(
+        [sys.executable, "-c", _heredoc("IMG_LIST_PY"), "fakepkg"],
+        env={"PYTHONPATH": str(site), "PATH": "/usr/bin:/bin"},
+    )
+    assert lst.returncode == 0, lst.stderr
+    listing.write_text(lst.stdout)
+    out = _run(
+        [
+            sys.executable,
+            "-c",
+            _heredoc("PKG_TREE_PY"),
+            str(tree),
+            "fakepkg",
+            "rt",
+            str(listing),
+        ]
+    )
+    assert out.returncode == 0, out.stderr
+    return out.stdout
+
+
+def test_the_whole_package_compare_reads_an_identical_install_as_a_match(
+    tmp_path: Path,
+) -> None:
+    tree, site = _fake_tree(tmp_path)
+    out = _compare(tree, site, tmp_path)
+    assert (
+        "pkg-tree fakepkg rt tree-files=3 image-files=3 missing=0 differ=0 stale-py=0"
+        in out
+    )
+    assert out.splitlines()[0].endswith("match=yes"), out
+
+
+@pytest.mark.parametrize(
+    ("mutate", "kind"),
+    [
+        (lambda s: (s / "fakepkg" / "sub" / "mod.py").write_text("Y = 3\n"), "differ"),
+        (lambda s: (s / "fakepkg" / "sub" / "mod.py").unlink(), "missing"),
+        (lambda s: (s / "fakepkg" / "old.py").write_text("Z = 0\n"), "stale-py"),
+    ],
+)
+def test_the_whole_package_compare_names_what_differs(
+    tmp_path: Path, mutate: Any, kind: str
+) -> None:
+    tree, site = _fake_tree(tmp_path)
+    mutate(site)
+    out = _compare(tree, site, tmp_path)
+    assert out.splitlines()[0].endswith("match=NO"), out
+    assert f"pkg-tree-diff fakepkg rt {kind} " in out
+    rb = pool.judge(
+        {
+            **GOOD,
+            "probe": "identity-subject fakepkg\n"
+            + out
+            + GOOD["probe"].split("\n", 1)[1],
+        }
+    )
+    assert rb.checks["image_identity"] is False
+
+
+def test_a_force_included_resource_is_counted_not_held_against_the_image(
+    tmp_path: Path,
+) -> None:
+    tree, site = _fake_tree(tmp_path)
+    (site / "fakepkg" / "config").mkdir()
+    (site / "fakepkg" / "config" / "lanes.yaml").write_text("a: 1\n")
+    out = _compare(tree, site, tmp_path)
+    assert "extra-other=1 match=yes" in out
+
+
+def test_the_probe_compares_every_repo_under_test_in_both_runtimes() -> None:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    probe = text[text.index("probe)") : text.index("tests)")]
+    assert 'echo "identity-subject $repo"' in probe
+    assert "for c in $M $E; do" in probe[probe.index("identity-subject") :]
+    assert '"$IMG_LIST_PY"' in probe and '"$PKG_TREE_PY"' in probe
 
 
 # ------------------------------------------------------------------ run end to end
