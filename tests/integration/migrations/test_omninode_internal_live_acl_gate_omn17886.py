@@ -329,6 +329,22 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
         assert pr_landing_live == pr_landing_declared, pr_landing_table
         assert "DELETE" not in pr_landing_live, pr_landing_table
 
+    # OMN-19399: the worktree reconcile projection grants exactly the runtime
+    # writer's SELECT/INSERT/UPDATE privileges, with no DELETE or sequence.
+    worktree_reconcile_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "worktree_reconcile_hosts"
+    }
+    assert worktree_reconcile_declared == {"SELECT", "INSERT", "UPDATE"}
+    worktree_reconcile_live = _live_privileges(
+        fresh_build, "worktree_reconcile_hosts", _RUNTIME
+    )
+    assert worktree_reconcile_live == worktree_reconcile_declared
+    assert "DELETE" not in worktree_reconcile_live
+
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}
     new = sorted(live - allowed)
