@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+---
+# Probe placement drift for omnibase_infra (OMN-19412 follow-up).
+#
+# Compares config/runner_routing_policy.yaml probe_placement_variables.omnibase_infra,
+# the committed values the required Lab Probe Windows check resolves scheduled
+# runs-on placements from, with this repository's live variables, read through
+# its own vars context (no token). omninode_infra and omnimarket carry the same
+# caller. See probe-placement-drift-reusable.yml for why.
+name: Probe Placement Drift
+
+on:
+  schedule:
+    - cron: "43 * * * *"
+  push:
+    branches: [dev]
+    paths:
+      - "config/runner_routing_policy.yaml"
+      - "scripts/ci/check_probe_placement_drift.py"
+      - ".github/workflows/probe-placement-drift.yml"
+      - ".github/workflows/probe-placement-drift-reusable.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    uses: ./.github/workflows/probe-placement-drift-reusable.yml
+    with:
+      repo: omnibase_infra
+      vars-json: ${{ toJSON(vars) }}
